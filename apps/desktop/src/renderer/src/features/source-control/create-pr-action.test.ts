@@ -1,5 +1,8 @@
-// #136: the toolbar Create-PR rule, adapted from the fork's
-// primary-create-pr-intent-action.ts to the daemon's upstream status.
+// MIT Copyright (c) 2026 Lovecast Inc.
+// #136: test cases for the toolbar Create-PR rule, adapted from the fork's
+// primary-create-pr-intent-action.ts (via
+// src/renderer/src/components/right-sidebar/source-control-create-pr-intent-state.test.ts)
+// to the daemon's upstream status.
 import { describe, expect, test } from "vitest";
 import { resolveCreatePrToolbarAction } from "./create-pr-action";
 

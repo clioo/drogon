@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-// Agent-state visuals parity with the fork (AgentStateDot + AgentWorkingSpinner
-// + AgentQuestionIcon + StatusIndicator quiet states): one case per contract
-// state asserting glyph, token, aria-label and shared tooltip copy.
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Parity test against the fork's AgentStateDot/AgentWorkingSpinner test
+// cases (src/renderer/src/components/AgentStateDot.test.ts: question-glyph
+// contrast floor, working spinner, unverifiable dashed ring) plus the
+// shared tooltip copy; asserts glyph, token, aria-label and keyframe
+// contract on the local AgentStateIcon.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import React from "react";

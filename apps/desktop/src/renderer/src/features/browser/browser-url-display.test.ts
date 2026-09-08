@@ -1,4 +1,5 @@
-// Ported from the Orca reference (read-only):
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from the Orca reference (read-only):
 //   src/renderer/src/components/browser-pane/describe-page/browser-page-url-display.test.ts
 // Adapted: no Kagi redaction or blank sentinel (blank tabs are "" here),
 // external URLs are https-only per the shell bridge policy.

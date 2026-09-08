@@ -1,3 +1,8 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from Orca's
+// src/renderer/src/components/right-sidebar/source-control-discard-confirmation.test.ts
+// (per-entry delete/permanently-delete copy), adapted to the local
+// discard-confirmation copy helpers.
 import { describe, expect, test } from "vitest";
 import {
   getDiscardAreaConfirmationCopy,

@@ -206,6 +206,14 @@ The Settings panes in `apps/desktop/src/renderer/src/features/settings/`
 the source section order) port Orca's `components/settings/{AgentsPane,CliSection,GitPane,AppearancePane,AppearanceSection,AppearanceInterfaceSection,AppearanceWindowSidebarSection,NotificationsPane,NotificationSoundSection,GeneralPane,SettingsSection}.tsx`,
 all at the pinned source revision above. Each ported file keeps the MIT notice.
 
+The Manage Sessions settings section in
+`features/settings/terminal-section.tsx` ports Orca's
+`components/settings/{ManageSessionsSection,ManageSessionsTable}.tsx`
+(sessions table with state dot, workspace, id and per-row kill, Kill-all
+toolbar), with the Restart-daemon row this repo adds on top, at the pinned
+source revision above. Each ported file keeps the MIT notice in its header
+comment.
+
 The tab strip interactions in `apps/desktop/src/renderer/src/features/shell/{SortableTab,TabContextMenu,tab-order}.ts(x)`
 and `features/shell/tab-strip/**` port Orca's `components/tab-bar/{SortableTab,SortableTabContextMenu,BrowserTab,reconcile-order}.ts(x)`
 and `store/slices/tabs/{tabs-tab-order,tabs-bulk-close-actions}.ts`, all at the
@@ -312,10 +320,14 @@ and `src/main/pi/agent-status-*-source.ts` (fork revision
 `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT), adapted to report through
 `drogon-cli internal hook-event`. Each ported file keeps the MIT notice.
 
-The native application menu, window-state persistence and dock unread badge in
-`apps/desktop/src/main/{menu,window,dock}/` port the Drogon fork's
-`src/main/menu/register-app-menu.ts`, `app-menu-selection-item.ts`,
-`src/main/window/main-window-state-lifecycle.ts` and `src/main/dock/unread-badge.ts`
+The native application menu, window-state persistence, window chrome and
+dock unread badge in `apps/desktop/src/main/{menu,window,dock}/` port the
+Drogon fork's `src/main/menu/register-app-menu.ts`,
+`app-menu-selection-item.ts`, `src/main/window/main-window-state-lifecycle.ts`,
+`src/main/window/createMainWindow.ts` (titleBarStyle per platform, darwin
+trafficLightPosition) and `src/main/window/main-window-visual-lifecycle.ts`
+(TITLEBAR_CSS_CENTER, TRAFFIC_LIGHT_RADIUS/X) as
+`main/window/window-chrome.ts`, and `src/main/dock/unread-badge.ts`
 (fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported
 file keeps the MIT notice.
 
@@ -325,6 +337,88 @@ editor tab kind, EditorHost and openers) port the Drogon fork's
 `src/renderer/src/components/editor/**` tab semantics (fork revision
 `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file keeps the
 MIT notice.
+
+The new-workspace composer in
+`apps/desktop/src/renderer/src/features/new-workspace/`
+(`NewWorkspaceComposer.tsx`, `NewWorkspaceComposerModal.tsx` and the
+composer model tests) ports Orca's
+`src/renderer/src/components/NewWorkspaceComposerCard.tsx` and
+`components/new-workspace/{NewWorkspaceComposerProjectSection,NewWorkspaceComposerNameSection,NewWorkspaceComposerFooter,NewWorkspaceComposerAgentSection}.tsx`
+(fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT), adapted to
+this repo's Project/Worktree RPC contract; the Model field mapping in
+`features/shell/pi-model-mapping.ts` and `composer-model.test.tsx` ports the
+Pi semantics of `src/renderer/src/lib/launch-drogon-bot-session.ts` (exact
+`provider/model-id`, blank means harness default, anything else fails with
+the fork's error). Not ported: the composer's remotes, setup and
+quick-session paths. Each ported file keeps the MIT notice in its header
+comment.
+
+The agent launch defaults in `apps/desktop/src/shared/agent-defaults.ts`
+port the fork's `src/shared/tui-agent-permissions.ts` (YOLO_TUI_AGENT_ARGS
+per agent) and `src/shared/tui-agent-launch-defaults.ts`
+(DEFAULT_TUI_AGENT_ARGS), adapted to Drogon's four harnesses and the
+daemon's permission modes; `features/settings/agent-defaults.ts` resolves
+the stored per-harness defaults against these fork defaults for the Agents
+section and every immediate launch path (fork revision
+`c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). Each ported file keeps the
+MIT notice in its header comment.
+
+The daemon connection loss/recovery surfaces in
+`apps/desktop/src/renderer/src/features/{shell,terminal,status-bar}/`
+(`daemon-connection.ts`, `daemon-connection-store.ts`,
+`DaemonConnectionBanner.tsx`, `daemon-disconnect-toast.ts`,
+`terminal/DaemonReconnectBanner.tsx`,
+`status-bar/DaemonConnectionSegment.tsx`) port Orca's
+`src/renderer/src/web/web-runtime-connection-transport.ts` (RECONNECT_DELAYS_MS
+retry ladder), `src/shared/reconnect-jitter.ts`,
+`src/renderer/src/runtime/runtime-host-connection-state.ts`,
+`src/store/slices/runtime-environment-disconnect-toast.ts`,
+`components/terminal-pane/TerminalRemoteRuntimeReconnectBanner.tsx` and
+`components/status-bar/{SshStatusSegment,RuntimeHostStatusRow}.tsx`, all at
+the pinned source revision above; adapted from per-runtime-environments to
+one local daemon, and no "reconnected" toast is raised, as the fork does.
+Each ported file keeps the MIT notice in its header comment.
+
+The split-terminal layout in
+`apps/desktop/src/renderer/src/features/terminal/`
+(`terminal-split.ts`, `TerminalSplitHost.tsx`,
+`TerminalSplitHeaderOverlay.tsx`) ports Orca's
+`src/renderer/src/components/terminal-pane/terminal-pane-layout-tree.ts`
+(leaf collection/pruning), `TerminalPaneHeaderOverlay.tsx` ("Split Terminal
+Right" entry) and `TerminalContextMenu.tsx` (split items with the
+terminal.splitRight/terminal.splitDown chords), plus the
+`.pane-divider.is-vertical` recipe of `src/renderer/src/assets/terminal.css`,
+all at the pinned source revision above; adapted to at most two daemon
+sessions per tab in flexbox instead of the fork's measured N-leaf layout.
+Each ported file keeps the MIT notice in its header comment.
+
+The native notifications pipeline in `apps/desktop/src/main/notifications/`
+(`settings.ts`, `watcher.ts`, `service.ts`) and
+`apps/desktop/src/preload/notifications.ts` ports the content selection,
+transition dedupe and click-to-navigate binding of Orca's
+`src/main/ipc/native-notification-delivery.ts` and the settings shape of
+`src/main/ipc/notification-options.ts`, adapted to a file-backed toggle and
+Electron-free unit-testable pure functions (OS delivery stays in
+`service.ts`), at the pinned source revision above. Each ported file keeps
+the MIT notice in its header comment.
+
+The preload bridges in `apps/desktop/src/preload/shell.ts` and
+`preload/native-theme.ts` port Orca's `src/preload/api/shell-bridge.ts`
+(`openUrl`) and the nativeTheme relay of
+`src/main/window/createMainWindow.ts` (shouldUseDarkColors + 'updated'
+events for the "System" theme), adapted to the `drogon:openExternal`
+channel and the `window.drogon.nativeTheme` namespace, at the pinned source
+revision above. Each ported file keeps the MIT notice in its header
+comment.
+
+The Mentu runtime provisioning in
+`crates/drogon-core/src/mentu/runtime_install.rs` and
+`scripts/mentu-runtime-provision.mjs` mirrors the read-only reference's
+build-time provisioning (`config/scripts/mentu-runtime-package.cjs`'s
+`provisionMentuRuntime`): verify the candidate binary's sha256 against the
+pinned lock and only then stage it atomically into the fixed runtime path
+(fork revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`, MIT). The crate
+module keeps the MIT notice in its header comment.
 
 ## Bundled fonts
 

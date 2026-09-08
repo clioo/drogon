@@ -2,7 +2,9 @@
 //! `<workspace>/.mentu/runs/<run_id>/run.json` — a narrowed Rust port of the
 //! fork's `mentu-run-parsing.ts`, keeping only what the panel/tab need to
 //! show honestly: per-step status, evidence file paths, errors and the
-//! recorded `verification` results. Fields this crate does not display
+//! recorded `verification` results.
+//!
+//! MIT Copyright (c) 2026 Lovecast Inc. Fields this crate does not display
 //! (git/drift metadata, hooks) are left in the raw JSON rather than
 //! modeled, matching this product's own wire contract (`MentuStepRun`)
 //! rather than the fork's fuller shape.

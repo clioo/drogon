@@ -1,3 +1,8 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from Orca's
+// src/renderer/src/components/right-sidebar/source-control-file-filter.test.ts
+// (case-insensitive path matching, oversized-query blanking), adapted to
+// the local grouped-entry filter model.
 import { describe, expect, test } from "vitest";
 import {
   buildSourceControlDisplaySections,

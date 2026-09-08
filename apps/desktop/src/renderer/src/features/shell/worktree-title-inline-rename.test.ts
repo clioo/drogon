@@ -1,3 +1,8 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from Orca's
+// src/renderer/src/components/sidebar/WorktreeTitleInlineRename.test.tsx
+// (trim-and-save, blank/unchanged cancel, failure copy), adapted to the
+// local getWorktreeTitleRenameCommit helper.
 import { describe, expect, test } from "vitest";
 import {
   getWorktreeTitleRenameCommit,

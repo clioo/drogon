@@ -1,6 +1,7 @@
 //! Native equivalents of the pinned `src/shared/automations-types.ts`
 //! (`Automation`, `AutomationRun`, and their supporting types), at source
-//! revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`. See
+//! revision `c97906287bb7a390b25e2025b600d9fb3c25d9c3`. MIT Copyright (c)
+//! 2026 Lovecast Inc. See
 //! `docs/migration/native-bot-state-contract.md` and
 //! `tests/parity/ports/WP-CAP-BOTS/native-state/` for the parity evidence.
 //!

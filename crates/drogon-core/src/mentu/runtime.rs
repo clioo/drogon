@@ -1,4 +1,5 @@
 //! Resolution and verification of the pinned `mentu-recipes` runtime.
+//! MIT Copyright (c) 2026 Lovecast Inc.
 //! Mirrors the fork's `mentu-runtime-identity.ts`, narrowed to this
 //! product's own simpler layout: `<data-dir>/mentu/runtime/bin/mentu-recipes`
 //! (or `DROGON_MENTU_RUNTIME` to override the exact executable path, the

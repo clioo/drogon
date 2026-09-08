@@ -1,3 +1,4 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
 // Window-level dispatch rules, mirroring the reference
 // (app-shell/use-global-keybindings.ts) minus the surfaces Drogon does not
 // have yet (plugin chords, floating panel, shortcut recorder, terminal

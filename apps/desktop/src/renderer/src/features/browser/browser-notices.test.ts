@@ -1,7 +1,10 @@
-// Banner/notice copy: permission, popup, download and recovery lines keep
-// the reference wording (fork navigate/browser-notices.ts,
-// browser-client-hosted-download-notices.ts,
-// browser-download-destination-toast.ts).
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Test cases ported from Orca's
+// src/renderer/src/components/browser-pane/navigate/browser-notices.test.ts
+// (adapted to the local module's API). The permission, popup, download and
+// recovery wording under test keeps the reference wording of fork
+// navigate/browser-notices.ts, browser-client-hosted-download-notices.ts
+// and browser-download-destination-toast.ts.
 import { describe, expect, test } from "vitest";
 import {
   formatByteCount,
