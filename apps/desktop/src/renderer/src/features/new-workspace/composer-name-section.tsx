@@ -4,9 +4,11 @@
    (adapter: the source's SmartWorkspaceNameField smart-source tabs — GitHub,
    GitLab, Linear, Jira, Branch — are not ported because Drogon has none of
    those source backends; the field renders the source's plain name input
-   chrome verbatim, with the fork's Smart-mode placeholder copy. The fork's
-   "Reuse branch" row is omitted: it only renders when a smart branch source
-   is selected, which cannot happen here). */
+   chrome; the label and placeholder are explicit because this repo's
+   worktree contract creates a new branch and exposes an existing branch
+   through Advanced → Base ref. The fork's "Reuse branch" row is omitted:
+   it only renders when a smart branch source is selected, which cannot
+   happen here). */
 import React from "react";
 import { CaseSensitive, Search } from "lucide-react";
 import { Input } from "../../components/ui/input";
@@ -32,7 +34,7 @@ export function NewWorkspaceComposerNameSection({
   return (
     <div className="min-w-0 space-y-1" data-contextual-tour-target="workspace-creation-name">
       <label className="block min-w-0 truncate text-xs font-medium text-muted-foreground">
-        {selectedRepoIsGit ? "Name or 'Create From'" : "Workspace name"}{" "}
+        {selectedRepoIsGit ? "New branch name" : "Workspace name"}{" "}
         <span className="text-muted-foreground/70">[Optional]</span>
       </label>
       <div className="relative min-w-0">
@@ -60,14 +62,17 @@ export function NewWorkspaceComposerNameSection({
             onNamePlainEnter();
           }}
           placeholder={
-            selectedRepoIsGit
-              ? "Type a name, #1234, branch, GitHub, GitLab, or Jira URL"
-              : "Workspace name"
+            selectedRepoIsGit ? "e.g. feature/my-worktree" : "Workspace name"
           }
           // Why: match adjacent comboboxes' solid background in light mode.
           className="h-9 bg-background pl-8 text-sm"
         />
       </div>
+      {selectedRepoIsGit ? (
+        <p className="text-[11px] text-muted-foreground">
+          To start from an existing branch, enter it in Advanced → Base ref.
+        </p>
+      ) : null}
     </div>
   );
 }

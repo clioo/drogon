@@ -76,6 +76,18 @@ fn run_git(cwd: &Path, argv: &[String]) -> Result<String, RpcError> {
     }
 }
 
+fn map_existing_branch_error(error: RpcError, branch: &str) -> RpcError {
+    if error.code == "io_error"
+        && error.message.contains("branch named")
+        && error.message.contains("already exists")
+    {
+        return error::invalid_argument(format!(
+            "branch '{branch}' already exists; choose a new worktree name and use Base ref to start from this branch"
+        ));
+    }
+    error
+}
+
 /// A Project's `name` becomes a directory segment under
 /// `<data-dir>/workspaces/`; this keeps that join safe even for a
 /// user-overridden name containing a path separator, without rejecting the
@@ -201,7 +213,8 @@ impl Engine {
         if let Some(base) = &base_ref {
             argv.push(base.clone());
         }
-        run_git(Path::new(&project.path), &argv)?;
+        run_git(Path::new(&project.path), &argv)
+            .map_err(|failure| map_existing_branch_error(failure, &name))?;
 
         let canonical_target = std::fs::canonicalize(&target).map_err(|e| {
             error::io_error(format!(
