@@ -596,23 +596,26 @@ async function probeStatusBarOverflow({ page, output }) {
 
 /**
  * Close every tab left in the Sessions strip (editor tabs from earlier
- * probes) through the tab's own close affordance, answering a dirty-close
- * dialog with the discard action when one appears.
+ * probes): activate the tab, use its own "Close <title>" affordance (or the
+ * editor header Close), and answer a dirty-close dialog with the discard
+ * action when one appears.
  */
 async function closeOpenStripTabs(page) {
   const tabs = page.locator('[role="tablist"][aria-label="Sessions"] [role="tab"]');
   for (let guard = 0; guard < 10 && (await tabs.count()) > 0; guard += 1) {
     const tab = tabs.first();
-    await tab.hover();
-    const closer = tab.locator("[data-tab-close-button]");
-    if ((await closer.count()) > 0) await closer.first().click();
+    await tab.click();
+    const closer = tab.getByRole("button", { name: /^Close / });
+    if ((await closer.count()) > 0) await closer.first().click({ force: true });
     else {
-      await tab.click();
-      await page.keyboard.press("Meta+w");
+      const paneClose = page.getByRole("button", { name: "Close", exact: true });
+      if ((await paneClose.count()) > 0) await paneClose.first().click();
     }
-    const discard = page.getByRole("button", { name: /^(Don't save|Close without saving|Discard)$/ });
-    if (await discard.count()) await discard.first().click();
-    await page.waitForTimeout(150);
+    const discard = page.getByRole("button", {
+      name: /^(Don't save|Close without saving|Discard)$/,
+    });
+    if ((await discard.count()) > 0) await discard.first().click();
+    await page.waitForTimeout(200);
   }
 }
 
