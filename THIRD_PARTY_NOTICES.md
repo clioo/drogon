@@ -206,6 +206,12 @@ The Settings panes in `apps/desktop/src/renderer/src/features/settings/`
 the source section order) port Orca's `components/settings/{AgentsPane,CliSection,GitPane,AppearancePane,AppearanceSection,AppearanceInterfaceSection,AppearanceWindowSidebarSection,NotificationsPane,NotificationSoundSection,GeneralPane,SettingsSection}.tsx`,
 all at the pinned source revision above. Each ported file keeps the MIT notice.
 
+The tab strip interactions in `apps/desktop/src/renderer/src/features/shell/{SortableTab,TabContextMenu,tab-order}.ts(x)`
+and `features/shell/tab-strip/**` port Orca's `components/tab-bar/{SortableTab,SortableTabContextMenu,BrowserTab,reconcile-order}.ts(x)`
+and `store/slices/tabs/{tabs-tab-order,tabs-bulk-close-actions}.ts`, all at the
+pinned source revision above. Each ported file keeps the MIT notice. `@dnd-kit/core`
+and `@dnd-kit/sortable` (MIT) are packaged dependencies.
+
 ## Bundled fonts
 
 Both fonts bundled under `apps/desktop/src/renderer/src/assets/fonts/` are licensed under the SIL Open Font License, Version 1.1; the full license texts ship next to the files.
