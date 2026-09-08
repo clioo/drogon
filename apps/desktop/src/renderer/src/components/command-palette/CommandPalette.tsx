@@ -12,6 +12,7 @@ import {
   isEditableTarget,
   resolveKeybindingPlatform,
 } from "../../keybindings";
+import { formatShortcutChordHint, resolveShortcutPlatform } from "../shortcut-labels";
 import {
   COMMAND_DEFS,
   commandTokenScore,
@@ -53,6 +54,7 @@ export interface CommandPaletteHostProps {
   onOpenFiles(): void;
   onOpenBots(): void;
   onToggleRightSidebar(): void;
+  onToggleSidebar(): void;
   onShowExplorer(): void;
   onShowSourceControl(): void;
   onToggleInspector(): void;
@@ -217,6 +219,9 @@ function PaletteDialog(props: DialogProps) {
       case "sidebar.right.toggle":
         props.onToggleRightSidebar();
         break;
+      case "sidebar.left.toggle":
+        props.onToggleSidebar();
+        break;
       case "sidebar.explorer.toggle":
         props.onShowExplorer();
         break;
@@ -309,6 +314,13 @@ function CommandRows(
   },
 ) {
   const { query, context, recentIds } = props;
+  // Chord hints render through the keybinding labels formatter (⌘T on macOS,
+  // Ctrl+T elsewhere) — the same labels the Shortcuts settings pane shows.
+  const palettePlatform = resolveShortcutPlatform(
+    typeof navigator === "undefined" ? "" : navigator.userAgent,
+  );
+  const chordHint = (actionId: string | undefined): string | null =>
+    actionId ? formatShortcutChordHint(actionId, palettePlatform) : null;
   const ranked = useMemo(
     () =>
       rankCommands({ defs: COMMAND_DEFS, query, context, recentIds }),
@@ -381,15 +393,21 @@ function CommandRows(
               {row.recent && (
                 <span className="command-palette-badge">recent</span>
               )}
-              {row.enabled ? (
-                row.def.hint && (
-                  <kbd className="command-palette-hint">{row.def.hint}</kbd>
-                )
-              ) : (
-                <span className="command-palette-disabled-reason">
-                  {row.disabledReason}
-                </span>
-              )}
+              {row.enabled
+                ? (() => {
+                    const hint =
+                      chordHint(row.def.keybindingActionId) ?? row.def.hint;
+                    return (
+                      hint && (
+                        <kbd className="command-palette-hint">{hint}</kbd>
+                      )
+                    );
+                  })()
+                : (
+                    <span className="command-palette-disabled-reason">
+                      {row.disabledReason}
+                    </span>
+                  )}
             </Command.Item>
           ))}
           {commands.overflowCount > 0 && (

@@ -81,6 +81,7 @@ const quietCodex = () =>
 const quietMemory = () =>
   Promise.resolve({ rssBytes: null, processCount: null, unavailableReason: "test" });
 const quietPorts = () => Promise.resolve({ listening: [], unavailableReason: "test" });
+const quietProbes = () => Promise.resolve([]);
 
 describe("usage store", () => {
   test("throwing readers resolve fail-closed, never reject", async () => {
@@ -90,6 +91,7 @@ describe("usage store", () => {
       readCodex: () => Promise.reject(new Error("nope")),
       readMemory: () => Promise.reject(new Error("ps?")),
       readPorts: () => Promise.reject(new Error("lsof?")),
+      readWorkspaceProbes: quietProbes,
     });
     const snapshot = await store.refresh();
     expect(snapshot.claude.status).toBe("error");
@@ -109,6 +111,7 @@ describe("usage store", () => {
       readCodex: quietCodex,
       readMemory: quietMemory,
       readPorts: quietPorts,
+      readWorkspaceProbes: quietProbes,
     });
     await store.refresh();
     await store.refresh();
@@ -126,6 +129,7 @@ describe("usage store", () => {
       readCodex: quietCodex,
       readMemory: quietMemory,
       readPorts: quietPorts,
+      readWorkspaceProbes: quietProbes,
     });
     // Three forced failures: backoff grows to 120s, updatedAt tracks now.
     await store.refresh();

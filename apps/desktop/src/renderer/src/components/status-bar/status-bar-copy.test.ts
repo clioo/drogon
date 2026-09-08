@@ -3,6 +3,7 @@ import type { ProviderUsage } from "../../../../shared/usage-contract";
 import {
   memoryLabel,
   memoryTitle,
+  portsAriaLabel,
   portsLabel,
   portsTitle,
   providerMeterRows,
@@ -26,8 +27,8 @@ describe("provider meter projections", () => {
   test("renders session, weekly and the Fable tier share", () => {
     const rows = providerMeterRows(claude(), 0);
     expect(rows.map((row) => row.key)).toEqual(["session", "weekly", "fable"]);
-    expect(rows[0].label).toBe("55% 1h");
-    expect(rows[1].label).toBe("30% wk");
+    expect(rows[0].label).toBe("55% used 1h");
+    expect(rows[1].label).toBe("30% used wk");
     expect(rows[2].label).toBe("8% used Fable");
     expect(rows[0].title).toContain("Resets in 1h");
     expect(rows[1].title).toContain("reset unknown");
@@ -61,11 +62,19 @@ describe("resource copy", () => {
     ).toContain("3 processes");
   });
   test("ports count honestly, including the empty and failed scans", () => {
-    expect(portsLabel({ listening: [], unavailableReason: null })).toBe("0 ports");
+    // Source PortsStatusSegment form: the count alone in the strip; the
+    // word "ports" lives in the aria-label and tooltip.
+    expect(portsLabel({ listening: [], unavailableReason: null })).toBe("0");
     expect(
       portsLabel({ listening: [{ port: 3000, process: "node" }], unavailableReason: null }),
-    ).toBe("1 port");
+    ).toBe("1");
     expect(portsLabel({ listening: [], unavailableReason: "no lsof" })).toBe("unavailable");
+    expect(portsAriaLabel({ listening: [], unavailableReason: null })).toBe(
+      "Ports, 0 workspace ports",
+    );
+    expect(
+      portsAriaLabel({ listening: [{ port: 3000, process: "node" }], unavailableReason: null }),
+    ).toBe("Ports, 1 workspace port");
     expect(portsTitle({ listening: [], unavailableReason: "no lsof" })).toContain("no lsof");
     expect(terminalsTitle(1)).toBe("1 live terminal");
     expect(terminalsTitle(2)).toBe("2 live terminals");

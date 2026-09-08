@@ -5,6 +5,7 @@ import {
   rankCommands,
   type CommandContext,
 } from "./command-registry";
+import { getKeybindingDefinition } from "../../keybindings/definitions";
 
 const onlineWorkspace: CommandContext = {
   connected: true,
@@ -155,5 +156,40 @@ describe("rankCommands", () => {
       expect(def.label.length).toBeGreaterThan(0);
       expect(def.keywords.length).toBeGreaterThan(0);
     }
+  });
+
+  // Titles and chords come from the keybinding table, verbatim from the
+  // source definitions (definitions-core-1/2.ts).
+  test("titles come verbatim from the keybinding table", () => {
+    const byId = new Map(COMMAND_DEFS.map((def) => [def.id, def]));
+    const expectations: readonly [string, string, string][] = [
+      ["terminal.new", "tab.newTerminal", "New terminal tab"],
+      ["worktree.new", "workspace.create", "Create worktree"],
+      ["sidebar.left.toggle", "sidebar.left.toggle", "Toggle Sidebar"],
+      ["sidebar.right.toggle", "sidebar.right.toggle", "Toggle Right Sidebar"],
+      ["sidebar.explorer.toggle", "sidebar.explorer.toggle", "Show Explorer"],
+      [
+        "sidebar.sourceControl.toggle",
+        "sidebar.sourceControl.toggle",
+        "Show Source Control",
+      ],
+      ["settings.open", "app.settings", "Open Settings"],
+    ] as const;
+    for (const [commandId, actionId, title] of expectations) {
+      const def = byId.get(commandId);
+      expect(def, commandId).toBeDefined();
+      expect(def?.keybindingActionId, commandId).toBe(actionId);
+      expect(def?.label, commandId).toBe(title);
+      expect(getKeybindingDefinition(actionId)?.title, actionId).toBe(title);
+    }
+  });
+
+  test("Drogon-only wording is gone from the palette", () => {
+    const labels = COMMAND_DEFS.map((def) => def.label);
+    for (const label of labels) {
+      expect(label.startsWith("Add workspace")).toBe(false);
+      expect(label.startsWith("New worktree")).toBe(false);
+    }
+    expect(labels).toContain("Add Project");
   });
 });

@@ -64,7 +64,7 @@ export const portInfoSchema = z.object({
 export type PortInfo = z.infer<typeof portInfoSchema>;
 
 export const portsSnapshotSchema = z.object({
-  /** Listening TCP ports attributed to this host. */
+  /** Listening TCP ports attributed to this desktop's workspace processes. */
   listening: z.array(portInfoSchema).max(4096),
   /** Why the scan is missing; null when the scan ran. */
   unavailableReason: z.string().max(300).nullable(),

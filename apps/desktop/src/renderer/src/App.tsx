@@ -2571,6 +2571,7 @@ export function App() {
         onOpenFiles={() => showRightExplorer()}
         onOpenBots={() => setRoute(BOTS_ROUTE_ID)}
         onToggleRightSidebar={toggleRightSidebar}
+        onToggleSidebar={toggleSidebar}
         onShowExplorer={showRightExplorer}
         onShowSourceControl={showRightSourceControl}
         onToggleInspector={toggleSessionPanel}

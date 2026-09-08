@@ -4,12 +4,18 @@
 //     (Interface / Terminal accordion sections with per-section summaries)
 //   src/renderer/src/components/settings/AppearanceInterfaceSection.tsx
 //     (Theme segmented System/Dark/Light first row)
-// Adapted: the MVP keeps this repo's three real controls (theme, terminal
-// font size, session details) grouped under Interface/Terminal subsection
-// headers; no font pickers, zoom or app-icon surface yet.
+// Adapted: the MVP keeps this repo's real controls (theme, terminal font
+// size, session details) grouped under Interface/Terminal subsection
+// headers, plus the source's Terminal Rendering GPU-acceleration control
+// (src/renderer/src/components/settings/TerminalRenderingSection.tsx copy);
+// no font pickers, zoom or app-icon surface yet.
 import { useState } from "react";
 import { Input } from "../../components/ui/input";
-import type { Theme } from "../../settings-store";
+import type { TerminalGpuAcceleration, Theme } from "../../settings-store";
+import {
+  readTerminalGpuAcceleration,
+  writeTerminalGpuAcceleration,
+} from "../../settings-store";
 import {
   SettingsFieldError,
   SettingsRow,
@@ -25,6 +31,57 @@ export const THEME_SEGMENT_OPTIONS: readonly { value: Theme; label: string }[] =
     { value: "dark", label: "Dark" },
     { value: "light", label: "Light" },
   ];
+
+export const GPU_ACCELERATION_SEGMENT_OPTIONS: readonly {
+  value: TerminalGpuAcceleration;
+  label: string;
+}[] = [
+  { value: "auto", label: "Auto" },
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" },
+];
+
+/** Source copy (TerminalRenderingSection.tsx): the mode-specific row description. */
+export function gpuAccelerationDescription(
+  mode: TerminalGpuAcceleration,
+): string {
+  if (mode === "off") return "WebGL disabled; DOM renderer for max compatibility.";
+  if (mode === "on") return "WebGL is always attempted for terminal panes.";
+  return "Auto tries WebGL, with DOM fallback for unsupported or risky renderers.";
+}
+
+export function GpuAccelerationRow(): React.JSX.Element {
+  // Self-contained persistence: the value lives in the settings envelope and
+  // TerminalPane reads it at pane construction; local state only mirrors it
+  // for the segmented control.
+  const [mode, setMode] = useState<TerminalGpuAcceleration>(() =>
+    typeof window === "undefined"
+      ? "auto"
+      : readTerminalGpuAcceleration(window.localStorage),
+  );
+  return (
+    <SettingsRow
+      label="GPU Acceleration"
+      description={
+        "Controls whether the terminal uses xterm.js WebGL rendering. Auto tries WebGL when the renderer is supported, with a conservative Linux fallback for software or unknown GPU renderers. " +
+        gpuAccelerationDescription(mode)
+      }
+      control={
+        <SettingsSegmentedControl<TerminalGpuAcceleration>
+          value={mode}
+          onChange={(next) => {
+            setMode(next);
+            if (typeof window !== "undefined") {
+              writeTerminalGpuAcceleration(window.localStorage, next);
+            }
+          }}
+          options={GPU_ACCELERATION_SEGMENT_OPTIONS}
+          ariaLabel="GPU Acceleration"
+        />
+      }
+    />
+  );
+}
 
 export function AppearanceSection({
   theme,
@@ -73,6 +130,7 @@ export function AppearanceSection({
             title="Terminal"
             description="How terminal sessions read."
           />
+          <GpuAccelerationRow />
           <SettingsRow
             label="Terminal font size"
             description="9 to 32 pixels."
