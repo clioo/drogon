@@ -200,6 +200,42 @@ fn fake_gh_list_paged(total: u64) -> String {
     )
 }
 
+/// A fake `gh` with 8 issues (newest first: 8..1) carrying assignee/author
+/// fields spread through the stream, plus `api user` for `@me`. Issue 2 is
+/// the only title holding "settings" and sits past a 2-row first window, so
+/// a windowed-then-filtered implementation would drop it and misreport
+/// `hasNextPage` — the regression this guards.
+fn fake_gh_list_attributed() -> String {
+    let mut rows = Vec::new();
+    for n in (1..=8u64).rev() {
+        let title = if n == 2 {
+            "Deep settings panel".to_string()
+        } else {
+            format!("Work {n}")
+        };
+        let assignees = match n {
+            7 => r#", "assignees":[{"login":"fixture-me"}]"#.to_string(),
+            6 | 5 => r#", "assignees":[{"login":"octocat"}]"#.to_string(),
+            2 => r#", "assignees":[{"login":"octocat"}]"#.to_string(),
+            _ => r#", "assignees":[]"#.to_string(),
+        };
+        let author = match n {
+            3 | 2 => r#", "author":{"login":"helix"}"#,
+            _ => r#", "author":{"login":"clioo"}"#,
+        };
+        rows.push(format!(
+            r#"{{"number":{n},"title":"{title}","state":"OPEN","labels":[]{assignees}{author},"updatedAt":"2026-09-06T12:00:00Z","url":"https://github.com/example/repo/issues/{n}"}}"#
+        ));
+    }
+    let list = format!("[{}]", rows.join(","));
+    format!(
+        "#!/bin/sh\necho \"$*\" > \"$PWD/.gh-argv-last\"\n\
+         if [ \"$1\" = \"api\" ] && [ \"$2\" = \"user\" ]; then\nprintf 'fixture-me'; echo; \
+         elif [ \"$1\" = \"issue\" ] && [ \"$2\" = \"list\" ]; then\ncat <<'EOF'\n{list}\nEOF\n\
+         else\necho 'could not resolve' >&2\nexit 1\nfi\n"
+    )
+}
+
 struct Fixture {
     _root: tempfile::TempDir,
     _override: GhOverride,
@@ -379,6 +415,125 @@ fn list_state_filter_reaches_gh_and_rejects_out_of_bounds_pages() {
             "out-of-bounds paging must be refused"
         );
     }
+}
+
+#[test]
+fn list_query_filters_over_the_full_stream_not_the_first_window() {
+    let fx = Fixture::new(
+        Some("https://github.com/example/repo.git"),
+        Some(&fake_gh_list_attributed()),
+    );
+    let numbers = |value: &Value| {
+        value["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|issue| issue["number"].as_u64().unwrap())
+            .collect::<Vec<_>>()
+    };
+
+    // "settings" only matches issue 2, past a 2-row first window: a
+    // windowed-then-filtered list would report zero rows and no next page.
+    let found = ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id, "query": "settings", "page": 1, "perPage": 2}),
+    );
+    assert_eq!(numbers(&found), vec![2]);
+    assert_eq!(found["hasNextPage"], false);
+    assert!(
+        fx.last_argv().contains("--limit 1001"),
+        "filtered lists must fetch the full bounded stream, got: {}",
+        fx.last_argv()
+    );
+
+    // Combined qualifier + text, and the daemon-implied `is:` qualifiers
+    // from a pasted fork preset, stay exact.
+    let combined = ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id, "query": "assignee:octocat settings"}),
+    );
+    assert_eq!(numbers(&combined), vec![2]);
+    let implied = ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id, "query": "assignee:octocat is:issue is:open"}),
+    );
+    assert_eq!(numbers(&implied), vec![6, 5, 2]);
+
+    // Page 2 of the full match set still slices honestly.
+    let page2 = ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id, "query": "assignee:octocat", "page": 2, "perPage": 2}),
+    );
+    assert_eq!(numbers(&page2), vec![2]);
+    assert_eq!(page2["hasNextPage"], false);
+}
+
+#[test]
+fn list_assignee_and_author_qualifiers_filter_on_gh_fields() {
+    let fx = Fixture::new(
+        Some("https://github.com/example/repo.git"),
+        Some(&fake_gh_list_attributed()),
+    );
+    let list = |query: &str| {
+        ok(
+            &fx.engine,
+            "tasks.list",
+            json!({"projectId": fx.project_id, "query": query}),
+        )
+    };
+    let numbers = |value: &Value| {
+        value["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|issue| issue["number"].as_u64().unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(numbers(&list("assignee:octocat")), vec![6, 5, 2]);
+    assert_eq!(numbers(&list("assignee:OctoCat")), vec![6, 5, 2]);
+    assert_eq!(numbers(&list("assignee:nobody")), Vec::<u64>::new());
+    assert_eq!(numbers(&list("author:helix")), vec![3, 2]);
+    assert_eq!(numbers(&list("author:clioo")), vec![8, 7, 6, 5, 4, 1]);
+    // `@me` resolves through `gh api user` (the fake answers fixture-me).
+    assert_eq!(numbers(&list("assignee:@me")), vec![7]);
+    // Unknown qualifier-shaped tokens keep substring behavior: no silent
+    // widening to the whole list.
+    assert_eq!(numbers(&list("review-requested:@me")), Vec::<u64>::new());
+}
+
+#[test]
+fn pulls_list_qualifiers_filter_on_pr_fields() {
+    let fx = Fixture::new(
+        Some("https://github.com/example/repo.git"),
+        Some(&fake_gh_list_view()),
+    );
+    let list = |query: &str| {
+        ok(
+            &fx.engine,
+            "tasks.list",
+            json!({"projectId": fx.project_id, "mode": "pulls", "query": query}),
+        )
+    };
+    let numbers = |value: &Value| {
+        value["pulls"]
+            .as_array()
+            .map(|pulls| {
+                pulls
+                    .iter()
+                    .map(|pull| pull["number"].as_u64().unwrap())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    // Fixture: PR 12 assignee octocat + author helix, PR 13 author helix.
+    assert_eq!(numbers(&list("assignee:octocat")), vec![12]);
+    assert_eq!(numbers(&list("author:helix")), vec![12, 13]);
+    assert_eq!(numbers(&list("author:clioo")), Vec::<u64>::new());
+    assert_eq!(numbers(&list("assignee:octocat is:pr is:open")), vec![12]);
 }
 
 #[test]

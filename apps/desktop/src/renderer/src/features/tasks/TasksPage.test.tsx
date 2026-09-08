@@ -326,6 +326,19 @@ describe("github default query (source presetToQuery)", () => {
     expect(projectTasksDaemonQuery("  crash  ")).toBe("crash");
     expect(projectTasksDaemonQuery("")).toBeUndefined();
   });
+
+  test("passes assignee:/author: qualifiers through for the daemon", () => {
+    // The daemon filters these on the returned fields (resolving @me via
+    // `gh api user`); the projection must not strip or rewrite them.
+    expect(projectTasksDaemonQuery("assignee:@me")).toBe("assignee:@me");
+    expect(projectTasksDaemonQuery("author:clioo")).toBe("author:clioo");
+    expect(projectTasksDaemonQuery("assignee:octocat is:issue is:open")).toBe(
+      "assignee:octocat",
+    );
+    expect(projectTasksDaemonQuery("assignee:octocat crash")).toBe(
+      "assignee:octocat crash",
+    );
+  });
 });
 
 describe("work item status", () => {

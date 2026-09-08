@@ -363,11 +363,115 @@ fn matches_title_number(number: u64, title: &str, query: &str) -> bool {
     title.to_lowercase().contains(&trimmed.to_lowercase())
 }
 
-/// Client-side substring filter: title contains (case-insensitive), or an
-/// exact issue-number match (`123` or `#123`). `gh --search` needs repo
-/// search qualifiers and ranks; a bounded local filter is honest and exact.
-fn matches_query(issue: &TaskIssue, query: &str) -> bool {
-    matches_title_number(issue.number, &issue.title, query)
+/// `is:` qualifiers the daemon already encodes elsewhere: the kind switch
+/// carries `is:issue`/`is:pr` and the state filter carries
+/// `is:open`/`is:closed`, so a pasted fork preset query keeps working
+/// instead of becoming a title substring that matches nothing.
+const IMPLIED_IS_QUALIFIERS: [&str; 4] = ["is:issue", "is:pr", "is:open", "is:closed"];
+
+/// Structured form of the daemon's query language: free text stays a
+/// title/number substring (see `matches_title_number`), while the fork's
+/// preset qualifiers `assignee:<login>` and `author:<login>` filter on the
+/// fields `gh` already returns. Any other qualifier-shaped token keeps the
+/// historical substring behavior — never silently dropped, never widened.
+struct TaskQueryFilter {
+    text: String,
+    assignee: Option<String>,
+    author: Option<String>,
+}
+
+fn parse_task_query(query: &str) -> TaskQueryFilter {
+    let mut text_parts: Vec<&str> = Vec::new();
+    let mut assignee: Option<String> = None;
+    let mut author: Option<String> = None;
+    for token in query.split_whitespace() {
+        let lower = token.to_ascii_lowercase();
+        if let Some(value) = lower.strip_prefix("assignee:") {
+            if !value.is_empty() && assignee.is_none() {
+                assignee = Some(value.to_string());
+            } else if value.is_empty() {
+                text_parts.push(token);
+            }
+        } else if let Some(value) = lower.strip_prefix("author:") {
+            if !value.is_empty() && author.is_none() {
+                author = Some(value.to_string());
+            } else if value.is_empty() {
+                text_parts.push(token);
+            }
+        } else if IMPLIED_IS_QUALIFIERS.contains(&lower.as_str()) {
+            // Already encoded via kind + state; dropping keeps a pasted
+            // `assignee:@me is:issue is:open` preset exact.
+        } else {
+            text_parts.push(token);
+        }
+    }
+    TaskQueryFilter {
+        text: text_parts.join(" "),
+        assignee,
+        author,
+    }
+}
+
+/// Client-side filter over one `gh` row: title contains
+/// (case-insensitive), or an exact issue-number match (`123` or `#123`),
+/// plus the parsed `assignee:`/`author:` constraints. `gh --search` needs
+/// repo search qualifiers and ranks; a bounded local filter over the full
+/// retrievable stream (see `do_tasks_list`) is honest and exact.
+fn assignee_mismatch(assignees: &[String], want: Option<&str>) -> bool {
+    want.is_some_and(|login| {
+        !assignees
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(login))
+    })
+}
+
+fn author_mismatch(author: Option<&str>, want: Option<&str>) -> bool {
+    want.is_some_and(|login| author.is_none_or(|candidate| !candidate.eq_ignore_ascii_case(login)))
+}
+
+fn matches_query(issue: &TaskIssue, filter: &TaskQueryFilter) -> bool {
+    if assignee_mismatch(&issue.assignees, filter.assignee.as_deref()) {
+        return false;
+    }
+    if author_mismatch(issue.author.as_deref(), filter.author.as_deref()) {
+        return false;
+    }
+    matches_title_number(issue.number, &issue.title, &filter.text)
+}
+
+fn matches_pull_query(pull: &TaskPullRequest, filter: &TaskQueryFilter) -> bool {
+    if assignee_mismatch(&pull.assignees, filter.assignee.as_deref()) {
+        return false;
+    }
+    if author_mismatch(pull.author.as_deref(), filter.author.as_deref()) {
+        return false;
+    }
+    matches_title_number(pull.number, &pull.title, &filter.text)
+}
+
+/// Resolves the `@me` qualifier value through `gh api user` (one bounded
+/// call, only when a filter actually uses it). Auth-shaped failures keep
+/// the typed `gh_unauthenticated` error via `run_gh`.
+fn resolve_me_login(project_path: &str, value: &str) -> Result<String, RpcError> {
+    if !value.eq_ignore_ascii_case("@me") {
+        return Ok(value.to_string());
+    }
+    let stdout = run_gh(
+        Path::new(project_path),
+        &[
+            "api".to_string(),
+            "user".to_string(),
+            "--jq".to_string(),
+            ".login".to_string(),
+        ],
+    )?;
+    let login = stdout.trim().trim_matches('"').to_string();
+    if login.is_empty() {
+        return Err(error::io_error(
+            "gh api user returned an empty login for @me".to_string(),
+        ));
+    }
+    Ok(login)
 }
 
 // --- `gh pr` JSON ------------------------------------------------------------
@@ -689,10 +793,26 @@ impl Engine {
         let (state, query, page, per_page, mode) = params.validate()?;
         let (_, project_path, _) = self.tasks_git_project_path(&params.project_id)?;
         let repo = github_repo_for_project(&project_path)?;
-        // Fetch one row past the requested window so `hasNextPage` is
-        // proven, not guessed from a full page. Bounded by MAX_TASKS_PAGE *
-        // MAX_TASKS_PER_PAGE + 1 (see the protocol constants).
-        let fetch_limit = (page * per_page + 1).min(MAX_TASKS_PAGE * MAX_TASKS_PER_PAGE + 1);
+        // A filtered list must see every row before slicing: `gh` has no
+        // server-side title/assignee filter for this call shape, so a
+        // windowed fetch would silently drop matches past the window and
+        // lie about `hasNextPage`. Fetch the full bounded stream instead
+        // (at most MAX_TASKS_PAGE * MAX_TASKS_PER_PAGE + 1 rows); the
+        // unfiltered path keeps the cheap one-window probe.
+        let mut filter = parse_task_query(query.as_deref().unwrap_or(""));
+        if let Some(assignee) = filter.assignee.take() {
+            filter.assignee = Some(resolve_me_login(&project_path, &assignee)?);
+        }
+        if let Some(author) = filter.author.take() {
+            filter.author = Some(resolve_me_login(&project_path, &author)?);
+        }
+        let filtered =
+            !filter.text.trim().is_empty() || filter.assignee.is_some() || filter.author.is_some();
+        let fetch_limit = if filtered {
+            MAX_TASKS_PAGE * MAX_TASKS_PER_PAGE + 1
+        } else {
+            (page * per_page + 1).min(MAX_TASKS_PAGE * MAX_TASKS_PER_PAGE + 1)
+        };
         let stdout = match mode {
             TasksListMode::Issues => run_gh(
                 Path::new(&project_path),
@@ -715,7 +835,7 @@ impl Engine {
                 let mut matching = Vec::with_capacity(raw.len());
                 for item in raw {
                     let issue = convert_issue(item)?;
-                    if query.as_deref().is_some_and(|q| !matches_query(&issue, q)) {
+                    if !matches_query(&issue, &filter) {
                         continue;
                     }
                     matching.push(issue);
@@ -731,10 +851,7 @@ impl Engine {
                 let mut matching = Vec::with_capacity(raw.len());
                 for item in raw {
                     let pull = convert_pull(item)?;
-                    if query
-                        .as_deref()
-                        .is_some_and(|q| !matches_title_number(pull.number, &pull.title, q))
-                    {
+                    if !matches_pull_query(&pull, &filter) {
                         continue;
                     }
                     matching.push(pull);
@@ -1186,18 +1303,33 @@ mod tests {
             title: "Fix the sidebar crash".into(),
             state: TaskIssueState::Open,
             labels: vec![],
-            assignees: vec![],
-            author: None,
+            assignees: vec!["octocat".into()],
+            author: Some("clioo".into()),
             updated_at: String::new(),
             url: String::new(),
             body: None,
         };
-        assert!(matches_query(&issue, ""));
-        assert!(matches_query(&issue, "sidebar"));
-        assert!(matches_query(&issue, "SIDEBAR"));
-        assert!(matches_query(&issue, "123"));
-        assert!(matches_query(&issue, "#123"));
-        assert!(!matches_query(&issue, "browser"));
-        assert!(!matches_query(&issue, "12"));
+        let query = |q: &str| matches_query(&issue, &parse_task_query(q));
+        assert!(query(""));
+        assert!(query("sidebar"));
+        assert!(query("SIDEBAR"));
+        assert!(query("123"));
+        assert!(query("#123"));
+        assert!(!query("browser"));
+        assert!(!query("12"));
+        // Fork preset qualifiers filter on the returned fields; the
+        // daemon-implied `is:` qualifiers strip out instead of becoming
+        // title substrings that match nothing.
+        assert!(query("assignee:octocat"));
+        assert!(query("assignee:OctoCat"));
+        assert!(!query("assignee:someone-else"));
+        assert!(query("author:clioo"));
+        assert!(!query("author:octocat"));
+        assert!(query("assignee:octocat is:issue is:open"));
+        assert!(query("assignee:octocat sidebar"));
+        assert!(!query("assignee:octocat browser"));
+        // Unknown qualifier-shaped tokens keep the historical substring
+        // behavior: never widened, never silently dropped.
+        assert!(!query("review-requested:@me"));
     }
 }
