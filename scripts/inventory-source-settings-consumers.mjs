@@ -55,7 +55,9 @@ import { fileURLToPath } from 'node:url'
 // match the pinned baseline is always a hard failure.
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = realpathSync(path.resolve(SCRIPT_DIR, '..'))
-const DEFAULT_SOURCE = '/Users/carlos/Documents/Drogon-mentu-session'
+// No implicit reference checkout: pass --source explicitly or set
+// $DROGON_SOURCE_ROOT (check-frozen-test-ports precedent).
+const DEFAULT_SOURCE = process.env.DROGON_SOURCE_ROOT ?? null
 const PINNED_SOURCE_SHA = 'c97906287bb7a390b25e2025b600d9fb3c25d9c3'
 const CANONICAL_FIELDS_PATH = path.join(REPO_ROOT, 'docs/migration/parity-settings-properties.json')
 const SCHEMA = 'drogon.inventory.settings-consumers.v1'
@@ -1201,6 +1203,7 @@ function renderMarkdown(doc) {
 // in-memory regeneration.
 async function run(argv) {
   const opts = parseArgv(argv)
+  assert.ok(opts.source, 'pass --source <read-only reference checkout> or set $DROGON_SOURCE_ROOT; no implicit checkout')
   const sourceRoot = realpathSync(opts.source)
   const gitMeta = sourceGitMeta(sourceRoot)
   const shaMismatch = gitMeta.headSha !== PINNED_SOURCE_SHA

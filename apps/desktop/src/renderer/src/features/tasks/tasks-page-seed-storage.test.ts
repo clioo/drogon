@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// MIT Copyright (c) 2026 Lovecast Inc.
 /* Tasks persisted seed (R16-BF): last session's rows survive a renderer
    restart in localStorage so the next cold open paints instantly and
    revalidates underneath. Corrupt entries, foreign shapes, quota failures

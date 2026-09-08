@@ -51,6 +51,7 @@ jobs:
         run: |
           node --test scripts/live-child-crash-fixture.test.mjs
           node scripts/accept-live-child-crash.mjs
+      - run: pnpm check:hygiene
 
   windows-compilation:
     runs-on: windows-2022

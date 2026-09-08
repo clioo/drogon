@@ -7,7 +7,8 @@
 //
 // --ref  CDP http endpoint of the running orca-drogon dev app (confirmation
 //        only: the script never creates data there, only navigates views and
-//        opens/closes ephemeral overlays).
+//        opens/closes ephemeral overlays). Defaults to $ORCA_REFERENCE_CDP
+//        when --ref is absent.
 // --out  Output dir; default .preflight/fidelity/<timestamp>/.
 // --cand Optional existing candidate CDP endpoint. When absent the script
 //        launches its OWN production candidate: target/debug/drogond plus
@@ -41,7 +42,14 @@ import {
 import { emulatePageFocus } from "../acceptance-page-focus.mjs";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
-const REF_ROOT = "/Users/carlos/Documents/Drogon-mentu-session";
+// No implicit reference checkout: export $DROGON_SOURCE_ROOT (the read-only
+// reference root the source inventory reads at runtime).
+const REF_ROOT = process.env.DROGON_SOURCE_ROOT ?? null;
+assert.ok(
+  REF_ROOT,
+  "Missing reference source root: set $DROGON_SOURCE_ROOT " +
+    "to the read-only reference checkout for source-anchored diffs.",
+);
 const args = process.argv.slice(2);
 
 // The normal oracle remains the 1440×900 desktop comparison. Narrow sweeps
@@ -72,7 +80,12 @@ function flag(name, def = null) {
   if (i + 1 < args.length && !args[i + 1].startsWith("--")) return args[i + 1];
   return true;
 }
-const REF_CDP = flag("--ref", "http://127.0.0.1:9445");
+const REF_CDP = flag("--ref", process.env.ORCA_REFERENCE_CDP ?? null);
+assert.ok(
+  REF_CDP,
+  "Missing reference CDP endpoint: pass --ref <cdp-url> or set " +
+    "ORCA_REFERENCE_CDP to the read-only orca-drogon dev app's CDP http endpoint.",
+);
 const CAND_CDP = flag("--cand", null);
 const OUT = flag("--out", null);
 const NO_DARK = args.includes("--no-dark");
@@ -6211,7 +6224,7 @@ async function main() {
   } catch (error) {
     console.error(
       `Reference app not reachable at ${REF_CDP}: ${error.message.split("\n")[0]}\n` +
-        "Start the orca-drogon dev app on this Mac (CDP http://127.0.0.1:9445) and re-run. The candidate was not started.",
+        "Start the orca-drogon dev app on this Mac and re-run with its CDP endpoint. The candidate was not started.",
     );
     process.exitCode = 2;
     return;

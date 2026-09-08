@@ -1,3 +1,4 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
 // clioo/drogon#315: pins the editor save transform to BYTE fidelity — the
 // draft the model holds is the exact string the file bridge receives, for
 // whole-document replacements, mid-file edits, files with and without a

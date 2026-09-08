@@ -21,6 +21,7 @@ supporting areas.
 - V4 checkpoint-001: automation dispatch evaluation, Mentu/Meet contracts, exported BotsPanel (#13)
 - V1 checkpoint-001: native dogfood + CLI argument parity 22/22 (#14)
 - V5 platform/release: Windows pipe probe, acceptance runbook, E5 decision prep (#15)
+- fix(daemon): second daemon refuses an owned data dir promptly again (Fixes #290) (#299)
 
 ### Shell, sidebar & fixes (J1)
 
@@ -39,6 +40,7 @@ supporting areas.
 - fix(shell): sidebar always populates once the daemon is ready (#185) (#204)
 - fix(sidebar): worktree card nested session rows like the fork (Fixes #229) (#251)
 - fix(shell): worktree Delete menu works (Fixes #220); model field format and Retry (Fixes #221) (#253)
+- R16-BI: fix(shell): sidebar width, tab strip geometry, status-bar separator a11y and Escape from pages match the fork (#310)
 
 ### Terminal & sessions (J1)
 
@@ -66,6 +68,7 @@ supporting areas.
 - fix(agent-state): visuals and notification copy parity (#174)
 - fix(shell): #192 launch dialog model, #194 agent-state derivation, #197 create-menu rows (#206)
 - R16-AG: fix(shell): native menu, dock badge, notifications and window state end to end (#214)
+- perf(sessions): push agent-state changes to the renderer like the fork (card/badge < 200 ms) (#311)
 
 ### Editor, Explorer & Source Control (J2)
 
@@ -82,6 +85,9 @@ supporting areas.
 - R16-X: keyboard input reaches Monaco; dirty/external-write conflict marks and suspends autosave (fixes #144) (#210)
 - fidelity: oracle states for source-control clean/dirty (git-project fixture) (#216)
 - fix(editor): Save persistence (#207), dirty dot and header parity (#195 #196) (#256)
+- R16-AS: fix(source-control): J2 end to end (groups, diff, commit, sync, Create PR gating) (#295)
+- fix(editor,source-control): diff opens as an editor tab, deleted files close their tab, clean-state copy like the fork (Fixes #294, Fixes #302, Fixes #176) (#314)
+- R16-BN: fix(editor): saving a fully replaced document writes exactly the typed bytes like the fork (Fixes #315) (#324)
 
 ### Command line (drogon-cli, J3)
 
@@ -104,6 +110,8 @@ supporting areas.
 - fix(main): background test instances never open the system browser, Finder or native pickers (#225)
 - fix(shell): restore editor/browser tabs after restart (#215); refresh workspaces on project changes (#218) (#240)
 - fix(browser): address bar search fallback like the fork (Fixes #234); browser strip tab anatomy (Fixes #235) (#249)
+- fix(browser): keep local guests painting after navigation (#291)
+- fix(browser,daemon): renderer stays responsive across daemon restart with persisted local browser tabs (Fixes #309) (#321)
 
 ### Palette & quick open (J5)
 
@@ -148,6 +156,7 @@ supporting areas.
 - Bots page exactness against the Drogon fork (R13-A) (#97)
 - R16-S fix(bots): end-to-end run with the local model (#191)
 - fix(pages): Bots opens instantly like Orca (Fixes #237); Tasks single filter bar and fast default load (Fixes #238) (#262)
+- fix(bots): scheduled and run-now responsibilities use the bot's harness policy (Fixes #188) (#307)
 
 ### Mentu recipes (J9)
 
@@ -192,6 +201,7 @@ supporting areas.
 - R16-AI: fix(accept): probes follow the R16 UI (harness form, packaged surfaces) (#224)
 - R16-Z2 feat(packaging): original Drogon app icon (#243)
 - fix(packaging): rasterize the app icon with Chromium (Fixes #201) (#263)
+- fix(packaging): icon built and asserted before install; install-preview tolerates old previews (Fixes #319) (#323)
 
 ### Status bar (J12)
 
@@ -221,6 +231,7 @@ supporting areas.
 - ci green Foundation on ubuntu/macos/windows (hook_event timing, bot_history ordering, app-menu platform labels, main-tokens line endings) (#233)
 - task_4974921f3a45 follow-up: node heap for desktop build (macos-14 OOM) (#247)
 - de-flake hook_event needs_input test (startup-prompt race) (#258)
+- perf(desktop): startup and page-open latency parity with orca-drogon (#306)
 
 ### Docs & plan
 

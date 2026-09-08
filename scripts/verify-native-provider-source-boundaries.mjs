@@ -18,7 +18,9 @@ export function providerSourceBoundaryCases() {
   for (const entry of [...manifest.files, manifest.license]) {
     assert.equal(digest(readFileSync(path.join(stage, entry.path))), entry.sha256, entry.path);
   }
-  const require = createRequire('/Users/carlos/Documents/Drogon-mentu-session/package.json');
+  // No implicit reference checkout: esbuild resolves from $DROGON_SOURCE_ROOT.
+  assert(process.env.DROGON_SOURCE_ROOT, 'set $DROGON_SOURCE_ROOT to the read-only reference checkout');
+  const require = createRequire(path.join(process.env.DROGON_SOURCE_ROOT, 'package.json'));
   const esbuild = require('esbuild');
   const allowed = new Set(manifest.files.map((entry) => path.resolve(stage, entry.path)));
   const load = (entry) => {

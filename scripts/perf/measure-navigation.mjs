@@ -5,7 +5,7 @@
 //
 //   # Reference (attach only: never starts, stops, types into, or reloads
 //   # the live instance; sidebar-rail navigation only):
-//   node scripts/perf/measure-navigation.mjs --reference-cdp http://127.0.0.1:9445
+//   node scripts/perf/measure-navigation.mjs --reference-cdp "$ORCA_REFERENCE_CDP"
 //
 //   # Packaged candidate (harness owns the lifecycle: spawns the bundle,
 //   # ensures one git project + worktree + workspace + --sessions-count

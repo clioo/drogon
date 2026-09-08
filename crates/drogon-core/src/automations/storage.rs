@@ -28,7 +28,7 @@
 //! and mislabeled that as a port of the source's real
 //! `assertAutomationOwnerFence`
 //! (`src/shared/automation-owner-precondition.ts`). Root review
-//! (msg_80ee2d7bfde1) correctly rejected the mislabeling: the real source
+//! correctly rejected the mislabeling: the real source
 //! fence has nothing to do with Bot ownership at all -- it fences which
 //! **execution host** (self/local, or a specific SSH target at a specific
 //! registration generation) the caller believes currently has authority

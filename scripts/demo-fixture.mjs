@@ -34,9 +34,13 @@ export const DEFAULT_MANIFEST_PATH = path.join(
   ".preflight",
   "demo-fixture.json",
 );
+// Override with $DROGON_MENTU_RUNTIME_SOURCE on machines without the local
+// reference checkout; the daemon is consulted first and this path is only
+// used when the pinned runtime is not already installed.
 export const PINNED_MENTU_RUNTIME_SOURCE =
+  process.env.DROGON_MENTU_RUNTIME_SOURCE ??
   "/Users/carlos/Documents/Drogon-mentu-session/.mentu/runtime/" +
-  "b72a1203d46c1d930be1aead65388ddfbe9a8fc4/bin/mentu-recipes";
+    "b72a1203d46c1d930be1aead65388ddfbe9a8fc4/bin/mentu-recipes";
 export const PINNED_MENTU_RUNTIME_PROVISION_COMMAND = `node scripts/mentu-runtime-provision.mjs --source ${PINNED_MENTU_RUNTIME_SOURCE}`;
 export const DEMO_PROVIDER = "dgx-spark";
 export const DEMO_MODEL = "qwen3.8-flash-next-nvidia-nvfp4";

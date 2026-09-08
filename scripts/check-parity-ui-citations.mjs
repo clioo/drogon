@@ -6,7 +6,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const root = path.resolve(process.argv[2] ?? '/Users/carlos/Documents/Drogon-mentu-session')
+const root = path.resolve(process.argv[2] ?? process.env.DROGON_SOURCE_ROOT ?? missingSourceRoot())
+function missingSourceRoot() {
+  throw new Error('pass the read-only reference checkout as argv[2] or $DROGON_SOURCE_ROOT; no implicit checkout')
+}
 assert.equal(execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), 'c97906287bb7a390b25e2025b600d9fb3c25d9c3')
 assert.equal(execFileSync('git', ['-C', root, 'status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }).trim(), '')
 function read(file) {

@@ -1,5 +1,5 @@
 // node --test suite for the NR-1 final-bundle notices verifier.
-// Run: /Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test scripts/verify-final-bundle-notices.test.mjs
+// Run: node --test scripts/verify-final-bundle-notices.test.mjs (Node 24, see AGENTS.md)
 // The suite binds to the checked-in manifest (drogon.release.final-bundle-notices.v1)
 // and assembles fixture shipped-notices bytes strictly from the manifest's own
 // verbatim texts plus the documented section grammar — never from generator
@@ -356,7 +356,7 @@ test("byte-shifted negative: a genuine mutation after a non-ASCII preamble is st
   assert.ok(result.changed.some((c) => c.key === "__root_preamble__"));
 });
 
-// --- Separator-byte bypass regressions (ROOT-reproduced defect, msg_39667384a338) ---
+// --- Separator-byte bypass regressions (ROOT-reproduced defect) ---
 // parseNoticeSections excludes exactly one byte before every heading match
 // as "the join" without ever checking its value or count, so every
 // inter-section grammar byte was excluded from all hashed spans and could be

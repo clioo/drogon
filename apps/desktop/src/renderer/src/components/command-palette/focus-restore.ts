@@ -1,6 +1,6 @@
 /* MIT Copyright (c) 2026 Lovecast Inc.
  * Ported from the read-only reference
- * `/Users/carlos/Documents/Drogon-mentu-session/src/renderer/src/components/cmd-j/palette-focus-restore-target.ts`
+ * the read-only Orca reference `src/renderer/src/components/cmd-j/palette-focus-restore-target.ts`
  * (Orca 1.4.197 + Drogon fork). Adapted: standalone module, no store imports.
  */
 

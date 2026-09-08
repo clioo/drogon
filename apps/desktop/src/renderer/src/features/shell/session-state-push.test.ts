@@ -1,3 +1,7 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// R16-BF2 push semantics: idempotent, out-of-order-safe application of one
+// pushed session-state change (fork pushes agent state to the card/badge;
+// this build merges the push through the same row projection as the poller).
 import { describe, expect, it } from "vitest";
 import type { Session } from "../../../../shared/session-contract";
 import { applySessionStatePush } from "./session-state-push";

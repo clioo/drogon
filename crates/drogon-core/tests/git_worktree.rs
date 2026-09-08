@@ -92,9 +92,12 @@ fn parses_nul_delimited_prunable_entry_with_reason() {
 
 #[test]
 fn parses_nul_delimited_path_with_spaces() {
-    let input = "worktree /Users/carlos/My Worktrees/feature branch\0HEAD 4444444444444444444444444444444444444444\0branch refs/heads/main\0\0";
+    let input = "worktree /tmp/drogon-fixture/My Worktrees/feature branch\0HEAD 4444444444444444444444444444444444444444\0branch refs/heads/main\0\0";
     let entries = parse_worktree_list_porcelain(input).unwrap();
-    assert_eq!(entries[0].path, "/Users/carlos/My Worktrees/feature branch");
+    assert_eq!(
+        entries[0].path,
+        "/tmp/drogon-fixture/My Worktrees/feature branch"
+    );
 }
 
 #[test]
@@ -162,9 +165,12 @@ fn parses_line_block_locked_and_prunable_annotations() {
 
 #[test]
 fn parses_line_block_path_with_spaces() {
-    let input = "worktree /Users/carlos/My Worktrees/feature branch\nHEAD 4444444444444444444444444444444444444444\nbranch refs/heads/main\n\n";
+    let input = "worktree /tmp/drogon-fixture/My Worktrees/feature branch\nHEAD 4444444444444444444444444444444444444444\nbranch refs/heads/main\n\n";
     let entries = parse_worktree_list_porcelain(input).unwrap();
-    assert_eq!(entries[0].path, "/Users/carlos/My Worktrees/feature branch");
+    assert_eq!(
+        entries[0].path,
+        "/tmp/drogon-fixture/My Worktrees/feature branch"
+    );
 }
 
 #[test]

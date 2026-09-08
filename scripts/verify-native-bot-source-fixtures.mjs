@@ -23,7 +23,9 @@ export function verifyNativeBotSourceFixtures() {
   assert.equal(stagedRequire('zod/package.json').version, manifest.transportRuntime.zod.version);
   const zodTree = snapshotTransportPackage(path.dirname(zodFile));
   assert.equal(zodTree.treeSha256, manifest.transportRuntime.zod.treeSha256);
-  const sourceRequire = createRequire('/Users/carlos/Documents/Drogon-mentu-session/package.json');
+  // No implicit reference checkout: esbuild resolves from $DROGON_SOURCE_ROOT.
+  assert.ok(process.env.DROGON_SOURCE_ROOT, 'set $DROGON_SOURCE_ROOT to the read-only reference checkout');
+  const sourceRequire = createRequire(path.join(process.env.DROGON_SOURCE_ROOT, 'package.json'));
   const esbuild = sourceRequire('esbuild');
   const allowed = new Set(manifest.files.map((entry) => path.resolve(stage, entry.path)));
   const loadSource = (file) => {

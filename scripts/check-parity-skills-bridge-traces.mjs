@@ -8,7 +8,10 @@ import { fileURLToPath } from 'node:url'
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 assert(process.argv.length <= 3, 'usage: node check-parity-skills-bridge-traces.mjs [source]')
-const root = realpathSync(process.argv[2] ?? '/Users/carlos/Documents/Drogon-mentu-session')
+const root = realpathSync(process.argv[2] ?? process.env.DROGON_SOURCE_ROOT ?? missingSourceRoot())
+function missingSourceRoot() {
+  throw new Error('pass the read-only reference checkout as argv[2] or $DROGON_SOURCE_ROOT; no implicit checkout')
+}
 const pin = 'c97906287bb7a390b25e2025b600d9fb3c25d9c3'
 const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', maxBuffer: 1024 * 1024 }).trim()
 assert.equal(git('rev-parse', 'HEAD'), pin)

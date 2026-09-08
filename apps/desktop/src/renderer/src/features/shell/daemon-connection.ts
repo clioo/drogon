@@ -1,5 +1,5 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from the Orca reference
-// (read-only /Users/carlos/Documents/Drogon-mentu-session):
+// (read-only Orca reference):
 //   src/renderer/src/web/web-runtime-connection-transport.ts
 //     (RECONNECT_DELAYS_MS ladder, infinite retry, attempt counting)
 //   src/shared/reconnect-jitter.ts (withReconnectJitter, one-sided +20%)

@@ -50,8 +50,9 @@
 //      `unresolved-disposer-pairing` with both call sites' anchors, never
 //      silently upgraded to a pairing claim.
 //
-// Parses the LEGACY Orca checkout (default /Users/carlos/Documents/Drogon-mentu-session,
-// pinned to c97906287bb7a390b25e2025b600d9fb3c25d9c3) with the Babel parser
+// Parses the LEGACY Orca checkout (pass --source explicitly or set
+// $DROGON_SOURCE_ROOT; pinned to c97906287bb7a390b25e2025b600d9fb3c25d9c3)
+// with the Babel parser
 // already installed in this workspace's node_modules (resolved indirectly
 // through @vitejs/plugin-react, per task instruction) and emits deterministic
 // artifacts into THIS repo only:
@@ -98,7 +99,9 @@ import { fileURLToPath } from 'node:url'
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..')
-const DEFAULT_SOURCE = '/Users/carlos/Documents/Drogon-mentu-session'
+// No implicit reference checkout: pass --source explicitly or set
+// $DROGON_SOURCE_ROOT (check-frozen-test-ports precedent).
+const DEFAULT_SOURCE = process.env.DROGON_SOURCE_ROOT ?? null
 const EXPECTED_SOURCE_SHA = 'c97906287bb7a390b25e2025b600d9fb3c25d9c3'
 const KNOWN_UNTRACKED = new Set(['.mentu/plans/drogon-rewrite-preflight.md'])
 const JSON_OUTPUT = path.join(REPO_ROOT, 'docs/migration/parity-source-bridges.json')
@@ -1716,6 +1719,7 @@ function collectMainIpcRegistrations(source, fileHashes) {
 // ---------------------------------------------------------------------------
 function run(args) {
   const { source, expectedSha, knownUntracked } = args
+  assert.ok(source, 'pass --source <read-only reference checkout> or set $DROGON_SOURCE_ROOT; no implicit checkout')
   const meta = sourceGitMeta(source, expectedSha, knownUntracked)
   const fileHashes = {}
 

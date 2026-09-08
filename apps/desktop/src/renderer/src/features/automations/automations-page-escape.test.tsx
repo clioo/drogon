@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-// Escape precedence for the Automations page (fork
-// use-automations-page-escape): run → back per origin, detail → list,
+// MIT Copyright (c) 2026 Lovecast Inc. Escape precedence cases parallel the
+// fork's AutomationsPage.escape-precedence.test.tsx over the port in
+// automations-page-escape.ts (from use-automations-page-escape.ts):
+// run → back per origin, detail → list,
 // runs → automations, top level → close; dialogs and fields own Escape
 // first; a hidden keep-alive host never handles it (#270).
 import { afterEach, describe, expect, it, vi } from "vitest";

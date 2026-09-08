@@ -1,6 +1,6 @@
 /* MIT Copyright (c) 2026 Lovecast Inc.
  * Ranking adapts the token-score approach from the read-only reference
- * `/Users/carlos/Documents/Drogon-mentu-session/src/renderer/src/components/cmd-j/palette-query-tokens.ts`
+ * the read-only Orca reference `src/renderer/src/components/cmd-j/palette-query-tokens.ts`
  * and `palette-results.ts` (exact > prefix > substring per token, plus a
  * coverage gate so multi-word queries must cover most of what was typed).
  * Rewritten standalone: no i18n, no settings/action split.
