@@ -71,12 +71,14 @@ pub(crate) struct SessionHandle {
     /// later PTY output has cleared yet. `None` for sessions that never got
     /// one — other harnesses keep purely activity-based states.
     needs_input_at: Mutex<Option<String>>,
-    /// Per-session harness hook install `harness.start` wrote for this
-    /// session (claude's `--settings` file, Pi's `--extension` file, or
-    /// OpenCode's `OPENCODE_CONFIG_DIR` overlay directory), removed when
-    /// the session exits (`hooks::remove_settings_file` handles both a file
-    /// and a directory tree). `None` for sessions launched without one.
-    hook_settings_file: Mutex<Option<std::path::PathBuf>>,
+    /// Per-session harness hook install artifacts `harness.start` wrote for
+    /// this session (claude's `--settings` file; OpenCode's
+    /// `OPENCODE_CONFIG_DIR` overlay directory, one path since its load
+    /// marker lives inside it; Pi's `--extension` file *and* its sibling
+    /// load marker, two paths), all removed when the session exits
+    /// (`hooks::remove_settings_file` handles both a file and a directory
+    /// tree). Empty for sessions launched without hook wiring.
+    hook_cleanup_paths: Mutex<Vec<std::path::PathBuf>>,
     /// OpenCode/Pi opt out of the reader thread's generic activity-based
     /// clear (set by `harness.rs` via [`Self::set_explicit_wait_clear`]):
     /// their TUIs can repaint while genuinely still waiting, so any PTY byte
@@ -124,7 +126,7 @@ impl SessionHandle {
             reader_done: AtomicBool::new(false),
             last_activity: Mutex::new(None),
             needs_input_at: Mutex::new(None),
-            hook_settings_file: Mutex::new(None),
+            hook_cleanup_paths: Mutex::new(Vec::new()),
             explicit_wait_clear: AtomicBool::new(false),
             db,
         })
@@ -152,15 +154,16 @@ impl SessionHandle {
         self.explicit_wait_clear.store(true, Ordering::Release);
     }
 
-    /// Remembers the per-session hook install so the exit paths can remove
-    /// it. Called once by `harness.start` right after launch.
-    pub(crate) fn set_hook_settings_file(&self, path: std::path::PathBuf) {
-        *self.hook_settings_file.lock().unwrap() = Some(path);
+    /// Remembers one per-session hook install artifact so the exit paths
+    /// can remove it. Called once or twice by `harness.start` right after
+    /// launch (Pi has both its `--extension` file and a sibling marker).
+    pub(crate) fn add_hook_cleanup_path(&self, path: std::path::PathBuf) {
+        self.hook_cleanup_paths.lock().unwrap().push(path);
     }
 
-    /// Takes the remembered hook install path for deletion, if any.
-    fn take_hook_settings_file(&self) -> Option<std::path::PathBuf> {
-        self.hook_settings_file.lock().unwrap().take()
+    /// Takes every remembered hook install artifact for deletion, if any.
+    fn take_hook_cleanup_paths(&self) -> Vec<std::path::PathBuf> {
+        std::mem::take(&mut self.hook_cleanup_paths.lock().unwrap())
     }
 }
 
@@ -361,7 +364,7 @@ fn poll_until_exit(handle: &SessionHandle) {
     loop {
         if let Some(code) = try_reap(handle) {
             if persist_exit(handle, code).is_ok() {
-                if let Some(path) = handle.take_hook_settings_file() {
+                for path in handle.take_hook_cleanup_paths() {
                     crate::hooks::remove_settings_file(&path);
                 }
                 try_release_native(handle);
@@ -538,7 +541,7 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
     use drogon_protocol::orchestration_worker::ProcessAction;
 
     if let Some(code) = try_reap(handle) {
-        if let Some(path) = handle.take_hook_settings_file() {
+        for path in handle.take_hook_cleanup_paths() {
             crate::hooks::remove_settings_file(&path);
         }
         try_release_native(handle);
@@ -557,7 +560,7 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
     let deadline = Instant::now() + STOP_VERIFY_TIMEOUT;
     loop {
         if let Some(code) = try_reap(handle) {
-            if let Some(path) = handle.take_hook_settings_file() {
+            for path in handle.take_hook_cleanup_paths() {
                 crate::hooks::remove_settings_file(&path);
             }
             try_release_native(handle);

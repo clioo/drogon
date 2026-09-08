@@ -160,6 +160,8 @@ fn opencode_harness_start_installs_overlay_and_env_and_removes_it_on_exit() {
          echo \"HOOK_CLI=$DROGON_HOOK_CLI\"\n\
          echo \"HOOK_INC=$DROGON_HOOK_INCARNATION\"\n\
          echo \"SESSION_ID=$DROGON_SESSION_ID\"\n\
+         echo \"HOOK_MARKER=$DROGON_HOOK_MARKER\"\n\
+         touch \"$DROGON_HOOK_MARKER\"\n\
          sleep 30",
     );
     prepend_fixture_bin(bin.path());
@@ -206,6 +208,16 @@ fn opencode_harness_start_installs_overlay_and_env_and_removes_it_on_exit() {
         std::path::Path::new(&hook_cli).is_file(),
         "DROGON_HOOK_CLI must be a real, absolute CLI path: {hook_cli}"
     );
+    let marker_path = get("HOOK_MARKER=");
+    assert_eq!(
+        std::path::Path::new(&marker_path).parent().unwrap(),
+        std::path::Path::new(&config_dir),
+        "the load marker must live inside the overlay, not the plugins dir"
+    );
+    assert!(
+        std::path::Path::new(&marker_path).is_file(),
+        "the fixture's `touch $DROGON_HOOK_MARKER` must have created it"
+    );
 
     let plugins_dir = std::path::Path::new(&config_dir).join("plugins");
     let plugin_files: Vec<_> = std::fs::read_dir(&plugins_dir)
@@ -240,6 +252,10 @@ fn opencode_harness_start_installs_overlay_and_env_and_removes_it_on_exit() {
     assert!(
         !std::path::Path::new(&config_dir).exists(),
         "the overlay directory must be removed when the session exits"
+    );
+    assert!(
+        !std::path::Path::new(&marker_path).exists(),
+        "the load marker must go with the overlay"
     );
 }
 
@@ -348,6 +364,8 @@ fn pi_harness_start_installs_extension_and_removes_it_on_exit() {
         "echo \"HOOK_CLI=$DROGON_HOOK_CLI\"\n\
          echo \"HOOK_INC=$DROGON_HOOK_INCARNATION\"\n\
          echo \"SESSION_ID=$DROGON_SESSION_ID\"\n\
+         echo \"HOOK_MARKER=$DROGON_HOOK_MARKER\"\n\
+         touch \"$DROGON_HOOK_MARKER\"\n\
          sleep 30",
     );
     prepend_fixture_bin(bin.path());
@@ -405,6 +423,16 @@ fn pi_harness_start_installs_extension_and_removes_it_on_exit() {
     assert_eq!(get("HOOK_INC="), incarnation);
     assert_eq!(get("SESSION_ID="), session_id);
     assert!(std::path::Path::new(&get("HOOK_CLI=")).is_file());
+    let marker_path = get("HOOK_MARKER=");
+    assert_eq!(
+        marker_path,
+        format!("{extension_path}.loaded"),
+        "the marker must be a sibling of the extension file"
+    );
+    assert!(
+        std::path::Path::new(&marker_path).is_file(),
+        "the fixture's `touch $DROGON_HOOK_MARKER` must have created it"
+    );
 
     let stopped = ok(
         &engine,
@@ -415,6 +443,10 @@ fn pi_harness_start_installs_extension_and_removes_it_on_exit() {
     assert!(
         !std::path::Path::new(&extension_path).exists(),
         "the extension file must be removed when the session exits"
+    );
+    assert!(
+        !std::path::Path::new(&marker_path).exists(),
+        "the sibling load marker must also be removed when the session exits"
     );
 }
 

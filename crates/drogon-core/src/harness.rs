@@ -30,12 +30,14 @@ enum PendingHookInstall {
     },
 }
 
-/// The install once admission minted real identity: where to install/what
-/// to remove on exit, the environment overlay to apply on top of the base
-/// session environment, and whether this harness clears `needs_input` only
-/// through its own hook events (see `SessionHandle::set_explicit_wait_clear`).
+/// The install once admission minted real identity: every artifact to
+/// remove on exit (claude/opencode: one; pi: its `--extension` file and its
+/// sibling load marker), the environment overlay to apply on top of the
+/// base session environment, and whether this harness clears `needs_input`
+/// only through its own hook events (see
+/// `SessionHandle::set_explicit_wait_clear`).
 struct ReadyHookInstall {
-    cleanup_path: PathBuf,
+    cleanup_paths: Vec<PathBuf>,
     extra_env: Vec<(String, String)>,
     explicit_wait_clear: bool,
 }
@@ -143,13 +145,17 @@ impl Engine {
             Ok(launched) => launched,
             Err(err) => {
                 if let Some(ready) = &ready {
-                    crate::hooks::remove_settings_file(&ready.cleanup_path);
+                    for path in &ready.cleanup_paths {
+                        crate::hooks::remove_settings_file(path);
+                    }
                 }
                 return Err(err);
             }
         };
         if let Some(ready) = ready {
-            handle.set_hook_settings_file(ready.cleanup_path);
+            for path in ready.cleanup_paths {
+                handle.add_hook_cleanup_path(path);
+            }
             if ready.explicit_wait_clear {
                 handle.set_explicit_wait_clear();
             }
@@ -182,7 +188,7 @@ impl Engine {
                     prepared.incarnation(),
                 )?;
                 Ok(Some(ReadyHookInstall {
-                    cleanup_path: path,
+                    cleanup_paths: vec![path],
                     extra_env: Vec::new(),
                     explicit_wait_clear: false,
                 }))
@@ -209,23 +215,27 @@ impl Engine {
                         .into_owned(),
                 ));
                 Ok(Some(ReadyHookInstall {
-                    cleanup_path: overlay,
+                    // The load marker lives inside the overlay dir (see
+                    // `opencode::marker_path`), so removing the overlay
+                    // removes it too -- one cleanup path suffices.
+                    cleanup_paths: vec![overlay],
                     extra_env,
                     explicit_wait_clear: true,
                 }))
             }
             PendingHookInstall::Pi { path } => {
                 harness_hooks::pi::write_extension_file(&path)?;
+                let marker = harness_hooks::pi::marker_path(&path);
                 let mut extra_env =
                     crate::session_env::harness_hook_env(cli, prepared.incarnation());
                 extra_env.push((
                     "DROGON_HOOK_MARKER".to_string(),
-                    harness_hooks::pi::marker_path(&path)
-                        .to_string_lossy()
-                        .into_owned(),
+                    marker.to_string_lossy().into_owned(),
                 ));
                 Ok(Some(ReadyHookInstall {
-                    cleanup_path: path,
+                    // The load marker is a sibling file, not inside a
+                    // removable directory -- both paths need cleanup.
+                    cleanup_paths: vec![path, marker],
                     extra_env,
                     explicit_wait_clear: true,
                 }))
