@@ -268,6 +268,7 @@ pub(crate) fn send_group_in_tx(
                 subject: &params.subject,
                 body: params.body.as_deref(),
                 payload: params.payload.as_ref(),
+                priority: params.priority,
                 thread_id: params.thread_id.as_deref(),
                 origin_request_id,
                 created_at: &created_at,
@@ -409,6 +410,7 @@ mod tests {
             subject: "s".into(),
             body: Some("b".into()),
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             final_report: None,
         }

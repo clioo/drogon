@@ -196,7 +196,10 @@ const VERSIONED_COMPONENTS: &[(&str, i64)] = &[
         crate::project::PROJECTS_SCHEMA_VERSION,
     ),
     ("coordination_access", 1),
-    ("orchestration_mail", 1),
+    (
+        crate::coordination_mail::SCHEMA_COMPONENT,
+        crate::coordination_mail::SCHEMA_VERSION,
+    ),
     ("orchestration_attempts", 1),
     (
         crate::coordination_worker_retain::SCHEMA_COMPONENT,

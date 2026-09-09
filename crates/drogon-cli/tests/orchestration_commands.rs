@@ -3584,3 +3584,267 @@ async fn dispatch_without_to_is_usage_error() {
     drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_human_wait_and_delivery_kind_priority_parity() {
+    let dir = temp_dir("check-human-parity");
+    let timed_out = json!({
+        "messages": [],
+        "timedOut": true, "cancelled": false, "connectionLost": false
+    });
+    let delivered = json!({
+        "delivery": {"deliveryId": "d1", "messageIds": ["m1", "m2"]},
+        "messages": [
+            {"messageId": "m1", "sequence": 1, "kind": "finalReport",
+             "fromActor": "dispatch:worker-1", "subject": "done work", "priority": "urgent"},
+            {"messageId": "m2", "sequence": 2, "kind": "status",
+             "fromActor": "dispatch:worker-1", "subject": "note", "priority": "high"}
+        ],
+        "timedOut": false, "cancelled": false, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                ("orchestration.check", timed_out),
+                ("orchestration.check", delivered),
+            ],
+        ),
+    );
+    let env = worker_mail_env_ref();
+    let timeout = run_cli(
+        &dir,
+        &["orchestration", "check", "--wait", "--timeout-ms", "1000"],
+        &env,
+    );
+    assert_eq!(
+        timeout.stdout, "Wait timed out; no messages were consumed.\n",
+        "{}",
+        timeout.stdout
+    );
+    assert!(
+        timeout
+            .stderr
+            .contains("warning: wait timed out; no messages were consumed"),
+        "{}",
+        timeout.stderr
+    );
+    let human = run_cli(&dir, &["orchestration", "check"], &env);
+    assert_eq!(human.exit_code, 0, "stderr: {}", human.stderr);
+    let expected = "Delivery d1\n\
+        m1 [URGENT] [worker_done] from=dispatch:worker-1 \"done work\"\n\
+        m2 [HIGH] [status] from=dispatch:worker-1 \"note\"\n";
+    assert_eq!(human.stdout, expected, "{}", human.stdout);
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_format_expands_blocks_and_passes_server_formatted_through() {
+    let dir = temp_dir("check-format");
+    let messages = json!([
+        {"messageId": "m1", "sequence": 1, "kind": "guidance",
+         "fromActor": "coordinator:owner", "subject": "orders",
+         "body": "do it", "payload": {"step": 1}, "priority": "normal"}
+    ]);
+    let unformatted = json!({
+        "messages": messages,
+        "timedOut": false, "cancelled": false, "connectionLost": false
+    });
+    let server = json!({
+        "messages": messages,
+        "formatted": "SERVER BLOCK",
+        "timedOut": false, "cancelled": false, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                ("orchestration.check", unformatted),
+                ("orchestration.check", server),
+            ],
+        ),
+    );
+    let env = worker_mail_env_ref();
+    let local = run_cli(&dir, &["orchestration", "check", "--format"], &env);
+    assert_eq!(local.exit_code, 0, "stderr: {}", local.stderr);
+    let out = local.stdout;
+    assert!(
+        out.contains("m1 [guidance] from=coordinator:owner"),
+        "{out}"
+    );
+    assert!(out.contains("[subject]\n  orders"), "{out}");
+    assert!(out.contains("[body]\n  do it"), "{out}");
+    assert!(out.contains("[payload]"), "{out}");
+    assert!(
+        out.contains("[Reply: drogon-cli orchestration reply --id m1 --body \"...\"]"),
+        "{out}"
+    );
+    let passthrough = run_cli(&dir, &["orchestration", "check", "--format"], &env);
+    assert_eq!(
+        passthrough.stdout, "SERVER BLOCK\n",
+        "{}",
+        passthrough.stdout
+    );
+    let captured = mock.captured();
+    let formats: Vec<&Value> = captured
+        .iter()
+        .filter(|r| r["method"] == "orchestration.check")
+        .collect();
+    assert_eq!(formats.len(), 2);
+    assert_eq!(formats[0]["params"]["format"], json!(true));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_unread_flag_is_explicit_consuming_read_with_source_exclusivity_text() {
+    let dir = temp_dir("check-unread");
+    let result = json!({
+        "delivery": {"deliveryId": "d1", "messageIds": ["m1"]},
+        "messages": [
+            {"messageId": "m1", "sequence": 1, "kind": "status",
+             "fromActor": "dispatch:worker-1", "subject": "s"}
+        ],
+        "timedOut": false, "cancelled": false, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.check", result)]),
+    );
+    let env = worker_mail_env_ref();
+    let explicit = run_cli(&dir, &["orchestration", "check", "--unread"], &env);
+    assert_eq!(explicit.exit_code, 0, "stderr: {}", explicit.stderr);
+    assert!(
+        explicit.stdout.starts_with("Delivery d1\n"),
+        "{}",
+        explicit.stdout
+    );
+    for conflicting in [
+        vec!["--unread", "--peek"],
+        vec!["--unread", "--all"],
+        vec!["--unread", "--peek", "--all"],
+    ] {
+        let mut args = vec!["orchestration", "check"];
+        args.extend(conflicting.iter().copied());
+        let invocation = run_cli(&dir, &args, &env);
+        assert_eq!(invocation.exit_code, 2, "args {conflicting:?}");
+        assert!(invocation.stdout.is_empty());
+        assert!(
+            invocation
+                .stderr
+                .contains("Choose at most one message read mode: --unread, --peek, or --all."),
+            "args {conflicting:?}: {}",
+            invocation.stderr
+        );
+    }
+    let captured = mock.captured();
+    assert_eq!(
+        captured
+            .iter()
+            .filter(|r| r["method"] == "orchestration.check")
+            .count(),
+        1,
+        "contradictory checks never reach the wire"
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_wait_keepalive_writes_compact_json_to_stderr_only() {
+    use std::sync::LazyLock;
+    static INTERVAL: LazyLock<OsString> = LazyLock::new(|| OsString::from("100"));
+    let dir = temp_dir("check-keepalive");
+    let result =
+        json!({"messages": [], "timedOut": false, "cancelled": false, "connectionLost": false});
+    let canned: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(vec![(
+        "orchestration.check".to_string(),
+        result,
+    )]));
+    let behavior: Behavior = Arc::new(move |request| {
+        let request_id = request["requestId"].as_str().unwrap_or("").to_string();
+        match request["method"].as_str() {
+            Some("status") => Action::Respond(ok_envelope(
+                &request_id,
+                json!({"hostId": HOST, "serviceInstanceId": "svc-1", "protocol": 1,
+                    "capabilities": ["workspace.v1", "orchestration.native.v1"],
+                    "version": "0.1.0"}),
+            )),
+            Some("orchestration.check") => {
+                std::thread::sleep(Duration::from_millis(650));
+                let mut queue = canned.lock().expect("canned lock");
+                let (_, result) = queue.remove(0);
+                Action::Respond(ok_envelope(&request_id, result))
+            }
+            _ => Action::Respond(error_envelope(
+                &request_id,
+                "method_not_found",
+                "mock lacks this method",
+            )),
+        }
+    });
+    let mock = MockService::start(&dir, behavior);
+    let mut env = worker_mail_env_ref();
+    env.push(("DROGON_KEEPALIVE_INTERVAL_MS", &INTERVAL));
+    let invocation = run_cli(
+        &dir,
+        &["orchestration", "check", "--wait", "--timeout-ms", "5000"],
+        &env,
+    );
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    assert_eq!(invocation.stdout, "No messages.\n", "{}", invocation.stdout);
+    assert!(
+        !invocation.stdout.contains("_keepalive"),
+        "{}",
+        invocation.stdout
+    );
+    let lines: Vec<&str> = invocation
+        .stderr
+        .lines()
+        .filter(|l| l.contains("_keepalive"))
+        .collect();
+    assert!(lines.len() >= 2, "stderr: {}", invocation.stderr);
+    for line in lines {
+        let value: Value = serde_json::from_str(line).expect("keepalive is compact JSON");
+        assert_eq!(value["_keepalive"], json!(true));
+        assert!(value["elapsedMs"].is_number(), "{line}");
+    }
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_json_envelope_passes_result_through() {
+    let dir = temp_dir("check-json");
+    let result = json!({
+        "delivery": {"deliveryId": "d9", "messageIds": ["m1"]},
+        "messages": [
+            {"messageId": "m1", "sequence": 7, "kind": "escalation",
+             "fromActor": "dispatch:worker-1", "subject": "help", "priority": "urgent"}
+        ],
+        "formatted": "SERVER BLOCK",
+        "timedOut": false, "cancelled": false, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.check", result)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &["orchestration", "check", "--json"],
+        &worker_mail_env_ref(),
+    );
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    let envelope: Value = serde_json::from_str(&invocation.stdout).expect("JSON envelope");
+    assert_eq!(envelope["result"]["delivery"]["deliveryId"], json!("d9"));
+    assert_eq!(
+        envelope["result"]["messages"][0]["priority"],
+        json!("urgent")
+    );
+    assert_eq!(envelope["result"]["formatted"], json!("SERVER BLOCK"));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}

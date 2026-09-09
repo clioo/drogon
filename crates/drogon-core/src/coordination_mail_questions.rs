@@ -8,7 +8,7 @@
 
 use drogon_protocol::RpcError;
 use drogon_protocol::orchestration_common::validate_opaque_token;
-use drogon_protocol::orchestration_mail::MessageKind;
+use drogon_protocol::orchestration_mail::{MessageKind, MessagePriority};
 use drogon_protocol::orchestration_question::AnswerPayload;
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde_json::json;
@@ -109,6 +109,7 @@ pub(crate) fn ask_new_in_tx(
             subject: question_text,
             body: None,
             payload: payload.as_ref(),
+            priority: MessagePriority::Normal,
             thread_id,
             origin_request_id,
             created_at,
@@ -251,6 +252,7 @@ pub(crate) fn reply_in_tx(
             subject: question.summary.subject.as_str(),
             body: Some(body),
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: Some(stored_thread.as_str()),
             origin_request_id,
             created_at,

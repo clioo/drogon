@@ -1366,3 +1366,164 @@ fn invalid_or_corrupted_ack_is_rejected_before_wait_budget() {
         );
     }
 }
+
+#[test]
+fn check_priority_round_trips_and_peek_all_read_states() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "b".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    for (id, priority, subject) in [
+        ("send-normal", "normal", "plain"),
+        ("send-high", "high", "elevated"),
+        ("send-urgent", "urgent", "critical"),
+    ] {
+        ok(
+            &engine,
+            "orchestration.send",
+            id,
+            json!({"scope": coordinator_scope(&fx), "kind": "guidance",
+                "to": {"kind": "dispatch", "dispatchId": "dispatch-1"},
+                "subject": subject, "priority": priority}),
+        );
+    }
+    let check = |id: &str, extra: Value| {
+        let mut params = json!({"scope": dispatch_scope(&fx, "dispatch-1")});
+        for (k, v) in extra.as_object().unwrap() {
+            params[k] = v.clone();
+        }
+        let response = worker_call(&engine, "orchestration.check", id, &secret, params);
+        assert!(response.ok, "{:?}", response.error);
+        response.result.unwrap()
+    };
+    // Peek is non-consuming: all three unread rows with priorities intact.
+    let peeked = check("peek-1", json!({"mode": "peek"}));
+    assert_eq!(peeked["messages"].as_array().unwrap().len(), 3);
+    assert_eq!(peeked["messages"][0]["priority"], "normal");
+    assert_eq!(peeked["messages"][1]["priority"], "high");
+    assert_eq!(peeked["messages"][2]["priority"], "urgent");
+    assert!(peeked.get("delivery").is_none());
+    // Server-side kind filter applies to inspection output.
+    let peeked_guidance = check("peek-2", json!({"mode": "peek", "kinds": ["guidance"]}));
+    assert_eq!(peeked_guidance["messages"].as_array().unwrap().len(), 3);
+    let peeked_status = check("peek-3", json!({"mode": "peek", "kinds": ["status"]}));
+    assert_eq!(peeked_status["messages"].as_array().unwrap().len(), 0);
+    // Peek consumed nothing: the consuming read still gets the whole batch.
+    let consumed = check("unread-1", json!({"mode": "unread"}));
+    assert_eq!(consumed["messages"].as_array().unwrap().len(), 3);
+    let delivery_id = consumed["delivery"]["deliveryId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // An outstanding (unacked) delivery still reads as unread; only the ack
+    // advances the read pointer.
+    let peeked_outstanding = check("peek-4", json!({"mode": "peek"}));
+    assert_eq!(peeked_outstanding["messages"].as_array().unwrap().len(), 3);
+    let acked = check(
+        "unread-2",
+        json!({"mode": "unread", "acknowledge": delivery_id}),
+    );
+    assert_eq!(acked["acknowledged"]["alreadyAcknowledged"], false);
+    assert_eq!(acked["messages"].as_array().unwrap().len(), 0);
+    // After the ack, peek sees only unread (none); all includes read rows.
+    let peeked_after = check("peek-5", json!({"mode": "peek"}));
+    assert_eq!(peeked_after["messages"].as_array().unwrap().len(), 0);
+    let all = check("all-1", json!({"mode": "all"}));
+    assert_eq!(all["messages"].as_array().unwrap().len(), 3);
+    assert!(all.get("delivery").is_none());
+}
+
+#[test]
+fn check_format_flag_returns_server_side_expanded_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "c".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    ok(
+        &engine,
+        "orchestration.send",
+        "send-1",
+        json!({"scope": coordinator_scope(&fx), "kind": "guidance",
+            "to": {"kind": "dispatch", "dispatchId": "dispatch-1"},
+            "subject": "orders", "body": "do the thing",
+            "payload": {"step": 1}, "priority": "urgent"}),
+    );
+    let response = worker_call(
+        &engine,
+        "orchestration.check",
+        "check-1",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode": "peek", "format": true}),
+    );
+    assert!(response.ok, "{:?}", response.error);
+    let formatted = response.result.unwrap()["formatted"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(formatted.contains("[URGENT] [guidance]"), "{formatted}");
+    assert!(formatted.contains("[subject]"), "{formatted}");
+    assert!(formatted.contains("[body]"), "{formatted}");
+    assert!(formatted.contains("[payload]"), "{formatted}");
+    assert!(
+        formatted.contains("drogon-cli orchestration reply"),
+        "{formatted}"
+    );
+}
+
+#[test]
+fn check_consuming_kind_filter_is_wake_only_never_a_local_output_filter() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "d".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    ok(
+        &engine,
+        "orchestration.send",
+        "send-1",
+        json!({"scope": coordinator_scope(&fx), "kind": "status",
+            "to": {"kind": "dispatch", "dispatchId": "dispatch-1"}, "subject": "first"}),
+    );
+    ok(
+        &engine,
+        "orchestration.send",
+        "send-2",
+        json!({"scope": coordinator_scope(&fx), "kind": "question",
+            "to": {"kind": "dispatch", "dispatchId": "dispatch-1"}, "subject": "second"}),
+    );
+    // Run-mailbox parity: `kinds` wakes the waiter, but the delivered FIFO
+    // batch keeps its earlier non-matching messages.
+    let response = worker_call(
+        &engine,
+        "orchestration.check",
+        "check-1",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode": "unread",
+            "kinds": ["question"]}),
+    );
+    assert!(response.ok, "{:?}", response.error);
+    let result = response.result.unwrap();
+    let subjects: Vec<&str> = result["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["subject"].as_str().unwrap())
+        .collect();
+    assert_eq!(subjects, vec!["first", "second"]);
+    // With no matching kind anywhere, nothing is allocated yet.
+    let response = worker_call(
+        &engine,
+        "orchestration.check",
+        "check-2",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode": "unread",
+            "acknowledge": result["delivery"]["deliveryId"].as_str().unwrap(),
+            "kinds": ["heartbeat"]}),
+    );
+    assert!(response.ok, "{:?}", response.error);
+    let result = response.result.unwrap();
+    assert_eq!(result["messages"].as_array().unwrap().len(), 0);
+    assert!(result.get("delivery").is_none());
+}

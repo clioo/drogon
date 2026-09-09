@@ -29,6 +29,45 @@ pub enum MessageKind {
     Escalation,
 }
 
+/// Source display priority (`MessagePriority`): urgent/high messages render
+/// `[URGENT]`/`[HIGH]` tags in human output. Absent on the wire means
+/// normal (pre-priority senders and stores).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MessagePriority {
+    #[default]
+    Normal,
+    High,
+    Urgent,
+}
+
+impl MessagePriority {
+    pub fn tag(self) -> &'static str {
+        match self {
+            MessagePriority::Normal => "",
+            MessagePriority::High => " [HIGH]",
+            MessagePriority::Urgent => " [URGENT]",
+        }
+    }
+
+    pub fn from_stored(value: &str) -> Option<Self> {
+        match value {
+            "normal" => Some(MessagePriority::Normal),
+            "high" => Some(MessagePriority::High),
+            "urgent" => Some(MessagePriority::Urgent),
+            _ => None,
+        }
+    }
+
+    pub fn as_stored(self) -> &'static str {
+        match self {
+            MessagePriority::Normal => "normal",
+            MessagePriority::High => "high",
+            MessagePriority::Urgent => "urgent",
+        }
+    }
+}
+
 /// Addressing. Lifecycle kinds may only target the run home (or omit the
 /// target for the sender's own run home); group addressing stays available
 /// for non-lifecycle traffic. Authority for guidance/replies is validated by
@@ -85,6 +124,9 @@ pub struct SendParams {
     /// Structured message payload (task-authored data, source: `payload`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<Value>,
+    /// Display priority (source: `priority`); absent means normal.
+    #[serde(default)]
+    pub priority: MessagePriority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
     /// Required exactly when `kind` is `finalReport` (source: `--outcome`
@@ -309,6 +351,22 @@ impl<'de> Deserialize<'de> for CheckMode {
     }
 }
 
+impl MessageKind {
+    /// Human display name. Source `type` strings are the contract:
+    /// `worker_done` (not the wire `finalReport`), everything else 1:1.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            MessageKind::Status => "status",
+            MessageKind::Question => "question",
+            MessageKind::Answer => "answer",
+            MessageKind::Heartbeat => "heartbeat",
+            MessageKind::FinalReport => "worker_done",
+            MessageKind::Guidance => "guidance",
+            MessageKind::Escalation => "escalation",
+        }
+    }
+}
+
 impl CheckMode {
     pub fn validate_shape(&self) -> Result<(), RpcError> {
         if let CheckMode::Unread {
@@ -349,6 +407,9 @@ pub struct CheckParams {
     /// Preamble/inject presentation flag (source: `inject`).
     #[serde(default)]
     pub inject: bool,
+    /// Expanded local-text rendering flag (source: `--format`).
+    #[serde(default)]
+    pub format: bool,
     /// Inspection-only pagination; consuming checks cannot split a FIFO delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<OpaqueCursor>,
@@ -398,6 +459,9 @@ pub struct MessageSummary {
     pub body: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<Value>,
+    /// Display priority; defaults to normal for pre-priority stores.
+    #[serde(default)]
+    pub priority: MessagePriority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
 }
@@ -461,6 +525,10 @@ pub struct CheckResult {
     pub acknowledged: Option<AckReceipt>,
     #[serde(default)]
     pub messages: Vec<MessageSummary>,
+    /// Server-side expanded rendering (source: `formatted`); the CLI prints
+    /// it verbatim for human output when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formatted: Option<String>,
     /// Continuation token for bounded inspection output (peek/all); a
     /// consuming read always returns the whole FIFO batch instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]

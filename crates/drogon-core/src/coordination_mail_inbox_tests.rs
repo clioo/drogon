@@ -137,7 +137,7 @@ impl Fixture {
     /// send-path tests); the sweep only reads the stored rows.
     fn seed_addressed(&self, message_id: &str, subject: &str) {
         use crate::coordination_mail::{Actor, NewMessage, Recipient};
-        use drogon_protocol::orchestration_mail::MessageKind;
+        use drogon_protocol::orchestration_mail::{MessageKind, MessagePriority};
         let mut conn = self.engine.db.lock().unwrap();
         let tx = conn.transaction().unwrap();
         crate::coordination_mail::append_message_in_tx(
@@ -152,6 +152,7 @@ impl Fixture {
                 subject,
                 body: None,
                 payload: None,
+                priority: MessagePriority::Normal,
                 thread_id: None,
                 origin_request_id: "seed",
                 created_at: "2026-09-07T00:00:00Z",

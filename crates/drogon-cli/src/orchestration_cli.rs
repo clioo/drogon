@@ -5,6 +5,7 @@
 //! environment hints); only pure grammar goes here.
 
 use clap::{Args, Subcommand, ValueEnum};
+use drogon_protocol::orchestration_mail::MessagePriority;
 
 /// Explicit execution-host override. Absent means: use the scoped
 /// `DROGON_HOST_ID` hint when present, else the connected runtime's own host
@@ -154,6 +155,23 @@ impl MessageKindArg {
             MessageKindArg::FinalReport => "finalReport",
             MessageKindArg::Guidance => "guidance",
             MessageKindArg::Escalation => "escalation",
+        }
+    }
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PriorityArg {
+    Normal,
+    High,
+    Urgent,
+}
+
+impl PriorityArg {
+    pub fn as_wire(self) -> MessagePriority {
+        match self {
+            PriorityArg::Normal => MessagePriority::Normal,
+            PriorityArg::High => MessagePriority::High,
+            PriorityArg::Urgent => MessagePriority::Urgent,
         }
     }
 }
@@ -555,6 +573,9 @@ pub enum OrchestrationCommand {
         payload: Option<String>,
         #[arg(long, value_name = "ID")]
         thread_id: Option<String>,
+        /// Display priority (source: urgent/high render [URGENT]/[HIGH] tags)
+        #[arg(long, value_enum, default_value_t = PriorityArg::Normal)]
+        priority: PriorityArg,
         /// Final-report outcome (required for --kind final-report)
         #[arg(long, value_enum)]
         outcome: Option<OutcomeArg>,
@@ -568,6 +589,9 @@ pub enum OrchestrationCommand {
     Check {
         #[command(flatten)]
         actor: ActorScopeArgs,
+        /// Explicit consuming read (the default mode)
+        #[arg(long, default_value_t = false)]
+        unread: bool,
         /// Non-consuming inspection of unread mail
         #[arg(long, default_value_t = false)]
         peek: bool,
@@ -588,6 +612,9 @@ pub enum OrchestrationCommand {
         kinds: Option<String>,
         #[arg(long, default_value_t = false)]
         inject: bool,
+        /// Expanded per-message rendering ([subject]/[body]/[payload] blocks)
+        #[arg(long, default_value_t = false)]
+        format: bool,
         /// Inspection-only continuation cursor (peek/all only)
         #[arg(long, value_name = "TOKEN")]
         cursor: Option<String>,

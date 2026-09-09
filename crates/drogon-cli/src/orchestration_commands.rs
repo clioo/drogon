@@ -532,6 +532,78 @@ fn wait_policy(timeout_ms: Option<u32>) -> Result<WaitPolicy, CliError> {
     Ok(policy)
 }
 
+/// Source `startCheckKeepalive`: while a `--wait` check holds the RPC open,
+/// a compact JSON keepalive line goes to stderr every 15 s (never stdout,
+/// never interleaved into the result). The interval honors
+/// `DROGON_KEEPALIVE_INTERVAL_MS` so subprocess tests can use a short
+/// window; bogus values fall back to the default.
+fn keepalive_interval_ms() -> u64 {
+    // Source `resolveKeepaliveIntervalMs`: test-only hatch honoring the
+    // source variable name first, then the legacy alias; bogus values fall
+    // back to the 15 s default.
+    for key in [
+        "ORCA_KEEPALIVE_INTERVAL_MS",
+        "DROGON_KEEPALIVE_INTERVAL_MS",
+        "ORCA_HEARTBEAT_INTERVAL_MS",
+    ] {
+        if let Ok(raw) = std::env::var(key)
+            && let Ok(parsed) = raw.parse::<u64>()
+            && parsed > 0
+        {
+            return parsed;
+        }
+    }
+    15_000
+}
+
+struct CheckKeepalive {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for CheckKeepalive {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn start_check_keepalive(timeout_ms: Option<u32>) -> CheckKeepalive {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let worker_stop = std::sync::Arc::clone(&stop);
+    let interval = keepalive_interval_ms();
+    let started = std::time::Instant::now();
+    let handle = std::thread::spawn(move || {
+        // Why short slices: the stop flag must win within ~50 ms of the
+        // RPC resolving, not one full keepalive interval later.
+        let slice = std::time::Duration::from_millis(50);
+        let mut next_at = interval;
+        loop {
+            std::thread::sleep(slice);
+            if worker_stop.load(Ordering::Acquire) {
+                break;
+            }
+            if started.elapsed().as_millis() >= u128::from(next_at) {
+                let payload = serde_json::json!({
+                    "_keepalive": true,
+                    "_heartbeat": true,
+                    "elapsedMs": started.elapsed().as_millis() as u64,
+                    "deadlineMs": timeout_ms,
+                });
+                eprintln!("{payload}");
+                next_at += interval;
+            }
+        }
+    });
+    CheckKeepalive {
+        stop,
+        handle: Some(handle),
+    }
+}
+
 /// Transport timeout: the configured wait budget plus a small bounded margin
 /// (never the default, never indefinite).
 fn call_timeout(wait: Option<&WaitPolicy>) -> Duration {
@@ -1997,6 +2069,7 @@ pub async fn run(
             body,
             payload,
             thread_id,
+            priority,
             outcome,
             result: result_meta,
             ..
@@ -2054,6 +2127,7 @@ pub async fn run(
                 subject: subject.clone(),
                 body: body.clone(),
                 payload: parse_json_object("payload", payload)?,
+                priority: priority.as_wire(),
                 thread_id: thread_id.clone(),
                 final_report,
             };
@@ -2088,6 +2162,7 @@ pub async fn run(
         }
         OrchestrationCommand::Check {
             actor,
+            unread,
             peek,
             all,
             ack,
@@ -2095,10 +2170,18 @@ pub async fn run(
             timeout_ms,
             kinds,
             inject,
+            format,
             cursor,
             limit,
             ..
         } => {
+            // Why: older runtimes strip unknown peek and run --unread --peek
+            // as destructive mark-read; the source refuses any pair outright.
+            if [*unread, *peek, *all].iter().filter(|v| **v).count() > 1 {
+                return Err(usage(
+                    "Choose at most one message read mode: --unread, --peek, or --all.",
+                ));
+            }
             let mode = match (peek, all, ack) {
                 (false, false, None) => CheckMode::Unread { acknowledge: None },
                 (false, false, Some(delivery_id)) => CheckMode::Unread {
@@ -2108,7 +2191,7 @@ pub async fn run(
                 (false, true, None) => CheckMode::All,
                 _ => {
                     return Err(usage(
-                        "--peek, --all and --ack are mutually exclusive read modes",
+                        "Choose at most one message read mode: --unread, --peek, or --all.",
                     ));
                 }
             };
@@ -2143,12 +2226,21 @@ pub async fn run(
                     None => Vec::new(),
                 },
                 inject: *inject,
+                format: *format,
             };
             let value = validate_params(
                 &params,
                 |p: &CheckParams| p.validate_shape(&host_id),
                 request_id,
             )?;
+            // Why: a bounded server-side wait holds the RPC open; a compact
+            // JSON keepalive line on stderr (never stdout) keeps shells and
+            // harnesses from treating the silence as a hang.
+            let _keepalive = if *wait {
+                Some(start_check_keepalive(*timeout_ms))
+            } else {
+                None
+            };
             let call = client
                 .call(
                     "orchestration.check",
@@ -2157,6 +2249,7 @@ pub async fn run(
                     call_timeout(policy.as_ref()),
                 )
                 .await?;
+            drop(_keepalive);
             let result: CheckResult =
                 Client::decode_checked(&call, "orchestration.check", |r: &CheckResult| {
                     r.validate_shape().map_err(|e| e.message)?;
@@ -2178,58 +2271,20 @@ pub async fn run(
                     }
                     Ok(())
                 })?;
+            let format_requested = *format;
             let mut outcome = emit(
                 call,
                 json,
-                || {
-                    let mut lines = Vec::new();
-                    if let Some(acknowledged) = &result.acknowledged {
-                        lines.push(format!(
-                            "Acknowledged delivery {} ({} message(s))",
-                            acknowledged.delivery_id,
-                            acknowledged.message_ids.len()
-                        ));
-                    }
-                    if result.timed_out {
-                        lines.push("No messages within the wait budget.".to_string());
-                    }
-                    if let Some(delivery) = &result.delivery {
-                        lines.push(format!(
-                            "Delivery {} holds {} message(s); ack with --ack {}",
-                            delivery.delivery_id,
-                            delivery.message_ids.len(),
-                            delivery.delivery_id
-                        ));
-                    }
-                    for message in &result.messages {
-                        lines.push(format!(
-                            "{} [{}] {}: {}",
-                            message.message_id,
-                            wire_message_kind(message.kind),
-                            message.from_actor,
-                            message.subject
-                        ));
-                        if let Some(body) = &message.body {
-                            lines.push(body.clone());
-                        }
-                    }
-                    if let Some(cursor) = &result.next_cursor {
-                        lines.push(format!("More: --cursor {}", cursor.0));
-                    }
-                    if lines.is_empty() {
-                        lines.push("No messages.".to_string());
-                    }
-                    lines.join("\n")
-                },
+                || crate::orchestration_output::format_check(&result, format_requested),
                 // Why: a waiting read that ended without a delivery is an
                 // honestly unfinished observation, never a success.
                 u8::from(*wait && (result.timed_out || result.cancelled)),
             )?;
             if !json && *wait && (result.timed_out || result.cancelled) {
                 outcome.stderr_note = Some(if result.cancelled {
-                    "warning: check wait was interrupted (cancelled)".to_string()
+                    "warning: wait cancelled; no messages were consumed".to_string()
                 } else {
-                    "warning: no messages within the wait budget".to_string()
+                    "warning: wait timed out; no messages were consumed".to_string()
                 });
             }
             Ok(outcome)
@@ -2542,18 +2597,6 @@ fn wire_task_status(status: TaskStatus) -> &'static str {
         TaskStatus::Completed => "completed",
         TaskStatus::Failed => "failed",
         TaskStatus::Blocked => "blocked",
-    }
-}
-
-fn wire_message_kind(kind: MessageKind) -> &'static str {
-    match kind {
-        MessageKind::Status => "status",
-        MessageKind::Question => "question",
-        MessageKind::Answer => "answer",
-        MessageKind::Heartbeat => "heartbeat",
-        MessageKind::FinalReport => "final-report",
-        MessageKind::Guidance => "guidance",
-        MessageKind::Escalation => "escalation",
     }
 }
 

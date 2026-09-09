@@ -19,7 +19,7 @@ pub(crate) const QUICK_SESSION_MARKER_OWNER: &str = "drogon";
 pub(crate) const QUICK_SESSION_DEFAULT_NAME: &str = "Quick Session";
 
 pub(crate) const PROJECTS_SCHEMA_COMPONENT: &str = "projects";
-pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 5;
+pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 6;
 
 fn create_v1_tables(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
@@ -122,6 +122,13 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             );",
         )
     }
+    // v6: the linked GitHub issue number (`worktree create --issue`,
+    // `--issue`/`--no-issue` on set). Nullable integer, NULL on old
+    // rows. Same "run on every already-versioned arm" pattern as
+    // v4/v5 so versioned stores pick it up on next open.
+    fn apply_v6_linked_issue_column(tx: &Transaction) -> rusqlite::Result<()> {
+        add_column_if_missing(tx, "worktrees", "linked_issue", "INTEGER")
+    }
     match existing {
         None => {
             create_v1_tables(tx)?;
@@ -129,6 +136,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_linked_issue_column(tx)?;
             tx.execute(
                 "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -151,6 +159,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_linked_issue_column(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -160,6 +169,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_linked_issue_column(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -181,6 +191,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         Some(3) => {
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_linked_issue_column(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -194,6 +205,14 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         // this fix landed still picks it up on its next open.
         Some(4) => {
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_linked_issue_column(tx)?;
+            tx.execute(
+                "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
+                params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
+            )?;
+        }
+        Some(5) => {
+            apply_v6_linked_issue_column(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],

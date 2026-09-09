@@ -13,8 +13,9 @@ use drogon_protocol::orchestration_common::{
 };
 use drogon_protocol::orchestration_mail::{
     AckReceipt, CheckMode, CheckParams, CheckResult, DuplicateReportReceipt, FinalReport,
-    LifecycleVerdict, MessageKind, MessageReceipt, MessageSummary, OutstandingDelivery,
-    ReplyParams, ReplyResult, SendBatchResult, SendParams, SendResult, SendTarget, SendWarning,
+    LifecycleVerdict, MessageKind, MessagePriority, MessageReceipt, MessageSummary,
+    OutstandingDelivery, ReplyParams, ReplyResult, SendBatchResult, SendParams, SendResult,
+    SendTarget, SendWarning,
 };
 use drogon_protocol::orchestration_question::{
     AnswerPayload, AskIntent, AskParams, AskResult, AskWaitOutcome, BootstrapScope, ReceiptScope,
@@ -607,6 +608,7 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
         subject: "task complete".into(),
         body: Some("all checks passed".into()),
         payload: None,
+        priority: MessagePriority::Urgent,
         thread_id: None,
         final_report: Some(FinalReport {
             outcome: ReportOutcome::Succeeded,
@@ -661,6 +663,7 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
         wait: Some(WaitPolicy { timeout_ms: 1_000 }),
         kinds: vec![MessageKind::Guidance, MessageKind::Escalation],
         inject: false,
+        format: true,
         cursor: None,
         limit: None,
     };
@@ -697,9 +700,11 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
                 subject: "next steps".into(),
                 body: Some("do the thing".into()),
                 payload: None,
+                priority: MessagePriority::Normal,
                 thread_id: None,
             })
             .collect(),
+        formatted: None,
         next_cursor: None,
         timed_out: false,
         cancelled: false,
@@ -716,6 +721,7 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
         wait: None,
         kinds: vec![],
         inject: false,
+        format: false,
         cursor: None,
         limit: None,
     };
@@ -905,6 +911,7 @@ fn additive_params_and_result_fields_are_ignored_not_identity() {
         wait: None,
         kinds: vec![],
         inject: false,
+        format: false,
         cursor: None,
         limit: None,
     })
@@ -952,6 +959,7 @@ fn scopes_are_required_and_refuse_wrong_host_or_version() {
         subject: "s".into(),
         body: None,
         payload: None,
+        priority: MessagePriority::Normal,
         thread_id: None,
         final_report: None,
     };
@@ -1089,6 +1097,7 @@ fn check_ack_reserved_on_inspection_and_ask_contradictions_fail_at_decode() {
         }),
         kinds: vec![],
         inject: false,
+        format: false,
         cursor: None,
         limit: None,
     };
@@ -1104,6 +1113,7 @@ fn check_ack_reserved_on_inspection_and_ask_contradictions_fail_at_decode() {
             }),
             kinds: vec![],
             inject: false,
+            format: false,
             cursor: None,
             limit: None,
         };
@@ -1167,6 +1177,7 @@ fn check_ack_reserved_on_inspection_and_ask_contradictions_fail_at_decode() {
             message_ids: vec!["msg-1".into()],
         }),
         messages: vec![],
+        formatted: None,
         next_cursor: None,
         timed_out: false,
         cancelled: false,
@@ -1208,6 +1219,7 @@ fn generic_send_reserves_answers_for_correlated_reply() {
             subject: "answer".into(),
             body: Some("forged".into()),
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: Some("question-thread".into()),
             final_report: None,
         };
@@ -1235,6 +1247,7 @@ fn lifecycle_kinds_target_only_run_home_and_reports_require_their_payload() {
                 subject: "s".into(),
                 body: None,
                 payload: None,
+                priority: MessagePriority::Normal,
                 thread_id: None,
                 final_report: None,
             };
@@ -1256,6 +1269,7 @@ fn lifecycle_kinds_target_only_run_home_and_reports_require_their_payload() {
             subject: "s".into(),
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             final_report,
         };
@@ -1274,6 +1288,7 @@ fn lifecycle_kinds_target_only_run_home_and_reports_require_their_payload() {
         subject: "s".into(),
         body: None,
         payload: None,
+        priority: MessagePriority::Normal,
         thread_id: None,
         final_report: None,
     };
@@ -1285,6 +1300,7 @@ fn lifecycle_kinds_target_only_run_home_and_reports_require_their_payload() {
         subject: "s".into(),
         body: None,
         payload: None,
+        priority: MessagePriority::Urgent,
         thread_id: None,
         final_report: Some(FinalReport {
             outcome: ReportOutcome::Failed,
@@ -1483,6 +1499,7 @@ fn no_params_or_results_serde_shape_carries_a_credential() {
             subject: "s".into(),
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             final_report: None,
         })

@@ -234,6 +234,7 @@ impl Engine {
                     subject: &params.subject,
                     body: params.body.as_deref(),
                     payload: params.payload.as_ref(),
+                    priority: params.priority,
                     thread_id: params.thread_id.as_deref(),
                     origin_request_id,
                     created_at: &crate::now_rfc3339(),
@@ -332,6 +333,7 @@ impl Engine {
                 subject: &params.subject,
                 body: params.body.as_deref(),
                 payload: params.payload.as_ref(),
+                priority: params.priority,
                 thread_id: params.thread_id.as_deref(),
                 origin_request_id,
                 created_at: &crate::now_rfc3339(),
@@ -460,6 +462,7 @@ impl Engine {
                             delivery: None,
                             acknowledged: None,
                             messages: vec![],
+                            formatted: None,
                             next_cursor: None,
                             timed_out: false,
                             cancelled: true,
@@ -559,6 +562,7 @@ impl Engine {
                             delivery: None,
                             acknowledged: None,
                             messages: vec![],
+                            formatted: None,
                             next_cursor: None,
                             timed_out: false,
                             cancelled: true,
@@ -708,10 +712,14 @@ impl Engine {
                 WaitObservation::Found | WaitObservation::NotRequested => (false, false),
             }
         };
+        let formatted = params
+            .format
+            .then(|| coordination_mail::format_check_messages(&outcome.messages));
         encode(CheckResult {
             delivery: outcome.delivery,
             acknowledged: outcome.acknowledged,
             messages: outcome.messages,
+            formatted,
             next_cursor: None,
             timed_out,
             cancelled,
@@ -742,10 +750,14 @@ impl Engine {
             cursor,
             limit,
         )?;
+        let formatted = params
+            .format
+            .then(|| coordination_mail::format_check_messages(&messages));
         encode(CheckResult {
             delivery: None,
             acknowledged: None,
             messages,
+            formatted,
             next_cursor: next_cursor.map(OpaqueCursor),
             timed_out: false,
             cancelled: false,
