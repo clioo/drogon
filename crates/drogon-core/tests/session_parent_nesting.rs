@@ -171,19 +171,30 @@ fn parent_record_survives_a_daemon_restart() {
 
 #[test]
 fn harness_start_records_the_parent_session() {
+    use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();
+    // A cmd-override fixture keeps the launch hermetic on machines without
+    // the real CLI on PATH (CI): only the parent record is under test.
+    let binary = dir.path().join("claude-fixture");
+    std::fs::write(&binary, "#!/bin/sh\nread line\n").unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // `ok` itself asserts the RPC succeeded.
+    let _updated = ok(
+        &engine,
+        "agent.settings_update",
+        json!({"updates": {"agentCmdOverrides": {"claude": binary}}}),
+    );
     let workspace_id = register_workspace(&engine);
     let parent = start_session(&engine, &workspace_id, None);
     let parent_id = parent["id"].as_str().unwrap().to_string();
 
-    // Antigravity installs no hook wiring, so it needs no fixture on PATH.
     let launched = ok(
         &engine,
         "harness.start",
         json!({
             "workspaceId": workspace_id,
-            "harnessId": "antigravity",
+            "harnessId": "claude",
             "permissionMode": "inherit",
             "parentSessionId": parent_id,
         }),
