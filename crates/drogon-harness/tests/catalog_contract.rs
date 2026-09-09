@@ -608,6 +608,9 @@ struct ChildReport {
     catalog: drogon_harness::HostCatalog,
     declared_children: usize,
     registered_children: usize,
+    /// Retained registration failure evidence from the child (empty on a
+    /// healthy run); any entry makes the run unverifiable.
+    registration_failures: Vec<String>,
 }
 
 fn write_child_report(dir: &Path, report: &ChildReport) {
@@ -615,16 +618,60 @@ fn write_child_report(dir: &Path, report: &ChildReport) {
     std::fs::write(dir.join(RESULT_FILE), json).expect("write child report");
 }
 
+/// How one ledger identity left the system: the product-vs-rescue
+/// distinction. NaturalExit/Replaced mean the identity was already gone
+/// (exited on its own, or the PID was recycled) and the supervisor sent
+/// NOTHING; Terminated/ForceKilled are rescue actions the supervisor took
+/// after positive identity rechecks.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResolutionOutcome {
+    NaturalExit,
+    Replaced,
+    Terminated,
+    ForceKilled,
+    Unverifiable,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Debug)]
+struct Resolution {
+    pid: u32,
+    outcome: ResolutionOutcome,
+}
+
 #[cfg(unix)]
 struct CleanupReport {
     actions: Vec<String>,
     unverifiable: Vec<String>,
+    resolutions: Vec<Resolution>,
 }
 
 #[cfg(unix)]
 impl CleanupReport {
     fn is_clean(&self) -> bool {
         self.unverifiable.is_empty()
+    }
+
+    /// Identities the supervisor RESOLVED WITHOUT ANY SIGNAL.
+    fn natural_resolutions(&self) -> impl Iterator<Item = &Resolution> {
+        self.resolutions.iter().filter(|r| {
+            matches!(
+                r.outcome,
+                ResolutionOutcome::NaturalExit | ResolutionOutcome::Replaced
+            )
+        })
+    }
+
+    /// Identities the supervisor had to rescue with a signal (TERM or
+    /// KILL), each preceded by a positive identity recheck.
+    fn rescues(&self) -> impl Iterator<Item = &Resolution> {
+        self.resolutions.iter().filter(|r| {
+            matches!(
+                r.outcome,
+                ResolutionOutcome::Terminated | ResolutionOutcome::ForceKilled
+            )
+        })
     }
 }
 
@@ -695,8 +742,12 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
     struct Pending {
         entry: LedgerEntry,
         term_at: Option<Instant>,
+        /// A SIGKILL was delivered: a later Gone resolution is
+        /// ForceKilled, not Terminated.
+        force_sent: bool,
     }
     let mut pending: Vec<Pending> = Vec::new();
+    let mut resolutions: Vec<Resolution> = Vec::new();
     loop {
         let (entries, malformed) = read_ledger(&fixture_path);
         for bad in malformed {
@@ -713,6 +764,7 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
             pending.push(Pending {
                 entry,
                 term_at: None,
+                force_sent: false,
             });
         }
         let mut resolved = Vec::new();
@@ -737,8 +789,27 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
                 }
             }
             match identity {
-                Identity::Gone | Identity::Replaced => {
+                Identity::Gone => {
                     actions.push(format!("pid={} resolved-gone", item.entry.pid));
+                    let outcome = if item.force_sent {
+                        ResolutionOutcome::ForceKilled
+                    } else if item.term_at.is_some() {
+                        ResolutionOutcome::Terminated
+                    } else {
+                        ResolutionOutcome::NaturalExit
+                    };
+                    resolutions.push(Resolution {
+                        pid: item.entry.pid,
+                        outcome,
+                    });
+                    resolved.push(index);
+                }
+                Identity::Replaced => {
+                    actions.push(format!("pid={} resolved-replaced", item.entry.pid));
+                    resolutions.push(Resolution {
+                        pid: item.entry.pid,
+                        outcome: ResolutionOutcome::Replaced,
+                    });
                     resolved.push(index);
                 }
                 Identity::Alive => {
@@ -779,7 +850,10 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
                         }
                         if recheck == Identity::Alive {
                             match signal_pid(item.entry.pid, libc::SIGKILL) {
-                                Ok(()) => actions.push(format!("pid={} SIGKILL", item.entry.pid)),
+                                Ok(()) => {
+                                    actions.push(format!("pid={} SIGKILL", item.entry.pid));
+                                    item.force_sent = true;
+                                }
                                 Err(err) => unverifiable.push(err),
                             }
                         }
@@ -791,6 +865,10 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
                         "pid={} identity unverifiable (ps error/silent failure)",
                         item.entry.pid
                     ));
+                    resolutions.push(Resolution {
+                        pid: item.entry.pid,
+                        outcome: ResolutionOutcome::Unverifiable,
+                    });
                     resolved.push(index);
                 }
             }
@@ -810,9 +888,12 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
         ));
     }
 
-    // Registration accounting (amendment B): the child declares how many
-    // fixture children it spawned; an incomplete ledger cannot become
-    // PASS merely because the current list is empty.
+    // Registration accounting (amendment B), independent: the parent
+    // reads the ledger ITSELF and cross-checks BOTH numbers the child
+    // reported - declared and registered. Neither side trusting the
+    // other: a child that under-reports declared, over-reports
+    // registered, or suppresses a registration failure is caught by the
+    // comparison, and any retained failure evidence is unverifiable.
     let report: Option<serde_json::Value> = std::fs::read_to_string(fixture_path.join(RESULT_FILE))
         .ok()
         .and_then(|json| serde_json::from_str(&json).ok());
@@ -822,12 +903,32 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
             .and_then(serde_json::Value::as_u64)
             .map(|n| n as usize)
             .unwrap_or(0);
+        let registered_reported = value
+            .get("registered_children")
+            .and_then(serde_json::Value::as_u64)
+            .map(|n| n as usize);
         let (entries, _) = read_ledger(&fixture_path);
         if declared > entries.len() {
             unverifiable.push(format!(
                 "incomplete registration: child declared {declared} children but the ledger holds {}",
                 entries.len()
             ));
+        }
+        if let Some(registered) = registered_reported
+            && registered != entries.len()
+        {
+            unverifiable.push(format!(
+                "registration accounting mismatch: child reports {registered} registered but the ledger holds {}",
+                entries.len()
+            ));
+        }
+        if let Some(failures) = value
+            .get("registration_failures")
+            .and_then(|f| f.as_array())
+        {
+            for failure in failures {
+                unverifiable.push(format!("registration failure retained: {failure}"));
+            }
         }
     }
 
@@ -856,6 +957,7 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
         cleanup: CleanupReport {
             actions,
             unverifiable,
+            resolutions,
         },
         retained_dir,
         _unreaped_helpers: unreaped_helpers,
@@ -1060,12 +1162,17 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
     let pi = add_fixture(&dir, "pi", pi_script);
     let catalog = probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), budget);
     let (entries, _) = read_ledger(&dir);
+    // The adversarial fixtures self-register by appending `pid|lstart` to
+    // the ledger; there is no separate child-side registrar, so the
+    // counts derive from the ledger itself and no failure evidence is
+    // expected.
     write_child_report(
         &dir,
         &ChildReport {
             catalog,
             declared_children: entries.len(),
             registered_children: entries.len(),
+            registration_failures: Vec::new(),
         },
     );
 }
@@ -1417,10 +1524,11 @@ fn isolation_setup_failure_fails_closed_without_probing() {
 // supervisor that only worked when nothing went wrong would fail here.
 
 #[cfg(unix)]
-/// Registers `pid` with its captured birth identity. Returns false when
-/// the birth cannot be established: a birthless identity is NEVER written
-/// to the ledger (it could not be rechecked before a signal); the caller
-/// reports the gap through declared-vs-registered accounting instead.
+/// Registers `pid` with its captured birth identity. On failure the full
+/// BoundedError (including unreaped helper ownership) is returned to the
+/// caller, which must reap any unreaped helper IT owns (bounded) and then
+/// report the failure - nothing is silently dropped on any registration
+/// path.
 #[cfg(unix)]
 fn append_ledger(dir: &Path, pid: u32) -> Result<(), BoundedError> {
     let birth = birth_of(pid)?;
@@ -1434,30 +1542,81 @@ fn append_ledger(dir: &Path, pid: u32) -> Result<(), BoundedError> {
     Ok(())
 }
 
+/// Registration accounting owned by the child test process (lifecycle):
+/// how many fixture children it declared, how many it registered, and
+/// the retained failure detail for every registration that failed.
 #[cfg(unix)]
-fn spawn_shell_child(dir: &Path, script: &str, register: bool) -> u32 {
-    // The handle is intentionally not waited: the child is reaped by the
-    // parent supervisor through the identity ledger, not this handle.
-    #[allow(clippy::zombie_processes)]
-    let child = std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg(script)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .current_dir(dir)
-        .spawn()
-        .expect("spawn shell child");
-    let pid = child.id();
-    if register {
-        // Registration failure must NOT silently drop the BoundedError:
-        // the caller reports the gap via declared-vs-registered
-        // accounting (amendment B), which makes the run unverifiable.
-        if let Err(err) = append_ledger(dir, pid) {
-            panic!("register child with birth identity failed: {}", err.message);
-        }
+#[derive(Default)]
+struct RegistrationLedger {
+    declared: usize,
+    registered: usize,
+    failures: Vec<String>,
+}
+
+#[cfg(unix)]
+impl RegistrationLedger {
+    /// Declare a fixture child WITHOUT registering it (the
+    /// missing-registration self-test): the declared count rises but the
+    /// ledger stays empty, and accounting must expose the gap.
+    fn declare_only(&mut self, dir: &Path, script: &str) -> u32 {
+        self.declared += 1;
+        #[allow(clippy::zombie_processes)]
+        let child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(script)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .current_dir(dir)
+            .spawn()
+            .expect("spawn shell child");
+        child.id()
     }
-    pid
+
+    /// Register one fixture child. Spawn/registration failures are
+    /// retained as evidence; an unreaped ps helper from a failed birth
+    /// capture is reaped HERE, in the process that owns it, with a
+    /// bounded wait - dropping that Child would leak a zombie.
+    fn register(&mut self, dir: &Path, script: &str) -> u32 {
+        self.declared += 1;
+        // The handle is intentionally not waited: the fixture child is
+        // reaped by the parent supervisor through the identity ledger,
+        // not this handle.
+        #[allow(clippy::zombie_processes)]
+        let child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(script)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .current_dir(dir)
+            .spawn()
+            .expect("spawn shell child");
+        let pid = child.id();
+        match append_ledger(dir, pid) {
+            Ok(()) => self.registered += 1,
+            Err(err) => {
+                let mut note = format!("pid={pid} registration failed: {}", err.message);
+                if let Some(mut helper) = err.unreaped {
+                    // We own this helper: bounded reap, never a silent
+                    // drop.
+                    let reap_deadline = Instant::now() + Duration::from_secs(1);
+                    while helper.try_wait().ok().flatten().is_none()
+                        && Instant::now() < reap_deadline
+                    {
+                        sleep_capped(reap_deadline, Duration::from_millis(2));
+                    }
+                    if helper.try_wait().ok().flatten().is_some() {
+                        note.push_str("; unreaped ps helper reaped by registrant");
+                    } else {
+                        note.push_str("; unreaped ps helper could NOT be reaped by registrant");
+                    }
+                }
+                self.failures.push(note);
+            }
+        }
+        pid
+    }
 }
 
 #[cfg(unix)]
@@ -1516,14 +1675,17 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
     if in_child_mode() {
         let dir = fixture_dir_from_env();
         // Register only after a delay: the parent must keep reading the
-        // append-only ledger while tearing down (amendment B).
-        let pid = spawn_shell_child(&dir, "sleep 5", false);
+        // append-only ledger while tearing down (amendment B). A late
+        // registration failure is retained as evidence, never dropped.
+        let mut ledger = RegistrationLedger::default();
+        let pid = ledger.declare_only(&dir, "sleep 5");
         std::thread::sleep(Duration::from_millis(300));
-        if let Err(err) = append_ledger(&dir, pid) {
-            panic!(
-                "late registration with birth identity failed: {}",
+        match append_ledger(&dir, pid) {
+            Ok(()) => ledger.registered += 1,
+            Err(err) => ledger.failures.push(format!(
+                "pid={pid} late registration failed: {}",
                 err.message
-            );
+            )),
         }
         write_child_report(
             &dir,
@@ -1537,8 +1699,9 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
                     Vec::new(),
                     None,
                 ),
-                declared_children: 1,
-                registered_children: 1,
+                declared_children: ledger.declared,
+                registered_children: ledger.registered,
+                registration_failures: ledger.failures,
             },
         );
         return;
@@ -1553,6 +1716,13 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
         "the late-registered child must be TERM-resolved: {:?}",
         run.cleanup.actions
     );
+    assert!(
+        run.cleanup
+            .rescues()
+            .any(|r| r.outcome == ResolutionOutcome::Terminated),
+        "expected a Terminated rescue; resolutions: {:?}",
+        run.cleanup.resolutions
+    );
 }
 
 #[cfg(unix)]
@@ -1560,7 +1730,8 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
 fn supervisor_term_resistant_child_is_forced_after_recheck() {
     if in_child_mode() {
         let dir = fixture_dir_from_env();
-        spawn_shell_child(&dir, "trap '' TERM; sleep 30", true);
+        let mut ledger = RegistrationLedger::default();
+        ledger.register(&dir, "trap '' TERM; sleep 30");
         write_child_report(
             &dir,
             &ChildReport {
@@ -1573,8 +1744,9 @@ fn supervisor_term_resistant_child_is_forced_after_recheck() {
                     Vec::new(),
                     None,
                 ),
-                declared_children: 1,
-                registered_children: 1,
+                declared_children: ledger.declared,
+                registered_children: ledger.registered,
+                registration_failures: ledger.failures,
             },
         );
         return;
@@ -1582,6 +1754,15 @@ fn supervisor_term_resistant_child_is_forced_after_recheck() {
     let run = supervise(
         "supervisor_term_resistant_child_is_forced_after_recheck",
         SUPERVISE_OVERALL,
+    );
+    // Genuine rescue: the TERM-trapped fixture needed the force path,
+    // recorded as a structured ForceKilled resolution.
+    assert!(
+        run.cleanup
+            .rescues()
+            .any(|r| r.outcome == ResolutionOutcome::ForceKilled),
+        "expected a ForceKilled rescue; resolutions: {:?}",
+        run.cleanup.resolutions
     );
     run.assert_clean();
     assert!(
@@ -1598,7 +1779,8 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
         let dir = fixture_dir_from_env();
         // Spawn WITHOUT registering; the child honestly reports the gap.
         // The child is short-lived so the scenario self-cleans.
-        spawn_shell_child(&dir, "sleep 2", false);
+        let mut ledger = RegistrationLedger::default();
+        ledger.declare_only(&dir, "sleep 2");
         write_child_report(
             &dir,
             &ChildReport {
@@ -1611,8 +1793,9 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
                     Vec::new(),
                     None,
                 ),
-                declared_children: 1,
-                registered_children: 0,
+                declared_children: ledger.declared,
+                registered_children: ledger.registered,
+                registration_failures: ledger.failures,
             },
         );
         return;
@@ -1641,13 +1824,80 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
 
 #[cfg(unix)]
 #[test]
+fn supervisor_distinguishes_product_cleanup_from_rescue() {
+    if in_child_mode() {
+        let dir = fixture_dir_from_env();
+        let mut ledger = RegistrationLedger::default();
+        // One fixture exits promptly: pure product cleanup. One sleeps:
+        // needs a rescue signal from the supervisor.
+        ledger.register(&dir, "sleep 0.2");
+        std::thread::sleep(Duration::from_millis(500));
+        ledger.register(&dir, "sleep 30");
+        write_child_report(
+            &dir,
+            &ChildReport {
+                catalog: drogon_harness::HostCatalog::caller_enumerated(
+                    HarnessId::Pi,
+                    drogon_harness::HarnessAvailability::Available,
+                    None,
+                    None,
+                    "supervisor-self-test",
+                    Vec::new(),
+                    None,
+                ),
+                declared_children: ledger.declared,
+                registered_children: ledger.registered,
+                registration_failures: ledger.failures,
+            },
+        );
+        return;
+    }
+    let run = supervise(
+        "supervisor_distinguishes_product_cleanup_from_rescue",
+        SUPERVISE_OVERALL,
+    );
+    run.assert_clean();
+    // The distinction is structural, not string-matching: exactly one
+    // identity resolved without any signal and exactly one needed a
+    // TERM-first rescue.
+    let naturals: Vec<&Resolution> = run.cleanup.natural_resolutions().collect();
+    let rescues: Vec<&Resolution> = run.cleanup.rescues().collect();
+    assert_eq!(
+        naturals.len(),
+        1,
+        "the prompt fixture must resolve naturally; resolutions: {:?}",
+        run.cleanup.resolutions
+    );
+    assert_eq!(
+        rescues.len(),
+        1,
+        "the sleeping fixture must need exactly one rescue; resolutions: {:?}",
+        run.cleanup.resolutions
+    );
+    assert!(
+        matches!(
+            rescues[0].outcome,
+            ResolutionOutcome::Terminated | ResolutionOutcome::ForceKilled
+        ),
+        "rescue must be TERM-first evidence: {:?}",
+        rescues[0]
+    );
+    assert_ne!(
+        naturals[0].pid, rescues[0].pid,
+        "natural and rescued identities must be different processes"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn supervisor_stale_identity_is_resolved_without_signaling() {
     if in_child_mode() {
         let dir = fixture_dir_from_env();
         // Register a child that exits immediately: by the time the parent
         // checks, the identity is stale and must be resolved-gone without
         // any signal.
-        spawn_shell_child(&dir, "sleep 0.2", true);
+        let mut ledger = RegistrationLedger::default();
+        ledger.register(&dir, "sleep 0.2");
         std::thread::sleep(Duration::from_millis(500));
         write_child_report(
             &dir,
@@ -1661,8 +1911,9 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
                     Vec::new(),
                     None,
                 ),
-                declared_children: 1,
-                registered_children: 1,
+                declared_children: ledger.declared,
+                registered_children: ledger.registered,
+                registration_failures: ledger.failures,
             },
         );
         return;
@@ -1679,6 +1930,21 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
             .any(|a| a.contains("resolved-gone")),
         "{:?}",
         run.cleanup.actions
+    );
+    // Product cleanup, not rescue: the identity exited on its own, so
+    // the supervisor sent NOTHING (asserted both as actions and as
+    // structured resolutions).
+    assert!(
+        run.cleanup.rescues().next().is_none(),
+        "a stale identity must never be signaled; resolutions: {:?}",
+        run.cleanup.resolutions
+    );
+    assert!(
+        run.cleanup
+            .natural_resolutions()
+            .any(|r| r.outcome == ResolutionOutcome::NaturalExit),
+        "expected a NaturalExit resolution; resolutions: {:?}",
+        run.cleanup.resolutions
     );
     assert!(
         !run.cleanup
