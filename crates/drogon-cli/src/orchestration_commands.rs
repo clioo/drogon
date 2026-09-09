@@ -528,18 +528,30 @@ fn parse_target(value: &str) -> Result<SendTarget, CliError> {
     if value == "run-home" {
         return Ok(SendTarget::RunHome);
     }
+    if let Some(id) = value.strip_prefix("run:") {
+        // Source spelling `--to run:<id>` names the run's home mailbox.
+        if id.is_empty() {
+            return Err(usage("--to run:<ID> requires a run id"));
+        }
+        return Ok(SendTarget::RunHome);
+    }
     if let Some(id) = value.strip_prefix("dispatch:") {
         return Ok(SendTarget::Dispatch {
             dispatch_id: id.to_string(),
         });
     }
-    if let Some(name) = value.strip_prefix("group:") {
+    // Source group addresses start with @ (`@all`, `@idle`, `@<agent>`,
+    // `@worktree:<id>`); the native `group:<NAME>` spelling stays accepted.
+    let name = value
+        .strip_prefix("@")
+        .or_else(|| value.strip_prefix("group:"));
+    if let Some(name) = name {
         return Ok(SendTarget::Group {
             name: name.to_string(),
         });
     }
     Err(usage(
-        "--to must be run-home, dispatch:<ID> or group:<NAME>",
+        "--to must be run-home, run:<ID>, dispatch:<ID>, @<GROUP> or group:<NAME>",
     ))
 }
 
@@ -2247,14 +2259,22 @@ pub async fn run(
             emit(
                 call,
                 json,
-                || match (&result.message, &result.batch) {
-                    (Some(message), _) => format!("Sent {}", message.message_id),
-                    (_, Some(batch)) => format!(
-                        "Sent {} message(s) to {} recipient(s)",
-                        batch.messages.len(),
-                        batch.recipients
-                    ),
-                    _ => "Sent".to_string(),
+                || {
+                    let line = match (&result.message, &result.batch) {
+                        (Some(message), _) => format!("Sent {}", message.message_id),
+                        (_, Some(batch)) => format!(
+                            "Sent {} message(s) to {} recipient(s)",
+                            batch.messages.len(),
+                            batch.recipients
+                        ),
+                        _ => "Sent".to_string(),
+                    };
+                    // Source `withWarnings`: warnings join the output after
+                    // the sent line.
+                    result.warnings.iter().fold(line, |mut text, warning| {
+                        text.push_str(&format!("\nWarning: {}", warning.message));
+                        text
+                    })
                 },
                 exit_code,
             )

@@ -161,6 +161,54 @@ fn coordinator_args() -> Vec<&'static str> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_to_run_id_and_at_group_use_source_target_spellings() {
+    for (to, expected) in [
+        ("run:run-1", json!({"kind": "runHome"})),
+        ("@all", json!({"kind":"group","name":"all"})),
+        (
+            "@worktree:ws-9",
+            json!({"kind":"group","name":"worktree:ws-9"}),
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mock = MockService::start(
+            dir.path(),
+            mock_behavior(
+                true,
+                vec![(
+                    "orchestration.send",
+                    json!({"message":{"messageId":"msg-1","sequence":1,"runId":"run-1","kind":"status"},"deliveries":1}),
+                )],
+            ),
+        );
+        let mut args = vec![
+            "--json",
+            "orchestration",
+            "send",
+            "--kind",
+            "status",
+            "--subject",
+            "hi",
+            "--to",
+            to,
+        ];
+        args.extend(coordinator_args());
+        let invocation = run_cli(dir.path(), &args, &[]);
+        assert_eq!(
+            invocation.exit_code, 0,
+            "{to}: {} {}",
+            invocation.stdout, invocation.stderr
+        );
+        let sent = mock
+            .captured()
+            .into_iter()
+            .find(|r| r["method"] == "orchestration.send")
+            .unwrap();
+        assert_eq!(sent["params"]["to"], expected, "{to}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn structured_payload_flags_build_the_source_payload_object() {
     let dir = tempfile::tempdir().unwrap();
     let mock = MockService::start(
