@@ -145,7 +145,10 @@ fn task_cursor_advances_while_brief_and_full_specs_preserve_unicode() {
         tasks::create(&tx, &task_params("run-a", &text, vec![]), id, 42).unwrap();
     }
     let first = tasks::list(&tx, &task_list("run-a", None)).unwrap();
+    // Source abbreviation: 159 content chars plus the ellipsis; the ellipsis
+    // is the truncation marker, never a bare 160-char cut.
     assert_eq!(first.tasks[0].spec.chars().count(), 160);
+    assert!(first.tasks[0].spec.ends_with('…'));
     assert!(first.tasks[0].spec_truncated);
     assert!(first.tasks[0].spec.starts_with("hello "));
     let second = tasks::list(&tx, &task_list("run-a", first.next_cursor)).unwrap();

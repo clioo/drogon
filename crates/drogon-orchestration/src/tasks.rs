@@ -78,13 +78,16 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Brief rendering: collapse, then cap at `BRIEF_SPEC_CHARS` characters. The
+/// Brief rendering: collapse, then cap at `BRIEF_SPEC_CHARS` characters
+/// including the ellipsis. Source `abbreviateOrchestrationTasks` truncates to
+/// 159 chars + `…` (UTF-16 units there, Unicode scalar values here).
 fn brief_spec(text: &str) -> (String, bool) {
     let collapsed = collapse_whitespace(text);
     if collapsed.chars().count() <= BRIEF_SPEC_CHARS {
         return (collapsed, false);
     }
-    (collapsed.chars().take(BRIEF_SPEC_CHARS).collect(), true)
+    let truncated: String = collapsed.chars().take(BRIEF_SPEC_CHARS - 1).collect();
+    (format!("{}…", truncated.trim_end()), true)
 }
 
 fn encode_string_list(values: &[String]) -> Result<String, RpcError> {
