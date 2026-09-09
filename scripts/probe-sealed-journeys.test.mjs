@@ -201,15 +201,17 @@ describe("waitForFixtureReady (fail-closed identity + redirect refusal)", () => 
     withCleanFixtureEnv(async () => {
       const fixture = await startSealedModelFixture();
       try {
-        assert.equal(await waitForFixtureReady(5000, fixture.baseUrl), true);
+        assert.equal(await waitForFixtureReady(5000, fixture.baseUrl), false);
         assert.equal(
           await waitForFixtureReady(5000, fixture.baseUrl, fixture.instanceId),
           true,
         );
         // The env-fallback path used by the two real probe call sites.
         process.env[SEALED_MODEL_FIXTURE_BASE_URL_ENV] = fixture.baseUrl;
+        process.env.DROGON_SEALED_MODEL_FIXTURE_INSTANCE_ID = fixture.instanceId;
         assert.equal(await waitForFixtureReady(5000), true);
       } finally {
+        delete process.env.DROGON_SEALED_MODEL_FIXTURE_INSTANCE_ID;
         await fixture.close();
       }
     }));

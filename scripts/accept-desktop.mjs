@@ -271,8 +271,8 @@ async function relaunchDesktop() {
 }
 try {
   // Every operation after the server starts is covered by final cleanup.
-  modelFixture = await startAndSeedModelFixture((baseUrl) =>
-    seedLocalPiProvider(piDir, baseUrl),
+  modelFixture = await startAndSeedModelFixture((baseUrl, instanceId) =>
+    seedLocalPiProvider(piDir, baseUrl, instanceId),
   );
   if (process.env.DROGON_VERIFY_OS_FOCUS === "1") {
     foregroundObservation = await startForegroundObservation(output);

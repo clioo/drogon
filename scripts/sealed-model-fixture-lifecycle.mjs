@@ -25,9 +25,12 @@ export async function startAndSeedModelFixture(
   let modelFixture = null;
   try {
     modelFixture = await startFixture();
-    await seed(modelFixture.baseUrl);
+    await seed(modelFixture.baseUrl, modelFixture.instanceId);
   } catch (error) {
-    if (modelFixture) await modelFixture.close().catch(() => {});
+    if (modelFixture) {
+      const cleanup = await closeModelFixtureForReport(modelFixture);
+      if (cleanup.failed) throw new AggregateError([error, new Error(cleanup.errorDetail)], "fixture setup and cleanup failed");
+    }
     throw error;
   }
   return modelFixture;
@@ -54,11 +57,11 @@ export async function closeModelFixtureForReport(modelFixture) {
     const cleanupLine =
       `sealed model fixture: ${fixtureClose.verdict}${fixtureClose.forced ? " (forced)" : ""} ` +
       `(requests=${receipt.totalRequests}, rejected=${receipt.rejected}, ` +
-      `outstandingStreams=${fixtureClose.outstandingStreams}, outstandingSockets=${fixtureClose.outstandingSockets})`;
-    const failed = fixtureClose.verdict !== "stopped" || outstanding > 0;
+      `outstandingStreams=${fixtureClose.outstandingStreams}, outstandingSockets=${fixtureClose.outstandingSockets}, abortedStreams=${fixtureClose.abortedStreams ?? 0})`;
+    const failed = fixtureClose.verdict !== "stopped" || !Number.isFinite(outstanding) || outstanding > 0 || (fixtureClose.abortedStreams ?? 0) > 0;
     const errorDetail = failed
       ? `sealed model fixture cleanup: verdict=${fixtureClose.verdict}, ` +
-        `outstandingStreams=${fixtureClose.outstandingStreams}, outstandingSockets=${fixtureClose.outstandingSockets}` +
+        `outstandingStreams=${fixtureClose.outstandingStreams}, outstandingSockets=${fixtureClose.outstandingSockets}, abortedStreams=${fixtureClose.abortedStreams ?? 0}` +
         (fixtureClose.error ? `, error=${fixtureClose.error}` : "")
       : null;
     return { failed, cleanupLine, errorDetail };

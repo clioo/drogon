@@ -143,6 +143,8 @@ export function mentuStepsAll(steps, expected) {
 // script's process. Both seedLocalPiProvider and waitForFixtureReady accept
 // an explicit baseUrl argument for tests/direct callers; this env var is
 // only the default plumbing for the real acceptance harness.
+import { selectSettingsTheme, captureThemeSurface } from "./acceptance-theme.mjs";
+
 export const SEALED_MODEL_FIXTURE_BASE_URL_ENV =
   "DROGON_SEALED_MODEL_FIXTURE_BASE_URL";
 
@@ -155,7 +157,10 @@ function assertLoopbackBaseUrl(baseUrl) {
       `seedLocalPiProvider: baseUrl must be a valid URL, got ${JSON.stringify(baseUrl)}`,
     );
   }
-  assertLoopbackHost(parsed.hostname);
+  if (parsed.protocol !== "http:" || parsed.username || parsed.password || parsed.pathname !== "/v1" || parsed.search || parsed.hash) {
+    throw new Error("baseUrl must be an HTTP loopback /v1 URL without userinfo or query");
+  }
+  assertLoopbackHost(parsed.hostname.replace(/^\[|\]$/g, ""));
 }
 
 /**
@@ -178,6 +183,7 @@ function assertLoopbackBaseUrl(baseUrl) {
 export async function seedLocalPiProvider(
   piDir,
   baseUrl = process.env[SEALED_MODEL_FIXTURE_BASE_URL_ENV],
+  instanceId,
 ) {
   if (!baseUrl) {
     throw new Error(
@@ -186,6 +192,8 @@ export async function seedLocalPiProvider(
   }
   assertLoopbackBaseUrl(baseUrl);
   process.env[SEALED_MODEL_FIXTURE_BASE_URL_ENV] = baseUrl;
+  if (instanceId) process.env.DROGON_SEALED_MODEL_FIXTURE_INSTANCE_ID = instanceId;
+  else delete process.env.DROGON_SEALED_MODEL_FIXTURE_INSTANCE_ID;
   await mkdir(piDir, { recursive: true });
   await writeFile(
     path.join(piDir, "models.json"),
@@ -326,20 +334,20 @@ async function openPaletteWithRegistryChord(page, root) {
 export async function waitForFixtureReady(
   timeoutMs,
   baseUrl = process.env[SEALED_MODEL_FIXTURE_BASE_URL_ENV],
-  expectedInstanceId,
+  expectedInstanceId = process.env.DROGON_SEALED_MODEL_FIXTURE_INSTANCE_ID,
 ) {
-  if (!baseUrl) return false;
+  if (!baseUrl || !expectedInstanceId || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return false;
   assertLoopbackBaseUrl(baseUrl);
   const healthUrl = healthUrlFor(baseUrl);
   const deadline = Date.now() + timeoutMs;
-  for (;;) {
+  while (Date.now() < deadline) {
     try {
       // "error" on redirect: a health check must never silently follow a
       // redirect to a different, possibly non-loopback/external base --
       // that would defeat the whole point of pinning ownership below.
       const response = await fetch(healthUrl, {
         redirect: "error",
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(Math.max(1, Math.min(5000, Math.ceil(deadline - Date.now())))),
       });
       if (response.ok) {
         const body = await response.json();
@@ -348,9 +356,11 @@ export async function waitForFixtureReady(
     } catch {
       // unreachable, redirected, or timed out: keep waiting
     }
-    if (Date.now() > deadline) return false;
-    await delay(250);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    await delay(Math.min(250, remaining));
   }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -398,9 +408,9 @@ export async function probeJumpPaletteSwitch({ page, root, output }) {
     { timeout: 15000 },
   );
   for (const colorScheme of ["light", "dark"]) {
-    await page.emulateMedia({ colorScheme });
+    const selection = await selectSettingsTheme(page, colorScheme);
     await openPaletteWithRegistryChord(page, root);
-    await shot(page, output, `jump-palette-${colorScheme}.png`);
+    await captureThemeSurface(page, path.join(output, `jump-palette-${colorScheme}.png`), selection);
     await page.keyboard.press("Escape");
     await page.locator(".command-palette-input").waitFor({ state: "hidden" });
   }
@@ -935,10 +945,11 @@ export async function probeMentuApproveRunEvidence({ page, workspace, output }) 
     "the second step's stdout evidence must carry the marker it read",
   );
   for (const colorScheme of ["light", "dark"]) {
-    await page.emulateMedia({ colorScheme });
-    await shot(page, output, `mentu-evidence-${colorScheme}.png`);
+    const selection = await selectSettingsTheme(page, colorScheme);
+    await evidence.waitFor();
+    await captureThemeSurface(page, path.join(output, `mentu-evidence-${colorScheme}.png`), selection);
   }
-  await page.emulateMedia({ colorScheme: "light" });
+  await selectSettingsTheme(page, "light");
   return [
     "mentu-approve-and-run-two-step-recipe-succeeds",
     "mentu-evidence-shows-both-step-statuses-and-outputs",
@@ -1365,10 +1376,11 @@ export async function probeBotPresetManualRun({
     }
     assert.ok(markerVisible, "a bot run attempt must record the marker");
     for (const colorScheme of ["light", "dark"]) {
-      await page.emulateMedia({ colorScheme });
-      await shot(page, output, `bots-run-detail-${colorScheme}.png`);
+      const selection = await selectSettingsTheme(page, colorScheme);
+      await page.getByText(marker, { exact: false }).first().waitFor();
+      await captureThemeSurface(page, path.join(output, `bots-run-detail-${colorScheme}.png`), selection);
     }
-    await page.emulateMedia({ colorScheme: "light" });
+    await selectSettingsTheme(page, "light");
     return [
       "bots-preset-create-with-local-pi-model",
       "bots-manual-responsibility-run-history-row-exited",

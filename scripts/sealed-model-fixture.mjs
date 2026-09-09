@@ -59,16 +59,46 @@ export function countingReplyText() {
   return Array.from({ length: 200 }, (_, index) => index + 1).join(", ");
 }
 
-/** The last message with role "user" and a string content -- the shape
- *  every OpenAI-compatible chat request carries the live turn's prompt in,
- *  regardless of how many system/assistant messages precede it. */
+/**
+ * Extracts the plain text a user message actually carries, from either
+ * legitimate OpenAI-compatible content shape: a plain string, or a
+ * content-part array (`[{type:"text",text:"..."},...]`, interleaved with
+ * non-text parts such as `image_url`). This is the REAL wire shape the
+ * installed Pi package (`@earendil-works/pi-coding-agent`) sends -- headless
+ * (`pi -p`, the automation/bot-run route) content arrives as the array
+ * form (confirmed both by reading its openai-completions transport source
+ * and by a bounded real loopback reproduction: `pi -p` against a private
+ * capture server), while this repo's own interactive-typed-prompt journey
+ * (J1) happens to arrive as a plain string. Concatenates every text part
+ * in order (never reordering/synthesizing text); returns null for
+ * anything that carries no recognizable text at all (content that is
+ * neither a string nor an array, or an array with zero text parts) --
+ * the caller still fails closed on that, exactly as before.
+ */
+function textFromContent(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const text = content
+      .filter((part) => part?.type === "text" && typeof part.text === "string")
+      .map((part) => part.text)
+      .join("");
+    return text.length > 0 ? text : null;
+  }
+  return null;
+}
+
+/** The last message with role "user" and recognizable text content --
+ *  the shape every OpenAI-compatible chat request carries the live turn's
+ *  prompt in, regardless of how many system/assistant messages precede
+ *  it, and regardless of which of the two legitimate content shapes
+ *  (string or text-part array) that specific transport call used. */
 export function lastUserContent(messages) {
   if (!Array.isArray(messages)) return null;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message?.role === "user" && typeof message.content === "string") {
-      return message.content;
-    }
+    if (message?.role !== "user") continue;
+    const text = textFromContent(message.content);
+    if (text !== null) return text;
   }
   return null;
 }
@@ -102,7 +132,7 @@ export function healthUrlFor(baseUrl) {
 export function isOwnedFixtureHealth(body, expectedInstanceId) {
   if (!body || typeof body !== "object") return false;
   if (body.fixture !== FIXTURE_IDENTITY) return false;
-  if (expectedInstanceId !== undefined && body.instanceId !== expectedInstanceId) {
+  if (typeof expectedInstanceId !== "string" || !expectedInstanceId || body.instanceId !== expectedInstanceId) {
     return false;
   }
   return true;
@@ -235,6 +265,10 @@ export async function startSealedModelFixture({
   closeDeadlineMs = DEFAULT_CLOSE_DEADLINE_MS,
 } = {}) {
   assertLoopbackHost(host);
+  for (const value of [streamChunkSize, maxBodyBytes, closeDeadlineMs]) {
+    if (!Number.isSafeInteger(value) || value <= 0) throw new Error("invalid fixture bound");
+  }
+  if (!Number.isFinite(streamIntervalMs) || streamIntervalMs < 0) throw new Error("invalid fixture pacing");
   const instanceId = randomUUID();
   const receipt = {
     totalRequests: 0,
@@ -245,6 +279,8 @@ export async function startSealedModelFixture({
   let nextId = 0;
   const sockets = new Set();
   const activeStreams = new Set();
+  const handlers = new Set();
+  let closing = false;
 
   async function handle(req, res) {
     receipt.totalRequests += 1;
@@ -303,14 +339,17 @@ export async function startSealedModelFixture({
   }
 
   const server = createServer((req, res) => {
-    handle(req, res).catch((error) => {
+    if (closing) { res.destroy(); return; }
+    const task = handle(req, res).catch((error) => {
       receipt.rejected += 1;
       fixtureError(res, 500, `sealed fixture internal error: ${error.message}`);
-    });
+    }).finally(() => handlers.delete(task));
+    handlers.add(task);
   });
   server.on("connection", (socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
+    if (closing) socket.destroy();
   });
 
   await new Promise((resolve, reject) => {
@@ -318,7 +357,8 @@ export async function startSealedModelFixture({
     server.listen(0, host, resolve);
   });
   const address = server.address();
-  const baseUrl = `http://${host}:${address.port}/v1`;
+  const numericHost = address.address.includes(":") ? `[${address.address}]` : address.address;
+  const baseUrl = `http://${numericHost}:${address.port}/v1`;
 
   /**
    * Bounded, structured, never-throwing teardown: aborts every in-flight
@@ -339,37 +379,36 @@ export async function startSealedModelFixture({
    * earlier functional failure instead of needing to swallow it with a
    * bare .catch(() => {}).
    */
-  async function close() {
-    const outstandingStreams = activeStreams.size;
-    for (const controller of activeStreams) controller.abort();
-    // A short, fixed instant for a just-aborted stream's res.end()/FIN, or
-    // an already-finishing exchange, to close itself before anything is
-    // forced -- not a wait for natural keep-alive idle, which a socket may
-    // never reach on its own within any useful bound.
-    await delay(20);
-    const outstandingSockets = sockets.size;
-    const forced = outstandingSockets > 0;
-    if (forced) {
-      if (typeof server.closeAllConnections === "function") {
-        server.closeAllConnections();
-      } else {
-        for (const socket of sockets) socket.destroy();
-      }
-    }
-    const settled = await Promise.race([
-      new Promise((resolve) => server.close(() => resolve(true))),
-      delay(closeDeadlineMs).then(() => false),
-    ]);
-    if (!settled) {
-      return {
-        verdict: "unverifiable",
-        forced,
-        outstandingStreams,
-        outstandingSockets,
-        error: "sealed-model-fixture: server.close() did not settle within the bounded deadline",
-      };
-    }
-    return { verdict: "stopped", forced, outstandingStreams, outstandingSockets };
+  let closePromise;
+  function close() {
+    if (closePromise) return closePromise;
+    closing = true;
+    closePromise = (async () => {
+      const abortedStreams = activeStreams.size;
+      const forced = sockets.size > 0;
+      // Stop admission before sweeping connections, including late accept events.
+      const listenerClosed = new Promise((resolve) => server.close(() => resolve()));
+      const socketClosures = [...sockets].map((socket) => new Promise((resolve) => {
+        socket.once("close", resolve);
+        socket.destroy();
+      }));
+      for (const controller of activeStreams) controller.abort();
+      let timer;
+      let settled;
+      try {
+        settled = await Promise.race([
+          Promise.all([listenerClosed, ...socketClosures, ...handlers]).then(() => true),
+          new Promise((resolve) => { timer = setTimeout(() => resolve(false), closeDeadlineMs); }),
+        ]);
+      } finally { clearTimeout(timer); }
+      const outstandingStreams = activeStreams.size;
+      const outstandingSockets = sockets.size;
+      const stopped = settled && !server.listening && outstandingStreams === 0 && outstandingSockets === 0 && handlers.size === 0;
+      return { verdict: stopped ? "stopped" : "unverifiable", forced,
+        abortedStreams, outstandingStreams, outstandingSockets,
+        ...(stopped ? {} : { error: "fixture resources did not settle within the close deadline" }) };
+    })();
+    return closePromise;
   }
 
   return {

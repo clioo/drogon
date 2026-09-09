@@ -62,11 +62,70 @@ describe("lastUserContent", () => {
     );
   });
 
-  it("returns null with no user message, a non-string content, or a non-array", () => {
+  it("returns null with no user message, or a content value that is neither a string nor an array", () => {
     assert.equal(lastUserContent([{ role: "system", content: "x" }]), null);
-    assert.equal(lastUserContent([{ role: "user", content: [{ type: "text" }] }]), null);
+    assert.equal(lastUserContent([{ role: "user", content: 42 }]), null);
+    assert.equal(lastUserContent([{ role: "user", content: null }]), null);
     assert.equal(lastUserContent(null), null);
     assert.equal(lastUserContent(undefined), null);
+  });
+
+  // Coordinator review (real headless-transport correction): the real
+  // installed Pi package's openai-completions transport
+  // (chunks/openai-completions-*.js) sends a user message's content as
+  // this content-part array shape -- not a plain string -- whenever the
+  // internal message itself carries structured parts (confirmed both by
+  // reading that transport's source and by a bounded real loopback
+  // reproduction: `pi -p` against a private capture server). The
+  // headless/automation route (bot.run, automation Run Now) hits this
+  // shape; the interactive-typed-prompt route (J1) happens to send a
+  // plain string. Both are legitimate OpenAI-compatible shapes and must
+  // both be recognized -- this is extraction only, never a broadening of
+  // what classifyPrompt itself accepts.
+  it("extracts text from the real content-part array shape the installed Pi package's headless transport sends", () => {
+    assert.equal(
+      lastUserContent([
+        { role: "system", content: "You are Pi." },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Drogon task:\nReply with exactly this acceptance marker and nothing else: BOT_777",
+            },
+          ],
+        },
+      ]),
+      "Drogon task:\nReply with exactly this acceptance marker and nothing else: BOT_777",
+    );
+  });
+
+  it("concatenates multiple text parts in order and ignores interleaved non-text parts (e.g. image_url)", () => {
+    assert.equal(
+      lastUserContent([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Count from 1 to 200 " },
+            { type: "image_url", image_url: { url: "data:image/png;base64,AA==" } },
+            { type: "text", text: "separated by commas. Reply with only the numbers." },
+          ],
+        },
+      ]),
+      "Count from 1 to 200 separated by commas. Reply with only the numbers.",
+    );
+  });
+
+  it("returns null for a content-part array with no text part at all (e.g. image-only) -- still fails closed, never invents text", () => {
+    assert.equal(
+      lastUserContent([
+        {
+          role: "user",
+          content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AA==" } }],
+        },
+      ]),
+      null,
+    );
   });
 });
 
@@ -91,10 +150,10 @@ describe("healthUrlFor", () => {
 });
 
 describe("isOwnedFixtureHealth", () => {
-  it("accepts a matching identity with no instance pinned", () => {
+  it("refuses a matching type with no instance pinned", () => {
     assert.equal(
       isOwnedFixtureHealth({ fixture: FIXTURE_IDENTITY, instanceId: "a" }),
-      true,
+      false,
     );
   });
 
@@ -195,6 +254,118 @@ describe("startSealedModelFixture", () => {
       const receipt = fixture.receipt();
       assert.equal(receipt.byKind.marker, 1);
       assert.equal(receipt.rejected, 0);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  // Real packaged-acceptance regression: automation/bot Run Now (headless
+  // Pi, `pi -p`) sent exactly this shape -- a streamed request whose user
+  // message content is a one-element text-part array wrapping the
+  // "Drogon task:\n" + prompt text launch.rs's headless argv always adds
+  // -- and the fixture returned 422 "unrecognized prompt" because
+  // lastUserContent only handled a plain string. Pinned against the exact
+  // shape a bounded real `pi -p` reproduction against a private capture
+  // server actually sent on the wire (verified separately; never
+  // committed as a raw transcript here).
+  it("answers the real headless-transport marker-echo shape (streamed, content as a wrapped text-part array) -- the actual packaged-acceptance regression", async () => {
+    const fixture = await startSealedModelFixture({
+      streamChunkSize: 40,
+      streamIntervalMs: 5,
+    });
+    try {
+      const response = await fetch(`${fixture.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "qwen3.8-flash-next-nvidia-nvfp4",
+          stream: true,
+          messages: [
+            { role: "system", content: "You are Pi, a coding assistant." },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "Drogon task:\nReply with exactly this acceptance marker and nothing else: AUTOMATION_ACCEPT_7",
+                },
+              ],
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type"), "text/event-stream");
+      const decoder = new TextDecoder();
+      let buffered = "";
+      let assembled = "";
+      for await (const bytes of response.body) {
+        buffered += decoder.decode(bytes, { stream: true });
+        let boundary;
+        while ((boundary = buffered.indexOf("\n\n")) !== -1) {
+          const frame = buffered.slice(0, boundary).trim();
+          buffered = buffered.slice(boundary + 2);
+          if (!frame.startsWith("data: ") || frame === "data: [DONE]") continue;
+          const delta = JSON.parse(frame.slice("data: ".length)).choices[0].delta;
+          if (typeof delta.content === "string") assembled += delta.content;
+        }
+      }
+      assert.equal(assembled, "AUTOMATION_ACCEPT_7");
+      const receipt = fixture.receipt();
+      assert.equal(receipt.byKind.marker, 1);
+      assert.equal(receipt.rejected, 0);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("still fails closed (422) on the array content shape when no text part is recognizable -- the fix is extraction, never a broadened/arbitrary echo", async () => {
+    const fixture = await startSealedModelFixture();
+    try {
+      const response = await fetch(`${fixture.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "image_url", image_url: { url: "data:image/png;base64,AA==" } },
+              ],
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      assert.equal(response.status, 422);
+      const receipt = fixture.receipt();
+      assert.equal(receipt.rejected, 1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("still fails closed (422) on a real-shaped array whose text does not match any known prompt -- extraction succeeded, classification correctly refused", async () => {
+    const fixture = await startSealedModelFixture();
+    try {
+      const response = await fetch(`${fixture.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: "Drogon task:\nWhat is the weather today?" }],
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      assert.equal(response.status, 422);
+      const receipt = fixture.receipt();
+      assert.equal(receipt.rejected, 1);
     } finally {
       await fixture.close();
     }
@@ -329,6 +500,7 @@ describe("startSealedModelFixture", () => {
     assert.deepEqual(result, {
       verdict: "stopped",
       forced: false,
+      abortedStreams: 0,
       outstandingStreams: 0,
       outstandingSockets: 0,
     });
@@ -368,8 +540,9 @@ describe("startSealedModelFixture", () => {
     // The real point of this correction: a caller must be able to see
     // that something was genuinely still in flight, not just infer it
     // from a boolean.
-    assert.equal(result.outstandingStreams, 1);
-    assert.ok(result.outstandingSockets >= 1);
+    assert.equal(result.abortedStreams, 1);
+    assert.equal(result.outstandingStreams, 0);
+    assert.equal(result.outstandingSockets, 0);
     assert.equal(result.forced, true);
     assert.ok(
       elapsedMs < 1000,

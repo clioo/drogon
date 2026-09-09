@@ -103,8 +103,9 @@ describe("closeModelFixtureForReport", () => {
     const result = await closeModelFixtureForReport(modelFixture);
     assert.equal(result.failed, true);
     assert.ok(result.errorDetail, "a failing close must carry a real error detail, not just a flag");
-    assert.match(result.errorDetail, /outstandingStreams=1/);
-    assert.match(result.cleanupLine, /outstandingStreams=1/);
+    assert.match(result.errorDetail, /abortedStreams=1/);
+    assert.match(result.cleanupLine, /abortedStreams=1/);
+    assert.match(result.cleanupLine, /outstandingStreams=0, outstandingSockets=0/);
     await inFlight;
   });
 
