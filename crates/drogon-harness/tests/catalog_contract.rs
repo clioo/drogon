@@ -74,6 +74,13 @@ const OP_ENVELOPE: Duration = Duration::from_secs(8);
 /// force escalation and reap always have at least this much timeline.
 #[cfg(unix)]
 const UNWIND_RESERVE: Duration = Duration::from_secs(1);
+/// Bound for one blocking natural-exit reap: the owner waits for THIS
+/// fixture's actual exit instead of sleeping and hoping.
+#[cfg(unix)]
+const NATURAL_EXIT_WAIT: Duration = Duration::from_secs(5);
+/// Total bound for the end-of-branch ownership transfer cleanup.
+#[cfg(unix)]
+const RELEASE_BUDGET: Duration = Duration::from_secs(3);
 #[cfg(unix)]
 const TICK: Duration = Duration::from_millis(25);
 /// Combined bytes one bounded helper may retain across both streams.
@@ -2897,6 +2904,10 @@ struct RegistrationLedger {
     registered: usize,
     failures: Vec<String>,
     owned: Vec<std::process::Child>,
+    /// Pids the parent acknowledged: the only handles that may transfer
+    /// to parent supervision. Everything else is reaped-or-forced by the
+    /// owner before transfer, with leaks recorded as failure evidence.
+    accepted: Vec<u32>,
     /// Set by seal(): the source is closed and no further spawn is
     /// accepted.
     closed: bool,
@@ -3000,6 +3011,10 @@ impl RegistrationLedger {
                     note.push_str(&unwind_owned(self, pid, cap));
                     self.failures.push(note);
                     failed = true;
+                } else {
+                    // Acknowledged: the parent observes this identity, so
+                    // the handle may transfer to parent supervision.
+                    self.accepted.push(pid);
                 }
             }
             Err(err) => {
@@ -3055,18 +3070,65 @@ impl RegistrationLedger {
         }
     }
 
-    /// Explicit transfer of outliving fixtures to the parent supervisor:
-    /// every handle this child still owns is released WITHOUT waiting
-    /// (waiting would hang on fixtures the parent must contain), and the
-    /// ledger plus declaration records the parent reads stay the
-    /// ownership record. Call at every normal child-branch end so no
-    /// usable handle drops silently on a report path; failure paths
-    /// unwind-or-retain instead, and panic paths still fail the run
-    /// closed through the missing-report/dead-runner evidence. Dropping
-    /// a Child only closes our handle — the processes keep running
-    /// under parent supervision.
-    fn release_transferred(&mut self) {
-        self.owned.clear();
+    /// Blocking reap of ONE owned handle (natural-exit proof for a
+    /// specific fixture) without touching siblings. Returns whether it
+    /// was reaped within the deadline — no timing luck, the wait
+    /// observes the actual exit.
+    fn reap_pid_bounded(&mut self, pid: u32, deadline: Instant) -> bool {
+        let Some(index) = self.owned.iter().position(|child| child.id() == pid) else {
+            return false;
+        };
+        while self.owned[index].try_wait().ok().flatten().is_none() && Instant::now() < deadline {
+            sleep_capped(deadline, Duration::from_millis(5));
+        }
+        self.owned[index].try_wait().ok().flatten().is_some()
+    }
+
+    /// Genuine owner cleanup at branch end — never a silent clear.
+    /// ACCEPTED handles (registered AND parent-acknowledged) transfer to
+    /// parent supervision by handle-drop; the ledger and declaration
+    /// records the parent reads stay the ownership record. Every other
+    /// handle is reaped-or-forced boundedly FIRST: exited ones drop,
+    /// live ones get TERM, grace, KILL and reap, and anything still
+    /// alive afterwards is recorded as failure evidence (which the
+    /// report written after this call carries to the parent). The child
+    /// still exits afterwards, but never silently.
+    fn release_transferred(&mut self, deadline: Instant) {
+        let owned = std::mem::take(&mut self.owned);
+        for mut child in owned {
+            let pid = child.id();
+            match child.try_wait() {
+                Ok(Some(_)) => continue,
+                Ok(None) if self.accepted.contains(&pid) => continue,
+                Ok(None) => {}
+                Err(err) => {
+                    self.failures
+                        .push(format!("transfer wait failed for pid={pid}: {err}"));
+                }
+            }
+            let term = signal_pid(pid, libc::SIGTERM);
+            let term_at = Instant::now();
+            let grace = std::cmp::min(term_at + Duration::from_millis(500), deadline);
+            while child.try_wait().ok().flatten().is_none() && Instant::now() < grace {
+                sleep_capped(deadline, Duration::from_millis(5));
+            }
+            let kill = if child.try_wait().ok().flatten().is_none() {
+                let kill = child.kill();
+                while child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
+                    sleep_capped(deadline, Duration::from_millis(2));
+                }
+                Some(kill)
+            } else {
+                None
+            };
+            match child.try_wait() {
+                Ok(Some(_)) => {}
+                other => self.failures.push(format!(
+                    "unaccepted fixture pid={pid} leaked at transfer \
+                     (term={term:?}, kill={kill:?}, wait={other:?})"
+                )),
+            }
+        }
     }
 
     /// Bounded reap of everything this child still owns, used by tests
@@ -3106,6 +3168,8 @@ fn retain_late_registration(ledger: &mut RegistrationLedger, dir: &Path, pid: u3
                 note.push_str("; ");
                 note.push_str(&unwind_owned(ledger, pid, cap));
                 ledger.failures.push(note);
+            } else {
+                ledger.accepted.push(pid);
             }
         }
         Err(err) => {
@@ -3202,11 +3266,8 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
             .expect("fixture spawn");
         std::thread::sleep(Duration::from_millis(300));
         retain_late_registration(&mut ledger, &dir, pid);
-        // Harvest pass for uniformity; the late fixture is a deliberate
-        // survivor at this point (parent-owned from here).
-        ledger.reap_owned_bounded(Instant::now());
         ledger.seal(&dir);
-        ledger.release_transferred();
+        ledger.release_transferred(Instant::now() + RELEASE_BUDGET);
         write_child_report(
             &dir,
             &ChildReport {
@@ -3256,11 +3317,8 @@ fn supervisor_term_resistant_child_is_forced_after_recheck() {
         let dir = fixture_dir_from_env();
         let mut ledger = RegistrationLedger::default();
         ledger.register(&dir, "trap '' TERM; sleep 30");
-        // Harvest pass: nothing exited is expected (deliberate survivor
-        // stays parent-owned); stuck handles transfer, never block here.
-        ledger.reap_owned_bounded(Instant::now());
         ledger.seal(&dir);
-        ledger.release_transferred();
+        ledger.release_transferred(Instant::now() + RELEASE_BUDGET);
         write_child_report(
             &dir,
             &ChildReport {
@@ -3329,7 +3387,7 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
         ledger.seal(&dir);
         // Nothing outlives here (reaped above); the call documents the
         // transfer point like every other branch.
-        ledger.release_transferred();
+        ledger.release_transferred(Instant::now() + RELEASE_BUDGET);
         write_child_report(
             &dir,
             &ChildReport {
@@ -3386,15 +3444,19 @@ fn supervisor_distinguishes_product_cleanup_from_rescue() {
         let mut ledger = RegistrationLedger::default();
         // One fixture exits promptly: pure product cleanup. One sleeps:
         // needs a rescue signal from the supervisor.
-        ledger.register(&dir, "sleep 0.2");
-        std::thread::sleep(Duration::from_millis(500));
+        // Real owning-parent reap: block until THIS fixture exits
+        // (bounded), proving natural exit instead of sleeping and
+        // hoping. The deliberate survivor is registered next.
+        if let Some(first) = ledger.register(&dir, "sleep 0.2")
+            && !ledger.reap_pid_bounded(first, Instant::now() + NATURAL_EXIT_WAIT)
+        {
+            ledger.failures.push(format!(
+                "natural-exit fixture pid={first} still owned at report time"
+            ));
+        }
         ledger.register(&dir, "sleep 30");
-        // Harvest reaps the exited prompt fixture; the deliberate
-        // survivor stays parent-owned (stuck handles transfer, never
-        // block here).
-        ledger.reap_owned_bounded(Instant::now());
         ledger.seal(&dir);
-        ledger.release_transferred();
+        ledger.release_transferred(Instant::now() + RELEASE_BUDGET);
         write_child_report(
             &dir,
             &ChildReport {
@@ -3463,19 +3525,18 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
         // checks, the identity is stale and must be resolved-gone without
         // any signal.
         let mut ledger = RegistrationLedger::default();
-        ledger.register(&dir, "sleep 0.2");
-        std::thread::sleep(Duration::from_millis(500));
-        // Reap natural exits through our own handles BEFORE reporting:
-        // an unreaped exited child stays a zombie, and a zombie must
-        // never reach the parent as a live identity.
-        let stuck = ledger.reap_owned_bounded(Instant::now());
-        if !stuck.is_empty() {
+        // Real owning-parent reap: block until THIS fixture exits
+        // (bounded) instead of sleeping and hoping — no timing luck, no
+        // zombie at resolve time.
+        if let Some(fixture) = ledger.register(&dir, "sleep 0.2")
+            && !ledger.reap_pid_bounded(fixture, Instant::now() + NATURAL_EXIT_WAIT)
+        {
             ledger.failures.push(format!(
-                "natural-exit fixture(s) still owned at report time: {stuck:?}"
+                "natural-exit fixture pid={fixture} still owned at report time"
             ));
         }
         ledger.seal(&dir);
-        ledger.release_transferred();
+        ledger.release_transferred(Instant::now() + RELEASE_BUDGET);
         write_child_report(
             &dir,
             &ChildReport {
