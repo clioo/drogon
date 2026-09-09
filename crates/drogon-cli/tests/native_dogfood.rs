@@ -1011,6 +1011,18 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
         let mut release_args: Vec<String> = vec!["orchestration".into(), "worker-release".into()];
         scope_args(&mut release_args);
         release_args.extend(["--dispatch".to_string(), dispatch.clone()]);
+        let mut retain_args = release_args.clone();
+        retain_args[1] = "worker-retain".into();
+        let retain_ref: Vec<_> = retain_args.iter().map(String::as_str).collect();
+        let (code, retained) = coordinator_call(&data_dir, &retain_ref);
+        assert_ok(code, &retained, &retain_ref);
+        assert_eq!(retained["result"]["state"], "retained");
+        assert_eq!(retained["result"]["processAction"], "none");
+        for resource in retained["result"]["residualResources"].as_array().unwrap() {
+            if resource["kind"] == "session" {
+                assert_eq!(resource["disposition"], "retained");
+            }
+        }
         let release_ref: Vec<&str> = release_args.iter().map(String::as_str).collect();
         let (code, release) = coordinator_call(&data_dir, &release_ref);
         assert_eq!(
@@ -1018,6 +1030,9 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
             "release of a settled, already-exited attempt must succeed: {release:#}"
         );
         assert_eq!(text_field(&release, "/result/disposition"), "released");
+        let (code, retained_after) = coordinator_call(&data_dir, &retain_ref);
+        assert_ok(code, &retained_after, &retain_ref);
+        assert_eq!(retained_after["result"]["state"], "already_released");
     }
 
     // `daemon` and `scratch` drop here: the daemon process is signaled and

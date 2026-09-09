@@ -456,6 +456,15 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+    /// Retain a worker's resources (durable user-requested hold, no process effects)
+    WorkerRetain {
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[arg(long, value_name = "ID")]
+        dispatch: String,
+        #[command(flatten)]
+        host: HostOpt,
+    },
     /// Send a scoped coordination message
     Send {
         /// Actor scope: coordinator binding or dispatch binding
@@ -588,7 +597,8 @@ impl OrchestrationCommand {
             | Self::WorkerRead { scope, .. }
             | Self::WorkerStop { scope, .. }
             | Self::WorkerAbandon { scope, .. }
-            | Self::WorkerRelease { scope, .. } => Some(scope),
+            | Self::WorkerRelease { scope, .. }
+            | Self::WorkerRetain { scope, .. } => Some(scope),
             _ => None,
         }
     }
@@ -607,7 +617,8 @@ impl OrchestrationCommand {
             | Self::WorkerRead { scope, .. }
             | Self::WorkerStop { scope, .. }
             | Self::WorkerAbandon { scope, .. }
-            | Self::WorkerRelease { scope, .. } => Some(scope),
+            | Self::WorkerRelease { scope, .. }
+            | Self::WorkerRetain { scope, .. } => Some(scope),
             _ => None,
         }
     }

@@ -111,11 +111,17 @@ lists pending gates, optionally filtered by `--task`.
 resolves a gate and returns its task to ready. Creation and resolution refuse
 an active supervised worker rather than silently discarding its assignment.
 
+`drogon-cli orchestration worker-retain --dispatch <ID> --from <TERMINAL>`
+records a durable debugging hold without stopping the worker, including an active
+worker. An explicit `worker-release` clears that hold. Retain cannot undo a
+committed release; a pending release is distinct from an uncertain outcome.
+Retention never resurrects an exited process. Output archive parity is not yet implemented.
+
 ## Scope And Credentials
 
 Bound coordinator verbs (`run-use`, `task-create`, `task-update`, `task-list`,
 `task-show`, `gate-create`, `gate-resolve`, `gate-list`, `worker-start`,
-`worker-show`, `worker-read`, `worker-stop`, `worker-abandon`, `worker-release`) accept
+`worker-show`, `worker-read`, `worker-stop`, `worker-abandon`, `worker-release`, `worker-retain`) accept
 explicit `--run`, `--coordinator-id` and `--consumer-generation` bindings.
 With `orchestration.terminal-bindings.v1`, the current Drogon terminal or
 `--from <terminal-id>` resolves the daemon's persisted binding instead:

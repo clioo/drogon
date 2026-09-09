@@ -93,6 +93,7 @@ fn worker_operations_refuse_a_foreign_host_before_any_effect_or_receipt() {
         "workerStop",
         "workerAbandon",
         "workerRelease",
+        "workerRetain",
     ] {
         let response = engine.dispatch(Request {
             protocol: PROTOCOL_VERSION,

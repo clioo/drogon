@@ -477,7 +477,10 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
     let release = WorkerReleaseResult {
         dispatch_id: "dispatch-1".into(),
         disposition: ResourceDisposition::NoOwnedResource,
+        state: "retained".into(),
         process_verdict: ProcessVerdict::Exited,
+        process_action: ProcessAction::None,
+        archive: None,
         residual_resources: vec![],
     };
     assert_camel_case_round_trip(&release, "disposition");

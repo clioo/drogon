@@ -22,6 +22,7 @@ mod coordination_question_rpc;
 mod coordination_receipts;
 mod coordination_runs;
 mod coordination_worker_control;
+mod coordination_worker_retain;
 mod coordination_workers;
 mod desktop_relay_rpc;
 pub mod jira;
@@ -547,7 +548,8 @@ impl Engine {
             | "orchestration.workerRead"
             | "orchestration.workerStop"
             | "orchestration.workerAbandon"
-            | "orchestration.workerRelease" => self.dispatch_coordination_worker(request),
+            | "orchestration.workerRelease"
+            | "orchestration.workerRetain" => self.dispatch_coordination_worker(request),
             "orchestration.requestShow" => self.show_coordination_receipt(request, None),
             "orchestration.send" | "orchestration.check" => self.dispatch_admin_mail(request),
             "orchestration.ask" | "orchestration.reply" => {

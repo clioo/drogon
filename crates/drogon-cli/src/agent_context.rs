@@ -507,7 +507,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration run-use --run run-1 --coordinator-id coord-1 --consumer-generation 0 --json",
+                "drogon-cli orchestration run-use --run run-1 --coordinator-id coord-1 --consumer-generation 1 --json",
             ],
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
@@ -532,7 +532,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration task-create --run run-1 --coordinator-id coord-1 --consumer-generation 0 --instructions 'do it' --json",
+                "drogon-cli orchestration task-create --run run-1 --coordinator-id coord-1 --consumer-generation 1 --instructions 'do it' --json",
             ],
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
@@ -611,7 +611,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration task-update --run run-1 --coordinator-id coord-1 --consumer-generation 0 --id task-1 --status completed --json",
+                "drogon-cli orchestration task-update --run run-1 --coordinator-id coord-1 --consumer-generation 1 --id task-1 --status completed --json",
             ],
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
@@ -633,7 +633,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration task-list --run run-1 --coordinator-id coord-1 --consumer-generation 0 --json",
+                "drogon-cli orchestration task-list --run run-1 --coordinator-id coord-1 --consumer-generation 1 --json",
             ],
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
@@ -651,7 +651,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration task-show --run run-1 --coordinator-id coord-1 --consumer-generation 0 --task task-1 --json",
+                "drogon-cli orchestration task-show --run run-1 --coordinator-id coord-1 --consumer-generation 1 --task task-1 --json",
             ],
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
@@ -681,7 +681,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration worker-start --run run-1 --coordinator-id coord-1 --consumer-generation 0 --task task-1 --workspace ws-1 --harness pi --json",
+                "drogon-cli orchestration worker-start --run run-1 --coordinator-id coord-1 --consumer-generation 1 --task task-1 --workspace ws-1 --harness pi --json",
             ],
             &[
                 ORCHESTRATION_CAPABILITY,
@@ -703,7 +703,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration worker-show --run run-1 --coordinator-id coord-1 --consumer-generation 0 --dispatch disp-1 --json",
+                "drogon-cli orchestration worker-show --run run-1 --coordinator-id coord-1 --consumer-generation 1 --dispatch disp-1 --json",
             ],
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
@@ -724,7 +724,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration worker-read --run run-1 --coordinator-id coord-1 --consumer-generation 0 --dispatch disp-1 --json",
+                "drogon-cli orchestration worker-read --run run-1 --coordinator-id coord-1 --consumer-generation 1 --dispatch disp-1 --json",
             ],
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
@@ -742,7 +742,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration worker-stop --run run-1 --coordinator-id coord-1 --consumer-generation 0 --dispatch disp-1 --json",
+                "drogon-cli orchestration worker-stop --run run-1 --coordinator-id coord-1 --consumer-generation 1 --dispatch disp-1 --json",
             ],
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
@@ -761,7 +761,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration worker-abandon --run run-1 --coordinator-id coord-1 --consumer-generation 0 --dispatch disp-1 --json",
+                "drogon-cli orchestration worker-abandon --run run-1 --coordinator-id coord-1 --consumer-generation 1 --dispatch disp-1 --json",
             ],
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
@@ -779,7 +779,25 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration worker-release --run run-1 --coordinator-id coord-1 --consumer-generation 0 --dispatch disp-1 --json",
+                "drogon-cli orchestration worker-release --run run-1 --coordinator-id coord-1 --consumer-generation 1 --dispatch disp-1 --json",
+            ],
+            &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
+        ),
+        entry(
+            "orchestration worker-retain",
+            &["orchestration", "worker-retain"],
+            "Retain a worker's resources (durable user-requested hold, no process effects)",
+            "drogon-cli orchestration worker-retain --run <ID> --coordinator-id <ID> --consumer-generation <N> --dispatch <ID>",
+            &[
+                "consumer-generation",
+                "coordinator-id",
+                "dispatch",
+                "host",
+                "run",
+            ],
+            &[],
+            &[
+                "drogon-cli orchestration worker-retain --run run-1 --coordinator-id coord-1 --consumer-generation 1 --dispatch disp-1 --json",
             ],
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
@@ -809,7 +827,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration send --run run-1 --coordinator-id coord-1 --consumer-generation 0 --kind heartbeat --subject alive --json",
+                "drogon-cli orchestration send --run run-1 --coordinator-id coord-1 --consumer-generation 1 --kind heartbeat --subject alive --json",
             ],
             &[
                 ORCHESTRATION_CAPABILITY,
@@ -843,7 +861,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration check --run run-1 --coordinator-id coord-1 --consumer-generation 0 --peek --json",
+                "drogon-cli orchestration check --run run-1 --coordinator-id coord-1 --consumer-generation 1 --peek --json",
             ],
             &[
                 ORCHESTRATION_CAPABILITY,
@@ -871,7 +889,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration reply --run run-1 --coordinator-id coord-1 --consumer-generation 0 --question msg-1 --body yes --json",
+                "drogon-cli orchestration reply --run run-1 --coordinator-id coord-1 --consumer-generation 1 --question msg-1 --body yes --json",
             ],
             &[
                 ORCHESTRATION_CAPABILITY,
@@ -901,7 +919,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
             &[],
             &[
-                "drogon-cli orchestration ask --run run-1 --coordinator-id coord-1 --consumer-generation 0 --question 'proceed?' --timeout-ms 600000 --json",
+                "drogon-cli orchestration ask --run run-1 --coordinator-id coord-1 --consumer-generation 1 --question 'proceed?' --timeout-ms 600000 --json",
             ],
             &[
                 ORCHESTRATION_CAPABILITY,
@@ -1141,6 +1159,24 @@ mod tests {
             missing.is_empty(),
             "clap verbs missing from agent-context: {missing:?}"
         );
+    }
+
+    #[test]
+    fn examples_use_protocol_valid_consumer_generations() {
+        for entry in all_commands() {
+            for example in entry.examples {
+                let words: Vec<_> = example.split_whitespace().collect();
+                for pair in words.windows(2) {
+                    if pair[0] == "--consumer-generation" {
+                        let generation = pair[1].parse().expect("numeric generation example");
+                        drogon_protocol::orchestration_common::validate_consumer_generation(
+                            generation,
+                        )
+                        .unwrap_or_else(|error| panic!("{example}: {error}"));
+                    }
+                }
+            }
+        }
     }
 
     #[test]

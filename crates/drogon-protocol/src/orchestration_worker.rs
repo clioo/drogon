@@ -1,5 +1,5 @@
 //! Worker attempt wire types:
-//! `orchestration.workerStart/workerShow/workerRead/workerStop/workerAbandon/workerRelease`.
+//! `orchestration.workerStart/workerShow/workerRead/workerStop/workerAbandon/workerRelease/workerRetain`.
 //! Coordinator authority with fence-before-effects. Shape validation only; the
 //! engine owns admission, process handles and liveness evidence.
 
@@ -280,12 +280,13 @@ pub struct WorkerReadResult {
 
 /// What the engine actually did to the process. `none` is the honest outcome
 /// when the assignment was fenced without closing an unsupervised process.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ProcessAction {
     /// A signal was sent to the exact owned handle.
     Signalled,
     /// No signal was sent (not owned, already fenced, retained process).
+    #[default]
     None,
     /// The engine cannot currently prove what happened.
     Unverifiable,
@@ -381,7 +382,63 @@ impl WorkerReleaseParams {
 pub struct WorkerReleaseResult {
     pub dispatch_id: String,
     pub disposition: ResourceDisposition,
+    /// Source-compatible release state: `released`, `already_released`,
+    /// `release_pending`, `release_unknown`, or `retained` (nothing owned to
+    /// release). `disposition` alone cannot distinguish pending from unknown.
+    #[serde(default)]
+    pub state: String,
     pub process_verdict: ProcessVerdict,
+    /// Source compatibility: the engine never signals on release-unknown
+    /// paths beyond the owned handle, and there is no archive implementation
+    /// yet, so this is honestly `none` / `null`.
+    #[serde(default)]
+    pub process_action: ProcessAction,
+    #[serde(default)]
+    pub archive: Option<serde_json::Value>,
+    #[serde(default)]
+    pub residual_resources: Vec<ResidualResource>,
+}
+
+/// Retain records a durable user-requested hold on a supervised worker's
+/// resources. It performs no process or filesystem effects: the engine never
+/// signals, never archives output, and never equates process exit with
+/// release. A released resource answers `already_released`; a committed
+/// release (`release_pending` / `release_unknown`) cannot be undone and
+/// answers `unverifiable` with that reason.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerRetainParams {
+    #[serde(flatten)]
+    pub scope: CoordinatorScope,
+    pub dispatch_id: String,
+}
+
+impl WorkerRetainParams {
+    pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
+        self.scope.validate_shape(execution_host_id)?;
+        validate_opaque_token(&self.dispatch_id, 128, "Invalid dispatch id.")
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerRetainResult {
+    pub dispatch_id: String,
+    pub disposition: ResourceDisposition,
+    /// Machine-readable reason: `user_requested`, `already_released`,
+    /// `release_committed`, or `no_owned_resource`.
+    pub reason: String,
+    /// Source-compatible retain state: `retained`, `already_released`,
+    /// `release_pending`, or `release_unknown`.
+    #[serde(default)]
+    pub state: String,
+    pub process_verdict: ProcessVerdict,
+    /// Source compatibility: retain never signals and there is no archive
+    /// implementation yet, so this is honestly `none` / `null`.
+    #[serde(default)]
+    pub process_action: ProcessAction,
+    #[serde(default)]
+    pub archive: Option<serde_json::Value>,
     #[serde(default)]
     pub residual_resources: Vec<ResidualResource>,
 }

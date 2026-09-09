@@ -161,6 +161,29 @@ fn coordinator_args() -> Vec<&'static str> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retain_does_not_derive_mutation_authority_from_named_run_inspection() {
+    let dir = tempfile::tempdir().unwrap();
+    let mock = MockService::start(dir.path(), mock_behavior(true, vec![]));
+    let invocation = run_cli(
+        dir.path(),
+        &[
+            "orchestration",
+            "worker-retain",
+            "--run",
+            "run-1",
+            "--dispatch",
+            "dispatch-1",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 2);
+    assert!(
+        mock.captured().is_empty(),
+        "retention must not guess coordinator ownership via run-show"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn terminal_binding_capability_is_required_before_any_mutation() {
     let dir = tempfile::tempdir().unwrap();
     let mock = MockService::start(dir.path(), mock_behavior(true, vec![]));
@@ -417,6 +440,35 @@ async fn review_wrong_dispatch_result_is_rejected() {
         "--dispatch",
         "dispatch-1",
         "--json",
+    ];
+    args.extend(coordinator_args());
+    let output = run_cli(dir.path(), &args, &[]);
+    assert_eq!(output.exit_code, 1, "{} {}", output.stdout, output.stderr);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn review_legacy_release_without_state_exits_1() {
+    // Regression: a legacy `workerRelease` answer with no `state` field and
+    // an `unverifiable` disposition is an honestly uncertain operation and
+    // must exit 1 (restored fallback when state cannot distinguish
+    // `release_pending` from `release_unknown`).
+    let dir = tempfile::tempdir().unwrap();
+    let _mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRelease",
+                json!({"dispatchId":"dispatch-1",
+        "disposition":"unverifiable", "processVerdict":"unverifiable"}),
+            )],
+        ),
+    );
+    let mut args = vec![
+        "orchestration",
+        "worker-release",
+        "--dispatch",
+        "dispatch-1",
     ];
     args.extend(coordinator_args());
     let output = run_cli(dir.path(), &args, &[]);
@@ -2380,7 +2432,10 @@ async fn red_worker_release_unverifiable_exits_failure() {
     let result = json!({
         "dispatchId": "dispatch-1",
         "disposition": "unverifiable",
+        "state": "release_unknown",
         "processVerdict": "unverifiable",
+        "processAction": "none",
+        "archive": null,
         "residualResources": [
             {"kind": "session", "resourceId": "session-1",
              "incarnation": "f2b4c995-0e6c-4a0a-9e6f-1f2a3b4c5d6e",
@@ -2638,5 +2693,292 @@ async fn red_worker_start_completed_with_live_process_is_success() {
         invocation.stderr
     );
     assert!(invocation.stdout.contains("unverifiable"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// worker-retain: typed params, schema checks, exit codes, credential refusal.
+// ---------------------------------------------------------------------------
+
+fn retain_result(disposition: &str, reason: &str) -> Value {
+    let state = match reason {
+        "already_released" => "already_released",
+        "release_committed" => "release_unknown",
+        _ => "retained",
+    };
+    json!({
+        "dispatchId": "dispatch-1",
+        "disposition": disposition,
+        "reason": reason,
+        "state": state,
+        "processVerdict": "exited",
+        "processAction": "none",
+        "archive": null,
+        "residualResources": [],
+    })
+}
+
+fn retain_args(extra: &[&str]) -> Vec<String> {
+    let mut args = vec![
+        "orchestration".to_string(),
+        "worker-retain".to_string(),
+        "--dispatch".to_string(),
+        "dispatch-1".to_string(),
+    ];
+    args.extend(extra.iter().map(|s| s.to_string()));
+    args.extend(coordinator_args().iter().map(|s| s.to_string()));
+    args
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_records_user_requested_hold() {
+    let dir = temp_dir("retain-ok");
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                retain_result("retained", "user_requested"),
+            )],
+        ),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    let captured = mock.captured();
+    let sent = captured
+        .iter()
+        .find(|r| r["method"] == "orchestration.workerRetain")
+        .expect("retain sent");
+    assert_eq!(sent["params"]["dispatchId"], json!("dispatch-1"));
+    assert_eq!(sent["params"]["runId"], json!("run-1"));
+    assert_eq!(sent["params"]["coordinatorId"], json!("coord-1"));
+    assert_eq!(sent["params"]["consumerGeneration"], json!(3));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_human_output_names_reason() {
+    let dir = temp_dir("retain-human");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                retain_result("retained", "user_requested"),
+            )],
+        ),
+    );
+    let args = retain_args(&[]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("retained"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("user_requested"),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_already_released_is_settled_success() {
+    let dir = temp_dir("retain-released");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                retain_result("released", "already_released"),
+            )],
+        ),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("already_released"),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_committed_release_exits_failure() {
+    let dir = temp_dir("retain-committed");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                retain_result("unverifiable", "release_committed"),
+            )],
+        ),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(
+        invocation.exit_code, 1,
+        "a committed release cannot be retained over: {}",
+        invocation.stderr
+    );
+    assert!(
+        invocation.stdout.contains("release_committed"),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_release_pending_exits_success() {
+    let dir = temp_dir("retain-pending");
+    let pending = json!({
+        "dispatchId": "dispatch-1",
+        "disposition": "unverifiable",
+        "reason": "release_committed",
+        "state": "release_pending",
+        "processVerdict": "live",
+        "processAction": "none",
+        "archive": null,
+        "residualResources": [],
+    });
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.workerRetain", pending)]),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(
+        invocation.exit_code, 0,
+        "release_pending is not a failure: {}",
+        invocation.stderr
+    );
+    assert!(
+        invocation.stdout.contains("release_pending"),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_wrong_dispatch_result_is_rejected() {
+    let dir = temp_dir("retain-mismatch");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                json!({"dispatchId": "unrelated-dispatch",
+                       "disposition": "retained", "reason": "user_requested",
+                       "state": "retained", "processVerdict": "live",
+                       "processAction": "none", "archive": null}),
+            )],
+        ),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_validates_state_without_discarding_additive_archive_metadata() {
+    for (contradictory, expected) in [(false, 0), (true, 1)] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut result = retain_result("retained", "user_requested");
+        result["archive"] = json!({"available": true, "futureMetadata": "preserved"});
+        if contradictory {
+            result["disposition"] = json!("released");
+        }
+        let _mock = MockService::start(
+            dir.path(),
+            mock_behavior(true, vec![("orchestration.workerRetain", result)]),
+        );
+        let args = retain_args(&["--json"]);
+        let args: Vec<_> = args.iter().map(String::as_str).collect();
+        let invocation = run_cli(dir.path(), &args, &[]);
+        assert_eq!(
+            invocation.exit_code, expected,
+            "{} {}",
+            invocation.stdout, invocation.stderr
+        );
+        if !contradictory {
+            let value: Value = serde_json::from_str(&invocation.stdout).unwrap();
+            assert_eq!(value["result"]["archive"]["futureMetadata"], "preserved");
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_unknown_reason_is_rejected() {
+    let dir = temp_dir("retain-reason");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                json!({"dispatchId": "dispatch-1",
+                       "disposition": "retained", "reason": "bogus",
+                       "processVerdict": "live"}),
+            )],
+        ),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_refuses_worker_credential() {
+    let dir = temp_dir("retain-cred");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let capability = os(SCOPED_CREDENTIAL);
+    let env = [("DROGON_DISPATCH_CAPABILITY", &capability)];
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "worker-retain",
+            "--dispatch",
+            "dispatch-1",
+            "--json",
+        ],
+        &env,
+    );
+    assert_eq!(invocation.exit_code, 2);
+    assert!(
+        invocation
+            .stderr
+            .contains("refuses DROGON_DISPATCH_CAPABILITY"),
+        "{}",
+        invocation.stderr
+    );
+    assert!(
+        mock.captured().is_empty(),
+        "refused credential never connects"
+    );
+    drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
 }

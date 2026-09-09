@@ -35,8 +35,8 @@ use drogon_protocol::orchestration_task::{
 use drogon_protocol::orchestration_worker::{
     OutputSource, ProcessAction, WorkerAbandonParams, WorkerAbandonResult, WorkerExecution,
     WorkerPlacement, WorkerReadParams, WorkerReadResult, WorkerReleaseParams, WorkerReleaseResult,
-    WorkerShowParams, WorkerShowResult, WorkerStartParams, WorkerStartResult, WorkerStopParams,
-    WorkerStopResult,
+    WorkerRetainParams, WorkerRetainResult, WorkerShowParams, WorkerShowResult, WorkerStartParams,
+    WorkerStartResult, WorkerStopParams, WorkerStopResult,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -114,6 +114,7 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             | OrchestrationCommand::WorkerStop { .. }
             | OrchestrationCommand::WorkerAbandon { .. }
             | OrchestrationCommand::WorkerRelease { .. }
+            | OrchestrationCommand::WorkerRetain { .. }
     );
     if coordinator_only {
         if worker_credential {
@@ -619,6 +620,7 @@ pub async fn run(
         | OrchestrationCommand::WorkerStop { host, .. }
         | OrchestrationCommand::WorkerAbandon { host, .. }
         | OrchestrationCommand::WorkerRelease { host, .. }
+        | OrchestrationCommand::WorkerRetain { host, .. }
         | OrchestrationCommand::Send { host, .. }
         | OrchestrationCommand::Check { host, .. }
         | OrchestrationCommand::Reply { host, .. }
@@ -1511,12 +1513,12 @@ pub async fn run(
                     Ok(())
                 },
             )?;
-            // Intentional retained/no-owned-resource releases succeed; an
-            // unverifiable disposition is an honestly uncertain operation.
-            let exit_code = u8::from(
-                result.disposition
-                    == drogon_protocol::orchestration_common::ResourceDisposition::Unverifiable,
-            );
+            // Only a committed-but-unproven release is a failure:
+            // `release_unknown` exits 1, while `release_pending`, retained,
+            // released and no-owned-resource answers are settled successes.
+            // Disposition alone cannot distinguish pending from unknown.
+            let exit_code = u8::from(result.state == "release_unknown"
+                || (result.state.is_empty() && result.disposition == drogon_protocol::orchestration_common::ResourceDisposition::Unverifiable));
             emit(
                 call,
                 json,
@@ -1525,6 +1527,88 @@ pub async fn run(
                         "Dispatch {}: {} (process {})",
                         result.dispatch_id,
                         wire_disposition(result.disposition),
+                        wire_verdict(result.process_verdict)
+                    );
+                    text.push_str(&human_extras(&None, &result.residual_resources));
+                    text
+                },
+                exit_code,
+            )
+        }
+        OrchestrationCommand::WorkerRetain {
+            scope, dispatch, ..
+        } => {
+            let params = WorkerRetainParams {
+                scope: coordinator_scope(&host_id, scope),
+                dispatch_id: dispatch.clone(),
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call(
+                    "orchestration.workerRetain",
+                    value,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result: WorkerRetainResult = Client::decode_checked(
+                &call,
+                "orchestration.workerRetain",
+                |r: &WorkerRetainResult| {
+                    check_dispatch_id(&r.dispatch_id)?;
+                    if r.dispatch_id != *dispatch {
+                        return Err(
+                            "worker retain response does not match the requested dispatch".into(),
+                        );
+                    }
+                    if !matches!(
+                        r.reason.as_str(),
+                        "user_requested"
+                            | "already_released"
+                            | "release_committed"
+                            | "no_owned_resource"
+                    ) {
+                        return Err("worker retain response carries an unknown reason".into());
+                    }
+                    if !matches!(
+                        r.state.as_str(),
+                        "retained" | "already_released" | "release_pending" | "release_unknown"
+                    ) {
+                        return Err("worker retain response carries an unknown state".into());
+                    }
+                    if r.process_action != ProcessAction::None {
+                        return Err("worker retain never signals a process".into());
+                    }
+                    use drogon_protocol::orchestration_common::ResourceDisposition as D;
+                    if !matches!(
+                        (r.state.as_str(), r.reason.as_str(), r.disposition),
+                        ("retained", "user_requested", D::Retained)
+                            | ("retained", "no_owned_resource", D::NoOwnedResource)
+                            | ("already_released", "already_released", D::Released)
+                            | (
+                                "release_pending" | "release_unknown",
+                                "release_committed",
+                                D::Unverifiable
+                            )
+                    ) {
+                        return Err("worker retain state contradicts its disposition".into());
+                    }
+                    Ok(())
+                },
+            )?;
+            // Only a committed-but-unproven release is a failure; retained,
+            // already-released and no-owned-resource are settled answers.
+            // `release_pending` also exits 0: only `release_unknown` is 1.
+            let exit_code = u8::from(result.state == "release_unknown");
+            emit(
+                call,
+                json,
+                || {
+                    let mut text = format!(
+                        "Dispatch {}: {} ({}) (process {})",
+                        result.dispatch_id,
+                        wire_disposition(result.disposition),
+                        result.reason,
                         wire_verdict(result.process_verdict)
                     );
                     text.push_str(&human_extras(&None, &result.residual_resources));

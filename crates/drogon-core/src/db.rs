@@ -198,6 +198,10 @@ const VERSIONED_COMPONENTS: &[(&str, i64)] = &[
     ("coordination_access", 1),
     ("orchestration_mail", 1),
     ("orchestration_attempts", 1),
+    (
+        crate::coordination_worker_retain::SCHEMA_COMPONENT,
+        crate::coordination_worker_retain::SCHEMA_VERSION,
+    ),
 ];
 
 /// One recorded component version a forward migration would advance.
@@ -437,6 +441,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     mentu_storage::apply_pending_steps_in_tx(&tx)?;
     crate::project::apply_pending_steps_in_tx(&tx)?;
     coordination_access::apply_pending_steps_in_tx(&tx)?;
+    crate::coordination_worker_retain::apply_pending_steps_in_tx(&tx)?;
     drogon_orchestration::schema::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;
     crate::coordination_attempts::migrate(&tx).map_err(StartupError::Orchestration)?;
     crate::coordination_mail::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;
