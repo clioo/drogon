@@ -24,18 +24,23 @@ function fakeSession(): GuestSessionLike & {
   const session: GuestSessionLike & typeof state = Object.assign(state, {
     setPermissionRequestHandler(
       handler: (
-        webContents: unknown,
+        webContents: { id: number } | undefined,
         permission: string,
         callback: (allow: boolean) => void,
       ) => void,
     ): void {
       // Record the real decision by invoking with a probe callback.
-      handler({}, "media", (allow) => {
+      handler({ id: 0 }, "media", (allow) => {
         (session as { lastDecision?: boolean }).lastDecision = allow;
       });
     },
-    setPermissionCheckHandler(handler: () => boolean): void {
-      state.checkHandler = handler;
+    setPermissionCheckHandler(
+      handler: (
+        webContents: { id: number } | undefined,
+        permission: string,
+      ) => boolean,
+    ): void {
+      state.checkHandler = () => handler(undefined, "clipboard-read");
     },
     on(event: "will-download", listener: (event: { preventDefault(): void }) => void): void {
       if (event === "will-download")
@@ -162,6 +167,23 @@ describe("guest trust boundary", () => {
     ).toBe(false);
     expect(session.checkHandler?.()).toBe(false);
     expect(session.downloadPrevented).toBe(true);
+  });
+  test("blank duplicate opens a fresh blank tab instead of blocking", () => {
+    const { host } = harness();
+    // Why: the tab-strip Duplicate item passes the source tab's URL; a New
+    // Tab's URL is the blank identity, which must clone as a usable blank
+    // tab (fork parity), never the blocked `about:` error.
+    const created = host.createTab("w1", "about:blank");
+    expect(created).toMatchObject({ url: "about:blank" });
+    const contents = (host as unknown as {
+      views: Map<string, GuestViewLike>;
+    }).views.get((created as { tabId: string }).tabId)?.webContents as ReturnType<typeof fakeContents>;
+    expect(contents.loaded).toEqual(["about:blank"]);
+  });
+  test("whitespace-only duplicate opens a fresh blank tab", () => {
+    const { host } = harness();
+    const created = host.createTab("w1", "   ");
+    expect(created).toMatchObject({ url: "about:blank" });
   });
   test("guest popups are denied and routed into a pane tab", () => {
     const { host } = harness();

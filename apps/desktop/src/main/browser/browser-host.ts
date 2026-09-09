@@ -27,6 +27,7 @@ import {
   type BrowserHostSnapshot,
 } from "./browser-state";
 import { normalizeBrowserUrl } from "./browser-url";
+import { isAppWindowClipboardPermissionAllowed } from "./browser-permission-policy";
 
 /**
  * The exact guest preferences every tab is created with. There is
@@ -49,9 +50,18 @@ export function nextTabId(): string {
 
 export type GuestSessionLike = {
   setPermissionRequestHandler(
-    handler: (webContents: unknown, permission: string, callback: (allow: boolean) => void) => void,
+    handler: (
+      webContents: { id: number } | undefined,
+      permission: string,
+      callback: (allow: boolean) => void,
+    ) => void,
   ): void;
-  setPermissionCheckHandler(handler: () => boolean): void;
+  setPermissionCheckHandler(
+    handler: (
+      webContents: { id: number } | undefined,
+      permission: string,
+    ) => boolean,
+  ): void;
   on(event: "will-download", listener: (event: { preventDefault(): void }) => void): void;
 };
 
@@ -102,7 +112,12 @@ export type BrowserParentWindowLike = {
     addChildView(view: GuestViewLike | WebContentsView): void;
     removeChildView(view: GuestViewLike | WebContentsView): void;
   };
-  webContents: { send(channel: string, payload: unknown): void };
+  // Why `id` is optional: test doubles model only what each test needs; the
+  // permission policy falls back to deny-all when no app-window id is known.
+  webContents: {
+    send(channel: string, payload: unknown): void;
+    id?: number;
+  };
   getContentBounds(): { width: number; height: number };
   on(event: "resize", listener: () => void): void;
 };
@@ -139,12 +154,33 @@ const MAX_ZOOM_LEVEL = 8;
 /**
  * Creates one guest view with the locked-down preferences. Exported so
  * tests can prove the sandbox posture without a running Electron.
+ *
+ * Guests share the default session with the app window, so the installed
+ * session-level handlers must stay app-aware: clipboard access is granted
+ * only to the app window's own frame (fork preload parity), everything
+ * else — guests included — is denied.
  */
-export function lockDownGuestSession(session: GuestSessionLike): void {
-  session.setPermissionRequestHandler((_webContents, _permission, callback) =>
-    callback(false),
+export function lockDownGuestSession(
+  session: GuestSessionLike,
+  appWindowWebContentsId?: number,
+): void {
+  session.setPermissionRequestHandler(
+    (webContents, permission, callback) =>
+      callback(
+        isAppWindowClipboardPermissionAllowed(
+          permission,
+          webContents,
+          appWindowWebContentsId,
+        ),
+      ),
   );
-  session.setPermissionCheckHandler(() => false);
+  session.setPermissionCheckHandler((webContents, permission) =>
+    isAppWindowClipboardPermissionAllowed(
+      permission,
+      webContents,
+      appWindowWebContentsId,
+    ),
+  );
   session.on("will-download", (event) => event.preventDefault());
 }
 
@@ -421,9 +457,16 @@ export class BrowserHost {
     );
     if (existing.length >= MAX_BROWSER_TABS)
       return { blocked: `Tab limit reached (${MAX_BROWSER_TABS}).` };
-    const normalized = rawUrl?.trim()
-      ? normalizeBrowserUrl(rawUrl)
-      : { kind: "load" as const, url: HOME_URL };
+    // Why: a blank duplicate (tab context menu → Duplicate Tab on a New
+    // Tab) carries the blank identity 'about:blank'; the fork re-creates a
+    // fresh new-tab there (createBrowserTab with the blank URL) instead of
+    // round-tripping it through a loader, so the clone must land on the
+    // same blank home, never on the blocked-URL path below.
+    const trimmedUrl = rawUrl?.trim() ?? "";
+    const normalized =
+      trimmedUrl === "" || trimmedUrl === HOME_URL
+        ? { kind: "load" as const, url: HOME_URL }
+        : normalizeBrowserUrl(trimmedUrl);
     if (normalized.kind === "blocked") return { blocked: normalized.reason };
     const tabId = nextTabId();
     const view = this.createView({ webPreferences: { ...GUEST_WEB_PREFERENCES } });
@@ -433,7 +476,7 @@ export class BrowserHost {
     // compositor and retain a black surface after the page commits; the fork
     // disables background throttling for every browsing guest for this reason.
     contents.setBackgroundThrottling(false);
-    lockDownGuestSession(contents.session);
+    lockDownGuestSession(contents.session, window.webContents.id);
     // Popups never open OS windows: denied here, routed into a pane tab.
     contents.setWindowOpenHandler(({ url }) => {
       this.createTab(workspaceId, url);
