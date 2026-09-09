@@ -1,3 +1,5 @@
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Navigation adapted from drogon-orca/src/renderer/src/lib/worktree-activation.ts.
 import {
   forwardRef,
   useCallback,
@@ -1718,8 +1720,9 @@ export function App() {
       "unknown",
     ];
     const offFocus = bridge.onFocusSession((event) => {
+      setRoute(null);
       setSelected(event.workspaceId);
-      setActive(event.sessionId);
+      selectSessionTab(event.sessionId);
       setRevision((value) => value + 1);
     });
     const offState = bridge.onStateChanged((event) => {
@@ -1754,6 +1757,8 @@ export function App() {
   // Shared by sidebar worktree cards: re-clicking the already-active
   // workspace must not clear its visible live-session projection.
   const selectWorkspaceId = (id: string) => {
+    // The source activates the session surface even for the current workspace.
+    setRoute(null);
     const resolution = resolveWorkspaceSelection(selected, id);
     if (!resolution.changed) return;
     setSelected(resolution.selected);
@@ -2287,11 +2292,13 @@ export function App() {
   // for it (the pane reports bounds for the selection, activating it on
   // the host). Closing a page reconciles through the strip subscription.
   const selectSessionTab = (id: string) => {
+    setRoute(null);
     setActive(id);
     setActiveBrowserTabId(null);
     setActiveEditorTabId(null);
   };
   const selectBrowserTab = (tabId: string) => {
+    setRoute(null);
     setActiveBrowserTabId(tabId);
     setActiveEditorTabId(null);
   };
@@ -2389,6 +2396,7 @@ export function App() {
       openFileInFiles(name);
     });
   const selectEditorTab = (tabId: string) => {
+    setRoute(null);
     setActiveEditorTabId(tabId);
     setActiveBrowserTabId(null);
   };
@@ -3405,11 +3413,11 @@ export function App() {
       const next =
         (at < 0 ? (delta < 0 ? 0 : -1) : at + delta + workspaces.length) %
         workspaces.length;
-      setSelected(workspaces[next].id);
+      selectWorkspaceId(workspaces[next].id);
     };
     const selectWorkspaceAt = (index: number) => {
       const workspace = workspaces[index];
-      if (workspace) setSelected(workspace.id);
+      if (workspace) selectWorkspaceId(workspace.id);
     };
     const closeActiveTab = () => {
       if (activeEditorTabId) {
@@ -3800,12 +3808,14 @@ export function App() {
               <NoWorkspacePage
                 title={noWorkspaceCopy.title}
                 description={noWorkspaceCopy.description}
+                projects={projectGroups.map((group) => group.project)}
                 onAddProject={requestAddProject}
-                onCreateWorkspace={() => requestCreateWorkspace()}
+                onCreateWorkspace={requestCreateWorkspace}
               />
             ) : (
               <Landing
-                hasProjects={false}
+                hasProjects={projectGroups.length > 0}
+                hasWorkspaces={false}
                 onAddProject={requestAddProject}
                 onCreateWorkspace={() => requestCreateWorkspace()}
               />
@@ -4418,13 +4428,7 @@ export function App() {
         busy={busy}
         onNewTerminal={() => void create()}
         onNewBrowserTab={() => void newBrowserTab()}
-        onSelectWorkspace={(id) => {
-          const resolution = resolveWorkspaceSelection(selected, id);
-          if (!resolution.changed) return;
-          setSelected(resolution.selected);
-          setActive("");
-          setSessions([]);
-        }}
+        onSelectWorkspace={selectWorkspaceId}
         onSelectSession={selectSessionTab}
         onSelectEditorTab={selectEditorTab}
         onSelectBrowserTab={selectBrowserTab}

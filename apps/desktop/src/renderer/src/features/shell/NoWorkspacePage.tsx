@@ -9,14 +9,17 @@ import { Button } from "../../components/ui/button";
 export function NoWorkspacePage({
   title,
   description,
+  projects,
   onAddProject,
   onCreateWorkspace,
 }: {
   title: string;
   description: string;
+  projects: readonly { id: string; name: string }[];
   onAddProject: () => void;
-  onCreateWorkspace: () => void;
+  onCreateWorkspace: (projectId: string | null) => void;
 }): React.JSX.Element {
+  const project = projects.length === 1 ? projects[0] : null;
   return (
     <main
       data-testid="no-workspace-page"
@@ -33,17 +36,24 @@ export function NoWorkspacePage({
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="flex max-w-md flex-col items-center gap-4 text-center">
           <p className="text-sm text-muted-foreground">
-            Add a project or create a workspace to get started.
+            {projects.length === 0
+              ? "Add a project to get started."
+              : project
+                ? `Create a workspace in ${project.name} to get started.`
+                : "Create a workspace in one of your projects to get started."}
           </p>
           <div className="flex flex-wrap justify-center gap-2.5">
+            {projects.length === 0 ? (
             <Button variant="secondary" onClick={onAddProject}>
               <FolderPlus />
               Add Project
             </Button>
-            <Button variant="secondary" onClick={onCreateWorkspace}>
+            ) : (
+            <Button variant="secondary" onClick={() => onCreateWorkspace(project?.id ?? null)}>
               <GitBranchPlus />
               Create workspace
             </Button>
+            )}
           </div>
         </div>
       </div>

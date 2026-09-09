@@ -44,6 +44,7 @@ import {
   writeFixtureGh,
 } from "./probe-sealed-journeys.mjs";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
+import { probeSessionNavigation } from "./probe-session-navigation.mjs";
 import {
   BUNDLE_ICON_FILE,
   bundlePaths,
@@ -416,6 +417,9 @@ try {
     return value.ok ? value.result.sessions[0] : null;
   }, registered.id);
   assert.ok(original?.incarnation);
+  report.checks.push(await probeSessionNavigation({
+    page, workspaceId: registered.id, session: original, marker,
+  }));
   await page.reload();
   await waitForTerminalText(page, marker);
   const reconnected = await page.evaluate(async (id) => {
