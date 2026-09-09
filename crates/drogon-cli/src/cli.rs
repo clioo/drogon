@@ -1083,6 +1083,23 @@ mod tests {
     }
 
     #[test]
+    fn full_grammar_parses_on_the_provisioned_cli_stack() {
+        // Regression guard for the Windows named-pipe acceptance failure:
+        // clap derive construction recurses with grammar size and overflowed
+        // the 1 MiB main-thread stack Windows grants drogon-cli.exe (fatal
+        // `thread 'main' has overflowed its stack` on every invocation, so
+        // the daemon never saw a ready status). The binary routes its whole
+        // main through `run_on_cli_stack`; this test drives the real parse
+        // through that same provisioned path.
+        let handle = crate::run_on_cli_stack(|| {
+            Cli::command().debug_assert();
+            <Cli as clap::Parser>::try_parse_from(["drogon-cli", "status"])
+                .expect("status parses on the provisioned stack");
+        });
+        handle.join().expect("CLI work thread panicked");
+    }
+
+    #[test]
     fn status_with_global_flags_in_both_positions() {
         let cli = parse(&["--json", "--data-dir", "/tmp/d", "status"]).unwrap();
         assert!(cli.json);
