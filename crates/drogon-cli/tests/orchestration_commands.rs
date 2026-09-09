@@ -2432,6 +2432,42 @@ async fn red_run_and_task_response_identity_is_enforced() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_show_human_output_matches_source_head_and_wait_lines() {
+    for (observation, wait_line) in [
+        (None, "Interactive wait: unknown (not evaluated)"),
+        (Some(json!(null)), "Interactive wait: none"),
+        (
+            Some(json!({"source":"hook","reason":"waiting for human input since 12:00"})),
+            "Waiting on a human: waiting for human input since 12:00 (via hook)",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut result = json!({"dispatchId":"dispatch-1","taskId":"task-1",
+            "assignmentState":"ready","readiness":"notObserved",
+            "processVerdict":"live","residualResources":[]});
+        if let Some(wait) = observation {
+            result["observation"] = json!({"agentWait": wait});
+        }
+        let _mock = MockService::start(
+            dir.path(),
+            mock_behavior(true, vec![("orchestration.workerShow", result)]),
+        );
+        let mut args = vec!["orchestration", "worker-show", "--dispatch", "dispatch-1"];
+        args.extend(coordinator_args());
+        let invocation = run_cli(dir.path(), &args, &[]);
+        assert_eq!(
+            invocation.exit_code, 0,
+            "{} {}",
+            invocation.stdout, invocation.stderr
+        );
+        assert_eq!(
+            invocation.stdout.trim_end(),
+            format!("dispatch-1 task=task-1 [ready]\n{wait_line}")
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn red_worker_show_and_stop_dispatch_identity_is_enforced() {
     let dir = temp_dir("ra-wident");
     for (method, verb, result) in [

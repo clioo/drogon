@@ -86,6 +86,7 @@ impl Engine {
                             residual_resources: attempt.result.residual_resources.clone(),
                             failure: attempt.result.failure.clone(),
                             warning: attempt.result.warning.clone(),
+                            observation: self.agent_wait_observation(attempt),
                         }
                     })
                     .inspect(|result| {
@@ -119,6 +120,7 @@ impl Engine {
                     attempts::show(tx, &params.scope, &params.dispatch_id)
                 })?;
                 let verdict = self.worker_verdict(&attempt)?;
+                let observation = self.agent_wait_observation(&attempt);
                 encode(WorkerShowResult {
                     dispatch_id: attempt.result.dispatch_id,
                     task_id: attempt.result.task_id,
@@ -132,6 +134,7 @@ impl Engine {
                     residual_resources: attempt.result.residual_resources,
                     failure: attempt.result.failure,
                     warning: attempt.result.warning,
+                    observation,
                 })
             }
             "orchestration.workerStart" => {
@@ -166,6 +169,44 @@ impl Engine {
             }
             other => Err(error::method_not_found(other)),
         }
+    }
+
+    /// A durable hook needs_input stamp is the `hook` evidence source; a
+    /// live handle answers from the same snapshot session.list publishes.
+    pub(crate) fn agent_wait_observation(&self, attempt: &Attempt) -> Option<WorkerObservation> {
+        let identity = attempt.result.session_identity.as_ref()?;
+        let handle = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&identity.session_id)
+            .cloned();
+        let snapshot = match handle {
+            Some(handle) => {
+                if handle.incarnation != identity.incarnation
+                    || handle.host_id != self.host_id
+                    || handle.workspace_id != attempt.result.workspace_id
+                {
+                    return None;
+                }
+                session::snapshot(&handle)
+            }
+            None => self
+                .session_row_as_value(&identity.session_id, &identity.incarnation)
+                .ok()?,
+        };
+        if snapshot["hostId"] != self.host_id
+            || snapshot["workspaceId"] != attempt.result.workspace_id
+        {
+            return None;
+        }
+        let wait = (snapshot["agentState"].as_str() == Some("needs_input")).then(|| AgentWait {
+            source: "hook".into(),
+            reason: snapshot["agentStateAt"]
+                .as_str()
+                .map(|stamp| format!("waiting for human input since {stamp}")),
+        });
+        Some(WorkerObservation { agent_wait: wait })
     }
 
     pub(crate) fn worker_verdict(&self, attempt: &Attempt) -> Result<ProcessVerdict, RpcError> {

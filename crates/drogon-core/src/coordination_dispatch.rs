@@ -298,6 +298,7 @@ impl Engine {
             residual_resources: attempt.result.residual_resources.clone(),
             failure: attempt.result.failure.clone(),
             warning: attempt.result.warning.clone(),
+            observation: self.agent_wait_observation(attempt),
         };
         if let Err(err) = row.validate_shape() {
             debug_assert!(false, "invalid dispatch row: {err}");

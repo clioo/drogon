@@ -1562,21 +1562,24 @@ pub async fn run(
                 call,
                 json,
                 || {
-                    let outcome = result
-                        .outcome
-                        .map(|o| match o {
-                            ReportOutcome::Succeeded => "succeeded",
-                            ReportOutcome::Failed => "failed",
-                        })
-                        .unwrap_or("none");
-                    let mut text = format!(
-                        "Dispatch {} ({}; readiness {}; process {}; outcome {})",
+                    // Source worker-show head plus the interactive-wait line.
+                    let base = format!(
+                        "{} task={} [{}]",
                         result.dispatch_id,
+                        result.task_id,
                         wire_assignment(result.assignment_state),
-                        wire_readiness(result.readiness),
-                        wire_verdict(result.process_verdict),
-                        outcome
                     );
+                    let mut text = match &result.observation {
+                        None => format!("{base}\nInteractive wait: unknown (not evaluated)"),
+                        Some(observation) => match &observation.agent_wait {
+                            Some(wait) => format!(
+                                "{base}\nWaiting on a human: {} (via {})",
+                                wait.reason.as_deref().unwrap_or("interactive prompt"),
+                                wait.source,
+                            ),
+                            None => format!("{base}\nInteractive wait: none"),
+                        },
+                    };
                     if let Some(failure) = &result.failure {
                         text.push_str(&format!(
                             "\nfailure: {} at {}: {}",

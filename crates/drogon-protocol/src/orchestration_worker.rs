@@ -201,6 +201,29 @@ pub struct WorkerShowResult {
     pub failure: Option<AttemptFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    /// Interactive-wait observation (source: `observation.agentWait`); absent
+    /// means the host never evaluated it, distinct from an evaluated None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<WorkerObservation>,
+}
+
+/// Whether the worker's terminal is parked on a prompt only a human can
+/// answer. A waiting worker is healthy, not failed.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerObservation {
+    /// `Some(wait)` waiting on a human; `None` evaluated with no wait found.
+    #[serde(default)]
+    pub agent_wait: Option<AgentWait>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWait {
+    /// Evidence source: hook, prompt-text, or title.
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 impl WorkerShowResult {

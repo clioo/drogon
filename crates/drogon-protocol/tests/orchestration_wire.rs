@@ -376,6 +376,7 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
     assert_camel_case_round_trip(&result, "effects");
 
     let mut show = WorkerShowResult {
+        observation: None,
         dispatch_id: "dispatch-1".into(),
         task_id: "task-1".into(),
         assignment_state: AssignmentState::Ready,
@@ -505,6 +506,7 @@ fn prompt_stall_failure_and_late_first_report_serialize_without_resume_claims() 
     // failed-but-inspectable, readiness unverified, no reported outcome, and
     // the process verdict independent — explicit retry names this attempt.
     let stalled = WorkerShowResult {
+        observation: None,
         dispatch_id: "dispatch-9".into(),
         task_id: "task-1".into(),
         assignment_state: AssignmentState::Failed,

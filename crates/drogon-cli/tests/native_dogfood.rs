@@ -871,6 +871,12 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     assert_ok(code, &show1, &["orchestration", "worker-show"]);
     assert_eq!(text_field(&show1, "/result/assignmentState"), "failed");
     assert_eq!(text_field(&show1, "/result/outcome"), "failed");
+    // The exited fixture's wait observation is evaluated and empty: distinct
+    // from "never evaluated" (absent) and from an active wait.
+    assert!(
+        show1["result"]["observation"]["agentWait"].is_null(),
+        "exited worker has an evaluated empty wait observation: {show1:#}"
+    );
 
     let mut task_show_args: Vec<String> = vec!["orchestration".into(), "task-show".into()];
     scope_args(&mut task_show_args);
