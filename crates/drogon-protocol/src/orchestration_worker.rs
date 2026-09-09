@@ -345,6 +345,10 @@ pub struct WorkerStopResult {
     /// Source: retained unsupervised terminal produces an explicit warning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    /// Source `stop_unknown`: the fence committed but the process outcome
+    /// was never proven; the CLI maps this to exit 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
 }
 
 /// Abandon releases coordinator attachment without ever signalling the

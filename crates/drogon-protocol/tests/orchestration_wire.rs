@@ -436,6 +436,7 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
     assert_camel_case_round_trip(&read, "entries");
 
     let stop = WorkerStopResult {
+        state: None,
         dispatch_id: "dispatch-1".into(),
         assignment_state: AssignmentState::Stopped,
         process_action: ProcessAction::None,

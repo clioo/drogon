@@ -1690,19 +1690,27 @@ pub async fn run(
                     Ok(())
                 },
             )?;
-            // An unverifiable process action is an honestly uncertain
-            // operation, never a claimed success.
-            let exit_code = u8::from(result.process_action == ProcessAction::Unverifiable);
+            // Source worker-stop: `stop_unknown` is exit 1; so is any
+            // unproven process action on older hosts without the field.
+            let exit_code = u8::from(
+                result.state.as_deref() == Some("stop_unknown")
+                    || (result.state.is_none()
+                        && result.process_action == ProcessAction::Unverifiable),
+            );
             emit(
                 call,
                 json,
                 || {
                     // Source worker-stop: `Worker <id> [stopped] process=<action>`
                     // plus the optional warning line.
+                    let state = result
+                        .state
+                        .as_deref()
+                        .unwrap_or_else(|| wire_assignment(result.assignment_state));
                     let mut text = format!(
                         "Worker {} [{}] process={}",
                         result.dispatch_id,
-                        wire_assignment(result.assignment_state),
+                        state,
                         wire_process_action(result.process_action),
                     );
                     if let Some(warning) = &result.warning {

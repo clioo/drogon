@@ -2474,6 +2474,32 @@ async fn red_run_and_task_response_identity_is_enforced() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_stop_unknown_state_exits_1_with_source_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let _mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerStop",
+                json!({"dispatchId":"dispatch-1","assignmentState":"stopped",
+                    "processAction":"unverifiable","processVerdict":"unverifiable",
+                    "state":"stop_unknown","residualResources":[],
+                    "warning":"The stop outcome is unknown: the process may still be live."}),
+            )],
+        ),
+    );
+    let mut args = vec!["orchestration", "worker-stop", "--dispatch", "dispatch-1"];
+    args.extend(coordinator_args());
+    let invocation = run_cli(dir.path(), &args, &[]);
+    assert_eq!(invocation.exit_code, 1, "{}", invocation.stdout);
+    assert_eq!(
+        invocation.stdout.trim_end(),
+        "Worker dispatch-1 [stop_unknown] process=unverifiable\nWarning: The stop outcome is unknown: the process may still be live."
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worker_show_human_output_matches_source_head_and_wait_lines() {
     for (observation, wait_line) in [
         (None, "Interactive wait: unknown (not evaluated)"),
