@@ -3,6 +3,8 @@
 //! configuration, no credentials. Public-API contract tests against
 //! `drogon_harness::catalog`.
 
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -29,17 +31,22 @@ const CHILD_MODE_ENV: &str = "DROGON_CATALOG_CHILD_MODE";
 const FIXTURE_DIR_ENV: &str = "DROGON_CATALOG_FIXTURE_DIR";
 const LEDGER_FILE: &str = "ledger.children";
 const RESULT_FILE: &str = "result.json";
-#[cfg(unix)]
 /// Overall budget measured from launch preparation (amendment A): spawn,
 /// bootstrap, and bounded ps/kill helpers all consume it.
-const SUPERVISE_OVERALL: Duration = Duration::from_secs(30);
 #[cfg(unix)]
+const SUPERVISE_OVERALL: Duration = Duration::from_secs(30);
 /// Separate bounded cleanup grace after the overall deadline (amendment A).
+#[cfg(unix)]
 const CLEANUP_GRACE: Duration = Duration::from_secs(8);
 #[cfg(unix)]
 const TERM_GRACE: Duration = Duration::from_secs(2);
+/// Per-identity ps budget, always consumed inside an absolute deadline.
 #[cfg(unix)]
 const PS_TIMEOUT: Duration = Duration::from_secs(2);
+/// Cleanup (kill + reap) reserve kept INSIDE every operation deadline
+/// rather than waiting until the total is exhausted.
+#[cfg(unix)]
+const REAP_RESERVE: Duration = Duration::from_millis(100);
 #[cfg(unix)]
 const TICK: Duration = Duration::from_millis(25);
 
@@ -54,6 +61,7 @@ fn fixture_dir_from_env() -> PathBuf {
 /// Canonical birth identity: `lstart` under a pinned locale/TZ (amendment
 /// C). The fixture children capture births with the same pinned
 /// environment, so string comparison is meaningful.
+#[cfg(unix)]
 fn canonical_birth(raw: &str) -> String {
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -67,16 +75,10 @@ fn ps_cmd(pid: &str) -> Command {
     cmd
 }
 
-/// Run `cmd` with a hard wall-clock bound and captured output: piped
-/// stdout/stderr are configured here (the caller cannot forget), and
-/// unbounded `output()`/`status()` are never used in supervision paths
-/// (amendment D). The deadline is taken at entry so spawn cost counts,
-/// and even the post-kill reap is bounded — a killed helper is never
-/// trusted to exit on its own.
 /// Error from a bounded helper run. When the helper could not be
-/// confirmed reaped, its `Child` ownership is retained here so the caller
-/// keeps the evidence instead of silently dropping a possibly-zombie
-/// process — a signal (or a timeout) is never exit proof.
+/// confirmed reaped, its `Child` ownership is returned here so the
+/// caller keeps the evidence instead of silently dropping a possibly
+/// zombie process — a signal (or a timeout) is never exit proof.
 #[cfg(unix)]
 struct BoundedError {
     message: String,
@@ -85,15 +87,32 @@ struct BoundedError {
     unreaped: Option<std::process::Child>,
 }
 
-/// Run `cmd` bounded by ONE absolute operation deadline, shared by the
-/// spawn wait AND the post-kill reap: nothing extends the total. Pipes
-/// are configured here; output collection happens only after the exit
-/// status is observed, so a stuck drain cannot outlive the deadline.
+#[cfg(unix)]
+struct PipeBuf {
+    fd: std::os::unix::io::RawFd,
+    open: bool,
+    bytes: Vec<u8>,
+}
+
+/// Run `cmd` bounded by ONE absolute operation deadline. Pipes are
+/// drained with poll(2) while waiting (never an unbounded
+/// `wait_with_output`), spawn never happens after an expired deadline,
+/// and REAP_RESERVE inside the deadline is reserved for kill+reap: a
+/// helper that exceeds its WORK window is killed, reaped within the
+/// reserve, and reported as a timeout error — even if a status is
+/// observed afterwards, because output from a killed helper is not
+/// trustworthy evidence.
 #[cfg(unix)]
 fn run_until(
     cmd: &mut Command,
     op_deadline: Instant,
 ) -> Result<std::process::Output, BoundedError> {
+    if Instant::now() >= op_deadline {
+        return Err(BoundedError {
+            message: "operation deadline already expired; not spawning".to_string(),
+            unreaped: None,
+        });
+    }
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -106,63 +125,204 @@ fn run_until(
             });
         }
     };
+    let work_deadline = op_deadline - REAP_RESERVE;
+    let mut pipes = [
+        PipeBuf {
+            fd: child.stdout.as_ref().expect("piped stdout").as_raw_fd(),
+            open: true,
+            bytes: Vec::new(),
+        },
+        PipeBuf {
+            fd: child.stderr.as_ref().expect("piped stderr").as_raw_fd(),
+            open: true,
+            bytes: Vec::new(),
+        },
+    ];
+    for pipe in &pipes {
+        // SAFETY: fcntl on a live, owned pipe fd.
+        unsafe {
+            let flags = libc::fcntl(pipe.fd, libc::F_GETFL);
+            libc::fcntl(pipe.fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+    }
+    let mut status: Option<std::process::ExitStatus> = None;
     loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                // The exit status was observed, so the child is reaped;
-                // `wait_with_output` consumes the handle and can only fail
-                // on output collection, not on reap — there is no
-                // unreaped ownership left to retain.
-                return match child.wait_with_output() {
-                    Ok(output) => Ok(output),
-                    Err(err) => Err(BoundedError {
-                        message: format!("collect: {err}"),
-                        unreaped: None,
-                    }),
-                };
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(found) => status = found,
+                Err(err) => {
+                    return Err(BoundedError {
+                        message: format!("wait: {err}"),
+                        unreaped: Some(child),
+                    });
+                }
             }
-            Ok(None) => {
-                if Instant::now() >= op_deadline {
+        }
+        if pipes.iter().all(|pipe| !pipe.open) {
+            break;
+        }
+        if Instant::now() >= work_deadline {
+            let _ = child.kill();
+            while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let reaped = child.try_wait().ok().flatten().is_some();
+            return Err(BoundedError {
+                message: "bounded command exceeded its work window".to_string(),
+                unreaped: if reaped { None } else { Some(child) },
+            });
+        }
+        let mut poll_fds: Vec<libc::pollfd> = pipes
+            .iter()
+            .filter(|pipe| pipe.open)
+            .map(|pipe| libc::pollfd {
+                fd: pipe.fd,
+                events: libc::POLLIN,
+                revents: 0,
+            })
+            .collect();
+        // SAFETY: poll_fds is valid for its length; fds stay open.
+        let ready =
+            unsafe { libc::poll(poll_fds.as_mut_ptr(), poll_fds.len() as libc::nfds_t, 10) };
+        if ready > 0 {
+            for poll_fd in &poll_fds {
+                let Some(pipe) = pipes.iter_mut().find(|p| p.fd == poll_fd.fd) else {
+                    continue;
+                };
+                let mut chunk = [0u8; 8192];
+                loop {
+                    // SAFETY: live nonblocking pipe fd.
+                    let n = unsafe { libc::read(pipe.fd, chunk.as_mut_ptr().cast(), chunk.len()) };
+                    if n > 0 {
+                        pipe.bytes.extend_from_slice(&chunk[..n as usize]);
+                        continue;
+                    }
+                    if n == 0 {
+                        pipe.open = false;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    if status.is_none() {
+        // Pipes at EOF but no exit observed (the helper closed its fds
+        // while still running): bound the wait by the work window, then
+        // kill with only the reserved reap time left.
+        let fallback_deadline =
+            std::cmp::min(Instant::now() + Duration::from_millis(50), work_deadline);
+        loop {
+            match child.try_wait() {
+                Ok(found @ Some(_)) => {
+                    status = found;
+                    break;
+                }
+                Ok(None) if Instant::now() < fallback_deadline => {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Ok(None) => {
                     let _ = child.kill();
                     while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline
                     {
                         std::thread::sleep(Duration::from_millis(2));
                     }
-                    if child.try_wait().ok().flatten().is_some() {
-                        return match child.wait_with_output() {
-                            Ok(output) => Ok(output),
-                            Err(err) => Err(BoundedError {
-                                message: format!("collect: {err}"),
-                                unreaped: None,
-                            }),
-                        };
-                    }
+                    let reaped = child.try_wait().ok().flatten().is_some();
                     return Err(BoundedError {
-                        message: "bounded command exceeded its operation deadline".to_string(),
+                        message: "helper closed its pipes but never exited".to_string(),
+                        unreaped: if reaped { None } else { Some(child) },
+                    });
+                }
+                Err(err) => {
+                    return Err(BoundedError {
+                        message: format!("wait: {err}"),
                         unreaped: Some(child),
                     });
                 }
-                std::thread::sleep(Duration::from_millis(2));
-            }
-            Err(err) => {
-                return Err(BoundedError {
-                    message: format!("wait: {err}"),
-                    unreaped: Some(child),
-                });
             }
         }
     }
+    let [out, err] = pipes;
+    Ok(std::process::Output {
+        status: status.expect("exit observed before return"),
+        stdout: out.bytes,
+        stderr: err.bytes,
+    })
 }
 
-/// Captured birth identity for a live pid, or `None` when it cannot be
-/// established (callers treat that as unverifiable, never as absence).
-fn birth_of(pid: u32) -> Option<String> {
+/// Strict parse of bounded ps output: successful exit, empty stderr,
+/// strict UTF-8, exactly ONE complete record with a validated
+/// `lstart stat` shape (real weekday/month/day/time/year, plus a
+/// non-empty alphabetic stat). Malformed output never establishes
+/// anything — neither alive nor replaced.
+#[cfg(unix)]
+fn parse_ps_record(output: &std::process::Output) -> Option<(String, String)> {
+    if !output.status.success() || !output.stderr.is_empty() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout.clone()).ok()?;
+    let trimmed = text.trim();
+    let mut lines = trimmed.lines();
+    let line = lines.next()?;
+    if lines.next().is_some() {
+        return None; // multiple records
+    }
+    let (birth, stat) = line.rsplit_once(' ')?;
+    let birth = birth.trim();
+    let stat = stat.trim();
+    const WEEKDAYS: &[&str] = &["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const MONTHS: &[&str] = &[
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let fields: Vec<&str> = birth.split_whitespace().collect();
+    let valid_birth = fields.len() == 5
+        && WEEKDAYS.contains(&fields[0])
+        && MONTHS.contains(&fields[1])
+        && fields[2]
+            .parse::<u8>()
+            .ok()
+            .is_some_and(|day| (1..=31).contains(&day))
+        && {
+            let time: Vec<&str> = fields[3].split(':').collect();
+            time.len() == 3
+                && time
+                    .iter()
+                    .all(|part| part.len() == 2 && part.bytes().all(|b| b.is_ascii_digit()))
+        }
+        && fields[4].len() == 4
+        && fields[4].bytes().all(|b| b.is_ascii_digit());
+    let valid_stat = !stat.is_empty()
+        && stat
+            .chars()
+            .all(|c| c.is_ascii_alphabetic() || c == '+' || c == '<' || c == '>');
+    if !valid_birth || !valid_stat {
+        return None;
+    }
+    Some((canonical_birth(birth), stat.to_string()))
+}
+
+/// Captured birth identity for a live pid. Any bounded-run failure is
+/// preserved as a `BoundedError` (including unreaped helper ownership);
+/// the caller decides how to retain that evidence.
+#[cfg(unix)]
+fn birth_of(pid: u32) -> Result<String, BoundedError> {
     let op_deadline = Instant::now() + PS_TIMEOUT;
-    let output = run_until(&mut ps_cmd(&pid.to_string()), op_deadline).ok()?;
-    parse_ps_record(&output).map(|(birth, _)| birth)
+    if Instant::now() >= op_deadline {
+        return Err(BoundedError {
+            message: "operation deadline already expired".to_string(),
+            unreaped: None,
+        });
+    }
+    let output = run_until(&mut ps_cmd(&pid.to_string()), op_deadline)?;
+    parse_ps_record(&output)
+        .map(|(birth, _)| birth)
+        .ok_or_else(|| BoundedError {
+            message: "ps output was not a complete single record".to_string(),
+            unreaped: None,
+        })
 }
 
-/// Append-only ledger entry: a strictly positive PID plus its birth.
+/// Append-only ledger entry: a strictly positive PID (within the signed
+/// pid_t range) plus its birth.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LedgerEntry {
     pid: u32,
@@ -211,51 +371,14 @@ fn read_ledger(dir: &Path) -> (Vec<LedgerEntry>, Vec<String>) {
     (entries, malformed)
 }
 
-/// Strict parse of bounded ps output: successful exit, empty stderr,
-/// strict UTF-8, exactly ONE complete record with a validated
-/// `lstart stat` shape (five birth fields ending in a 4-digit year, plus
-/// a non-empty alphabetic stat). Malformed output never establishes
-/// anything — neither alive nor replaced.
+/// What a bounded identity check could prove. Only a clean, non-signaled
+/// exit-1 with empty stdout AND empty stderr proves "no such process".
+/// A live or replaced identity is decided ONLY by the strict single-record
+/// parser. Everything else — signal termination, silent failure,
+/// diagnostics, partial or unparseable output — is unverifiable, never
+/// absence (amendment C).
 #[cfg(unix)]
-fn parse_ps_record(output: &std::process::Output) -> Option<(String, String)> {
-    if !output.status.success() || !output.stderr.is_empty() {
-        return None;
-    }
-    let text = String::from_utf8(output.stdout.clone()).ok()?;
-    let trimmed = text.trim();
-    let mut lines = trimmed.lines();
-    let line = lines.next()?;
-    if lines.next().is_some() {
-        return None; // multiple records
-    }
-    let (birth, stat) = line.rsplit_once(' ')?;
-    let birth = birth.trim();
-    let stat = stat.trim();
-    if birth.is_empty()
-        || stat.is_empty()
-        || !stat
-            .chars()
-            .all(|c| c.is_ascii_alphabetic() || c == '+' || c == '<' || c == '>')
-    {
-        return None;
-    }
-    let fields: Vec<&str> = birth.split_whitespace().collect();
-    let valid_birth = fields.len() == 5
-        && fields[0].chars().all(|c| c.is_ascii_alphabetic())
-        && fields[4].len() == 4
-        && fields[4].bytes().all(|b| b.is_ascii_digit());
-    if !valid_birth {
-        return None;
-    }
-    Some((canonical_birth(birth), stat.to_string()))
-}
-
-/// What a bounded identity check could prove. Only a successful ps with a
-/// matching birth proves the recorded identity is alive; a different
-/// verified identity means the original is gone; everything else is
-/// unverifiable, never absence (amendment C).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg(unix)]
 enum Identity {
     Alive,
     Gone,
@@ -263,33 +386,6 @@ enum Identity {
     Unverifiable,
 }
 
-#[cfg(unix)]
-/// Identity check with the helper's failure detail preserved: a bounded
-/// run that could not confirm its own cleanup yields the error (including
-/// any unreaped helper ownership) alongside the Unverifiable verdict so
-/// the supervisor can retain evidence instead of discarding it.
-#[cfg(unix)]
-fn identity_probe(entry: &LedgerEntry, op_deadline: Instant) -> (Identity, Option<BoundedError>) {
-    if Instant::now() >= op_deadline {
-        return (Identity::Unverifiable, None);
-    }
-    match run_until(&mut ps_cmd(&entry.pid.to_string()), op_deadline) {
-        Ok(output) => (classify_ps(entry, &output), None),
-        Err(err) => (Identity::Unverifiable, Some(err)),
-    }
-}
-
-#[cfg(unix)]
-fn check_identity_at(entry: &LedgerEntry, op_deadline: Instant) -> Identity {
-    identity_probe(entry, op_deadline).0
-}
-
-/// Classify bounded ps output. Only a clean, non-signaled exit-1 with
-/// empty stdout AND empty stderr proves "no such process". A live or
-/// replaced identity is decided ONLY by the strict single-record parser —
-/// malformed output never establishes replacement. Everything else —
-/// signal termination, silent failure, diagnostics, partial or
-/// unparseable output — is unverifiable, never absence (amendment C).
 #[cfg(unix)]
 fn classify_ps(entry: &LedgerEntry, output: &std::process::Output) -> Identity {
     let stdout_empty = output.stdout.is_empty();
@@ -307,6 +403,27 @@ fn classify_ps(entry: &LedgerEntry, output: &std::process::Output) -> Identity {
         Some((birth, _stat)) if birth == entry.birth => Identity::Alive,
         Some(_) => Identity::Replaced,
         None => Identity::Unverifiable,
+    }
+}
+
+/// Identity check with the helper's failure detail preserved: a bounded
+/// run that could not confirm its own cleanup yields the error (including
+/// any unreaped helper ownership) alongside the Unverifiable verdict so
+/// the supervisor can retain evidence instead of discarding it.
+#[cfg(unix)]
+fn identity_probe(entry: &LedgerEntry, op_deadline: Instant) -> (Identity, Option<BoundedError>) {
+    if Instant::now() >= op_deadline {
+        return (
+            Identity::Unverifiable,
+            Some(BoundedError {
+                message: "operation deadline reached before probe".to_string(),
+                unreaped: None,
+            }),
+        );
+    }
+    match run_until(&mut ps_cmd(&entry.pid.to_string()), op_deadline) {
+        Ok(output) => (classify_ps(entry, &output), None),
+        Err(err) => (Identity::Unverifiable, Some(err)),
     }
 }
 
@@ -352,7 +469,6 @@ impl CleanupReport {
     }
 }
 
-#[cfg(unix)]
 struct ChildRun {
     /// Exit evidence from the direct Child handle (no raw waitpid mixed
     /// into the Child lifecycle, amendment D).
@@ -369,9 +485,9 @@ struct ChildRun {
     _unreaped_helpers: Vec<std::process::Child>,
 }
 
-#[cfg(unix)]
 /// Spawn this test binary in child mode under a fresh parent-owned
 /// fixture directory, bound the whole run, then clean up strictly.
+#[cfg(unix)]
 fn supervise(test_name: &str, overall: Duration) -> ChildRun {
     let overall_deadline = Instant::now() + overall;
     let fixture_dir = tempfile::tempdir().expect("parent-owned fixture dir");
@@ -397,7 +513,7 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
         std::thread::sleep(TICK);
     }
     // Bounded reap of the runner through the Child handle.
-    let reap_deadline = Instant::now() + TERM_GRACE;
+    let reap_deadline = Instant::now() + REAP_RESERVE.max(Duration::from_millis(500));
     let mut status = child.try_wait().expect("wait child");
     while status.is_none() && Instant::now() < reap_deadline {
         std::thread::sleep(TICK);
@@ -469,7 +585,17 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
                     if item.term_at.is_none() {
                         // Recheck immediately before every signal
                         // (amendment C); TERM first (amendment D).
-                        if check_identity_at(&item.entry, op_deadline) == Identity::Alive {
+                        let (recheck, recheck_error) = identity_probe(&item.entry, op_deadline);
+                        if let Some(err) = recheck_error {
+                            actions.push(format!(
+                                "pid={} pre-signal probe error: {}",
+                                item.entry.pid, err.message
+                            ));
+                            if let Some(helper) = err.unreaped {
+                                unreaped_helpers.push(helper);
+                            }
+                        }
+                        if recheck == Identity::Alive {
                             match signal_pid(item.entry.pid, libc::SIGTERM) {
                                 Ok(()) => {
                                     actions.push(format!("pid={} SIGTERM", item.entry.pid));
@@ -478,14 +604,26 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
                                 Err(err) => unverifiable.push(err),
                             }
                         }
-                    } else if now >= item.term_at.expect("term_at") + TERM_GRACE {
-                        if check_identity_at(&item.entry, op_deadline) == Identity::Alive {
+                    } else if Instant::now() >= item.term_at.expect("term_at") + TERM_GRACE {
+                        let op_deadline =
+                            std::cmp::min(cleanup_deadline, Instant::now() + PS_TIMEOUT);
+                        let (recheck, recheck_error) = identity_probe(&item.entry, op_deadline);
+                        if let Some(err) = recheck_error {
+                            actions.push(format!(
+                                "pid={} pre-force probe error: {}",
+                                item.entry.pid, err.message
+                            ));
+                            if let Some(helper) = err.unreaped {
+                                unreaped_helpers.push(helper);
+                            }
+                        }
+                        if recheck == Identity::Alive {
                             match signal_pid(item.entry.pid, libc::SIGKILL) {
                                 Ok(()) => actions.push(format!("pid={} SIGKILL", item.entry.pid)),
                                 Err(err) => unverifiable.push(err),
                             }
                         }
-                        item.term_at = Some(now); // re-grade the next force
+                        item.term_at = Some(Instant::now()); // re-grade the next force
                     }
                 }
                 Identity::Unverifiable => {
@@ -522,9 +660,9 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
         let declared = value
             .get("declared_children")
             .and_then(serde_json::Value::as_u64)
+            .map(|n| n as usize)
             .unwrap_or(0);
         let (entries, _) = read_ledger(&fixture_path);
-        let declared = declared as usize;
         if declared > entries.len() {
             unverifiable.push(format!(
                 "incomplete registration: child declared {declared} children but the ledger holds {}",
@@ -1110,9 +1248,15 @@ fn isolation_setup_failure_fails_closed_without_probing() {
 // supervisor that only worked when nothing went wrong would fail here.
 
 #[cfg(unix)]
+/// Registers `pid` with its captured birth identity. Returns false when
+/// the birth cannot be established: a birthless identity is NEVER written
+/// to the ledger (it could not be rechecked before a signal); the caller
+/// reports the gap through declared-vs-registered accounting instead.
 #[cfg(unix)]
-fn append_ledger(dir: &Path, pid: u32) {
-    let birth = birth_of(pid).expect("birth for a live child");
+fn append_ledger(dir: &Path, pid: u32) -> bool {
+    let Ok(birth) = birth_of(pid) else {
+        return false;
+    };
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .append(true)
@@ -1120,6 +1264,7 @@ fn append_ledger(dir: &Path, pid: u32) {
         .open(dir.join(LEDGER_FILE))
         .expect("open ledger");
     writeln!(file, "{pid}|{birth}").expect("append ledger");
+    true
 }
 
 #[cfg(unix)]
@@ -1385,102 +1530,114 @@ fn ledger_lines_require_positive_pids_with_birth_identities() {
     assert_eq!(entry.birth, "Mon Sep 9 08:00:00 2026");
 }
 
+/// Pure parser/classifier tests: every `ExitStatus` is constructed with
+/// `ExitStatusExt::from_raw` (0 = success, 1<<8 = exit code 1, a signal
+/// number = signaled). Constructing a status sends NO signal and spawns
+/// NO process; genuine containment self-tests belong to the supervised
+/// lifecycle tests, not this parser unit.
 #[cfg(unix)]
 mod ps_classification {
     use super::*;
+    use std::os::unix::process::ExitStatusExt;
 
-    fn entry(pid: u32, birth: &str) -> LedgerEntry {
+    fn status(raw: i32) -> std::process::ExitStatus {
+        std::process::ExitStatus::from_raw(raw)
+    }
+
+    fn output(raw: i32, stdout: &[u8], stderr: &[u8]) -> std::process::Output {
+        std::process::Output {
+            status: status(raw),
+            stdout: stdout.to_vec(),
+            stderr: stderr.to_vec(),
+        }
+    }
+
+    const VALID: &[u8] = b"Mon Sep  9 08:00:00 2026 S\n";
+
+    fn entry(birth: &str) -> LedgerEntry {
         LedgerEntry {
-            pid,
+            pid: 4242,
             birth: birth.to_string(),
         }
     }
 
-    fn sh(script: &str) -> std::process::Output {
-        let mut cmd = Command::new("/bin/sh");
-        cmd.arg("-c").arg(script);
-        match run_until(&mut cmd, Instant::now() + PS_TIMEOUT) {
-            Ok(output) => output,
-            Err(err) => panic!("bounded sh failed: {}", err.message),
-        }
+    #[test]
+    fn valid_record_decides_alive_and_replaced() {
+        let parsed = parse_ps_record(&output(0, VALID, b"")).expect("valid record");
+        assert_eq!(parsed.0, "Mon Sep  9 08:00:00 2026");
+        assert_eq!(
+            classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &output(0, VALID, b"")),
+            Identity::Alive
+        );
+        assert_eq!(
+            classify_ps(&entry("Mon Jan  1 00:00:00 2001"), &output(0, VALID, b"")),
+            Identity::Replaced
+        );
     }
 
     #[test]
     fn malformed_success_output_establishes_nothing() {
-        // "garbage S" exits 0 but is not a complete lstart record: the
-        // original identity must be unverifiable, NOT replaced.
-        let output = sh("echo 'garbage S'");
-        assert!(parse_ps_record(&output).is_none());
-        let me = std::process::id();
+        // "Bad Month 99 nope 2026 S" succeeds but is not a real lstart
+        // record: neither alive nor replaced may be concluded.
+        let garbage = output(0, b"Bad Month 99 nope 2026 S\n", b"");
+        assert!(parse_ps_record(&garbage).is_none());
         assert_eq!(
-            classify_ps(&entry(me, "Mon Sep  9 08:00:00 2026"), &output),
+            classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &garbage),
             Identity::Unverifiable
         );
+        // Almost-valid shapes fail too: wrong weekday, bad day, bad time.
+        for bad in [
+            &b"Funday Sep  9 08:00:00 2026 S\n"[..],
+            b"Mon Sep 99 08:00:00 2026 S\n",
+            b"Mon Sep  9 8:00:00 2026 S\n",
+            b"Mon Sep  9 08:00:00 26 S\n",
+        ] {
+            assert!(parse_ps_record(&output(0, bad, b"")).is_none(), "{:?}", bad);
+        }
     }
 
     #[test]
     fn success_with_stderr_is_rejected() {
-        let output = sh("echo diag >&2; echo 'Mon Sep  9 08:00:00 2026 S'");
-        assert!(parse_ps_record(&output).is_none());
+        assert!(parse_ps_record(&output(0, VALID, b"diag\n")).is_none());
     }
 
     #[test]
     fn multiline_output_is_rejected() {
-        let output = sh("printf 'Mon Sep  9 08:00:00 2026 S\\nMon Sep  9 08:00:01 2026 R\\n'");
-        assert!(parse_ps_record(&output).is_none());
+        let two = b"Mon Sep  9 08:00:00 2026 S\nMon Sep  9 08:00:01 2026 R\n";
+        assert!(parse_ps_record(&output(0, two, b"")).is_none());
     }
 
     #[test]
     fn non_utf8_output_is_rejected() {
-        let output = sh("printf '\\xff S'");
-        assert!(parse_ps_record(&output).is_none());
+        assert!(parse_ps_record(&output(0, b"\xff S", b"")).is_none());
+    }
+
+    #[test]
+    fn exit_one_with_empty_streams_means_gone() {
+        let out = output(1 << 8, b"", b"");
+        assert_eq!(
+            classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &out),
+            Identity::Gone
+        );
     }
 
     #[test]
     fn signal_terminated_ps_is_unverifiable_not_gone() {
-        let mut child = std::process::Command::new("/bin/sleep")
-            .arg("30")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("spawn sleep");
-        let _ = child.kill();
-        let status = loop {
-            if let Some(status) = child.try_wait().expect("wait") {
-                break status;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        };
-        assert!(status.code().is_none(), "SIGKILL leaves no exit code");
-        let output = std::process::Output {
-            status,
-            stdout: Vec::new(),
-            stderr: Vec::new(),
-        };
-        let me = std::process::id();
+        // from_raw(SIGTERM) constructs a terminated-by-signal status; no
+        // signal is sent.
+        let out = output(libc::SIGTERM, b"", b"");
         assert_eq!(
-            classify_ps(&entry(me, "Mon Sep  9 08:00:00 2026"), &output),
+            classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &out),
             Identity::Unverifiable
         );
     }
 
     #[test]
-    fn valid_record_decides_alive_and_replaced() {
-        let me = std::process::id();
-        let my_birth = birth_of(me).expect("own birth");
-        let my_output = match run_until(&mut ps_cmd(&me.to_string()), Instant::now() + PS_TIMEOUT) {
-            Ok(output) => output,
-            Err(err) => panic!("ps self failed: {}", err.message),
-        };
+    fn exit_one_with_diagnostics_is_unverifiable() {
+        let out = output(1 << 8, b"", b"usage: ps\n");
         assert_eq!(
-            classify_ps(&entry(me, &my_birth), &my_output),
-            Identity::Alive
-        );
-        // A live pid carrying a DIFFERENT verified birth means the
-        // recorded identity is gone (replaced), never signalable.
-        assert_eq!(
-            classify_ps(&entry(me, "Mon Jan  1 00:00:00 2001"), &my_output),
-            Identity::Replaced
+            classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &out),
+            Identity::Unverifiable
         );
     }
 }
