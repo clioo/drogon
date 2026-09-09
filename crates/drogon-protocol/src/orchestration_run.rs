@@ -5,7 +5,7 @@
 use crate::RpcError;
 use crate::orchestration_common::{
     MAX_SUBJECT_TEXT_BYTES, OpaqueCursor, SessionIdentity, validate_consumer_generation,
-    validate_page_limit, validate_short_label, validate_task_text,
+    validate_opaque_token, validate_page_limit, validate_short_label, validate_task_text,
 };
 use crate::orchestration_scope::HostScope;
 use serde::{Deserialize, Serialize};
@@ -145,6 +145,86 @@ impl RunBindParams {
         validate_short_label(&self.coordinator_id)?;
         self.caller.validate_shape()
     }
+}
+
+use crate::orchestration_scope::CoordinatorScope;
+
+/// Inspect a task's current dispatch (read-only; preamble is deterministic).
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchShowParams {
+    #[serde(flatten)]
+    pub scope: CoordinatorScope,
+    pub task_id: String,
+    #[serde(default)]
+    pub preamble: bool,
+}
+
+impl DispatchShowParams {
+    pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
+        self.scope.validate_shape(execution_host_id)?;
+        validate_short_label(&self.task_id)
+    }
+}
+
+/// Coordinator dispatches a ready task to an existing live terminal.
+/// `to` names a session id observed by this host and is required unless
+/// `dry_run` previews the preamble without touching state. `inject` writes
+/// the preamble into the target session; a minted dispatch capability is
+/// embedded in the preamble only in that case (source: `dispatchCapability`).
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchParams {
+    #[serde(flatten)]
+    pub scope: CoordinatorScope,
+    pub task_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    #[serde(default)]
+    pub inject: bool,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub return_preamble: bool,
+}
+
+impl DispatchParams {
+    pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
+        self.scope.validate_shape(execution_host_id)?;
+        validate_short_label(&self.task_id)?;
+        if let Some(to) = &self.to {
+            validate_opaque_token(to, 128, "Invalid target session id.")?;
+        } else if !self.dry_run {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Missing --to: a live target terminal is required unless --dry-run.",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Dispatch outcome. `dispatch` is null for a dry run; `preamble` is present
+/// for a dry run and when `return_preamble` was requested.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<crate::orchestration_worker::WorkerShowResult>,
+    pub injected: bool,
+    pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preamble: Option<String>,
+}
+
+/// Current dispatch row plus, when requested, the regenerated preamble.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchShowResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<crate::orchestration_worker::WorkerShowResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preamble: Option<String>,
 }
 
 /// Bounded, cursor-paginated run listing (inspection, no state allocation).

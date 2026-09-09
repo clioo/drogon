@@ -142,6 +142,69 @@ fn replacement_fences_old_authority_without_erasing_history() {
     );
 }
 
+fn dispatch_attempt(id: &str) -> Attempt {
+    let mut entry = attempt(id);
+    entry.result.assignment_state = AssignmentState::Ready;
+    entry.cleanup_owned = false;
+    entry
+}
+
+#[test]
+fn dispatch_admission_refuses_an_active_current_attempt() {
+    let mut conn = database();
+    let tx = conn.transaction().unwrap();
+    assert_eq!(
+        admit_dispatch(&tx, &scope(), &dispatch_attempt("d1")).unwrap(),
+        None
+    );
+    assert_eq!(
+        admit_dispatch(&tx, &scope(), &dispatch_attempt("d2"))
+            .unwrap_err()
+            .code,
+        "attempt_active"
+    );
+    require_current_unfenced(&tx, &scope(), "d1").unwrap();
+}
+
+#[test]
+fn dispatch_admission_replaces_a_settled_current_attempt() {
+    let mut conn = database();
+    let tx = conn.transaction().unwrap();
+    admit_dispatch(&tx, &scope(), &dispatch_attempt("d1")).unwrap();
+    fence(&tx, &scope(), "d1", AssignmentState::Stopped).unwrap();
+    assert_eq!(
+        admit_dispatch(&tx, &scope(), &dispatch_attempt("d2")).unwrap(),
+        Some("d1".into())
+    );
+    assert_eq!(
+        current_for_task(&tx, &scope(), "task-a")
+            .unwrap()
+            .unwrap()
+            .result
+            .dispatch_id,
+        "d2"
+    );
+    assert_eq!(
+        require_current_unfenced(&tx, &scope(), "d1")
+            .unwrap_err()
+            .code,
+        "attempt_fenced"
+    );
+}
+
+#[test]
+fn inject_failure_marks_the_current_dispatch_failed() {
+    let mut conn = database();
+    let tx = conn.transaction().unwrap();
+    admit_dispatch(&tx, &scope(), &dispatch_attempt("d1")).unwrap();
+    let failed = mark_inject_failed(&tx, &scope(), "d1", "pty write failed").unwrap();
+    assert_eq!(failed.result.assignment_state, AssignmentState::Failed);
+    assert_eq!(failed.result.failure.as_ref().unwrap().stage, "inject");
+    // Still current, so dispatch-show reports it; still fenced-free, so a
+    // later worker-stop can settle it.
+    require_current_unfenced(&tx, &scope(), "d1").unwrap();
+}
+
 #[test]
 fn rolled_back_replacement_restores_prior_authority_and_history() {
     let mut conn = database();

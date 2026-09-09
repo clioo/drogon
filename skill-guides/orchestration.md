@@ -76,6 +76,14 @@ and ask a worker a direct question with
 `drogon-cli orchestration send --run <ID> --coordinator-id <ID> --consumer-generation 3 --kind question --subject <TEXT> --to dispatch:<ID>`.
 Targets are `run-home`, `dispatch:<ID>` or `group:<NAME>`.
 
+`drogon-cli orchestration dispatch --task <ID> --to <TERMINAL> --from <TERMINAL>`
+assigns a ready task to an existing terminal as an unsupervised dispatch context:
+the target's process is never signalled or owned, and `--inject` writes the
+preamble into a detected agent session and mints its scoped capability.
+`--dry-run` previews the preamble without any state change; `--return-preamble`
+returns the injected text. Inspect a task's current context with
+`drogon-cli orchestration dispatch-show --task <ID> --preamble`.
+
 ## Ask And Reply
 
 Ask blocks for an answer inside one bounded budget:

@@ -3463,3 +3463,124 @@ async fn inbox_zero_limit_is_usage_error() {
     drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dispatch_maps_flags_and_renders_human_text() {
+    let dir = temp_dir("dispatch-human");
+    let result = json!({
+        "dispatch": {"dispatchId": "dispatch-1", "taskId": "task-1",
+            "assignmentState": "ready", "readiness": "notObserved",
+            "processVerdict": "live",
+            "sessionIdentity": {"sessionId": "session-1", "incarnation": "i1"}},
+        "injected": true, "dryRun": false, "preamble": "PREAMBLE-TEXT",
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.dispatch", result)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "dispatch",
+            "--run",
+            "run-1",
+            "--coordinator-id",
+            "coord-1",
+            "--consumer-generation",
+            "3",
+            "--task",
+            "task-1",
+            "--to",
+            "session-1",
+            "--inject",
+            "--return-preamble",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    assert_eq!(
+        invocation.stdout.trim_end(),
+        "Dispatched task-1 -> dispatch-1 [ready]\n\n--- Preamble ---\nPREAMBLE-TEXT"
+    );
+    let calls = mock.captured();
+    let dispatch = calls
+        .iter()
+        .find(|r| r["method"] == "orchestration.dispatch")
+        .expect("dispatch called");
+    assert_eq!(dispatch["params"]["taskId"], "task-1");
+    assert_eq!(dispatch["params"]["to"], "session-1");
+    assert_eq!(dispatch["params"]["inject"], true);
+    assert_eq!(dispatch["params"]["dryRun"], false);
+    assert_eq!(dispatch["params"]["returnPreamble"], true);
+    assert_eq!(dispatch["params"]["runId"], "run-1");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dispatch_dry_run_prints_only_the_preamble() {
+    let dir = temp_dir("dispatch-dry");
+    let result = json!({
+        "dispatch": null, "injected": false, "dryRun": true,
+        "preamble": "PREVIEW-TEXT",
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.dispatch", result)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "dispatch",
+            "--run",
+            "run-1",
+            "--coordinator-id",
+            "coord-1",
+            "--consumer-generation",
+            "3",
+            "--task",
+            "task-1",
+            "--dry-run",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    assert_eq!(invocation.stdout.trim_end(), "PREVIEW-TEXT");
+    let calls = mock.captured();
+    let dispatch = calls
+        .iter()
+        .find(|r| r["method"] == "orchestration.dispatch")
+        .expect("dispatch called");
+    assert_eq!(dispatch["params"]["dryRun"], true);
+    assert!(dispatch["params"].get("to").is_none());
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dispatch_without_to_is_usage_error() {
+    let dir = temp_dir("dispatch-usage");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "dispatch",
+            "--run",
+            "run-1",
+            "--coordinator-id",
+            "coord-1",
+            "--consumer-generation",
+            "3",
+            "--task",
+            "task-1",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 2, "stderr: {}", invocation.stderr);
+    assert!(mock.captured().is_empty(), "usage error never connects");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}

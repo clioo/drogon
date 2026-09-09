@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use drogon_orchestration::runs;
 use drogon_protocol::orchestration_common::ProcessVerdict;
+use drogon_protocol::orchestration_run::{DispatchParams, DispatchShowParams, DispatchShowResult};
 use drogon_protocol::orchestration_worker::*;
 use drogon_protocol::{Request, RpcError};
 use serde_json::Value;
@@ -58,6 +59,58 @@ impl Engine {
         request: &Request,
     ) -> Result<Value, RpcError> {
         match request.method.as_str() {
+            "orchestration.dispatchShow" => {
+                let params: DispatchShowParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                let snapshot = self.coordination_read(|tx| {
+                    runs::require_coordinator(tx, &params.scope)?;
+                    let attempt = attempts::current_for_task(tx, &params.scope, &params.task_id)?;
+                    Ok(attempt)
+                })?;
+                let dispatch = snapshot
+                    .as_ref()
+                    .map(|attempt| {
+                        let verdict = self.worker_verdict(attempt).unwrap_or(
+                            drogon_protocol::orchestration_common::ProcessVerdict::Unverifiable,
+                        );
+                        WorkerShowResult {
+                            dispatch_id: attempt.result.dispatch_id.clone(),
+                            task_id: attempt.result.task_id.clone(),
+                            assignment_state: attempt.result.assignment_state,
+                            readiness: attempt.result.readiness,
+                            process_verdict: verdict,
+                            outcome: attempt.outcome,
+                            report_result: attempt.report_result.clone(),
+                            session_identity: attempt.result.session_identity.clone(),
+                            launch: Some(attempt.launch.clone()),
+                            residual_resources: attempt.result.residual_resources.clone(),
+                            failure: attempt.result.failure.clone(),
+                            warning: attempt.result.warning.clone(),
+                        }
+                    })
+                    .inspect(|result| {
+                        // Fail closed on malformed derived identity rather
+                        // than serving an unverifiable dispatch row.
+                        if let Err(err) = result.validate_shape() {
+                            debug_assert!(false, "invalid dispatch row: {err}");
+                        }
+                    });
+                // The preamble is regenerated deterministically from the
+                // current task spec so a preview matches an actual dispatch.
+                let preamble = params.preamble.then(|| {
+                    crate::coordination_preamble::build_dispatch_preamble(
+                        &params.scope,
+                        &params.task_id,
+                        snapshot.as_ref().map(|a| a.result.dispatch_id.as_str()),
+                    )
+                });
+                encode(DispatchShowResult { dispatch, preamble })
+            }
+            "orchestration.dispatch" => {
+                let params: DispatchParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.dispatch_coordination(request, params)
+            }
             "orchestration.workerShow" => {
                 let params: WorkerShowParams = decode(&request.params)?;
                 params.validate_shape(&self.host_id)?;

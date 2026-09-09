@@ -648,6 +648,42 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+    /// Dispatch a ready task to a live terminal, optionally injecting the preamble
+    Dispatch {
+        /// Task id to dispatch
+        #[arg(long, value_name = "ID")]
+        task: String,
+        /// Target live session id (required unless --dry-run)
+        #[arg(long, value_name = "SESSION")]
+        to: Option<String>,
+        /// Write the preamble into the target session (requires a running agent there)
+        #[arg(long, default_value_t = false)]
+        inject: bool,
+        /// Preview the preamble without touching state
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Return the preamble in the response
+        #[arg(long, default_value_t = false)]
+        return_preamble: bool,
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// The dispatcher for a task: its current dispatch (if any) plus a
+    /// deterministic preview preamble when requested
+    DispatchShow {
+        /// Task id to inspect
+        #[arg(long, value_name = "ID")]
+        task: String,
+        /// Regenerate the dispatch preamble from the current task spec
+        #[arg(long, default_value_t = false)]
+        preamble: bool,
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[command(flatten)]
+        host: HostOpt,
+    },
     /// Recover a receipt by id from an explicit receipt scope
     RequestShow {
         /// Target receipt id (distinct from the --request-id envelope id)
@@ -683,7 +719,9 @@ impl OrchestrationCommand {
             | Self::WorkerStop { scope, .. }
             | Self::WorkerAbandon { scope, .. }
             | Self::WorkerRelease { scope, .. }
-            | Self::WorkerRetain { scope, .. } => Some(scope),
+            | Self::WorkerRetain { scope, .. }
+            | Self::Dispatch { scope, .. }
+            | Self::DispatchShow { scope, .. } => Some(scope),
             _ => None,
         }
     }
@@ -703,7 +741,9 @@ impl OrchestrationCommand {
             | Self::WorkerStop { scope, .. }
             | Self::WorkerAbandon { scope, .. }
             | Self::WorkerRelease { scope, .. }
-            | Self::WorkerRetain { scope, .. } => Some(scope),
+            | Self::WorkerRetain { scope, .. }
+            | Self::Dispatch { scope, .. }
+            | Self::DispatchShow { scope, .. } => Some(scope),
             _ => None,
         }
     }

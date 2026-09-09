@@ -75,6 +75,16 @@ fn usage(message: impl Into<String>) -> CliError {
 /// only the dispatch receipt scope; and reuse execution refuses fresh launch
 /// preferences.
 pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliError> {
+    // Dispatch needs a live target terminal unless it only previews the
+    // preamble: a purely local flag contradiction, refused before contact.
+    if let OrchestrationCommand::Dispatch { to, dry_run, .. } = command
+        && to.is_none()
+        && !dry_run
+    {
+        return Err(usage(
+            "Missing --to: pass a live target terminal or --dry-run for a preamble preview.",
+        ));
+    }
     // Reset takes exactly one scope flag (source: reset-handler usage check).
     if let OrchestrationCommand::Reset {
         all,
@@ -135,6 +145,8 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             | OrchestrationCommand::WorkerAbandon { .. }
             | OrchestrationCommand::WorkerRelease { .. }
             | OrchestrationCommand::WorkerRetain { .. }
+            | OrchestrationCommand::Dispatch { .. }
+            | OrchestrationCommand::DispatchShow { .. }
             | OrchestrationCommand::WorkerList { .. }
             | OrchestrationCommand::Reset { .. }
     );
@@ -695,6 +707,8 @@ pub async fn run(
         | OrchestrationCommand::WorkerAbandon { host, .. }
         | OrchestrationCommand::WorkerRelease { host, .. }
         | OrchestrationCommand::WorkerRetain { host, .. }
+        | OrchestrationCommand::Dispatch { host, .. }
+        | OrchestrationCommand::DispatchShow { host, .. }
         | OrchestrationCommand::WorkerList { host, .. }
         | OrchestrationCommand::Reset { host, .. }
         | OrchestrationCommand::Send { host, .. }
@@ -1698,6 +1712,142 @@ pub async fn run(
                     text
                 },
                 exit_code,
+            )
+        }
+        OrchestrationCommand::Dispatch {
+            scope,
+            task,
+            to,
+            inject,
+            dry_run,
+            return_preamble,
+            ..
+        } => {
+            // Re-checked after binding resolution: the RPC re-enforces, but
+            // the CLI fails fast with a usage error (also enforced
+            // pre-contact in validate_actor_flags).
+            if to.is_none() && !dry_run {
+                return Err(usage(
+                    "Missing --to: pass a live target terminal or --dry-run for a preamble preview.",
+                ));
+            }
+            let params = drogon_protocol::orchestration_run::DispatchParams {
+                scope: coordinator_scope(&host_id, scope),
+                task_id: task.clone(),
+                to: to.clone(),
+                inject: *inject,
+                dry_run: *dry_run,
+                return_preamble: *return_preamble,
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call("orchestration.dispatch", value, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let result: drogon_protocol::orchestration_run::DispatchResult =
+                Client::decode_checked(
+                    &call,
+                    "orchestration.dispatch",
+                    |r: &drogon_protocol::orchestration_run::DispatchResult| {
+                        if r.dry_run != *dry_run {
+                            return Err("dispatch response disagrees about dry-run".into());
+                        }
+                        match (&r.dispatch, &r.preamble) {
+                            (Some(dispatch), _) => {
+                                if dispatch.task_id != *task {
+                                    return Err("dispatch response names a different task".into());
+                                }
+                                check_dispatch_id(&dispatch.dispatch_id)?;
+                                Ok(())
+                            }
+                            (None, Some(_)) if *dry_run => Ok(()),
+                            (None, _) if *dry_run => Err("dry-run returned no preamble".into()),
+                            (None, _) => Err("dispatch returned no dispatch row".into()),
+                        }
+                    },
+                )?;
+            let want_dry = *dry_run;
+            emit(
+                call,
+                json,
+                || {
+                    if want_dry {
+                        return result.preamble.clone().unwrap_or_default();
+                    }
+                    let dispatch = result.dispatch.as_ref().expect("validated dispatch row");
+                    let base = format!(
+                        "Dispatched {} -> {} [{}]",
+                        dispatch.task_id,
+                        dispatch.dispatch_id,
+                        wire_assignment(dispatch.assignment_state),
+                    );
+                    match &result.preamble {
+                        Some(text) => format!("{base}\n\n--- Preamble ---\n{text}"),
+                        None => base,
+                    }
+                },
+                0,
+            )
+        }
+        OrchestrationCommand::DispatchShow {
+            scope,
+            task,
+            preamble,
+            ..
+        } => {
+            let params = drogon_protocol::orchestration_run::DispatchShowParams {
+                scope: coordinator_scope(&host_id, scope),
+                task_id: task.clone(),
+                preamble: *preamble,
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call(
+                    "orchestration.dispatchShow",
+                    value,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result: drogon_protocol::orchestration_run::DispatchShowResult =
+                Client::decode_checked(
+                    &call,
+                    "orchestration.dispatchShow",
+                    |r: &drogon_protocol::orchestration_run::DispatchShowResult| {
+                        if let Some(dispatch) = &r.dispatch {
+                            if dispatch.task_id != *task {
+                                return Err("dispatch-show response names a different task".into());
+                            }
+                            check_dispatch_id(&dispatch.dispatch_id)?;
+                        }
+                        if *preamble && r.preamble.is_none() {
+                            return Err("dispatch-show --preamble returned no preamble".into());
+                        }
+                        Ok(())
+                    },
+                )?;
+            let want_preamble = *preamble;
+            emit(
+                call,
+                json,
+                || match (&result.dispatch, &result.preamble) {
+                    (Some(dispatch), Some(text)) if want_preamble => {
+                        format!(
+                            "{} task={} [{}]\n\n--- Preamble ---\n{text}",
+                            dispatch.dispatch_id,
+                            dispatch.task_id,
+                            wire_assignment(dispatch.assignment_state),
+                        )
+                    }
+                    (Some(dispatch), _) => format!(
+                        "{} task={} [{}]",
+                        dispatch.dispatch_id,
+                        dispatch.task_id,
+                        wire_assignment(dispatch.assignment_state),
+                    ),
+                    (None, Some(text)) if want_preamble => text.clone(),
+                    (None, _) => format!("No dispatch context found for task {task}."),
+                },
+                0,
             )
         }
         OrchestrationCommand::WorkerList {

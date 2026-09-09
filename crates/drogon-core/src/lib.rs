@@ -12,12 +12,14 @@ pub mod bots;
 pub mod claim_identity;
 mod coordination_access;
 mod coordination_attempts;
+mod coordination_dispatch;
 mod coordination_identity;
 mod coordination_launch;
 mod coordination_mail;
 mod coordination_mail_groups;
 mod coordination_mail_rpc;
 mod coordination_output;
+mod coordination_preamble;
 mod coordination_question_rpc;
 mod coordination_receipts;
 mod coordination_reset;
@@ -562,6 +564,8 @@ impl Engine {
             | "orchestration.taskShow" => self.dispatch_run_task(request),
             "orchestration.workerStart"
             | "orchestration.workerShow"
+            | "orchestration.dispatch"
+            | "orchestration.dispatchShow"
             | "orchestration.workerRead"
             | "orchestration.workerStop"
             | "orchestration.workerAbandon"
