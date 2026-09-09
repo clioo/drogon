@@ -536,7 +536,12 @@ mod tests {
             );
         }
         assert_eq!(
-            derive(true, Activity::LastActiveAgo(Duration::from_millis(0)), false, HookTurn::Ended),
+            derive(
+                true,
+                Activity::LastActiveAgo(Duration::from_millis(0)),
+                false,
+                HookTurn::Ended
+            ),
             AgentState::Exited
         );
     }

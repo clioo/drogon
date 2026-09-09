@@ -725,7 +725,9 @@ impl Engine {
                     .map_err(error::from_sqlite)?
                     > 0;
                 if !exists {
-                    return Err(error::not_found("parentSessionId names no session on this host"));
+                    return Err(error::not_found(
+                        "parentSessionId names no session on this host",
+                    ));
                 }
                 Some(parent.to_string())
             }

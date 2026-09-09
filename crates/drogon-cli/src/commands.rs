@@ -147,10 +147,10 @@ async fn terminal(
             // records it as the parent session so the sidebar nests the
             // new row under its spawner. Outside a session the variable is
             // absent and the terminal is parentless.
-            if let Ok(parent) = std::env::var("DROGON_SESSION_ID") {
-                if !parent.is_empty() {
-                    params["parentSessionId"] = json!(parent);
-                }
+            if let Ok(parent) = std::env::var("DROGON_SESSION_ID")
+                && !parent.is_empty()
+            {
+                params["parentSessionId"] = json!(parent);
             }
             let call = client
                 .call("session.start", params, request_id, DEFAULT_TIMEOUT)
@@ -592,10 +592,10 @@ async fn harness(
             // Issue #359: same env-inherited parent record as
             // `terminal create` — a harness launched from inside a session
             // nests under that session in the sidebar.
-            if let Ok(parent) = std::env::var("DROGON_SESSION_ID") {
-                if !parent.is_empty() {
-                    params["parentSessionId"] = json!(parent);
-                }
+            if let Ok(parent) = std::env::var("DROGON_SESSION_ID")
+                && !parent.is_empty()
+            {
+                params["parentSessionId"] = json!(parent);
             }
             let call = client
                 .call("harness.start", params, request_id, DEFAULT_TIMEOUT)

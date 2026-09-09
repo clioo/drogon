@@ -94,17 +94,18 @@ fn session_start_records_and_reports_the_parent_session() {
     let parent = start_session(&engine, &workspace_id, None);
     let parent_id = parent["id"].as_str().unwrap().to_string();
 
-    let child = start_session(
-        &engine,
-        &workspace_id,
-        Some(json!(parent_id)),
-    );
+    let child = start_session(&engine, &workspace_id, Some(json!(parent_id)));
     assert_eq!(
-        child["parentSessionId"], json!(parent_id),
+        child["parentSessionId"],
+        json!(parent_id),
         "the spawn result must echo the recorded parent: {child}"
     );
 
-    let list = ok(&engine, "session.list", json!({ "workspaceId": workspace_id }));
+    let list = ok(
+        &engine,
+        "session.list",
+        json!({ "workspaceId": workspace_id }),
+    );
     let row = listed_row(&list, child["id"].as_str().unwrap());
     assert_eq!(row["parentSessionId"], json!(parent_id));
     let parent_row = listed_row(&list, &parent_id);
@@ -153,11 +154,7 @@ fn parent_record_survives_a_daemon_restart() {
         let engine = Engine::open(dir.path()).unwrap();
         let workspace_id = register_workspace(&engine);
         let parent = start_session(&engine, &workspace_id, None);
-        let child = start_session(
-            &engine,
-            &workspace_id,
-            Some(json!(parent["id"])),
-        );
+        let child = start_session(&engine, &workspace_id, Some(json!(parent["id"])));
         (
             parent["id"].as_str().unwrap().to_string(),
             child["id"].as_str().unwrap().to_string(),
@@ -192,7 +189,8 @@ fn harness_start_records_the_parent_session() {
         }),
     );
     assert_eq!(
-        launched["parentSessionId"], json!(parent_id),
+        launched["parentSessionId"],
+        json!(parent_id),
         "a harness launched from inside a session carries the same parent record: {launched}"
     );
 

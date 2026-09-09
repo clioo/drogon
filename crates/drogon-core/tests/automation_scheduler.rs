@@ -615,7 +615,9 @@ fn record_skip_writes_a_skipped_row_and_reschedules() {
 
 fn base64_decode(text: &str) -> Vec<u8> {
     use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD.decode(text).unwrap()
+    base64::engine::general_purpose::STANDARD
+        .decode(text)
+        .unwrap()
 }
 
 fn request(id: &str, method: &str, params: Value) -> Request {
@@ -1566,7 +1568,10 @@ fn tick_finalizes_a_turn_ended_live_session_as_completed() {
         if text.contains("turn-ended-marker") {
             break;
         }
-        assert!(std::time::Instant::now() < deadline, "sleeper must echo its marker");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "sleeper must echo its marker"
+        );
         cursor = read["nextCursor"].as_u64().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(50));
     }

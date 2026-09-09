@@ -96,7 +96,10 @@ fn reserve_committed(
 ) -> PreparedSession {
     let conn = db.lock().unwrap();
     let tx = begin_immediate(&conn);
-    let plan = reserve(&tx, "host-1", "ws-1", cwd, command, args, None, None, 80, 24).expect("reserve");
+    let plan = reserve(
+        &tx, "host-1", "ws-1", cwd, command, args, None, None, 80, 24,
+    )
+    .expect("reserve");
     tx.commit().expect("commit reservation");
     plan
 }

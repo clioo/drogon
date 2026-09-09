@@ -200,10 +200,7 @@ mod tests {
         // Issue #360 fork parity: Claude's Stop means the turn concluded
         // (the fork maps it to done), never needs_input; Notification stays
         // this install's genuine-wait surface.
-        assert_eq!(
-            classify_hook_event("Notification"),
-            Some(HookSignal::Wait)
-        );
+        assert_eq!(classify_hook_event("Notification"), Some(HookSignal::Wait));
         assert_eq!(classify_hook_event("Stop"), Some(HookSignal::TurnEnd));
     }
 
