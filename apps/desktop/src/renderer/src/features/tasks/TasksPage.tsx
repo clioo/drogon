@@ -15,6 +15,11 @@ import {
 } from "../../../../shared/tasks-contract";
 import type { Session } from "../../../../shared/session-contract";
 import type { ProjectGroup } from "../shell/project-adapter";
+import type {
+  JiraBridge,
+  JiraConnectionStatus,
+  JiraIssue,
+} from "../../../../shared/jira-contract";
 import {
   consumePendingTaskSource,
   resolveRequestedTaskSource,
@@ -40,11 +45,18 @@ import {
   getGitHubDefaultQuery,
   getGitHubModeButtons,
   getGitHubTaskPresetQuery,
+  getJiraPresets,
   getSourceOptions,
   projectTasksDaemonQuery,
   projectTasksDaemonState,
+  type JiraPresetId,
 } from "./task-page-localized-options";
 import { windowShellOpenExternal } from "../landing/github-star";
+import { toast } from "sonner";
+import { useJiraListState } from "./jira/use-jira-list-state";
+import { useJiraIssueCreationDialog } from "./jira/use-jira-issue-creation";
+import { startWorkspaceFromJiraIssue } from "./jira/use-jira-start-issue";
+import { jiraSurfaceRefusedBridge } from "./jira/jira-surface-defaults";
 import type {
   GitHubOwnerRepo,
   IssueSourcePreference,
@@ -69,6 +81,22 @@ function parseTaskRepoSlug(slug: string | undefined): GitHubOwnerRepo | null {
   return { owner: slug.slice(0, slash), repo: slug.slice(slash + 1) };
 }
 
+// Why: off-app renders (tests) have no granted jira.v1 namespace; a refused
+// stub keeps the chrome renderable and every RPC fails closed.
+const refusedJiraBridge = jiraSurfaceRefusedBridge;
+
+/** The workspace sheet's external-link opener (the shell.openExternal seam). */
+const openJiraIssueUrlOpener = (url: string): Promise<unknown> | unknown =>
+  typeof window === "undefined"
+    ? undefined
+    : (windowShellOpenExternal(window.drogon)?.(url) ?? undefined);
+
+/** The workspace sheet's clipboard seam (this repo's navigator pattern). */
+const writeJiraClipboardTextOpener = (text: string): Promise<unknown> | unknown =>
+  typeof navigator === "undefined"
+    ? Promise.resolve()
+    : (navigator.clipboard?.writeText(text) ?? Promise.resolve());
+
 export const TASKS_ROUTE_ID = "tasks";
 export const TASKS_TITLE = "Tasks";
 
@@ -85,6 +113,9 @@ export type TasksPageHost = {
   onOpenTerminal: (workspaceId: string) => void;
   /** Closes the Tasks page (SourceBar close / Esc); optional until the app wires it. */
   onClose?: () => void;
+  /** The `jira.v1` bridge; defaults to the granted `window.drogon.jira`
+   *  namespace (tests inject a stub here). */
+  jiraBridge?: JiraBridge;
 };
 
 export type TasksPanelProps = {
@@ -173,7 +204,18 @@ function writeTasksPageCache(key: TasksPageCacheKey, result: TasksPageCachedResu
   }
 }
 
-export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: TasksPageHost) {
+export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose, jiraBridge }: TasksPageHost) {
+  // Why: the granted jira.v1 namespace (R17-A preload); off-app (tests that
+  // render chrome only) a refused stub keeps the surface renderable.
+  const jira = useMemo<JiraBridge>(
+    () =>
+      jiraBridge ??
+      ((typeof window !== "undefined"
+        ? (window.drogon as unknown as { jira?: JiraBridge } | undefined)?.jira
+        : undefined) ??
+        refusedJiraBridge()),
+    [jiraBridge],
+  );
   // #270: fork `use-task-page-global-effects.ts` — Escape closes the page
   // from anywhere (window capture) once the page is the visible surface.
   useTaskPageGlobalEscape({
@@ -273,6 +315,170 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   const [startError, setStartError] = useState<string | null>(null);
   const githubListScrollRef = useRef<HTMLDivElement | null>(null);
 
+  // --- R17-B: Jira source state (fork use-task-page-jira-list-state +
+  // store-bindings + repo-selection derivation) ---------------------------
+  const [jiraStatusState, setJiraStatusState] = useState<{
+    status: JiraConnectionStatus | null;
+    checked: boolean;
+  }>({ status: null, checked: false });
+  const refreshJiraStatus = useCallback(() => {
+    let cancelled = false;
+    void jira
+      .jiraStatus()
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setJiraStatusState({ status: result.result, checked: true });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) {
+          setJiraStatusState((current) =>
+            current.checked ? current : { ...current, checked: true },
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [jira]);
+  useEffect(() => refreshJiraStatus(), [refreshJiraStatus]);
+  const jiraStatus = jiraStatusState.status;
+  // Why: the fork's jiraStatusCurrent keys the status to the provider
+  // runtime context; Drogon runs one local runtime, so a fetched status is
+  // always current (declared R17-B deviation).
+  const jiraStatusReady = jiraStatusState.checked;
+  const jiraConnected = jiraStatus?.connected ?? false;
+  const jiraSites = useMemo(() => jiraStatus?.sites ?? [], [jiraStatus]);
+  // Fork repo-selection derivation: selectedSiteId, else activeSiteId, else
+  // the first connected site.
+  const selectedJiraSiteId =
+    jiraStatus?.selectedSiteId ?? jiraStatus?.activeSiteId ?? jiraSites[0]?.id ?? null;
+  const selectedJiraSite =
+    selectedJiraSiteId && selectedJiraSiteId !== "all"
+      ? (jiraSites.find((site) => site.id === selectedJiraSiteId) ?? null)
+      : null;
+  const [jiraConnectOpen, setJiraConnectOpen] = useState(false);
+  // Fork hideTaskSource semantics: hidden providers drop out of the source
+  // options (the fork persists settings.visibleTaskProviders; Drogon keeps
+  // the page-mounted set, declared deviation).
+  const [hiddenTaskSources, setHiddenTaskSources] = useState<Set<TaskSource>>(
+    () => new Set(),
+  );
+  const sourceOptions = getSourceOptions();
+  const visibleSourceOptions = sourceOptions.filter(
+    (option) => !hiddenTaskSources.has(option.id),
+  );
+  // #346 + R17-B: a requested source (sidebar chip, source-icon click)
+  // selects as soon as it is renderable; the Jira option now always is.
+  const taskSource: TaskSource = resolveRequestedTaskSource(
+    requestedTaskSource,
+    visibleSourceOptions.map((option) => option.id),
+  );
+  const jiraList = useJiraListState({
+    bridge: jira,
+    taskSource,
+    jiraConnected,
+    selectedJiraSiteId,
+  });
+  // Fork detail-routing state: the selected issue key + fallback snapshot
+  // collapse to one value here (no cross-page cache to reconcile against).
+  const [selectedJiraIssue, setSelectedJiraIssue] = useState<JiraIssue | null>(null);
+  const openJiraDetailPage = useCallback((issue: JiraIssue) => {
+    setSelectedJiraIssue(issue);
+  }, []);
+  const closeJiraDetailPage = useCallback(() => {
+    setSelectedJiraIssue(null);
+  }, []);
+  // The fork's selected-issue reconciliation: when the issue leaves the
+  // displayed list (site switch, preset change, refresh), the sheet closes.
+  useEffect(() => {
+    if (!jiraConnected || jiraList.jiraIssues.length === 0) {
+      if (selectedJiraIssue !== null) {
+        setSelectedJiraIssue(null);
+      }
+      return;
+    }
+    if (
+      selectedJiraIssue &&
+      !jiraList.jiraIssues.some(
+        (issue) =>
+          issue.key === selectedJiraIssue.key &&
+          (!selectedJiraIssue.siteId ||
+            !issue.siteId ||
+            issue.siteId === selectedJiraIssue.siteId),
+      )
+    ) {
+      setSelectedJiraIssue(null);
+    }
+  }, [jiraConnected, jiraList.jiraIssues, selectedJiraIssue]);
+
+  const onSelectTaskSource = useCallback((source: TaskSource) => {
+    setRequestedTaskSource(source);
+  }, []);
+  const hideTaskSource = useCallback((source: TaskSource) => {
+    setHiddenTaskSources((current) => {
+      const next = new Set(current);
+      next.add(source);
+      return next;
+    });
+  }, []);
+  // Fork SourceBar selectJiraSite: clear the list immediately, then let the
+  // daemon switch; a failure toasts the fork's copy and keeps the old site.
+  const onSelectJiraSite = useCallback(
+    (siteId: string) => {
+      setSelectedJiraIssue(null);
+      jiraList.resetJiraList();
+      void jira
+        .jiraSelectSite({ siteId })
+        .then((result) => {
+          if (result.ok) {
+            setJiraStatusState({ status: result.result, checked: true });
+            return;
+          }
+          toast.error("Failed to switch Jira site.");
+        })
+        .catch(() => {
+          toast.error("Failed to switch Jira site.");
+        });
+    },
+    [jira, jiraList],
+  );
+  const onSelectJiraPreset = useCallback(
+    (preset: JiraPresetId) => {
+      jiraList.setJiraSearchInput("");
+      jiraList.setAppliedJiraSearch("");
+      jiraList.setActiveJiraPreset(preset);
+      jiraList.persistJiraResumeState({ jiraPreset: preset, jiraQuery: "" });
+      jiraList.handleRefreshJiraIssues();
+    },
+    [jiraList],
+  );
+  const jiraCreationDialog = useJiraIssueCreationDialog({
+    bridge: jira,
+    connected: jiraConnected,
+    siteId: selectedJiraSiteId,
+    // The fork inserts the created issue into the list cache and selects
+    // it; without a cache the refresh re-reads the list and the sheet opens
+    // on the fresh issue.
+    onCreated: (issue) => {
+      jiraList.handleRefreshJiraIssues();
+      openJiraDetailPage(issue);
+    },
+  });
+  // Why: the creation hook's returned object is a fresh literal each render;
+  // the open/close setters are stable, so the chrome callbacks key on them.
+  const setJiraDialogOpen = jiraCreationDialog.setOpen;
+  const onOpenNewJiraIssue = useCallback(() => {
+    setJiraDialogOpen(true);
+  }, [setJiraDialogOpen]);
+  const onJiraIssuePatched = useCallback((issue: JiraIssue) => {
+    jiraList.patchJiraIssue(issue);
+  }, [jiraList]);
+  // handleUseJiraItem lives below next to refreshLinks (it opens the
+  // started worktree's terminal and refreshes the issue badges).
+
   const refreshGroups = useCallback(() => {
     const next = loadGroups();
     setGroups(next);
@@ -350,6 +556,32 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   useEffect(() => {
     refreshLinks();
   }, [refreshLinks]);
+
+  // Fork handleUseJiraItem → openComposerForJiraItem: the daemon creates
+  // the worktree (jira.startIssue) and the page opens its terminal through
+  // the same harness seam as the GitHub rows; the composer-modal repo pick
+  // has no Drogon counterpart, so the page's selected project applies.
+  const handleUseJiraItem = useCallback(
+    (issue: JiraIssue) => {
+      if (projectId === null) {
+        toast.error("Select a project in the Tasks page before starting a Jira issue.");
+        return;
+      }
+      void startWorkspaceFromJiraIssue(jira, { projectId, issue })
+        .then((outcome) => {
+          if (!outcome.ok) {
+            toast.error(outcome.error);
+            return;
+          }
+          refreshLinks();
+          onOpenTerminal(outcome.workspaceId);
+        })
+        .catch(() => {
+          toast.error("Could not start the Jira issue.");
+        });
+    },
+    [jira, projectId, refreshLinks, onOpenTerminal],
+  );
 
   // The pin is per project: switching repos adopts the stored choice of
   // the newly selected repo (or `'auto'` when it was never pinned).
@@ -573,13 +805,6 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   );
 
   const selectedRepo = selectedRepos[0] ?? null;
-  // #346: a request for a source the page cannot render yet (Jira before
-  // R17-B) resolves to the default source instead of blanking the page.
-  const sourceOptions = getSourceOptions();
-  const taskSource: TaskSource = resolveRequestedTaskSource(
-    requestedTaskSource,
-    sourceOptions.map((option) => option.id),
-  );
   const githubEmptyState = getRepoBackedTaskEmptyState({
     provider: "github",
     selectedRepoCount: selectedRepos.length,
@@ -593,15 +818,36 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
 
   const model: TaskPageModel = {
     taskSource,
-    visibleSourceOptions: sourceOptions,
+    visibleSourceOptions,
     taskSourceAvailabilityNoticeByProvider: {},
     // Fork parity (#238): the pill target is the repo identity
     // (owner/repo slug) like the source's provider-identity label — the
-    // project display name is only the pre-resolve fallback.
-    taskSourceContextSummary: {
-      label: ["GitHub", "Local", repo ?? selectedRepo?.name ?? "No project"].join(" · "),
-      title: ["GitHub source", repo ? `Source: ${repo}` : null].filter(Boolean).join(" · "),
-    },
+    // project display name is only the pre-resolve fallback. The Jira
+    // branch is the fork's account-backed summary
+    // (task-source-context-summary.ts getAccountBackedTaskSourceSummary):
+    // Jira · Local · <site displayName|siteUrl|Current account>.
+    taskSourceContextSummary:
+      taskSource === "jira"
+        ? {
+            label: [
+              "Jira",
+              "Local",
+              selectedJiraSite?.displayName ??
+                selectedJiraSite?.siteUrl ??
+                "Current account",
+            ].join(" · "),
+            title: [
+              "Jira source",
+              "Host: Local",
+              `Account: ${selectedJiraSite?.displayName ?? selectedJiraSite?.siteUrl ?? "Current account"}`,
+            ].join(" · "),
+          }
+        : {
+            label: ["GitHub", "Local", repo ?? selectedRepo?.name ?? "No project"].join(" · "),
+            title: ["GitHub source", repo ? `Source: ${repo}` : null]
+              .filter(Boolean)
+              .join(" · "),
+          },
     closeTaskPage: () => onClose?.(),
     taskSourceAvailabilityNotice: null,
     taskPageListChromeHidden: false,
@@ -672,6 +918,48 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
     handleStartWorkItem,
     startBusyNumber,
     githubListScrollRef,
+
+    // R17-B: the Jira source surface.
+    onSelectTaskSource,
+    hideTaskSource,
+    jiraStatus,
+    jiraStatusReady,
+    jiraConnected,
+    jiraSites,
+    selectedJiraSiteId,
+    onSelectJiraSite,
+    jiraConnectOpen,
+    setJiraConnectOpen,
+    refreshJiraStatus,
+    jiraPresets: getJiraPresets(),
+    jiraLoading: jiraList.jiraLoading,
+    jiraSearchInput: jiraList.jiraSearchInput,
+    setJiraSearchInput: jiraList.setJiraSearchInput,
+    setAppliedJiraSearch: jiraList.setAppliedJiraSearch,
+    activeJiraPreset: jiraList.activeJiraPreset,
+    onSelectJiraPreset,
+    handleRefreshJiraIssues: jiraList.handleRefreshJiraIssues,
+    jiraProjectsLoading: jiraList.jiraProjectsLoading,
+    sortedAvailableJiraProjects: jiraList.availableJiraProjects,
+    onOpenNewJiraIssue,
+    jiraIssues: jiraList.jiraIssues,
+    jiraError: jiraList.jiraError,
+    jiraErrorDetailsOpen: jiraList.jiraErrorDetailsOpen,
+    setJiraErrorDetailsOpen: jiraList.setJiraErrorDetailsOpen,
+    jiraOrderBy: jiraList.jiraOrderBy,
+    jiraOrderDirection: jiraList.jiraOrderDirection,
+    handleJiraSort: jiraList.handleJiraSort,
+    sortedJiraIssues: jiraList.sortedJiraIssues,
+    selectedJiraIssue,
+    openJiraDetailPage,
+    closeJiraDetailPage,
+    handleUseJiraItem,
+    jiraWorkspaceBridge: jira,
+    jiraWorkspaceSiteId: selectedJiraSiteId,
+    openJiraIssueUrl: openJiraIssueUrlOpener,
+    writeJiraClipboardText: writeJiraClipboardTextOpener,
+    onJiraIssuePatched,
+    jiraCreationDialog,
   };
 
   return <TaskPageSurface model={model} />;
@@ -688,6 +976,7 @@ export function createTasksPanelDescriptor(host: TasksPageHost): TasksPanelDescr
         loadGroups={host.loadGroups}
         onOpenTerminal={host.onOpenTerminal}
         onClose={host.onClose}
+        jiraBridge={host.jiraBridge}
       />
     ),
     capability: TASKS_CAPABILITY,

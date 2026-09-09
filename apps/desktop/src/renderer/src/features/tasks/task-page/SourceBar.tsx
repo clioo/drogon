@@ -1,11 +1,21 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-// src/renderer/src/components/task-page/SourceBar.tsx. GitHub-only: the
-// Linear scope selector and Jira site select do not exist here; the source
-// icon row renders the single GitHub option, active.
+// src/renderer/src/components/task-page/SourceBar.tsx (R17-B: the source
+// icons switch the active source like the fork's openTaskPage({taskSource})
+// — the fork also persists defaultTaskSource through a settings RPC, which
+// has no Drogon counterpart, so the selection is page-mounted state — and
+// the connected Jira site select renders on the right, exactly where the
+// fork puts it; the Linear scope selector stays unported).
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { Button } from "../../../components/ui/button";
 import { X } from "lucide-react";
 import { cn } from "../cn";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "../../../components/ui/select";
 import type { TaskPageModelProps } from "../task-page-model";
 
 export function TaskPageSourceBar({
@@ -17,6 +27,11 @@ export function TaskPageSourceBar({
     taskSource,
     taskSourceAvailabilityNoticeByProvider,
     taskSourceContextSummary,
+    onSelectTaskSource,
+    jiraConnected,
+    jiraSites,
+    selectedJiraSiteId,
+    onSelectJiraSite,
   } = model;
   return (
     <div className="flex items-center justify-between gap-2">
@@ -46,7 +61,7 @@ export function TaskPageSourceBar({
           const active = taskSource === source.id;
           const sourceAvailabilityNotice =
             taskSourceAvailabilityNoticeByProvider[source.id] ?? null;
-          const sourceDisabled = source.disabled;
+          const sourceDisabled = source.disabled || sourceAvailabilityNotice?.blocking;
           return (
             <Tooltip key={source.id}>
               <TooltipTrigger asChild>
@@ -54,6 +69,12 @@ export function TaskPageSourceBar({
                   type="button"
                   disabled={sourceDisabled}
                   data-task-source={source.id}
+                  onClick={() => {
+                    if (sourceAvailabilityNotice?.blocking) {
+                      return;
+                    }
+                    onSelectTaskSource(source.id);
+                  }}
                   aria-label={sourceAvailabilityNotice?.label ?? source.label}
                   aria-pressed={active}
                   className={cn(
@@ -80,6 +101,25 @@ export function TaskPageSourceBar({
           <span className="truncate">{taskSourceContextSummary.label}</span>
         </div>
       </div>
+      {taskSource === "jira" && jiraConnected ? (
+        <div className="flex items-center gap-2">
+          {jiraSites.length > 1 ? (
+            <Select value={selectedJiraSiteId ?? undefined} onValueChange={onSelectJiraSite}>
+              <SelectTrigger className="h-8 w-[220px] rounded-md border-border/50 bg-muted/50 text-xs font-medium shadow-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Jira sites</SelectItem>
+                {jiraSites.map((site) => (
+                  <SelectItem key={site.id} value={site.id}>
+                    {site.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

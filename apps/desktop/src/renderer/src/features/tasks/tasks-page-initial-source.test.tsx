@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-/* MIT Copyright (c) 2026 Lovecast Inc. Tasks initial source (#346): a
-   source requested through the navigation seam before mount is consumed
-   on mount; a request for a source the page cannot render yet (Jira
-   before R17-B) falls back to the default source instead of blanking the
-   page; a live request while the page is kept mounted re-resolves. */
+/* MIT Copyright (c) 2026 Lovecast Inc. Tasks initial source (#346 + R17-B):
+   a source requested through the navigation seam before mount is consumed
+   on mount; with the Jira surface landed, a Jira request selects Jira and
+   renders its chrome (the connect prompt when no jira.v1 bridge answers);
+   a live request while the page is kept mounted re-resolves. */
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -114,14 +114,15 @@ describe("TasksPage initial source", () => {
     });
   });
 
-  test("a Jira request before R17-B falls back to the default source and still renders", async () => {
+  test("a Jira request selects the Jira source (R17-B) and renders its surface", async () => {
     requestTaskSourceNavigation("jira");
     renderPage();
     await waitFor(() => {
-      expect(sourceButton("github")?.getAttribute("aria-pressed")).toBe("true");
+      expect(sourceButton("jira")?.getAttribute("aria-pressed")).toBe("true");
     });
-    // The GitHub list content is intact — the page did not blank out.
-    expect(await screen.findByText("Fix the sidebar crash")).not.toBeNull();
+    // No jira.v1 bridge in jsdom: the surface renders the fork's
+    // connect prompt instead of blanking the page.
+    expect(await screen.findByText("Connect your Jira site")).not.toBeNull();
   });
 
   test("a live request while kept mounted resolves without remounting", async () => {
@@ -135,9 +136,9 @@ describe("TasksPage initial source", () => {
       requestTaskSourceNavigation("jira");
     });
     await waitFor(() => {
-      expect(sourceButton("github")?.getAttribute("aria-pressed")).toBe("true");
+      expect(sourceButton("jira")?.getAttribute("aria-pressed")).toBe("true");
     });
-    // The GitHub list content is intact — the fallback never blanks the page.
-    expect(await screen.findByText("Fix the sidebar crash")).not.toBeNull();
+    // The GitHub list gives way to the Jira surface — no remount, no blank.
+    expect(await screen.findByText("Connect your Jira site")).not.toBeNull();
   });
 });

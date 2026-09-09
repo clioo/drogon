@@ -24,6 +24,7 @@ import {
 import { toWorkItem, type TaskPageModel } from "./task-page-model";
 import { GITHUB_TASK_GRID_CLASS } from "./task-page-source-context";
 import { TooltipProvider } from "./ui/tooltip";
+import { jiraSurfaceModelDefaults } from "./jira/jira-surface-defaults";
 import type { TaskIssue } from "../../../../shared/tasks-contract";
 
 function issue(number: number, overrides: Partial<TaskIssue> = {}): TaskIssue {
@@ -94,6 +95,7 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
     handleStartWorkItem: () => {},
     startBusyNumber: null,
     githubListScrollRef: { current: null },
+    ...jiraSurfaceModelDefaults(),
     ...overrides,
   };
 }

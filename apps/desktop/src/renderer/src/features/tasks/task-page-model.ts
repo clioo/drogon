@@ -1,7 +1,8 @@
 // Adapter model for the ported Orca task-page components. The source
 // threads one giant `TaskPageComposerActionsModel` through every component;
-// this repo keeps the same field names but only the GitHub-only subset the
-// components actually read, assembled by TasksPage.tsx from the bridge.
+// this repo keeps the same field names but only the GitHub + Jira subset
+// the components actually read, assembled by TasksPage.tsx from the
+// bridges.
 import type { Dispatch, JSX, RefObject, SetStateAction } from "react";
 import type {
   CheckState,
@@ -24,6 +25,20 @@ import type {
   IssueSourcePreference,
 } from "./issue-source-selector";
 import type { TaskSource } from "./task-source-navigation";
+import type {
+  JiraBridge,
+  JiraConnectionStatus,
+  JiraIssue,
+  JiraProject,
+  JiraSite,
+} from "../../../../shared/jira-contract";
+import type { JiraPreset, JiraPresetId } from "./task-page-localized-options";
+import type { TaskPageJiraLoadError } from "./jira/jira-list-load-state";
+import type {
+  JiraIssueSortColumn,
+  JiraIssueSortDirection,
+} from "./jira/jira-issue-sorter";
+import type { JiraIssueCreationDialogState } from "./jira/use-jira-issue-creation";
 
 /** One row of the GitHub list: a TaskIssue/TaskPullRequest projected into the source's work-item shape. */
 export type TaskPageWorkItem = GitHubWorkItemLike & {
@@ -177,6 +192,56 @@ export type TaskPageModel = {
 
   // Refs (scroll position reset across page changes).
   githubListScrollRef: RefObject<HTMLDivElement | null>;
+} & TaskPageJiraModelFields;
+
+// R17-B: the Jira source surface (fork task-page/jira/Content.tsx +
+// Filters.tsx + SourceBar.tsx wiring), assembled by TasksPage.tsx over
+// the jira.v1 bridge. Field names mirror the fork's model keys; kept as
+// an intersected field set so chrome tests can spread
+// jiraSurfaceModelDefaults().
+export type TaskPageJiraModelFields = {
+  onSelectTaskSource: (source: TaskSource) => void;
+  hideTaskSource: (source: TaskSource, label: string) => void;
+  jiraStatus: JiraConnectionStatus | null;
+  jiraStatusReady: boolean;
+  jiraConnected: boolean;
+  jiraSites: JiraSite[];
+  selectedJiraSiteId: string | null;
+  onSelectJiraSite: (siteId: string) => void;
+  jiraConnectOpen: boolean;
+  setJiraConnectOpen: (open: boolean) => void;
+  /** Re-reads jira.status after the connect dialog succeeds. */
+  refreshJiraStatus: () => void;
+  jiraPresets: JiraPreset[];
+  jiraLoading: boolean;
+  jiraSearchInput: string;
+  setJiraSearchInput: Dispatch<SetStateAction<string>>;
+  setAppliedJiraSearch: Dispatch<SetStateAction<string>>;
+  activeJiraPreset: JiraPresetId;
+  onSelectJiraPreset: (preset: JiraPresetId) => void;
+  handleRefreshJiraIssues: () => void;
+  jiraProjectsLoading: boolean;
+  sortedAvailableJiraProjects: JiraProject[];
+  onOpenNewJiraIssue: () => void;
+  jiraIssues: JiraIssue[];
+  jiraError: TaskPageJiraLoadError | null;
+  jiraErrorDetailsOpen: boolean;
+  setJiraErrorDetailsOpen: (open: boolean) => void;
+  jiraOrderBy: JiraIssueSortColumn;
+  jiraOrderDirection: JiraIssueSortDirection;
+  handleJiraSort: (column: JiraIssueSortColumn) => void;
+  sortedJiraIssues: JiraIssue[];
+  selectedJiraIssue: JiraIssue | null;
+  openJiraDetailPage: (issue: JiraIssue) => void;
+  closeJiraDetailPage: () => void;
+  handleUseJiraItem: (issue: JiraIssue) => void;
+  jiraWorkspaceBridge: JiraBridge;
+  jiraWorkspaceSiteId: string | null;
+  openJiraIssueUrl: (url: string) => Promise<unknown> | unknown;
+  writeJiraClipboardText: (text: string) => Promise<unknown> | unknown;
+  onJiraIssuePatched: (issue: JiraIssue) => void;
+  /** The R17-C create dialog state (the fork's newJiraIssue* slice). */
+  jiraCreationDialog: JiraIssueCreationDialogState;
 };
 
 export type TaskPageModelProps = { model: TaskPageModel };
