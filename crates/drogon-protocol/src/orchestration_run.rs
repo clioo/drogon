@@ -4,8 +4,8 @@
 
 use crate::RpcError;
 use crate::orchestration_common::{
-    MAX_SUBJECT_TEXT_BYTES, OpaqueCursor, validate_consumer_generation, validate_page_limit,
-    validate_short_label, validate_task_text,
+    MAX_SUBJECT_TEXT_BYTES, OpaqueCursor, SessionIdentity, validate_consumer_generation,
+    validate_page_limit, validate_short_label, validate_task_text,
 };
 use crate::orchestration_scope::HostScope;
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,8 @@ pub struct RunCreateParams {
     pub host: HostScope,
     pub objective: String,
     pub coordinator_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller: Option<SessionIdentity>,
 }
 
 impl RunCreateParams {
@@ -31,7 +33,11 @@ impl RunCreateParams {
             MAX_SUBJECT_TEXT_BYTES,
             "Invalid run objective.",
         )?;
-        validate_short_label(&self.coordinator_id)
+        validate_short_label(&self.coordinator_id)?;
+        if let Some(caller) = &self.caller {
+            caller.validate_shape()?;
+        }
+        Ok(())
     }
 }
 
@@ -64,11 +70,17 @@ pub struct RunCurrentParams {
     #[serde(flatten)]
     pub host: HostScope,
     pub coordinator_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller: Option<SessionIdentity>,
 }
 impl RunCurrentParams {
     pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
         self.host.validate_target(execution_host_id)?;
-        validate_short_label(&self.coordinator_id)
+        validate_short_label(&self.coordinator_id)?;
+        if let Some(caller) = &self.caller {
+            caller.validate_shape()?;
+        }
+        Ok(())
     }
 }
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -90,6 +102,8 @@ pub struct RunUseParams {
     pub consumer_generation: u64,
     #[serde(default)]
     pub takeover: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller: Option<SessionIdentity>,
 }
 
 impl RunUseParams {
@@ -97,7 +111,11 @@ impl RunUseParams {
         self.host.validate_target(execution_host_id)?;
         validate_short_label(&self.run_id)?;
         validate_short_label(&self.coordinator_id)?;
-        validate_consumer_generation(self.consumer_generation)
+        validate_consumer_generation(self.consumer_generation)?;
+        if let Some(caller) = &self.caller {
+            caller.validate_shape()?;
+        }
+        Ok(())
     }
 }
 

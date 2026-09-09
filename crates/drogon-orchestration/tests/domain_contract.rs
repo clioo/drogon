@@ -37,6 +37,7 @@ fn create_run(tx: &rusqlite::Transaction<'_>, id: &str) {
             host: host(),
             objective: "objective".into(),
             coordinator_id: "owner-a".into(),
+            caller: None,
         },
         id,
         42,
@@ -68,6 +69,7 @@ fn explicit_takeover_installs_a_different_coordinator_and_fences_prior_owner() {
     let tx = conn.transaction().unwrap();
     create_run(&tx, "run-a");
     let mut takeover = RunUseParams {
+        caller: None,
         host: host(),
         run_id: "run-a".into(),
         coordinator_id: "owner-b".into(),
@@ -205,6 +207,7 @@ fn storage_error_does_not_echo_trigger_payload() {
             host: host(),
             objective: "objective".into(),
             coordinator_id: "owner-a".into(),
+            caller: None,
         },
         "run-a",
         0,
@@ -396,6 +399,7 @@ fn ignored_takeover_update_cannot_report_success() {
     create_run(&tx, "run-a");
     tx.execute_batch("CREATE TRIGGER ignore_takeover BEFORE UPDATE ON orchestration_runs BEGIN SELECT RAISE(IGNORE); END;").unwrap();
     let params = RunUseParams {
+        caller: None,
         host: host(),
         run_id: "run-a".into(),
         coordinator_id: "owner-b".into(),

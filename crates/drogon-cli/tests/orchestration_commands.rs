@@ -161,6 +161,35 @@ fn coordinator_args() -> Vec<&'static str> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_binding_capability_is_required_before_any_mutation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mock = MockService::start(dir.path(), mock_behavior(true, vec![]));
+    let invocation = run_cli(
+        dir.path(),
+        &[
+            "--json",
+            "orchestration",
+            "run-create",
+            "--objective",
+            "fixture",
+            "--from",
+            "terminal-1",
+        ],
+        &[],
+    );
+    assert_ne!(invocation.exit_code, 0);
+    let value: Value = serde_json::from_str(&invocation.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "unsupported_feature");
+    assert_eq!(
+        mock.captured()
+            .iter()
+            .map(|r| r["method"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["status"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn root_worker_read_decodes_terminal_bytes_and_checks_cursor_span() {
     for (encoded, end, expected_exit) in
         [("aGVsbG8=", 5, 0), ("aGVsbG8=", 6, 1), ("not-base64", 5, 1)]
@@ -540,7 +569,7 @@ async fn run_use_maps_scope_and_generation_fence() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn run_use_without_explicit_binding_is_not_silently_defaulted() {
+async fn run_use_without_target_or_caller_does_not_guess_a_binding() {
     let dir = temp_dir("run-use-default");
     let mock = MockService::start(&dir, mock_behavior(true, vec![]));
     let invocation = run_cli(&dir, &["orchestration", "run-use", "--json"], &[]);

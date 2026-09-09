@@ -14,6 +14,7 @@ pub mod client;
 pub mod commands;
 pub mod credential;
 pub mod error;
+mod orchestration_binding;
 pub mod orchestration_cli;
 pub mod orchestration_commands;
 mod orchestration_gate_commands;

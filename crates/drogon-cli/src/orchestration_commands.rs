@@ -80,6 +80,9 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
         "DROGON_TASK_ID",
         "DROGON_DISPATCH_ID",
         "DROGON_HOST_ID",
+        "DROGON_SESSION_ID",
+        "DROGON_SESSION_INCARNATION",
+        "DROGON_HOOK_INCARNATION",
     ] {
         if let Some(raw) = std::env::var_os(key) {
             let value = raw
@@ -115,6 +118,17 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
         if worker_credential {
             return Err(usage(
                 "this command is coordinator-only and refuses DROGON_DISPATCH_CAPABILITY; there is no administrator fallback",
+            ));
+        }
+        if let Some(scope) = command.coordinator_scope()
+            && !scope.is_complete()
+            && scope.from.is_none()
+            && scope.coordinator_id.is_none()
+            && !crate::orchestration_binding::terminal_hint()
+            && !(crate::orchestration_binding::named_inspection(command) && scope.run.is_some())
+        {
+            return Err(usage(
+                "Coordinator context is required: pass --from or explicit --run, --coordinator-id and --consumer-generation.",
             ));
         }
         if let OrchestrationCommand::WorkerStart {
@@ -336,20 +350,20 @@ fn resolve_host(
     Ok(chosen)
 }
 
-fn host_scope(host_id: &str) -> HostScope {
+pub(crate) fn host_scope(host_id: &str) -> HostScope {
     HostScope {
         contract_version: drogon_protocol::orchestration_scope::COORDINATION_CONTRACT_VERSION,
         host_id: host_id.to_string(),
     }
 }
 
-/// Coordinator bindings are explicit-only: no hint filling, no defaults.
+/// Convert a binding after explicit validation or authoritative runtime resolution.
 pub(crate) fn coordinator_scope(host_id: &str, args: &CoordinatorScopeArgs) -> CoordinatorScope {
     CoordinatorScope {
         host: host_scope(host_id),
-        run_id: args.run.clone(),
-        coordinator_id: args.coordinator_id.clone(),
-        consumer_generation: args.consumer_generation,
+        run_id: args.run_id().to_owned(),
+        coordinator_id: args.coordinator_id().to_owned(),
+        consumer_generation: args.generation(),
     }
 }
 
@@ -529,7 +543,7 @@ pub(crate) fn emit(
 }
 
 /// Shared invariant checks for run summaries on any run method result.
-fn check_run(run: &RunSummary) -> Result<(), String> {
+pub(crate) fn check_run(run: &RunSummary) -> Result<(), String> {
     drogon_protocol::orchestration_common::validate_short_label(&run.run_id)
         .map_err(|e| e.message)?;
     drogon_protocol::orchestration_common::validate_short_label(&run.coordinator_id)
@@ -611,6 +625,10 @@ pub async fn run(
         | OrchestrationCommand::RequestShow { host, .. } => host.host.as_deref(),
     };
     let host_id = resolve_host(explicit_host, &status.host_id, request_id)?;
+    let resolved =
+        crate::orchestration_binding::resolve(client, request_id, &status, command.clone()).await?;
+    let caller = resolved.caller;
+    let command = &resolved.command;
 
     match command {
         OrchestrationCommand::RunCreate {
@@ -628,6 +646,7 @@ pub async fn run(
                 )
             });
             let params = RunCreateParams {
+                caller: caller.clone(),
                 host: host_scope(&host_id),
                 objective: objective.clone(),
                 coordinator_id: coordinator_id.clone(),
@@ -746,7 +765,11 @@ pub async fn run(
             )
         }
         OrchestrationCommand::RunCurrent { coordinator_id, .. } => {
+            let coordinator_id = coordinator_id
+                .as_ref()
+                .ok_or_else(|| usage("run-current needs a coordinator or terminal identity"))?;
             let params = RunCurrentParams {
+                caller: caller.clone(),
                 host: host_scope(&host_id),
                 coordinator_id: coordinator_id.clone(),
             };
@@ -786,10 +809,11 @@ pub async fn run(
             scope, takeover, ..
         } => {
             let params = RunUseParams {
+                caller: caller.clone(),
                 host: host_scope(&host_id),
-                run_id: scope.run.clone(),
-                coordinator_id: scope.coordinator_id.clone(),
-                consumer_generation: scope.consumer_generation,
+                run_id: scope.run_id().to_owned(),
+                coordinator_id: scope.coordinator_id().to_owned(),
+                consumer_generation: scope.generation(),
                 takeover: *takeover,
             };
             let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
@@ -799,17 +823,18 @@ pub async fn run(
             let result: RunUseResult =
                 Client::decode_checked(&call, "orchestration.runUse", |r: &RunUseResult| {
                     check_run(&r.run)?;
-                    if r.run.run_id != scope.run {
+                    if r.run.run_id != scope.run_id() {
                         return Err(format!(
                             "run-use response names {:?}, not the requested {:?}",
-                            r.run.run_id, scope.run
+                            r.run.run_id,
+                            scope.run_id()
                         ));
                     }
                     let expected_generation = scope
-                        .consumer_generation
+                        .generation()
                         .checked_add(u64::from(*takeover))
                         .ok_or("run-use generation overflow")?;
-                    if r.run.coordinator_id != scope.coordinator_id
+                    if r.run.coordinator_id != scope.coordinator_id()
                         || r.run.consumer_generation != expected_generation
                     {
                         return Err("run-use response does not match the requested binding".into());
@@ -872,7 +897,7 @@ pub async fn run(
                 "orchestration.taskCreate",
                 |r: &TaskCreateResult| {
                     check_task_id(&r.task.task_id)?;
-                    if r.task.run_id != scope.run {
+                    if r.task.run_id != scope.run_id() {
                         return Err("task-create response names a different run".into());
                     }
                     Ok(())
@@ -918,7 +943,7 @@ pub async fn run(
                 "orchestration.taskUpdate",
                 |r: &TaskUpdateResult| {
                     if r.task.task_id != *task
-                        || r.task.run_id != scope.run
+                        || r.task.run_id != scope.run_id()
                         || r.task.status != params.status
                     {
                         return Err(
@@ -1020,7 +1045,7 @@ pub async fn run(
             let result: TaskShowResult =
                 Client::decode_checked(&call, "orchestration.taskShow", |r: &TaskShowResult| {
                     check_task_id(&r.task.task_id)?;
-                    if r.task.task_id != *task || r.task.run_id != scope.run {
+                    if r.task.task_id != *task || r.task.run_id != scope.run_id() {
                         return Err(
                             "task-show response does not match the requested task scope".into()
                         );
@@ -1144,7 +1169,7 @@ pub async fn run(
                 )
                 .await?;
             let requested_workspace = workspace.clone();
-            let requested_scope = (scope.run.clone(), scope.consumer_generation);
+            let requested_scope = (scope.run_id().to_owned(), scope.generation());
             let result: WorkerStartResult = Client::decode_checked(
                 &call,
                 "orchestration.workerStart",

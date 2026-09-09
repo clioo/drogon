@@ -9,7 +9,7 @@ use clap::{Args, Subcommand, ValueEnum};
 /// Explicit execution-host override. Absent means: use the scoped
 /// `DROGON_HOST_ID` hint when present, else the connected runtime's own host
 /// identity from the read-only preflight.
-#[derive(Args, Debug, Default)]
+#[derive(Args, Debug, Default, Clone)]
 pub struct HostOpt {
     /// Execution host id (defaults to the scoped hint or the connected host)
     #[arg(long, value_name = "ID")]
@@ -19,17 +19,34 @@ pub struct HostOpt {
 /// Coordinator binding flags. There is no client binding store and no
 /// default-to-latest behavior: these are required verbatim on every
 /// coordinator-scope verb.
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct CoordinatorScopeArgs {
-    /// Run id of the coordination run
+    /// Run id (defaults to the caller's explicitly bound run)
     #[arg(long, value_name = "ID")]
-    pub run: String,
-    /// Coordinator binding id (opaque, returned by run-create)
+    pub run: Option<String>,
+    /// Explicit native coordinator binding id
     #[arg(long, value_name = "ID")]
-    pub coordinator_id: String,
-    /// Consumer generation fence known to this coordinator
+    pub coordinator_id: Option<String>,
+    /// Explicit known generation; never silently replaced if stale
     #[arg(long, value_name = "N")]
-    pub consumer_generation: u64,
+    pub consumer_generation: Option<u64>,
+    /// Coordinator terminal id (defaults to the current Drogon terminal)
+    #[arg(long, value_name = "HANDLE")]
+    pub from: Option<String>,
+}
+impl CoordinatorScopeArgs {
+    pub fn run_id(&self) -> &str {
+        self.run.as_deref().unwrap_or_default()
+    }
+    pub fn coordinator_id(&self) -> &str {
+        self.coordinator_id.as_deref().unwrap_or_default()
+    }
+    pub fn generation(&self) -> u64 {
+        self.consumer_generation.unwrap_or(0)
+    }
+    pub fn is_complete(&self) -> bool {
+        self.run.is_some() && self.coordinator_id.is_some() && self.consumer_generation.is_some()
+    }
 }
 
 /// Why one flat group: dual-actor verbs (send/check/reply/ask/request-show)
@@ -38,7 +55,7 @@ pub struct CoordinatorScopeArgs {
 /// Scoped worker context environment hints (DROGON_RUN_ID/TASK_ID/
 /// DISPATCH_ID) fill dispatch-scope gaps; explicit flags and hints must
 /// agree, and hints never grant authority.
-#[derive(Args, Debug, Default)]
+#[derive(Args, Debug, Default, Clone)]
 pub struct ActorScopeArgs {
     /// Coordinator binding: run id
     #[arg(long, value_name = "ID")]
@@ -53,6 +70,9 @@ pub struct ActorScopeArgs {
     /// Dispatch binding: dispatch id
     #[arg(long, visible_alias = "dispatch-id", value_name = "ID")]
     pub dispatch: Option<String>,
+    /// Caller terminal; check also accepts the source --terminal spelling
+    #[arg(long, visible_alias = "terminal", value_name = "HANDLE")]
+    pub from: Option<String>,
 }
 
 impl ActorScopeArgs {
@@ -188,7 +208,7 @@ impl ReceiptScopeArg {
     }
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum OrchestrationCommand {
     /// Create a run bound to a coordinator (initial generation is server-owned)
     RunCreate {
@@ -198,13 +218,17 @@ pub enum OrchestrationCommand {
         /// Coordinator binding id; generated and returned when omitted
         #[arg(long, value_name = "ID")]
         coordinator_id: Option<String>,
+        #[arg(long, value_name = "HANDLE")]
+        from: Option<String>,
         #[command(flatten)]
         host: HostOpt,
     },
     /// Show the run explicitly bound to a coordinator identity
     RunCurrent {
         #[arg(long, value_name = "ID")]
-        coordinator_id: String,
+        coordinator_id: Option<String>,
+        #[arg(long, value_name = "HANDLE")]
+        from: Option<String>,
         #[command(flatten)]
         host: HostOpt,
     },
@@ -228,6 +252,9 @@ pub enum OrchestrationCommand {
     RunUse {
         #[command(flatten)]
         scope: CoordinatorScopeArgs,
+        /// Source spelling for the target run
+        #[arg(long, value_name = "ID")]
+        id: Option<String>,
         #[arg(long, default_value_t = false)]
         takeover: bool,
         #[command(flatten)]
@@ -543,4 +570,55 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+}
+
+impl OrchestrationCommand {
+    pub(crate) fn coordinator_scope(&self) -> Option<&CoordinatorScopeArgs> {
+        match self {
+            Self::RunUse { scope, .. }
+            | Self::TaskCreate { scope, .. }
+            | Self::TaskUpdate { scope, .. }
+            | Self::TaskList { scope, .. }
+            | Self::TaskShow { scope, .. }
+            | Self::GateCreate { scope, .. }
+            | Self::GateResolve { scope, .. }
+            | Self::GateList { scope, .. }
+            | Self::WorkerStart { scope, .. }
+            | Self::WorkerShow { scope, .. }
+            | Self::WorkerRead { scope, .. }
+            | Self::WorkerStop { scope, .. }
+            | Self::WorkerAbandon { scope, .. }
+            | Self::WorkerRelease { scope, .. } => Some(scope),
+            _ => None,
+        }
+    }
+    pub(crate) fn coordinator_scope_mut(&mut self) -> Option<&mut CoordinatorScopeArgs> {
+        match self {
+            Self::RunUse { scope, .. }
+            | Self::TaskCreate { scope, .. }
+            | Self::TaskUpdate { scope, .. }
+            | Self::TaskList { scope, .. }
+            | Self::TaskShow { scope, .. }
+            | Self::GateCreate { scope, .. }
+            | Self::GateResolve { scope, .. }
+            | Self::GateList { scope, .. }
+            | Self::WorkerStart { scope, .. }
+            | Self::WorkerShow { scope, .. }
+            | Self::WorkerRead { scope, .. }
+            | Self::WorkerStop { scope, .. }
+            | Self::WorkerAbandon { scope, .. }
+            | Self::WorkerRelease { scope, .. } => Some(scope),
+            _ => None,
+        }
+    }
+    pub(crate) fn actor_scope_mut(&mut self) -> Option<&mut ActorScopeArgs> {
+        match self {
+            Self::Send { actor, .. }
+            | Self::Check { actor, .. }
+            | Self::Ask { actor, .. }
+            | Self::Reply { actor, .. }
+            | Self::RequestShow { actor, .. } => Some(actor),
+            _ => None,
+        }
+    }
 }

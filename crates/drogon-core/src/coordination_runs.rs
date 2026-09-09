@@ -1,6 +1,7 @@
 //! Engine-owned admission and receipts around transaction-only run/task operations.
 
 use drogon_orchestration::{gates, runs, tasks};
+use drogon_protocol::orchestration_common::SessionIdentity;
 use drogon_protocol::orchestration_gate::*;
 use drogon_protocol::orchestration_run::*;
 use drogon_protocol::orchestration_scope::CoordinatorScope;
@@ -9,6 +10,7 @@ use drogon_protocol::{Request, RpcError};
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::sync::atomic::Ordering;
 
 use crate::coordination_attempts;
@@ -28,7 +30,12 @@ impl Engine {
                 self.coordination_mutation(
                     request,
                     actor,
-                    |_| Ok(()),
+                    |_| {
+                        self.require_coordinator_caller(
+                            params.caller.as_ref(),
+                            &params.coordinator_id,
+                        )
+                    },
                     |tx| encode(runs::create(tx, &params, &new_id("run"), now_ms())?),
                 )
             }
@@ -45,14 +52,26 @@ impl Engine {
                 self.coordination_mutation(
                     request,
                     actor,
-                    |tx| authorize_run_use(tx, &params, request, &key),
+                    |tx| {
+                        self.require_coordinator_caller(
+                            params.caller.as_ref(),
+                            &params.coordinator_id,
+                        )?;
+                        authorize_run_use(tx, &params, request, &key)
+                    },
                     |tx| encode(runs::use_run(tx, &params)?),
                 )
             }
             "orchestration.runCurrent" => {
                 let params: RunCurrentParams = decode(&request.params)?;
                 params.validate_shape(&self.host_id)?;
-                self.coordination_read(|tx| encode(runs::current(tx, &params)?))
+                self.coordination_read(|tx| {
+                    self.require_coordinator_caller(
+                        params.caller.as_ref(),
+                        &params.coordinator_id,
+                    )?;
+                    encode(runs::current(tx, &params)?)
+                })
             }
             "orchestration.runList" => {
                 let params: RunListParams = decode(&request.params)?;
@@ -167,6 +186,49 @@ impl Engine {
             }
             other => Err(error::method_not_found(other)),
         }
+    }
+
+    fn require_coordinator_caller(
+        &self,
+        caller: Option<&SessionIdentity>,
+        coordinator_id: &str,
+    ) -> Result<(), RpcError> {
+        let Some(caller) = caller else {
+            return Ok(());
+        };
+        let identity = serde_json::json!([
+            "drogon.coordinator-session.v1",
+            caller.session_id,
+            caller.incarnation
+        ]);
+        let expected = format!(
+            "terminal-{:x}",
+            Sha256::digest(identity.to_string().as_bytes())
+        );
+        if expected != coordinator_id {
+            return Err(error::invalid_argument(
+                "Coordinator identity does not match the caller session.",
+            ));
+        }
+        let handle = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&caller.session_id)
+            .cloned()
+            .ok_or_else(|| {
+                error::unverifiable(
+                    "Coordinator session has no live handle in this service instance.",
+                )
+            })?;
+        crate::session::check_incarnation(&handle, &caller.incarnation)?;
+        let observed = crate::session::snapshot(&handle);
+        if observed["hostId"] != self.host_id || observed["verdict"] != "live" {
+            return Err(error::unverifiable(
+                "Coordinator session is not observed live on this host.",
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn coordination_mutation(

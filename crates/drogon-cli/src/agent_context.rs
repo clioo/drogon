@@ -60,6 +60,14 @@ fn entry(
     examples: &[&'static str],
     notes: &[&'static str],
 ) -> AgentCommand {
+    let mut command_flags = extra_flags.to_vec();
+    // Shared clap scope groups carry the same caller selectors on every verb.
+    if path.first() == Some(&"orchestration") && extra_flags.contains(&"consumer-generation") {
+        command_flags.push("from");
+        if extra_flags.contains(&"task") && extra_flags.contains(&"dispatch") {
+            command_flags.push("terminal");
+        }
+    }
     AgentCommand {
         command,
         path: path.to_vec(),
@@ -67,7 +75,7 @@ fn entry(
         argument_mode: "parsed",
         summary,
         usage,
-        flags: flags(extra_flags),
+        flags: flags(&command_flags),
         positional_args: positional_args.to_vec(),
         examples: examples.to_vec(),
         notes: notes.to_vec(),
@@ -76,7 +84,7 @@ fn entry(
 
 /// Shared note for the supervised-coordination verbs.
 const ORCHESTRATION_CAPABILITY: &str = "Requires the service capability orchestration.native.v1; the preflight decides before any method.";
-const COORDINATOR_BINDING: &str = "There is no client binding store: the coordinator binding is required verbatim on every coordinator-scope verb.";
+const COORDINATOR_BINDING: &str = "Use the current Drogon terminal or --from to resolve the daemon's bound run. Explicit native bindings remain supported; stale generations are never repaired. Terminal resolution requires orchestration.terminal-bindings.v1.";
 
 /// The full verb table, sorted by command. Keep each `usage` in the same
 /// shape as the verb's clap `override_usage` line where one exists.
@@ -446,7 +454,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["orchestration", "run-create"],
             "Create a run bound to a coordinator (initial generation is server-owned)",
             "drogon-cli orchestration run-create --objective <TEXT> [--coordinator-id <ID>]",
-            &["coordinator-id", "host", "objective"],
+            &["coordinator-id", "from", "host", "objective"],
             &[],
             &["drogon-cli orchestration run-create --objective 'fix the bug' --json"],
             &[ORCHESTRATION_CAPABILITY],
@@ -456,7 +464,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["orchestration", "run-current"],
             "Show the run explicitly bound to a coordinator identity",
             "drogon-cli orchestration run-current --coordinator-id <ID>",
-            &["coordinator-id", "host"],
+            &["coordinator-id", "from", "host"],
             &[],
             &["drogon-cli orchestration run-current --coordinator-id coord-1 --json"],
             &[
@@ -493,6 +501,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "consumer-generation",
                 "coordinator-id",
                 "host",
+                "id",
                 "run",
                 "takeover",
             ],

@@ -53,7 +53,7 @@ pub(crate) async fn run(
                 &call,
                 "orchestration.gateCreate",
                 |r: &GateResult| {
-                    check_gate(&r.gate, &scope.run)?;
+                    check_gate(&r.gate, scope.run_id())?;
                     if r.gate.task_id != *task
                         || r.gate.question != *question
                         || r.gate.status != GateStatus::Pending
@@ -98,7 +98,7 @@ pub(crate) async fn run(
                 .await?;
             let result: GateResult =
                 Client::decode_checked(&call, "orchestration.gateResolve", |r: &GateResult| {
-                    check_gate(&r.gate, &scope.run)?;
+                    check_gate(&r.gate, scope.run_id())?;
                     if r.gate.id != *id
                         || r.gate.status != GateStatus::Resolved
                         || r.gate.resolution.as_ref() != Some(resolution)
@@ -143,12 +143,12 @@ pub(crate) async fn run(
                 &call,
                 "orchestration.gateList",
                 |r: &GateListResult| {
-                    if r.run_id != scope.run || r.count != r.gates.len() {
+                    if r.run_id != scope.run_id() || r.count != r.gates.len() {
                         return Err("gate-list response has inconsistent run/count".into());
                     }
                     let mut ids = std::collections::HashSet::new();
                     for gate in &r.gates {
-                        check_gate(gate, &scope.run)?;
+                        check_gate(gate, scope.run_id())?;
                         if task.as_ref().is_some_and(|t| *t != gate.task_id)
                             || status.is_some_and(|s| s != gate.status)
                             || !ids.insert(&gate.id)

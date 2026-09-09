@@ -115,9 +115,18 @@ an active supervised worker rather than silently discarding its assignment.
 
 Bound coordinator verbs (`run-use`, `task-create`, `task-update`, `task-list`,
 `task-show`, `gate-create`, `gate-resolve`, `gate-list`, `worker-start`,
-`worker-show`, `worker-read`, `worker-stop`, `worker-abandon`, `worker-release`) need the
-explicit `--run`, `--coordinator-id` and `--consumer-generation` bindings
-on every call: there is no default run and no binding store. Mail verbs
+`worker-show`, `worker-read`, `worker-stop`, `worker-abandon`, `worker-release`) accept
+explicit `--run`, `--coordinator-id` and `--consumer-generation` bindings.
+With `orchestration.terminal-bindings.v1`, the current Drogon terminal or
+`--from <terminal-id>` resolves the daemon's persisted binding instead:
+`drogon-cli orchestration run-create --objective <TEXT> --from <TERMINAL>`,
+`drogon-cli orchestration run-current --from <TERMINAL>` and
+`drogon-cli orchestration task-create --spec <TEXT> --from <TERMINAL>`.
+`drogon-cli orchestration run-use --id <RUN> --from <TERMINAL>` explicitly
+moves that terminal to a run, fencing its previous run. No run is guessed
+from global recency, and explicit stale generations are never repaired.
+A lost or replaced terminal is refused; use a new live terminal to bind again.
+Named-run task and gate inspection does not require a terminal binding. Mail verbs
 (`send`, `check`, `reply`, `ask`) accept either the coordinator binding or
 the dispatch binding (`--task`, `--dispatch`); a dispatched worker's own
 terminal fills missing dispatch fields from scoped hints. Explicit worker

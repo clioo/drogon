@@ -348,6 +348,200 @@ fn text_field<'a>(value: &'a Value, pointer: &str) -> &'a str {
 }
 
 #[test]
+fn terminal_bound_coordinator_uses_source_commands_without_native_scope_flags() {
+    let binary = build_drogond();
+    let root = tempfile::tempdir().unwrap();
+    let data_dir = root.path().join("data");
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let daemon = Daemon::start(&binary, &data_dir, None);
+    let (code, ws) = coordinator_call(
+        &data_dir,
+        &["workspace", "add", workspace.to_str().unwrap()],
+    );
+    assert_ok(code, &ws, &["workspace", "add"]);
+    let (code, terminal) = coordinator_call(
+        &data_dir,
+        &[
+            "terminal",
+            "create",
+            "--workspace",
+            ws["result"]["id"].as_str().unwrap(),
+            "--",
+            "/bin/sh",
+            "-c",
+            "while read line; do :; done",
+        ],
+    );
+    assert_ok(code, &terminal, &["terminal", "create"]);
+    let session = text_field(&terminal, "/result/id").to_string();
+    let guard = SessionGuard {
+        data_dir: data_dir.clone(),
+        session_id: session.clone(),
+        incarnation: text_field(&terminal, "/result/incarnation").to_string(),
+        closed: false,
+    };
+    let create_a = [
+        "--request-id",
+        "terminal-run-a",
+        "orchestration",
+        "run-create",
+        "--objective",
+        "first",
+        "--from",
+        &session,
+    ];
+    let (code, first) = coordinator_call(&data_dir, &create_a);
+    assert_ok(code, &first, &create_a);
+    let a = text_field(&first, "/result/run/runId").to_string();
+    let owner = text_field(&first, "/result/run/coordinatorId").to_string();
+    let (code, task) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "task-create",
+            "--spec",
+            "fixture task",
+            "--from",
+            &session,
+        ],
+    );
+    assert_ok(code, &task, &["task-create"]);
+    assert_eq!(task["result"]["task"]["runId"], a);
+    let task_id = text_field(&task, "/result/task/taskId").to_string();
+    let (code, second) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "run-create",
+            "--objective",
+            "second",
+            "--from",
+            &session,
+        ],
+    );
+    assert_ok(code, &second, &["run-create"]);
+    let b = text_field(&second, "/result/run/runId").to_string();
+    let (code, replay) = coordinator_call(&data_dir, &create_a);
+    assert_ok(code, &replay, &create_a);
+    assert_eq!(replay["result"], first["result"]);
+    let (code, current) = coordinator_call(
+        &data_dir,
+        &["orchestration", "run-current", "--from", &session],
+    );
+    assert_ok(code, &current, &["run-current"]);
+    assert_eq!(current["result"]["run"]["runId"], b);
+    let from_env = common::run_cli_with(
+        &data_dir,
+        &["--json", "orchestration", "run-current"],
+        &[
+            ("DROGON_SESSION_ID", &session),
+            (
+                "DROGON_SESSION_INCARNATION",
+                text_field(&terminal, "/result/incarnation"),
+            ),
+        ],
+    );
+    assert!(from_env.status.success(), "{}", stderr(&from_env));
+    let from_env: Value = serde_json::from_slice(&from_env.stdout).unwrap();
+    assert_eq!(from_env["result"]["run"]["runId"], b);
+    let stale = common::run_cli_with(
+        &data_dir,
+        &["--json", "orchestration", "run-current"],
+        &[
+            ("DROGON_SESSION_ID", &session),
+            ("DROGON_SESSION_INCARNATION", "wrong-birth"),
+        ],
+    );
+    assert!(!stale.status.success());
+    let stale: Value = serde_json::from_slice(&stale.stdout).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_incarnation");
+    // A raw client cannot bypass the daemon's physical caller recheck.
+    let forged = serde_json::json!({"contractVersion": 1, "hostId": terminal["result"]["hostId"], "coordinatorId": owner,
+        "objective": "forged", "caller": {"sessionId": session, "incarnation": "wrong-birth"}}).to_string();
+    let (code, refused) = coordinator_call(
+        &data_dir,
+        &["rpc", "orchestration.runCreate", "--params", &forged],
+    );
+    assert_ne!(code, 0);
+    assert_eq!(refused["error"]["code"], "invalid_argument");
+    let (code, old) = coordinator_call(&data_dir, &["orchestration", "run-show", "--id", &a]);
+    assert_ok(code, &old, &["run-show"]);
+    assert_eq!(old["result"]["run"]["consumerGeneration"], 2);
+    assert_ne!(old["result"]["run"]["coordinatorId"], owner);
+    let (code, fenced) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "task-update",
+            "--id",
+            &task_id,
+            "--status",
+            "completed",
+            "--run",
+            &a,
+            "--coordinator-id",
+            &owner,
+            "--consumer-generation",
+            "1",
+        ],
+    );
+    assert_ne!(code, 0);
+    assert_eq!(fenced["error"]["code"], "consumer_fenced");
+    let (code, used) = coordinator_call(
+        &data_dir,
+        &["orchestration", "run-use", "--id", &a, "--from", &session],
+    );
+    assert_ok(code, &used, &["run-use"]);
+    assert_eq!(used["result"]["run"]["consumerGeneration"], 3);
+    let (code, tasks) = coordinator_call(
+        &data_dir,
+        &["orchestration", "task-list", "--from", &session],
+    );
+    assert_ok(code, &tasks, &["task-list"]);
+    assert_eq!(tasks["result"]["tasks"][0]["taskId"], task_id);
+    let (code, refused) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "task-create",
+            "--spec",
+            "wrong run",
+            "--run",
+            &b,
+            "--from",
+            &session,
+        ],
+    );
+    assert_ne!(code, 0);
+    assert_eq!(refused["error"]["code"], "consumer_fenced");
+    let (code, inspection) =
+        coordinator_call(&data_dir, &["orchestration", "task-list", "--run", &b]);
+    assert_ok(code, &inspection, &["task-list", "--run"]);
+    assert!(inspection["result"]["tasks"].as_array().unwrap().is_empty());
+    let closed = guard.close("terminal coordinator fixture");
+    assert_eq!(closed["result"]["verdict"], "exited");
+    let (code, missing) = coordinator_call(
+        &data_dir,
+        &["orchestration", "run-current", "--from", &session],
+    );
+    assert_ne!(code, 0);
+    assert_eq!(missing["error"]["code"], "not_found");
+    let closed_caller = serde_json::json!({"contractVersion": 1, "hostId": terminal["result"]["hostId"], "coordinatorId": owner,
+        "objective": "closed caller", "caller": {"sessionId": session, "incarnation": terminal["result"]["incarnation"]}}).to_string();
+    let (code, refused) = coordinator_call(
+        &data_dir,
+        &["rpc", "orchestration.runCreate", "--params", &closed_caller],
+    );
+    assert_ne!(code, 0);
+    assert_eq!(refused["error"]["code"], "unverifiable");
+    let (code, runs) = coordinator_call(&data_dir, &["orchestration", "run-list"]);
+    assert_ok(code, &runs, &["run-list"]);
+    assert_eq!(runs["result"]["runs"].as_array().unwrap().len(), 2);
+    drop(daemon);
+}
+
+#[test]
 fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     let drogond_path = build_drogond();
 

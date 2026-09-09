@@ -93,6 +93,7 @@ where
 #[test]
 fn run_methods_round_trip_with_explicit_host_and_generation() {
     let params = RunCreateParams {
+        caller: None,
         host: host_scope(),
         objective: "Coordinate the release audit".into(),
         coordinator_id: "coordinator-1".into(),
@@ -147,6 +148,7 @@ fn run_methods_round_trip_with_explicit_host_and_generation() {
         "runId",
     );
     let use_params = RunUseParams {
+        caller: None,
         host: host_scope(),
         run_id: "run-1".into(),
         coordinator_id: "coordinator-1".into(),
@@ -866,6 +868,7 @@ fn question_and_receipt_methods_round_trip_with_explicit_scope() {
 #[test]
 fn additive_params_and_result_fields_are_ignored_not_identity() {
     let mut run_use = serde_json::to_value(RunUseParams {
+        caller: None,
         host: host_scope(),
         run_id: "run-1".into(),
         coordinator_id: "coordinator-1".into(),
@@ -911,6 +914,7 @@ fn additive_params_and_result_fields_are_ignored_not_identity() {
 #[test]
 fn scopes_are_required_and_refuse_wrong_host_or_version() {
     let mut run_create = serde_json::to_value(RunCreateParams {
+        caller: None,
         host: host_scope(),
         objective: "obj".into(),
         coordinator_id: "coordinator-1".into(),
@@ -920,6 +924,7 @@ fn scopes_are_required_and_refuse_wrong_host_or_version() {
     assert!(serde_json::from_value::<RunCreateParams>(run_create).is_err());
 
     let params = RunCreateParams {
+        caller: None,
         host: host_scope(),
         objective: "obj".into(),
         coordinator_id: "coordinator-1".into(),
@@ -1026,6 +1031,7 @@ fn actor_scopes_reject_contradictory_reserved_fields_but_keep_additive_ones() {
 fn generation_fences_refuse_unsafe_values() {
     for generation in [0u64, MAX_CONSUMER_GENERATION + 1, u64::MAX] {
         let params = RunUseParams {
+            caller: None,
             host: host_scope(),
             run_id: "run-1".into(),
             coordinator_id: "coordinator-1".into(),
@@ -1039,6 +1045,7 @@ fn generation_fences_refuse_unsafe_values() {
         );
     }
     let mut raw = serde_json::to_value(RunUseParams {
+        caller: None,
         host: host_scope(),
         run_id: "run-1".into(),
         coordinator_id: "coordinator-1".into(),
@@ -1421,6 +1428,7 @@ fn process_liveness_has_exactly_three_verdicts_and_cursors_are_bounded() {
 fn no_params_or_results_serde_shape_carries_a_credential() {
     let samples: Vec<Value> = vec![
         serde_json::to_value(RunCreateParams {
+            caller: None,
             host: host_scope(),
             objective: "obj".into(),
             coordinator_id: "coordinator-1".into(),
