@@ -29,9 +29,35 @@ beforeEach(async () => {
   await agentSettingsState.load();
 });
 afterEach(() => { cleanup(); window.drogon = original; });
-function mount() {
-  return render(<TooltipProvider><AgentsSection harnesses={harnesses} defaultHarnessId="" harnessDefaults={{}} onDefaultHarnessChange={() => {}} onHarnessDefaultChange={() => {}} /></TooltipProvider>);
+function mount(overrides?: { capabilityAvailable?: boolean }) {
+  return render(<TooltipProvider><AgentsSection harnesses={harnesses} defaultHarnessId="" harnessDefaults={{}} onDefaultHarnessChange={() => {}} onHarnessDefaultChange={() => {}} capabilityAvailable={overrides?.capabilityAvailable} /></TooltipProvider>);
 }
+
+// User-feature-closure item 7: an old daemon missing agent.settings.v1
+// (crates/drogon-core/src/lib.rs's CAPABILITIES) must not have this panel
+// silently claim full functionality -- it previously had no capability
+// awareness at all. `capabilityAvailable` defaults to true (omitted prop =
+// legacy callers/tests keep compiling unchanged) so only an explicit false
+// -- App.tsx wiring isAgentSettingsAvailable(liveCapabilities) -- shows the
+// notice; it never blocks rendering (a stale/local view of settings is
+// still useful) and never triggers a restart on its own.
+describe("agent.settings.v1 mixed-version guard", () => {
+  test("shows no capability notice once the daemon advertises the capability", async () => {
+    mount();
+    await screen.findByText("2 detected");
+    expect(screen.queryByText(/agent settings/i, { selector: "[role=status]" })).toBeNull();
+  });
+
+  test("shows a non-blocking notice, and the panel still renders, when the daemon withholds agent.settings.v1", async () => {
+    mount({ capabilityAvailable: false });
+    await screen.findByText("2 detected");
+    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toMatch(/restart/i);
+    // The fieldset (and its controls) still render -- a capability gap is
+    // surfaced, not a reason to hide the panel.
+    expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy();
+  });
+});
 describe("source Agents pane", () => {
   test("source order, copy and detected-only default pills replace the synthetic model form", async () => {
     mount();

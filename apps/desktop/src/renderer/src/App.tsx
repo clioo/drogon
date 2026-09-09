@@ -211,6 +211,7 @@ import {
   isBotsAvailable,
   registerBotsRoute,
 } from "./bots-mount";
+import { isAgentSettingsAvailable } from "./daemon-capabilities";
 import { BOTS_PAGE_HOST_TESTID } from "./features/bots";
 import {
   planBrowserRehydrate,
@@ -3870,6 +3871,11 @@ export function App() {
                   onDefaultHarnessChange={changeDefaultHarness}
                   harnessDefaults={harnessDefaults}
                   onHarnessDefaultChange={changeHarnessDefault}
+                  agentSettingsCapabilityAvailable={
+                    status === null
+                      ? undefined
+                      : isAgentSettingsAvailable(liveCapabilities)
+                  }
                   notifyOnAgentNeedsInput={notifyOnAgentNeedsInput}
                   onNotifyChange={changeNotifyOnAgentNeedsInput}
                   notifyOnAgentTaskComplete={notifyOnAgentTaskComplete}

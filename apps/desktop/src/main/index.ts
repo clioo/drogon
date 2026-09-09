@@ -626,6 +626,25 @@ async function bootstrapDaemon(): Promise<void> {
     console.error(
       `[drogon] native runtime bootstrap: ${JSON.stringify(outcome)}`,
     );
+  if (outcome.kind === "already-healthy") {
+    // Mixed-version guard (user-feature-closure item 7): bootstrap
+    // correctly attached to the incumbent (never spawns over it, never
+    // kills it — see this function's own docstring), but its capability
+    // list may predate this build's assumptions (e.g. an old drogond from
+    // before agent.settings.v1/bot.snapshot.v1 — crates/drogon-core/src/lib.rs's
+    // CAPABILITIES). Log-only, using the same two literals the renderer's
+    // capability gates check (isBotsAvailable, isAgentSettingsAvailable in
+    // daemon-capabilities.ts) — not imported here, so main's bundle never
+    // pulls in renderer-only code for a diagnostic line.
+    const REQUIRED = ["agent.settings.v1", "bot.snapshot.v1"];
+    const missing = REQUIRED.filter(
+      (capability) => !outcome.capabilities.includes(capability),
+    );
+    if (missing.length > 0)
+      console.warn(
+        `[drogon] native runtime bootstrap: attached to an already-healthy service missing ${JSON.stringify(missing)} — some features stay unavailable until it is restarted with the bundled build.`,
+      );
+  }
 }
 
 /**

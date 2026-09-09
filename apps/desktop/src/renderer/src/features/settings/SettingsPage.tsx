@@ -77,6 +77,10 @@ export type SettingsPageProps = {
     harnessId: string,
     next: HarnessAgentDefault,
   ) => void;
+  /** User-feature-closure item 7: App wires isAgentSettingsAvailable over
+   *  the live status capabilities. Omitted renders unchanged (see
+   *  AgentsSection's own prop doc). */
+  agentSettingsCapabilityAvailable?: boolean;
   notifyOnAgentNeedsInput: boolean;
   onNotifyChange: (next: boolean) => void;
   notifyOnAgentTaskComplete?: boolean;
@@ -194,6 +198,7 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                     onDefaultHarnessChange={props.onDefaultHarnessChange}
                     harnessDefaults={props.harnessDefaults}
                     onHarnessDefaultChange={props.onHarnessDefaultChange}
+                    capabilityAvailable={props.agentSettingsCapabilityAvailable}
                   />
                 ) : null}
                 {visible.includes("general") ? <GeneralSection /> : null}

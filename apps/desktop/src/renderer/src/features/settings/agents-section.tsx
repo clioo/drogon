@@ -61,6 +61,14 @@ export function AgentsSection(props: {
   onDefaultHarnessChange: (id: string) => void;
   harnessDefaults: Record<string, HarnessAgentDefault>;
   onHarnessDefaultChange: (id: string, value: HarnessAgentDefault) => void;
+  /** User-feature-closure item 7: whether the attached daemon advertises
+   *  agent.settings.v1 (App.tsx wires isAgentSettingsAvailable over the
+   *  live status capabilities). Omitted (or true) renders unchanged --
+   *  only an explicit false, meaning a mixed-version old daemon is
+   *  attached, shows the notice below. The panel keeps rendering either
+   *  way: a capability gap is surfaced, never a reason to hide settings
+   *  or restart anything automatically. */
+  capabilityAvailable?: boolean;
 }) {
   const { settings, ready, saving, error } = useAgentSettings();
   const [detected, setDetected] = useState<Harness[] | null>(
@@ -113,6 +121,16 @@ export function AgentsSection(props: {
       title="Agents"
       description="Manage AI agents, set a default, and customize commands."
     >
+      {props.capabilityAvailable === false && (
+        <div
+          role="status"
+          className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground"
+        >
+          This Drogon service is running an older version that does not
+          support Agent settings yet. Restart the app to pick up the update
+          — your current sessions stay untouched until you do.
+        </div>
+      )}
       {error && (
         <div
           role="alert"
