@@ -16,6 +16,43 @@ import { cacheCountdown } from "../shell/AgentCacheTimer";
 import type { Session } from "../../../../shared/session-contract";
 
 describe("native preference state", () => {
+  test.each(["overlap", "retry", "missing-bridge"])(
+    "retains migration across %s loads",
+    async (mode) => {
+      const get = vi.fn<AgentSettingsBridge["get"]>().mockResolvedValue({
+        ok: true,
+        result: { initialized: false, settings: AGENT_SETTINGS_DEFAULTS },
+      });
+      const update = vi.fn<AgentSettingsBridge["update"]>().mockResolvedValue({
+        ok: true,
+        result: { initialized: true, settings: AGENT_SETTINGS_DEFAULTS },
+      });
+      let available = mode !== "missing-bridge";
+      const state = createAgentSettingsState(() =>
+        available ? { get, update } : undefined,
+      );
+      const legacy = { defaultTuiAgent: "pi" as const };
+      if (mode === "overlap") {
+        const child = state.load();
+        await Promise.all([child, state.load(legacy)]);
+      } else if (mode === "missing-bridge") {
+        await state.load(legacy);
+        available = true;
+        await state.load();
+      } else {
+        get.mockResolvedValueOnce({
+          ok: false,
+          error: { code: "unverifiable", message: "Offline", retryable: true },
+        });
+        await state.load(legacy);
+        await state.load();
+      }
+      expect(update).toHaveBeenCalledWith({
+        updates: legacy,
+        onlyIfUninitialized: true,
+      });
+    },
+  );
   test("migration preserves explicit blank and model/effort as quoted launch arguments", () => {
     expect(migrateAgentPreferences({})).toEqual({});
     expect(migrateAgentPreferences({ defaultHarnessId: "" })).toEqual({

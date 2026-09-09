@@ -204,6 +204,13 @@ fn live_hooks_are_removed_restored_and_feed_titles_and_cache() {
         .unwrap();
     assert_eq!(next["agentPromptPreview"], prompt);
     assert!(next["cacheIdleAt"].is_null());
+    let closed = invoke(
+        &engine,
+        "session.close",
+        json!({"sessionId": session["id"], "incarnation": session["incarnation"]}),
+    );
+    assert!(closed.ok, "{closed:?}");
+    assert_eq!(closed.result.unwrap()["verdict"], "exited");
 }
 
 #[cfg(unix)]

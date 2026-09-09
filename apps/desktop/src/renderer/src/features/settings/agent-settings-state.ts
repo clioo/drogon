@@ -65,12 +65,15 @@ export function createAgentSettingsState(
   const listeners = new Set<() => void>();
   let queue: Promise<void> = Promise.resolve();
   let loading: Promise<void> | undefined;
+  let migration: AgentSettingsUpdate = {};
   let pending = 0;
   const publish = (next: Partial<AgentSettingsState>) => {
     state = { ...state, ...next };
     for (const listener of listeners) listener();
   };
-  const load = (legacy: AgentSettingsUpdate = {}): Promise<void> => {
+  const load = (legacy?: AgentSettingsUpdate): Promise<void> => {
+    // Child effects can request loading before App supplies the legacy snapshot.
+    if (legacy !== undefined) migration = legacy;
     if (loading) return loading;
     loading = (async () => {
       try {
@@ -83,7 +86,7 @@ export function createAgentSettingsState(
         if (!result.ok) throw new Error(result.error.message);
         if (!result.result.initialized)
           result = await bridge.update({
-            updates: legacy,
+            updates: migration,
             onlyIfUninitialized: true,
           });
         if (!result.ok) throw new Error(result.error.message);
@@ -95,10 +98,10 @@ export function createAgentSettingsState(
               ? error.message
               : "Could not load agent settings.",
         });
-      } finally {
-        loading = undefined;
       }
-    })();
+    })().finally(() => {
+      loading = undefined;
+    });
     return loading;
   };
   const update = (updates: AgentSettingsMutation): Promise<void> => {

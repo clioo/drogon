@@ -297,12 +297,10 @@ export async function probeRenderedExitedStubs({
     },
     { id: workspaceId, b: remainingStubId },
   );
-  assert.equal(
-    await page
-      .getByRole("tab", { name: new RegExp(remainingStubId) })
-      .count(),
-    0,
-  );
+  // The native record disappears before React commits the acknowledged close.
+  await page
+    .getByRole("tab", { name: new RegExp(remainingStubId) })
+    .waitFor({ state: "detached" });
 
   // 3) Kill all: a fresh live terminal plus the remaining stub-history
   // rows must ALL clear through Settings → Terminal → Kill all sessions.

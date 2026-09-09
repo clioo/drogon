@@ -7,7 +7,8 @@
 //! data directory.  The user's real Codex home is a read-only source: selected
 //! resources and config are copied into the private home, user hook trust keys
 //! are rewritten for the copied `hooks.json`, and Drogon's own hook entries are
-//! added there.  No auth, history, or session database files are copied.
+//! added there. Auth and session databases are never copied; rollout history
+//! can be imported separately from the configured history source home.
 //!
 //! This is intentionally a filesystem adapter, not a Codex client.  The
 //! managed hooks invoke the already-installed `drogon-cli` with the same
