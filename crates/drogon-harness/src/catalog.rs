@@ -23,34 +23,49 @@
 //! (C01-B) may inject entries it enumerated itself through
 //! [`HostCatalog::caller_enumerated`], with provenance saying so.
 //!
-//! Probe isolation and cleanup (coordinator C01-A gates; unix
-//! implementation):
+//! Probe isolation and cleanup (coordinator C01-A gates; unix-only):
+//! - Probing requires unix process-group and `poll(2)` primitives. On
+//!   platforms without them this module fails CLOSED before spawning
+//!   anything: [`EnumerationStatus::UnsupportedPlatform`] with an explicit
+//!   note. Generic harness launch (session argv/env construction) is
+//!   unaffected; only host enumeration is unavailable there.
 //! - Every probe child — `--version` included — runs in its own private
 //!   root: fresh empty `HOME`, `TMPDIR`, `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/
 //!   `XDG_CACHE_HOME`, a private cwd, and harness-specific
 //!   `PI_CODING_AGENT_DIR`/`OPENCODE_CONFIG_DIR`, all `0700`, created with
-//!   unpredictable names and `create_dir` (fails if the name somehow
-//!   exists). The environment is `env_clear`'d plus a minimal whitelist,
-//!   so no user config, plugin discovery, credential variable or inherited
-//!   runtime overlay reaches the child. Any setup failure is
-//!   [`EnumerationStatus::IsolationFailed`]: the probe does not run, and
-//!   there is no fallback to a real profile.
+//!   CSPRNG-random names via `create_dir` (a collision or ANY setup error
+//!   fails the probe as [`EnumerationStatus::IsolationFailed`]; there is no
+//!   fallback to a real profile and never a `remove_dir_all` of a root we
+//!   did not create — ownership is tracked and deletion only ever targets
+//!   dirs this call created). Entropy failure is also fail-closed: no
+//!   time/pid name fallback.
+//! - The environment is `env_clear`'d plus a minimal whitelist, so no user
+//!   config, plugin discovery, credential variable or inherited runtime
+//!   overlay reaches the child.
 //! - The child leads its own process group (`process_group(0)`). Pipes are
-//!   drained with `poll(2)` under ONE combined byte cap and hard deadlines;
-//!   the deadline does not stop at leader exit, because a grandchild that
-//!   inherits the pipes would otherwise hang the drain forever — after
-//!   leader exit the drain continues for a bounded post-exit grace, then
-//!   escalates GROUP TERM → GROUP KILL, checking `killpg(pgid, 0)` after
-//!   each step so surviving descendants are reported, never assumed dead.
+//!   drained with `poll(2)` under ONE combined byte cap, per-event fairness
+//!   caps (a continuously-producing stdout cannot starve the deadline or
+//!   stderr checks), and hard deadlines including an unconditional final
+//!   bound. The deadline does not stop at leader exit, because a
+//!   grandchild that inherits the pipes would otherwise hang the drain
+//!   forever — after leader exit the drain continues for a bounded
+//!   post-exit grace, then escalates GROUP TERM → GROUP KILL.
+//! - Descendant exit is checked evidence, never assumed: `killpg(pgid, 0)`
+//!   distinguishes ESRCH (provably empty) from EPERM and other errors
+//!   (unverifiable), is re-checked after every grace, and a leader exit
+//!   with pipes at EOF is STILL followed by a group check — a background
+//!   child with stdio redirected to `/dev/null` holds no pipe and would
+//!   otherwise survive a "successful" probe. fcntl and poll errors are
+//!   handled, not ignored. Surviving or unverifiable cleanup retains the
+//!   probe root (with its path in the catalog note) instead of deleting
+//!   evidence.
+//! - A process that escapes the group via `setsid`/double-fork is outside
+//!   what `killpg` can see; that limit is stated in the evidence whenever
+//!   cleanup could not be fully verified, never papered over.
 //! - A nonzero leader exit is [`EnumerationStatus::ProbeFailed`] with a
 //!   bounded stderr tail: failed or warning output never becomes model
 //!   rows.
-//! - The non-unix implementation stays compilable and honest with the std
-//!   tools available (single-child kill, capped thread readers); it does
-//!   not claim group-level descendant cleanup it cannot perform, and the
-//!   catalog note says so.
 
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -74,13 +89,26 @@ pub const PROBE_TIMEOUT_DEFAULT: Duration = Duration::from_secs(10);
 const POST_EXIT_GRACE: Duration = Duration::from_secs(3);
 
 /// Grace after a group TERM before a group KILL, and after a KILL before
-/// the drain gives up and reports unverifiable holders.
+/// cleanup is declared unverifiable.
 const SIGNAL_GRACE: Duration = Duration::from_secs(2);
 
 /// Bounded wait for the leader to become reapable after its pipes reached
 /// EOF (observed on macOS: a window where the writer is gone but
 /// waitpid(WNOHANG) still reports the process running).
 const REAP_GRACE: Duration = Duration::from_secs(1);
+
+/// Margin over the worst-case escalation chain after which the drain loop
+/// stops unconditionally, so no child behavior can hang a probe.
+const HARD_STOP_MARGIN: Duration = Duration::from_secs(1);
+
+/// How long the post-leader group check rides out transient teardown
+/// statuses (Present/EPERM) before declaring survivors or unverifiable.
+const POST_EOF_GROUP_GRACE: Duration = Duration::from_millis(500);
+
+/// Per-fd, per-poll-event drain bound: a continuously-producing child is
+/// serviced in slices so deadline, escalation and the sibling stream are
+/// all checked between slices.
+const DRAIN_PER_EVENT_CAP: usize = 128 * 1024;
 
 /// Environment keys preserved for probe children. Everything else —
 /// credentials, runtime overlays, inherited config pointers — is dropped.
@@ -146,6 +174,10 @@ pub enum EnumerationStatus {
     /// command (claude/codex/antigravity today). `note` says what was
     /// captured instead (usually just the version probe).
     UnsupportedSurface,
+    /// The harness CLI was not probed because this platform lacks the
+    /// unix process-group/poll primitives required for safe, fail-closed
+    /// probing. Generic harness launch is unaffected.
+    UnsupportedPlatform,
     /// The probe ran but its output could not be parsed. `note` carries a
     /// bounded sample so operators can see what the surface actually said.
     ParseFailed,
@@ -156,8 +188,9 @@ pub enum EnumerationStatus {
     /// bounded stderr tail; failed or warning output never becomes model
     /// rows.
     ProbeFailed,
-    /// The private probe root could not be created (permissions, temp dir).
-    /// The probe did not run and no fallback to a real profile was used.
+    /// The private probe root could not be created (permissions, temp dir,
+    /// entropy). The probe did not run and no fallback to a real profile
+    /// was used.
     IsolationFailed,
 }
 
@@ -175,8 +208,9 @@ pub struct HostCatalog {
     pub provenance: Option<ProbeProvenance>,
     pub entries: Vec<CatalogEntry>,
     pub status: EnumerationStatus,
-    /// Honesty scope notes (auth-gating, cleanup evidence, raw parse
-    /// sample on failure). Never credential material.
+    /// Honesty scope notes (auth-gating, cleanup evidence, retained probe
+    /// root after unverifiable cleanup, raw parse sample on failure).
+    /// Never credential material.
     pub note: Option<String>,
 }
 
@@ -255,7 +289,11 @@ pub fn freshness_token(catalog: &HostCatalog) -> String {
     let executable = catalog
         .executable
         .as_ref()
-        .and_then(|path| path.file_name().and_then(OsStr::to_str).map(str::to_owned))
+        .and_then(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
         .unwrap_or_else(|| catalog.harness.executable().to_string());
     format!("{executable}|{version}|{}", keys.join(";"))
 }
@@ -266,6 +304,9 @@ pub fn freshness_token(catalog: &HostCatalog) -> String {
 /// auth-gated surface that enumerates nothing reports an empty catalog
 /// with the scope in provenance, and selection validation degrades to
 /// manual-unverified accordingly.
+///
+/// On non-unix platforms this fails closed with
+/// [`EnumerationStatus::UnsupportedPlatform`] before spawning anything.
 pub fn probe_host_catalog(harness: HarnessId, executable: Option<&Path>) -> HostCatalog {
     probe_host_catalog_with_budget(harness, executable, PROBE_TIMEOUT_DEFAULT)
 }
@@ -280,75 +321,100 @@ pub fn probe_host_catalog_with_budget(
     let Some(executable) = executable else {
         return HostCatalog::unavailable(harness, HarnessAvailability::Missing);
     };
-    match harness {
-        HarnessId::Pi => probe_pi(executable, budget),
-        HarnessId::Opencode => probe_opencode(executable, budget),
-        HarnessId::Claude | HarnessId::Codex | HarnessId::Antigravity => {
-            probe_version_only(harness, executable)
+    #[cfg(unix)]
+    {
+        match harness {
+            HarnessId::Pi => probe_pi(executable, budget),
+            HarnessId::Opencode => probe_opencode(executable, budget),
+            HarnessId::Claude | HarnessId::Codex | HarnessId::Antigravity => {
+                probe_version_only(harness, executable)
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        HostCatalog {
+            harness,
+            availability: HarnessAvailability::Available,
+            executable: Some(executable.to_path_buf()),
+            provenance: None,
+            entries: Vec::new(),
+            status: EnumerationStatus::UnsupportedPlatform,
+            note: Some(
+                "host enumeration requires unix process-group primitives; \
+                 failed closed without spawning the executable. Generic \
+                 harness launch is unaffected."
+                    .to_string(),
+            ),
         }
     }
 }
 
-/// Random hex for unpredictable probe dir names. Unix uses the OS CSPRNG
-/// via libc (`getentropy` on macOS, `getrandom` elsewhere); other
-/// platforms fall back to time+pid+counter, which is unpredictable enough
-/// for a private temp dir but is documented as the weaker path.
 #[cfg(all(unix, any(target_os = "macos", target_os = "ios")))]
-fn fill_random(buffer: &mut [u8]) -> i32 {
-    // SAFETY: getentropy fills the whole buffer on success (returns 0).
-    unsafe { libc::getentropy(buffer.as_mut_ptr().cast(), buffer.len()) }
+fn fill_random(buffer: &mut [u8]) -> Result<(), String> {
+    // getentropy fills the whole buffer and only returns 0 on success
+    // (per Darwin man pages; it does not short-read or return a count).
+    // SAFETY: the buffer is valid for its length.
+    let rc = unsafe { libc::getentropy(buffer.as_mut_ptr().cast(), buffer.len()) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "getentropy failed: {}",
+            std::io::Error::last_os_error()
+        ))
+    }
 }
 
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios"))))]
-fn fill_random(buffer: &mut [u8]) -> i32 {
-    // SAFETY: getrandom fills up to the requested length; a full fill is
-    // expected on the short reads we request.
-    unsafe { libc::getrandom(buffer.as_mut_ptr().cast(), buffer.len(), 0) }
-}
-
-#[cfg(unix)]
-fn random_hex(bytes: usize) -> String {
-    let mut buffer = vec![0u8; bytes];
-    let filled = fill_random(&mut buffer);
-    if filled != 0 {
-        // CSPRNG failure: fall back rather than panic; the name only needs
-        // to be unique, and 0700 permissions carry the isolation.
-        return format!(
-            "{:x}-{}-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or_default(),
-            std::process::id(),
-            buffer.len()
-        );
+fn fill_random(buffer: &mut [u8]) -> Result<(), String> {
+    // getrandom returns ssize_t: the byte count written (a full or partial
+    // fill), 0 only for len 0, and -1 with errno on failure (EINTR means
+    // retry). Loop until the whole buffer is filled; no fallback entropy.
+    let mut filled = 0usize;
+    while filled < buffer.len() {
+        // SAFETY: the buffer tail is valid for its remaining length.
+        let n = unsafe {
+            libc::getrandom(
+                buffer[filled..].as_mut_ptr().cast(),
+                buffer.len() - filled,
+                0,
+            )
+        };
+        if n > 0 {
+            filled += n as usize;
+            continue;
+        }
+        if n == 0 {
+            return Err("getrandom returned 0 for a non-empty buffer".to_string());
+        }
+        let err = std::io::Error::last_os_error();
+        if err.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        return Err(format!("getrandom failed: {err}"));
     }
-    buffer.iter().map(|byte| format!("{byte:02x}")).collect()
+    Ok(())
 }
 
-#[cfg(not(unix))]
-fn random_hex(bytes: usize) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NONCE: AtomicU64 = AtomicU64::new(0);
-    format!(
-        "{:x}-{}-{}-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default(),
-        std::process::id(),
-        NONCE.fetch_add(1, Ordering::Relaxed),
-        bytes
-    )
+/// Unpredictable probe dir names from the OS CSPRNG. Any entropy failure
+/// propagates: probe isolation fails closed rather than falling back to
+/// predictable time/pid names.
+#[cfg(unix)]
+fn random_hex(bytes: usize) -> Result<String, String> {
+    let mut buffer = vec![0u8; bytes];
+    fill_random(&mut buffer)?;
+    Ok(buffer.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 /// The private filesystem root one probe child sees. Every directory is
-/// created `0700` with `create_dir` (fails rather than reusing anything)
-/// under an unpredictable name; any failure aborts the probe
-/// ([`EnumerationStatus::IsolationFailed`]) — there is no fallback to the
-/// real profile.
+/// created `0700` with `create_dir` (fails rather than reusing anything).
+/// `root` is `Some` only for a root THIS call created — a create collision
+/// or error therefore can never make `Drop` delete a pre-existing
+/// directory.
+#[cfg(unix)]
 struct ProbeIsolation {
-    root: PathBuf,
+    root: Option<PathBuf>,
     home: PathBuf,
     tmp: PathBuf,
     cwd: PathBuf,
@@ -357,9 +423,19 @@ struct ProbeIsolation {
     xdg_cache: PathBuf,
 }
 
+#[cfg(unix)]
 impl ProbeIsolation {
     fn create() -> Result<Self, String> {
-        let root = std::env::temp_dir().join(format!("drogon-probe-{}", random_hex(16)));
+        let name = random_hex(16).map_err(|err| format!("entropy unavailable: {err}"))?;
+        Self::create_at(std::env::temp_dir().join(format!("drogon-probe-{name}")))
+    }
+
+    /// Creates the private root at an exact path (test seam for collision
+    /// and permission paths). Fails without deleting anything if `root`
+    /// already exists or any child dir cannot be created; only a root this
+    /// call created is ever removed, and only by `Drop`.
+    fn create_at(root: PathBuf) -> Result<Self, String> {
+        create_private_dir(&root)?;
         let isolation = Self {
             home: root.join("home"),
             tmp: root.join("tmp"),
@@ -367,25 +443,29 @@ impl ProbeIsolation {
             xdg_config: root.join("xdg-config"),
             xdg_data: root.join("xdg-data"),
             xdg_cache: root.join("xdg-cache"),
-            root,
+            root: Some(root),
         };
-        isolation.create_dirs()?;
-        Ok(isolation)
-    }
-
-    fn create_dirs(&self) -> Result<(), String> {
-        create_private_dir(&self.root)?;
         for dir in [
-            &self.home,
-            &self.tmp,
-            &self.cwd,
-            &self.xdg_config,
-            &self.xdg_data,
-            &self.xdg_cache,
+            &isolation.home,
+            &isolation.tmp,
+            &isolation.cwd,
+            &isolation.xdg_config,
+            &isolation.xdg_data,
+            &isolation.xdg_cache,
         ] {
             create_private_dir(dir)?;
         }
-        Ok(())
+        Ok(isolation)
+    }
+
+    /// Keep the root on disk (unverifiable cleanup) and return its path so
+    /// the caller can record it as evidence.
+    fn disarm(mut self) -> Option<PathBuf> {
+        self.root.take()
+    }
+
+    fn root(&self) -> &Path {
+        self.root.as_deref().expect("root set after create_at")
     }
 
     /// The probe child environment: cleared, whitelisted, and pointed
@@ -414,35 +494,32 @@ impl ProbeIsolation {
     }
 }
 
+#[cfg(unix)]
 impl Drop for ProbeIsolation {
     fn drop(&mut self) {
-        // Best-effort, one named place; the probe child is already reaped
-        // by the time the isolation drops.
-        if self.root.exists() {
-            let _ = std::fs::remove_dir_all(&self.root);
+        // Only a root this call created is removed, and only when not
+        // disarmed for retention.
+        if let Some(root) = &self.root
+            && root.exists()
+        {
+            let _ = std::fs::remove_dir_all(root);
         }
     }
 }
 
+#[cfg(unix)]
 fn create_private_dir(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(path)
-            .map_err(|err| format!("cannot create private dir {}: {err}", path.display()))?;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .map_err(|err| format!("cannot chmod {}: {err}", path.display()))?;
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::create_dir(path)
-            .map_err(|err| format!("cannot create private dir {}: {err}", path.display()))?;
-    }
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(path)
+        .map_err(|err| format!("cannot create private dir {}: {err}", path.display()))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .map_err(|err| format!("cannot chmod {}: {err}", path.display()))?;
     Ok(())
 }
 
+#[cfg(unix)]
 fn isolation_failed_catalog(harness: HarnessId, executable: &Path, reason: String) -> HostCatalog {
     HostCatalog {
         harness,
@@ -470,13 +547,14 @@ fn isolation_failed_catalog(harness: HarnessId, executable: &Path, reason: Strin
 /// Per coordinator safety guidance this probe never mirrors
 /// `auth.json`/`models-store.json` or any credential material to make more
 /// models visible.
+#[cfg(unix)]
 fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
     let isolation = match ProbeIsolation::create() {
         Ok(isolation) => isolation,
         Err(reason) => return isolation_failed_catalog(HarnessId::Pi, executable, reason),
     };
     let mut env = isolation.env();
-    let pi_agent = isolation.root.join("pi-agent");
+    let pi_agent = isolation.root().join("pi-agent");
     if let Err(err) = create_private_dir(&pi_agent) {
         return isolation_failed_catalog(HarnessId::Pi, executable, err);
     }
@@ -488,7 +566,7 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
     env.push(("PI_TELEMETRY".to_string(), "0".to_string()));
     env.push(("PI_SKIP_VERSION_CHECK".to_string(), "1".to_string()));
 
-    let version = probe_version(executable, &env, &isolation);
+    let version = probe_version(executable, &env, isolation.root());
     let argv = vec!["--list-models".to_string()];
     let attempt = ProbeAttempt {
         executable,
@@ -496,26 +574,28 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
         env: &env,
         cwd: &isolation.cwd,
     };
-    let (provenance, status, entries, note) = match run_probe(&attempt, budget) {
-        ProbeRun::Completed {
-            output,
-            post_exit_cleanup,
-        } => {
+    let outcome = run_probe(&attempt, budget);
+    let cleanup_note = outcome.cleanup_note();
+    let retained = if outcome.cleanup_verified {
+        None
+    } else {
+        isolation.disarm()
+    };
+    let (provenance, status, entries, mut note) = match outcome.run {
+        ProbeRun::Completed { output, .. } => {
             let provenance = probe_provenance(executable, argv.clone(), version);
-            let cleanup_note = post_exit_cleanup
-                .map(|evidence| format!("post-exit descendant cleanup needed: {evidence}"));
             match parse_pi_list_models(&output) {
                 ParseOutcome::Entries(entries) => (
                     provenance,
                     EnumerationStatus::Enumerated,
                     entries,
-                    Some(cleanup_note.unwrap_or_else(|| {
+                    Some(
                         "auth-gated enumeration under a private isolated config: \
                          pi --list-models only lists models whose provider auth is \
                          configured; user-configured providers are not visible here \
                          and absence is not proof a model does not exist"
-                            .to_string()
-                    })),
+                            .to_string(),
+                    ),
                 ),
                 ParseOutcome::Empty => (
                     provenance,
@@ -539,6 +619,7 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
         ProbeRun::FailedExit {
             stderr_tail,
             exit_code,
+            ..
         } => (
             probe_provenance(executable, argv.clone(), version),
             EnumerationStatus::ProbeFailed,
@@ -547,7 +628,7 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
                 "pi --list-models exited {exit_code}: {stderr_tail}"
             )),
         ),
-        ProbeRun::TimedOut { evidence } => (
+        ProbeRun::TimedOut { evidence, .. } => (
             probe_provenance(executable, argv.clone(), version),
             EnumerationStatus::TimedOut,
             Vec::new(),
@@ -560,6 +641,16 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
             Some(message),
         ),
     };
+    if let Some(cleanup) = cleanup_note {
+        note = Some(format!("{}; {cleanup}", note.unwrap_or_default()));
+    }
+    if let Some(path) = retained {
+        note = Some(format!(
+            "{}; probe root retained for inspection: {} (descendant cleanup unverifiable)",
+            note.unwrap_or_default(),
+            path.display()
+        ));
+    }
     HostCatalog {
         harness: HarnessId::Pi,
         availability: HarnessAvailability::Available,
@@ -577,13 +668,14 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
 /// the user's config dir is never the probe target. Scope note is
 /// explicit: the built-in catalog only; user-defined providers are not
 /// enumerated.
+#[cfg(unix)]
 fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
     let isolation = match ProbeIsolation::create() {
         Ok(isolation) => isolation,
         Err(reason) => return isolation_failed_catalog(HarnessId::Opencode, executable, reason),
     };
     let mut env = isolation.env();
-    let opencode_dir = isolation.root.join("opencode-config");
+    let opencode_dir = isolation.root().join("opencode-config");
     if let Err(err) = create_private_dir(&opencode_dir) {
         return isolation_failed_catalog(HarnessId::Opencode, executable, err);
     }
@@ -591,7 +683,7 @@ fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
         "OPENCODE_CONFIG_DIR".to_string(),
         opencode_dir.to_string_lossy().into_owned(),
     ));
-    let version = probe_version(executable, &env, &isolation);
+    let version = probe_version(executable, &env, isolation.root());
     let argv = vec!["models".to_string()];
     let attempt = ProbeAttempt {
         executable,
@@ -599,25 +691,27 @@ fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
         env: &env,
         cwd: &isolation.cwd,
     };
-    let (provenance, status, entries, note) = match run_probe(&attempt, budget) {
-        ProbeRun::Completed {
-            output,
-            post_exit_cleanup,
-        } => {
+    let outcome = run_probe(&attempt, budget);
+    let cleanup_note = outcome.cleanup_note();
+    let retained = if outcome.cleanup_verified {
+        None
+    } else {
+        isolation.disarm()
+    };
+    let (provenance, status, entries, mut note) = match outcome.run {
+        ProbeRun::Completed { output, .. } => {
             let provenance = probe_provenance(executable, argv.clone(), version);
-            let cleanup_note = post_exit_cleanup
-                .map(|evidence| format!("post-exit descendant cleanup needed: {evidence}"));
             match parse_opencode_models(&output) {
                 ParseOutcome::Entries(entries) => (
                     provenance,
                     EnumerationStatus::Enumerated,
                     entries,
-                    Some(cleanup_note.unwrap_or_else(|| {
+                    Some(
                         "built-in catalog under a private isolated OPENCODE_CONFIG_DIR; \
                          selections against user-defined providers are not \
                          host-validated here"
-                            .to_string()
-                    })),
+                            .to_string(),
+                    ),
                 ),
                 ParseOutcome::Empty => (
                     provenance,
@@ -636,13 +730,14 @@ fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
         ProbeRun::FailedExit {
             stderr_tail,
             exit_code,
+            ..
         } => (
             probe_provenance(executable, argv.clone(), version),
             EnumerationStatus::ProbeFailed,
             Vec::new(),
             Some(format!("opencode models exited {exit_code}: {stderr_tail}")),
         ),
-        ProbeRun::TimedOut { evidence } => (
+        ProbeRun::TimedOut { evidence, .. } => (
             probe_provenance(executable, argv.clone(), version),
             EnumerationStatus::TimedOut,
             Vec::new(),
@@ -655,6 +750,16 @@ fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
             Some(message),
         ),
     };
+    if let Some(cleanup) = cleanup_note {
+        note = Some(format!("{}; {cleanup}", note.unwrap_or_default()));
+    }
+    if let Some(path) = retained {
+        note = Some(format!(
+            "{}; probe root retained for inspection: {} (descendant cleanup unverifiable)",
+            note.unwrap_or_default(),
+            path.display()
+        ));
+    }
     HostCatalog {
         harness: HarnessId::Opencode,
         availability: HarnessAvailability::Available,
@@ -670,13 +775,14 @@ fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
 /// the bounded version probe, and say so. Selections for these stay
 /// [`crate::selection::SelectionVerdict::NotValidatable`] — shape-checked
 /// but never host-confirmed, per the no-fictitious-confirmation rule.
+#[cfg(unix)]
 fn probe_version_only(harness: HarnessId, executable: &Path) -> HostCatalog {
     let isolation = match ProbeIsolation::create() {
         Ok(isolation) => isolation,
         Err(reason) => return isolation_failed_catalog(harness, executable, reason),
     };
     let env = isolation.env();
-    let version = probe_version(executable, &env, &isolation);
+    let version = probe_version(executable, &env, isolation.root());
     let provenance = ProbeProvenance {
         executable: executable.to_path_buf(),
         argv: Vec::new(),
@@ -699,6 +805,7 @@ fn probe_version_only(harness: HarnessId, executable: &Path) -> HostCatalog {
     }
 }
 
+#[cfg(unix)]
 fn probe_provenance(
     executable: &Path,
     argv: Vec<String>,
@@ -713,18 +820,15 @@ fn probe_provenance(
     }
 }
 
-fn probe_version(
-    executable: &Path,
-    env: &[(String, String)],
-    isolation: &ProbeIsolation,
-) -> Option<String> {
+#[cfg(unix)]
+fn probe_version(executable: &Path, env: &[(String, String)], cwd: &Path) -> Option<String> {
     let attempt = ProbeAttempt {
         executable,
         argv: &["--version".to_string()],
         env,
-        cwd: &isolation.cwd,
+        cwd,
     };
-    match run_probe(&attempt, Duration::from_secs(5)) {
+    match run_probe(&attempt, Duration::from_secs(5)).run {
         ProbeRun::Completed { output, .. } => String::from_utf8_lossy(&output)
             .lines()
             .next()
@@ -735,6 +839,7 @@ fn probe_version(
     }
 }
 
+#[cfg(unix)]
 struct ProbeAttempt<'a> {
     executable: &'a Path,
     argv: &'a [String],
@@ -742,17 +847,14 @@ struct ProbeAttempt<'a> {
     cwd: &'a Path,
 }
 
+#[cfg(unix)]
 enum ProbeRun {
     /// The leader exited zero. `output` is the combined, cap-bounded
-    /// stdout+stderr. `post_exit_cleanup` carries the descendant-cleanup
-    /// evidence when the drain had to escalate after leader exit (a
-    /// grandchild held the pipes); `None` on an ordinary clean exit.
+    /// stdout+stderr.
     Completed {
         output: Vec<u8>,
-        post_exit_cleanup: Option<String>,
     },
-    /// The leader exited non-zero (or was found already dead with a
-    /// failure status). Never parsed into catalog rows.
+    /// The leader exited non-zero. Never parsed into catalog rows.
     FailedExit {
         stderr_tail: String,
         exit_code: String,
@@ -766,36 +868,151 @@ enum ProbeRun {
     SpawnFailed(String),
 }
 
+#[cfg(unix)]
+struct ProbeOutcome {
+    run: ProbeRun,
+    /// Whether every descendant's exit was proven (group-empty via ESRCH)
+    /// at every step. When false, callers retain the probe root as
+    /// evidence instead of deleting it.
+    cleanup_verified: bool,
+    /// Evidence of descendant cleanup needed after leader exit; `None` on
+    /// an ordinary clean exit.
+    post_exit_cleanup: Option<String>,
+}
+
+#[cfg(unix)]
+impl ProbeOutcome {
+    /// Evidence of descendant cleanup for the catalog note: the recorded
+    /// escalation evidence, plus — whenever cleanup was not fully verified
+    /// — an explicit statement of what could not be proven (a
+    /// setsid-detached process is outside killpg visibility).
+    fn cleanup_note(&self) -> Option<String> {
+        let unverifiable = "descendant cleanup unverifiable (EPERM/killpg \
+                            error, hard stop, or surviving group members; a \
+                            setsid-detached process is outside killpg \
+                            visibility)";
+        match (&self.post_exit_cleanup, self.cleanup_verified) {
+            (Some(evidence), true) => Some(evidence.clone()),
+            (Some(evidence), false) => Some(format!("{evidence}; {unverifiable}")),
+            (None, false) => Some(unverifiable.to_string()),
+            (None, true) => None,
+        }
+    }
+}
+
 /// Bounded stderr tail for the failure note.
+#[cfg(unix)]
 const FAILURE_TAIL_LIMIT: usize = 400;
 
 #[cfg(unix)]
 mod run {
     use super::{
-        FAILURE_TAIL_LIMIT, POST_EXIT_GRACE, ProbeAttempt, ProbeRun, REAP_GRACE, SIGNAL_GRACE,
+        DRAIN_PER_EVENT_CAP, FAILURE_TAIL_LIMIT, HARD_STOP_MARGIN, POST_EOF_GROUP_GRACE,
+        POST_EXIT_GRACE, ProbeAttempt, ProbeOutcome, ProbeRun, REAP_GRACE, SIGNAL_GRACE,
     };
     use std::os::unix::io::AsRawFd;
     use std::process::{Child, Command, ExitStatus, Stdio};
     use std::time::{Duration, Instant};
 
-    /// Group-existence probe: `killpg(pgid, 0)` succeeds while any member
-    /// exists. This is the descendant-exit evidence available without
-    /// procfs; tests pair it with a pgid-scoped pgrep for identity. Signal
-    /// success alone is never reported as verified exit.
-    fn group_exists(pgid: u32) -> bool {
-        // SAFETY: kill with sig 0 performs no action beyond error checking.
-        (unsafe { libc::killpg(pgid as libc::pid_t, 0) }) == 0
+    /// What `killpg(pgid, 0)` could prove. Only ESRCH demonstrates absence;
+    /// EPERM and other errors leave the answer unknown, never "empty".
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum GroupStatus {
+        Empty,
+        Present,
+        Unknown,
     }
 
-    fn signal_group(pgid: u32, signal: libc::c_int) -> Result<(), std::io::Error> {
+    fn group_status(pgid: u32) -> GroupStatus {
+        // SAFETY: kill with sig 0 performs no action beyond error checking.
+        let rc = unsafe { libc::killpg(pgid as libc::pid_t, 0) };
+        if rc == 0 {
+            return GroupStatus::Present;
+        }
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ESRCH) {
+            GroupStatus::Empty
+        } else {
+            GroupStatus::Unknown
+        }
+    }
+
+    fn describe_group(status: GroupStatus) -> &'static str {
+        match status {
+            GroupStatus::Empty => "group-empty",
+            GroupStatus::Present => "group-present",
+            GroupStatus::Unknown => "group-membership-unverifiable(EPERM-or-other)",
+        }
+    }
+
+    fn signal_group(pgid: u32, signal: libc::c_int, evidence: &mut Vec<String>) {
         // SAFETY: killpg signals every process in the group; the group was
         // created by us with process_group(0) and contains only probe
         // descendants.
         let rc = unsafe { libc::killpg(pgid as libc::pid_t, signal) };
-        if rc == 0 {
-            Ok(())
+        let name = if signal == libc::SIGTERM {
+            "SIGTERM"
         } else {
-            Err(std::io::Error::last_os_error())
+            "SIGKILL"
+        };
+        if rc == 0 {
+            evidence.push(format!("group {name} delivered"));
+        } else {
+            evidence.push(format!(
+                "group {name} failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+
+    /// Poll group membership until it is provably Empty or the deadline
+    /// passes. `child` is reaped while polling: a leader that has exited
+    /// but not been waited still counts as a group member, which would
+    /// otherwise exhaust every grace as a false "survivor". Non-Empty
+    /// statuses are ridden out rather than sampled once: macOS returns
+    /// EPERM transiently while a group tears down (observed: errno 1 on
+    /// the poll right after SIGTERM, ESRCH one tick later), so a single
+    /// check would report unverifiable exactly when cleanup was working.
+    fn wait_group_empty(pgid: u32, child: &mut Child, deadline: Instant) -> GroupStatus {
+        let mut last = group_status(pgid);
+        while last != GroupStatus::Empty && Instant::now() < deadline {
+            let _ = child.try_wait();
+            std::thread::sleep(Duration::from_millis(10));
+            last = group_status(pgid);
+        }
+        last
+    }
+
+    /// Escalate the whole process group and collect checked evidence about
+    /// descendant exit. Returns whether the group was provably empty at
+    /// the end; mere signal delivery is never reported as verified exit.
+    fn escalate_group(pgid: u32, child: &mut Child, evidence: &mut Vec<String>) -> bool {
+        signal_group(pgid, libc::SIGTERM, evidence);
+        let term_deadline = Instant::now() + SIGNAL_GRACE;
+        match wait_group_empty(pgid, child, term_deadline) {
+            GroupStatus::Empty => {
+                evidence.push("group-empty after SIGTERM".to_string());
+                true
+            }
+            GroupStatus::Unknown => {
+                evidence.push(
+                    "group membership unverifiable after SIGTERM grace (EPERM or \
+                     other killpg error persisted)"
+                        .to_string(),
+                );
+                false
+            }
+            GroupStatus::Present => {
+                evidence.push("group survived SIGTERM; escalating to SIGKILL".to_string());
+                signal_group(pgid, libc::SIGKILL, evidence);
+                let kill_deadline = Instant::now() + SIGNAL_GRACE;
+                let final_status = wait_group_empty(pgid, child, kill_deadline);
+                evidence.push(format!(
+                    "group after SIGKILL: {}",
+                    describe_group(final_status)
+                ));
+                matches!(final_status, GroupStatus::Empty)
+            }
         }
     }
 
@@ -812,12 +1029,13 @@ mod run {
         bytes: Vec<u8>,
     }
 
-    /// Read everything currently available on a nonblocking pipe fd.
-    /// Returns false once EOF is reached. Retention is governed by the
-    /// caller through `combined`/`cap`; excess is drained, not kept.
+    /// Read available data on a nonblocking pipe fd, bounded per event so
+    /// one chatty stream cannot starve the deadline, escalation checks or
+    /// the sibling stream. Returns false once EOF is reached.
     fn drain(pipe: &mut PipeState, combined: &mut usize, cap: usize) -> bool {
         let mut chunk = [0u8; 8192];
-        loop {
+        let mut served = 0usize;
+        while served < DRAIN_PER_EVENT_CAP {
             // SAFETY: `raw` is a live, owned pipe fd in nonblocking mode.
             let n = unsafe { libc::read(pipe.raw, chunk.as_mut_ptr().cast(), chunk.len()) };
             if n > 0 {
@@ -825,14 +1043,22 @@ mod run {
                 let room = cap.saturating_sub(*combined);
                 pipe.bytes.extend_from_slice(&chunk[..n.min(room)]);
                 *combined += n;
+                served += n;
                 continue;
             }
             if n == 0 {
                 return false; // EOF: every writer (incl. descendants) closed it.
             }
             let err = std::io::Error::last_os_error();
-            return err.kind() == std::io::ErrorKind::WouldBlock; // EAGAIN: still open
+            if err.kind() == std::io::ErrorKind::WouldBlock {
+                return true; // EAGAIN: drained for this event.
+            }
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return false; // EIO and friends: treat as closed-with-error.
         }
+        true
     }
 
     fn failure_tail(bytes: &[u8]) -> String {
@@ -841,45 +1067,21 @@ mod run {
         tail.chars().rev().collect()
     }
 
-    /// Escalate the whole process group and collect evidence about
-    /// descendant exit. Never presents mere signal success as verified
-    /// exit: after each grace the group's continued existence is
-    /// re-checked and recorded.
-    fn escalate_group(pgid: u32, evidence: &mut Vec<String>) {
-        match signal_group(pgid, libc::SIGTERM) {
-            Ok(()) => evidence.push("group SIGTERM delivered".to_string()),
-            Err(err) => evidence.push(format!("group SIGTERM failed: {err}")),
-        }
-        let term_deadline = Instant::now() + SIGNAL_GRACE;
-        while Instant::now() < term_deadline && group_exists(pgid) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if group_exists(pgid) {
-            evidence.push("group survived SIGTERM; escalating to SIGKILL".to_string());
-            match signal_group(pgid, libc::SIGKILL) {
-                Ok(()) => evidence.push("group SIGKILL delivered".to_string()),
-                Err(err) => evidence.push(format!("group SIGKILL failed: {err}")),
-            }
-            let kill_deadline = Instant::now() + SIGNAL_GRACE;
-            while Instant::now() < kill_deadline && group_exists(pgid) {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
-        evidence.push(format!(
-            "group-empty after escalation: {}",
-            !group_exists(pgid)
-        ));
-    }
-
-    fn set_nonblocking(raw: std::os::unix::io::RawFd) {
+    fn set_nonblocking(raw: std::os::unix::io::RawFd) -> Result<(), std::io::Error> {
         // SAFETY: fcntl on a live, owned pipe fd.
         unsafe {
             let flags = libc::fcntl(raw, libc::F_GETFL);
-            libc::fcntl(raw, libc::F_SETFL, flags | libc::O_NONBLOCK);
+            if flags == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::fcntl(raw, libc::F_SETFL, flags | libc::O_NONBLOCK) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
         }
+        Ok(())
     }
 
-    pub fn run_probe(attempt: &ProbeAttempt, budget: Duration) -> ProbeRun {
+    pub fn run_probe(attempt: &ProbeAttempt, budget: Duration) -> ProbeOutcome {
         let mut command = Command::new(attempt.executable);
         command
             .args(attempt.argv)
@@ -895,13 +1097,41 @@ mod run {
         }
         let mut child: Child = match command.spawn() {
             Ok(child) => child,
-            Err(err) => return ProbeRun::SpawnFailed(format!("spawn failed: {err}")),
+            Err(err) => {
+                return ProbeOutcome {
+                    run: ProbeRun::SpawnFailed(format!("spawn failed: {err}")),
+                    cleanup_verified: true,
+                    post_exit_cleanup: None,
+                };
+            }
         };
         let pgid = child.id();
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
-        set_nonblocking(stdout.as_raw_fd());
-        set_nonblocking(stderr.as_raw_fd());
+        let mut evidence: Vec<String> = Vec::new();
+        let mut cleanup_verified = true;
+        if let Err(err) = set_nonblocking(stdout.as_raw_fd()) {
+            evidence.push(format!("set_nonblocking(stdout) failed: {err}"));
+            cleanup_verified = false;
+        }
+        if let Err(err) = set_nonblocking(stderr.as_raw_fd()) {
+            evidence.push(format!("set_nonblocking(stderr) failed: {err}"));
+            cleanup_verified = false;
+        }
+        if !cleanup_verified {
+            // Nonblocking setup failed: draining could block, so fail
+            // closed instead of probing further.
+            escalate_group(pgid, &mut child, &mut evidence);
+            let _ = child.kill();
+            let _ = child.wait();
+            return ProbeOutcome {
+                run: ProbeRun::TimedOut {
+                    evidence: evidence.join("; "),
+                },
+                cleanup_verified,
+                post_exit_cleanup: None,
+            };
+        }
         let mut pipes = [
             PipeState {
                 raw: stdout.as_raw_fd(),
@@ -919,11 +1149,19 @@ mod run {
         let mut combined = 0usize;
 
         let deadline = Instant::now() + budget;
+        // Unconditional final bound: budget, plus the worst-case escalation
+        // chain (post-exit grace, TERM wait, KILL wait), reap, and margin.
+        // No child behavior can keep the probe alive past this.
+        let hard_stop = deadline
+            + POST_EXIT_GRACE
+            + SIGNAL_GRACE
+            + SIGNAL_GRACE
+            + REAP_GRACE
+            + HARD_STOP_MARGIN;
         let mut leader_exited: Option<ExitStatus> = None;
         let mut exit_deadline: Option<Instant> = None;
         let mut escalated = false;
         let mut budget_expired = false;
-        let mut evidence: Vec<String> = Vec::new();
 
         loop {
             // Leader exit is cheap to check every iteration; it does NOT
@@ -940,6 +1178,13 @@ mod run {
             }
 
             let now = Instant::now();
+            if now >= hard_stop {
+                escalated = true;
+                evidence.push("unconditional hard stop reached".to_string());
+                cleanup_verified = false;
+                escalate_group(pgid, &mut child, &mut evidence);
+                break;
+            }
             if !escalated && (now >= deadline || exit_deadline.is_some_and(|d| now >= d)) {
                 escalated = true;
                 if now >= deadline && leader_exited.is_none() {
@@ -952,19 +1197,22 @@ mod run {
                             .to_string(),
                     );
                 }
-                escalate_group(pgid, &mut evidence);
+                if !escalate_group(pgid, &mut child, &mut evidence) {
+                    cleanup_verified = false;
+                }
             }
             // Post-escalation bail: group demonstrably empty but EOF never
-            // arrived (pathological holder). Bounded, honest, reported.
+            // arrived (pathological holder). Bounded by hard_stop.
             if escalated
-                && !group_exists(pgid)
+                && matches!(group_status(pgid), GroupStatus::Empty)
                 && exit_deadline.is_some_and(|d| Instant::now() >= d + SIGNAL_GRACE + SIGNAL_GRACE)
             {
                 evidence.push(
                     "group empty but pipe EOF unconfirmed; proceeding with captured \
-                     bytes (holders unverifiable)"
+                     bytes (pipe holders unverifiable)"
                         .to_string(),
                 );
+                cleanup_verified = false;
                 break;
             }
 
@@ -996,6 +1244,14 @@ mod run {
                     timeout.as_millis() as libc::c_int,
                 )
             };
+            if ready < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.kind() != std::io::ErrorKind::Interrupted {
+                    evidence.push(format!("poll failed: {err}"));
+                    cleanup_verified = false;
+                }
+                continue;
+            }
             if ready > 0 {
                 for poll_fd in &poll_fds {
                     let Some(pipe) = pipes.iter_mut().find(|p| p.raw == poll_fd.fd) else {
@@ -1011,11 +1267,11 @@ mod run {
             }
         }
 
-        // Pipe EOF means every writer is gone, so the leader is exiting —
-        // but on macOS there is a window where waitpid(WNOHANG) still
-        // reports it running, which must not be mistaken for a timeout.
-        // Reap it with a bounded wait; a leader that closed its fds but
-        // keeps running is pathological and gets escalated, not trusted.
+        // Pipe EOF means every PIPE writer is gone, so the leader is
+        // exiting — but on macOS there is a window where waitpid(WNOHANG)
+        // still reports it running, which must not be mistaken for a
+        // timeout. Reap it with a bounded wait; a leader that closed its
+        // fds but keeps running is pathological and gets escalated.
         if leader_exited.is_none() {
             let reap_deadline = Instant::now() + REAP_GRACE;
             while leader_exited.is_none() && Instant::now() < reap_deadline {
@@ -1028,7 +1284,9 @@ mod run {
         }
         if leader_exited.is_none() {
             evidence.push("leader closed its pipes but did not exit; escalating".to_string());
-            escalate_group(pgid, &mut evidence);
+            if !escalate_group(pgid, &mut child, &mut evidence) {
+                cleanup_verified = false;
+            }
             let kill_deadline = Instant::now() + SIGNAL_GRACE;
             while leader_exited.is_none() && Instant::now() < kill_deadline {
                 if let Ok(Some(status)) = child.try_wait() {
@@ -1036,6 +1294,38 @@ mod run {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(5));
+            }
+            if leader_exited.is_none() {
+                cleanup_verified = false;
+            }
+        }
+
+        // EOF + exited leader is NOT enough: a background child with stdio
+        // redirected to /dev/null holds no pipe and stays invisible to the
+        // drain. Check the group after reaping the leader, riding out the
+        // transient teardown statuses before deciding.
+        if leader_exited.is_some() {
+            match wait_group_empty(pgid, &mut child, Instant::now() + POST_EOF_GROUP_GRACE) {
+                GroupStatus::Empty => {}
+                GroupStatus::Present => {
+                    escalated = true;
+                    evidence.push(
+                        "surviving group members after leader exit and pipe EOF \
+                         (stdio may be redirected); escalating"
+                            .to_string(),
+                    );
+                    if !escalate_group(pgid, &mut child, &mut evidence) {
+                        cleanup_verified = false;
+                    }
+                }
+                GroupStatus::Unknown => {
+                    evidence.push(
+                        "group membership unverifiable after leader exit (EPERM or \
+                         other killpg error persisted)"
+                            .to_string(),
+                    );
+                    cleanup_verified = false;
+                }
             }
         }
 
@@ -1048,13 +1338,14 @@ mod run {
             }
         }
         output.extend_from_slice(&stderr_bytes);
-        match leader_exited {
-            Some(status) if status.success() && !budget_expired => ProbeRun::Completed {
-                output,
-                post_exit_cleanup: escalated.then(|| evidence.join("; ")),
-            },
+        let post_exit_cleanup = escalated.then(|| evidence.join("; "));
+        let run = match leader_exited {
+            Some(status) if status.success() && !budget_expired => ProbeRun::Completed { output },
             Some(status) if budget_expired => {
-                evidence.push(format!("leader was still running at the deadline; leader status after cleanup: {status}"));
+                evidence.push(format!(
+                    "leader was still running at the deadline; leader status after \
+                     cleanup: {status}"
+                ));
                 ProbeRun::TimedOut {
                     evidence: evidence.join("; "),
                 }
@@ -1066,116 +1357,19 @@ mod run {
             None => ProbeRun::TimedOut {
                 evidence: evidence.join("; "),
             },
-        }
-    }
-}
-#[cfg(not(unix))]
-mod run {
-    use super::{Command, FAILURE_TAIL_LIMIT, ProbeAttempt, ProbeRun, Stdio};
-    use std::io::Read;
-    use std::time::{Duration, Instant};
-
-    /// Honest non-unix fallback: std gives no process-group or poll
-    /// primitives, so this path kills and reaps only the direct child and
-    /// says so in the evidence. It never claims descendant cleanup.
-    pub fn run_probe(attempt: &ProbeAttempt, budget: Duration) -> ProbeRun {
-        let mut command = Command::new(attempt.executable);
-        command
-            .args(attempt.argv)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env_clear()
-            .envs(attempt.env.iter().cloned())
-            .current_dir(attempt.cwd);
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(err) => return ProbeRun::SpawnFailed(format!("spawn failed: {err}")),
         };
-        let stdout = child.stdout.take().expect("piped stdout");
-        let stderr = child.stderr.take().expect("piped stderr");
-        let out_reader = spawn_capped_reader(stdout);
-        let err_reader = spawn_capped_reader(stderr);
-        let deadline = Instant::now() + budget;
-        let mut timed_out = false;
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) => {
-                    if Instant::now() >= deadline {
-                        timed_out = true;
-                        let _ = child.kill();
-                        let hard = Instant::now() + Duration::from_secs(2);
-                        while Instant::now() < hard && child.try_wait().ok().flatten().is_none() {
-                            std::thread::sleep(Duration::from_millis(10));
-                        }
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                Err(err) => {
-                    let _ = err;
-                    timed_out = true;
-                    break;
-                }
-            }
+        ProbeOutcome {
+            run,
+            cleanup_verified,
+            post_exit_cleanup,
         }
-        let _ = child.wait();
-        let mut output = out_reader.join().unwrap_or_default();
-        let stderr_bytes = err_reader.join().unwrap_or_default();
-        output.extend_from_slice(&stderr_bytes);
-        if timed_out {
-            ProbeRun::TimedOut {
-                evidence: "non-unix fallback: direct child killed; descendant cleanup \
-                           not verifiable with std primitives"
-                    .to_string(),
-            }
-        } else {
-            match child.try_wait() {
-                Ok(Some(status)) if status.success() => ProbeRun::Completed {
-                    output,
-                    post_exit_cleanup: None,
-                },
-                Ok(Some(status)) => ProbeRun::FailedExit {
-                    stderr_tail: failure_tail(&stderr_bytes),
-                    exit_code: status.to_string(),
-                },
-                _ => ProbeRun::Completed(output),
-            }
-        }
-    }
-
-    fn failure_tail(bytes: &[u8]) -> String {
-        let text = String::from_utf8_lossy(bytes);
-        let tail: String = text.chars().rev().take(FAILURE_TAIL_LIMIT).collect();
-        tail.chars().rev().collect()
-    }
-
-    fn spawn_capped_reader(
-        mut stream: impl Read + Send + 'static,
-    ) -> std::thread::JoinHandle<Vec<u8>> {
-        std::thread::spawn(move || {
-            let mut kept = Vec::new();
-            let mut chunk = [0u8; 8192];
-            loop {
-                match stream.read(&mut chunk) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if kept.len() < super::PROBE_OUTPUT_CAP {
-                            let room = super::PROBE_OUTPUT_CAP - kept.len();
-                            kept.extend_from_slice(&chunk[..n.min(room)]);
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-            kept
-        })
     }
 }
 
+#[cfg(unix)]
 use run::run_probe;
 
+#[cfg(unix)]
 enum ParseOutcome {
     Entries(Vec<CatalogEntry>),
     Empty,
@@ -1188,6 +1382,7 @@ enum ParseOutcome {
 /// images`). The auth-empty case prints a `No models available` line. Rows
 /// only count once the header has been seen; if nothing parses, the output
 /// is malformed and reported with a bounded sample.
+#[cfg(unix)]
 fn parse_pi_list_models(output: &[u8]) -> ParseOutcome {
     let text = String::from_utf8_lossy(output);
     let mut entries = Vec::new();
@@ -1240,6 +1435,7 @@ fn parse_pi_list_models(output: &[u8]) -> ParseOutcome {
 
 /// Parse `opencode models` output: one `provider/id` per line, blank lines
 /// and `#` comments skipped. Ids without a `/` are kept provider-less.
+#[cfg(unix)]
 fn parse_opencode_models(output: &[u8]) -> ParseOutcome {
     let text = String::from_utf8_lossy(output);
     let mut entries = Vec::new();
@@ -1273,17 +1469,52 @@ fn parse_opencode_models(output: &[u8]) -> ParseOutcome {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
+    use super::{EnumerationStatus, HarnessId, ProbeIsolation, create_private_dir};
+
     #[test]
     fn isolation_failure_catalog_is_fail_closed() {
         let catalog = super::isolation_failed_catalog(
-            super::HarnessId::Pi,
+            HarnessId::Pi,
             std::path::Path::new("/fixture/pi"),
             "cannot create private dir /tmp/x: denied".to_string(),
         );
-        assert_eq!(catalog.status, super::EnumerationStatus::IsolationFailed);
+        assert_eq!(catalog.status, EnumerationStatus::IsolationFailed);
         assert!(catalog.entries.is_empty());
         assert!(catalog.note.as_deref().unwrap().contains("denied"));
+    }
+
+    #[test]
+    fn entropy_failure_fails_closed_without_fallback() {
+        // The failure path is exercised through create_at with an
+        // unwritable parent: no probe root is created and nothing is
+        // deleted. (The CSPRNG itself cannot be forced to fail portably.)
+        let guard = tempfile::tempdir().expect("temp dir");
+        let read_only = guard.path().join("read-only");
+        std::fs::create_dir(&read_only).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let result = ProbeIsolation::create_at(read_only.join("probe"));
+        assert!(result.is_err(), "unwritable parent must fail closed");
+        assert!(read_only.exists());
+    }
+
+    #[test]
+    fn create_collision_never_deletes_a_pre_existing_root() {
+        // A name collision (or any create_dir error) must fail without
+        // deleting the pre-existing directory: ownership is tracked and
+        // Drop only removes a root this call created.
+        let guard = tempfile::tempdir().expect("temp dir");
+        let foreign = guard.path().join("drogon-probe-collision");
+        create_private_dir(&foreign).unwrap();
+        std::fs::write(foreign.join("sentinel.txt"), "not ours").unwrap();
+        let result = ProbeIsolation::create_at(foreign.clone());
+        assert!(result.is_err(), "existing root must not be reused");
+        assert!(
+            foreign.join("sentinel.txt").exists(),
+            "pre-existing root must survive untouched"
+        );
+        assert!(foreign.exists());
     }
 }

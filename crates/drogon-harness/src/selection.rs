@@ -159,7 +159,8 @@ pub fn validate_selection(selection: &HarnessSelection, catalog: &HostCatalog) -
         EnumerationStatus::TimedOut
         | EnumerationStatus::ParseFailed
         | EnumerationStatus::ProbeFailed
-        | EnumerationStatus::IsolationFailed => SelectionVerdict::CatalogUnavailable {
+        | EnumerationStatus::IsolationFailed
+        | EnumerationStatus::UnsupportedPlatform => SelectionVerdict::CatalogUnavailable {
             reason: catalog.note.clone().unwrap_or_else(|| {
                 "the catalog probe failed; try again before launching".to_string()
             }),

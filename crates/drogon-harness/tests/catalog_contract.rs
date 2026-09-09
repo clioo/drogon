@@ -12,6 +12,42 @@ use drogon_harness::{
     freshness_token, probe_host_catalog, probe_host_catalog_with_budget,
 };
 
+#[cfg(unix)]
+/// The fixture scripts under test record their background children's real
+/// PIDs next to the fixture executable. Verifying each recorded identity
+/// with `ps` is descendant-exit evidence; unlike `pgrep -f` it does not
+/// depend on argv contents (a `sleep` carries no launcher path) and a
+/// `ps` error is never read as "absent" without a bounded retry.
+fn assert_recorded_children_reaped(log: &Path) {
+    let content = std::fs::read_to_string(log).expect("children log written by fixture");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    for pid in content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        loop {
+            let output = Command::new("/bin/ps")
+                .args(["-p", pid, "-o", "stat="])
+                .output()
+                .expect("run ps");
+            let stat = String::from_utf8_lossy(&output.stdout);
+            // `ps` exits nonzero and prints nothing once the pid is gone;
+            // empty output is the identity-exit evidence. A 'Z' stat is a
+            // zombie awaiting reap, not a live descendant.
+            let alive = stat.trim().chars().next().is_some_and(|state| state != 'Z');
+            if !alive {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "recorded child {pid} survived cleanup"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
 /// A fixture bin dir with deterministic fake CLIs. Nothing here touches a
 /// real harness or the user's config.
 struct FixtureBin {
@@ -153,10 +189,16 @@ fn missing_executable_is_not_installed() {
 #[cfg(unix)]
 #[test]
 fn timed_out_probe_is_killed_within_its_budget() {
+    // The fixture records its own PID before hanging; cleanup evidence is
+    // the recorded identity exiting, never an argv-based grep.
     let bin = FixtureBin::new();
+    let log = bin.dir.path().join("timeout.children");
     let pi = bin.add(
         "pi",
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\nsleep 60\n",
+        "#!/bin/sh\n\
+         if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
+         echo $$ >> \"$(dirname \"$0\")/timeout.children\"\n\
+         sleep 60\n",
     );
     let start = Instant::now();
     let catalog =
@@ -164,22 +206,13 @@ fn timed_out_probe_is_killed_within_its_budget() {
     let elapsed = start.elapsed();
     assert_eq!(catalog.status, EnumerationStatus::TimedOut);
     assert!(
-        elapsed < Duration::from_secs(8),
+        elapsed < Duration::from_secs(15),
         "kill+reap must stay far below the 60s child sleep: {elapsed:?}"
     );
-    // The group kill must take the whole tree: neither the fixture script
-    // nor the `sleep 60` it spawned may survive. pgrep -f on the exact
-    // fixture path keeps the check scoped to this test's own children.
-    let pattern = pi.display().to_string();
-    let check = Command::new("/usr/bin/pgrep")
-        .args(["-f", &pattern])
-        .output()
-        .expect("pgrep");
-    assert!(
-        check.stdout.is_empty(),
-        "fixture descendants must be reaped: {:?}",
-        String::from_utf8_lossy(&check.stdout)
-    );
+    let note = catalog.note.expect("timeout evidence note");
+    assert!(note.contains("leader still running"), "{note}");
+    assert!(note.contains("group-empty"), "{note}");
+    assert_recorded_children_reaped(&log);
 }
 
 #[test]
@@ -300,8 +333,10 @@ fn leader_exits_but_grandchild_holds_pipes_is_bounded_and_reported() {
     // The leader prints the table and exits zero, but a background child
     // inherits stdout and sleeps: the drain must not hang on the open
     // pipe, must escalate the GROUP after the post-exit grace, and must
-    // report the cleanup in the catalog note.
+    // report the cleanup in the catalog note. The fixture records the
+    // child's real PID; the test verifies that identity exits.
     let bin = FixtureBin::new();
+    let log = bin.dir.path().join("leader-exits.children");
     let pi = bin.add(
         "pi",
         "#!/bin/sh\n\
@@ -310,7 +345,7 @@ fn leader_exits_but_grandchild_holds_pipes_is_bounded_and_reported() {
 provider      model                            context  max-out  thinking  images\n\
 kimi-coding   kimi-for-coding                  262.1K   32.8K    yes       yes\n\
 PIEOF\n\
-         sleep 30 &\n\
+         sleep 30 & echo $! >> \"$(dirname \"$0\")/leader-exits.children\"\n\
          exit 0\n",
     );
     let start = Instant::now();
@@ -322,21 +357,19 @@ PIEOF\n\
     assert_eq!(catalog.status, EnumerationStatus::Enumerated);
     assert_eq!(catalog.entries.len(), 1);
     let note = catalog.note.expect("cleanup note");
-    assert!(note.contains("post-exit descendant cleanup"), "{note}");
     assert!(
-        note.contains("group-empty after escalation: true"),
+        note.contains("leader exited but pipes stayed open past the post-exit grace"),
+        "{note}"
+    );
+    assert!(
+        note.contains("group-empty after SIGTERM"),
         "evidence must record verified group exit, not assumed: {note}"
     );
-    // No fixture descendant may survive.
-    let check = Command::new("/usr/bin/pgrep")
-        .args(["-f", &pi.display().to_string()])
-        .output()
-        .expect("pgrep");
     assert!(
-        check.stdout.is_empty(),
-        "fixture descendants must be reaped: {:?}",
-        String::from_utf8_lossy(&check.stdout)
+        !note.contains("probe root retained"),
+        "verified cleanup must not retain the root: {note}"
     );
+    assert_recorded_children_reaped(&log);
 }
 
 #[cfg(unix)]
@@ -346,6 +379,7 @@ fn term_resistant_descendant_is_sigkilled_and_evidence_recorded() {
     // SIGKILL, and the note must say the group survived TERM rather than
     // claiming signal success as verified exit.
     let bin = FixtureBin::new();
+    let log = bin.dir.path().join("term-resistant.children");
     let pi = bin.add(
         "pi",
         "#!/bin/sh\n\
@@ -354,7 +388,7 @@ fn term_resistant_descendant_is_sigkilled_and_evidence_recorded() {
 provider      model                            context  max-out  thinking  images\n\
 kimi-coding   kimi-for-coding                  262.1K   32.8K    yes       yes\n\
 PIEOF\n\
-         ( trap '' TERM; sleep 60 ) &\n\
+         ( trap '' TERM; sleep 60 ) & echo $! >> \"$(dirname \"$0\")/term-resistant.children\"\n\
          exit 0\n",
     );
     let start = Instant::now();
@@ -369,19 +403,76 @@ PIEOF\n\
         note.contains("group survived SIGTERM"),
         "the TERM survival must be recorded: {note}"
     );
-    assert!(
-        note.contains("group-empty after escalation: true"),
-        "{note}"
+    assert!(note.contains("group after SIGKILL: group-empty"), "{note}");
+    assert_recorded_children_reaped(&log);
+}
+
+#[cfg(unix)]
+#[test]
+fn redirected_stdio_survivor_is_caught_after_eof_and_leader_exit() {
+    // A background child with stdio redirected to /dev/null holds no pipe,
+    // so pipe EOF plus a clean leader exit is NOT proof of cleanup: the
+    // post-leader group check must catch it, escalate, and report it.
+    let bin = FixtureBin::new();
+    let log = bin.dir.path().join("redirected.children");
+    let pi = bin.add(
+        "pi",
+        "#!/bin/sh\n\
+         if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
+         cat <<'PIEOF'\n\
+provider      model                            context  max-out  thinking  images\n\
+kimi-coding   kimi-for-coding                  262.1K   32.8K    yes       yes\n\
+PIEOF\n\
+         sleep 45 </dev/null >/dev/null 2>&1 & echo $! >> \"$(dirname \"$0\")/redirected.children\"\n\
+         exit 0\n",
     );
-    let check = Command::new("/usr/bin/pgrep")
-        .args(["-f", &pi.display().to_string()])
-        .output()
-        .expect("pgrep");
+    let start = Instant::now();
+    let catalog = probe_host_catalog(HarnessId::Pi, Some(&pi));
     assert!(
-        check.stdout.is_empty(),
-        "fixture descendants must be reaped: {:?}",
-        String::from_utf8_lossy(&check.stdout)
+        start.elapsed() < Duration::from_secs(20),
+        "redirected-stdio survivor must be caught within bounds"
     );
+    assert_eq!(catalog.status, EnumerationStatus::Enumerated);
+    let note = catalog.note.expect("cleanup note");
+    assert!(
+        note.contains("surviving group members after leader exit and pipe EOF"),
+        "the invisible survivor must be recorded: {note}"
+    );
+    assert!(
+        !note.contains("probe root retained"),
+        "verified cleanup must not retain the root: {note}"
+    );
+    assert_recorded_children_reaped(&log);
+}
+
+#[cfg(unix)]
+#[test]
+fn continuous_producer_respects_the_deadline_and_is_fully_reaped() {
+    // A child that produces output forever must hit the wall-clock budget
+    // (drain fairness caps prevent stdout from starving the deadline), be
+    // group-killed, and leave checked evidence.
+    let bin = FixtureBin::new();
+    let log = bin.dir.path().join("continuous.children");
+    let pi = bin.add(
+        "pi",
+        "#!/bin/sh\n\
+         if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
+         echo $$ >> \"$(dirname \"$0\")/continuous.children\"\n\
+         while :; do echo 'provider      model                            context  max-out  thinking  images'; done\n",
+    );
+    let start = Instant::now();
+    let catalog =
+        probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), Duration::from_millis(300));
+    assert_eq!(catalog.status, EnumerationStatus::TimedOut);
+    assert!(
+        start.elapsed() < Duration::from_secs(15),
+        "continuous output must not delay the deadline: {:?}",
+        start.elapsed()
+    );
+    let note = catalog.note.expect("timeout evidence note");
+    assert!(note.contains("leader still running"), "{note}");
+    assert!(note.contains("group-empty"), "{note}");
+    assert_recorded_children_reaped(&log);
 }
 
 #[test]

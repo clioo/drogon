@@ -256,7 +256,7 @@ fn pi_translation_requires_an_executable_shaped_binding() {
     // A binding shaped wrong for the adapter (embedded credentials in the
     // base_url) is blocked, not laundered into a recipe.
     let invalid = PiProviderBinding {
-        base_url: "https://user:pw@kimi.example.com".to_string(),
+        base_url: "https://user:pw@192.0.2.1".to_string(),
         ..valid.clone()
     };
     let translation = translate_selection(
