@@ -3,8 +3,8 @@
 //! (`display_identity`, `instructions`), with explicit expected-version
 //! compare-and-swap semantics and provenance. This module adds NO fields
 //! to [`Bot`] itself: the identity version is a standalone counter the
-//! storage owner persists alongside the Bot row (checkpoint
-//! msg_068595e02641), supplied here as an explicit argument so the domain
+//! storage owner persists alongside the Bot row (the C04 contract
+//! checkpoint), supplied here as an explicit argument so the domain
 //! layer never guesses a version. Kept meanings: `instructions` stays
 //! free-standing text the operating prompt trims for display, the handle
 //! stays normalized (trimmed, one leading `@` stripped, empty dropped)

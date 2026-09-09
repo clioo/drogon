@@ -145,7 +145,10 @@ pub struct BotMemory {
 }
 
 /// A create request (user action): content must be non-empty, scope
-/// pairing enforced, provenance supplied by the caller.
+/// pairing enforced, provenance supplied by the caller. `project_id`
+/// MUST be the stable id of an authoritative project record
+/// (`crate::project`), never a folder path or display title -- scope
+/// decisions follow project identity, not mutable names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewMemoryRequest {
     pub bot_id: String,
@@ -380,9 +383,11 @@ pub fn assert_project_access(
 
 /// The visible set for a turn/project context: every `Global` record plus
 /// exactly the `Project` records of `project_id` (none when the context
-/// is project-less). Order follows the input slice (the storage layer's
-/// stable read order); filtering here is a domain helper -- the RPC list
-/// endpoint must apply the same rule server-side.
+/// is project-less). `project_id` must come from the authoritative
+/// workspace/project records the caller resolved for the turn -- never a
+/// folder path or title. Order follows the input slice (the storage
+/// layer's stable read order); filtering here is a domain helper -- the
+/// RPC list endpoint must apply the same rule server-side.
 pub fn visible_memories<'a>(
     records: &'a [BotMemory],
     project_id: Option<&str>,

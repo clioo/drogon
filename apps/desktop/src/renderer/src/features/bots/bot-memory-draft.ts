@@ -5,7 +5,7 @@
  * is the only authority on validation/storage semantics); these are the
  * feature-local transport types the excluded `shared/bot-contract.ts` and
  * the BotsPanel mount will adopt through the reviewed bridge grant
- * (checkpoint msg_068595e02641). Pure data layer: no bridge calls, no
+ * (the C04 contract checkpoint). Pure data layer: no bridge calls, no
  * localStorage persistence -- every mutation goes through the caller's
  * bridge-backed callbacks with an explicit expected version. */
 

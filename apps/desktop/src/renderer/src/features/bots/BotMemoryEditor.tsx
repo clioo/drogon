@@ -5,7 +5,7 @@
  * bridge-backed callback -- no bridge access, no window.api, no local
  * persistence. The excluded BotsPanel/use-bots-page-controller mount
  * wires these callbacks to the reviewed `bot.memory_*` bridge methods
- * (checkpoint msg_068595e02641) and owns busy/error/conflict state. */
+ * (the C04 contract checkpoint) and owns busy/error/conflict state. */
 
 import { useState } from "react";
 import { Plus } from "lucide-react";

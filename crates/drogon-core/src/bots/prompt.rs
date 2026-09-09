@@ -195,7 +195,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 ///
 /// Returns the prompt plus the [`FrozenPromptContext`] to persist on the
 /// turn, freezing identity version, per-memory versions and the context
-/// hash so later edits apply only to subsequent turns.
+/// hash so later edits apply only to subsequent turns. The hash pins the
+/// EXACT selected contents (ids, versions, scopes, contents): persisting
+/// the context JSON beside the turn is what makes the freeze auditable
+/// after restarts, since memory rows themselves keep moving.
 pub fn build_scoped_operating_prompt(
     bot: &Bot,
     message: &str,

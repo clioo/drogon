@@ -1,7 +1,7 @@
 //! C04 domain acceptance tests: versioned identity and project-scoped
 //! memory operations, the scoped prompt-composition freeze, and the
 //! legacy migration rule. These exercise the pure domain layer the
-//! storage/RPC owners integrate (checkpoint msg_068595e02641); they use
+//! storage/RPC owners integrate (the C04 contract checkpoint); they use
 //! deterministic injected ids/clocks, no daemon and no external process.
 
 use drogon_core::bots::identity::{

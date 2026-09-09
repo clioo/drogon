@@ -4,7 +4,7 @@
  * state, this repo's Bots data-layer convention: the save is emitted as
  * an explicit expected-version request through the caller's bridge-backed
  * callback, and the excluded BotsPanel/controller mount wires it to the
- * reviewed `bot.update` bridge method (checkpoint msg_068595e02641).
+ * reviewed `bot.update` bridge method (the C04 contract checkpoint).
  * Normalization (trim, `@` strip, empty dropped) stays native-side, in
  * `crates/drogon-core/src/bots/identity.rs`. */
 
