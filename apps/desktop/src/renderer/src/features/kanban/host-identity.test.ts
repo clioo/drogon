@@ -10,6 +10,8 @@
    becoming destructive-action authority, malformed input failing honestly,
    and the encoded keys staying compatible with grouping, search, selection
    and manual order. */
+import { act, renderHook } from "@testing-library/react";
+import React from "react";
 import { describe, expect, it } from "vitest";
 import {
   composeWorktreeHostIdentity,
@@ -20,7 +22,9 @@ import {
   parseWorktreeHostIdentity,
 } from "./host-identity";
 import { groupWorkspaceKanbanWorktrees } from "./worktree-groups";
-import { buildKanbanWorktrees } from "./kanban-worktree";
+import { useWorkspaceKanbanSelection } from "./use-kanban-selection";
+import { buildManualOrderUpdatesForGroupDrop } from "./manual-order";
+import { buildKanbanWorktrees, type KanbanWorktree } from "./kanban-worktree";
 import { matchWorkspaceBoardWorktrees } from "./board-search";
 import { worktree } from "./test-fixtures";
 import type { Project } from "../../../../shared/session-contract";
@@ -282,5 +286,194 @@ describe("data-layer compatibility", () => {
       getWorktreeHostIdentity(a).localeCompare(getWorktreeHostIdentity(b)),
     );
     expect(ordered).toHaveLength(2);
+  });
+
+  it("selection gestures change one host's row and never the twin's", () => {
+    const rowsA = buildKanbanWorktrees({
+      worktrees: [
+        {
+          id: "shared",
+          projectId: "proj",
+          workspaceId: "ws",
+          path: "/tmp/shared",
+          branch: "shared",
+          head: "head",
+          baseRef: null,
+          createdAt: "2026-09-09T00:00:00Z",
+        },
+      ],
+      projectById: new Map([
+        ["proj", { ...projectById.get("proj")!, hostId: "a|b" }],
+      ]),
+      workspaceById: new Map(),
+    });
+    const rowsB = buildKanbanWorktrees({
+      worktrees: [
+        {
+          id: "shared",
+          projectId: "proj",
+          workspaceId: "ws",
+          path: "/tmp/shared",
+          branch: "shared",
+          head: "head",
+          baseRef: null,
+          createdAt: "2026-09-09T00:00:00Z",
+        },
+      ],
+      projectById: new Map([
+        ["proj", { ...projectById.get("proj")!, hostId: "ab" }],
+      ]),
+      workspaceById: new Map(),
+    });
+    const rowA = rowsA[0]!;
+    const rowB = rowsB[0]!;
+    const identityA = getWorktreeHostIdentity(rowA);
+    const identityB = getWorktreeHostIdentity(rowB);
+    expect(identityA).toBe("a%7Cb|shared");
+    expect(identityB).toBe("ab|shared");
+
+    const hook = renderHook(
+      ({
+        board,
+        rendered,
+      }: {
+        board: ReturnType<typeof buildKanbanWorktrees>;
+        rendered: ReturnType<typeof buildKanbanWorktrees>;
+      }) => useWorkspaceKanbanSelection(true, board, rendered),
+      {
+        initialProps: {
+          board: [rowA, rowB],
+          rendered: [rowA, rowB],
+        },
+      },
+    );
+    const isMac = navigator.userAgent.includes("Mac");
+
+    // Plain click selects exactly the clicked host's row.
+    act(() => {
+      hook.result.current.updateSelectionForGesture(
+        {
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+        } as React.MouseEvent<HTMLElement>,
+        identityA,
+      );
+    });
+    expect([...hook.result.current.selectedWorktreeIds]).toEqual([identityA]);
+
+    // Toggle adds the other host's row as its own selection entry.
+    act(() => {
+      hook.result.current.updateSelectionForGesture(
+        {
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          shiftKey: false,
+        } as React.MouseEvent<HTMLElement>,
+        identityB,
+      );
+    });
+    expect(hook.result.current.selectedWorktreeIds).toEqual(
+      new Set([identityA, identityB]),
+    );
+
+    // Context selection on an already-selected card keeps the multi-selection
+    // payload intact (source: the Move-to-Status payload carries all selected
+    // rows; nothing is narrowed away).
+    act(() => {
+      hook.result.current.selectForContextMenu(
+        {} as React.MouseEvent<HTMLElement>,
+        rowB,
+      );
+    });
+    expect(hook.result.current.selectedWorktreeIds).toEqual(
+      new Set([identityA, identityB]),
+    );
+
+    // A filter change that hides rowA leaves the selection intact.
+    act(() => {
+      hook.rerender({
+        board: [rowA, rowB],
+        rendered: [rowB],
+      });
+    });
+    expect(hook.result.current.selectedWorktreeIds).toEqual(
+      new Set([identityA, identityB]),
+    );
+
+    // Context selection on a NOT-selected card narrows to exactly that host's
+    // row: the selected host changes from A to B and A does not tag along.
+    act(() => {
+      hook.result.current.updateSelectionForGesture(
+        {
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+        } as React.MouseEvent<HTMLElement>,
+        identityA,
+      );
+    });
+    expect([...hook.result.current.selectedWorktreeIds]).toEqual([identityA]);
+    let scoped: readonly KanbanWorktree[] = [];
+    act(() => {
+      scoped = hook.result.current.selectForContextMenu(
+        {} as React.MouseEvent<HTMLElement>,
+        rowB,
+      );
+    });
+    expect(scoped.map(getWorktreeHostIdentity)).toEqual([identityB]);
+    expect([...hook.result.current.selectedWorktreeIds]).toEqual([identityB]);
+    hook.unmount();
+  });
+
+  it("manual-order rank helpers move one host's identity and leave the twin untouched", () => {
+    const identityA = getWorktreeHostIdentity({
+      id: "shared",
+      hostId: "a|b",
+    });
+    const identityB = getWorktreeHostIdentity({ id: "shared", hostId: "ab" });
+    const groups = [
+      { key: "todo", worktreeIds: [identityA, identityB] },
+      { key: "doing", worktreeIds: [] },
+    ];
+
+    // Same-lane reorder with the REAL sparse rank path: known ranks for both
+    // identities, so only the moved host receives an update row and the twin
+    // keeps its stored rank untouched.
+    const reordered = buildManualOrderUpdatesForGroupDrop({
+      groups,
+      targetGroupKey: "todo",
+      draggedIds: [identityA],
+      dropIndex: 2,
+      now: 5000,
+      rankByWorktreeId: new Map([
+        [identityA, 10000],
+        [identityB, 9000],
+      ]),
+      allWorktreeIds: [identityA, identityB],
+    });
+    expect(reordered.changed).toBe(true);
+    expect(reordered.orderedIds).toEqual([identityB, identityA]);
+    expect([...reordered.updates.keys()]).toEqual([identityA]);
+    // The moved rank lands strictly between/below the twin's untouched rank.
+    expect(reordered.updates.get(identityA)!.manualOrder).toBeLessThan(9000);
+
+    // Cross-lane move with known ranks: host A leaves 'todo'; host B stays
+    // exactly where it was, in content and in rank updates.
+    const moved = buildManualOrderUpdatesForGroupDrop({
+      groups,
+      targetGroupKey: "doing",
+      draggedIds: [identityA],
+      dropIndex: 0,
+      now: 9000,
+      rankByWorktreeId: new Map([
+        [identityA, 10000],
+        [identityB, 9000],
+      ]),
+      allWorktreeIds: [identityA, identityB],
+    });
+    expect(moved.orderedIds).toEqual([identityB, identityA]);
+    expect(moved.updates.get(identityA)?.manualOrder).toBeDefined();
+    expect(moved.updates.has(identityB)).toBe(false);
   });
 });
