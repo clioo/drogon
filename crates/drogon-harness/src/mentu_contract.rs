@@ -647,25 +647,11 @@ pub fn translate_selection(
                     "PiCLIAdapter.swift execute guard on reasoning/thinking",
                 );
             }
-            let verdict = validate_selection(selection, catalog);
-            match &verdict {
-                SelectionVerdict::Enumerated { .. }
-                | SelectionVerdict::ProviderDefault { .. }
-                | SelectionVerdict::ManualUnverified { .. } => {}
-                other => {
-                    return blocked(
-                        format!("the host catalog refutes this selection: {other:?}"),
-                        "coordinator C01-A requirement: no fictitious combinations",
-                    );
-                }
-            }
-            // Effective-model rule (pinned adapter mapping: the recipe
-            // executes `request.model ?? config.model`, and this
-            // translation sets BOTH to one value). An explicit selection
-            // for model A must never silently become the binding's
-            // model B; an omitted selection model resolves to the
-            // binding's exact ID, which the caller's credential
-            // resolution owns.
+            // Effective model FIRST: the recipe executes `request.model
+            // ?? config.model` with both set to one value, so an explicit
+            // selection for model A is refused (never substituted) when
+            // the binding carries model B, and an omitted selection model
+            // resolves to the binding's exact ID.
             let effective_model = match &selection.model {
                 Some(selected) if *selected != binding.model => {
                     return blocked(
@@ -681,6 +667,26 @@ pub fn translate_selection(
                 Some(selected) => selected.clone(),
                 None => binding.model.clone(),
             };
+            // The EFFECTIVE selection is validated against the same
+            // catalog, and the verdict/notes rest on it: a binding model
+            // the catalog never enumerated (or a shape-invalid one) is
+            // refuted here instead of bypassing the checks through an
+            // omitted selection model.
+            let effective_selection = crate::selection::HarnessSelection {
+                model: Some(effective_model.clone()),
+                ..selection.clone()
+            };
+            let verdict = validate_selection(&effective_selection, catalog);
+            match &verdict {
+                SelectionVerdict::Enumerated { .. } | SelectionVerdict::ManualUnverified { .. } => {
+                }
+                other => {
+                    return blocked(
+                        format!("the host catalog refutes this selection: {other:?}"),
+                        "coordinator C01-A requirement: no fictitious combinations",
+                    );
+                }
+            }
             let mut notes = vec![
                 "pi step executes through a provider-config adapter, not bare 'pi'".to_string(),
                 "PiCLIAdapter requires Pi >= 0.84.1 and Node >= 22.19 on the execution \

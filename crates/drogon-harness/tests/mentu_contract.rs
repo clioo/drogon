@@ -396,6 +396,78 @@ fn pi_selected_model_must_match_the_binding_model() {
 }
 
 #[test]
+fn pi_omitted_model_validates_the_effective_selection() {
+    // The effective model (binding-supplied when the selection omits
+    // one) is validated against the same catalog: unknown or
+    // shape-invalid binding models do not bypass the checks through an
+    // omitted selection model.
+    let catalog = enumerated_catalog(
+        HarnessId::Pi,
+        vec![entry("kimi-coding", "kimi-for-coding", Some(true))],
+    );
+    let binding_for = |model: &str| PiProviderBinding {
+        provider_name: "kimi-coding".to_string(),
+        base_url: "https://kimi.example.com/v1".to_string(),
+        model: model.to_string(),
+        api_key_env: Some("KIMI_FIXTURE_KEY".to_string()),
+        api_key_vault: None,
+    };
+    // Default to an unknown model: the effective selection is refuted.
+    let translation = translate_selection(
+        &locked_identity(),
+        &adapters(),
+        &selection(HarnessId::Pi, Some("kimi-coding"), None, None),
+        &catalog,
+        Some(&binding_for("kimi-for-unknown")),
+    );
+    let MentuTranslation::Blocked { reason, .. } = translation else {
+        panic!("expected Blocked, got {translation:?}");
+    };
+    assert!(reason.contains("refutes"), "{reason}");
+    assert!(reason.contains("kimi-for-unknown"), "{reason}");
+    // Default to a shape-invalid model: the effective selection is
+    // malformed (mirrors plan_launch's value rules), not translated.
+    let translation = translate_selection(
+        &locked_identity(),
+        &adapters(),
+        &selection(HarnessId::Pi, Some("kimi-coding"), None, None),
+        &catalog,
+        Some(&binding_for("--bad")),
+    );
+    let MentuTranslation::Blocked { reason, .. } = translation else {
+        panic!("expected Blocked, got {translation:?}");
+    };
+    assert!(reason.contains("refutes"), "{reason}");
+    // Empty catalog with an omitted model: truthful manual-unverified,
+    // never a fake enumeration — the binding model rides unverified
+    // with both notes.
+    let empty = enumerated_catalog(HarnessId::Pi, Vec::new());
+    let translation = translate_selection(
+        &locked_identity(),
+        &adapters(),
+        &selection(HarnessId::Pi, Some("kimi-coding"), None, None),
+        &empty,
+        Some(&binding_for("kimi-for-coding")),
+    );
+    let MentuTranslation::Translated(plan) = translation else {
+        panic!("expected Translated, got {translation:?}");
+    };
+    assert_eq!(plan.model.as_deref(), Some("kimi-for-coding"));
+    assert!(
+        plan.notes
+            .iter()
+            .any(|note| note.contains("manual-unverified")),
+        "empty catalog stays unverified: {:?}",
+        plan.notes
+    );
+    assert!(
+        plan.notes.iter().any(|note| note.contains("omitted")),
+        "omitted model stays noted: {:?}",
+        plan.notes
+    );
+}
+
+#[test]
 fn opencode_and_antigravity_have_no_adapter_and_stay_blocked() {
     let catalog = no_surface_catalog(HarnessId::Opencode);
     let translation = translate_selection(
