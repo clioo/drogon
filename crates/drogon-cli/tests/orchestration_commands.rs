@@ -225,6 +225,48 @@ async fn run_show_human_output_matches_source_two_line_shape() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_done_without_lifecycle_verdict_is_operation_unknown() {
+    // Source requireWorkerDoneSettlement: an accepted worker_done whose host
+    // never returned a lifecycle verdict is an unknown operation (exit 1),
+    // never a quiet "Sent".
+    let dir = tempfile::tempdir().unwrap();
+    let _mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.send",
+                json!({"message":{"messageId":"msg-1","sequence":1,"runId":"run-1","kind":"finalReport"},"deliveries":1}),
+            )],
+        ),
+    );
+    let invocation = run_cli(
+        dir.path(),
+        &[
+            "--json",
+            "orchestration",
+            "send",
+            "--type",
+            "worker_done",
+            "--subject",
+            "done",
+            "--outcome",
+            "succeeded",
+            "--run",
+            "run-1",
+            "--coordinator-id",
+            "coord-1",
+            "--consumer-generation",
+            "3",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+    let value: Value = serde_json::from_str(&invocation.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "operation_unknown");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn send_to_run_id_and_at_group_use_source_target_spellings() {
     for (to, expected) in [
         ("run:run-1", json!({"kind": "runHome"})),
@@ -281,7 +323,7 @@ async fn structured_payload_flags_build_the_source_payload_object() {
             true,
             vec![(
                 "orchestration.send",
-                json!({"message":{"messageId":"msg-9","sequence":3,"runId":"run-1","kind":"finalReport"},"deliveries":1}),
+                json!({"message":{"messageId":"msg-9","sequence":3,"runId":"run-1","kind":"finalReport"},"deliveries":1,"lifecycle":{"action":"settled","outcome":"succeeded","duplicate":false}}),
             )],
         ),
     );

@@ -2281,10 +2281,19 @@ pub async fn run(
                 Client::decode_checked(&call, "orchestration.send", |r: &SendResult| {
                     r.validate_shape().map_err(|e| e.message)
                 })?;
-            // A negative lifecycle verdict is a failed invocation: the
-            // envelope still prints, but the caller must see exit 1.
+            // Source `requireWorkerDoneSettlement`: a worker_done whose host
+            // could not prove the lifecycle outcome is an unknown operation.
             let exit_code = match &result.lifecycle {
                 Some(LifecycleVerdict::Rejected { .. }) | Some(LifecycleVerdict::Failed) => 1,
+                None if kind_value == MessageKind::FinalReport => {
+                    return Err(CliError::local(
+                        RpcError::new(
+                            "operation_unknown",
+                            "The runtime accepted worker_done but did not confirm that the exact report settled its Task and Dispatch. Retry from the assigned worker after verifying its active Dispatch.",
+                        ),
+                        request_id,
+                    ));
+                }
                 _ => 0,
             };
             emit(
