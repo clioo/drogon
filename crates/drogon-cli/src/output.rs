@@ -209,7 +209,8 @@ pub fn session_read(result: &ReadResult) -> String {
 }
 
 pub fn session_wrote(result: &WriteResult, session_hint: &str) -> String {
-    format!("Wrote {} bytes to {}.", result.accepted_bytes, session_hint)
+    // Source copy: `Sent N bytes to <handle>.` (terminal-format.ts).
+    format!("Sent {} bytes to {}.", result.accepted_bytes, session_hint)
 }
 
 pub fn session_resized(session: &Session) -> String {

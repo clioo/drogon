@@ -170,7 +170,7 @@ async fn terminal(
             let session: Session = Client::decode_checked(&call, "session.start", check_session)?;
             emit(call, json, || output::session_started(&session), 0, None)
         }
-        TerminalAction::List { workspace } => {
+        TerminalAction::List { workspace, limit } => {
             let params = match workspace {
                 Some(id) => json!({ "workspaceId": id }),
                 None => json!({}),
@@ -185,13 +185,23 @@ async fn terminal(
             // rejected ones.
             let list: SessionList = Client::decode(&call, "session.list")?;
             let (sessions, warnings) = partition_session_list(list);
+            // Source `--limit` caps the returned inventory after filtering.
+            let sessions = match limit {
+                Some(cap) => sessions
+                    .into_iter()
+                    .take((*cap).min(usize::MAX as u64) as usize)
+                    .collect(),
+                None => sessions,
+            };
             let list = SessionList { sessions };
             let stderr_note = if warnings.is_empty() {
                 None
             } else {
                 Some(warnings.join("\n"))
             };
-            if json && stderr_note.is_some() {
+            // --limit changes the payload, so JSON output must be rebuilt
+            // from the capped list even when there were no warnings.
+            if json && (stderr_note.is_some() || limit.is_some()) {
                 let mut filtered = call.raw.clone();
                 filtered["result"]["sessions"] =
                     serde_json::to_value(&list.sessions).map_err(|err| {
@@ -234,13 +244,25 @@ async fn terminal(
             session,
             incarnation,
             text,
+            enter,
+            interrupt,
         } => {
-            let sent_bytes = text.len() as u64;
+            // Source `terminal send` composes the exact byte stream: typed
+            // text, then a carriage return when --enter, or just the
+            // interrupt byte (Ctrl-C, 0x03) when --interrupt. No shell
+            // interpolation anywhere; UTF-8 encoded once.
+            let mut bytes = text.clone().unwrap_or_default().into_bytes();
+            if *enter {
+                bytes.push(b'\r');
+            }
+            if *interrupt {
+                bytes.push(0x03);
+            }
+            let sent_bytes = bytes.len() as u64;
             let params = json!({
                 "sessionId": session,
                 "incarnation": incarnation,
-                // UTF-8 encoded once, here; never shell-interpolated anywhere.
-                "dataBase64": STANDARD.encode(text.as_bytes()),
+                "dataBase64": STANDARD.encode(&bytes),
             });
             let call = client
                 .call("session.write", params, request_id, DEFAULT_TIMEOUT)

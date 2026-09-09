@@ -411,7 +411,124 @@ async fn send_encodes_utf8_text_to_base64_exactly_once() {
     );
     // The CLI now cross-checks acceptedBytes against the exact input byte
     // count, so the mock's echo must match it.
-    assert!(stdout(&output).contains(&format!("Wrote {} bytes", text.len())));
+    assert!(stdout(&output).contains(&format!("Sent {} bytes", text.len())));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_limit_caps_the_returned_inventory() {
+    let dir = temp_data_dir("list-limit");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            let result = match request["method"].as_str() {
+                Some("session.list") => {
+                    json!({ "sessions": [session_result("a"), session_result("b")] })
+                }
+                _ => json!({}),
+            };
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                result,
+            ))
+        }),
+    );
+    let output = run_cli(dir.path(), &["--json", "terminal", "list", "--limit", "1"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let sessions = envelope["result"]["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["id"], "a");
+
+    let zero = run_cli(dir.path(), &["terminal", "list", "--limit", "0"]);
+    assert_eq!(zero.status.code(), Some(2), "--limit 0 is a usage error");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_enter_appends_carriage_return_and_interrupt_sends_ctrl_c() {
+    let dir = temp_data_dir("send-enter");
+    let service = MockService::start(dir.path(), echo_behavior());
+
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "send",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--text",
+            "ls",
+            "--enter",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.first_captured();
+    assert_eq!(request["params"]["dataBase64"], STANDARD.encode(b"ls\r"));
+
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "send",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--interrupt",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["dataBase64"], STANDARD.encode([0x03]));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_without_text_enter_or_interrupt_is_a_usage_error() {
+    let dir = temp_data_dir("send-empty");
+    let service = MockService::start(dir.path(), echo_behavior());
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "send",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        service.captured().is_empty(),
+        "usage errors never reach the daemon"
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_interrupt_rejects_text_combination() {
+    let dir = temp_data_dir("send-conflict");
+    let service = MockService::start(dir.path(), echo_behavior());
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "send",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--interrupt",
+            "--text",
+            "x",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(service.captured().is_empty());
     drop(service);
 }
 

@@ -220,8 +220,8 @@ pub fn all_commands() -> Vec<AgentCommand> {
             "terminal list",
             &["terminal", "list"],
             "List sessions, optionally scoped to one workspace",
-            "drogon-cli terminal list [--workspace <ID>]",
-            &["workspace"],
+            "drogon-cli terminal list [--workspace <ID>] [--limit <N>]",
+            &["limit", "workspace"],
             &[],
             &["drogon-cli terminal list --json"],
             &[],
@@ -244,16 +244,16 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "terminal send",
             &["terminal", "send"],
-            "Write UTF-8 text to a session (encoded to base64 exactly once)",
-            "drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT>",
-            &["incarnation", "session", "text"],
+            "Send text to a session's PTY, optionally submitting or interrupting",
+            "drogon-cli terminal send --session <ID> --incarnation <TOKEN> [--text <TEXT>] [--enter] [--interrupt]",
+            &["enter", "incarnation", "interrupt", "session", "text"],
             &[],
             &[
-                "drogon-cli terminal send --session sess-1 --incarnation tok --text 'echo hi' --json",
+                "drogon-cli terminal send --session sess-1 --incarnation tok --text 'echo hi' --enter --json",
             ],
             &[
                 "Text is encoded to base64 exactly once here, never shell interpolated anywhere.",
-                "To send Enter, end the value with a real newline, not the two characters backslash-n.",
+                "--enter appends the carriage return byte after the text; --interrupt sends the Ctrl-C byte (0x03) and conflicts with --text/--enter.",
             ],
         ),
         entry(

@@ -398,11 +398,14 @@ pub enum TerminalAction {
     /// List sessions, optionally scoped to one workspace
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli terminal list [--workspace <ID>]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+        override_usage = "drogon-cli terminal list [--workspace <ID>] [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --request-id, --retry-request, --workspace"
     )]
     List {
         #[arg(long, value_name = "ID")]
         workspace: Option<String>,
+        /// Cap the number of sessions returned (newest last, source order)
+        #[arg(long, value_name = "N")]
+        limit: Option<u64>,
     },
     /// Read bounded output from a session
     #[command(
@@ -421,18 +424,25 @@ pub enum TerminalAction {
         #[arg(long, value_name = "BYTES")]
         limit_bytes: Option<u64>,
     },
-    /// Write UTF-8 text to a session (encoded to base64 exactly once)
+    /// Send text to a session's PTY, optionally submitting or interrupting
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT>\nValid flags: --data-dir, --help, --incarnation, --json, --request-id, --retry-request, --session, --text"
+        override_usage = "drogon-cli terminal send --session <ID> --incarnation <TOKEN> [--text <TEXT>] [--enter] [--interrupt]\nValid flags: --data-dir, --enter, --help, --incarnation, --interrupt, --json, --request-id, --retry-request, --session, --text"
     )]
     Send {
         #[arg(long, value_name = "ID")]
         session: String,
         #[arg(long, value_name = "TOKEN")]
         incarnation: String,
+        /// Text to type. Optional when only --enter or --interrupt is sent.
         #[arg(long, value_name = "TEXT")]
-        text: String,
+        text: Option<String>,
+        /// Append a carriage return after the text (submit the line)
+        #[arg(long)]
+        enter: bool,
+        /// Send the interrupt byte (Ctrl-C, 0x03); incompatible with --text/--enter
+        #[arg(long, conflicts_with_all = ["enter", "text"])]
+        interrupt: bool,
     },
     /// Resize a session's PTY
     #[command(
@@ -776,9 +786,14 @@ impl Cli {
                         }
                     }
                 }
-                TerminalAction::List { workspace } => {
+                TerminalAction::List { workspace, limit } => {
                     if let Some(workspace) = workspace {
                         require_nonempty("workspace", workspace)?;
+                    }
+                    if let Some(limit) = limit
+                        && *limit == 0
+                    {
+                        return Err(CliError::Usage("--limit must be a positive integer".into()));
                     }
                 }
                 TerminalAction::Read {
@@ -798,10 +813,17 @@ impl Cli {
                 TerminalAction::Send {
                     session,
                     incarnation,
-                    ..
+                    text,
+                    enter,
+                    interrupt,
                 } => {
                     require_nonempty("session", session)?;
                     require_nonempty("incarnation", incarnation)?;
+                    if text.is_none() && !enter && !interrupt {
+                        return Err(CliError::Usage(
+                            "terminal send requires --text, --enter or --interrupt".into(),
+                        ));
+                    }
                 }
                 TerminalAction::Resize {
                     session,
