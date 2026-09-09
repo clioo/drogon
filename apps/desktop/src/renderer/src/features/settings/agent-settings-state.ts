@@ -141,6 +141,10 @@ export function createAgentSettingsState(
       };
     },
     load,
+    ensureReady: async (): Promise<boolean> => {
+      if (!state.ready) await load();
+      return state.ready;
+    },
     update,
   };
 }

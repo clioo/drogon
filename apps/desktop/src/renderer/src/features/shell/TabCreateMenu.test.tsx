@@ -351,7 +351,7 @@ describe("TabCreateMenu immediate harness launch (#231)", () => {
     const seen: string[] = [];
     const onLaunch = vi.fn(async (input: { requestId: string }) => {
       seen.push(input.requestId);
-      return true;
+      return false;
     });
     mount({ onLaunch });
     openMenu();
@@ -362,6 +362,17 @@ describe("TabCreateMenu immediate harness launch (#231)", () => {
     await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(2));
     expect(seen[0]).toMatch(/^[0-9a-f-]{36}$/);
     expect(seen[1]).toBe(seen[0]);
+  });
+
+  it.each(HARNESSES)("creates a fresh admission for each confirmed $displayName launch", async (agent) => {
+    const onLaunch = vi.fn(async (_input: { requestId: string }) => true);
+    mount({ onLaunch });
+    for (let count = 1; count <= 3; count++) {
+      openMenu();
+      clickMenuItem(agent.displayName);
+      await waitFor(() => expect(onLaunch).toHaveBeenCalledTimes(count));
+    }
+    expect(new Set(onLaunch.mock.calls.map(([input]) => input.requestId)).size).toBe(3);
   });
 
   it("never launches an unavailable harness row, even by keyboard", () => {

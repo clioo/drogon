@@ -188,12 +188,15 @@ export function replaceTerminalSplitPane(
     if (at === -1) continue;
     const panes: [string, string] = [...split.panes] as [string, string];
     panes[at] = newPaneId;
-    // The tab keeps its root identity even when the root pane restarts:
-    // only the second-pane slot changes what the strip hides.
+    // Drogon's tab root is the first session ID. Migrate that key too,
+    // or persistence rejects the replacement and dissolves the split.
+    const next = { ...splits };
+    delete next[split.rootId];
     return {
-      ...splits,
-      [split.rootId]: {
+      ...next,
+      [panes[0]]: {
         ...split,
+        rootId: panes[0],
         panes,
         activePaneId:
           split.activePaneId === oldPaneId ? newPaneId : split.activePaneId,

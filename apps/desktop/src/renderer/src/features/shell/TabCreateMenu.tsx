@@ -278,6 +278,9 @@ export function TabCreateMenu({
     setSubmitting(true);
     try {
       const launched = await onLaunch(input);
+      // A confirmed launch is complete. The next agent click is a NEW tab,
+      // not an idempotent replay of the session we just created.
+      if (launched) lastAttempt.current = null;
       // Only a *confirmed* launch clears the recovery record — an ambiguous
       // or refused attempt leaves the exact requestId+params recoverable.
       if (launched && hostId) {

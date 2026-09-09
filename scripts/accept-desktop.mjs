@@ -385,7 +385,11 @@ try {
   await page.getByRole("button", { name: "Sessions", exact: true }).click();
   await page.getByRole("heading", { name: "Drogon", exact: true }).waitFor();
   report.checks.push("no-workspace-sidebar-navigation-clicks");
-  if (withSessions) report.checks.push(await probeStandaloneSessions({ page, output, dataDir }));
+  if (withSessions) {
+    report.checks.push(await probeStandaloneSessions({ page, output, dataDir }));
+    report.checks.push("plus-agent-creates-distinct-focused-tabs-from-terminal-browser-editor-and-split");
+    report.checks.push("terminal-exit-pane-overlays-full-width-restart-in-place-reload-close-and-clean-exit");
+  }
 
   // Add Project dialog (ported folder picker): registers the folder as a
   // project AND its implicit workspace, so the sidebar renders its row

@@ -157,8 +157,10 @@ describe("replaceTerminalSplitPane", () => {
 
   it("leaves focus alone when another pane restarts", () => {
     const next = replaceTerminalSplitPane(splits, "root", "fresh");
-    expect(next.root.panes).toEqual(["fresh", "second"]);
-    expect(next.root.activePaneId).toBe("second");
+    expect(next.fresh.panes).toEqual(["fresh", "second"]);
+    expect(next.fresh.activePaneId).toBe("second");
+    expect(next.root).toBeUndefined();
+    expect(hydrateTerminalSplits(persistTerminalSplits(next))).toEqual(next);
   });
 });
 

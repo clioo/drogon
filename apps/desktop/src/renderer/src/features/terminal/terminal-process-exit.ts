@@ -27,7 +27,9 @@ export function projectTerminalProcessExit(session: {
   verdict: "live" | "unverifiable" | "exited";
   exitCode: number | null;
 }): TerminalProcessExit | null {
-  if (session.verdict !== "exited") return null;
+  // Source pty-exit-hibernate.ts only offers the failure overlay for
+  // nonzero exits; a successful shell exit is not a process failure.
+  if (session.verdict !== "exited" || session.exitCode === 0) return null;
   return { exitCode: session.exitCode, reason: "process-failed" };
 }
 

@@ -16,6 +16,25 @@ import { cacheCountdown } from "../shell/AgentCacheTimer";
 import type { Session } from "../../../../shared/session-contract";
 
 describe("native preference state", () => {
+  test("launch readiness recovers a failed startup load and shares concurrent retries", async () => {
+    const get = vi.fn<AgentSettingsBridge["get"]>()
+      .mockResolvedValueOnce({ ok: false, error: { code: "method_not_found", message: "Old daemon", retryable: false } })
+      .mockResolvedValue({ ok: true, result: { initialized: true, settings: AGENT_SETTINGS_DEFAULTS } });
+    const update = vi.fn<AgentSettingsBridge["update"]>();
+    const state = createAgentSettingsState(() => ({ get, update }));
+    await state.load();
+    expect(state.getSnapshot().ready).toBe(false);
+    expect(await Promise.all([state.ensureReady(), state.ensureReady()])).toEqual([true, true]);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(state.getSnapshot().error).toBeNull();
+    expect(await state.ensureReady()).toBe(true);
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+  test("launch readiness stays false when settings cannot be loaded", async () => {
+    const state = createAgentSettingsState(() => undefined);
+    expect(await state.ensureReady()).toBe(false);
+    expect(state.getSnapshot().error).toContain("unavailable");
+  });
   test.each(["overlap", "retry", "missing-bridge"])(
     "retains migration across %s loads",
     async (mode) => {
