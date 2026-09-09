@@ -11,11 +11,14 @@
    ("No session yet"). `data-testid` hooks stay: the packaged probe and
    contract tests address the card through them.
    Adapters for this repo (data layer, declared): getAgentLabel is the
-   local botHarnessLabel; history evidence names the automation run NUMBER
-   (this store keeps no status verdict on the snapshot join, unlike the
-   fork's `status · id`); `preset` narrows the transport string to the
-   preset union at the avatar boundary — native owns preset validation and
-   an unknown preset falls to the Bot glyph exactly like the fork's `none`. */
+   local botHarnessLabel; history evidence is the fork's
+   `status · id` shape with the run NUMBER standing in for the raw id
+   (`completed · run 1`) — the snapshot now projects both the linked
+   run's status verdict and the per-automation ordinal the native store
+   assigns at creation, mirroring the fork's `nextAutomationRunNumber`;
+   `preset` narrows the transport string to the preset union at the
+   avatar boundary — native owns preset validation and an unknown preset
+   falls to the Bot glyph exactly like the fork's `none`. */
 
 import { CalendarClock, Play, Plus, Zap } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
@@ -40,17 +43,23 @@ import { DrogonBotAvatar } from "./DrogonBotAvatar";
 import { botHarnessLabel } from "./bots-page-model";
 import type { DrogonBotCharacterPreset } from "./bot-characters";
 
-/** Right-hand evidence line for one history row: the automation-linked
- *  form names the run (this store joins the run number, never a status
- *  verdict), else a Mentu run id, else a bare recorded marker. Orphaned
- *  rows (deleted responsibility/automation) keep their null joins visible,
- *  never invented. */
+/** Right-hand evidence line for one history row, the fork's
+ *  `automationRun.status · automationRun.id` shape with this repo's
+ *  declared run-number adapter standing in for the raw id: a linked run
+ *  renders its verdict and ordinal (`completed · run 1`), so the row
+ *  settles exactly when the run does. The number/status join is null for
+ *  rows whose automation run predates the projection (or was deleted),
+ *  never invented. Orphaned rows keep their null joins visible: a Mentu
+ *  run id, else the bare recorded marker. */
 function historyDetail(entry: BotsPanelHistoryEntry): string {
   if (
     entry.automationRunNumber !== null &&
     entry.automationRunNumber !== undefined
   ) {
-    return `${entry.automationName ?? "automation"} · run ${entry.automationRunNumber}`;
+    const ordinal = `run ${entry.automationRunNumber}`;
+    return entry.automationRunStatus
+      ? `${entry.automationRunStatus} · ${ordinal}`
+      : `${entry.automationName ?? "automation"} · ${ordinal}`;
   }
   if (entry.run.recipe?.runId) {
     return `Mentu run ${entry.run.recipe.runId}`;

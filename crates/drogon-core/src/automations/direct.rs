@@ -367,7 +367,13 @@ pub fn record_direct_outcome(
         started_at: dispatched,
         dispatched_at: dispatched,
         created_at: plan.attempt_at,
-        run_number: None,
+        // Fork parity (`nextAutomationRunNumber`): the ordinal is assigned
+        // at creation only; the Completed-guard above already returned for
+        // replays of a finished run.
+        run_number: Some(automations_storage::next_automation_run_number(
+            &tx,
+            &plan.automation_id,
+        )?),
         occurrence_count: None,
         last_occurrence_at: None,
         session_incarnation,
@@ -469,7 +475,12 @@ pub fn record_skip(
         started_at: None,
         dispatched_at: None,
         created_at,
-        run_number: None,
+        // Fork parity (`nextAutomationRunNumber`): assigned once, here at
+        // creation; the Completed-guard above already returned for replays.
+        run_number: Some(automations_storage::next_automation_run_number(
+            &tx,
+            automation_id,
+        )?),
         occurrence_count: None,
         last_occurrence_at: None,
         session_incarnation: None,

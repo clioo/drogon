@@ -127,7 +127,11 @@ fn history_entry_json(entry: HistoryEntry) -> Value {
         "run":entry.responsibility_run,
         "responsibilityName":entry.responsibility.map(|r|r.name),
         "automationName":entry.automation.map(|a|a.name),
-        "automationRunNumber":entry.automation_run.and_then(|r|r.run_number),
+        "automationRunNumber":entry.automation_run.as_ref().and_then(|r|r.run_number),
+        // The fork's snapshot carries the full linked `AutomationRun` row
+        // and its history row renders `status · id`; project the same
+        // status verdict (snake_case, e.g. "completed") so the UI can.
+        "automationRunStatus":entry.automation_run.map(|r|r.status),
     })
 }
 

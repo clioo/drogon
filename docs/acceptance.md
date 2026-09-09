@@ -60,7 +60,7 @@ two post-turn states (never a premature `Working`).
 | `bots-ui-create-renders-bot-in-list` | creating the preset bot (`dgx-spark/qwen3.8-flash-next-nvidia-nvfp4`) renders it in the list |
 | `bots-responsibility-card-renders-saved-duty-with-run` | the saved responsibility card renders with its Run button |
 | `bots-preset-create-with-local-pi-model` | the bot persists with the free local model selected (CLI cross-check) |
-| `bots-manual-responsibility-run-history-row-exited` | a manual run records a visible history row that settles `· exited` (bounded retries while the shared server is busy) |
+| `bots-manual-responsibility-run-history-row-exited` | a manual run records a visible history row whose evidence line turns terminal (`completed · run N`, the fork's `status · id`; bounded retries while the shared server is busy) |
 | `bots-run-output-visible-in-automation-detail` | the responsibility persists as a bot-owned automation whose run detail shows the model output |
 
 The created bot and its responsibility are deleted through the UI before

@@ -54,6 +54,7 @@ export type BotsPanelHistoryRow = {
   responsibilityName: string | null;
   automationName: string | null;
   automationRunNumber: number | null;
+  automationRunStatus: string | null;
   triggerLabel: "Scheduled" | "Manual";
 };
 
@@ -147,6 +148,7 @@ export function projectHistoryRows(
     responsibilityName: entry.responsibilityName,
     automationName: entry.automationName,
     automationRunNumber: entry.automationRunNumber,
+    automationRunStatus: entry.automationRunStatus,
     triggerLabel: historyTriggerLabel(entry.run.invocation),
   }));
 }

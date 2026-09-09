@@ -478,6 +478,24 @@ pub fn upsert_automation_run(conn: &Connection, run: &AutomationRun) -> Result<(
     Ok(())
 }
 
+/// Next per-automation run ordinal (`MAX(runNumber) + 1` over the
+/// automation's existing rows) -- the native equivalent of the fork
+/// store's `nextAutomationRunNumber`
+/// (`src/main/persistence/scheduling-automations/automation-run-operations.ts`),
+/// which assigns the ordinal once at run creation. Callers must invoke this
+/// inside their own write transaction so the ordinal and the row commit
+/// atomically; a replay that finds an existing row keeps that row's number
+/// (the merge path never re-derives it).
+pub fn next_automation_run_number(conn: &Connection, automation_id: &str) -> Result<f64> {
+    let next: f64 = conn.query_row(
+        "SELECT COALESCE(MAX(json_extract(payload_json, '$.runNumber')), 0) + 1
+         FROM automation_runs WHERE automation_id = ?1",
+        params![automation_id],
+        |row| row.get(0),
+    )?;
+    Ok(next)
+}
+
 pub fn get_automation_run(conn: &Connection, id: &str) -> Result<Option<AutomationRun>> {
     conn.query_row(
         "SELECT payload_json FROM automation_runs WHERE id = ?1",
