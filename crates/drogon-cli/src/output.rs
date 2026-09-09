@@ -305,6 +305,11 @@ pub fn automation_created(summary: &AutomationSummary) -> String {
     format!("Created automation {}", automation_line(summary))
 }
 
+/// The shared one-line automation summary, public for update/run surfaces.
+pub fn automation_line_public(summary: &AutomationSummary) -> String {
+    automation_line(summary)
+}
+
 pub fn automation_list(list: &AutomationList) -> String {
     if list.automations.is_empty() {
         return "No automations.".into();

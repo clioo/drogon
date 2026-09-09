@@ -823,6 +823,119 @@ async fn automation(
                 None,
             )
         }
+        AutomationAction::Edit {
+            id,
+            name,
+            cron,
+            workspace,
+            harness,
+            prompt,
+            enable,
+            disable,
+            grace_minutes,
+            model,
+            provider,
+        } => {
+            let mut params = json!({ "id": id });
+            if let Some(name) = name {
+                params["name"] = json!(name);
+            }
+            if let Some(cron) = cron {
+                params["cron"] = json!(cron);
+            }
+            if let Some(workspace) = workspace {
+                params["workspaceId"] = json!(workspace);
+            }
+            if let Some(harness) = harness {
+                params["harness"] = json!(harness);
+            }
+            if let Some(prompt) = prompt {
+                params["prompt"] = json!(prompt);
+            }
+            if *enable {
+                params["enabled"] = json!(true);
+            }
+            if *disable {
+                params["enabled"] = json!(false);
+            }
+            if let Some(grace) = grace_minutes {
+                params["graceMinutes"] = json!(grace);
+            }
+            if let Some(model) = model {
+                params["model"] = json!(model);
+            }
+            if let Some(provider) = provider {
+                params["provider"] = json!(provider);
+            }
+            if params.as_object().map(|o| o.len() <= 1).unwrap_or(true) {
+                return Err(CliError::Usage(
+                    "automation edit requires at least one field flag".into(),
+                ));
+            }
+            let call = client
+                .call("automation.update", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let automation: AutomationSummary =
+                Client::decode_checked(&call, "automation.update", check_automation)?;
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "Updated automation {}",
+                        crate::output::automation_line_public(&automation)
+                    )
+                },
+                0,
+                None,
+            )
+        }
+        AutomationAction::Remove { id } => {
+            let call = client
+                .call(
+                    "automation.delete",
+                    json!({ "id": id }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let removed_id = call.result["id"].as_str().unwrap_or(id).to_string();
+            emit(
+                call,
+                json,
+                || format!("Removed automation {removed_id}."),
+                0,
+                None,
+            )
+        }
+        AutomationAction::Runs {
+            status,
+            page,
+            per_page,
+        } => {
+            let mut params = json!({});
+            if let Some(status) = status {
+                params["status"] = json!(status);
+            }
+            if let Some(page) = page {
+                params["page"] = json!(page);
+            }
+            if let Some(per_page) = per_page {
+                params["perPage"] = json!(per_page);
+            }
+            let call = client
+                .call("automation.runs_all", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let total = call.result["total"].as_u64().unwrap_or(0);
+            let runs = call.result["runs"].as_array().map(Vec::len).unwrap_or(0);
+            emit(
+                call,
+                json,
+                || format!("{runs} runs on this page, {total} total."),
+                0,
+                None,
+            )
+        }
     }
 }
 

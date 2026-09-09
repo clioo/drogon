@@ -266,6 +266,59 @@ pub enum AutomationAction {
         #[arg(long, value_name = "N")]
         limit: Option<u64>,
     },
+    /// Update an automation's fields (only the given flags change)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation edit --id <ID> [--name <NAME>] [--cron <EXPR>] [--workspace <ID>] [--harness <ID>] [--prompt <TEXT>] [--enable|--disable] [--grace-minutes <N>] [--model <ID>] [--provider <ID>]\nValid flags: --cron, --data-dir, --disable, --enable, --grace-minutes, --harness, --help, --id, --json, --model, --name, --prompt, --provider, --request-id, --retry-request, --workspace"
+    )]
+    Edit {
+        #[arg(long, value_name = "ID")]
+        id: String,
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+        #[arg(long, value_name = "EXPR")]
+        cron: Option<String>,
+        #[arg(long, value_name = "ID")]
+        workspace: Option<String>,
+        #[arg(long, value_name = "ID")]
+        harness: Option<String>,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        prompt: Option<String>,
+        /// Enable the automation (conflicts with --disable)
+        #[arg(long, conflicts_with = "disable")]
+        enable: bool,
+        /// Disable the automation (conflicts with --enable)
+        #[arg(long)]
+        disable: bool,
+        #[arg(long, value_name = "N")]
+        grace_minutes: Option<f64>,
+        #[arg(long, value_name = "ID")]
+        model: Option<String>,
+        #[arg(long, value_name = "ID")]
+        provider: Option<String>,
+    },
+    /// Delete an automation and its run history
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation remove --id <ID>\nValid flags: --data-dir, --help, --id, --json, --request-id, --retry-request"
+    )]
+    Remove {
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+    /// List runs across every automation, newest scheduled first
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation runs [--status <STATUS>] [--page <N>] [--per-page <N>]\nValid flags: --data-dir, --help, --json, --page, --per-page, --request-id, --retry-request, --status"
+    )]
+    Runs {
+        #[arg(long, value_name = "STATUS")]
+        status: Option<String>,
+        #[arg(long, value_name = "N")]
+        page: Option<u64>,
+        #[arg(long, value_name = "N")]
+        per_page: Option<u64>,
+    },
 }
 
 /// Hidden service-internal callbacks. Only the hook-event callback exists:
@@ -981,6 +1034,55 @@ impl Cli {
                         && (*limit == 0 || *limit > 200)
                     {
                         return Err(CliError::Usage("--limit must be within 1..=200".into()));
+                    }
+                }
+                AutomationAction::Edit {
+                    id,
+                    name,
+                    cron,
+                    workspace,
+                    harness,
+                    prompt,
+                    grace_minutes,
+                    model,
+                    provider,
+                    ..
+                } => {
+                    require_nonempty("id", id)?;
+                    for (flag, value) in [
+                        ("name", name.as_deref()),
+                        ("cron", cron.as_deref()),
+                        ("workspace", workspace.as_deref()),
+                        ("harness", harness.as_deref()),
+                        ("prompt", prompt.as_deref()),
+                        ("model", model.as_deref()),
+                        ("provider", provider.as_deref()),
+                    ] {
+                        if let Some(value) = value {
+                            require_nonempty(flag, value)?;
+                        }
+                    }
+                    if let Some(grace) = grace_minutes
+                        && *grace < 0.0
+                    {
+                        return Err(CliError::Usage(
+                            "--grace-minutes must not be negative".into(),
+                        ));
+                    }
+                }
+                AutomationAction::Remove { id } => {
+                    require_nonempty("id", id)?;
+                }
+                AutomationAction::Runs { page, per_page, .. } => {
+                    if let Some(page) = page
+                        && *page == 0
+                    {
+                        return Err(CliError::Usage("--page must be >= 1".into()));
+                    }
+                    if let Some(per_page) = per_page
+                        && (*per_page == 0 || *per_page > 200)
+                    {
+                        return Err(CliError::Usage("--per-page must be within 1..=200".into()));
                     }
                 }
             },

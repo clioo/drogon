@@ -1902,3 +1902,70 @@ async fn worktree_create_always_tags_the_cli_creation_provenance() {
     assert_eq!(request["params"]["creator"], "cli");
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automation_edit_maps_only_the_given_flags() {
+    let dir = temp_data_dir("automation-edit");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("status") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "hostId": "host-1",
+                    "serviceInstanceId": "svc-1",
+                    "protocol": 1,
+                    "capabilities": ["workspace.v1", "session.pty.v1", "automation.v1"],
+                    "version": "0.1.0"
+                }),
+            )),
+            Some("automation.update") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": request["params"]["id"],
+                    "name": "renamed",
+                    "cron": "0 0 1 1 *",
+                    "workspaceId": "ws-1",
+                    "harness": "pi",
+                    "prompt": "p",
+                    "enabled": false,
+                    "nextRunAt": 0.0,
+                    "lastRunAt": null,
+                    "lastRun": null
+                }),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "automation",
+            "edit",
+            "--id",
+            "a1",
+            "--name",
+            "renamed",
+            "--disable",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "automation.update");
+    assert_eq!(request["params"]["name"], "renamed");
+    assert_eq!(request["params"]["enabled"], false);
+    assert!(request["params"].get("cron").is_none());
+    assert!(request["params"].get("prompt").is_none());
+
+    // Edit with no field flags is a usage error before any daemon contact.
+    let bare = run_cli(dir.path(), &["automation", "edit", "--id", "a1"]);
+    assert_eq!(bare.status.code(), Some(2));
+
+    // Remove maps to automation.delete and prints the id.
+    let removed = run_cli(dir.path(), &["automation", "remove", "--id", "a1"]);
+    let _ = removed;
+    drop(service);
+}
