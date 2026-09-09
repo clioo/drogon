@@ -1754,11 +1754,15 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    // Source worker-abandon: state line plus its warning.
                     let mut text = format!(
-                        "Dispatch {} abandoned (no signal; {})",
+                        "Worker {} [{}]",
                         result.dispatch_id,
                         wire_assignment(result.assignment_state)
                     );
+                    if let Some(warning) = &result.warning {
+                        text.push_str(&format!("\nWarning: {warning}"));
+                    }
                     text.push_str(&human_extras(&None, &result.residual_resources));
                     text
                 },
@@ -1804,11 +1808,13 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    // Source formatWorkerRelease: head carries state and the
+                    // process action; reason/archive are absent on this host.
                     let mut text = format!(
-                        "Dispatch {}: {} (process {})",
+                        "Worker {} terminal [{}] process={}",
                         result.dispatch_id,
-                        wire_disposition(result.disposition),
-                        wire_verdict(result.process_verdict)
+                        result.state,
+                        wire_process_action(result.process_action),
                     );
                     text.push_str(&human_extras(&None, &result.residual_resources));
                     text
@@ -1885,12 +1891,17 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    let reason = if result.reason.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" reason={}", result.reason)
+                    };
                     let mut text = format!(
-                        "Dispatch {}: {} ({}) (process {})",
+                        "Worker {} terminal [{}]{} process={}",
                         result.dispatch_id,
-                        wire_disposition(result.disposition),
-                        result.reason,
-                        wire_verdict(result.process_verdict)
+                        result.state,
+                        reason,
+                        wire_process_action(result.process_action),
                     );
                     text.push_str(&human_extras(&None, &result.residual_resources));
                     text

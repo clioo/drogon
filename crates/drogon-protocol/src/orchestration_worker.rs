@@ -377,6 +377,9 @@ impl WorkerAbandonParams {
 pub struct WorkerAbandonResult {
     pub dispatch_id: String,
     pub assignment_state: AssignmentState,
+    /// Source `worker-abandon` always warns that no signal was sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
     #[serde(default)]
     pub residual_resources: Vec<ResidualResource>,
 }

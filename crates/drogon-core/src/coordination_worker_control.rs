@@ -47,6 +47,10 @@ impl Engine {
                 encode(WorkerAbandonResult {
                     dispatch_id: params.dispatch_id.clone(),
                     assignment_state: attempt.result.assignment_state,
+                    // Source: the warning is unconditional — no signal was sent.
+                    warning: Some(
+                        "The worker was abandoned without signalling its process.".into(),
+                    ),
                     residual_resources: attempt.result.residual_resources,
                 })
             },

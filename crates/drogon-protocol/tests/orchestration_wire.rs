@@ -462,6 +462,7 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
     let abandon = WorkerAbandonResult {
         dispatch_id: "dispatch-1".into(),
         assignment_state: AssignmentState::Abandoned,
+        warning: Some("The worker was abandoned without signalling its process.".into()),
         residual_resources: vec![ResidualResource {
             kind: ResourceKind::Session,
             resource_id: "session-1".into(),

@@ -642,7 +642,7 @@ async fn review_retained_release_never_claims_released() {
             vec![(
                 "orchestration.workerRelease",
                 json!({"dispatchId":"dispatch-1",
-        "disposition":"retained", "processVerdict":"live"}),
+        "disposition":"retained", "processVerdict":"live", "state":"retained","processAction":"none"}),
             )],
         ),
     );
