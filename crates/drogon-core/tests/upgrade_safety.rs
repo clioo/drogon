@@ -474,7 +474,10 @@ fn old_git_kind_workspace_is_backfilled_with_its_own_attachable_worktree() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!(ws_count, 1, "must reuse the old workspace row, never duplicate it");
+    assert_eq!(
+        ws_count, 1,
+        "must reuse the old workspace row, never duplicate it"
+    );
     assert_eq!(ws_id, workspace_id);
 }
 
@@ -490,8 +493,10 @@ fn old_git_kind_workspace_is_backfilled_with_its_own_attachable_worktree() {
 // test, reproduced and pinned here directly against the recovery itself.
 #[test]
 fn an_existing_secondary_worktrees_workspace_is_never_mistaken_for_an_orphan() {
-    let (dir, engine) =
-        open_seeded("v1-secondary-worktree", "projects-v1-with-secondary-worktree");
+    let (dir, engine) = open_seeded(
+        "v1-secondary-worktree",
+        "projects-v1-with-secondary-worktree",
+    );
     let listed = engine
         .dispatch(Request {
             protocol: PROTOCOL_VERSION,
@@ -546,7 +551,10 @@ fn an_existing_secondary_worktrees_workspace_is_never_mistaken_for_an_orphan() {
 // build sees for the very first time.
 #[test]
 fn recovers_pre_projects_orphans_even_when_the_store_is_already_at_v3() {
-    let (dir, engine) = open_seeded("already-v3-with-orphans", "projects-v3-with-pre-projects-orphan");
+    let (dir, engine) = open_seeded(
+        "already-v3-with-orphans",
+        "projects-v3-with-pre-projects-orphan",
+    );
     let response = engine.dispatch(Request {
         protocol: PROTOCOL_VERSION,
         request_id: "list-1".into(),

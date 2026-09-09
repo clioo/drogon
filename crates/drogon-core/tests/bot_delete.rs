@@ -300,7 +300,8 @@ fn delete_succeeds_when_the_caller_names_a_different_registered_workspace() {
 // is the bot's own, never an arbitrary caller-asserted one.
 
 #[test]
-fn responsibility_create_succeeds_with_the_host_global_empty_workspace_scope_and_uses_the_bots_own_workspace() {
+fn responsibility_create_succeeds_with_the_host_global_empty_workspace_scope_and_uses_the_bots_own_workspace()
+ {
     let fx = Fixture::new();
     let bot_id = fx.create_bot("bot-1")["id"].as_str().unwrap().to_string();
     let created = ok(fx.create_responsibility_with_workspace("create-1", "", &bot_id));
@@ -325,11 +326,8 @@ fn responsibility_create_succeeds_after_switching_to_a_different_registered_work
         .as_str()
         .unwrap()
         .to_string();
-    let created = ok(fx.create_responsibility_with_workspace(
-        "create-1",
-        &other_workspace_id,
-        &bot_id,
-    ));
+    let created =
+        ok(fx.create_responsibility_with_workspace("create-1", &other_workspace_id, &bot_id));
     // Never the caller's mismatched workspace -- the bot's own.
     assert_eq!(created["workspaceId"], json!(fx.workspace_id));
     assert_ne!(created["workspaceId"], json!(other_workspace_id));
@@ -340,12 +338,8 @@ fn responsibility_create_still_rejects_a_genuinely_unknown_workspace() {
     let fx = Fixture::new();
     let bot_id = fx.create_bot("bot-1")["id"].as_str().unwrap().to_string();
     assert_eq!(
-        err(fx.create_responsibility_with_workspace(
-            "create-1",
-            "no-such-workspace",
-            &bot_id,
-        ))
-        .code,
+        err(fx.create_responsibility_with_workspace("create-1", "no-such-workspace", &bot_id,))
+            .code,
         "unknown_workspace"
     );
 }
@@ -381,12 +375,8 @@ fn responsibility_delete_succeeds_with_the_host_global_empty_workspace_scope() {
     let responsibility_id = created["responsibilityId"].as_str().unwrap().to_string();
     let automation_id = created["automationId"].as_str().unwrap().to_string();
 
-    let deleted = ok(fx.delete_responsibility_with_workspace(
-        "del-1",
-        "",
-        &bot_id,
-        &responsibility_id,
-    ));
+    let deleted =
+        ok(fx.delete_responsibility_with_workspace("del-1", "", &bot_id, &responsibility_id));
     assert_eq!(deleted["removed"], json!(true));
     assert_eq!(deleted["automationId"], json!(automation_id.clone()));
 
@@ -446,19 +436,11 @@ fn responsibility_delete_replays_the_stored_receipt_after_the_bot_is_already_gon
     let created = fx.create_responsibility("resp-1", &bot_id);
     let responsibility_id = created["responsibilityId"].as_str().unwrap().to_string();
 
-    let first = ok(fx.delete_responsibility_with_workspace(
-        "del-once",
-        "",
-        &bot_id,
-        &responsibility_id,
-    ));
+    let first =
+        ok(fx.delete_responsibility_with_workspace("del-once", "", &bot_id, &responsibility_id));
     ok(fx.delete_bot("del-bot", &bot_id));
-    let replayed = ok(fx.delete_responsibility_with_workspace(
-        "del-once",
-        "",
-        &bot_id,
-        &responsibility_id,
-    ));
+    let replayed =
+        ok(fx.delete_responsibility_with_workspace("del-once", "", &bot_id, &responsibility_id));
     assert_eq!(first, replayed);
 }
 

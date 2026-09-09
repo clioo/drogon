@@ -343,7 +343,13 @@ fn backfill_projects_from_pre_existing_workspaces(tx: &Transaction) -> rusqlite:
         tx.execute(
             "INSERT INTO projects (id, host_id, path, name, kind, default_base_ref, created_at)
              VALUES (?1, ?2, ?3, ?4, 'folder', NULL, ?5)",
-            params![uuid::Uuid::new_v4().to_string(), host_id, path, name, created_at],
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                host_id,
+                path,
+                name,
+                created_at
+            ],
         )?;
     }
 

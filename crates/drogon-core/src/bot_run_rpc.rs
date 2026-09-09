@@ -574,7 +574,9 @@ enum WorkspaceScope {
     /// afterward, by bot id, in [`authorized_prepare`] -- never here.
     HostGlobal,
     UnknownWorkspace,
-    ForeignWorkspaceHost { workspace_host_id: String },
+    ForeignWorkspaceHost {
+        workspace_host_id: String,
+    },
     ForeignAssertedHost,
 }
 

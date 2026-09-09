@@ -478,7 +478,11 @@ fn quick_session_survives_a_daemon_restart_without_disturbing_other_projects() {
     let other_dir = tempfile::tempdir().unwrap();
     let (chat_id, chat_path, other_project_id) = {
         let engine = Engine::open(data_dir.path()).unwrap();
-        let created = ok(&engine, "project.quickSessionCreate", json!({"name": "Chat"}));
+        let created = ok(
+            &engine,
+            "project.quickSessionCreate",
+            json!({"name": "Chat"}),
+        );
         let chat_id = created["project"]["id"].as_str().unwrap().to_string();
         let chat_path = created["project"]["path"].as_str().unwrap().to_string();
         let other = ok(
@@ -486,7 +490,11 @@ fn quick_session_survives_a_daemon_restart_without_disturbing_other_projects() {
             "project.add",
             json!({"path": other_dir.path().to_str().unwrap()}),
         );
-        (chat_id, chat_path, other["id"].as_str().unwrap().to_string())
+        (
+            chat_id,
+            chat_path,
+            other["id"].as_str().unwrap().to_string(),
+        )
     }; // engine dropped here -- simulates the daemon exiting.
 
     // Reopen: the "restart" the requirement names.
