@@ -1,17 +1,20 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-// src/renderer/src/components/task-page-localized-options.tsx — GitHub-only
-// adaptation. The source icon set shrinks to GitHub (no Linear/Jira/GitLab
-// in this repo); the source's qualifier defaults (presetToQuery) prefill the
-// search box while projectTasksDaemonQuery strips the qualifiers the daemon
-// already encodes via kind + `state` (open|closed|all).
+// src/renderer/src/components/task-page-localized-options.tsx — GitHub +
+// Jira adaptation. The source icon set shrinks to GitHub and Jira (no
+// Linear/GitLab in this repo); the source's qualifier defaults
+// (presetToQuery) prefill the search box while projectTasksDaemonQuery
+// strips the qualifiers the daemon already encodes via kind + `state`
+// (open|closed|all). The Jira preset pills and the Jira source option are
+// the fork's (R17-B).
 
 import { GithubIcon } from "./github-icon";
+import { JiraIcon } from "./jira/jira-issue-workspace-content";
 import type { TaskIssueState } from "../../../../shared/tasks-contract";
 
 export type GitHubTaskKind = "issues" | "pulls";
 
 export type SourceOption = {
-  id: "github";
+  id: "github" | "jira";
   label: string;
   Icon: (props: { className?: string }) => React.JSX.Element;
   disabled?: boolean;
@@ -24,6 +27,26 @@ export function getSourceOptions(): SourceOption[] {
       label: "GitHub",
       Icon: ({ className }) => <GithubIcon className={className} />,
     },
+    {
+      id: "jira",
+      label: "Jira",
+      Icon: ({ className }) => <JiraIcon className={className} />,
+    },
+  ];
+}
+
+// R17-B: the fork's four Jira filter tabs (task-page-localized-options.tsx
+// getJiraPresets); the ids double as this repo's JiraIssueFilter contract.
+export type JiraPresetId = "assigned" | "reported" | "all" | "done";
+
+export type JiraPreset = { id: JiraPresetId; label: string };
+
+export function getJiraPresets(): JiraPreset[] {
+  return [
+    { id: "assigned", label: "Assigned" },
+    { id: "reported", label: "Reported" },
+    { id: "all", label: "All Open" },
+    { id: "done", label: "Done" },
   ];
 }
 

@@ -42,6 +42,10 @@ export function formatRelativeTime(input: string): string {
 }
 
 export const TASK_SEARCH_DEBOUNCE_MS = 300;
+
+// R17-B: the fork's Jira list window (task-page-source-context.ts
+// JIRA_ITEM_LIMIT) — one Jira fetch serves at most this many issues.
+export const JIRA_ITEM_LIMIT = 50;
 import { cn } from "./cn";
 export const GITHUB_TASK_GRID_CLASS =
   "min-w-[790px] grid-cols-[72px_minmax(320px,1fr)_84px_100px_92px_122px]";

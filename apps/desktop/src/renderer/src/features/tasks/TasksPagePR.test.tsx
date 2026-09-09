@@ -23,6 +23,7 @@ import { PRReviewCell } from "./task-page/github/ReviewCell";
 import { PRChecksCell } from "./task-page/github/ChecksCell";
 import { PRMergeCell } from "./task-page/github/MergeCell";
 import { TooltipProvider } from "./ui/tooltip";
+import { jiraSurfaceModelDefaults } from "./jira/jira-surface-defaults";
 import type { TaskPullRequest } from "../../../../shared/tasks-contract";
 
 function pull(number: number, overrides: Partial<TaskPullRequest> = {}): TaskPullRequest {
@@ -110,6 +111,7 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
     handleStartWorkItem: () => {},
     startBusyNumber: null,
     githubListScrollRef: { current: null },
+    ...jiraSurfaceModelDefaults(),
     ...overrides,
   };
 }
