@@ -1828,6 +1828,7 @@ impl DispatchGuard {
         let stop_ref: Vec<&str> = stop_args.iter().map(String::as_str).collect();
         let (code, stop) = coordinator_call(&self.data_dir, &stop_ref);
         assert_eq!(code, 0, "worker-stop must be accepted: {stop:#}");
+        assert_eq!(text_field(&stop, "/result/assignmentState"), "stopped");
 
         let start = Instant::now();
         let last_show = loop {

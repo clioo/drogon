@@ -1700,14 +1700,18 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    // Source worker-stop: `Worker <id> [stopped] process=<action>`
+                    // plus the optional warning line.
                     let mut text = format!(
-                        "Dispatch {}: assignment {}; process action {} (verdict {})",
+                        "Worker {} [{}] process={}",
                         result.dispatch_id,
                         wire_assignment(result.assignment_state),
                         wire_process_action(result.process_action),
-                        wire_verdict(result.process_verdict)
                     );
-                    text.push_str(&human_extras(&result.warning, &result.residual_resources));
+                    if let Some(warning) = &result.warning {
+                        text.push_str(&format!("\nWarning: {warning}"));
+                    }
+                    text.push_str(&human_extras(&None, &result.residual_resources));
                     text
                 },
                 exit_code,
