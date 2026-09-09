@@ -82,6 +82,28 @@ fn source_ask_csv_options_are_distinct_from_literal_repeatable_options() {
 }
 
 #[test]
+fn source_ask_timeout_accepts_exact_numeric_forms_and_clamps_at_thirty_minutes() {
+    for (raw, expected) in [
+        ("1e3", 1000),
+        ("1000.0", 1000),
+        ("1800001", 1_800_000),
+        ("9007199254740991", 1_800_000),
+    ] {
+        let OrchestrationCommand::Ask { timeout_ms, .. } = parse(&[
+            "orchestration",
+            "ask",
+            "--question",
+            "continue?",
+            "--timeout-ms",
+            raw,
+        ]) else {
+            panic!("expected ask")
+        };
+        assert_eq!(timeout_ms, expected);
+    }
+}
+
+#[test]
 fn source_ask_uses_ten_minute_default_without_timeout_flag() {
     let OrchestrationCommand::Ask { timeout_ms, .. } =
         parse(&["orchestration", "ask", "--question", "continue?"])

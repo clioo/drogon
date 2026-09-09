@@ -436,6 +436,43 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     let task_id = text_field(&task, "/result/task/taskId").to_string();
     assert_eq!(text_field(&task, "/result/task/status"), "ready");
 
+    // Source ask is bare JSON; a durable answer makes the long-budget resume immediate.
+    let mut ask_args = vec!["orchestration".to_string(), "ask".to_string()];
+    scope_args(&mut ask_args);
+    ask_args.extend(
+        [
+            "--question",
+            "Proceed?",
+            "--options",
+            "yes,yes,no",
+            "--timeout-ms",
+            "1",
+        ]
+        .map(String::from),
+    );
+    let args: Vec<_> = ask_args.iter().map(String::as_str).collect();
+    let (code, pending) = coordinator_call(&data_dir, &args);
+    assert_eq!(code, 1, "{pending:#}");
+    assert_eq!(pending["timedOut"], true);
+    let question = text_field(&pending, "/messageId").to_string();
+    let mut reply_args = vec!["orchestration".to_string(), "reply".to_string()];
+    scope_args(&mut reply_args);
+    reply_args.extend(["--id", &question, "--body", "approved ✓"].map(String::from));
+    let args: Vec<_> = reply_args.iter().map(String::as_str).collect();
+    let (code, replied) = coordinator_call(&data_dir, &args);
+    assert_ok(code, &replied, &args);
+    let mut resume_args = vec!["orchestration".to_string(), "ask".to_string()];
+    scope_args(&mut resume_args);
+    resume_args
+        .extend(["--resume", &question, "--timeout-ms", "9007199254740991"].map(String::from));
+    let args: Vec<_> = resume_args.iter().map(String::as_str).collect();
+    let (code, answered) = coordinator_call(&data_dir, &args);
+    assert_eq!(code, 0, "{answered:#}");
+    assert_eq!(answered["answer"], "approved ✓");
+    assert_eq!(answered["messageId"], question);
+    assert_eq!(answered["timeoutMs"], 1_800_000);
+    assert!(answered.get("result").is_none());
+
     // Status updates traverse the real CLI and daemon, preserving an explicit
     // result across a later update that omits --result.
     for (status, report) in [("blocked", Some("review before launch ✓")), ("ready", None)] {

@@ -1,5 +1,5 @@
 //! Clap grammar for the native orchestration subcommands, split out of
-//! `cli.rs` so the nested 18-verb surface stays domain-specific. Scope flags
+//! `cli.rs` so the nested command surface stays domain-specific. Scope flags
 //! are flattened arg groups shared by the verbs that need them. All
 //! orchestration validation lives in `orchestration_commands` (it needs
 //! environment hints); only pure grammar goes here.
@@ -506,8 +506,8 @@ pub enum OrchestrationCommand {
         /// Resume an existing pending question by its message id
         #[arg(long, value_name = "MSG-ID")]
         resume: Option<String>,
-        /// Positive bounded wait budget in ms (default 10 minutes, <= 900000)
-        #[arg(long, value_name = "MS", default_value_t = 600_000)]
+        /// Positive safe integer budget in ms (default 10 minutes; clamped to 30)
+        #[arg(long, value_name = "MS", default_value_t = 600_000, value_parser = crate::orchestration_timeout::ask_timeout)]
         timeout_ms: u32,
         #[command(flatten)]
         host: HostOpt,

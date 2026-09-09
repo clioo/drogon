@@ -1810,17 +1810,43 @@ pub async fn run(
             };
             let note = match result.wait {
                 AskWaitOutcome::Pending => Some(format!(
-                    "question {} stays pending; resume with --resume {}",
-                    result.question_message_id, result.question_message_id
+                    "ask timeout after {}ms (thread {})",
+                    result.effective_timeout_ms.unwrap_or(*timeout_ms),
+                    result.thread_id
                 )),
                 AskWaitOutcome::Cancelled => Some(format!(
-                    "question {} wait was interrupted",
+                    "ask {} (question {})",
+                    if result.connection_lost {
+                        "connection closed"
+                    } else {
+                        "cancelled"
+                    },
                     result.question_message_id
                 )),
                 AskWaitOutcome::Answered => None,
             };
             if json {
-                let stdout = serde_json::to_string_pretty(&call.raw).map_err(|err| {
+                // Source ask is deliberately bare: callers use jq -r .answer.
+                let mut source = call.raw["result"].clone();
+                if let Some(fields) = source.as_object_mut() {
+                    fields.remove("questionMessageId");
+                    fields.remove("effectiveTimeoutMs");
+                    fields.remove("wait");
+                    fields.remove("answerMessageId");
+                }
+                source["answer"] = serde_json::json!(result.answer.as_ref().map(|a| &a.body));
+                source["messageId"] = serde_json::json!(result.question_message_id);
+                source["threadId"] = serde_json::json!(result.thread_id);
+                source["timedOut"] = serde_json::json!(result.wait == AskWaitOutcome::Pending);
+                source["cancelled"] = serde_json::json!(result.wait == AskWaitOutcome::Cancelled);
+                source["connectionLost"] = serde_json::json!(result.connection_lost);
+                if let Some(budget) = result.effective_timeout_ms {
+                    source["timeoutMs"] = serde_json::json!(budget);
+                }
+                if let Some(answer) = &result.answer {
+                    source["answerMessageId"] = serde_json::json!(answer.answer_message_id);
+                }
+                let stdout = serde_json::to_string_pretty(&source).map_err(|err| {
                     CliError::local(
                         internal_error(format!("cannot encode response: {err}")),
                         call.request_id.clone(),

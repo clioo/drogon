@@ -80,26 +80,48 @@ Targets are `run-home`, `dispatch:<ID>` or `group:<NAME>`.
 
 Ask blocks for an answer inside one bounded budget:
 `drogon-cli orchestration ask --run <ID> --coordinator-id <ID> --consumer-generation 3 --question <TEXT> --timeout-ms 60000`.
-A worker answers from its own terminal with
+A worker asks from its own terminal with
 `drogon-cli orchestration ask --task <ID> --dispatch <ID> --question <TEXT> --timeout-ms 60000`
 when it needs the coordinator, and a coordinator answers a pending
 question with
 `drogon-cli orchestration reply --run <ID> --coordinator-id <ID> --consumer-generation 3 --question <MSG> --body <TEXT>`.
 Answer with `reply`, never with a second `ask`: the question id keeps the
 correlation. Resume a pending ask by its message id rather than opening a
-duplicate.
+duplicate. Without `--timeout-ms`, the budget is ten minutes; larger explicit
+budgets are clamped to thirty minutes. `--options` accepts comma-separated
+choices, while repeatable `--option` keeps each choice literal.
+
+Unlike other RPC commands, `ask --json` returns a bare object: read `.answer`,
+`.messageId`, `.threadId`, `.timedOut`, `.cancelled` and `.connectionLost` directly.
+A pending or cancelled wait exits 1; a timeout never closes the question.
+
+## Task Status And Decision Gates
+
+`drogon-cli orchestration task-update --run <ID> --coordinator-id <ID> --consumer-generation 3 --id <TASK> --status completed --result <TEXT>`
+updates a task after its active worker has settled or stopped. Omitting
+`--result` preserves the previous result. Completing prerequisites promotes
+their eligible dependent tasks; a status label never proves process exit.
+
+`drogon-cli orchestration gate-create --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <TASK> --question <TEXT>`
+creates a durable decision gate and blocks the task. Gate `--options` is a JSON
+array of strings, unlike ask's CSV form.
+`drogon-cli orchestration gate-list --run <ID> --coordinator-id <ID> --consumer-generation 3 --status pending`
+lists pending gates, optionally filtered by `--task`.
+`drogon-cli orchestration gate-resolve --run <ID> --coordinator-id <ID> --consumer-generation 3 --id <GATE> --resolution <TEXT>`
+resolves a gate and returns its task to ready. Creation and resolution refuse
+an active supervised worker rather than silently discarding its assignment.
 
 ## Scope And Credentials
 
-Coordinator verbs (`run-create`, `run-list`, `run-show`, `run-use`,
-`task-create`, `task-list`, `task-show`, `worker-start`, `worker-show`,
-`worker-read`, `worker-stop`, `worker-abandon`, `worker-release`) need the
+Bound coordinator verbs (`run-use`, `task-create`, `task-update`, `task-list`,
+`task-show`, `gate-create`, `gate-resolve`, `gate-list`, `worker-start`,
+`worker-show`, `worker-read`, `worker-stop`, `worker-abandon`, `worker-release`) need the
 explicit `--run`, `--coordinator-id` and `--consumer-generation` bindings
 on every call: there is no default run and no binding store. Mail verbs
 (`send`, `check`, `reply`, `ask`) accept either the coordinator binding or
 the dispatch binding (`--task`, `--dispatch`); a dispatched worker's own
-terminal fills the dispatch side from scoped hints, so explicit worker
-flags there are refused. Coordinator-only verbs refuse a worker credential
+terminal fills missing dispatch fields from scoped hints. Explicit worker
+fields must agree with those hints. Coordinator-only verbs refuse a worker credential
 outright. Take over a run explicitly with
 `drogon-cli orchestration run-use --run <ID> --coordinator-id <ID> --consumer-generation 3 --takeover`.
 

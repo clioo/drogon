@@ -92,16 +92,8 @@ impl AskIntent {
                     MAX_TASK_TEXT_BYTES,
                     "Invalid orchestration question.",
                 )?;
-                let mut seen = std::collections::BTreeSet::new();
                 for option in options {
                     validate_task_text(option, 1024, "Invalid question option.")?;
-                    // Why: duplicate options would make an answer ambiguous.
-                    if !seen.insert(option.as_str()) {
-                        return Err(RpcError::new(
-                            "invalid_argument",
-                            "Duplicate question option.",
-                        ));
-                    }
                 }
                 Ok(())
             }
@@ -118,6 +110,9 @@ impl<'de> Deserialize<'de> for AskIntent {
         Self::from_value(value).map_err(serde::de::Error::custom)
     }
 }
+
+/// Source ask budgets are independent of the generic mailbox wait ceiling.
+pub const MAX_ASK_TIMEOUT_MS: u32 = 1_800_000;
 
 /// Ask a question and optionally wait for the answer. The commit and the wait
 /// are separate: the question message id is durable as soon as the method
@@ -178,7 +173,13 @@ impl AskParams {
         if let Some(target) = &self.to {
             target.validate_shape()?;
         }
-        self.wait.validate()
+        if self.wait.timeout_ms == 0 || self.wait.timeout_ms > MAX_ASK_TIMEOUT_MS {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Ask timeout must be between 1 and 1800000ms.",
+            ));
+        }
+        Ok(())
     }
 }
 

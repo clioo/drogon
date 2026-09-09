@@ -746,6 +746,30 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
 }
 
 #[test]
+fn source_ask_budget_and_duplicate_choices_do_not_use_generic_wait_constraints() {
+    let mut ask = AskParams {
+        scope: ActorScope::Dispatch(dispatch_scope()),
+        intent: AskIntent::New {
+            question: "Continue?".into(),
+            options: vec!["yes".into(), "yes".into()],
+        },
+        to: None,
+        wait: WaitPolicy {
+            timeout_ms: 1_800_000,
+        },
+    };
+    ask.validate_shape("host-a").unwrap();
+    assert!(
+        ask.wait.validate().is_err(),
+        "the generic check wait limit is unchanged"
+    );
+    ask.wait.timeout_ms = 0;
+    assert!(ask.validate_shape("host-a").is_err());
+    ask.wait.timeout_ms = 1_800_001;
+    assert!(ask.validate_shape("host-a").is_err());
+}
+
+#[test]
 fn question_and_receipt_methods_round_trip_with_explicit_scope() {
     let ask = AskParams {
         scope: ActorScope::Dispatch(dispatch_scope()),

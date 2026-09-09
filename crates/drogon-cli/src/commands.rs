@@ -1,6 +1,6 @@
 //! Command execution: builds protocol params, performs the round trip,
-//! applies per-method invariant checks, renders once. This layer owns "one
-//! JSON envelope stdout, no progress noise" and the request-id lifecycle: the
+//! applies per-method invariant checks, renders once. This layer owns one JSON
+//! output without progress noise (ask uses the source's bare object) and the request-id lifecycle: the
 //! id is minted (or taken from `--request-id`) before any transport work so
 //! every failure keeps it replayable.
 

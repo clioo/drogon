@@ -2,7 +2,7 @@
 //!
 //! Real compiled `drogon-cli` binary against an isolated mock transport
 //! (protocol peer only). These tests prove CLI behavior — argument mapping to
-//! the exact 18 typed RPC contracts, scope/credential handling, preflight and
+//! the typed RPC contracts, scope/credential handling, preflight and
 //! exit codes — NOT native engine parity. Data dirs, sockets and token files
 //! are real; every child runs with a cleared environment and a hard timeout
 //! with exact owned cleanup. All credentials are synthetic test literals.
@@ -1060,6 +1060,68 @@ async fn ask_default_timeout_reaches_runtime_for_new_and_resumed_questions() {
     }
     drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ask_json_preserves_the_source_bare_answer_contract_and_wait_verdicts() {
+    for (outcome, answer, lost, code) in [
+        ("answered", Some("approved ✓"), false, 0),
+        ("pending", None, false, 1),
+        ("cancelled", None, true, 1),
+    ] {
+        let dir = temp_dir("ask-source-json");
+        let mut result = json!({
+            "questionMessageId": "question-1", "threadId": "thread-1",
+            "wait": {"outcome": outcome}, "effectiveTimeoutMs": 1_800_000,
+            "connectionLost": lost, "futureField": "preserved"
+        });
+        if let Some(answer) = answer {
+            result["answer"] = json!({"body": answer, "answerMessageId": "answer-1"});
+        }
+        let mock = MockService::start(
+            &dir,
+            mock_behavior(true, vec![("orchestration.ask", result)]),
+        );
+        let invocation = run_cli(
+            &dir,
+            &[
+                "orchestration",
+                "ask",
+                "--json",
+                "--question",
+                "continue?",
+                "--timeout-ms",
+                "9007199254740991",
+                "--options",
+                "yes,yes,no",
+            ],
+            &worker_mail_env_ref(),
+        );
+        assert_eq!(invocation.exit_code, code, "{}", invocation.stderr);
+        let value: Value = serde_json::from_str(&invocation.stdout).unwrap();
+        assert_eq!(value["answer"], json!(answer));
+        assert_eq!(value["messageId"], "question-1");
+        assert_eq!(value["threadId"], "thread-1");
+        assert_eq!(value["timedOut"], outcome == "pending");
+        assert_eq!(value["cancelled"], outcome == "cancelled");
+        assert_eq!(value["connectionLost"], lost);
+        assert_eq!(value["timeoutMs"], 1_800_000);
+        assert_eq!(value["futureField"], "preserved");
+        assert!(value.get("result").is_none());
+        assert!(value.get("wait").is_none());
+        if answer.is_some() {
+            assert_eq!(value["answerMessageId"], "answer-1");
+        }
+        let calls = mock.captured();
+        let ask = calls
+            .iter()
+            .find(|r| r["method"] == "orchestration.ask")
+            .unwrap();
+        assert_eq!(ask["params"]["wait"]["timeoutMs"], 1_800_000);
+        assert_eq!(ask["params"]["options"], json!(["yes", "yes", "no"]));
+        drop(mock);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
