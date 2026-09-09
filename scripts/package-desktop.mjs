@@ -17,7 +17,7 @@ import {
   mentuRuntimeSignIgnore,
   verifiedBuildInfo,
 } from "./desktop-artifacts.mjs";
-import { MENTU_LOCK_REVISION } from "./mentu-runtime-provision.mjs";
+import { MENTU_LOCK_REVISION, ensureOfficialMentuRuntime } from "./mentu-runtime-provision.mjs";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
 import { writePackageNotices } from "./package-notices.mjs";
 
@@ -40,6 +40,10 @@ assert.equal(
   "Package only a clean, integrated checkout",
 );
 const revision = await git(["rev-parse", "HEAD"]);
+// The supported macOS package must never silently ship without Mentu.
+if (process.platform === "darwin" && process.arch === "arm64") {
+  await ensureOfficialMentuRuntime(root);
+}
 const desktopManifest = JSON.parse(
   await readFile(path.join(root, "apps", "desktop", "package.json"), "utf8"),
 );
@@ -102,10 +106,8 @@ const info = {
 };
 const infoPath = path.join(staging, "build-info.json");
 await writeFile(infoPath, JSON.stringify(info, null, 2) + "\n");
-// Additive, optional: a runtime staged by
-// `scripts/mentu-runtime-provision.mjs` (gitignored, never committed).
-// Ships it when present, skips cleanly otherwise — the sealed acceptance
-// stays green without it, same as before this runtime existed.
+// Apple Silicon is provisioned above, including the official license.
+// Other platforms retain their existing optional-runtime packaging.
 const bundledMentuRuntime = path.join(root, "apps", "desktop", "resources", "mentu-runtime");
 // R16-Z2 (#201) + R16-BO (#319): original Drogon icon. The .icns is a
 // committed build artifact of apps/desktop/resources/icon.svg — a missing
