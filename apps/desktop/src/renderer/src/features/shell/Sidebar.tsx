@@ -17,6 +17,7 @@ import { RecentSessions } from "../sessions/RecentSessions";
 import type { TabStripState } from "./tab-order";
 import { ProjectList } from "./ProjectList";
 import type { ProjectAction } from "./ProjectList";
+import { ChatsList } from "./ChatsList";
 import { SidebarFooter } from "./sidebar-footer";
 import type { SettingsSectionId } from "../settings/settings-sections";
 import {
@@ -190,6 +191,18 @@ export function Sidebar({
               onSubmitRemoveProject={onSubmitRemoveProject}
               onSubmitRename={onSubmitRenameWorktree}
               onOpenProjectSettings={onOpenProjectSettings}
+            />
+            <ChatsList
+              groups={groups.filter((group) => group.project.quickSession)}
+              workspaces={workspaces}
+              sessions={sessions}
+              selectedWorkspaceId={selectedWorkspaceId}
+              activeSessionId={activeSessionId}
+              tabStrip={tabStrip}
+              disabled={workspaceDisabled}
+              onSelectWorkspace={onSelectWorkspace}
+              onSelectSession={onSelectSession}
+              onSubmitRemove={onSubmitRemoveProject}
             />
           </div>
           <SidebarFooter
