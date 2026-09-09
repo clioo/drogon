@@ -149,8 +149,8 @@ fn run_until(
             || unsafe { libc::fcntl(pipe.fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
         {
             let _ = child.kill();
-            let reap_deadline = Instant::now() + REAP_RESERVE;
-            while child.try_wait().ok().flatten().is_none() && Instant::now() < reap_deadline {
+            // Cleanup stays inside the ONE absolute operation deadline.
+            while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline {
                 std::thread::sleep(Duration::from_millis(2));
             }
             let reaped = child.try_wait().ok().flatten().is_some();
@@ -164,6 +164,9 @@ fn run_until(
         }
     }
     let mut status: Option<std::process::ExitStatus> = None;
+    // Combined retained bytes across BOTH streams; overflow is an
+    // explicit error, never a truncation-success.
+    let mut total_read: usize = 0;
     loop {
         if status.is_none() {
             match child.try_wait() {
@@ -206,8 +209,8 @@ fn run_until(
             let err = std::io::Error::last_os_error();
             if err.kind() != std::io::ErrorKind::Interrupted {
                 let _ = child.kill();
-                let reap_deadline = Instant::now() + REAP_RESERVE;
-                while child.try_wait().ok().flatten().is_none() && Instant::now() < reap_deadline {
+                // Cleanup stays inside the ONE absolute operation deadline.
+                while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline {
                     std::thread::sleep(Duration::from_millis(2));
                 }
                 let reaped = child.try_wait().ok().flatten().is_some();
@@ -220,13 +223,28 @@ fn run_until(
         }
         if ready > 0 {
             for poll_fd in &poll_fds {
+                // POLLNVAL: the fd is not pollable. Explicit error, never
+                // EOF evidence.
+                if poll_fd.revents & libc::POLLNVAL != 0 {
+                    let _ = child.kill();
+                    while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline
+                    {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    let reaped = child.try_wait().ok().flatten().is_some();
+                    return Err(BoundedError {
+                        message: format!("poll invalid fd {}", poll_fd.fd),
+                        unreaped: if reaped { None } else { Some(child) },
+                    });
+                }
                 let Some(pipe) = pipes.iter_mut().find(|p| p.fd == poll_fd.fd) else {
                     continue;
                 };
                 // Finite work per ready fd per cycle: bounded chunk count
-                // and a combined cap, with the deadline re-checked between
-                // chunks, so a continuously-producing helper can neither
-                // monopolize the loop nor grow memory without limit.
+                // and a COMBINED cap across both streams, with the
+                // deadline re-checked between chunks, so a continuously-
+                // producing helper can neither monopolize the loop nor
+                // grow memory without limit.
                 let mut chunks = 0u32;
                 while chunks < 16 {
                     if Instant::now() >= work_deadline {
@@ -236,22 +254,49 @@ fn run_until(
                     // SAFETY: live nonblocking pipe fd.
                     let n = unsafe { libc::read(pipe.fd, chunk.as_mut_ptr().cast(), chunk.len()) };
                     if n > 0 {
-                        let room = HELPER_OUTPUT_CAP.saturating_sub(pipe.bytes.len());
-                        pipe.bytes
-                            .extend_from_slice(&chunk[..(n as usize).min(room)]);
+                        total_read += n as usize;
+                        if total_read > HELPER_OUTPUT_CAP {
+                            let _ = child.kill();
+                            while child.try_wait().ok().flatten().is_none()
+                                && Instant::now() < op_deadline
+                            {
+                                std::thread::sleep(Duration::from_millis(2));
+                            }
+                            let reaped = child.try_wait().ok().flatten().is_some();
+                            return Err(BoundedError {
+                                message: format!(
+                                    "combined helper output exceeded {HELPER_OUTPUT_CAP} bytes"
+                                ),
+                                unreaped: if reaped { None } else { Some(child) },
+                            });
+                        }
+                        pipe.bytes.extend_from_slice(&chunk[..n as usize]);
                         chunks += 1;
                         continue;
                     }
                     if n == 0 {
                         pipe.open = false;
                     } else {
+                        // Capture errno BEFORE any cleanup decision.
                         let err = std::io::Error::last_os_error();
                         if err.kind() == std::io::ErrorKind::Interrupted {
                             continue;
                         }
                         if err.kind() != std::io::ErrorKind::WouldBlock {
-                            // EIO and friends: no more useful data.
-                            pipe.open = false;
+                            // EIO/EBADF and friends are explicit errors,
+                            // not EOF evidence; the helper's output is
+                            // untrustworthy.
+                            let _ = child.kill();
+                            while child.try_wait().ok().flatten().is_none()
+                                && Instant::now() < op_deadline
+                            {
+                                std::thread::sleep(Duration::from_millis(2));
+                            }
+                            let reaped = child.try_wait().ok().flatten().is_some();
+                            return Err(BoundedError {
+                                message: format!("read failed: {err}"),
+                                unreaped: if reaped { None } else { Some(child) },
+                            });
                         }
                     }
                     break;
@@ -337,17 +382,23 @@ fn parse_ps_record(output: &std::process::Output) -> Option<(String, String)> {
             .is_some_and(|day| (1..=31).contains(&day))
         && {
             let time: Vec<&str> = fields[3].split(':').collect();
+            let two_digits =
+                |part: &str| part.len() == 2 && part.bytes().all(|b| b.is_ascii_digit());
             time.len() == 3
-                && time
-                    .iter()
-                    .all(|part| part.len() == 2 && part.bytes().all(|b| b.is_ascii_digit()))
+                && two_digits(time[0])
+                && two_digits(time[1])
+                && two_digits(time[2])
+                && time[0].parse::<u8>().ok().is_some_and(|h| h <= 23)
+                && time[1].parse::<u8>().ok().is_some_and(|m| m <= 59)
+                && time[2].parse::<u8>().ok().is_some_and(|sec| sec <= 59)
         }
         && fields[4].len() == 4
         && fields[4].bytes().all(|b| b.is_ascii_digit());
-    let valid_stat = !stat.is_empty()
-        && stat
-            .chars()
-            .all(|c| c.is_ascii_alphabetic() || c == '+' || c == '<' || c == '>');
+    // Real ps(1) state letters plus documented modifiers only.
+    const STAT_LETTERS: &[char] = &[
+        'R', 'S', 'D', 'T', 'Z', 'W', 'X', 'I', 'U', '<', '>', '+', 'N', 'L', 'l', 's', 'E',
+    ];
+    let valid_stat = !stat.is_empty() && stat.chars().all(|c| STAT_LETTERS.contains(&c));
     if !valid_birth || !valid_stat {
         return None;
     }
@@ -1704,6 +1755,27 @@ mod ps_classification {
             classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &out),
             Identity::Unverifiable
         );
+    }
+
+    #[test]
+    fn out_of_range_time_is_rejected() {
+        for bad in [
+            &b"Mon Sep  9 99:00:00 2026 S\n"[..],
+            b"Mon Sep  9 23:99:00 2026 S\n",
+            b"Mon Sep  9 23:59:99 2026 S\n",
+        ] {
+            assert!(parse_ps_record(&output(0, bad, b"")).is_none(), "{:?}", bad);
+        }
+    }
+
+    #[test]
+    fn arbitrary_stat_letters_are_rejected() {
+        for bad in [
+            &b"Mon Sep  9 08:00:00 2026 Garbage\n"[..],
+            b"Mon Sep  9 08:00:00 2026 Q\n",
+        ] {
+            assert!(parse_ps_record(&output(0, bad, b"")).is_none(), "{:?}", bad);
+        }
     }
 
     #[test]
