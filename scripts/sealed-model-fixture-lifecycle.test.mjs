@@ -98,9 +98,13 @@ describe("closeModelFixtureForReport", () => {
       }),
       signal: AbortSignal.timeout(20000),
     }).catch(() => null);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const response = await inFlight;
+    assert.ok(response, "the request must reach the fixture before teardown");
+    const reader = response.body.getReader();
+    await reader.read();
 
     const result = await closeModelFixtureForReport(modelFixture);
+    await reader.cancel().catch(() => {});
     assert.equal(result.failed, true);
     assert.ok(result.errorDetail, "a failing close must carry a real error detail, not just a flag");
     assert.match(result.errorDetail, /abortedStreams=1/);

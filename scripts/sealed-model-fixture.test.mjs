@@ -528,11 +528,15 @@ describe("startSealedModelFixture", () => {
       }),
       signal: AbortSignal.timeout(20000),
     }).catch(() => null); // the in-flight request is expected to end abruptly
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const response = await inFlight;
+    assert.ok(response, "the request must reach the fixture before teardown");
+    const reader = response.body.getReader();
+    await reader.read();
 
     const startedAt = Date.now();
     const result = await fixture.close();
     const elapsedMs = Date.now() - startedAt;
+    await reader.cancel().catch(() => {});
     assert.ok(
       result.verdict === "stopped" || result.verdict === "unverifiable",
       `close() must always return a structured verdict, got ${JSON.stringify(result)}`,
