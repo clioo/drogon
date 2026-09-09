@@ -67,6 +67,25 @@ describe("shouldForwardSessionEvent", () => {
 });
 
 describe("startSessionStatePush", () => {
+  it("forwards title/cache changes without a state transition and dedupes repeats", async () => {
+    resetSessionStatePushForTests();
+    const { sent, window } = fakeWindow();
+    const calls = { count: 0 };
+    const metadata = { agentPromptPreview: "Refactor authentication", cacheIdleAt: "2026-09-08T07:00:10Z" };
+    const stop = startSessionStatePush({
+      getWindow: () => window as never,
+      call: async () => {
+        calls.count += 1;
+        return pollOk("boot-1", [{ ...working(calls.count), ...(calls.count > 1 ? metadata : {}) }], calls.count);
+      },
+      maxRounds: 3,
+    });
+    try {
+      await waitFor(calls, 3);
+      expect(sent).toHaveLength(2);
+      expect(sent[1]!.event).toMatchObject(metadata);
+    } finally { stop(); }
+  });
   it("forwards pushed events over the existing state-changed channel", async () => {
     resetSessionStatePushForTests();
     const { sent, window } = fakeWindow();

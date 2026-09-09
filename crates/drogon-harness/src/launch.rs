@@ -44,6 +44,15 @@ pub fn plan_launch(
     request: &HarnessLaunchRequest,
     executable: &Path,
 ) -> Result<HarnessLaunchPlan, RpcError> {
+    plan_launch_with_args(request, executable, &[])
+}
+
+/// Configured defaults are argv, not shell syntax, and pass the same Windows adapter.
+pub fn plan_launch_with_args(
+    request: &HarnessLaunchRequest,
+    executable: &Path,
+    default_args: &[String],
+) -> Result<HarnessLaunchPlan, RpcError> {
     if !executable.is_absolute() {
         return Err(invalid("Harness executable must be an absolute host path"));
     }
@@ -52,7 +61,7 @@ pub fn plan_launch(
         .ok_or_else(|| invalid("Harness executable path is not UTF-8"))?
         .to_owned();
     let is_batch_launcher = is_script_launcher(executable);
-    let mut args = Vec::new();
+    let mut args = default_args.to_vec();
     for (name, value) in [
         ("model", &request.model),
         ("provider", &request.provider),

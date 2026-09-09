@@ -62,7 +62,9 @@ describe("settings sections", () => {
       "notifications",
       "shortcuts",
     ]);
-    expect(filterSettingsSections("cli")).toEqual(["general"]);
+    expect(filterSettingsSections("cli")).toEqual(["agents", "general"]);
+    expect(filterSettingsSections("cache timer")).toEqual(["agents"]);
+    expect(filterSettingsSections("command override")).toEqual(["agents"]);
     expect(filterSettingsSections("ask before deleting")).toEqual(["general"]);
     expect(filterSettingsSections("star")).toEqual(["general"]);
     expect(filterSettingsSections("codex")).toEqual(["agents"]);

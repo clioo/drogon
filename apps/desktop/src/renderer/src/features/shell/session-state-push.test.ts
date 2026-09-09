@@ -27,6 +27,17 @@ const row = (
 });
 
 describe("applySessionStatePush", () => {
+  it("updates live title/cache metadata, preserves it on legacy polls, and applies clears", () => {
+    const items = [row("a", "working", "2026-09-08T07:00:00Z")];
+    const event = { sessionId: "a", workspaceId: "w-1", agentState: "working" as const, agentStateAt: items[0]!.agentStateAt! };
+    const metadata = { agentPromptPreview: "Refactor auth", cacheIdleAt: "2026-09-08T07:00:01Z" };
+    const updated = applySessionStatePush(items, { ...event, ...metadata });
+    expect(updated.applied).toBe(true);
+    expect(updated.sessions[0]).toMatchObject(metadata);
+    expect(applySessionStatePush(updated.sessions, event).sessions).toBe(updated.sessions);
+    expect(applySessionStatePush(updated.sessions, { ...event, ...metadata }).applied).toBe(false);
+    expect(applySessionStatePush(updated.sessions, { ...event, cacheIdleAt: null }).sessions[0]!.cacheIdleAt).toBeNull();
+  });
   it("applies a fresh transition to the matching row only", () => {
     const items = [
       row("a", "unknown", null),

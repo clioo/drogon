@@ -23,7 +23,7 @@ export const SETTINGS_SEARCH_BUCKETS: readonly SettingsSectionSearchBucket[] = [
   {
     id: "agents",
     title: "Agents",
-    description: "Default harness and per-harness launch defaults.",
+    description: "Manage AI agents, set a default, and customize commands.",
     keywords: [
       "harness",
       "model",
@@ -33,7 +33,10 @@ export const SETTINGS_SEARCH_BUCKETS: readonly SettingsSectionSearchBucket[] = [
       "claude",
       "pi",
       "opencode",
-      "codex",
+      "codex", "antigravity", "hooks", "status", "working", "waiting", "done",
+      "auto-generate", "tab titles", "prompt", "cache", "timer", "duration", "ttl",
+      "awake", "sleep", "power", "permissions", "yolo", "manual", "arguments", "cli",
+      "environment", "command override", "installed", "detection", "enabled", "disabled",
     ],
   },
   {

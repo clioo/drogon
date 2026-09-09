@@ -26,6 +26,7 @@ import type { WorktreeCardPrDisplay } from "./worktree-card-pr-display";
 import { useWorktreeGitStatus } from "./use-worktree-git-status";
 import { buildWorktreeAgentRows } from "./worktree-agent-rows";
 import { WorktreeAgentRow } from "./WorktreeAgentRow";
+import { useGeneratedAgentTitles } from "../settings/agent-generated-titles";
 import type { TabStripState } from "./tab-order";
 
 /**
@@ -99,10 +100,11 @@ export function WorktreeCard({
   // One nested row per session (the fork's useWorktreeAgentRows slot); the
   // summary counts below derive from these same rows so the two can never
   // disagree — a session that never reported still owns its fallback row.
+  const generatedTitles = useGeneratedAgentTitles(attached);
   const rows = buildWorktreeAgentRows(attached, {
     stripOrder: tabStrip?.order,
     pinnedIds: tabStrip?.pinned,
-    customTitles: tabStrip?.titles,
+    customTitles: { ...generatedTitles, ...tabStrip?.titles },
     activeSessionId,
   });
   const rowSessions = rows.map((row) => row.session);

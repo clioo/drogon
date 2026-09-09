@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { agentSettingsResultSchema } from "./agent-settings-contract";
 import { automationResultSchemas } from "./automation-contract";
 import { fileResultSchemas } from "./file-validation";
 import { workspacePortKillResultSchema } from "./usage-contract";
@@ -32,6 +33,8 @@ const session = z.object({
   // validates; absent reads as `unknown` at the call sites.
   agentState: z.enum(["working", "idle", "needs_input", "exited", "unknown"]).optional(),
   agentStateAt: z.string().nullable().optional(),
+  agentPromptPreview: z.string().max(2048).nullable().optional(),
+  cacheIdleAt: z.string().nullable().optional(),
 });
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const harness = z
@@ -107,4 +110,6 @@ export const resultSchemas: Record<string, z.ZodType> = {
       ),
     })),
   "harness.start": session,
+  "agent.settings": agentSettingsResultSchema,
+  "agent.settings_update": agentSettingsResultSchema,
 };

@@ -19,6 +19,7 @@ import {
   verifyForegroundObservation,
 } from "./acceptance-foreground.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
+import { probeAgentSettings, probeAgentSettingsNarrow, writeAgentSettingsFixtures } from "./probe-agent-settings.mjs";
 import { probeRenderedSessionRestart } from "./probe-rendered-session-restart.mjs";
 import { probeRenderedExitedStubs } from "./probe-rendered-exited-stubs.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
@@ -58,6 +59,9 @@ import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
 const args = process.argv.slice(2);
 const bundle =
   args[0] === "--bundle" ? path.resolve(args.splice(0, 2)[1]) : null;
+const agentsIndex = args.indexOf("--agents");
+const withAgents = agentsIndex !== -1;
+if (withAgents) args.splice(agentsIndex, 1);
 const filesIndex = args.indexOf("--files");
 const withFiles = filesIndex !== -1;
 if (withFiles) args.splice(filesIndex, 1);
@@ -104,6 +108,7 @@ await writeFixtureGh(fixtureBin, [
   { number: 1, title: "Acceptance issue one" },
   { number: 2, title: "Acceptance issue two" },
 ]);
+if (withAgents) await writeAgentSettingsFixtures(fixtureBin);
 const output = path.join(
   root,
   ".preflight",
@@ -136,6 +141,7 @@ const report = {
 let daemon, desktop, browser, page, registered;
 let foregroundObservation;
 let lastLivePage = null; // kept for failure evidence after phase-local cleanup
+let agentWindowBounds = "1440x928+4000+4000";
 let ranUpgradeCheck = false; // guards the explicit exit in the upgrade path
 async function stopOwned(child, label) {
   if (!child) return;
@@ -158,9 +164,10 @@ async function launchDesktop(overrideDataDir = null) {
         DROGON_DATA_DIR: activeDataDir,
         DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
         DROGON_BACKGROUND_WINDOW: "1",
+        ...(withAgents ? { DROGON_WINDOW_BOUNDS: agentWindowBounds } : {}),
         PI_CODING_AGENT_DIR: piDir,
         ...(process.platform !== "win32" ? { SHELL: "/bin/sh" } : {}),
-        ...(packaged
+        ...(packaged || withAgents
           ? { PATH: `${fixtureBin}:/usr/bin:/bin:/usr/sbin:/sbin` }
           : {}),
         ...(withHarness
@@ -774,6 +781,19 @@ try {
     report.checks.push(
       ...(await probeRenderedTabs({ page, workspace, output })),
     );
+  }
+  if (withAgents) {
+    // Drop the earlier narrow viewport emulation. Relaunch at native bounds,
+    // through the same hidden-window launcher used by the fidelity oracle.
+    await relaunchDesktop();
+    report.checks.push(...await probeAgentSettings({ page, workspaceId: registered.id, output, dataDir, fixtureBin,
+      cli: packaged?.cli ?? path.join(root, "target/debug/drogon-cli"),
+    }));
+    if (!packaged) {
+      agentWindowBounds = "760x928+4000+4000";
+      await relaunchDesktop();
+      report.checks.push(...await probeAgentSettingsNarrow({ page, output }));
+    }
   }
   if (withHarness) {
     report.checks.push(

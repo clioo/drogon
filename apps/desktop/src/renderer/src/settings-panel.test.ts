@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { redirectSettingsToPage, SettingsPanel } from "./settings-panel";
 import { SettingsPage } from "./features/settings/SettingsPage";
+import { TooltipProvider } from "./components/ui/tooltip";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import {
   filterSettingsSections,
@@ -69,7 +70,7 @@ describe("settings search filter (sidebar + pane share this)", () => {
     expect(filterSettingsSections("keyboard")).toEqual(["shortcuts"]);
     expect(filterSettingsSections("github")).toEqual(["general", "git"]);
     expect(filterSettingsSections("notify")).toEqual(["notifications"]);
-    expect(filterSettingsSections("CLI")).toEqual(["general"]);
+    expect(filterSettingsSections("CLI")).toEqual(["agents", "general"]);
   });
 
   it("requires every token to match", () => {
@@ -90,7 +91,7 @@ describe("SettingsPage chrome (Orca settings-page-renderer parity)", () => {
   const noop = () => {};
   function page(section?: "appearance" | "agents" | "shortcuts" | "git" | "terminal" | "notifications" | "general"): string {
     return renderToString(
-      createElement(SettingsPage, {
+      createElement(TooltipProvider, null, createElement(SettingsPage, {
         theme: "system",
         onThemeChange: noop,
         terminalFontSize: 13,
@@ -117,7 +118,7 @@ describe("SettingsPage chrome (Orca settings-page-renderer parity)", () => {
         workspacePath: null,
         initialSection: section,
         onBack: noop,
-      }),
+      })),
     );
   }
 
@@ -132,7 +133,7 @@ describe("SettingsPage chrome (Orca settings-page-renderer parity)", () => {
   it("marks the active section with aria-current and renders its pane", () => {
     const html = page("agents");
     expect(html).toContain('aria-current="page"');
-    expect(html).toContain("Default harness");
+    expect(html).toContain("Default Agent");
   });
 
   it("lists only the matching sections in the nav while searching", () => {

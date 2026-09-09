@@ -31,6 +31,7 @@ enum PendingHookInstall {
     Codex {
         home: PathBuf,
         source_home: PathBuf,
+        history_home: Option<PathBuf>,
         install_hooks: bool,
     },
 }
@@ -48,16 +49,40 @@ struct ReadyHookInstall {
 }
 
 impl Engine {
-    pub(super) fn harness_list(&self) -> Value {
+    pub(super) fn harness_list(&self) -> Result<Value, RpcError> {
         let path = std::env::var_os("PATH");
-        json!({"hostId": self.host_id, "harnesses": discover(path.as_deref())})
+        let mut installations = discover(path.as_deref());
+        if let Some(settings) = self.read_agent_settings()? {
+            for item in &mut installations {
+                if let Some(command) = settings
+                    .agent_cmd_overrides
+                    .get(harness_id_wire(item.harness_id))
+                    .filter(|cmd| !cmd.is_empty())
+                {
+                    item.executable = crate::agent_settings::resolve_command(command);
+                    item.availability = if item.executable.is_some() {
+                        HarnessAvailability::Available
+                    } else {
+                        HarnessAvailability::Missing
+                    };
+                }
+            }
+        }
+        Ok(json!({"hostId": self.host_id, "harnesses": installations}))
     }
 
     pub(super) fn do_harness_start(&self, params: &Value) -> Result<Value, RpcError> {
         let workspace_id = require_str(params, "workspaceId")?;
         let request: HarnessLaunchRequest = serde_json::from_value(params.clone())
             .map_err(|_| error::invalid_argument("Invalid harness launch preferences"))?;
-        let plan = resolve_launch(&request)?;
+        let settings = self.read_agent_settings()?;
+        let plan = match settings.as_ref() {
+            Some(settings) => crate::agent_settings::plan_with_settings(&request, settings)?,
+            None => resolve_launch(&request)?,
+        };
+        let hooks_enabled = settings
+            .as_ref()
+            .is_none_or(|settings| settings.agent_status_hooks_enabled);
         // Each harness's wait signal (permission prompts, questions, turn
         // end) is reported through `session.hook_event` by a per-harness
         // hook install below. Any argv the install needs (claude's
@@ -72,12 +97,20 @@ impl Engine {
         // managed home in headless mode: config/resources must never be read
         // from or written to the user's real `~/.codex`.
         let pending = match request.harness_id {
+            id if !hooks_enabled && id != HarnessId::Codex => PendingHookInstall::None,
             HarnessId::Codex => {
                 let nonce = uuid::Uuid::new_v4().to_string();
                 PendingHookInstall::Codex {
                     home: harness_hooks::codex::nonce_home_path(&self.data_dir, &nonce),
                     source_home: harness_hooks::codex::source_home_path(),
-                    install_hooks: !request.headless,
+                    history_home: settings.as_ref().map(|settings| {
+                        if settings.codex_session_source_home.is_empty() {
+                            harness_hooks::codex::source_home_path()
+                        } else {
+                            PathBuf::from(&settings.codex_session_source_home)
+                        }
+                    }),
+                    install_hooks: !request.headless && hooks_enabled,
                 }
             }
             HarnessId::Claude if request.headless => PendingHookInstall::None,
@@ -151,10 +184,25 @@ impl Engine {
                 return Err(err);
             }
         };
-        let mut extra_env = ready
+        let mut extra_env: Vec<(String, String)> = settings
             .as_ref()
-            .map(|r| r.extra_env.clone())
+            .and_then(|settings| {
+                settings
+                    .agent_default_env
+                    .get(harness_id_wire(request.harness_id))
+            })
+            .map(|env| {
+                env.iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect()
+            })
             .unwrap_or_default();
+        extra_env.extend(
+            ready
+                .as_ref()
+                .map(|r| r.extra_env.clone())
+                .unwrap_or_default(),
+        );
         let mut cleanup_paths: Vec<PathBuf> = ready
             .as_ref()
             .map(|r| r.cleanup_paths.clone())
@@ -222,7 +270,7 @@ impl Engine {
                 cleanup_paths.push(plan.dir);
             }
         }
-        let (session_id, handle, session_json) =
+        let (session_id, handle, _session_json) =
             match session_admission::launch_reserved_with_cleanup(
                 self.db.clone(),
                 &self.data_dir,
@@ -246,13 +294,16 @@ impl Engine {
                 }
             };
 
+        if let Some(prompt) = request.prompt.as_deref() {
+            handle.note_agent_prompt(prompt);
+        }
         self.sessions
             .lock()
             .unwrap()
             .insert(session_id, handle.clone());
         // Retain ownership even when the post-spawn durable transition fails.
         crate::session::persist_admission(&handle)?;
-        Ok(session_json)
+        Ok(crate::session::snapshot(&handle))
     }
 
     /// Writes/installs the hook artifact now that admission minted the real
@@ -329,6 +380,7 @@ impl Engine {
             PendingHookInstall::Codex {
                 home,
                 source_home,
+                history_home,
                 install_hooks,
             } => {
                 if let Err(err) = harness_hooks::codex::install(
@@ -343,6 +395,12 @@ impl Engine {
                     // (for example, a malformed source hooks.json). The
                     // reservation is retired by the caller, and this failed
                     // attempt must not strand its private home on disk.
+                    crate::hooks::remove_settings_file(&home);
+                    return Err(err);
+                }
+                if let Some(history_home) = history_home
+                    && let Err(err) = harness_hooks::codex::import_history(&history_home, &home)
+                {
                     crate::hooks::remove_settings_file(&home);
                     return Err(err);
                 }
@@ -388,7 +446,7 @@ pub(crate) fn resolve_launch(
 /// contract's `HarnessId` union ("claude" | "pi" | "opencode" |
 /// "antigravity" | "codex") so a session record round-trips into
 /// `harness.start`.
-fn harness_id_wire(harness_id: HarnessId) -> &'static str {
+pub(crate) fn harness_id_wire(harness_id: HarnessId) -> &'static str {
     match harness_id {
         HarnessId::Claude => "claude",
         HarnessId::Pi => "pi",

@@ -33,6 +33,7 @@ pub mod session_authority;
 mod agent_state;
 mod db;
 pub(crate) use desktop_relay_rpc::RelayState;
+mod agent_settings;
 mod error;
 pub mod git;
 pub mod git_process;
@@ -96,6 +97,7 @@ const CAPABILITIES: &[&str] = &[
     "request.idempotency.v1",
     "harness.catalog.v1",
     "harness.launch.v1",
+    "agent.settings.v1",
     "git.v1",
     drogon_protocol::browser::BROWSER_RELAY_CAPABILITY,
     "runtime.quiescent-shutdown.v1",
@@ -160,6 +162,7 @@ pub struct Engine {
     host_id: String,
     service_instance_id: String,
     sessions: Mutex<HashMap<String, Arc<SessionHandle>>>,
+    agent_settings_lock: Mutex<()>,
     ledger: RequestLedger,
     /// In-memory desktop command relay (browser.relay.v1). Never persisted;
     /// a daemon restart drops every queued command.
@@ -253,6 +256,7 @@ impl Engine {
             host_id,
             service_instance_id: uuid::Uuid::new_v4().to_string(),
             sessions: Mutex::new(HashMap::new()),
+            agent_settings_lock: Mutex::new(()),
             ledger: RequestLedger::default(),
             desktop_relay: Mutex::new(RelayState::default()),
             worker_cli: None,
@@ -387,7 +391,9 @@ impl Engine {
         match request.method.as_str() {
             "status" => Ok(self.status()),
             "runtime.shutdown" => self.do_runtime_shutdown(request),
-            "harness.list" => Ok(self.harness_list()),
+            "harness.list" => self.harness_list(),
+            "agent.settings" => self.agent_settings(),
+            "agent.settings_update" => self.mutating(request, Self::do_agent_settings_update),
             "bot.snapshot" => self.bot_snapshot(&request.params),
             "bot.create" => self.bot_create(request),
             "bot.run" => self.bot_run(request),

@@ -132,6 +132,64 @@ pub(crate) fn install(
     Ok(())
 }
 
+// Source: codex-account-session-bridge.ts (rollout-relative paths). Copies,
+// rather than hardlinks, keep a resumed run from writing into the user's home.
+pub(crate) fn import_history(source_home: &Path, managed_home: &Path) -> Result<(), RpcError> {
+    let root = source_home.join("sessions");
+    if !root.is_dir() {
+        return Ok(());
+    }
+    let mut pending = vec![(root.clone(), 0)];
+    let mut bytes = 0u64;
+    let mut count = 0usize;
+    while let Some((dir, depth)) = pending.pop() {
+        if depth > 8 {
+            return Err(error::invalid_argument("Codex history tree is too deep"));
+        }
+        for entry in fs::read_dir(&dir).map_err(|_| error::io_error("Cannot read Codex history"))? {
+            let entry = entry.map_err(|_| error::io_error("Cannot inspect Codex history"))?;
+            count += 1;
+            if count > 10_000 {
+                return Err(error::invalid_argument(
+                    "Codex history exceeds the import limit",
+                ));
+            }
+            let kind = entry
+                .file_type()
+                .map_err(|_| error::io_error("Cannot inspect Codex history"))?;
+            if kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
+                pending.push((entry.path(), depth + 1));
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !kind.is_file() || !name.starts_with("rollout-") || !name.ends_with(".jsonl") {
+                continue;
+            }
+            bytes += entry
+                .metadata()
+                .map_err(|_| error::io_error("Cannot measure Codex history"))?
+                .len();
+            if bytes > 128 * 1024 * 1024 {
+                return Err(error::invalid_argument(
+                    "Codex history exceeds the 128 MiB import limit",
+                ));
+            }
+            let source = entry.path();
+            let relative = source
+                .strip_prefix(&root)
+                .map_err(|_| error::invalid_argument("Invalid Codex history path"))?;
+            let target = managed_home.join("sessions").join(relative);
+            fs::create_dir_all(target.parent().unwrap())
+                .map_err(|_| error::io_error("Cannot prepare Codex history"))?;
+            fs::copy(source, target).map_err(|_| error::io_error("Cannot import Codex history"))?;
+        }
+    }
+    Ok(())
+}
+
 fn copy_resources(source_home: &Path, managed_home: &Path) -> Result<(), RpcError> {
     for entry_name in CODEX_RESOURCE_ENTRIES {
         let source = source_home.join(entry_name);

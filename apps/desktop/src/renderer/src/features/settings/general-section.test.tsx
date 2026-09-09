@@ -28,11 +28,11 @@ describe("general workspace confirmations", () => {
   test("both confirmations default to asking (the fork defaults)", () => {
     render(<GeneralSection />);
     expect(
-      screen.getByRole("switch", { name: "Ask Before Deleting Workspaces" }),
-    ).toHaveProperty("checked", true);
+      screen.getByRole("switch", { name: "Ask Before Deleting Workspaces" }).getAttribute("aria-checked"),
+    ).toBe("true");
     expect(
-      screen.getByRole("switch", { name: "Ask Before Deleting Automations" }),
-    ).toHaveProperty("checked", true);
+      screen.getByRole("switch", { name: "Ask Before Deleting Automations" }).getAttribute("aria-checked"),
+    ).toBe("true");
   });
 
   test("toggling workspaces persists through the dialog's own seam", () => {
@@ -41,11 +41,11 @@ describe("general workspace confirmations", () => {
       name: "Ask Before Deleting Workspaces",
     });
     fireEvent.click(toggle);
-    expect(toggle).toHaveProperty("checked", false);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
     // The worktree dialog reads the same key: the toggle has a real effect.
     expect(readSkipDeleteWorktreeConfirm(window.localStorage)).toBe(true);
     fireEvent.click(toggle);
-    expect(toggle).toHaveProperty("checked", true);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
     expect(readSkipDeleteWorktreeConfirm(window.localStorage)).toBe(false);
   });
 
@@ -55,7 +55,7 @@ describe("general workspace confirmations", () => {
       name: "Ask Before Deleting Automations",
     });
     fireEvent.click(toggle);
-    expect(toggle).toHaveProperty("checked", false);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
     expect(shouldConfirmAutomationDelete()).toBe(false);
     expect(window.localStorage.getItem("drogon.automations.deleteConfirm")).toBe(
       "skip",
@@ -69,11 +69,11 @@ describe("general workspace confirmations", () => {
     setConfirmAutomationDelete(false);
     render(<GeneralSection />);
     expect(
-      screen.getByRole("switch", { name: "Ask Before Deleting Workspaces" }),
-    ).toHaveProperty("checked", false);
+      screen.getByRole("switch", { name: "Ask Before Deleting Workspaces" }).getAttribute("aria-checked"),
+    ).toBe("false");
     expect(
-      screen.getByRole("switch", { name: "Ask Before Deleting Automations" }),
-    ).toHaveProperty("checked", false);
+      screen.getByRole("switch", { name: "Ask Before Deleting Automations" }).getAttribute("aria-checked"),
+    ).toBe("false");
   });
 });
 

@@ -93,6 +93,7 @@ pub(crate) fn settings_json(cli: &str, session_id: &str, incarnation: &str) -> V
     let entries = |event: &str| json!([{ "hooks": [{ "type": "command", "command": hook_command(cli, session_id, incarnation, event) }] }]);
     json!({
         "hooks": {
+            "UserPromptSubmit": entries("UserPromptSubmit"),
             "Notification": entries("Notification"),
             "Stop": entries("Stop"),
         }
@@ -156,6 +157,17 @@ impl Engine {
                 "session already exited; hook event is moot",
             ));
         }
+        if self
+            .read_agent_settings()?
+            .is_some_and(|settings| !settings.agent_status_hooks_enabled)
+        {
+            handle.clear_hook_event();
+            return Ok(session::snapshot(&handle));
+        }
+        if let Some(prompt) = params.get("promptPreview").and_then(Value::as_str) {
+            handle.note_agent_prompt(prompt);
+        }
+        handle.note_cache_event(event);
         match signal {
             // A headless daemon run (`pi -p`, `claude -p`, `opencode run`,
             // `codex exec`, `agy -p`) has no approval-answer surface: stamping a wait

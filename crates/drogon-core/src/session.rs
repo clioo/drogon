@@ -71,6 +71,8 @@ pub(crate) struct SessionHandle {
     /// later PTY output has cleared yet. `None` for sessions that never got
     /// one — sessions without a managed hook keep purely activity-based states.
     needs_input_at: Mutex<Option<String>>,
+    agent_prompt_preview: Mutex<Option<String>>,
+    cache_idle_at: Mutex<Option<String>>,
     /// Per-session harness hook install artifacts `harness.start` wrote for
     /// this session (Claude's `--settings` file; OpenCode's
     /// `OPENCODE_CONFIG_DIR` overlay directory; Pi's `--extension` file and
@@ -78,6 +80,7 @@ pub(crate) struct SessionHandle {
     /// session exits (`hooks::remove_settings_file` handles both a file and a
     /// directory tree). Empty for sessions launched without hook wiring.
     hook_cleanup_paths: Mutex<Vec<std::path::PathBuf>>,
+    suspended_hook_files: Mutex<Vec<(std::path::PathBuf, Vec<u8>)>>,
     /// OpenCode/Pi/Codex opt out of the reader thread's generic
     /// activity-based clear (set by `harness.rs` via
     /// [`Self::set_explicit_wait_clear`]): their hook lifecycle is authoritative
@@ -132,11 +135,102 @@ impl SessionHandle {
             reader_done: AtomicBool::new(false),
             last_activity: Mutex::new(None),
             needs_input_at: Mutex::new(None),
+            agent_prompt_preview: Mutex::new(None),
+            cache_idle_at: Mutex::new(None),
             hook_cleanup_paths: Mutex::new(Vec::new()),
+            suspended_hook_files: Mutex::new(Vec::new()),
             explicit_wait_clear: AtomicBool::new(false),
             headless: AtomicBool::new(false),
             db,
         })
+    }
+
+    pub(crate) fn set_status_hooks_enabled(&self, enabled: bool) -> Result<(), RpcError> {
+        if self.is_exited() {
+            return Ok(());
+        }
+        let mut saved = self.suspended_hook_files.lock().unwrap();
+        if enabled {
+            for (path, bytes) in saved.iter() {
+                if path.exists() {
+                    std::fs::write(path, bytes)
+                        .map_err(|_| error::io_error("Cannot restore managed agent hook"))?;
+                }
+            }
+            saved.clear();
+        } else if saved.is_empty() {
+            let paths = self.hook_cleanup_paths.lock().unwrap().clone();
+            for root in paths {
+                let path = match self.harness_id.as_deref() {
+                    Some("codex") => root.join("hooks.json"),
+                    Some("opencode") => root.join("plugins/drogon-opencode-status.js"),
+                    Some("pi") if root.extension().is_some_and(|ext| ext == "ts") => root,
+                    Some("claude") => root,
+                    _ => continue,
+                };
+                if !path.is_file() {
+                    continue;
+                }
+                let bytes = std::fs::read(&path)
+                    .map_err(|_| error::io_error("Cannot read managed agent hook"))?;
+                let inactive = if path.extension().is_some_and(|ext| ext == "json") {
+                    let mut value: Value = serde_json::from_slice(&bytes)
+                        .map_err(|_| error::invalid_argument("Invalid managed hooks"))?;
+                    if let Some(events) = value["hooks"].as_object_mut() {
+                        for entries in events.values_mut() {
+                            if let Some(entries) = entries.as_array_mut() {
+                                for entry in entries.iter_mut() {
+                                    if let Some(hooks) = entry["hooks"].as_array_mut() {
+                                        hooks.retain(|hook| {
+                                            !hook["command"].as_str().is_some_and(|cmd| {
+                                                cmd.contains("internal hook-event")
+                                            })
+                                        });
+                                    }
+                                }
+                                entries.retain(|entry| {
+                                    entry["hooks"]
+                                        .as_array()
+                                        .is_none_or(|hooks| !hooks.is_empty())
+                                });
+                            }
+                        }
+                        events.retain(|_, entries| {
+                            entries.as_array().is_none_or(|entries| !entries.is_empty())
+                        });
+                    }
+                    serde_json::to_vec(&value).unwrap()
+                } else if self.harness_id.as_deref() == Some("opencode") {
+                    b"export const DrogonStatusPlugin = async () => ({});".to_vec()
+                } else {
+                    b"export default function () {}".to_vec()
+                };
+                std::fs::write(&path, inactive)
+                    .map_err(|_| error::io_error("Cannot remove managed agent hook"))?;
+                saved.push((path, bytes));
+            }
+            self.clear_hook_event();
+            *self.cache_idle_at.lock().unwrap() = None;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn note_agent_prompt(&self, prompt: &str) {
+        let mut preview = self.agent_prompt_preview.lock().unwrap();
+        if preview.is_none() && !prompt.trim().is_empty() {
+            *preview = Some(prompt.chars().take(512).collect());
+        }
+    }
+
+    pub(crate) fn note_cache_event(&self, event: &str) {
+        if self.harness_id.as_deref() != Some("claude") {
+            return;
+        }
+        if event == "Stop" {
+            *self.cache_idle_at.lock().unwrap() = Some(crate::now_rfc3339());
+        } else if matches!(event, "UserPromptSubmit" | "PreToolUse") {
+            *self.cache_idle_at.lock().unwrap() = None;
+        }
     }
 
     /// Records a hook wait signal; the next PTY output chunk clears it,
@@ -1044,6 +1138,8 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         "createdAt": handle.created_at,
         "agentState": agent_state,
         "agentStateAt": agent_state_at,
+        "agentPromptPreview": handle.agent_prompt_preview.lock().unwrap().clone(),
+        "cacheIdleAt": handle.cache_idle_at.lock().unwrap().clone(),
     })
 }
 
