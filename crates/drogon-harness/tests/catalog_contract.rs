@@ -116,6 +116,16 @@ fn run_until(
             unreaped: None,
         });
     }
+    // Work deadline and reap reserve are decided BEFORE spawning: the
+    // helper never runs on borrowed time, and cleanup always has the
+    // reserve left inside the one absolute deadline.
+    let work_deadline = op_deadline - REAP_RESERVE;
+    if Instant::now() >= work_deadline {
+        return Err(BoundedError {
+            message: "no remaining work budget; not spawning".to_string(),
+            unreaped: None,
+        });
+    }
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -128,7 +138,6 @@ fn run_until(
             });
         }
     };
-    let work_deadline = op_deadline - REAP_RESERVE;
     let mut pipes = [
         PipeBuf {
             fd: child.stdout.as_ref().expect("piped stdout").as_raw_fd(),
@@ -145,9 +154,12 @@ fn run_until(
         // SAFETY: fcntl on a live, owned pipe fd. Nonblocking setup must
         // succeed or the drain could block: fail closed.
         let flags = unsafe { libc::fcntl(pipe.fd, libc::F_GETFL) };
-        if flags == -1
-            || unsafe { libc::fcntl(pipe.fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
-        {
+        // Errno is captured at the instant of failure, before any
+        // cleanup syscall can overwrite it.
+        let fcntl_err = (flags == -1).then(std::io::Error::last_os_error);
+        let set_rc = unsafe { libc::fcntl(pipe.fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+        let fcntl_err = fcntl_err.or((set_rc == -1).then(std::io::Error::last_os_error));
+        if let Some(err) = fcntl_err {
             let _ = child.kill();
             // Cleanup stays inside the ONE absolute operation deadline.
             while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline {
@@ -155,10 +167,7 @@ fn run_until(
             }
             let reaped = child.try_wait().ok().flatten().is_some();
             return Err(BoundedError {
-                message: format!(
-                    "set_nonblocking failed: {}",
-                    std::io::Error::last_os_error()
-                ),
+                message: format!("set_nonblocking failed: {err}"),
                 unreaped: if reaped { None } else { Some(child) },
             });
         }
@@ -202,9 +211,20 @@ fn run_until(
                 revents: 0,
             })
             .collect();
+        // Cap the poll wait by the remaining work budget so a helper
+        // can never sleep past its own deadline in fixed 10ms ticks.
+        let remaining_ms = work_deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .min(10) as libc::c_int;
         // SAFETY: poll_fds is valid for its length; fds stay open.
-        let ready =
-            unsafe { libc::poll(poll_fds.as_mut_ptr(), poll_fds.len() as libc::nfds_t, 10) };
+        let ready = unsafe {
+            libc::poll(
+                poll_fds.as_mut_ptr(),
+                poll_fds.len() as libc::nfds_t,
+                remaining_ms,
+            )
+        };
         if ready < 0 {
             let err = std::io::Error::last_os_error();
             if err.kind() != std::io::ErrorKind::Interrupted {
@@ -340,6 +360,20 @@ fn run_until(
             }
         }
     }
+    // Late evidence is not evidence: output assembled after the work
+    // window closed is reported as a timeout (kill + reserved reap),
+    // never as a successful Ok.
+    if Instant::now() >= work_deadline {
+        let _ = child.kill();
+        while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let reaped = child.try_wait().ok().flatten().is_some();
+        return Err(BoundedError {
+            message: "bounded command finished after its work window".to_string(),
+            unreaped: if reaped { None } else { Some(child) },
+        });
+    }
     let [out, err] = pipes;
     Ok(std::process::Output {
         status: status.expect("exit observed before return"),
@@ -394,11 +428,16 @@ fn parse_ps_record(output: &std::process::Output) -> Option<(String, String)> {
         }
         && fields[4].len() == 4
         && fields[4].bytes().all(|b| b.is_ascii_digit());
-    // Real ps(1) state letters plus documented modifiers only.
-    const STAT_LETTERS: &[char] = &[
-        'R', 'S', 'D', 'T', 'Z', 'W', 'X', 'I', 'U', '<', '>', '+', 'N', 'L', 'l', 's', 'E',
-    ];
-    let valid_stat = !stat.is_empty() && stat.chars().all(|c| STAT_LETTERS.contains(&c));
+    // Grammar: one base state, then modifiers only. A bare modifier
+    // string ('+', 'NL') is not a live process; unknown shapes stay
+    // Unverifiable rather than being guessed live.
+    const BASE_STATES: &[char] = &['R', 'S', 'D', 'T', 'Z', 'W', 'X', 'I', 'U'];
+    const STAT_MODIFIERS: &[char] = &['<', '>', '+', 'N', 'L', 'l', 's'];
+    let mut stat_chars = stat.chars();
+    let valid_stat = stat_chars
+        .next()
+        .is_some_and(|first| BASE_STATES.contains(&first))
+        && stat_chars.all(|c| STAT_MODIFIERS.contains(&c));
     if !valid_birth || !valid_stat {
         return None;
     }
@@ -1775,6 +1814,26 @@ mod ps_classification {
             b"Mon Sep  9 08:00:00 2026 Q\n",
         ] {
             assert!(parse_ps_record(&output(0, bad, b"")).is_none(), "{:?}", bad);
+        }
+    }
+
+    #[test]
+    fn stat_requires_base_state_before_modifiers() {
+        // Bare modifiers are not process states.
+        for bad in [
+            &b"Mon Sep  9 08:00:00 2026 +\n"[..],
+            b"Mon Sep  9 08:00:00 2026 NL\n",
+            b"Mon Sep  9 08:00:00 2026 <\n",
+        ] {
+            assert!(parse_ps_record(&output(0, bad, b"")).is_none(), "{:?}", bad);
+        }
+        // Base state, optionally followed by modifiers, is live-shaped.
+        for ok in [
+            &b"Mon Sep  9 08:00:00 2026 S\n"[..],
+            b"Mon Sep  9 08:00:00 2026 S+\n",
+            b"Mon Sep  9 08:00:00 2026 RN\n",
+        ] {
+            assert!(parse_ps_record(&output(0, ok, b"")).is_some(), "{:?}", ok);
         }
     }
 
