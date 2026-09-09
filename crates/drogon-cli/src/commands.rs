@@ -474,7 +474,12 @@ async fn worktree(
             name,
             base,
         } => {
-            let mut params = json!({ "projectId": project, "name": name });
+            // Real, durable creation provenance (Workspace Options "Hide:
+            // CLI-created"): every worktree this command creates really was
+            // created via `drogon-cli worktree create`, so it is always
+            // tagged -- never left to default/guess like the desktop app's
+            // own create path, which sends no `creator` at all.
+            let mut params = json!({ "projectId": project, "name": name, "creator": "cli" });
             if let Some(base) = base {
                 params["baseRef"] = json!(base);
             }

@@ -19,7 +19,7 @@ pub(crate) const QUICK_SESSION_MARKER_OWNER: &str = "drogon";
 pub(crate) const QUICK_SESSION_DEFAULT_NAME: &str = "Quick Session";
 
 pub(crate) const PROJECTS_SCHEMA_COMPONENT: &str = "projects";
-pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 4;
+pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 5;
 
 fn create_v1_tables(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
@@ -44,6 +44,24 @@ fn create_v1_tables(tx: &Transaction) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS worktrees_project ON worktrees(project_id);",
     )
+}
+
+fn add_column_if_missing(
+    tx: &Transaction,
+    table: &str,
+    column: &str,
+    ddl: &str,
+) -> rusqlite::Result<()> {
+    let has_column: bool = tx
+        .prepare(&format!("PRAGMA table_info({table})"))?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|name| name == column);
+    if !has_column {
+        tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl}"))?;
+    }
+    Ok(())
 }
 
 /// Applies the `projects`/`worktrees` schema using the caller's already-open
@@ -79,23 +97,6 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         }
         Ok(())
     }
-    fn add_column_if_missing(
-        tx: &Transaction,
-        table: &str,
-        column: &str,
-        ddl: &str,
-    ) -> rusqlite::Result<()> {
-        let has_column: bool = tx
-            .prepare(&format!("PRAGMA table_info({table})"))?
-            .query_map([], |r| r.get::<_, String>(1))?
-            .collect::<Result<Vec<_>, _>>()?
-            .iter()
-            .any(|name| name == column);
-        if !has_column {
-            tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl}"))?;
-        }
-        Ok(())
-    }
     // v3: the composer Advanced rows — the worktree note and
     // sidebar-nesting parent, the project's setup script, the
     // Quick Session scratch marker, and per-project sparse-checkout
@@ -127,6 +128,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v2_title_column(tx)?;
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
+            apply_v5_workspace_options_columns(tx)?;
             tx.execute(
                 "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -148,6 +150,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v2_title_column(tx)?;
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
+            apply_v5_workspace_options_columns(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -156,6 +159,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         Some(2) => {
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
+            apply_v5_workspace_options_columns(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -176,6 +180,20 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         // there is nothing left to resurrect for a deliberate removal).
         Some(3) => {
             backfill_projects_from_pre_existing_workspaces(tx)?;
+            apply_v5_workspace_options_columns(tx)?;
+            tx.execute(
+                "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
+                params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
+            )?;
+        }
+        // v5: Workspace Options metadata columns (workspace_status,
+        // is_pinned, is_archived, sort_order, manual_order,
+        // last_activity_at, linked_pr, creator) -- additive, and the same
+        // "run on every already-versioned arm on the way to current"
+        // pattern as v4's recovery above, so a store already at v4 before
+        // this fix landed still picks it up on its next open.
+        Some(4) => {
+            apply_v5_workspace_options_columns(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -183,6 +201,80 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         }
         _ => {}
     }
+    Ok(())
+}
+
+/// v5: Workspace Options metadata columns on `worktrees`, additive.
+/// `is_pinned`/`is_archived`/`sort_order` are `NOT NULL DEFAULT 0` (always
+/// present, matching the protocol's non-optional `Worktree` fields);
+/// `workspace_status`/`manual_order`/`last_activity_at`/`linked_pr`/
+/// `creator` are nullable ("no value yet" is a real, distinct state, not
+/// merely a zero).
+fn apply_v5_workspace_options_columns(tx: &Transaction) -> rusqlite::Result<()> {
+    add_column_if_missing(tx, "worktrees", "workspace_status", "TEXT")?;
+    add_column_if_missing(tx, "worktrees", "is_pinned", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(tx, "worktrees", "is_archived", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(tx, "worktrees", "sort_order", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(tx, "worktrees", "manual_order", "INTEGER")?;
+    add_column_if_missing(tx, "worktrees", "last_activity_at", "TEXT")?;
+    add_column_if_missing(tx, "worktrees", "linked_pr", "INTEGER")?;
+    add_column_if_missing(tx, "worktrees", "creator", "TEXT")?;
+    // A folder Project has no `worktrees` row at all -- `worktree.list`
+    // synthesizes its one implicit worktree straight from the `projects`
+    // row (see `worktree_rpc::do_worktree_list`). Its Workspace Options
+    // metadata is real, durable state too (coordinator review,
+    // msg_cc2acea0c485: "status/manual order must work for folder
+    // workspaces with real identity"), so it lives on `projects` itself --
+    // the row that IS that implicit worktree's real identity -- rather
+    // than being defaulted every read. `sort_order`/`linked_pr`/`creator`
+    // are meaningless here: a folder project has exactly one worktree (no
+    // sibling to order against) and no branch (no PR to link, and its
+    // provenance is always "added via project.add", never worktree.create).
+    add_column_if_missing(tx, "projects", "workspace_status", "TEXT")?;
+    add_column_if_missing(tx, "projects", "is_pinned", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(tx, "projects", "is_archived", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(tx, "projects", "manual_order", "INTEGER")?;
+    add_column_if_missing(tx, "projects", "last_activity_at", "TEXT")?;
+    backfill_sort_order_and_last_activity(tx)?;
+    backfill_project_last_activity(tx)?;
+    Ok(())
+}
+
+/// Same honesty as `backfill_sort_order_and_last_activity`: a folder
+/// project with no recorded activity yet is, at minimum, as recently
+/// active as its own creation.
+fn backfill_project_last_activity(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute(
+        "UPDATE projects SET last_activity_at = created_at WHERE last_activity_at IS NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+/// `sort_order`: every pre-existing row lands on the column's own `DEFAULT
+/// 0` the first time this runs; assign each of those a stable, increasing
+/// stamp in `created_at` order (ties broken by `id`) so Sort by "Manual"
+/// keeps their natural creation order before anyone has ever dragged one.
+/// Idempotent: a worktree genuinely created (post-migration) with a real
+/// assigned `sort_order` is never 0, so a second run touches nothing.
+///
+/// `last_activity_at`: a worktree with no recorded activity yet is, at
+/// minimum, as recently active as its own creation -- never left blank.
+fn backfill_sort_order_and_last_activity(tx: &Transaction) -> rusqlite::Result<()> {
+    let ids: Vec<String> = tx
+        .prepare("SELECT id FROM worktrees WHERE sort_order = 0 ORDER BY created_at, id")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (index, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE worktrees SET sort_order = ?1 WHERE id = ?2",
+            params![(index as i64) + 1, id],
+        )?;
+    }
+    tx.execute(
+        "UPDATE worktrees SET last_activity_at = created_at WHERE last_activity_at IS NULL",
+        [],
+    )?;
     Ok(())
 }
 

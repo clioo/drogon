@@ -45,6 +45,9 @@ export type ProjectBridge = {
     note?: string;
     parentWorktreeId?: string;
     sparse?: string[];
+    /** Creation provenance (Workspace Options "Hide: CLI-created"); the
+     *  desktop app itself never sends this (absent = its own default). */
+    creator?: "cli" | "automation";
   }): Promise<Result<WorktreeResult>>;
   worktreeList(input: {
     projectId: string;
@@ -66,6 +69,14 @@ export type ProjectBridge = {
     worktreeId: string;
     note?: string | null;
     parentWorktreeId?: string | null;
+    /** Workspace Options metadata (schema v5); each nullable field is
+     *  tri-state -- absent leaves the column untouched, explicit null
+     *  clears it, matching `note`/`parentWorktreeId` above. */
+    workspaceStatus?: string | null;
+    isPinned?: boolean;
+    isArchived?: boolean;
+    manualOrder?: number | null;
+    linkedPr?: number | null;
   }): Promise<Result<WorktreeResult>>;
   /**
    * Subscribes to registry pushes from main (issue #146). Every method
@@ -120,6 +131,17 @@ export type WorktreeResult = {
   /** Composer Advanced → Parent worktree; null when top-level. */
   parentWorktreeId?: string | null;
   createdAt: string;
+  /** Workspace Options metadata (schema v5); see
+   *  `crates/drogon-protocol/src/worktree.rs`'s `Worktree` for the wire
+   *  contract each of these mirrors. */
+  workspaceStatus?: string | null;
+  isPinned?: boolean;
+  isArchived?: boolean;
+  sortOrder?: number;
+  manualOrder?: number | null;
+  lastActivityAt?: string | null;
+  linkedPr?: number | null;
+  creator?: "cli" | "automation" | null;
 };
 
 const id = z
@@ -193,6 +215,7 @@ export const projectBridgeSchemas = {
       )
       .max(256)
       .optional(),
+    creator: z.enum(["cli", "automation"]).optional(),
   }),
   worktreeList: z.object({ projectId: id }),
   worktreeRemove: z.object({ id, force: z.boolean().optional() }),
@@ -213,6 +236,16 @@ export const projectBridgeSchemas = {
       .nullable()
       .optional(),
     parentWorktreeId: id.nullable().optional(),
+    workspaceStatus: z
+      .string()
+      .max(64)
+      .refine((value) => !value.includes("\0"))
+      .nullable()
+      .optional(),
+    isPinned: z.boolean().optional(),
+    isArchived: z.boolean().optional(),
+    manualOrder: z.number().finite().nullable().optional(),
+    linkedPr: z.number().int().positive().nullable().optional(),
   }),
 };
 
@@ -254,6 +287,19 @@ const worktreeResult = z.object({
   note: z.string().nullable().nullish(),
   parentWorktreeId: z.string().nullable().nullish(),
   createdAt: z.string(),
+  // Workspace Options metadata (schema v5): workspaceStatus/manualOrder/
+  // lastActivityAt/linkedPr/creator are nullish the same way title/note
+  // are (a present-null value validates the same as an absent key);
+  // isPinned/isArchived/sortOrder default honestly rather than failing
+  // the whole worktree response against an older/partial payload.
+  workspaceStatus: z.string().nullable().nullish(),
+  isPinned: z.boolean().nullish().default(false),
+  isArchived: z.boolean().nullish().default(false),
+  sortOrder: z.number().nullish().default(0),
+  manualOrder: z.number().nullable().nullish(),
+  lastActivityAt: z.string().nullable().nullish(),
+  linkedPr: z.number().nullable().nullish(),
+  creator: z.enum(["cli", "automation"]).nullable().nullish(),
 });
 
 const projectChangesResult = z.object({ revision: z.string() });

@@ -277,33 +277,290 @@ fn canonical_or_raw(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn worktree_json(
-    id: &str,
-    project_id: &str,
-    workspace_id: &str,
-    path: &str,
-    branch: &str,
-    head: &str,
-    base_ref: Option<&str>,
-    title: Option<&str>,
-    note: Option<&str>,
-    parent_worktree_id: Option<&str>,
-    created_at: &str,
-) -> Value {
+/// Bundles every column `worktree_json` renders, named-field construction
+/// at each of its five call sites (create / list-folder / list-git /
+/// rename / update) instead of a positional argument list long enough to
+/// silently transpose two same-typed fields.
+struct WorktreeMetaRow<'a> {
+    id: &'a str,
+    project_id: &'a str,
+    workspace_id: &'a str,
+    path: &'a str,
+    branch: &'a str,
+    head: &'a str,
+    base_ref: Option<&'a str>,
+    title: Option<&'a str>,
+    note: Option<&'a str>,
+    parent_worktree_id: Option<&'a str>,
+    created_at: &'a str,
+    /// Workspace Options metadata (Group by/Sort by/Pin/Archive/PR-link
+    /// producers); see `drogon_protocol::worktree::Worktree`'s own field
+    /// docs for what each means. A folder Project's synthesized implicit
+    /// worktree (no real `worktrees` row) always renders these at their
+    /// defaults, matching `title`/`note`/`parent_worktree_id` above.
+    workspace_status: Option<&'a str>,
+    is_pinned: bool,
+    is_archived: bool,
+    sort_order: i64,
+    manual_order: Option<i64>,
+    last_activity_at: Option<&'a str>,
+    linked_pr: Option<i64>,
+    creator: Option<&'a str>,
+}
+
+fn worktree_json(fields: WorktreeMetaRow) -> Value {
     json!({
-        "id": id,
-        "projectId": project_id,
-        "workspaceId": workspace_id,
-        "path": path,
-        "branch": branch,
-        "head": head,
-        "baseRef": base_ref,
-        "title": title,
-        "note": note,
-        "parentWorktreeId": parent_worktree_id,
-        "createdAt": created_at,
+        "id": fields.id,
+        "projectId": fields.project_id,
+        "workspaceId": fields.workspace_id,
+        "path": fields.path,
+        "branch": fields.branch,
+        "head": fields.head,
+        "baseRef": fields.base_ref,
+        "title": fields.title,
+        "note": fields.note,
+        "parentWorktreeId": fields.parent_worktree_id,
+        "createdAt": fields.created_at,
+        "workspaceStatus": fields.workspace_status,
+        "isPinned": fields.is_pinned,
+        "isArchived": fields.is_archived,
+        "sortOrder": fields.sort_order,
+        "manualOrder": fields.manual_order,
+        "lastActivityAt": fields.last_activity_at,
+        "linkedPr": fields.linked_pr,
+        "creator": fields.creator,
     })
+}
+
+/// An owned worktree row, every `worktrees` column `worktree_json` renders.
+/// [`do_worktree_rename`](Engine::do_worktree_rename) and
+/// [`do_worktree_update`](Engine::do_worktree_update) both re-fetch and
+/// render one full row after their mutation, rather than each declaring
+/// its own copy of the same 18-column tuple type.
+struct StoredWorktreeRow {
+    id: String,
+    project_id: String,
+    workspace_id: String,
+    path: String,
+    branch: String,
+    head: String,
+    base_ref: Option<String>,
+    title: Option<String>,
+    note: Option<String>,
+    parent_worktree_id: Option<String>,
+    created_at: String,
+    workspace_status: Option<String>,
+    is_pinned: bool,
+    is_archived: bool,
+    sort_order: i64,
+    manual_order: Option<i64>,
+    last_activity_at: Option<String>,
+    linked_pr: Option<i64>,
+    creator: Option<String>,
+}
+
+impl StoredWorktreeRow {
+    fn as_json(&self) -> Value {
+        worktree_json(WorktreeMetaRow {
+            id: &self.id,
+            project_id: &self.project_id,
+            workspace_id: &self.workspace_id,
+            path: &self.path,
+            branch: &self.branch,
+            head: &self.head,
+            base_ref: self.base_ref.as_deref(),
+            title: self.title.as_deref(),
+            note: self.note.as_deref(),
+            parent_worktree_id: self.parent_worktree_id.as_deref(),
+            created_at: &self.created_at,
+            workspace_status: self.workspace_status.as_deref(),
+            is_pinned: self.is_pinned,
+            is_archived: self.is_archived,
+            sort_order: self.sort_order,
+            manual_order: self.manual_order,
+            last_activity_at: self.last_activity_at.as_deref(),
+            linked_pr: self.linked_pr,
+            creator: self.creator.as_deref(),
+        })
+    }
+}
+
+fn fetch_worktree_row(
+    conn: &rusqlite::Connection,
+    worktree_id: &str,
+) -> Result<StoredWorktreeRow, RpcError> {
+    conn.query_row(
+        "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at, \
+         workspace_status, is_pinned, is_archived, sort_order, manual_order, last_activity_at, linked_pr, creator \
+         FROM worktrees WHERE id = ?1",
+        [worktree_id],
+        |r| {
+            Ok(StoredWorktreeRow {
+                id: r.get(0)?,
+                project_id: r.get(1)?,
+                workspace_id: r.get(2)?,
+                path: r.get(3)?,
+                branch: r.get(4)?,
+                head: r.get(5)?,
+                base_ref: r.get(6)?,
+                title: r.get(7)?,
+                note: r.get(8)?,
+                parent_worktree_id: r.get(9)?,
+                created_at: r.get(10)?,
+                workspace_status: r.get(11)?,
+                is_pinned: r.get(12)?,
+                is_archived: r.get(13)?,
+                sort_order: r.get(14)?,
+                manual_order: r.get(15)?,
+                last_activity_at: r.get(16)?,
+                linked_pr: r.get(17)?,
+                creator: r.get(18)?,
+            })
+        },
+    )
+    .map_err(error::from_sqlite)
+}
+
+/// Workspace Options metadata for a folder Project's implicit worktree,
+/// stored on `projects` itself (no `worktrees` row exists for a folder
+/// project -- see `apply_v5_workspace_options_columns`'s own doc for why).
+struct FolderProjectMeta {
+    workspace_status: Option<String>,
+    is_pinned: bool,
+    is_archived: bool,
+    manual_order: Option<i64>,
+    last_activity_at: Option<String>,
+}
+
+fn fetch_folder_project_meta(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+) -> Result<FolderProjectMeta, RpcError> {
+    conn.query_row(
+        "SELECT workspace_status, is_pinned, is_archived, manual_order, last_activity_at \
+         FROM projects WHERE id = ?1",
+        [project_id],
+        |r| {
+            Ok(FolderProjectMeta {
+                workspace_status: r.get(0)?,
+                is_pinned: r.get(1)?,
+                is_archived: r.get(2)?,
+                manual_order: r.get(3)?,
+                last_activity_at: r.get(4)?,
+            })
+        },
+    )
+    .map_err(error::from_sqlite)
+}
+
+/// Renders a folder Project's synthesized implicit worktree, real
+/// Workspace Options metadata included -- shared by
+/// [`Engine::do_worktree_list`] and [`Engine::do_worktree_update`] (a
+/// folder project's implicit worktree id, always `project.id`, has no
+/// `worktrees` row to update, so `worktree.update` falls back to this same
+/// rendering after writing to `projects` directly).
+fn folder_implicit_worktree_json(
+    conn: &rusqlite::Connection,
+    project: &crate::project::ProjectInfo,
+) -> Result<Value, RpcError> {
+    let workspace_id: String = conn
+        .query_row(
+            "SELECT id FROM workspaces WHERE path = ?1",
+            [&project.path],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(error::from_sqlite)?
+        .ok_or_else(|| error::internal_error("folder project's implicit workspace is missing"))?;
+    let meta = fetch_folder_project_meta(conn, &project.id)?;
+    Ok(worktree_json(WorktreeMetaRow {
+        id: &project.id,
+        project_id: &project.id,
+        workspace_id: &workspace_id,
+        path: &project.path,
+        branch: "",
+        head: "",
+        base_ref: None,
+        title: None,
+        note: None,
+        parent_worktree_id: None,
+        created_at: &project.created_at,
+        workspace_status: meta.workspace_status.as_deref(),
+        is_pinned: meta.is_pinned,
+        is_archived: meta.is_archived,
+        sort_order: 0,
+        manual_order: meta.manual_order,
+        last_activity_at: meta.last_activity_at.as_deref(),
+        linked_pr: None,
+        creator: None,
+    }))
+}
+
+/// `worktree.update` fallback for a folder Project's implicit worktree
+/// (id == `project.id`, no `worktrees` row -- see
+/// `folder_implicit_worktree_json`'s own doc). Only the four fields that
+/// actually apply to a folder project (workspace status, pin, archive,
+/// manual order) are honored, on `projects` directly; `note`/
+/// `parentWorktreeId`/`linkedPr` have no folder-project equivalent
+/// (structurally: no branch, and exactly one worktree with no sibling to
+/// nest under or link a PR against), so an attempt to set one is refused
+/// outright rather than silently accepted and dropped.
+fn update_folder_project_meta(
+    conn: &rusqlite::Connection,
+    decoded: &drogon_protocol::worktree::WorktreeUpdateParams,
+) -> Result<Value, RpcError> {
+    if decoded.note.is_some() || decoded.parent_worktree_id.is_some() || decoded.linked_pr.is_some()
+    {
+        return Err(error::invalid_argument(
+            "note, parentWorktreeId and linkedPr do not apply to a folder project's implicit worktree",
+        ));
+    }
+    let project: crate::project::ProjectInfo = crate::project::get(conn, &decoded.worktree_id)?;
+    if project.kind != "folder" {
+        return Err(error::not_found("worktree not found"));
+    }
+    let mut mutated = false;
+    if let Some(status) = &decoded.workspace_status {
+        let trimmed = status.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        conn.execute(
+            "UPDATE projects SET workspace_status = ?1 WHERE id = ?2",
+            rusqlite::params![trimmed, project.id],
+        )
+        .map_err(error::from_sqlite)?;
+        mutated = true;
+    }
+    if let Some(is_pinned) = decoded.is_pinned {
+        conn.execute(
+            "UPDATE projects SET is_pinned = ?1 WHERE id = ?2",
+            rusqlite::params![is_pinned, project.id],
+        )
+        .map_err(error::from_sqlite)?;
+        mutated = true;
+    }
+    if let Some(is_archived) = decoded.is_archived {
+        conn.execute(
+            "UPDATE projects SET is_archived = ?1 WHERE id = ?2",
+            rusqlite::params![is_archived, project.id],
+        )
+        .map_err(error::from_sqlite)?;
+        mutated = true;
+    }
+    if let Some(manual_order) = &decoded.manual_order {
+        conn.execute(
+            "UPDATE projects SET manual_order = ?1 WHERE id = ?2",
+            rusqlite::params![manual_order, project.id],
+        )
+        .map_err(error::from_sqlite)?;
+        mutated = true;
+    }
+    if mutated {
+        conn.execute(
+            "UPDATE projects SET last_activity_at = ?1 WHERE id = ?2",
+            rusqlite::params![now_rfc3339(), project.id],
+        )
+        .map_err(error::from_sqlite)?;
+    }
+    folder_implicit_worktree_json(conn, &project)
 }
 
 impl Engine {
@@ -327,6 +584,22 @@ impl Engine {
         let note = optional_trimmed_str(params, "note")?;
         let parent_worktree_id = optional_trimmed_str(params, "parentWorktreeId")?;
         let sparse = normalize_sparse_directories(params)?;
+        // Creation provenance (Workspace Options "Hide: Automation-created"
+        // / "CLI-created"): absent means the desktop app's own create path.
+        // `drogon-cli worktree create` is the one caller that sets this
+        // today; "automation" is accepted (closed set, not free text) but
+        // has no producer yet -- automation-dispatched workspace creation
+        // is unwired elsewhere in this build
+        // (`bot_run_rpc::RunUnsupported::NewPerRunWorkspaceMode`).
+        let creator = optional_trimmed_str(params, "creator")?;
+        if let Some(value) = &creator
+            && value != "cli"
+            && value != "automation"
+        {
+            return Err(error::invalid_argument(
+                "creator must be \"cli\" or \"automation\" when provided",
+            ));
+        }
 
         let project = {
             let conn = self.db.lock().unwrap();
@@ -471,25 +744,45 @@ impl Engine {
 
         let id = uuid::Uuid::new_v4().to_string();
         let created_at = now_rfc3339();
+        // Monotonic creation-order stamp, scoped to the owning project (the
+        // only scope Sort by "Manual"'s tiebreak ever needs): one past the
+        // highest `sort_order` this project has assigned so far, real
+        // insertion order rather than a fake constant.
+        let sort_order: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM worktrees WHERE project_id = ?1",
+                [&project_id],
+                |r| r.get(0),
+            )
+            .map_err(error::from_sqlite)?;
         conn.execute(
-            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, note, parent_worktree_id, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-            rusqlite::params![id, project_id, workspace_id, canonical_target_str, branch_name, head, base_ref, note, parent_worktree_id, created_at],
+            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, note, parent_worktree_id, created_at, sort_order, last_activity_at, creator) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+            rusqlite::params![id, project_id, workspace_id, canonical_target_str, branch_name, head, base_ref, note, parent_worktree_id, created_at, sort_order, created_at, creator],
         )
         .map_err(error::from_sqlite)?;
 
-        Ok(worktree_json(
-            &id,
-            &project_id,
-            &workspace_id,
-            &canonical_target_str,
-            &branch_name,
-            &head,
-            base_ref.as_deref(),
-            None,
-            note.as_deref(),
-            parent_worktree_id.as_deref(),
-            &created_at,
-        ))
+        Ok(worktree_json(WorktreeMetaRow {
+            id: &id,
+            project_id: &project_id,
+            workspace_id: &workspace_id,
+            path: &canonical_target_str,
+            branch: &branch_name,
+            head: &head,
+            base_ref: base_ref.as_deref(),
+            title: None,
+            note: note.as_deref(),
+            parent_worktree_id: parent_worktree_id.as_deref(),
+            created_at: &created_at,
+            workspace_status: None,
+            is_pinned: false,
+            is_archived: false,
+            sort_order,
+            manual_order: None,
+            last_activity_at: Some(&created_at),
+            linked_pr: None,
+            creator: creator.as_deref(),
+        }))
     }
 
     pub(super) fn do_worktree_list(&self, params: &Value) -> Result<Value, RpcError> {
@@ -498,28 +791,14 @@ impl Engine {
         let project = crate::project::get(&conn, &project_id)?;
 
         if project.kind == "folder" {
-            let workspace_id: Option<String> = conn
-                .query_row(
-                    "SELECT id FROM workspaces WHERE path = ?1",
-                    [&project.path],
-                    |r| r.get(0),
-                )
-                .optional()
-                .map_err(error::from_sqlite)?;
-            let workspace_id = workspace_id.ok_or_else(|| {
-                error::internal_error("folder project's implicit workspace is missing")
-            })?;
-            return Ok(json!({
-                "worktrees": [worktree_json(
-                    &project.id, &project.id, &workspace_id, &project.path, "", "", None, None,
-                    None, None, &project.created_at,
-                )]
-            }));
+            return Ok(json!({ "worktrees": [folder_implicit_worktree_json(&conn, &project)?] }));
         }
 
         let mut stmt = conn
             .prepare(
-                "SELECT id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at FROM worktrees WHERE project_id = ?1 ORDER BY created_at",
+                "SELECT id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at, \
+                 workspace_status, is_pinned, is_archived, sort_order, manual_order, last_activity_at, linked_pr, creator \
+                 FROM worktrees WHERE project_id = ?1 ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
         struct Row {
@@ -533,6 +812,14 @@ impl Engine {
             note: Option<String>,
             parent_worktree_id: Option<String>,
             created_at: String,
+            workspace_status: Option<String>,
+            is_pinned: bool,
+            is_archived: bool,
+            sort_order: i64,
+            manual_order: Option<i64>,
+            last_activity_at: Option<String>,
+            linked_pr: Option<i64>,
+            creator: Option<String>,
         }
         let rows: Vec<Row> = stmt
             .query_map([&project_id], |r| {
@@ -547,6 +834,14 @@ impl Engine {
                     note: r.get(7)?,
                     parent_worktree_id: r.get(8)?,
                     created_at: r.get(9)?,
+                    workspace_status: r.get(10)?,
+                    is_pinned: r.get(11)?,
+                    is_archived: r.get(12)?,
+                    sort_order: r.get(13)?,
+                    manual_order: r.get(14)?,
+                    last_activity_at: r.get(15)?,
+                    linked_pr: r.get(16)?,
+                    creator: r.get(17)?,
                 })
             })
             .map_err(error::from_sqlite)?
@@ -583,19 +878,27 @@ impl Engine {
                     .and_then(|(_, b)| b.clone())
                     .map(|b| short_branch(&b))
                     .unwrap_or(row.branch);
-                worktree_json(
-                    &row.id,
-                    &project_id,
-                    &row.workspace_id,
-                    &row.path,
-                    &branch,
-                    &head,
-                    row.base_ref.as_deref(),
-                    row.title.as_deref(),
-                    row.note.as_deref(),
-                    row.parent_worktree_id.as_deref(),
-                    &row.created_at,
-                )
+                worktree_json(WorktreeMetaRow {
+                    id: &row.id,
+                    project_id: &project_id,
+                    workspace_id: &row.workspace_id,
+                    path: &row.path,
+                    branch: &branch,
+                    head: &head,
+                    base_ref: row.base_ref.as_deref(),
+                    title: row.title.as_deref(),
+                    note: row.note.as_deref(),
+                    parent_worktree_id: row.parent_worktree_id.as_deref(),
+                    created_at: &row.created_at,
+                    workspace_status: row.workspace_status.as_deref(),
+                    is_pinned: row.is_pinned,
+                    is_archived: row.is_archived,
+                    sort_order: row.sort_order,
+                    manual_order: row.manual_order,
+                    last_activity_at: row.last_activity_at.as_deref(),
+                    linked_pr: row.linked_pr,
+                    creator: row.creator.as_deref(),
+                })
             })
             .collect();
 
@@ -640,7 +943,6 @@ impl Engine {
     /// display title stored on the worktree row. The git branch and the
     /// worktree directory are untouched — verify by comparing `branch`
     /// and `path` before and after.
-    #[allow(clippy::type_complexity)]
     pub(super) fn do_worktree_rename(&self, params: &Value) -> Result<Value, RpcError> {
         let decoded: drogon_protocol::worktree::WorktreeRenameParams =
             serde_json::from_value(params.clone())
@@ -649,67 +951,29 @@ impl Engine {
         let name = decoded.name.trim().to_string();
 
         let conn = self.db.lock().unwrap();
+        // A rename is a real, user-visible mutation -- bump last_activity_at
+        // the same as note/status/pin/archive changes below, so Sort by
+        // "Recent" and Hide "Sleeping" see it.
         let changed = conn
             .execute(
-                "UPDATE worktrees SET title = ?1 WHERE id = ?2",
-                rusqlite::params![name, decoded.worktree_id],
+                "UPDATE worktrees SET title = ?1, last_activity_at = ?2 WHERE id = ?3",
+                rusqlite::params![name, now_rfc3339(), decoded.worktree_id],
             )
             .map_err(error::from_sqlite)?;
         if changed == 0 {
             return Err(error::not_found("worktree not found"));
         }
-        let row: (
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            String,
-        ) = conn
-            .query_row(
-                "SELECT id, project_id, workspace_id, path, branch, head, base_ref, note, parent_worktree_id, created_at FROM worktrees WHERE id = ?1",
-                [&decoded.worktree_id],
-                |r| {
-                    Ok((
-                        r.get(0)?,
-                        r.get(1)?,
-                        r.get(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                        r.get(5)?,
-                        r.get(6)?,
-                        r.get(7)?,
-                        r.get(8)?,
-                        r.get(9)?,
-                    ))
-                },
-            )
-            .map_err(error::from_sqlite)?;
-        Ok(worktree_json(
-            &row.0,
-            &row.1,
-            &row.2,
-            &row.3,
-            &row.4,
-            &row.5,
-            row.6.as_deref(),
-            Some(&name),
-            row.7.as_deref(),
-            row.8.as_deref(),
-            &row.9,
-        ))
+        Ok(fetch_worktree_row(&conn, &decoded.worktree_id)?.as_json())
     }
 
     /// Worktree-meta update (`worktree.update`): the note (the composer's
-    /// Advanced Note row) and the sidebar-nesting parent. Each field is
-    /// tri-state — absent leaves the column untouched, explicit null
-    /// clears it. The parent is nesting only: it never changes the base
-    /// branch, matching the fork's picker copy.
-    #[allow(clippy::type_complexity)]
+    /// Advanced Note row), the sidebar-nesting parent, and the Workspace
+    /// Options fields (workspace status, pin, archive, manual sort rank,
+    /// linked PR number). The nullable fields are tri-state — absent
+    /// leaves the column untouched, explicit null clears it; `isPinned`/
+    /// `isArchived` are plain optional bools (no meaningful "clear"). The
+    /// parent is nesting only: it never changes the base branch, matching
+    /// the fork's picker copy.
     pub(super) fn do_worktree_update(&self, params: &Value) -> Result<Value, RpcError> {
         let decoded: drogon_protocol::worktree::WorktreeUpdateParams =
             serde_json::from_value(params.clone())
@@ -720,15 +984,22 @@ impl Engine {
             return Err(error::invalid_argument("note is too long"));
         }
         let conn = self.db.lock().unwrap();
-        let project_id: String = conn
+        let project_id: Option<String> = conn
             .query_row(
                 "SELECT project_id FROM worktrees WHERE id = ?1",
                 [&decoded.worktree_id],
                 |r| r.get(0),
             )
             .optional()
-            .map_err(error::from_sqlite)?
-            .ok_or_else(|| error::not_found("worktree not found"))?;
+            .map_err(error::from_sqlite)?;
+        let Some(project_id) = project_id else {
+            // No `worktrees` row: this may be a folder project's own
+            // implicit-worktree id (`project.id`, no sibling row to find --
+            // see `folder_implicit_worktree_json`'s own doc). Genuinely
+            // unknown ids fall through to the same `not_found` either way.
+            return update_folder_project_meta(&conn, &decoded);
+        };
+        let mut mutated = false;
         if let Some(parent) = &decoded.parent_worktree_id {
             if let Some(parent_id) = parent {
                 validate_parent_update(&conn, &decoded.worktree_id, &project_id, parent_id)?;
@@ -738,6 +1009,7 @@ impl Engine {
                 rusqlite::params![parent, decoded.worktree_id],
             )
             .map_err(error::from_sqlite)?;
+            mutated = true;
         }
         if let Some(note) = &decoded.note {
             let trimmed = note.as_deref().map(str::trim).filter(|s| !s.is_empty());
@@ -746,53 +1018,57 @@ impl Engine {
                 rusqlite::params![trimmed, decoded.worktree_id],
             )
             .map_err(error::from_sqlite)?;
+            mutated = true;
         }
-        let row: (
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            String,
-        ) = conn
-            .query_row(
-                "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at FROM worktrees WHERE id = ?1",
-                [&decoded.worktree_id],
-                |r| {
-                    Ok((
-                        r.get(0)?,
-                        r.get(1)?,
-                        r.get(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                        r.get(5)?,
-                        r.get(6)?,
-                        r.get(7)?,
-                        r.get(8)?,
-                        r.get(9)?,
-                        r.get(10)?,
-                    ))
-                },
+        if let Some(status) = &decoded.workspace_status {
+            let trimmed = status.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            conn.execute(
+                "UPDATE worktrees SET workspace_status = ?1 WHERE id = ?2",
+                rusqlite::params![trimmed, decoded.worktree_id],
             )
             .map_err(error::from_sqlite)?;
-        Ok(worktree_json(
-            &row.0,
-            &row.1,
-            &row.2,
-            &row.3,
-            &row.4,
-            &row.5,
-            row.6.as_deref(),
-            row.7.as_deref(),
-            row.8.as_deref(),
-            row.9.as_deref(),
-            &row.10,
-        ))
+            mutated = true;
+        }
+        if let Some(is_pinned) = decoded.is_pinned {
+            conn.execute(
+                "UPDATE worktrees SET is_pinned = ?1 WHERE id = ?2",
+                rusqlite::params![is_pinned, decoded.worktree_id],
+            )
+            .map_err(error::from_sqlite)?;
+            mutated = true;
+        }
+        if let Some(is_archived) = decoded.is_archived {
+            conn.execute(
+                "UPDATE worktrees SET is_archived = ?1 WHERE id = ?2",
+                rusqlite::params![is_archived, decoded.worktree_id],
+            )
+            .map_err(error::from_sqlite)?;
+            mutated = true;
+        }
+        if let Some(manual_order) = &decoded.manual_order {
+            conn.execute(
+                "UPDATE worktrees SET manual_order = ?1 WHERE id = ?2",
+                rusqlite::params![manual_order, decoded.worktree_id],
+            )
+            .map_err(error::from_sqlite)?;
+            mutated = true;
+        }
+        if let Some(linked_pr) = &decoded.linked_pr {
+            conn.execute(
+                "UPDATE worktrees SET linked_pr = ?1 WHERE id = ?2",
+                rusqlite::params![linked_pr, decoded.worktree_id],
+            )
+            .map_err(error::from_sqlite)?;
+            mutated = true;
+        }
+        if mutated {
+            conn.execute(
+                "UPDATE worktrees SET last_activity_at = ?1 WHERE id = ?2",
+                rusqlite::params![now_rfc3339(), decoded.worktree_id],
+            )
+            .map_err(error::from_sqlite)?;
+        }
+        Ok(fetch_worktree_row(&conn, &decoded.worktree_id)?.as_json())
     }
 }
 

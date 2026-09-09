@@ -1701,3 +1701,62 @@ async fn harness_start_malformed_catalog_is_refused_but_start_still_works() {
     );
     drop(service);
 }
+
+// --- Worktree creation provenance (Workspace Options "Hide: CLI-created") ---
+
+fn worktree_created_result(creator: &Value) -> Value {
+    json!({
+        "id": "w1",
+        "projectId": "p1",
+        "workspaceId": "ws-1",
+        "path": "/data/workspaces/repo/feature",
+        "branch": "feature",
+        "head": "abc123",
+        "baseRef": null,
+        "createdAt": "2026-09-09T00:00:00Z",
+        "isPinned": false,
+        "isArchived": false,
+        "sortOrder": 1,
+        "creator": creator,
+    })
+}
+
+/// `drogon-cli worktree create` is the one real, durable producer of
+/// `creator: "cli"` (coordinator review, msg_cc2acea0c485: "Wire creator
+/// at actual worktree.create producer boundary"). The mock daemon echoes
+/// back exactly what it was asked to store, so this proves the CLI sends
+/// the tag on every call, not merely that the CLI *could*.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_always_tags_the_cli_creation_provenance() {
+    let dir = temp_data_dir("wt-creator");
+    let behavior: Behavior = std::sync::Arc::new(|request| match request["method"].as_str() {
+        Some("worktree.create") => {
+            assert_eq!(
+                request["params"]["creator"], "cli",
+                "drogon-cli must always tag its own worktree.create calls, params: {:?}",
+                request["params"]
+            );
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                worktree_created_result(&request["params"]["creator"]),
+            ))
+        }
+        _ => Action::Respond(error_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            "method_not_found",
+            "unexpected",
+        )),
+    });
+    let service = MockService::start(dir.path(), behavior);
+
+    let output = run_cli(
+        dir.path(),
+        &["worktree", "create", "--project", "p1", "--name", "feature"],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+
+    let request = service.first_captured();
+    assert_eq!(request["method"], "worktree.create");
+    assert_eq!(request["params"]["creator"], "cli");
+    drop(service);
+}

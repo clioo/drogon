@@ -391,6 +391,19 @@ impl Engine {
                         note: row.get(8)?,
                         parent_worktree_id: row.get(9)?,
                         created_at: row.get(10)?,
+                        // This response only needs `path` (the new
+                        // worktree's checkout location); it never round
+                        // trips through `worktree.list`, so Workspace
+                        // Options metadata is left at its defaults rather
+                        // than re-selecting eight more columns.
+                        workspace_status: None,
+                        is_pinned: false,
+                        is_archived: false,
+                        sort_order: 0,
+                        manual_order: None,
+                        last_activity_at: None,
+                        linked_pr: None,
+                        creator: None,
                     })
                 },
             )

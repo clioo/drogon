@@ -51,6 +51,7 @@ import { registerShellBridge } from "./shell-bridge";
 import { registerSettingsProbes } from "./settings-probes";
 import { registerSettingsCliBridge } from "./settings-bridge";
 import { registerAgentSettingsBridge } from "./agent-settings-bridge";
+import { registerWorkspaceUIPreferencesBridge } from "./workspace-ui-preferences-bridge";
 import { registerFontsBridge } from "./fonts";
 import { registerTasksBridge } from "./tasks-bridge";
 // R17-A additive wiring: jira data-layer bridge (granted main/jira-bridge.ts).
@@ -272,6 +273,7 @@ function registerBridge() {
   registerJiraBridge(() => window);
   registerBotBridge(() => window);
   registerMentuBridge(() => window);
+  registerWorkspaceUIPreferencesBridge(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {
     ipcMain.handle(`drogon:${method}`, async (event, input: unknown) => {
       if (

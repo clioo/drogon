@@ -24,7 +24,7 @@ type ComponentFixtures = &'static [(&'static str, i64)];
 const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("bots", 3, &[("bots-v1", 1), ("bots-v2", 2)]),
     ("automations", 2, &[("automations-v1", 1)]),
-    ("projects", 4, &[("projects-v1", 1)]),
+    ("projects", 5, &[("projects-v1", 1)]),
     ("mentu", 1, &[]),
     ("coordination_access", 1, &[]),
     ("orchestration_mail", 1, &[]),
@@ -571,7 +571,7 @@ fn recovers_pre_projects_orphans_even_when_the_store_is_already_at_v3() {
     assert_eq!(recovered["kind"], "folder");
 
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "projects"), 4);
+    assert_eq!(version_of(&conn, "projects"), 5);
 }
 
 // Coordinator review: a project the user genuinely removed (project.remove

@@ -95,6 +95,21 @@ export type TasksStartResult = {
 };
 export type TasksLinksResult = { links: TaskLink[] };
 
+// Optional like the granted `git`/`notifications`/`jira`/`ui` namespaces
+// (supplied at runtime by preload via Object.assign, never constructed in
+// the bridge literal), so older preloads without it keep typechecking.
+// Real Workspace Options "Group by: PR status" (workspace-pr-status.ts)
+// reads this directly off `window.drogon` (ProjectList.tsx's own
+// `windowTasksBridge` helper, mirroring project-adapter.ts's
+// `windowProjectBridge`) rather than through a new App.tsx prop, the same
+// existing `tasks.list(mode: "pulls")` provider bridge TasksPage.tsx
+// already uses -- no new RPC, no new credentials.
+declare module "./session-contract" {
+  interface DesktopBridge {
+    tasks?: TasksBridge;
+  }
+}
+
 export interface TasksBridge {
   tasksList(input: {
     projectId: string;

@@ -1,30 +1,33 @@
 /* MIT Copyright (c) 2026 Lovecast Inc.
-   User-feature-closure item 4: the remaining "Workspace options" sections
-   sidebar-options-show.ts's doc comment lists as not-ported ("Sort by /
-   Project order / card display / workspace filters ride sort/group/
-   display stores the MVP lacks"). Every control here is wired to a real,
-   persisted WorkspaceOptionsState (workspace-options-state.ts) and acts on
-   real data:
-   - Group by: None/Project only. Status/PR are omitted outright rather
-     than rendered inert — no PR or workspace-status tracking exists
-     anywhere in this renderer to group by (grep confirms it), and a
-     picker option with no real effect is exactly the mock UI the task
-     forbids.
-   - Sort by: Manual (the existing drag order), Name, Recent activity.
-   - Card layout: Comfortable/Compact (an additive CSS density class on
-     each card's wrapper — ProjectList.tsx; WorktreeCard's own markup and
-     tests are untouched).
-   - Show properties: Branch (name + ahead/behind) and Pull request chip —
-     the two real badge groups WorktreeCardMetaBadges already renders
-     (worktree-card-pr-display.ts / WorktreeCardMetaBadges.tsx); toggling
-     one off suppresses exactly that data, nothing invented.
-   - Hide: Sleeping / Default branch / Detached HEAD are real, computed
-     filters (workspace-options-state.ts). Automation-created and
-     CLI-created are rendered disabled with an explanatory hint: the
-     `worktrees` table has no creation-provenance column (verified by
-     reading crates/drogon-core/src/db.rs and project.rs), so a working
-     toggle here would need a daemon schema change out of this change's
-     scope — listed explicitly in the PR rather than faked. */
+   User-feature-closure item 4: the full "Workspace options" menu. Every
+   control here is wired to the ONE shared, persisted WorkspaceOptionsState
+   (workspace-options-state.ts, backed end to end by
+   `window.drogon.ui`/schema v5) and acts on real data, live-rendered in
+   ProjectList.tsx:
+   - Group by: None/Repo (ProjectRow's existing per-project rendering) and
+     Workspace status/PR status (EntryGroupRow's cross-project rendering
+     over `groupWorktreesByWorkspaceStatus`/`groupWorktreesByPrStatus` --
+     PR status correlates the existing `tasks.list(mode: "pulls")`
+     provider bridge by branch; an unfetched/failed project's worktrees
+     bucket under "PR status unavailable", never a false "no pull
+     request").
+   - Sort by: Manual (the real `Worktree.manualOrder`, schema v5 -- the
+     SAME field ProjectList.tsx's drag commit persists via
+     `worktree.update` and the Kanban board's own column-drag will
+     read/write), Name, Recent activity (`Worktree.lastActivityAt`), Smart
+     (pinned first, then recent), Repo (by owning project name -- only
+     visibly different from Name under the two cross-project groupings,
+     where entries can carry different real projects).
+   - Project order: Manual (the existing project-header drag order) or
+     Recent (by each project's own most-recent real worktree activity).
+   - Card layout: Comfortable/Compact.
+   - Show properties: Branch (name + ahead/behind) and Pull request chip.
+   - Hide: Sleeping / Default branch / Detached HEAD / Automation-created /
+     CLI-created are all real, computed filters (schema v5's
+     `Worktree.creator`, set by every `drogon-cli worktree create` call;
+     "Automation-created" stays enabled even though no producer exists
+     yet in this build -- see `WorkspaceHideFilters`'s own doc) -- no
+     control here is disabled or inert. */
 import {
   DropdownMenuCheckboxItem,
   DropdownMenuLabel,
@@ -36,28 +39,31 @@ import type {
   WorkspaceCardLayout,
   WorkspaceGroupBy,
   WorkspaceOptionsState,
+  WorkspaceProjectOrderBy,
   WorkspaceSortBy,
 } from "./workspace-options-state";
 
 const GROUP_BY_LABEL: Record<WorkspaceGroupBy, string> = {
-  project: "Project",
+  repo: "Repo",
   none: "None",
+  "workspace-status": "Workspace status",
+  "pr-status": "PR status",
 };
 const SORT_BY_LABEL: Record<WorkspaceSortBy, string> = {
   manual: "Manual (drag order)",
   name: "Name",
+  recent: "Recent activity",
+  smart: "Smart",
+  repo: "Repo",
+};
+const PROJECT_ORDER_BY_LABEL: Record<WorkspaceProjectOrderBy, string> = {
+  manual: "Manual (drag order)",
   recent: "Recent activity",
 };
 const CARD_LAYOUT_LABEL: Record<WorkspaceCardLayout, string> = {
   comfortable: "Comfortable",
   compact: "Compact",
 };
-
-/** Not tracked by the daemon yet (no creation-provenance column on
- *  `worktrees` — see this file's header comment); shown disabled rather
- *  than omitted, since the task names them explicitly, or silently faked. */
-const UNAVAILABLE_HIDE_HINT =
-  "Not available yet: the service does not record how a workspace was created.";
 
 export function WorkspaceOptionsMenuSections({
   state,
@@ -95,6 +101,23 @@ export function WorkspaceOptionsMenuSections({
             {SORT_BY_LABEL[value]}
           </DropdownMenuRadioItem>
         ))}
+      </DropdownMenuRadioGroup>
+      <DropdownMenuSeparator />
+
+      <DropdownMenuLabel>Project order</DropdownMenuLabel>
+      <DropdownMenuRadioGroup
+        value={state.projectOrderBy}
+        onValueChange={(value) =>
+          onChange({ ...state, projectOrderBy: value as WorkspaceProjectOrderBy })
+        }
+      >
+        {(Object.keys(PROJECT_ORDER_BY_LABEL) as WorkspaceProjectOrderBy[]).map(
+          (value) => (
+            <DropdownMenuRadioItem key={value} value={value}>
+              {PROJECT_ORDER_BY_LABEL[value]}
+            </DropdownMenuRadioItem>
+          ),
+        )}
       </DropdownMenuRadioGroup>
       <DropdownMenuSeparator />
 
@@ -177,20 +200,23 @@ export function WorkspaceOptionsMenuSections({
         Detached HEAD
       </DropdownMenuCheckboxItem>
       <DropdownMenuCheckboxItem
-        checked={false}
-        disabled
-        title={UNAVAILABLE_HIDE_HINT}
+        checked={state.hide.automationCreated}
         onSelect={(event) => event.preventDefault()}
-        onCheckedChange={() => {}}
+        onCheckedChange={(checked) =>
+          onChange({
+            ...state,
+            hide: { ...state.hide, automationCreated: checked },
+          })
+        }
       >
         Automation-created
       </DropdownMenuCheckboxItem>
       <DropdownMenuCheckboxItem
-        checked={false}
-        disabled
-        title={UNAVAILABLE_HIDE_HINT}
+        checked={state.hide.cliCreated}
         onSelect={(event) => event.preventDefault()}
-        onCheckedChange={() => {}}
+        onCheckedChange={(checked) =>
+          onChange({ ...state, hide: { ...state.hide, cliCreated: checked } })
+        }
       >
         CLI-created
       </DropdownMenuCheckboxItem>

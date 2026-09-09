@@ -251,7 +251,13 @@ fn resolve_bot_owning_folder(
 /// selected while the panel stayed mounted). The exact-match fast path
 /// reuses the caller's `workspace_id` verbatim (no reverse lookup); only
 /// the fallback path resolves it from the bot's own folder path.
-fn resolve_bot_owning_workspace(
+///
+/// `pub(crate)`: also the owner-resolution primitive for `bot_run_rpc`'s
+/// `authorized_prepare`, which has the identical gap this module's own
+/// doc originally called out ("bot.run's own workspace resolution ... is
+/// not yet migrated to this pattern") -- reused directly rather than
+/// re-implemented, so both mutations share one authoritative-owner route.
+pub(crate) fn resolve_bot_owning_workspace(
     conn: &Connection,
     derived_host_id: &str,
     workspace_id: &str,
@@ -352,8 +358,11 @@ fn parse_responsibility_params<T: serde::de::DeserializeOwned>(
 /// missing Bot workspace identity"; this is the consistent
 /// authoritative-owner routing for all three. `bot.run`'s own workspace
 /// resolution is entangled with session-launch targeting in a separate,
-/// larger staged-ledger pipeline and is not yet migrated to this pattern
-/// -- see the PR description for that explicit gap).
+/// larger staged-ledger pipeline (`bot_run_rpc`); its `authorized_prepare`
+/// work phase now reuses [`resolve_bot_owning_workspace`] directly for the
+/// same fallback, while its own `revalidate_run_scope` authorize phase
+/// mirrors this function's empty-workspace-id tolerance without weakening
+/// the unknown-workspace/foreign-host/replay defenses).
 ///
 /// This function only decides whether the REQUEST is authorized to
 /// proceed; it never resolves which folder/workspace the mutation should

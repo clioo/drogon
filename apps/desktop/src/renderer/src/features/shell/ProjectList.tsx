@@ -12,7 +12,7 @@
    control; each removable card's kebab menu opens the remove confirm
    dialog. All RPCs run in App; every submit resolves a verbatim error
    string or null on success. */
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   CircleX,
@@ -29,6 +29,7 @@ import type {
   Worktree,
   Workspace,
 } from "../../../../shared/session-contract";
+import type { TaskPullRequest } from "../../../../shared/tasks-contract";
 import { Button } from "../../components/ui/button";
 import {
   DropdownMenuCheckboxItem,
@@ -39,7 +40,13 @@ import {
   DropdownMenuSubTrigger,
 } from "../../components/ui/dropdown-menu";
 import type { ProjectGroup } from "./project-adapter";
-import { filterProjectGroups, nestProjectWorktrees } from "./project-adapter";
+import {
+  filterProjectGroups,
+  nestProjectWorktrees,
+  windowProjectBridge,
+  windowTasksBridge,
+  windowUiBridge,
+} from "./project-adapter";
 import { isWideSidebarHeader } from "./app-chrome-layout";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
@@ -54,21 +61,27 @@ import {
   getProjectsFilterVisibilityLabel,
 } from "./sidebar-options-show";
 import {
-  applyStoredSidebarOrder,
   loadSidebarProjectOrder,
-  loadSidebarWorktreeOrder,
   orderedProjectIds,
+  orderProjectGroups,
   saveSidebarProjectOrder,
-  saveSidebarWorktreeOrder,
 } from "./sidebar-order";
 import {
   applyWorkspaceHideFilters,
   DEFAULT_WORKSPACE_OPTIONS_STATE,
+  fromSharedUIPreferences,
+  groupWorktreesByPrStatus,
+  groupWorktreesByWorkspaceStatus,
+  INITIAL_SHARED_UI_PREFERENCES,
   loadWorkspaceOptionsState,
-  saveWorkspaceOptionsState,
+  manualOrderRanksFromOrderedIds,
+  sharedUIPreferencesAreUntouched,
   sortWorktreesForDisplay,
+  toSharedUIPreferences,
+  type WorkspaceEntryGroup,
   type WorkspaceOptionsState,
 } from "./workspace-options-state";
+import type { WorkspaceUIPreferences } from "../../../../shared/workspace-ui-preferences-contract";
 import { WorkspaceOptionsMenuSections } from "./WorkspaceOptionsMenuSections";
 import { useProjectHeaderDrag } from "./project-header-drag";
 import { useWorktreeCardDrag } from "./worktree-card-drag";
@@ -100,12 +113,13 @@ function readStoredProjectOrder(): string[] {
   return loadSidebarProjectOrder(localStorage);
 }
 
-function readStoredWorktreeOrder(): Record<string, string[]> {
-  if (typeof localStorage === "undefined") return {};
-  return loadSidebarWorktreeOrder(localStorage);
-}
-
-function readStoredWorkspaceOptions(): WorkspaceOptionsState {
+/** Pre-hydration seed only (see the hydration effect below): the legacy
+ *  `drogon:shell:workspace-options` localStorage entry, read once so the
+ *  very first render shows a familiar state instead of a flash of
+ *  defaults while `window.drogon.ui.get()` is in flight. Never written to
+ *  again once the shared store namespace exists -- `commitWorkspaceOptions`
+ *  persists only through `window.drogon.ui.set`. */
+function readLegacyWorkspaceOptions(): WorkspaceOptionsState {
   if (typeof localStorage === "undefined")
     return DEFAULT_WORKSPACE_OPTIONS_STATE;
   return loadWorkspaceOptionsState(localStorage);
@@ -129,6 +143,60 @@ function latestWorktreeActivityAt(
     freshest = session.agentStateAt;
   }
   return freshest;
+}
+
+/** Sorts a cross-project `WorkspaceEntryGroup`'s entries by delegating to
+ *  the same tested `sortWorktreesForDisplay` the single-project path uses
+ *  -- Sort by "Repo" is where this actually differs from a same-project
+ *  sort, since entries here can carry different real owning projects. */
+function sortEntriesForDisplay(
+  entries: readonly { worktree: Worktree; project: Project }[],
+  sortBy: WorkspaceOptionsState["sortBy"],
+  latestActivityAt: (worktree: Worktree) => string | null,
+): { worktree: Worktree; project: Project }[] {
+  const projectNameById = new Map(
+    entries.map((entry) => [entry.worktree.id, entry.project.name]),
+  );
+  const byWorktreeId = new Map(entries.map((entry) => [entry.worktree.id, entry]));
+  const sortedWorktrees = sortWorktreesForDisplay(
+    entries.map((entry) => entry.worktree),
+    sortBy,
+    latestActivityAt,
+    (worktree) => projectNameById.get(worktree.id) ?? "",
+  );
+  return sortedWorktrees.map((worktree) => byWorktreeId.get(worktree.id)!);
+}
+
+/** Real, most-recent activity across a project's own worktrees --
+ *  `Worktree.lastActivityAt` (schema v5) falling back to `createdAt`,
+ *  never "no activity" (a project with only ever-quiet worktrees still
+ *  ranks, oldest last). */
+function mostRecentProjectActivity(worktrees: readonly Worktree[]): string | null {
+  let best: string | null = null;
+  for (const worktree of worktrees) {
+    const at = worktree.lastActivityAt ?? worktree.createdAt;
+    if (best === null || at > best) best = at;
+  }
+  return best;
+}
+
+/** Workspace Options "Project order: Recent" (`projectOrderBy`) -- headers
+ *  ranked by their own most-recent real worktree activity, independent of
+ *  `sortBy` (which orders CARDS, not headers). "Manual" project order
+ *  keeps the existing drag-authored `projectOrder` list (no backend field
+ *  names a project's own manual rank, so there is nothing to migrate this
+ *  onto). */
+function projectIdsByRecentActivity(groups: readonly ProjectGroup[]): string[] {
+  return [...groups]
+    .sort((a, b) => {
+      const aTime = mostRecentProjectActivity(a.worktrees);
+      const bTime = mostRecentProjectActivity(b.worktrees);
+      if (aTime === null && bTime === null) return 0;
+      if (aTime === null) return 1;
+      if (bTime === null) return -1;
+      return bTime.localeCompare(aTime);
+    })
+    .map((group) => group.project.id);
 }
 
 /** Which project dialog the sidebar currently shows, if any. */
@@ -367,25 +435,91 @@ export function ProjectList({
   const [filter, setFilter] = useState("");
   const [activityOnly, setActivityOnly] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
-  // Persisted manual order (fork parity: pointer drag on headers/cards).
-  // Applied before filtering so a reorder survives reload; the stored
-  // lists only ever reorder ids the daemon still advertises.
+  // Persisted manual PROJECT HEADER order (fork parity: pointer drag on
+  // headers). No backend field names a project's own manual rank, so this
+  // stays the real, sole authority for header order -- unlike worktree
+  // order below, it is not a "second, private" copy of anything.
   const [projectOrder, setProjectOrder] = useState<string[]>(
     readStoredProjectOrder,
   );
-  const [worktreeOrder, setWorktreeOrder] = useState<Record<string, string[]>>(
-    readStoredWorktreeOrder,
+  // The ONE shared Workspace Options authority (main/workspace-ui-preferences.ts
+  // via window.drogon.ui): seeded synchronously from the legacy
+  // localStorage entry so first paint has no flash of defaults, then
+  // superseded by the real hydration effect below (which also runs the
+  // one-time migration). `workspaceOptions` is a pure projection of this
+  // state -- there is no separate `setWorkspaceOptions`.
+  const [sharedPrefs, setSharedPrefs] = useState<WorkspaceUIPreferences>(() => ({
+    ...INITIAL_SHARED_UI_PREFERENCES,
+    ...toSharedUIPreferences(
+      readLegacyWorkspaceOptions(),
+      INITIAL_SHARED_UI_PREFERENCES.worktreeCardProperties,
+    ),
+  }));
+  const workspaceOptions = useMemo(
+    () => fromSharedUIPreferences(sharedPrefs),
+    [sharedPrefs],
   );
-  // Workspace options (#user-feature-closure item 4): Group by / Sort by /
-  // Card layout / Show properties / Hide, persisted the same way as the
-  // project/worktree order just above.
-  const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceOptionsState>(
-    readStoredWorkspaceOptions,
-  );
+  useEffect(() => {
+    const ui = windowUiBridge(window.drogon);
+    if (!ui) return;
+    let cancelled = false;
+    void (async () => {
+      let fetched: WorkspaceUIPreferences;
+      try {
+        fetched = await ui.get();
+      } catch {
+        return;
+      }
+      if (cancelled) return;
+      // One-time migration: the shared store has never been written for
+      // this domain (still exactly the defaults) AND a legacy localStorage
+      // profile carries real, pre-existing customization -- write it
+      // through once so it becomes the durable, canonical value; a
+      // profile that was already migrated (or never customized) just
+      // adopts the fetched value as-is.
+      if (
+        sharedUIPreferencesAreUntouched(fetched) &&
+        typeof localStorage !== "undefined"
+      ) {
+        const legacy = loadWorkspaceOptionsState(localStorage);
+        if (
+          JSON.stringify(legacy) !== JSON.stringify(DEFAULT_WORKSPACE_OPTIONS_STATE)
+        ) {
+          try {
+            const migrated = await ui.set(
+              toSharedUIPreferences(legacy, fetched.worktreeCardProperties),
+            );
+            if (!cancelled) setSharedPrefs(migrated);
+            return;
+          } catch {
+            // Fall through to adopting the unmigrated fetched value below;
+            // the legacy localStorage entry is left untouched, so a later
+            // reload can retry the migration.
+          }
+        }
+      }
+      setSharedPrefs(fetched);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Runs once per mount: this is a one-shot hydration/migration, not a
+    // live subscription (window.drogon.ui has no push channel).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const commitWorkspaceOptions = useCallback((next: WorkspaceOptionsState) => {
-    setWorkspaceOptions(next);
-    if (typeof localStorage !== "undefined")
-      saveWorkspaceOptionsState(localStorage, next);
+    setSharedPrefs((current) => {
+      const partial = toSharedUIPreferences(next, current.worktreeCardProperties);
+      const merged = { ...current, ...partial };
+      const ui = windowUiBridge(window.drogon);
+      if (ui) {
+        void ui
+          .set(partial)
+          .then((authoritative) => setSharedPrefs(authoritative))
+          .catch(() => {});
+      }
+      return merged;
+    });
   }, []);
   const sectionRef = useRef<HTMLElement | null>(null);
   const getScrollContainer = useCallback(
@@ -395,10 +529,34 @@ export function ProjectList({
       ) as HTMLElement | null) ?? null,
     [],
   );
-  const ordered = useMemo(
-    () => applyStoredSidebarOrder(groups, projectOrder, worktreeOrder),
-    [groups, projectOrder, worktreeOrder],
+  // Optimistic overlay for a just-committed drag, applied on top of the
+  // real `manualOrder` from `groups` until the parent's own refresh (its
+  // project.changes poll / push) carries the persisted value back down --
+  // never a competing authority: once `groups` reflects the write, the
+  // override and the real field agree and this becomes a no-op.
+  const [manualOrderOverrides, setManualOrderOverrides] = useState<
+    ReadonlyMap<string, number>
+  >(new Map());
+  const withManualOrderOverride = useCallback(
+    (worktree: Worktree): Worktree => {
+      const override = manualOrderOverrides.get(worktree.id);
+      return override === undefined ? worktree : { ...worktree, manualOrder: override };
+    },
+    [manualOrderOverrides],
   );
+  const ordered = useMemo(() => {
+    const headerIds =
+      workspaceOptions.projectOrderBy === "recent"
+        ? projectIdsByRecentActivity(groups)
+        : projectOrder;
+    return orderProjectGroups(groups, headerIds).map((group) => ({
+      ...group,
+      worktrees: sortWorktreesForDisplay(
+        group.worktrees.map(withManualOrderOverride),
+        "manual",
+      ),
+    }));
+  }, [groups, projectOrder, workspaceOptions.projectOrderBy, withManualOrderOverride]);
   // `ordered` is unfiltered, so its ids are the full commit domain.
   const allProjectIds = useMemo(() => orderedProjectIds(ordered), [ordered]);
   const knownProjectIds = useMemo(
@@ -410,16 +568,36 @@ export function ProjectList({
     if (typeof localStorage !== "undefined")
       saveSidebarProjectOrder(localStorage, next);
   }, []);
+  const worktreesById = useMemo(() => {
+    const map = new Map<string, Worktree>();
+    for (const group of groups) {
+      for (const worktree of group.worktrees) map.set(worktree.id, worktree);
+    }
+    return map;
+  }, [groups]);
+  // The canonical worktree order authority: `worktree.manualOrder`
+  // (schema v5), the SAME field `worktree.update` and Kanban's own
+  // column-drag read/write -- no parallel private order store. A drag
+  // commit renumbers the WHOLE project (stride 1000, higher first) rather
+  // than splicing one value between neighbors, so the very first drag in a
+  // project with no prior manual ranks still produces a fully consistent,
+  // correct total order (see `manualOrderRanksFromOrderedIds`'s own doc).
   const commitWorktreeOrder = useCallback(
-    (projectId: string, next: string[]) => {
-      setWorktreeOrder((current) => {
-        const updated = { ...current, [projectId]: next };
-        if (typeof localStorage !== "undefined")
-          saveSidebarWorktreeOrder(localStorage, updated);
-        return updated;
+    (_projectId: string, next: string[]) => {
+      const ranks = manualOrderRanksFromOrderedIds(next);
+      setManualOrderOverrides((current) => {
+        const merged = new Map(current);
+        for (const [id, rank] of ranks) merged.set(id, rank);
+        return merged;
       });
+      const bridge = windowProjectBridge(window.drogon);
+      if (!bridge.worktreeUpdate) return;
+      for (const [worktreeId, manualOrder] of ranks) {
+        if (worktreesById.get(worktreeId)?.manualOrder === manualOrder) continue;
+        void bridge.worktreeUpdate({ worktreeId, manualOrder }).catch(() => {});
+      }
     },
-    [],
+    [worktreesById],
   );
   const visible = filterGroupsBySelectedProjects(
     filterProjectGroups(ordered, workspaces, filter),
@@ -495,30 +673,159 @@ export function ProjectList({
     onCommitWorktreeOrder: commitWorktreeOrder,
     getScrollContainer,
   });
-  // Workspace options apply to what's *rendered*, never to the drag
-  // geometry above (allProjectIds/visibleProjectIds/visibleCardIdsByProject
-  // stay driven by `active`): a card hidden by a filter simply isn't drawn
-  // to pick up, and its position in the underlying manual order is
-  // untouched, so turning a filter back off restores it exactly where it
-  // was. "Group by: None" hides each project's header (ProjectRow's
-  // `hideHeader`) rather than merging into a synthetic project, so every
-  // card's remove/rename/settings action keeps targeting its real project.
-  const displayed = useMemo(
+  // Workspace options' Hide filters apply to what's *rendered*, never to
+  // the drag geometry above (allProjectIds/visibleProjectIds/
+  // visibleCardIdsByProject stay driven by `active`): a card hidden by a
+  // filter simply isn't drawn to pick up, and its position in the
+  // underlying manual order is untouched, so turning a filter back off
+  // restores it exactly where it was.
+  const hideFiltered = useMemo(
     () =>
       active.map((group) => ({
         ...group,
-        worktrees: sortWorktreesForDisplay(
-          applyWorkspaceHideFilters(
-            group.worktrees,
-            group.project,
-            sessions,
-            workspaceOptions.hide,
-          ),
-          workspaceOptions.sortBy,
-          (worktree) => latestWorktreeActivityAt(worktree, sessions),
+        worktrees: applyWorkspaceHideFilters(
+          group.worktrees,
+          group.project,
+          sessions,
+          workspaceOptions.hide,
         ),
       })),
-    [active, sessions, workspaceOptions.hide, workspaceOptions.sortBy],
+    [active, sessions, workspaceOptions.hide],
+  );
+  // "Group by: None"/"Repo" both keep every worktree under its own real
+  // ProjectGroup (ProjectRow's `hideHeader` is what drops the header text
+  // for "None" -- see that component's own doc), so every card's
+  // remove/rename/settings action keeps targeting its real project.
+  const displayed = useMemo(
+    () =>
+      hideFiltered.map((group) => ({
+        ...group,
+        worktrees: sortWorktreesForDisplay(
+          group.worktrees,
+          workspaceOptions.sortBy,
+          (worktree) => latestWorktreeActivityAt(worktree, sessions),
+          // Every worktree in one `group` shares that group's own real
+          // project by construction (project-adapter.ts's
+          // groupProjectWorktrees), so Sort by "Repo" is a no-op here
+          // (see `sortEntriesForDisplay` below for where it actually
+          // matters: the two cross-project regroupings).
+          () => group.project.name,
+        ),
+      })),
+    [hideFiltered, sessions, workspaceOptions.sortBy],
+  );
+  // Cross-project regrouping (real, tested helpers in
+  // workspace-options-state.ts/workspace-pr-status.ts): each entry keeps
+  // its OWN real project (never a synthetic/borrowed one), so actions and
+  // card/header labels stay correct regardless of which bucket visually
+  // contains the card. Sorted the same way `displayed` is, just over
+  // `entries` (which can span projects) instead of one group's worktrees.
+  const statusGroups = useMemo(
+    () =>
+      groupWorktreesByWorkspaceStatus(hideFiltered, sharedPrefs.workspaceStatuses ?? []).map(
+        (group) => ({
+          ...group,
+          entries: sortEntriesForDisplay(group.entries, workspaceOptions.sortBy, (worktree) =>
+            latestWorktreeActivityAt(worktree, sessions),
+          ),
+        }),
+      ),
+    [hideFiltered, sharedPrefs.workspaceStatuses, workspaceOptions.sortBy, sessions],
+  );
+  const [pullsByProjectId, setPullsByProjectId] = useState<
+    ReadonlyMap<string, readonly TaskPullRequest[] | null>
+  >(new Map());
+  // Real provider fetch (the existing `tasks.list(mode: "pulls")` bridge,
+  // never a new RPC): one call per git project actually shown, cached by
+  // project id, only while "PR status" grouping is selected -- never spawn
+  // `gh` for a grouping mode the user is not looking at. A folder project
+  // has no branch/PR concept at all, so it is seeded straight to `[]`
+  // ("no pull request", never queried and never "unavailable" -- that
+  // bucket is reserved for a real fetch failure). An unknown/not-yet-
+  // fetched git project is left OUT of the map on purpose: `derivePrStatusBucket`
+  // treats absence as `unavailable`, distinct from a real empty `none`.
+  useEffect(() => {
+    if (workspaceOptions.groupBy !== "pr-status") return;
+    const bridge = windowTasksBridge(window.drogon);
+    if (!bridge.tasksList) return;
+    const gitProjectIds = [
+      ...new Set(
+        hideFiltered
+          .filter((group) => group.project.kind === "git")
+          .map((group) => group.project.id),
+      ),
+    ];
+    const folderProjectIds = hideFiltered
+      .filter((group) => group.project.kind === "folder")
+      .map((group) => group.project.id);
+    if (folderProjectIds.length > 0) {
+      setPullsByProjectId((current) => {
+        let changed = false;
+        const next = new Map(current);
+        for (const id of folderProjectIds) {
+          if (!next.has(id)) {
+            next.set(id, []);
+            changed = true;
+          }
+        }
+        return changed ? next : current;
+      });
+    }
+    const toFetch = gitProjectIds.filter((id) => !pullsByProjectId.has(id));
+    if (toFetch.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      toFetch.map((projectId) =>
+        bridge
+          .tasksList!({ projectId, mode: "pulls" })
+          .then((result) => [projectId, result.ok ? result.result.pulls ?? [] : null] as const)
+          .catch(() => [projectId, null] as const),
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      setPullsByProjectId((current) => {
+        const next = new Map(current);
+        for (const [projectId, pulls] of entries) next.set(projectId, pulls);
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hideFiltered, workspaceOptions.groupBy, pullsByProjectId]);
+  const prGroups = useMemo(
+    () =>
+      groupWorktreesByPrStatus(hideFiltered, pullsByProjectId).map((group) => ({
+        ...group,
+        entries: sortEntriesForDisplay(group.entries, workspaceOptions.sortBy, (worktree) =>
+          latestWorktreeActivityAt(worktree, sessions),
+        ),
+      })),
+    [hideFiltered, pullsByProjectId, workspaceOptions.sortBy, sessions],
+  );
+  // Shared by both render paths (repo/none's ProjectRow and the two
+  // cross-project regroupings' EntryGroupRow) so remove/rename always
+  // target the real worktree/project, whichever grouping mode drew the
+  // card.
+  const handleRemoveWorktree = useCallback(
+    (worktree: Worktree) => {
+      // The persisted "Don't ask again" preference bypasses the dialog; a
+      // failure reopens it so the error stays visible.
+      if (readSkipDeleteWorktreeConfirm() && !isImplicitFolderWorktree(worktree)) {
+        void onSubmitRemove(worktree, false).then((failure) => {
+          if (failure) onOpenAction({ kind: "remove", worktreeId: worktree.id });
+        });
+        return;
+      }
+      onOpenAction({ kind: "remove", worktreeId: worktree.id });
+    },
+    [onOpenAction, onSubmitRemove],
+  );
+  const handleRemoveProject = useCallback(
+    (project: Project) => {
+      onOpenAction({ kind: "remove-project", projectId: project.id });
+    },
+    [onOpenAction],
   );
   return (
     <section ref={sectionRef} className="shell-projects">
@@ -683,50 +990,61 @@ export function ProjectList({
       cardDrag.state.dropIndicatorY !== null ? (
         <SidebarDropIndicator y={cardDrag.state.dropIndicatorY} />
       ) : null}
-      {displayed.map((group, headerIndex) => (
-        <ProjectRow
-          key={group.project.id}
-          group={group}
-          hideHeader={workspaceOptions.groupBy === "none"}
-          showBranch={workspaceOptions.showProperties.branch}
-          showPr={workspaceOptions.showProperties.pr}
-          cardLayout={workspaceOptions.cardLayout}
-          headerIndex={headerIndex}
-          workspaces={workspaces}
-          sessions={sessions}
-          selectedWorkspaceId={selectedWorkspaceId}
-          disabled={disabled}
-          worktreesAvailable={worktreesAvailable}
-          onProjectHandlePointerDown={projectDrag.onHandlePointerDown}
-          onCardPointerDown={cardDrag.onCardPointerDown}
-          onCardClickCapture={cardDrag.onCardClickCapture}
-          onSelectWorkspace={onSelectWorkspace}
-          activeSessionId={activeSessionId}
-          tabStrip={tabStrip}
-          onSelectSession={onSelectSession}
-          onNewWorktree={() => onCreateWorkspace(group.project.id)}
-          onRemoveWorktree={(worktree) => {
-            // The persisted "Don't ask again" preference bypasses the
-            // dialog; a failure reopens it so the error stays visible.
-            if (
-              readSkipDeleteWorktreeConfirm() &&
-              !isImplicitFolderWorktree(worktree)
-            ) {
-              void onSubmitRemove(worktree, false).then((failure) => {
-                if (failure)
-                  onOpenAction({ kind: "remove", worktreeId: worktree.id });
-              });
-              return;
-            }
-            onOpenAction({ kind: "remove", worktreeId: worktree.id });
-          }}
-          onRenameWorktree={(worktree, name) => onSubmitRename(worktree, name)}
-          onOpenProjectSettings={onOpenProjectSettings}
-          onRemoveProject={(project) =>
-            onOpenAction({ kind: "remove-project", projectId: project.id })
-          }
-        />
-      ))}
+      {workspaceOptions.groupBy === "workspace-status" ||
+      workspaceOptions.groupBy === "pr-status" ? (
+        (workspaceOptions.groupBy === "workspace-status" ? statusGroups : prGroups).map(
+          (group) => (
+            <EntryGroupRow
+              key={group.key}
+              group={group}
+              showBranch={workspaceOptions.showProperties.branch}
+              showPr={workspaceOptions.showProperties.pr}
+              cardLayout={workspaceOptions.cardLayout}
+              workspaces={workspaces}
+              sessions={sessions}
+              selectedWorkspaceId={selectedWorkspaceId}
+              disabled={disabled}
+              worktreesAvailable={worktreesAvailable}
+              onSelectWorkspace={onSelectWorkspace}
+              activeSessionId={activeSessionId}
+              tabStrip={tabStrip}
+              onSelectSession={onSelectSession}
+              onRemoveWorktree={handleRemoveWorktree}
+              onRenameWorktree={(worktree, name) => onSubmitRename(worktree, name)}
+              onRemoveProject={handleRemoveProject}
+            />
+          ),
+        )
+      ) : (
+        displayed.map((group, headerIndex) => (
+          <ProjectRow
+            key={group.project.id}
+            group={group}
+            hideHeader={workspaceOptions.groupBy === "none"}
+            showBranch={workspaceOptions.showProperties.branch}
+            showPr={workspaceOptions.showProperties.pr}
+            cardLayout={workspaceOptions.cardLayout}
+            headerIndex={headerIndex}
+            workspaces={workspaces}
+            sessions={sessions}
+            selectedWorkspaceId={selectedWorkspaceId}
+            disabled={disabled}
+            worktreesAvailable={worktreesAvailable}
+            onProjectHandlePointerDown={projectDrag.onHandlePointerDown}
+            onCardPointerDown={cardDrag.onCardPointerDown}
+            onCardClickCapture={cardDrag.onCardClickCapture}
+            onSelectWorkspace={onSelectWorkspace}
+            activeSessionId={activeSessionId}
+            tabStrip={tabStrip}
+            onSelectSession={onSelectSession}
+            onNewWorktree={() => onCreateWorkspace(group.project.id)}
+            onRemoveWorktree={handleRemoveWorktree}
+            onRenameWorktree={(worktree, name) => onSubmitRename(worktree, name)}
+            onOpenProjectSettings={onOpenProjectSettings}
+            onRemoveProject={handleRemoveProject}
+          />
+        ))
+      )}
       {removeTarget && (
         <DeleteWorktreeDialog
           worktree={removeTarget}
@@ -795,6 +1113,116 @@ function findProject(
   return (
     groups.find((group) => group.project.id === action.projectId)?.project ??
     null
+  );
+}
+
+/**
+ * Renders one cross-project bucket (Workspace Options "Group by:
+ * Workspace status"/"PR status" -- workspace-options-state.ts's
+ * `WorkspaceEntryGroup`). Deliberately simpler than `ProjectRow`: the
+ * header is a plain label (no project-header drag, no "New worktree", no
+ * project-settings/remove menu -- none of those apply to a synthetic
+ * bucket), but every card below still resolves its remove/rename target
+ * through its OWN real `project` from the entry, exactly like `ProjectRow`
+ * does for a real project group. No card drag in this mode: a manual
+ * order across buckets that do not correspond to any one project has no
+ * coherent meaning, so `onCardPointerDown`/`onCardClickCapture` are no-ops
+ * here rather than wired to `useWorktreeCardDrag`.
+ */
+function EntryGroupRow({
+  group,
+  workspaces,
+  sessions,
+  selectedWorkspaceId,
+  disabled,
+  worktreesAvailable,
+  onSelectWorkspace,
+  activeSessionId,
+  tabStrip,
+  onSelectSession,
+  onRemoveWorktree,
+  onRenameWorktree,
+  onRemoveProject,
+  showBranch = true,
+  showPr = true,
+  cardLayout = "comfortable",
+}: {
+  group: WorkspaceEntryGroup;
+  workspaces: Workspace[];
+  sessions: Session[];
+  selectedWorkspaceId: string;
+  activeSessionId: string;
+  tabStrip: TabStripState;
+  onSelectSession: (sessionId: string) => void;
+  disabled: boolean;
+  worktreesAvailable: boolean;
+  onSelectWorkspace: (workspaceId: string) => void;
+  onRemoveWorktree: (worktree: Worktree) => void;
+  onRenameWorktree: (
+    worktree: Worktree,
+    name: string,
+  ) => Promise<string | null>;
+  onRemoveProject: (project: Project) => void;
+  showBranch?: boolean;
+  showPr?: boolean;
+  cardLayout?: "comfortable" | "compact";
+}) {
+  return (
+    <div className="shell-project">
+      <div
+        className="shell-project-row group relative"
+        data-entry-group-key={group.key}
+      >
+        <span className="shell-project-name">{group.label}</span>
+      </div>
+      <div className="shell-project-cards">
+        {group.entries.map(({ worktree, project }, index) => {
+          const implicitFolderWorktree = isImplicitFolderWorktree(worktree);
+          const primaryCheckout =
+            project.kind === "git" && worktree.path === project.path;
+          return (
+            <div
+              key={worktree.id}
+              className={
+                cardLayout === "compact" ? "shell-workspace-card-compact" : undefined
+              }
+            >
+              <WorktreeCard
+                worktree={worktree}
+                primaryCheckout={primaryCheckout}
+                workspaces={workspaces}
+                sessions={sessions}
+                selected={worktree.workspaceId === selectedWorkspaceId}
+                disabled={disabled}
+                projectKind={project.kind}
+                implicitFolderWorktree={implicitFolderWorktree}
+                cardIndex={index}
+                onCardPointerDown={() => {}}
+                onCardClickCapture={() => {}}
+                onSelect={onSelectWorkspace}
+                onSelectSession={onSelectSession}
+                activeSessionId={activeSessionId}
+                tabStrip={tabStrip}
+                showBranch={showBranch}
+                showPr={showPr}
+                onRemove={
+                  !worktreesAvailable
+                    ? null
+                    : implicitFolderWorktree || primaryCheckout
+                      ? () => onRemoveProject(project)
+                      : () => onRemoveWorktree(worktree)
+                }
+                onRename={
+                  worktreesAvailable && !implicitFolderWorktree
+                    ? (name) => onRenameWorktree(worktree, name)
+                    : null
+                }
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

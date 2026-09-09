@@ -93,6 +93,7 @@ export interface ProjectRpcBridge {
     note?: string;
     parentWorktreeId?: string;
     sparse?: string[];
+    creator?: "cli" | "automation";
   }) => Promise<Result<Worktree>>;
   worktreeRemove?: (input: {
     id: string;
@@ -106,6 +107,11 @@ export interface ProjectRpcBridge {
     worktreeId: string;
     note?: string | null;
     parentWorktreeId?: string | null;
+    workspaceStatus?: string | null;
+    isPinned?: boolean;
+    isArchived?: boolean;
+    manualOrder?: number | null;
+    linkedPr?: number | null;
   }) => Promise<Result<Worktree>>;
   /**
    * Push subscription for out-of-band registry moves (issue #146): main
@@ -198,6 +204,49 @@ export function useProjectRegistryRefresh(
 export function windowProjectBridge(host: unknown): ProjectRpcBridge {
   if (typeof host !== "object" || host === null) return {};
   return (host as { project?: ProjectRpcBridge }).project ?? {};
+}
+
+/**
+ * Structural subset of the `window.drogon.tasks` namespace (mirrors
+ * `windowProjectBridge` above): the one method Workspace Options "Group
+ * by: PR status" needs (`workspace-pr-status.ts`, correlating this same
+ * `tasks.list(mode: "pulls")` provider bridge TasksPage.tsx already
+ * calls, by branch). Reads the live namespace off `window.drogon` directly
+ * rather than a new App.tsx prop.
+ */
+export interface TasksRpcBridge {
+  tasksList?: (input: {
+    projectId: string;
+    mode?: "issues" | "pulls";
+  }) => Promise<Result<{ pulls?: import("../../../../shared/tasks-contract").TaskPullRequest[] }>>;
+}
+
+/** Reads the live `tasks` namespace off `window.drogon` (absent → {}). */
+export function windowTasksBridge(host: unknown): TasksRpcBridge {
+  if (typeof host !== "object" || host === null) return {};
+  return (host as { tasks?: TasksRpcBridge }).tasks ?? {};
+}
+
+/**
+ * Reads the live `ui` namespace off `window.drogon` (absent → null): the
+ * shared Workspace Options preferences store
+ * (workspace-ui-preferences-contract.ts). `null` (older preload, or a
+ * test double that never provides it) means ProjectList.tsx's hydration
+ * stays on its legacy-localStorage-seeded initial state rather than
+ * throwing -- there is still only ONE authority once this namespace
+ * exists, but its absence must degrade, not crash.
+ */
+export function windowUiBridge(
+  host: unknown,
+): import("../../../../shared/workspace-ui-preferences-contract").WorkspaceUIPreferencesBridge | null {
+  if (typeof host !== "object" || host === null) return null;
+  return (
+    (
+      host as {
+        ui?: import("../../../../shared/workspace-ui-preferences-contract").WorkspaceUIPreferencesBridge;
+      }
+    ).ui ?? null
+  );
 }
 
 /** One project with the worktrees that belong to it, in list order. */
