@@ -533,6 +533,7 @@ impl Engine {
             | "orchestration.runList"
             | "orchestration.runShow"
             | "orchestration.taskCreate"
+            | "orchestration.taskUpdate"
             | "orchestration.taskList"
             | "orchestration.taskShow" => self.dispatch_run_task(request),
             "orchestration.workerStart"

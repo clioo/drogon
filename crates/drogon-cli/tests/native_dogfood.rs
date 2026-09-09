@@ -436,6 +436,25 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     let task_id = text_field(&task, "/result/task/taskId").to_string();
     assert_eq!(text_field(&task, "/result/task/status"), "ready");
 
+    // Status updates traverse the real CLI and daemon, preserving an explicit
+    // result across a later update that omits --result.
+    for (status, report) in [("blocked", Some("review before launch ✓")), ("ready", None)] {
+        let mut update_args = vec!["orchestration".to_string(), "task-update".to_string()];
+        scope_args(&mut update_args);
+        update_args.extend(["--id", &task_id, "--status", status].map(String::from));
+        if let Some(report) = report {
+            update_args.extend(["--result", report].map(String::from));
+        }
+        let args: Vec<_> = update_args.iter().map(String::as_str).collect();
+        let (code, updated) = coordinator_call(&data_dir, &args);
+        assert_ok(code, &updated, &args);
+        assert_eq!(updated["result"]["task"]["status"], status);
+        assert_eq!(
+            updated["result"]["task"]["result"],
+            "review before launch ✓"
+        );
+    }
+
     // --- attempt 1: fresh launch, fixture harness reports FAILURE ---
     let mut start1_args: Vec<String> = vec!["orchestration".into(), "worker-start".into()];
     scope_args(&mut start1_args);

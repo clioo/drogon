@@ -242,6 +242,23 @@ fn pending_forward_migrations(conn: &Connection) -> rusqlite::Result<Vec<Pending
             }
         }
     }
+    if table_columns(conn, "orchestration_domain_meta")?.is_some() {
+        let recorded: Option<i64> = conn.query_row(
+            "SELECT MAX(version) FROM orchestration_domain_meta",
+            [],
+            |row| row.get(0),
+        )?;
+        let target = drogon_orchestration::schema::SCHEMA_VERSION;
+        if let Some(recorded) = recorded
+            && recorded < target
+        {
+            pending.push(PendingMigration {
+                component: "orchestration_domain".to_string(),
+                recorded,
+                target,
+            });
+        }
+    }
     // Main-schema additive columns: an older data dir's `sessions` table
     // lacks them; a fresh or current one already has all three.
     if let Ok(Some((_, cols))) = table_columns(conn, "sessions") {

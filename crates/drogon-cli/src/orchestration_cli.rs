@@ -244,6 +244,19 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+    /// Update task status after its active worker has stopped or settled
+    TaskUpdate {
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[arg(long, visible_alias = "id", value_name = "ID")]
+        task: String,
+        #[arg(long, value_enum)]
+        status: StatusArg,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        result: Option<String>,
+        #[command(flatten)]
+        host: HostOpt,
+    },
     /// List tasks in the bound run
     TaskList {
         #[command(flatten)]

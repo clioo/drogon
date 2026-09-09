@@ -172,6 +172,7 @@ fn forbidden_methods_are_unauthorized_before_any_scope_check() {
         "runtime.shutdown",
         "orchestration.runCreate",
         "orchestration.taskCreate",
+        "orchestration.taskUpdate",
         "orchestration.workerStart",
         "orchestration.workerStop",
         "unknown.method",

@@ -68,6 +68,39 @@ impl Engine {
                     |tx| encode(tasks::create(tx, &params, &new_id("task"), now_ms())?),
                 )
             }
+            "orchestration.taskUpdate" => {
+                let params: TaskUpdateParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.coordination_mutation(
+                    request,
+                    coordinator_actor(&params.scope),
+                    |tx| runs::require_coordinator(tx, &params.scope),
+                    |tx| {
+                        tasks::show(
+                            tx,
+                            &TaskShowParams {
+                                scope: params.scope.clone(),
+                                task_id: params.task_id.clone(),
+                            },
+                        )?;
+                        let active =
+                            coordination_attempts::history(tx, &params.scope, &params.task_id)?
+                                .iter()
+                                .any(|entry| entry.active);
+                        if active != (params.status == TaskStatus::Dispatched) {
+                            return Err(RpcError::new(
+                                "task_not_startable",
+                                if active {
+                                    "Stop or settle the active worker before changing task status."
+                                } else {
+                                    "A task cannot be dispatched without an active Dispatch."
+                                },
+                            ));
+                        }
+                        encode(tasks::update(tx, &params)?)
+                    },
+                )
+            }
             "orchestration.taskList" => {
                 let params: TaskListParams = decode(&request.params)?;
                 params.validate_shape(&self.host_id)?;

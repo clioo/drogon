@@ -29,7 +29,7 @@ use drogon_protocol::orchestration_run::{
 use drogon_protocol::orchestration_scope::{CoordinatorScope, HostScope};
 use drogon_protocol::orchestration_task::{
     TaskCreateParams, TaskCreateResult, TaskListParams, TaskListResult, TaskShowParams,
-    TaskShowResult, TaskSpec, TaskStatus,
+    TaskShowResult, TaskSpec, TaskStatus, TaskUpdateParams, TaskUpdateResult,
 };
 use drogon_protocol::orchestration_worker::{
     OutputSource, ProcessAction, WorkerAbandonParams, WorkerAbandonResult, WorkerExecution,
@@ -97,6 +97,7 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             | OrchestrationCommand::RunShow { .. }
             | OrchestrationCommand::RunUse { .. }
             | OrchestrationCommand::TaskCreate { .. }
+            | OrchestrationCommand::TaskUpdate { .. }
             | OrchestrationCommand::TaskList { .. }
             | OrchestrationCommand::TaskShow { .. }
             | OrchestrationCommand::WorkerStart { .. }
@@ -586,6 +587,7 @@ pub async fn run(
         | OrchestrationCommand::RunShow { host, .. }
         | OrchestrationCommand::RunUse { host, .. }
         | OrchestrationCommand::TaskCreate { host, .. }
+        | OrchestrationCommand::TaskUpdate { host, .. }
         | OrchestrationCommand::TaskList { host, .. }
         | OrchestrationCommand::TaskShow { host, .. }
         | OrchestrationCommand::WorkerStart { host, .. }
@@ -835,6 +837,62 @@ pub async fn run(
                         "Task {} ({})",
                         result.task.task_id,
                         wire_task_status(result.task.status)
+                    )
+                },
+                0,
+            )
+        }
+        OrchestrationCommand::TaskUpdate {
+            scope,
+            task,
+            status,
+            result,
+            ..
+        } => {
+            let params = TaskUpdateParams {
+                scope: coordinator_scope(&host_id, scope),
+                task_id: task.clone(),
+                status: wire_status_arg(*status),
+                result: result.clone(),
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call(
+                    "orchestration.taskUpdate",
+                    value,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let updated: TaskUpdateResult = Client::decode_checked(
+                &call,
+                "orchestration.taskUpdate",
+                |r: &TaskUpdateResult| {
+                    if r.task.task_id != *task
+                        || r.task.run_id != scope.run
+                        || r.task.status != params.status
+                    {
+                        return Err(
+                            "task-update response does not match the requested task/run/status"
+                                .into(),
+                        );
+                    }
+                    if params.result.is_some() && r.task.result != params.result {
+                        return Err(
+                            "task-update response does not match the requested result".into()
+                        );
+                    }
+                    Ok(())
+                },
+            )?;
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "Updated {} -> {}",
+                        updated.task.task_id,
+                        wire_task_status(updated.task.status)
                     )
                 },
                 0,

@@ -512,6 +512,27 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
         entry(
+            "orchestration task-update",
+            &["orchestration", "task-update"],
+            "Update task status after its active worker has stopped or settled",
+            "drogon-cli orchestration task-update --run <ID> --coordinator-id <ID> --consumer-generation <N> --id <ID> --status <STATUS> [--result <TEXT>]",
+            &[
+                "run",
+                "coordinator-id",
+                "consumer-generation",
+                "task",
+                "id",
+                "status",
+                "result",
+                "host",
+            ],
+            &[],
+            &[
+                "drogon-cli orchestration task-update --run run-1 --coordinator-id coord-1 --consumer-generation 0 --id task-1 --status completed --json",
+            ],
+            &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
+        ),
+        entry(
             "orchestration task-list",
             &["orchestration", "task-list"],
             "List tasks in the bound run",

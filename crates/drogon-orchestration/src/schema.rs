@@ -4,7 +4,7 @@ use drogon_protocol::RpcError;
 use rusqlite::{OptionalExtension, Transaction, params};
 
 /// Version stamped into `orchestration_domain_meta` for the DDL applied below.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 const DDL: &str = "
 CREATE TABLE IF NOT EXISTS orchestration_domain_meta (
@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS orchestration_tasks (
     depends_on_json TEXT NOT NULL,
     parent_task_id TEXT,
     metadata_json TEXT,
+    result TEXT,
     status TEXT NOT NULL,
     created_at_ms INTEGER NOT NULL
 );
@@ -80,8 +81,9 @@ pub fn schema_version(connection: &rusqlite::Connection) -> Result<Option<i64>, 
 
 /// Applies the additive DDL and stamps `SCHEMA_VERSION` inside the caller's
 pub fn migrate_in_tx(tx: &Transaction<'_>) -> Result<(), RpcError> {
-    if let Some(applied) = schema_version(tx)?
-        && applied != SCHEMA_VERSION
+    let applied = schema_version(tx)?;
+    if let Some(version) = applied
+        && !(1..=SCHEMA_VERSION).contains(&version)
     {
         return Err(RpcError::new(
             "unsupported_orchestration_contract",
@@ -89,8 +91,16 @@ pub fn migrate_in_tx(tx: &Transaction<'_>) -> Result<(), RpcError> {
         ));
     }
     tx.execute_batch(DDL).map_err(store_error)?;
-    // Insert only when nothing is stamped yet, so a restart never writes a second
-    if schema_version(tx)?.is_none() {
+    if applied == Some(1) {
+        tx.execute_batch("ALTER TABLE orchestration_tasks ADD COLUMN result TEXT;")
+            .map_err(store_error)?;
+        tx.execute(
+            "UPDATE orchestration_domain_meta SET version = ?1",
+            [SCHEMA_VERSION],
+        )
+        .map_err(store_error)?;
+    }
+    if applied.is_none() {
         tx.execute(
             "INSERT INTO orchestration_domain_meta (version) VALUES (?1)",
             params![SCHEMA_VERSION],

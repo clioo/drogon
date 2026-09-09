@@ -29,7 +29,7 @@ use drogon_protocol::orchestration_scope::{
 };
 use drogon_protocol::orchestration_task::{
     TaskCreateParams, TaskCreateResult, TaskListParams, TaskListResult, TaskRecord, TaskShowParams,
-    TaskShowResult, TaskSpec, TaskStatus, TaskSummary,
+    TaskShowResult, TaskSpec, TaskStatus, TaskSummary, TaskUpdateParams, TaskUpdateResult,
 };
 use drogon_protocol::orchestration_worker::{
     OutputEntry, OutputSource, ProcessAction, WorkerAbandonParams, WorkerAbandonResult,
@@ -260,9 +260,29 @@ fn task_methods_round_trip_with_decided_status_vocabulary() {
             run_id: "run-1".into(),
             status: TaskStatus::Pending,
             depends_on: vec!["task-0".into()],
+            result: None,
         },
     };
     assert_camel_case_round_trip(&created, "task");
+    let mut update = TaskUpdateParams {
+        scope: coordinator_scope(),
+        task_id: "task-1".into(),
+        status: TaskStatus::Completed,
+        result: Some("done ✓".into()),
+    };
+    update.validate_shape("host-a").unwrap();
+    assert_camel_case_round_trip(&update, "taskId");
+    assert_camel_case_round_trip(
+        &TaskUpdateResult {
+            task: created.task.clone(),
+        },
+        "task",
+    );
+    update.result = Some("".into());
+    update.validate_shape("host-a").unwrap();
+    update.result =
+        Some("x".repeat(drogon_protocol::orchestration_common::MAX_TASK_TEXT_BYTES + 1));
+    assert!(update.validate_shape("host-a").is_err());
     let shown = TaskShowResult {
         task: created.task,
         spec: params.spec,
