@@ -363,6 +363,73 @@ fn same_id_replay_of_a_settled_report_is_idempotent() {
 }
 
 #[test]
+fn worker_report_suppresses_its_earlier_unread_heartbeats() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "i".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    let heartbeat = |_id: &str, dispatch: &str| {
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "kind":"heartbeat",
+            "subject":"alive", "payload": {"taskId": fx.task, "dispatchId": dispatch}})
+    };
+    let first = worker_call(
+        &engine,
+        "orchestration.send",
+        "hb-1",
+        &secret,
+        heartbeat("hb-1", "dispatch-1"),
+    );
+    assert!(first.ok, "{:?}", first.error);
+    // Another dispatch's heartbeat must survive suppression.
+    let other = worker_call(
+        &engine,
+        "orchestration.send",
+        "hb-2",
+        &secret,
+        heartbeat("hb-2", "dispatch-9"),
+    );
+    assert!(other.ok, "{:?}", other.error);
+    let report = worker_call(
+        &engine,
+        "orchestration.send",
+        "report",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "kind":"finalReport",
+            "subject":"done", "finalReport": {"outcome":"succeeded"},
+            "payload": {"taskId": fx.task.clone(), "dispatchId": "dispatch-1"}}),
+    );
+    assert!(report.ok, "{:?}", report.error);
+    // The run-home coordinator's consuming check sees the foreign heartbeat
+    // but not dispatch-1's suppressed one (source: suppressEarlierHeartbeats
+    // advances the mailbox past them, so they leave the unread batch).
+    let check = engine.dispatch(
+        serde_json::from_value(json!({
+            "protocol": drogon_protocol::PROTOCOL_VERSION, "requestId": "check",
+            "method": "orchestration.check",
+            "params": {"scope": {"actorKind":"coordinator","contractVersion":1,"hostId":fx.host,
+                "runId":fx.run,"coordinatorId":"owner","consumerGeneration":1},
+                "mode": "unread", "kinds": ["heartbeat"]},
+        }))
+        .unwrap(),
+    );
+    assert!(check.ok, "{:?}", check.error);
+    let check_result = check.result.unwrap();
+    let seen: Vec<&str> = check_result["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["kind"] == "heartbeat")
+        .filter_map(|m| m["payload"]["dispatchId"].as_str())
+        .collect();
+    assert_eq!(
+        seen,
+        vec!["dispatch-9"],
+        "full check result: {check_result:#}"
+    );
+}
+
+#[test]
 fn report_payload_naming_another_task_is_refused_without_effects() {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();

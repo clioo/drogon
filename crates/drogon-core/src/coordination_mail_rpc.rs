@@ -368,6 +368,10 @@ impl Engine {
             final_report.result.as_ref(),
         )? {
             Settlement::New(attempt) => {
+                // Source `suppressEarlierHeartbeats`: the report makes the
+                // dispatch's earlier unread heartbeats stale, so they are
+                // read+delivered and never arrive in a later check batch.
+                suppress_earlier_heartbeats_in_tx(tx, scope, summary.sequence as i64, dispatch_id)?;
                 let task_status = match final_report.outcome {
                     drogon_protocol::orchestration_common::ReportOutcome::Succeeded => {
                         TaskStatus::Completed
@@ -779,4 +783,78 @@ impl Engine {
             connection_lost: false,
         })
     }
+}
+
+/// Source `suppressEarlierHeartbeats`: the final report supersedes this
+/// dispatch's earlier unread heartbeats, so they are advanced past on the
+/// recipient mailbox and excluded from future consuming batches. Heartbeats
+/// from other dispatches and newer heartbeats stay.
+fn suppress_earlier_heartbeats_in_tx(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    report_sequence: i64,
+    dispatch_id: &str,
+) -> Result<(), RpcError> {
+    // Suppression keys on the dispatch's own heartbeats: the worker's
+    // payload dispatchId and the from_dispatch identity must agree before
+    // any pointer moves.
+    let mut statement = tx
+        .prepare(
+            "SELECT message_id, sequence, payload_json FROM orchestration_mail_messages
+              WHERE host_id=?1 AND run_id=?2 AND to_dispatch_id='' AND kind='heartbeat'
+                AND from_kind='dispatch' AND from_dispatch_id=?3
+                AND sequence < ?4",
+        )
+        .map_err(error::from_sqlite)?;
+    let rows = statement
+        .query_map(
+            rusqlite::params![
+                scope.host.host_id,
+                scope.run_id,
+                dispatch_id,
+                report_sequence
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .map_err(error::from_sqlite)?;
+    let mut max_suppressed: i64 = 0;
+    for row in rows {
+        let (_id, sequence, payload_json) = row.map_err(error::from_sqlite)?;
+        let payload: Option<serde_json::Value> = payload_json
+            .map(|json| serde_json::from_str(&json))
+            .transpose()
+            .map_err(|_| error::internal_error("Invalid stored heartbeat payload."))?;
+        let matches = payload
+            .as_ref()
+            .and_then(|payload| payload.get("dispatchId"))
+            .and_then(|dispatch| dispatch.as_str())
+            == Some(dispatch_id);
+        if matches {
+            max_suppressed = max_suppressed.max(sequence);
+        }
+    }
+    if max_suppressed > 0 {
+        // Advance the run-home read pointer past the suppressed heartbeats.
+        // Messages before the pointer with other kinds still surface only via
+        // peek/all, never via a consuming read.
+        let changed = tx.execute(
+            "INSERT INTO orchestration_mail_read_pointers (host_id, run_id, to_dispatch_id, read_through_sequence)
+              VALUES (?1, ?2, '', ?3)
+              ON CONFLICT(host_id, run_id, to_dispatch_id) DO UPDATE SET
+                read_through_sequence = MAX(read_through_sequence, excluded.read_through_sequence)",
+            rusqlite::params![scope.host.host_id, scope.run_id, max_suppressed],
+        ).map_err(error::from_sqlite)?;
+        if changed != 1 {
+            return Err(error::internal_error(
+                "Heartbeat suppression was not persisted.",
+            ));
+        }
+    }
+    Ok(())
 }
