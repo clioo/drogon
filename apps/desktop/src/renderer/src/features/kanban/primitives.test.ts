@@ -54,21 +54,41 @@ describe("host identity", () => {
 
   it("recovers the host and id exactly, and keeps unqualified rows in their own bucket", () => {
     expect(
-      getExecutionHostIdFromWorktreeHostIdentity("ssh:box|a::/tmp/x"),
+      getExecutionHostIdFromWorktreeHostIdentity("ssh%3Abox|a::/tmp/x"),
     ).toBe("ssh:box");
     expect(
       getExecutionHostIdFromWorktreeHostIdentity("|a::/tmp/x"),
     ).toBeUndefined();
-    expect(getWorktreeIdFromHostIdentity("ssh:box|a::/tmp/x")).toBe(
+    expect(getWorktreeIdFromHostIdentity("ssh%3Abox|a::/tmp/x")).toBe(
       "a::/tmp/x",
     );
     expect(isWorktreeHostIdentity("|a::/tmp/x")).toBe(true);
     expect(isWorktreeHostIdentity("legacy|id")).toBe(true);
   });
 
+  it("fails honestly on non-canonical host encodings instead of guessing", () => {
+    // Compose percent-encodes the host, so a raw `host:...` prefix is foreign
+    // input: no host is derived from it and it is not classified canonical.
+    expect(
+      getExecutionHostIdFromWorktreeHostIdentity("ssh:box|a::/tmp/x"),
+    ).toBeUndefined();
+    expect(isWorktreeHostIdentity("ssh:box|a::/tmp/x")).toBe(false);
+    // The composed form round-trips exactly.
+    const composed = composeWorktreeHostIdentity("ssh:box", "a::/tmp/x");
+    expect(composed).toBe("ssh%3Abox|a::/tmp/x");
+    expect(getExecutionHostIdFromWorktreeHostIdentity(composed)).toBe(
+      "ssh:box",
+    );
+    expect(isWorktreeHostIdentity(composed)).toBe(true);
+  });
+
   it("keeps same-id rows on different hosts distinct", () => {
     const local = getWorktreeHostIdentity({ id: "shared", hostId: "local" });
     const remote = getWorktreeHostIdentity({ id: "shared", hostId: "ssh:box" });
+    // The host part is percent-encoded: `:` composes to %3A and can never
+    // collide with a raw host spelling or rebind onto another host's id.
+    expect(local).toBe("local|shared");
+    expect(remote).toBe("ssh%3Abox|shared");
     expect(local).not.toBe(remote);
   });
 });
