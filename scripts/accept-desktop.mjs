@@ -14,6 +14,8 @@ import {
   runAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
+import { captureSettingsThemes, verifyThemeCaptures } from "./acceptance-theme.mjs";
+import { verifyRenderedUsageFixture, writeAcceptanceUsageFixture } from "./acceptance-usage-fixture.mjs";
 import {
   startForegroundObservation,
   verifyForegroundObservation,
@@ -95,6 +97,7 @@ const appDir = path.join(root, "apps", "desktop");
 const appRequire = createRequire(path.join(appDir, "package.json"));
 const electron = appRequire("electron");
 const fixture = await mkdtemp(path.join(tmpdir(), "dgu-"));
+const usageFixture = await writeAcceptanceUsageFixture(fixture);
 const dataDir = path.join(fixture, "data");
 let fixtureDaemon = packaged
   ? packagedFixtureDaemon(packaged.daemon, packaged.cli, dataDir)
@@ -141,6 +144,12 @@ const report = {
   cleanup: [],
   desktopPids: [],
   fixture,
+  usageFixture: {
+    source: "deterministic-offline-fixture",
+    path: usageFixture.path,
+    sha256: usageFixture.sha256,
+    unavailableFallback: "claude,codex",
+  },
 };
 let daemon, desktop, browser, page, registered;
 let foregroundObservation;
@@ -168,6 +177,9 @@ async function launchDesktop(overrideDataDir = null) {
         DROGON_DATA_DIR: activeDataDir,
         DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
         DROGON_BACKGROUND_WINDOW: "1",
+        DROGON_USAGE_FIXTURE: usageFixture.path,
+        // Valid fixtures precede this guard; missing/invalid files still stay offline.
+        DROGON_USAGE_FORCE_UNAVAILABLE: "claude,codex",
         ...(withAgents ? { DROGON_WINDOW_BOUNDS: agentWindowBounds } : {}),
         PI_CODING_AGENT_DIR: piDir,
         ...(process.platform !== "win32" ? { SHELL: "/bin/sh" } : {}),
@@ -315,6 +327,7 @@ try {
   }
   await launchDesktop();
   if (daemonError) throw daemonError;
+  await verifyRenderedUsageFixture(page, usageFixture, report.checks);
   if (fixtureDaemon) {
     await fixtureDaemon.capture();
     assert.equal(
@@ -606,13 +619,9 @@ try {
     await page.getByRole("tab").first().waitFor();
   }
   report.checks.push("keyboard-tab-navigation-and-sibling-close");
-  for (const colorScheme of ["light", "dark"]) {
-    await page.emulateMedia({ colorScheme });
-    await page.screenshot({
-      path: path.join(output, `${colorScheme}.png`),
-      animations: "disabled",
-    });
-  }
+  report.themeCaptures = await captureSettingsThemes(page, output);
+  verifyThemeCaptures(report.themeCaptures);
+  report.checks.push("real-settings-light-dark-captures");
   await page.setViewportSize({ width: 760, height: 600 });
   assert.equal(
     await page.evaluate(
@@ -624,7 +633,7 @@ try {
     path: path.join(output, "narrow.png"),
     animations: "disabled",
   });
-  report.checks.push("light-dark-captures-and-narrow-no-overflow");
+  report.checks.push("narrow-no-document-overflow");
   await page.getByRole("button", { name: /Close .* session/ }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
   report.checks.push("exact-session-close-through-ui");
