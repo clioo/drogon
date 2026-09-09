@@ -14,7 +14,7 @@ esac
 [[ $# -le 1 ]] || { printf 'Too many arguments\n' >&2; exit 2; }
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-node_bin=/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin
+node_bin="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin"
 if [[ -x "$node_bin/node" ]]; then export PATH="$node_bin:$PATH"; fi
 for tool in git node npm cargo; do
   command -v "$tool" >/dev/null || { printf 'Required tool missing: %s\n' "$tool" >&2; exit 1; }
