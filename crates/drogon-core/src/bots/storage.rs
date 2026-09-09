@@ -571,6 +571,32 @@ pub fn get_bot(conn: &Connection, host_id: &str, folder: &str, id: &str) -> Resu
 /// current internal `rev` snapshot, needed as `expected_rev` for a
 /// subsequent [`cas_write`]. Not part of any source-visible field --
 /// `rev` never appears in the serialized [`Bot`] payload.
+/// The folder owning `bot_id` under `host_id`, if any -- a direct
+/// primary-key lookup (`bots.id`), independent of which workspace the
+/// caller currently has selected. See bot_mutation_rpc.rs's
+/// `resolve_bot_owning_folder` for why this exists: `bot.snapshot`'s
+/// host-global scope (workspaceId: "", R17-E #348) aggregates bots across
+/// every folder a host owns via `list_bots_with_folders`, but the wire
+/// contract it serializes to (`BotsPanelBot`) carries no
+/// workspaceId/folder field -- so a mutation (delete/run/responsibility
+/// create or delete) issued from that view, or from any workspace other
+/// than the one this specific bot happens to live in, has no
+/// caller-supplied `workspace_id` that could ever resolve to the bot's
+/// own folder through the exact-match path alone.
+pub(crate) fn folder_for_bot_id(
+    conn: &Connection,
+    host_id: &str,
+    bot_id: &str,
+) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT folder FROM bots WHERE id = ?1 AND host_id = ?2",
+            params![bot_id, host_id],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
 fn get_bot_with_rev(
     conn: &Connection,
     host_id: &str,

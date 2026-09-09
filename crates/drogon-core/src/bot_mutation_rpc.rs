@@ -203,6 +203,45 @@ fn owned_folder_for(
     )
 }
 
+/// Resolves the folder actually owning `bot_id` for an existing-Bot
+/// mutation (delete today; see this function's own doc for why the same
+/// gap applies to run/responsibility create/delete), falling back past
+/// the caller-supplied `workspace_id` when it does not name that bot's
+/// own home folder.
+///
+/// `bot.snapshot`'s host-global scope (`workspaceId: ""`, R17-E #348)
+/// aggregates Bots across every folder a host owns
+/// (`bots_storage::list_bots_with_folders`), but the wire contract it
+/// serializes to (`BotsPanelBot`) carries no workspaceId/folder field --
+/// so a mutation issued from that view (or from any workspace other than
+/// the one this specific bot happens to live in -- Bots keep-alive
+/// (App.tsx) can leave the panel mounted well past the workspace that was
+/// selected when it loaded) had no `workspace_id` that could ever resolve
+/// through the exact caller-supplied match alone, and failed `not_found`
+/// even though the bot was never lost. `bot_id` is a single global
+/// primary key (`bots.id`), so once `derived_host_id` (server-derived,
+/// never client input) is confirmed to own it, no caller-controlled input
+/// decides which folder is searched -- the same host boundary
+/// `owned_folder_for` enforces, just not gated on a workspace guess.
+fn resolve_bot_owning_folder(
+    conn: &Connection,
+    derived_host_id: &str,
+    workspace_id: &str,
+    asserted_host_id: &str,
+    bot_id: &str,
+) -> Result<String, RpcError> {
+    if let Ok(folder) = owned_folder_for(conn, derived_host_id, workspace_id, asserted_host_id)
+        && bots_storage::current_rev(conn, derived_host_id, &folder, bot_id)
+            .map_err(responsibility_storage_error)?
+            .is_some()
+    {
+        return Ok(folder);
+    }
+    bots_storage::folder_for_bot_id(conn, derived_host_id, bot_id)
+        .map_err(responsibility_storage_error)?
+        .ok_or_else(|| not_found(format!("bot {bot_id} not found")))
+}
+
 /// A scheduled responsibility is an automation owned by the Bot: the same
 /// owner/policy types `automation.create` uses (`SchedulerOwner`,
 /// `WorkspaceMode`, `MissedRunPolicy`), no parallel tables. Bounds mirror
@@ -274,6 +313,39 @@ fn authorize_responsibility_scope(
     workspace_id: &str,
     asserted_host_id: &str,
 ) -> Result<(), RpcError> {
+    owned_folder_for(conn, derived_host_id, workspace_id, asserted_host_id).map(|_| ())
+}
+
+/// `bot.delete`'s own authorize phase (`run_atomic`'s pre-mutation check).
+/// Two constraints shape this, not one:
+/// - It must forgive the same host-global/mismatched-workspace scope the
+///   mutation phase forgives (`resolve_bot_owning_folder`), or that
+///   fallback is dead code: an unresolvable `workspace_id` would be
+///   rejected here first, before the mutation phase ever runs.
+/// - It must NEVER require the bot to still exist. `run_atomic` re-runs
+///   `authorize` even on a cached-receipt replay (requests.rs: "Authorization
+///   runs before the saved-receipt lookup, on replay too") -- requiring
+///   bot existence here would break replaying the delete of a bot that
+///   (correctly) no longer exists after the first, real deletion.
+///
+/// A non-empty but *unresolvable* `workspace_id` (a typo, a stale id) is
+/// still rejected outright, exactly like the pre-existing exact-match
+/// behavior: only the deliberate empty-string host-global sentinel (#348)
+/// gets the bot-id-based benefit of the doubt.
+fn authorize_bot_delete_scope(
+    conn: &Connection,
+    derived_host_id: &str,
+    workspace_id: &str,
+    asserted_host_id: &str,
+) -> Result<(), RpcError> {
+    if workspace_id.is_empty() {
+        if asserted_host_id != derived_host_id {
+            return Err(foreign_workspace_host(
+                "Request belongs to another execution host",
+            ));
+        }
+        return Ok(());
+    }
     owned_folder_for(conn, derived_host_id, workspace_id, asserted_host_id).map(|_| ())
 }
 
@@ -399,7 +471,13 @@ fn delete_bot_in_connection(
     host_id: &str,
     params: &BotDeleteParams,
 ) -> Result<Value, RpcError> {
-    let folder = owned_folder_for(tx, host_id, &params.workspace_id, &params.host_id)?;
+    let folder = resolve_bot_owning_folder(
+        tx,
+        host_id,
+        &params.workspace_id,
+        &params.host_id,
+        &params.bot_id,
+    )?;
     let deleted = bots_storage::delete_bot_in_tx(tx, host_id, &folder, &params.bot_id)
         .map_err(responsibility_storage_error)?;
     let Some(deleted) = deleted else {
@@ -509,7 +587,7 @@ impl crate::Engine {
                         "service admission is frozen for shutdown",
                     ));
                 }
-                authorize_responsibility_scope(
+                authorize_bot_delete_scope(
                     tx,
                     &self.host_id,
                     &params.workspace_id,

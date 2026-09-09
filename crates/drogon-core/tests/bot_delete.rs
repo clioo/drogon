@@ -160,6 +160,117 @@ fn delete_removes_the_bot_its_responsibilities_and_their_owned_automations() {
     );
 }
 
+// User-feature-closure item 6 (packaged acceptance: "bot delete must remove
+// its owned automations"): bot.snapshot's host-global scope (workspaceId:
+// "", R17-E #348) aggregates Bots across every folder a host owns, but the
+// wire contract it serializes to (BotsPanelBot) carries no
+// workspaceId/folder field. The desktop UI's delete call always sends the
+// app's *currently selected* workspace scope (App.tsx's botsScope), which
+// for a Bot loaded through the host-global view -- or simply because the
+// user (or, in the packaged acceptance suite, a later journey) switched
+// workspaces while the Bots panel stayed mounted (its own keep-alive logic)
+// -- may not be the workspace this specific Bot actually lives in. Before
+// this fix, delete_bot_in_connection required an *exact* caller-supplied
+// workspace_id match and failed not_found otherwise, stranding the Bot and
+// its owned automation exactly as the packaged run's failureUi captured
+// (the "Acceptance Bot R16BB" card, Delete button and scheduled
+// responsibility all still present after the delete attempt).
+
+#[test]
+fn delete_succeeds_with_the_host_global_empty_workspace_scope() {
+    let fx = Fixture::new();
+    let bot = fx.create_bot("bot-1");
+    let bot_id = bot["id"].as_str().unwrap().to_string();
+    let created = fx.create_responsibility("resp-create-1", &bot_id);
+    let automation_id = created["automationId"].as_str().unwrap().to_string();
+
+    // Exactly the scope App.tsx's botsScope sends when no workspace is
+    // selected (#348's host-global fallback): workspaceId: "".
+    let deleted = ok(fx.engine.dispatch(request(
+        "del-1",
+        "bot.delete",
+        json!({"workspaceId": "", "hostId": fx.host_id, "botId": bot_id}),
+    )));
+    assert_eq!(deleted["botId"], json!(bot_id));
+    assert_eq!(deleted["removed"], json!(true));
+    assert_eq!(deleted["automationIds"], json!([automation_id.clone()]));
+
+    let snapshot = fx.snapshot();
+    assert!(snapshot["bots"].as_array().unwrap().is_empty());
+    let listed = ok(fx
+        .engine
+        .dispatch(request("auto-list", "automation.list", json!({}))));
+    assert!(
+        !listed["automations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["id"] == json!(automation_id)),
+        "bot delete must remove its owned automations"
+    );
+}
+
+#[test]
+fn delete_succeeds_when_the_caller_names_a_different_registered_workspace() {
+    let fx = Fixture::new();
+    let bot = fx.create_bot("bot-1");
+    let bot_id = bot["id"].as_str().unwrap().to_string();
+    let created = fx.create_responsibility("resp-create-1", &bot_id);
+    let automation_id = created["automationId"].as_str().unwrap().to_string();
+
+    // A second, validly-registered workspace under the same host -- the
+    // user (or a later acceptance journey) switched to it while the Bots
+    // panel, holding this Bot, stayed mounted (App.tsx's keep-alive).
+    let other_dir = tempfile::tempdir().unwrap();
+    let other = ok(fx.engine.dispatch(request(
+        "ws-register-2",
+        "workspace.register",
+        json!({"path": other_dir.path()}),
+    )));
+    let other_workspace_id = other["id"].as_str().unwrap().to_string();
+    assert_ne!(other_workspace_id, fx.workspace_id);
+
+    let deleted = ok(fx.engine.dispatch(request(
+        "del-1",
+        "bot.delete",
+        json!({
+            "workspaceId": other_workspace_id,
+            "hostId": fx.host_id,
+            "botId": bot_id,
+        }),
+    )));
+    assert_eq!(deleted["removed"], json!(true));
+    assert_eq!(deleted["automationIds"], json!([automation_id.clone()]));
+
+    let listed = ok(fx
+        .engine
+        .dispatch(request("auto-list", "automation.list", json!({}))));
+    assert!(
+        !listed["automations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["id"] == json!(automation_id)),
+        "bot delete must remove its owned automations"
+    );
+}
+
+#[test]
+fn delete_still_refuses_a_bot_id_that_genuinely_does_not_exist() {
+    // The fallback must never turn a real "no such bot" into a false
+    // success -- only a *workspace* mismatch is forgiven, never a bad id.
+    let fx = Fixture::new();
+    assert_eq!(
+        err(fx.engine.dispatch(request(
+            "del-1",
+            "bot.delete",
+            json!({"workspaceId": "", "hostId": fx.host_id, "botId": "no-such-bot"}),
+        )))
+        .code,
+        "not_found"
+    );
+}
+
 #[test]
 fn delete_replays_the_stored_receipt_for_the_same_request_id() {
     let fx = Fixture::new();
