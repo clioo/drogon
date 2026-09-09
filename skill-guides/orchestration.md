@@ -84,6 +84,11 @@ preamble into a detected agent session and mints its scoped capability.
 returns the injected text. Inspect a task's current context with
 `drogon-cli orchestration dispatch-show --task <ID> --preamble`.
 
+Priorities `--priority high|urgent` render `[HIGH]`/`[URGENT]` tags in `check` and
+`inbox` output; `normal` is the default. Structured report fields use
+`--task-id`, `--dispatch-id`, `--files-modified <CSV>`, `--report-path <PATH>` and
+`--phase <TEXT>` instead of hand-quoting `--payload` JSON (never mix the two forms).
+
 ## Ask And Reply
 
 Ask blocks for an answer inside one bounded budget:
