@@ -6,7 +6,7 @@ import path from "node:path";
 
 /** Actual Electron keyboard, xterm grid and kernel PTY size; no model requests. */
 export async function probeTerminalInputLayout({ page, session, output, expectedHome, dataDir }) {
-  const previousViewport = page.viewportSize();
+  const previousViewport = page.viewportSize() ?? await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const evidence = { layouts: [], backtab: null, shiftEnter: null };
   let sidebarToggles = 0;
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -128,7 +128,7 @@ export async function probeTerminalInputLayout({ page, session, output, expected
     await page.keyboard.press("Shift+Enter");
     evidence.shiftEnter = await page.evaluate(() => [...window.__terminalBacktabProbe.data]);
     assert.deepEqual(evidence.shiftEnter, ["\u001b\r"], "unnegotiated Shift+Enter must send the source Alt-Enter fallback once, not ordinary Enter");
-    return ["terminal-grid-and-kernel-size-agree-after-real-window-resizes", "terminal-shift-tab-delivered-once-without-chrome-focus-navigation", "terminal-shift-enter-sends-source-fallback-once-not-plain-enter"];
+    return ["terminal-resize-recovers-after-real-transport-loss", "terminal-grid-and-kernel-size-agree-after-real-window-resizes", "terminal-shift-tab-delivered-once-without-chrome-focus-navigation", "terminal-shift-enter-sends-source-fallback-once-not-plain-enter"];
   } finally {
     await page.evaluate(() => {
       window.__terminalBacktabProbe?.dispose();
