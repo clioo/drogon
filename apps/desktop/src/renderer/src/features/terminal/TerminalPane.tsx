@@ -21,6 +21,8 @@ import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ILinkProvider, ILink } from "@xterm/xterm";
 import { TerminalInputQueue } from "./terminal-input-queue";
 import { preventTerminalBacktabNavigation } from "./terminal-backtab-navigation";
+import { createTerminalShiftEnterHandler } from "./terminal-shift-enter";
+import { TerminalKittyKeyboardModeTracker } from "../../../../shared/terminal-kitty-keyboard-mode-tracker";
 import { attachTerminalMouseWheelMultiplier } from "./terminal-tui-wheel";
 import { resolveTerminalJisYenInput } from "./terminal-jis-yen-input";
 import {
@@ -865,8 +867,12 @@ export function TerminalPane({
       () => !disposed && canWrite,
       report,
     );
+    const kittyModes = new TerminalKittyKeyboardModeTracker();
+    kittyModes.resetForSnapshot();
+    const claimShiftEnter = createTerminalShiftEnterHandler(() => kittyModes.flags, (data) => terminal.input(data, true));
     let optionKeyLocations: TerminalOptionKeyLocation = 0;
     terminal.attachCustomKeyEventHandler((event) => {
+      if (canWrite && claimShiftEnter(event)) return false;
       if (canWrite) preventTerminalBacktabNavigation(event);
       optionKeyLocations = updateTerminalOptionKeyLocation(
         optionKeyLocations,
@@ -1234,10 +1240,9 @@ export function TerminalPane({
             // Track DECA 2004 (bracketed paste) transitions in the PTY
             // output so the paste policy brackets/decrypts exactly when the
             // app asked.
-            observeTerminalBracketedPasteModeOutput(
-              terminal,
-              outputDecoder.decode(chunk),
-            );
+            const decodedOutput = outputDecoder.decode(chunk, { stream: true });
+            kittyModes.scanReplay(decodedOutput);
+            observeTerminalBracketedPasteModeOutput(terminal, decodedOutput);
             await new Promise<void>((resolve) =>
               terminal.write(chunk, resolve),
             );
@@ -1255,10 +1260,11 @@ export function TerminalPane({
           terminal.write("\r\n[Earlier output is no longer retained]\r\n");
         // Track DECA 2004 (bracketed paste) transitions in the PTY output so
         // the paste policy brackets/decrypts exactly when the app asked.
-        observeTerminalBracketedPasteModeOutput(
-          terminal,
-          outputDecoder.decode(bytes),
-        );
+        const decodedOutput = outputDecoder.decode(bytes, { stream: true });
+        if (value.truncated) kittyModes.resetForSnapshot();
+        if (caughtUp.current && !value.truncated) kittyModes.scan(decodedOutput);
+        else kittyModes.scanReplay(decodedOutput);
+        observeTerminalBracketedPasteModeOutput(terminal, decodedOutput);
         await new Promise<void>((resolve) => terminal.write(bytes, resolve));
         if (disposed) return;
         cursor = value.nextCursor;

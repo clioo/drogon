@@ -44,6 +44,20 @@ test("the rendered Pi version and compact interactive controls prove TUI readine
   );
 });
 
+test("an older Pi banner cannot prove a newly launched session is ready", () => {
+  const previous = globalThis.window;
+  const entry = (text) => ({ buffer: { active: { length: 1, getLine: () => ({ translateToString: () => text }) } } });
+  globalThis.window = { __drogonTerminals: new Map([
+    ["old", entry("pi v0.84.1 clear/exit")], ["new", entry("starting")],
+  ]) };
+  try {
+    assert.equal(renderedPiIsReady("new"), false);
+    assert.equal(renderedPiIsReady("missing"), false);
+    globalThis.window.__drogonTerminals.set("new", entry("pi v0.84.1 clear/exit"));
+    assert.equal(renderedPiIsReady("new"), true);
+  } finally { globalThis.window = previous; }
+});
+
 function stubDom(tab) {
   let seen = "";
   globalThis.document = {

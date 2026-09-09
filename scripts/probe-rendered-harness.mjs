@@ -10,9 +10,12 @@ export function renderedPiIsReady(root = document) {
   const registry =
     typeof window !== "undefined" ? window.__drogonTerminals : undefined;
   let rendered = "";
+  const sessionId = typeof root === "string" ? root : null;
+  if (sessionId && !registry?.has(sessionId)) return false;
   if (registry && registry.size > 0) {
     const lines = [];
-    for (const terminal of registry.values()) {
+    const terminals = sessionId ? [registry.get(sessionId)] : registry.values();
+    for (const terminal of terminals) {
       const buffer = terminal.buffer.active;
       for (let row = 0; row < buffer.length; row += 1) {
         lines.push(buffer.getLine(row)?.translateToString(true) ?? "");

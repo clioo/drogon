@@ -578,13 +578,11 @@ async function runTurnUntilWorking(page, sessionId, prompt, armLines) {
     `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${sessionId}"]`,
   );
   await piTab.click();
-  const xtermInput = page.locator(".xterm-helper-textarea");
+  const xtermInput = page.locator(".xterm-helper-textarea:visible");
   await xtermInput.focus();
   await page.waitForFunction(
-    () =>
-      document.activeElement?.classList.contains("xterm-helper-textarea") ??
-      false,
-    null,
+    (id) => document.activeElement === window.__drogonTerminals?.get(id)?.textarea,
+    sessionId,
     { timeout: 10000 },
   );
   await page.keyboard.type(prompt);
@@ -614,17 +612,17 @@ async function runTurnUntilWorking(page, sessionId, prompt, armLines) {
       const tab = document.querySelector(
         `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${CSS.escape(id)}"]`,
       );
-      if (tab?.querySelector('[aria-label="Working"]') !== null) return "working";
+      if (tab?.querySelector('[aria-label="Working"]')) return "working";
       // The error phrase wraps across buffer lines at narrow widths, so
       // join every row written since arming before matching.
       const registry = window.__drogonTerminals;
       if (!registry) return null;
       let text = "";
-      for (const terminal of registry.values()) {
-        const buffer = terminal.buffer.active;
-        for (let row = afterLines; row < buffer.length; row += 1)
-          text += buffer.getLine(row)?.translateToString(true) ?? "";
-      }
+      const terminal = registry.get(id);
+      if (!terminal) return null;
+      const buffer = terminal.buffer.active;
+      for (let row = afterLines; row < buffer.length; row += 1)
+        text += buffer.getLine(row)?.translateToString(true) ?? "";
       return /Retry\s*failed\s*after\s*3\s*attempts/.test(text) ? "error" : null;
     },
     { id: sessionId, afterLines: armLines },
@@ -635,16 +633,9 @@ async function runTurnUntilWorking(page, sessionId, prompt, armLines) {
   return value;
 }
 
-/** Current total line count across the terminal debug registry. */
-async function terminalLineCount(page) {
-  return page.evaluate(() => {
-    const registry = window.__drogonTerminals;
-    if (!registry) return 0;
-    let rows = 0;
-    for (const terminal of registry.values())
-      rows += terminal.buffer.active.length;
-    return rows;
-  });
+/** Only the launched session can satisfy its own output checks. */
+async function terminalLineCount(page, sessionId) {
+  return page.evaluate((id) => window.__drogonTerminals?.get(id)?.buffer.active.length ?? 0, sessionId);
 }
 
 /** Diagnostic dump for the J1 state waits: strip tabs, live sessions and
@@ -699,6 +690,11 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
     .click();
   await page.locator(".session-header").waitFor({ timeout: 30000 });
   await setPiDefaults(page);
+  const beforeSessionIds = await page.evaluate(async (id) => {
+    const reply = await window.drogon.sessions(id);
+    if (!reply.ok) throw new Error(reply.error.message);
+    return reply.result.sessions.map((session) => session.id);
+  }, workspaceId);
   await page
     .getByRole("button", { name: "New tab", exact: true })
     .first()
@@ -708,7 +704,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
   // "live" right after spawning; a session.list racing that window fails
   // the renderer's contract schema ("The service response does not match
   // the expected contract"), so poll defensively until the live row lands.
-  const launched = await page.evaluate(async (id) => {
+  const launched = await page.evaluate(async ({ id, beforeSessionIds }) => {
     const deadline = Date.now() + 20000;
     let lastError = "no live Pi session after the Pi row launch";
     for (;;) {
@@ -716,7 +712,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
         const result = await window.drogon.sessions(id);
         if (!result.ok) throw new Error(result.error.message);
         const live = result.result.sessions.find(
-          (session) => session.verdict === "live",
+          (session) => session.verdict === "live" && session.harnessId === "pi" && !beforeSessionIds.includes(session.id),
         );
         if (live) return live;
       } catch (error) {
@@ -725,10 +721,10 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
       if (Date.now() > deadline) throw new Error(lastError);
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-  }, workspaceId);
+  }, { id: workspaceId, beforeSessionIds });
   await waitForSessionStripTab(page, launched.id, "live");
   // The Pi banner ("pi vX.Y.Z" + clear/exit hint) proves the TUI booted.
-  await page.waitForFunction(renderedPiIsReady, null, { timeout: 30000 });
+  await page.waitForFunction(renderedPiIsReady, launched.id, { timeout: 30000 });
   try {
       // Establish the pre-prompt baseline first. The Pi startup banner also
       // produces PTY activity; without proving that it decayed to Idle, the
@@ -746,7 +742,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
       // would return immediately.
       const prompt =
         "Count from 1 to 200 separated by commas. Reply with only the numbers.";
-      let armLines = await terminalLineCount(page);
+      let armLines = await terminalLineCount(page, launched.id);
       // The shared server frees slots in millisecond bursts: the turn itself
       // is the only honest probe, so retry it in place — each retry spends
       // pi's own three API attempts — until the badge reaches Working. The
@@ -766,7 +762,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
           );
         }
         if (outcome === "working") break;
-        armLines = await terminalLineCount(page);
+        armLines = await terminalLineCount(page, launched.id);
         assert.ok(
           Date.now() < deadline,
           "Pi turn never reached Working: the local model stayed overloaded",
@@ -809,6 +805,13 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
         `Pi turn ended in ${postTurnState}, not a settled state`,
       );
       await waitForCardRowAgentState(page, launched.id, postTurnState, 10000);
+      await page.waitForFunction((id) => {
+        const buffer = window.__drogonTerminals?.get(id)?.buffer.active;
+        if (!buffer) return false;
+        let text = "";
+        for (let row = 0; row < buffer.length; row++) text += buffer.getLine(row)?.translateToString(true) ?? "";
+        return /195,\s*196,\s*197,\s*198,\s*199,\s*200/.test(text);
+      }, launched.id, { timeout: 30000 });
       await shot(
         page,
         output,
