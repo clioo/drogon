@@ -59,6 +59,7 @@ function mount(overrides?: {
   groups?: ProjectGroup[];
   onSelectWorkspace?: (id: string) => void;
   onSubmitRemove?: (project: Project) => Promise<string | null>;
+  onCreate?: (() => void) | null;
 }) {
   (window as unknown as { drogon?: unknown }).drogon ??= {};
   return render(
@@ -73,15 +74,32 @@ function mount(overrides?: {
         disabled={false}
         onSelectWorkspace={overrides?.onSelectWorkspace ?? (() => {})}
         onSubmitRemove={overrides?.onSubmitRemove ?? (async () => null)}
+        onCreate={
+          overrides?.onCreate === undefined ? () => {} : overrides.onCreate
+        }
       />
     </TooltipProvider>,
   );
 }
 
 describe("ChatsList", () => {
-  test("renders nothing when there are no quick sessions (no empty header)", () => {
-    const { container } = mount({ groups: [] });
-    expect(container.firstChild).toBeNull();
+  // The header (and its "New chat" create entry point -- the sole
+  // remaining trigger after RecentSessions was removed, see this file's
+  // own header comment) must survive an empty list, or there would be no
+  // way to create the first Chat.
+  test("keeps the header (and create entry point) with zero chats, showing an empty state instead of nothing", () => {
+    const onCreate = vi.fn();
+    mount({ groups: [], onCreate });
+    expect(screen.getByTestId("sidebar-chats-section")).toBeTruthy();
+    expect(screen.getByText("Chats")).toBeTruthy();
+    expect(screen.getByText("No chats yet")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(onCreate).toHaveBeenCalledTimes(1);
+  });
+
+  test("hides the create button when no onCreate handler is provided", () => {
+    mount({ groups: [], onCreate: null });
+    expect(screen.queryByRole("button", { name: "New chat" })).toBeNull();
   });
 
   test("renders a Chats section header above the Chat card", () => {

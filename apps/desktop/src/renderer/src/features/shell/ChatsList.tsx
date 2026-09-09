@@ -10,8 +10,24 @@
    every other folder project — same selection, same session rows, same
    agent-state indicator, same confirmation-before-delete flow — so a Chat
    behaves like any other card except for the copy naming what deleting it
-   actually does (see remove-project-dialog-copy.ts). */
+   actually does (see remove-project-dialog-copy.ts).
+
+   Coordinator review (msg_c48e2acbef42) caught a real duplication: the
+   pre-existing RecentSessions section (features/sessions/RecentSessions.tsx)
+   already listed every quick-session group -- unconditionally, its whole
+   `groups.filter((g) => g.project.quickSession)` -- above Projects, with a
+   "New session" trigger and no delete affordance. Sidebar mounted it AND
+   this component, so every Chat rendered twice. RecentSessions is now
+   unmounted (its own file deleted -- nothing else referenced it); this
+   header absorbs its create-a-Chat entry point (`onCreate`, wired from
+   Sidebar's existing `onNewSession`/App.tsx's NewSessionDialog trigger, the
+   exact same handler RecentSessions used to call) so a Chat has exactly
+   one home and creating one still works from that home. The header (and
+   its create button) always renders, even with zero Chats yet -- otherwise
+   the only way to make the first one would disappear along with the empty
+   list. */
 import { useState } from "react";
+import { SquarePen } from "lucide-react";
 import type {
   Project,
   Session,
@@ -33,6 +49,7 @@ export function ChatsList({
   onSelectWorkspace,
   onSelectSession,
   onSubmitRemove,
+  onCreate,
 }: {
   /** Every quick-session group, unfiltered by the caller's own criteria —
    *  Sidebar passes `groups.filter((g) => g.project.quickSession)`. */
@@ -49,14 +66,39 @@ export function ChatsList({
    *  (project.remove); the daemon itself decides the file-deletion
    *  semantics per project kind (see project.rs's cleanup_quick_session_scratch). */
   onSubmitRemove: (project: Project) => Promise<string | null>;
-}): React.JSX.Element | null {
+  /** Opens the New Chat (quick session) dialog -- RecentSessions' former
+   *  "New session" trigger. Null hides the header button (parity with
+   *  Sidebar's own `onNewSession && <RecentSessions .../>` guard). */
+  onCreate: (() => void) | null;
+}): React.JSX.Element {
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
-  if (groups.length === 0) return null;
   return (
     <div className="shell-chats" data-testid="sidebar-chats-section">
-      <div className="shell-chats-header px-2 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        Chats
+      <div className="shell-chats-header mt-2 flex h-8 min-w-0 items-center justify-between gap-1.5 px-2">
+        <span
+          className="select-none pl-2 pr-0.5 text-xs font-semibold text-muted-foreground/80"
+          data-sidebar-section-title="chats"
+        >
+          Chats
+        </span>
+        {onCreate && (
+          <button
+            type="button"
+            aria-label="New chat"
+            title="New chat"
+            disabled={disabled}
+            onClick={onCreate}
+            className="shell-icon-button"
+          >
+            <SquarePen size={15} />
+          </button>
+        )}
       </div>
+      {groups.length === 0 && (
+        <p className="px-4 py-2 text-[11px] text-muted-foreground">
+          No chats yet
+        </p>
+      )}
       {groups.map((group) => {
         // A folder project's implicit worktree (worktree.list synthesizes
         // exactly one, id === project.id — worktree_rpc.rs's do_worktree_list);

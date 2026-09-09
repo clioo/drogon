@@ -13,7 +13,6 @@ import type {
 } from "../../../../shared/session-contract";
 import type { ProjectGroup } from "./project-adapter";
 import { SidebarNav } from "./SidebarNav";
-import { RecentSessions } from "../sessions/RecentSessions";
 import type { TabStripState } from "./tab-order";
 import { ProjectList } from "./ProjectList";
 import type { ProjectAction } from "./ProjectList";
@@ -158,15 +157,6 @@ export function Sidebar({
             showAutomationsButton={showAutomationsButton}
           />
           <div ref={scrollRef} className="shell-sidebar-scroll">
-            {onNewSession && <RecentSessions
-              groups={groups}
-              workspaces={workspaces}
-              selectedWorkspaceId={selectedWorkspaceId}
-              active={route === null}
-              disabled={workspaceDisabled}
-              onSelect={onSelectWorkspace}
-              onNew={onNewSession}
-            />}
             <ProjectList
               groups={groups.filter((group) => !group.project.quickSession)}
               workspaces={workspaces}
@@ -203,6 +193,7 @@ export function Sidebar({
               onSelectWorkspace={onSelectWorkspace}
               onSelectSession={onSelectSession}
               onSubmitRemove={onSubmitRemoveProject}
+              onCreate={onNewSession ?? null}
             />
           </div>
           <SidebarFooter
