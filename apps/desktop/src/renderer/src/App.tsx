@@ -277,7 +277,6 @@ import {
 } from "./settings-store";
 import {
   assertCloseReplyFor,
-  recoveryActionFor,
   recoveryTabLabel,
   retryAffordanceDisabled,
   retryOfferKey,
@@ -3272,15 +3271,10 @@ export function App() {
         typeof detail.sessionId === "string"
           ? sessionsRef.current.find((item) => item.id === detail.sessionId)
           : undefined;
-      // R16-AL2 (issue #228): restarting a post-restart stub revives its
-      // work as a NEW session; the stub record itself must then be
-      // forgotten (`session.close`, best-effort) or its unverifiable row
-      // would linger beside the revived terminal — and a tombstone cannot
-      // hide it, since dismissal only ever masks `exited` sessions. A
-      // genuinely exited session keeps its record: its tab and retained
-      // output are still meaningful.
-      const forgetRevivedStub = (session: Session | undefined) => {
-        if (!session || session.verdict !== "unverifiable") return;
+      // Orca restarts the pane in place. Once its replacement exists, the
+      // old exited/recovery record must not return as another tab on reload.
+      const forgetReplacedSession = (session: Session | undefined) => {
+        if (!session || session.verdict === "live") return;
         markSessionDismissed(session.hostId, session.id, session.incarnation);
         setSessions((items) =>
           items.filter(
@@ -3359,21 +3353,36 @@ export function App() {
           );
           if (old)
             markSessionDismissed(old.hostId, old.id, old.incarnation);
-          forgetRevivedStub(old);
+          forgetReplacedSession(old);
           setSessions((items) =>
             appendOrReplaceSession(
               items.filter((item) => item.id !== detail.sessionId),
               result,
             ),
           );
-          writeSplits(
-            replaceTerminalSplitPane(hydrated, detail.sessionId, result.id),
-          );
+          const next = {
+            ...tabStripRef.current,
+            ...migrateSplitTabIdentity(tabStripRef.current, detail.sessionId, result.id),
+            splits: persistTerminalSplits(replaceTerminalSplitPane(hydrated, detail.sessionId, result.id)),
+          };
+          tabStripRef.current = next;
+          setTabStrip(next);
+          saveTabStripState(window.localStorage, selectedRef.current, next);
+          if (activeRef.current === detail.sessionId) setActive(result.id);
           return;
         }
-        forgetRevivedStub(prior);
+        forgetReplacedSession(prior);
+        if (prior) {
+          const next = {
+            ...tabStripRef.current,
+            ...migrateSplitTabIdentity(tabStripRef.current, prior.id, result.id),
+          };
+          tabStripRef.current = next;
+          setTabStrip(next);
+          saveTabStripState(window.localStorage, selectedRef.current, next);
+        }
         setSessions((items) => appendOrReplaceSession(items, result));
-        setActive(result.id);
+        selectSessionTab(result.id);
       });
     };
     const onClose = (event: Event) => {
@@ -4048,30 +4057,6 @@ export function App() {
                     activeBrowserTab || activeEditorTab ? "none" : undefined,
                 }}
               >
-                {terminal &&
-                  status &&
-                  recoveryActionFor(terminal.verdict, {
-                    exitExpected: false,
-                  }).kind === "reveal-output+offer-new" && (
-                    <div className="error-banner" role="status">
-                      <span>
-                        This session exited (exit{" "}
-                        {terminal.exitCode ?? "unknown"}). Its output is kept
-                        below.
-                      </span>
-                      <Button
-                        size="sm"
-                        disabled={busy || loadingSessions}
-                        onClick={() =>
-                          current
-                            ? void create()
-                            : requestCreateWorkspace()
-                        }
-                      >
-                        New terminal
-                      </Button>
-                    </div>
-                  )}
                 {terminal && status ? (
                   <TerminalSplitHost
                     rootId={terminal.id}

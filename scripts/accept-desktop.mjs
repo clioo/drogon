@@ -388,6 +388,7 @@ try {
   if (withSessions) {
     report.checks.push(await probeStandaloneSessions({ page, output, dataDir }));
     report.checks.push("plus-agent-creates-distinct-focused-tabs-from-terminal-browser-editor-and-split");
+    report.checks.push("terminal-exit-pane-overlays-full-width-restart-in-place-reload-close-and-clean-exit");
   }
 
   // Add Project dialog (ported folder picker): registers the folder as a

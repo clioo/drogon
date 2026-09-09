@@ -1003,6 +1003,19 @@ export function TerminalPane({
     // ~1-frame poll cadence so typing echo lands like the fork's push
     // delivery instead of up to TERMINAL_LIVE_POLL_MS late.
     let lastActivityAt = 0;
+    let hadTerminalInput = false;
+    let cleanExitClosed = false;
+    const observeProcessExit = (value: Session) => {
+      const exit = projectTerminalProcessExit(value);
+      if (exit) showExit(exit);
+      // Match Orca's explicit successful exit: close this pane, not its
+      // sibling. Keep untouched newborn output mounted rather than jumping
+      // away from a workspace whose shell died during startup.
+      if (value.verdict === "exited" && value.exitCode === 0 && hadTerminalInput && !cleanExitClosed) {
+        cleanExitClosed = true;
+        closePane();
+      }
+    };
     const emitSessionUpdate = (value: Session) => {
       const signal: SessionSignal = {
         verdict: value.verdict,
@@ -1053,6 +1066,7 @@ export function TerminalPane({
     // retrying pane keeps its own cadence (the retry timeout must not be
     // cleared here, so canWrite gates the pull).
     const noteTerminalInput = () => {
+      hadTerminalInput = true;
       lastActivityAt = Date.now();
       if (
         disposed ||
@@ -1231,8 +1245,7 @@ export function TerminalPane({
           canWrite = value.session.verdict === "live";
           if (bytes.length > 0) lastActivityAt = Date.now();
           emitSessionUpdate(value.session);
-          const exit = projectTerminalProcessExit(value.session);
-          if (exit) showExit(exit);
+          observeProcessExit(value.session);
           timeout = setTimeout(read, livePollDelay());
           return;
         }
@@ -1251,8 +1264,7 @@ export function TerminalPane({
         if (bytes.length > 0) lastActivityAt = Date.now();
         emitSessionUpdate(value.session);
         if (bytes.length < TERMINAL_READ_PAGE_BYTES) caughtUp.current = true;
-        const exit = projectTerminalProcessExit(value.session);
-        if (exit) showExit(exit);
+        observeProcessExit(value.session);
         if (value.session.verdict === "exited" && bytes.length === 0) return;
         timeout = setTimeout(
           read,
@@ -1465,10 +1477,10 @@ export function TerminalPane({
     setProcessExit(null);
     window.dispatchEvent(new CustomEvent(TERMINAL_RESTART_EVENT, { detail }));
   };
-  const dismissExit = () => {
+  const closeExitedPane = () => {
     dismissedExitKey.current = `${sessionRef.current.id}:${sessionRef.current.incarnation}`;
     setProcessExit(null);
-    current?.focus();
+    closePane();
   };
   // R16-AL2 (issue #228): the recovery overlay for a session an explicit
   // Retry click confirmed still unverifiable. Same overlay component and
@@ -1515,13 +1527,16 @@ export function TerminalPane({
         <TerminalProcessExitOverlay
           processExit={processExit}
           onRestart={restartExits}
-          onClose={dismissExit}
+          onClose={closeExitedPane}
         />
       ) : recoveryOffer ? (
         <TerminalProcessExitOverlay
           processExit={{ exitCode: null, reason: "connection-unrecoverable" }}
           onRestart={restartExits}
-          onClose={dismissRecoveryOffer}
+          onClose={() => {
+            dismissRecoveryOffer();
+            closePane();
+          }}
         />
       ) : null}
       {/* Daemon loss keeps the tab and its scrollback: the banner covers

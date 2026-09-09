@@ -22,6 +22,10 @@ describe("projectTerminalProcessExit", () => {
     ).toBeNull();
   });
 
+  it("does not present a successful exit as a process failure", () => {
+    expect(projectTerminalProcessExit({ verdict: "exited", exitCode: 0 })).toBeNull();
+  });
+
   it("projects exited sessions with their code", () => {
     expect(
       projectTerminalProcessExit({ verdict: "exited", exitCode: 7 }),
