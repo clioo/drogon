@@ -306,6 +306,94 @@ fn git_project_create_two_worktrees_list_and_remove() {
     );
 }
 
+// --- Project removal drops its workspaces (#354) ----------------------------
+
+#[test]
+fn project_remove_also_removes_its_worktree_workspaces() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let other = ok(
+        &engine,
+        "project.add",
+        "p2",
+        json!({"path": folder.path().to_string_lossy()}),
+    );
+    let other_id = other["id"].as_str().unwrap().to_string();
+    let other_worktrees = ok(
+        &engine,
+        "worktree.list",
+        "w0",
+        json!({"projectId": other_id}),
+    );
+    let other_workspace = other_worktrees["worktrees"][0]["workspaceId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let wt = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "feature-a"}),
+    );
+    let wt_workspace = wt["workspaceId"].as_str().unwrap().to_string();
+    let wt_path = wt["path"].as_str().unwrap().to_string();
+    let before = ok(&engine, "workspace.list", "l1", json!({}));
+    assert!(
+        before["workspaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["id"] == wt_workspace),
+        "the worktree's workspace is listed before the removal"
+    );
+
+    ok(&engine, "project.remove", "p3", json!({"id": project_id}));
+    let after = ok(&engine, "workspace.list", "l2", json!({}));
+    assert!(
+        after["workspaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|w| w["id"] != wt_workspace),
+        "project.remove must drop the removed project's worktree workspaces"
+    );
+    assert!(
+        Path::new(&wt_path).is_dir(),
+        "project.remove never deletes files; the checkout becomes unmanaged"
+    );
+    // A different project's implicit folder workspace is untouched.
+    assert!(
+        after["workspaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["id"] == other_workspace),
+        "sibling projects keep their workspaces"
+    );
+    // The project's worktree registrations are gone with it.
+    assert_eq!(
+        err_code(
+            &engine,
+            "worktree.list",
+            "w2",
+            json!({"projectId": project_id}),
+        ),
+        "not_found"
+    );
+}
+
 #[test]
 fn worktree_create_reports_existing_branch_with_actionable_guidance() {
     let data_dir = tempfile::tempdir().unwrap();

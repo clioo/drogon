@@ -98,6 +98,19 @@ export function NewWorkspaceComposerModal({
   const [projectId, setProjectId] = useState<string | null>(() =>
     initialComposerProjectId(groups, initialProjectId),
   );
+  // #355 fork parity (the fork's initial-project-group effect): the modal
+  // can mount before the project view answers (a fresh-boot Landing →
+  // Create workspace) with an initialProjectId whose group has not landed
+  // yet — adopt it when the group arrives instead of leaving the combobox
+  // empty until the user re-picks. Deliberately scoped to the explicit
+  // preselect: opening without one does not auto-pick (composer default).
+  const initialProjectAppliedRef = useRef(false);
+  useEffect(() => {
+    if (initialProjectAppliedRef.current || initialProjectId === null) return;
+    if (!groups.some((group) => group.project.id === initialProjectId)) return;
+    initialProjectAppliedRef.current = true;
+    setProjectId(initialProjectId);
+  }, [groups, initialProjectId]);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   // The card owns submit/createDisabled; the modal's Cmd/Ctrl+Enter chord
