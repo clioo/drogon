@@ -1027,3 +1027,42 @@ fn worktree_ps_summarizes_live_session_counts_with_limit() {
         json!(0)
     );
 }
+
+#[test]
+fn diagnostics_memory_reports_session_counts_honestly() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let workspace = ok(
+        &engine,
+        "workspace.register",
+        "dm1",
+        json!({"path": data_dir.path().to_string_lossy()}),
+    );
+    let session = ok(
+        &engine,
+        "session.start",
+        "dm2",
+        json!({
+            "workspaceId": workspace["id"],
+            "command": "/bin/sh",
+            "args": ["-c", "sleep 30"],
+            "cols": 80, "rows": 24
+        }),
+    );
+    let report = ok(&engine, "diagnostics.memory", "dm3", json!({}));
+    assert_eq!(report["process"], json!("drogond"));
+    assert!(report["pid"].as_u64().is_some());
+    assert_eq!(report["liveSessions"], json!(1));
+    assert_eq!(report["totalSessions"], json!(1));
+    // rssBytes is platform-scoped: a number on Linux, null elsewhere — never
+    // a fabricated value.
+    assert!(report["rssBytes"].is_u64() || report["rssBytes"].is_null());
+    let _ = ok(
+        &engine,
+        "session.close",
+        "dm4",
+        json!({"sessionId": session["id"], "incarnation": session["incarnation"]}),
+    );
+    let after = ok(&engine, "diagnostics.memory", "dm5", json!({}));
+    assert_eq!(after["liveSessions"], json!(0));
+}

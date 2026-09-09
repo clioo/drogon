@@ -115,6 +115,18 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
         ),
         entry(
+            "diagnostics memory",
+            &["diagnostics", "memory"],
+            "Show the daemon's own memory footprint and session counts",
+            "drogon-cli diagnostics memory",
+            &[],
+            &[],
+            &["drogon-cli diagnostics memory --json"],
+            &[
+                "rssBytes is platform-scoped: a number on Linux, null elsewhere — never a fabricated value.",
+            ],
+        ),
+        entry(
             "workspace add",
             &["workspace", "add"],
             "Register an existing directory as a workspace",

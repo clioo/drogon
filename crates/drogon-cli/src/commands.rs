@@ -10,8 +10,8 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    AutomationAction, BrowserAction, Cli, Command, HarnessAction, InternalAction, ProjectAction,
-    TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
+    AutomationAction, BrowserAction, Cli, Command, DiagnosticsAction, HarnessAction,
+    InternalAction, ProjectAction, TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
@@ -124,6 +124,37 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
             unreachable!("agent-context is served locally before the client opens")
         }
         Command::Internal { action } => internal(&client, &request_id, json, action).await,
+        Command::Diagnostics { action } => match action {
+            DiagnosticsAction::Memory => {
+                let call = client
+                    .call(
+                        "diagnostics.memory",
+                        json!({}),
+                        &request_id,
+                        DEFAULT_TIMEOUT,
+                    )
+                    .await?;
+                let rss = call.result["rssBytes"].as_u64();
+                let live = call.result["liveSessions"].as_u64().unwrap_or(0);
+                let total = call.result["totalSessions"].as_u64().unwrap_or(0);
+                emit(
+                    call,
+                    json,
+                    || match rss {
+                        Some(bytes) => format!(
+                            "drogond pid {} rss {} MiB, {live} live of {total} sessions",
+                            std::process::id(),
+                            bytes / (1024 * 1024),
+                        ),
+                        None => format!(
+                            "drogond rss unknown on this platform, {live} live of {total} sessions"
+                        ),
+                    },
+                    0,
+                    None,
+                )
+            }
+        },
         Command::Rpc { method, params } => {
             let params: Value = match params {
                 Some(text) => serde_json::from_str(text)

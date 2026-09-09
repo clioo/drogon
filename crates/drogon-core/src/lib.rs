@@ -478,6 +478,7 @@ impl Engine {
             "session.write" => self.mutating(request, Self::do_session_write),
             "session.stop_workspace" => self.mutating(request, Self::do_session_stop_workspace),
             "session.show" => self.do_session_show(&request.params),
+            "diagnostics.memory" => self.do_diagnostics_memory(&request.params),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
             // R16-AL2 (issue #228): the user-initiated close paths. `close`
@@ -924,6 +925,26 @@ impl Engine {
         Ok(value)
     }
 
+    /// `diagnostics.memory {}`: the daemon's own footprint, honestly scoped.
+    /// RSS comes from the OS (Linux /proc, macOS mach via libc); when the
+    /// platform cannot report it, the field is null rather than a guess.
+    fn do_diagnostics_memory(&self, _params: &Value) -> Result<Value, RpcError> {
+        let daemon_rss_bytes: Option<u64> = self_rss_bytes();
+        let live_sessions = self.sessions.lock().unwrap().len() as u64;
+        let total_sessions: i64 = {
+            let conn = self.db.lock().unwrap();
+            conn.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+                .map_err(error::from_sqlite)?
+        };
+        Ok(json!({
+            "process": "drogond",
+            "pid": std::process::id(),
+            "rssBytes": daemon_rss_bytes,
+            "liveSessions": live_sessions,
+            "totalSessions": total_sessions,
+        }))
+    }
+
     /// `session.stop_workspace { workspaceId }`: source `terminal.stop` —
     /// best-effort sweep of every live session in one workspace. Each
     /// session's own stop is isolated (a failure on one never aborts the
@@ -1182,4 +1203,26 @@ fn require_dimension(params: &Value, field: &str, default: u16) -> Result<u16, R
         return Err(error::invalid_argument(format!("{field} must be 1..=1000")));
     }
     Ok(n as u16)
+}
+
+/// This process's resident set size in bytes, honestly platform-scoped:
+/// Linux reads `/proc/self/status` VmRSS; other Unix platforms return None
+/// rather than guessing (a mach task-info port is a deliberate follow-up).
+#[cfg(target_os = "linux")]
+fn self_rss_bytes() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
+    let kb: u64 = line
+        .strip_prefix("VmRSS:")?
+        .trim()
+        .strip_suffix("kB")?
+        .trim()
+        .parse()
+        .ok()?;
+    Some(kb * 1024)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn self_rss_bytes() -> Option<u64> {
+    None
 }

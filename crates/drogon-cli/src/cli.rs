@@ -80,6 +80,11 @@ pub enum Command {
         override_usage = "drogon-cli agent-context\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
     )]
     AgentContext,
+    /// Daemon diagnostics (memory footprint and session counts)
+    Diagnostics {
+        #[command(subcommand)]
+        action: DiagnosticsAction,
+    },
     /// Workspaces: registered directories that own terminal sessions
     Workspace {
         #[command(subcommand)]
@@ -341,6 +346,16 @@ pub enum InternalAction {
         #[arg(long, value_name = "NAME")]
         event: String,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DiagnosticsAction {
+    /// Show the daemon's own memory footprint and session counts
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli diagnostics memory\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    Memory,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1234,6 +1249,7 @@ impl Cli {
             },
             Command::Status => {}
             Command::AgentContext => {}
+            Command::Diagnostics { .. } => {}
         }
         Ok(())
     }

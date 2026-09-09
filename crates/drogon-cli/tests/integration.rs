@@ -1969,3 +1969,38 @@ async fn automation_edit_maps_only_the_given_flags() {
     let _ = removed;
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn diagnostics_memory_reports_the_daemon_footprint() {
+    let dir = temp_data_dir("diag-mem");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("diagnostics.memory") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "process": "drogond",
+                    "pid": 4242,
+                    "rssBytes": 104857600u64,
+                    "liveSessions": 2,
+                    "totalSessions": 5
+                }),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let human = run_cli(dir.path(), &["diagnostics", "memory"]);
+    assert_eq!(human.status.code(), Some(0), "stderr: {}", stderr(&human));
+    let text = stdout(&human);
+    assert!(text.contains("100 MiB"), "stdout: {text}");
+    assert!(text.contains("2 live of 5 sessions"), "stdout: {text}");
+
+    let json_out = run_cli(dir.path(), &["--json", "diagnostics", "memory"]);
+    assert_eq!(json_out.status.code(), Some(0));
+    let envelope: Value = serde_json::from_str(&stdout(&json_out)).unwrap();
+    assert_eq!(envelope["result"]["rssBytes"], 104857600u64);
+    drop(service);
+}
