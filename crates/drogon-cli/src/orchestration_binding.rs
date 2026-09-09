@@ -385,6 +385,8 @@ pub(crate) async fn resolve(
         return Ok(Resolved { command, caller });
     }
     if let Some(actor) = command.actor_scope_mut() {
+        // A fully explicit coordinator binding never needs terminal resolution.
+        // (Scoped worker credentials already returned above.)
         if actor.from.is_none()
             && actor.run.is_some()
             && actor.coordinator_id.is_some()

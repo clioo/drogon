@@ -281,6 +281,21 @@ impl Engine {
         // settled outcome must classify against the original message, never
         // append a new one; a conflicting outcome must be refused with no effect.
         let existing_attempt = attempts::show(tx, scope, dispatch_id)?;
+        // Payload task identity must name the reporting dispatch's task: a
+        // late report carrying another task's id can never settle it (source:
+        // resolveLifecycleAuthority task_dispatch_mismatch).
+        if let Some(payload_task) = params
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.get("taskId"))
+            .and_then(|task| task.as_str())
+            && payload_task != existing_attempt.result.task_id
+        {
+            return Err(RpcError::new(
+                "task_dispatch_mismatch",
+                format!("Task {payload_task} does not belong to Dispatch {dispatch_id}."),
+            ));
+        }
         if let Some(prior_outcome) = existing_attempt.outcome {
             if prior_outcome != final_report.outcome {
                 return Err(RpcError::new(

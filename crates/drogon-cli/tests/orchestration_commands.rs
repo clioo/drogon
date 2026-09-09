@@ -161,6 +161,127 @@ fn coordinator_args() -> Vec<&'static str> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn structured_payload_flags_build_the_source_payload_object() {
+    let dir = tempfile::tempdir().unwrap();
+    let mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.send",
+                json!({"message":{"messageId":"msg-9","sequence":3,"runId":"run-1","kind":"finalReport"},"deliveries":1}),
+            )],
+        ),
+    );
+    let mut args: Vec<&str> = vec![
+        "--json",
+        "orchestration",
+        "send",
+        "--type",
+        "worker_done",
+        "--subject",
+        "done",
+        "--outcome",
+        "succeeded",
+        "--task-id",
+        "task-1",
+        "--dispatch-id",
+        "dispatch-1",
+        "--files-modified",
+        " a.rs , b.rs ",
+        "--report-path",
+        "report.md",
+    ];
+    args.extend(coordinator_args());
+    let invocation = run_cli(dir.path(), &args, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    let sent = mock
+        .captured()
+        .into_iter()
+        .find(|r| r["method"] == "orchestration.send")
+        .unwrap();
+    assert_eq!(
+        sent["params"]["payload"],
+        json!({"taskId":"task-1","dispatchId":"dispatch-1","outcome":"succeeded","filesModified":["a.rs","b.rs"],"reportPath":"report.md"})
+    );
+    // Mixing raw and structured payloads is the source usage error.
+    let dir2 = tempfile::tempdir().unwrap();
+    let _mock2 = MockService::start(dir2.path(), mock_behavior(true, vec![]));
+    let mixed = run_cli(
+        dir2.path(),
+        &[
+            "orchestration",
+            "send",
+            "--kind",
+            "status",
+            "--subject",
+            "x",
+            "--payload",
+            "{}",
+            "--phase",
+            "implementing",
+            "--run",
+            "run-1",
+            "--coordinator-id",
+            "coord-1",
+            "--consumer-generation",
+            "3",
+        ],
+        &[],
+    );
+    assert_eq!(mixed.exit_code, 2);
+    assert!(
+        mixed
+            .stderr
+            .contains("Use either --payload or structured payload flags")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn source_mail_kinds_round_trip_as_opaque_mail() {
+    for (kind, wire) in [
+        ("dispatch", "dispatch"),
+        ("merge_ready", "mergeReady"),
+        ("handoff", "handoff"),
+        ("decision_gate", "decisionGate"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mock = MockService::start(
+            dir.path(),
+            mock_behavior(
+                true,
+                vec![(
+                    "orchestration.send",
+                    json!({"message":{"messageId":"msg-1","sequence":7,"runId":"run-1","kind":wire},"deliveries":1}),
+                )],
+            ),
+        );
+        let mut args = vec![
+            "--json",
+            "orchestration",
+            "send",
+            "--kind",
+            kind,
+            "--subject",
+            "opaque",
+        ];
+        args.extend(coordinator_args());
+        let invocation = run_cli(dir.path(), &args, &[]);
+        assert_eq!(
+            invocation.exit_code, 0,
+            "{kind}: {} {}",
+            invocation.stdout, invocation.stderr
+        );
+        let sent = mock
+            .captured()
+            .into_iter()
+            .find(|r| r["method"] == "orchestration.send")
+            .unwrap();
+        assert_eq!(sent["params"]["kind"], json!(wire));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retired_coordinator_verbs_fail_before_any_runtime_contact_with_migration_data() {
     for (verb, alias) in [
         ("coordinator-start", "run"),

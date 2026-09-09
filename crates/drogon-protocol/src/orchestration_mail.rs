@@ -27,6 +27,11 @@ pub enum MessageKind {
     FinalReport,
     Guidance,
     Escalation,
+    /// Source-only kinds carried as opaque mail with no lifecycle effect.
+    Dispatch,
+    MergeReady,
+    Handoff,
+    DecisionGate,
 }
 
 /// Source display priority (`MessagePriority`): urgent/high messages render
@@ -363,6 +368,10 @@ impl MessageKind {
             MessageKind::FinalReport => "worker_done",
             MessageKind::Guidance => "guidance",
             MessageKind::Escalation => "escalation",
+            MessageKind::Dispatch => "dispatch",
+            MessageKind::MergeReady => "merge_ready",
+            MessageKind::Handoff => "handoff",
+            MessageKind::DecisionGate => "decision_gate",
         }
     }
 }

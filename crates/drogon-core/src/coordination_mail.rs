@@ -142,6 +142,10 @@ pub(crate) fn message_kind_tag(kind: MessageKind) -> u8 {
         MessageKind::FinalReport => 4,
         MessageKind::Guidance => 5,
         MessageKind::Escalation => 6,
+        MessageKind::Dispatch => 7,
+        MessageKind::MergeReady => 8,
+        MessageKind::Handoff => 9,
+        MessageKind::DecisionGate => 10,
     }
 }
 
@@ -154,6 +158,10 @@ fn message_kind_str(kind: MessageKind) -> &'static str {
         MessageKind::FinalReport => "finalReport",
         MessageKind::Guidance => "guidance",
         MessageKind::Escalation => "escalation",
+        MessageKind::Dispatch => "dispatch",
+        MessageKind::MergeReady => "mergeReady",
+        MessageKind::Handoff => "handoff",
+        MessageKind::DecisionGate => "decisionGate",
     }
 }
 
@@ -166,6 +174,10 @@ fn message_kind_from_str(value: &str) -> Result<MessageKind, RpcError> {
         "finalReport" => MessageKind::FinalReport,
         "guidance" => MessageKind::Guidance,
         "escalation" => MessageKind::Escalation,
+        "dispatch" => MessageKind::Dispatch,
+        "mergeReady" | "merge_ready" => MessageKind::MergeReady,
+        "handoff" => MessageKind::Handoff,
+        "decisionGate" | "decision_gate" => MessageKind::DecisionGate,
         _ => return Err(error::internal_error("Invalid stored message kind.")),
     })
 }

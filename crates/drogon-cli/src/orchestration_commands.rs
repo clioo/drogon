@@ -39,7 +39,7 @@ use drogon_protocol::orchestration_worker::{
     WorkerShowParams, WorkerShowResult, WorkerStartParams, WorkerStartResult, WorkerStopParams,
     WorkerStopResult,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::cli::PermissionModeArg;
@@ -221,13 +221,17 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
     | OrchestrationCommand::Reply { actor, .. }
     | OrchestrationCommand::Ask { actor, .. } = command
     {
+        // --task-id/--dispatch-id are payload fields on send (source:
+        // getOptionalStructuredMessagePayload); only reply/ask treat them as
+        // worker bindings.
+        let payload_fields = matches!(command, OrchestrationCommand::Send { .. });
         if worker_credential {
             if actor.coordinator_id.is_some() || actor.consumer_generation.is_some() {
                 return Err(usage(
                     "worker credential set: --coordinator-id/--consumer-generation are                      coordinator bindings and would be discarded",
                 ));
             }
-        } else if actor.task.is_some() || actor.dispatch.is_some() {
+        } else if !payload_fields && (actor.task.is_some() || actor.dispatch.is_some()) {
             return Err(usage(
                 "coordinator actor: --task/--dispatch are worker bindings and would be discarded",
             ));
@@ -467,6 +471,59 @@ fn mail_scope(host_id: &str, actor: &ActorScopeArgs) -> Result<ActorScope, CliEr
     }
 }
 
+/// Structured send payload assembled from the PowerShell-safe flags
+/// (source: `getOptionalStructuredMessagePayload` — either --payload or the
+/// structured flags, never both).
+pub(crate) fn structured_send_payload(
+    payload: &Option<String>,
+    task_id: &Option<String>,
+    dispatch_id: &Option<String>,
+    outcome: Option<&str>,
+    files_modified: &Option<String>,
+    report_path: &Option<String>,
+    phase: &Option<String>,
+) -> Result<Option<Value>, CliError> {
+    let structured = task_id.is_some()
+        || dispatch_id.is_some()
+        || outcome.is_some()
+        || files_modified.is_some()
+        || report_path.is_some()
+        || phase.is_some();
+    if !structured {
+        return parse_json_object("payload", payload);
+    }
+    if payload.is_some() {
+        return Err(usage(
+            "Use either --payload or structured payload flags, not both.",
+        ));
+    }
+    let mut object = serde_json::Map::new();
+    if let Some(task_id) = task_id {
+        object.insert("taskId".into(), json!(task_id));
+    }
+    if let Some(dispatch_id) = dispatch_id {
+        object.insert("dispatchId".into(), json!(dispatch_id));
+    }
+    if let Some(outcome) = outcome {
+        object.insert("outcome".into(), json!(outcome));
+    }
+    if let Some(files) = files_modified {
+        let list: Vec<_> = files
+            .split(',')
+            .map(|file| file.trim())
+            .filter(|file| !file.is_empty())
+            .collect();
+        object.insert("filesModified".into(), json!(list));
+    }
+    if let Some(path) = report_path {
+        object.insert("reportPath".into(), json!(path));
+    }
+    if let Some(phase) = phase {
+        object.insert("phase".into(), json!(phase));
+    }
+    Ok(Some(Value::Object(object)))
+}
+
 fn parse_target(value: &str) -> Result<SendTarget, CliError> {
     if value == "run-home" {
         return Ok(SendTarget::RunHome);
@@ -495,6 +552,10 @@ fn parse_message_kind(name: &str) -> Option<MessageKind> {
         "final-report" | "finalReport" | "worker_done" => Some(MessageKind::FinalReport),
         "guidance" => Some(MessageKind::Guidance),
         "escalation" => Some(MessageKind::Escalation),
+        "dispatch" => Some(MessageKind::Dispatch),
+        "merge_ready" => Some(MessageKind::MergeReady),
+        "handoff" => Some(MessageKind::Handoff),
+        "decision_gate" => Some(MessageKind::DecisionGate),
         _ => None,
     }
 }
@@ -2088,6 +2149,9 @@ pub async fn run(
             body,
             payload,
             thread_id,
+            files_modified,
+            report_path,
+            phase,
             priority,
             outcome,
             result: result_meta,
@@ -2124,6 +2188,10 @@ pub async fn run(
                 MessageKindArg::FinalReport => MessageKind::FinalReport,
                 MessageKindArg::Guidance => MessageKind::Guidance,
                 MessageKindArg::Escalation => MessageKind::Escalation,
+                MessageKindArg::Dispatch => MessageKind::Dispatch,
+                MessageKindArg::MergeReady => MessageKind::MergeReady,
+                MessageKindArg::Handoff => MessageKind::Handoff,
+                MessageKindArg::DecisionGate => MessageKind::DecisionGate,
             };
             // Client-side lifecycle addressing refusal (usage error, exit 2).
             if matches!(
@@ -2139,13 +2207,25 @@ pub async fn run(
                     }
                 }
             }
+            let outcome_wire = final_report.as_ref().map(|report| match report.outcome {
+                ReportOutcome::Succeeded => "succeeded",
+                ReportOutcome::Failed => "failed",
+            });
             let params = SendParams {
                 scope: mail_scope(&host_id, actor)?,
                 kind: kind_value,
                 to: target,
                 subject: subject.clone(),
                 body: body.clone(),
-                payload: parse_json_object("payload", payload)?,
+                payload: structured_send_payload(
+                    payload,
+                    &actor.task,
+                    &actor.dispatch,
+                    outcome_wire,
+                    files_modified,
+                    report_path,
+                    phase,
+                )?,
                 priority: priority.as_wire(),
                 thread_id: thread_id.clone(),
                 final_report,

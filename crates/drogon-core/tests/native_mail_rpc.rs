@@ -363,6 +363,40 @@ fn same_id_replay_of_a_settled_report_is_idempotent() {
 }
 
 #[test]
+fn report_payload_naming_another_task_is_refused_without_effects() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "h".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    // The reporting dispatch's own task id settles fine; naming any other
+    // task id is a task_dispatch_mismatch before any write (source:
+    // resolveLifecycleAuthority).
+    let refused = worker_call(
+        &engine,
+        "orchestration.send",
+        "mismatch",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "kind":"finalReport",
+            "subject":"done", "finalReport": {"outcome":"succeeded"},
+            "payload": {"taskId": "some-other-task"}}),
+    );
+    assert!(!refused.ok);
+    assert_eq!(refused.error.unwrap().code, "task_dispatch_mismatch");
+    // Nothing settled and no message landed: the attempt still reports live.
+    let show = engine.dispatch(
+        serde_json::from_value(json!({
+            "protocol": drogon_protocol::PROTOCOL_VERSION, "requestId": "show",
+            "method": "orchestration.workerShow",
+            "params": dispatch_scope_admin(&fx, "dispatch-1"),
+        }))
+        .unwrap(),
+    );
+    assert!(show.ok);
+    assert!(show.result.unwrap()["outcome"].is_null());
+}
+
+#[test]
 fn conflicting_outcome_is_refused_and_original_status_is_preserved() {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();

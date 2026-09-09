@@ -143,6 +143,13 @@ pub enum MessageKindArg {
     FinalReport,
     Guidance,
     Escalation,
+    /// Source-only mail kinds (opaque, no lifecycle effect)
+    Dispatch,
+    #[value(name = "merge_ready")]
+    MergeReady,
+    Handoff,
+    #[value(name = "decision_gate")]
+    DecisionGate,
 }
 
 impl MessageKindArg {
@@ -155,6 +162,10 @@ impl MessageKindArg {
             MessageKindArg::FinalReport => "finalReport",
             MessageKindArg::Guidance => "guidance",
             MessageKindArg::Escalation => "escalation",
+            MessageKindArg::Dispatch => "dispatch",
+            MessageKindArg::MergeReady => "merge_ready",
+            MessageKindArg::Handoff => "handoff",
+            MessageKindArg::DecisionGate => "decision_gate",
         }
     }
 }
@@ -573,6 +584,15 @@ pub enum OrchestrationCommand {
         payload: Option<String>,
         #[arg(long, value_name = "ID")]
         thread_id: Option<String>,
+        /// Structured payload field: comma-separated modified paths
+        #[arg(long, value_name = "CSV")]
+        files_modified: Option<String>,
+        /// Structured payload field: long-form artifact path
+        #[arg(long, value_name = "PATH")]
+        report_path: Option<String>,
+        /// Structured payload field: heartbeat phase text
+        #[arg(long, value_name = "TEXT")]
+        phase: Option<String>,
         /// Display priority (source: urgent/high render [URGENT]/[HIGH] tags)
         #[arg(long, value_enum, default_value_t = PriorityArg::Normal)]
         priority: PriorityArg,
