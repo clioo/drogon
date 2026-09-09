@@ -241,7 +241,12 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   });
   const [workItems, setWorkItems] = useState<TaskPageWorkItem[]>(() => mountSeed.cached?.workItems ?? []);
   const [repo, setRepo] = useState<string | null>(() => mountSeed.cached?.repo ?? null);
-  const [listPhase, setListPhase] = useState<ListPhase>("loading");
+  // Fork parity (#353): the source's tasksLoading starts false, so a page
+  // that opens with no servable project paints the settled empty state
+  // directly; only a real project primes the skeleton.
+  const [listPhase, setListPhase] = useState<ListPhase>(() =>
+    pickDefaultProject(loadGroups()) === null ? "ready" : "loading",
+  );
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [githubUnavailable, setGithubUnavailable] = useState(false);
   const [page, setPage] = useState(1);
@@ -407,8 +412,15 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose }: Tasks
   // cheap one-window probe (see tasks_rpc do_tasks_list).
   useEffect(() => {
     if (projectId === null) {
+      // #353 fork parity (runTaskPageGitHubLandingRefresh): with zero repos
+      // selected the fork's fetch effect early-returns and clears its
+      // loading flags, so the page settles into the "No project sources
+      // selected" empty state instead of skeletoning forever.
       setWorkItems([]);
-      setListPhase("loading");
+      setRepo(null);
+      setTasksError(null);
+      setGithubUnavailable(false);
+      setListPhase("ready");
       return;
     }
     let cancelled = false;

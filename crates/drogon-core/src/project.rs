@@ -464,12 +464,15 @@ pub(crate) fn list(conn: &Connection) -> Result<Value, drogon_protocol::RpcError
 /// Removes the Project row (never the files on disk — except a Quick
 /// Session's app-owned scratch folder, which `do_project_remove` deletes
 /// after this row delete, matching the fork's on-explicit-delete scratch
-/// cleanup). Its Worktree rows are
-/// removed too (registration bookkeeping only — their git worktrees and
-/// branches are untouched on disk, exactly like the underlying `worktrees`
-/// checkouts becoming unmanaged rather than deleted). A folder project's
-/// implicit Workspace is registration-owned by that project and is removed
-/// with it; git worktree Workspace rows retain the existing orphan tolerance.
+/// cleanup). Its Worktree rows are removed too (registration bookkeeping
+/// only — their git worktrees and branches are untouched on disk, exactly
+/// like the underlying `worktrees` checkouts becoming unmanaged rather
+/// than deleted), and the worktrees' Workspace rows go with them, exactly
+/// like `worktree.remove` deletes its workspace row: a removed project's
+/// workspaces must vanish from `workspace.list`, or the shell keeps
+/// rendering the removed project's workspace (#354). A folder project's
+/// implicit Workspace is registration-owned by that project and is
+/// removed with it.
 pub(crate) fn remove(conn: &Connection, id: &str) -> Result<Value, drogon_protocol::RpcError> {
     let tx = conn.unchecked_transaction().map_err(error::from_sqlite)?;
     let folder_path: Option<String> = tx
@@ -486,6 +489,13 @@ pub(crate) fn remove(conn: &Connection, id: &str) -> Result<Value, drogon_protoc
     if existed == 0 {
         return Err(error::not_found("project not found"));
     }
+    // Why before the worktrees delete: the subquery reads the project's
+    // workspace ids from the rows this transaction is about to remove.
+    tx.execute(
+        "DELETE FROM workspaces WHERE id IN (SELECT workspace_id FROM worktrees WHERE project_id = ?1)",
+        [id],
+    )
+    .map_err(error::from_sqlite)?;
     tx.execute("DELETE FROM worktrees WHERE project_id = ?1", [id])
         .map_err(error::from_sqlite)?;
     tx.execute("DELETE FROM sparse_presets WHERE project_id = ?1", [id])

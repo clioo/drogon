@@ -7,7 +7,7 @@
    sparse rows plus the base ref, and the ⌘↵ footer. */
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, type ReactElement } from "react";
 import type {
   Harness,
   Project,
@@ -107,69 +107,28 @@ function claudeHarness(): Harness {
   };
 }
 
-function mount({
-  groups = [gitGroup()],
-  workspaces = [],
-  projectId = "git:1",
-  harnesses = [] as Harness[],
-  defaultHarnessId = "",
-  onSubmitWorktree = vi.fn(
-    async (_input: {
+function mount(
+  props: Partial<{
+    groups: ProjectGroup[];
+    workspaces: Workspace[];
+    projectId: string | null;
+    harnesses: Harness[];
+    defaultHarnessId: string;
+    onSubmitWorktree: (input: {
       projectId: string;
       name: string;
       baseRef?: string;
       agent: ComposerAgentSelection;
-    }) => null,
-  ),
-  onLaunchAgent = vi.fn(async (_launch: unknown) => null),
-  onCreateQuickSession = vi.fn(async (_input: unknown) => null),
-  onSelectWorkspace = vi.fn(),
-  onProjectChange = vi.fn(),
-  onAddProject = vi.fn(),
-  onClose = vi.fn(),
-}: Partial<{
-  groups: ProjectGroup[];
-  workspaces: Workspace[];
-  projectId: string | null;
-  harnesses: Harness[];
-  defaultHarnessId: string;
-  onSubmitWorktree: (input: {
-    projectId: string;
-    name: string;
-    baseRef?: string;
-    agent: ComposerAgentSelection;
-  }) => Promise<string | null>;
-  onLaunchAgent: (launch: unknown) => Promise<string | null>;
-  onCreateQuickSession: (input: unknown) => Promise<string | null>;
-  onSelectWorkspace: (workspaceId: string) => void;
-  onProjectChange: (projectId: string | null) => void;
-  onAddProject: () => void;
-  onClose: () => void;
-}> = {}) {
-  return render(
-    <TooltipProvider>
-      <NewWorkspaceComposer
-        groups={groups}
-        workspaces={workspaces}
-        projectId={projectId}
-        disabled={false}
-        nameInputRef={createRef<HTMLInputElement>()}
-        composerRef={createRef<HTMLDivElement>()}
-        harnesses={harnesses}
-        defaultHarnessId={defaultHarnessId}
-        harnessDefaults={{}}
-        onProjectChange={onProjectChange}
-        onSubmitWorktree={onSubmitWorktree}
-        onLaunchAgent={onLaunchAgent as never}
-        onCreateQuickSession={onCreateQuickSession}
-        onSelectWorkspace={onSelectWorkspace}
-        onAddProject={onAddProject}
-        onOpenAgentSettings={() => {}}
-        onSetDefaultAgent={() => {}}
-        onClose={onClose}
-      />
-    </TooltipProvider>,
-  );
+    }) => Promise<string | null>;
+    onLaunchAgent: (launch: unknown) => Promise<string | null>;
+    onCreateQuickSession: (input: unknown) => Promise<string | null>;
+    onSelectWorkspace: (workspaceId: string) => void;
+    onProjectChange: (projectId: string | null) => void;
+    onAddProject: () => void;
+    onClose: () => void;
+  }> = {},
+) {
+  return render(composerElement(props));
 }
 
 function fillName(value: string): void {
@@ -329,7 +288,98 @@ describe("NewWorkspaceComposer chrome (#316 fork anatomy)", () => {
     // No project selected: the Run on picker stays hidden (fork behavior).
     expect(screen.queryByRole("combobox", { name: "Run on" })).toBeNull();
   });
+
+  test("#355: harnesses answering after mount adopt the auto-pick and enable Quick Session", () => {
+    const onCreateQuickSession = vi.fn(async (_input: unknown) => null);
+    const view = mount({ harnesses: [], onCreateQuickSession });
+    // The catalog has not answered: the agent reads Blank Terminal and
+    // Quick Session stays disabled — the QA-INT-1 symptom.
+    expect(agentTriggerLabel()).toBe("Blank Terminal");
+    expect(quickSessionButton().hasAttribute("disabled")).toBe(true);
+    // The daemon's harness list lands (same mounted composer): the fork's
+    // derive-with-override binding adopts the auto-pick without a user
+    // click, and Quick Session becomes usable.
+    view.rerender(
+      composerElement({ harnesses: [claudeHarness()], onCreateQuickSession }),
+    );
+    expect(agentTriggerLabel()).toBe("Claude Code");
+    expect(quickSessionButton().hasAttribute("disabled")).toBe(false);
+  });
+
+  test("#355: an explicit Blank Terminal pick is preserved when the catalog lands", () => {
+    const view = mount({ harnesses: [] });
+    view.rerender(composerElement({ harnesses: [claudeHarness()] }));
+    expect(agentTriggerLabel()).toBe("Claude Code");
+    // The user deliberately picks Blank Terminal; a later catalog refresh
+    // must not resurrect the auto-pick (fork parity: the override wins).
+    fireEvent.click(agentTrigger());
+    fireEvent.click(screen.getByRole("option", { name: /Blank Terminal/ }));
+    expect(agentTriggerLabel()).toBe("Blank Terminal");
+    expect(quickSessionButton().hasAttribute("disabled")).toBe(true);
+    view.rerender(composerElement({ harnesses: [piHarness()] }));
+    expect(agentTriggerLabel()).toBe("Blank Terminal");
+  });
 });
+
+function composerElement(
+  overrides: Partial<Parameters<typeof mount>[0]> = {},
+): ReactElement {
+  const {
+    groups = [gitGroup()],
+    workspaces = [],
+    projectId = "git:1",
+    harnesses = [] as Harness[],
+    defaultHarnessId = "",
+    onSubmitWorktree = async () => null,
+    onLaunchAgent = async () => null,
+    onCreateQuickSession,
+    onSelectWorkspace = () => {},
+    onProjectChange = () => {},
+    onAddProject = () => {},
+    onClose = () => {},
+  } = overrides;
+  return (
+    <TooltipProvider>
+      <NewWorkspaceComposer
+        groups={groups}
+        workspaces={workspaces}
+        projectId={projectId}
+        disabled={false}
+        nameInputRef={createRef<HTMLInputElement>()}
+        composerRef={createRef<HTMLDivElement>()}
+        harnesses={harnesses}
+        defaultHarnessId={defaultHarnessId}
+        harnessDefaults={{}}
+        onProjectChange={onProjectChange}
+        onSubmitWorktree={onSubmitWorktree}
+        onLaunchAgent={onLaunchAgent as never}
+        onCreateQuickSession={onCreateQuickSession}
+        onSelectWorkspace={onSelectWorkspace}
+        onAddProject={onAddProject}
+        onOpenAgentSettings={() => {}}
+        onSetDefaultAgent={() => {}}
+        onClose={onClose}
+      />
+    </TooltipProvider>
+  );
+}
+
+function agentTrigger(): HTMLElement {
+  const el = document.querySelector(
+    '[data-agent-combobox-root="true"][role="combobox"]',
+  );
+  if (!el) throw new Error("agent combobox trigger not rendered");
+  return el as HTMLElement;
+}
+
+function agentTriggerLabel(): string {
+  return agentTrigger().textContent?.trim() ?? "";
+}
+
+function quickSessionButton(): HTMLElement {
+  const el = screen.getByRole("button", { name: /Quick Session/ });
+  return el;
+}
 
 describe("NewWorkspaceComposer submit (#316 unchanged daemon payload)", () => {
   test("git submit sends projectId, name, baseRef and the picked agent", async () => {

@@ -86,6 +86,31 @@ function okIssues(titles: [number, string][], repo = "example/repo") {
 }
 
 describe("tasks default load and result cache", () => {
+  test("#353: zero workspaces settles into the no-sources empty state (no infinite skeleton)", async () => {
+    // The fork's no-repo path (runTaskPageGitHubLandingRefresh) early-returns
+    // and clears its loading flags, so with zero projects the page must
+    // settle into the empty state instead of skeletoning forever — and it
+    // must not fan out a fetch with no project to ask about.
+    const tasksList = vi.fn(() =>
+      Promise.reject(new Error("tasksList must not be called without a project")),
+    );
+    render(
+      <TooltipProvider>
+        <TasksPage bridge={fakeBridge(tasksList)} loadGroups={() => []} onOpenTerminal={() => {}} />
+      </TooltipProvider>,
+    );
+    expect(await screen.findByText("No project sources selected")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Select at least one project source so Drogon knows which host/account to fetch tasks from.",
+      ),
+    ).toBeTruthy();
+    // The settled page shows no skeleton rows and leaves the refresh button
+    // idle (the fork is not busy with zero repos selected).
+    expect(document.querySelectorAll(".animate-pulse").length).toBe(0);
+    expect(tasksList).not.toHaveBeenCalled();
+  });
+
   test("default view lists open with no query and caches the result", async () => {
     const tasksList = vi.fn(async () => okIssues([[1, "Cached row one"]]));
     render(

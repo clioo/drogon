@@ -37,7 +37,6 @@ import {
 import {
   composerAgentLaunchInput,
   composerPrimaryActionLabel,
-  initialComposerAgentId,
   resolveComposerSubmit,
   type ComposerAgentSelection,
 } from "./composer-submit";
@@ -52,6 +51,7 @@ import { NewWorkspaceComposerNameSection } from "./composer-name-section";
 import { NewWorkspaceComposerAgentSection } from "./composer-agent-section";
 import { NewWorkspaceComposerAdvancedSection } from "./composer-advanced-section";
 import { NewWorkspaceComposerFooter } from "./composer-footer";
+import { resolveComposerQuickAgent } from "./composer-quick-agent";
 
 /**
  * New-workspace composer card: the fork's Create-worktree composer over
@@ -156,9 +156,26 @@ export function NewWorkspaceComposer({
   const [selectedSparsePresetId, setSelectedSparsePresetId] = useState<
     string | null
   >(null);
-  const [quickAgent, setQuickAgent] = useState<HarnessId | null>(() =>
-    initialComposerAgentId(harnesses, defaultHarnessId),
-  );
+  // #355 fork parity (quick-workspace-agent-selection): the quick agent
+  // derives from the live harness catalog with a user-pick override — a
+  // composer mounted before the daemon's harnesses answer (landing →
+  // Create workspace on a fresh boot) must adopt the auto-pick when the
+  // catalog lands instead of staying stuck on Blank Terminal, which
+  // disabled Quick Session as if the form were empty.
+  const [quickAgentOverride, setQuickAgentOverride] = useState<
+    HarnessId | null | undefined
+  >(undefined);
+  const resolvedQuickAgent = resolveComposerQuickAgent({
+    quickAgentOverride,
+    harnesses,
+    defaultHarnessId,
+  });
+  if (resolvedQuickAgent.quickAgentOverride !== quickAgentOverride) {
+    // Why: a pick the catalog later invalidated repairs before paint, the
+    // fork's render-time adjustment — no effect, no extra commit.
+    setQuickAgentOverride(resolvedQuickAgent.quickAgentOverride);
+  }
+  const quickAgent = resolvedQuickAgent.quickAgent;
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [createMultiple, setCreateMultiple] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -435,7 +452,7 @@ export function NewWorkspaceComposer({
         />
         <NewWorkspaceComposerAgentSection
           quickAgent={quickAgent}
-          onQuickAgentChange={setQuickAgent}
+          onQuickAgentChange={(next) => setQuickAgentOverride(next)}
           onOpenAgentSettings={onOpenAgentSettings}
           createDisabled={createDisabled}
           onCreate={() => void submit()}
