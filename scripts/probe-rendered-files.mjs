@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { selectSettingsTheme, captureThemeSurface } from "./acceptance-theme.mjs";
 import {
   readEditorValue,
   setEditorValue,
@@ -120,11 +121,9 @@ export async function probeRenderedFiles({ page, workspace, output }) {
       // Reopen on Explorer so every capture measures the real layout.
       await ensureFilesVisible();
       for (const colorScheme of PARITY_COLOR_SCHEMES) {
-        await page.emulateMedia({ colorScheme });
-        await page.screenshot({
-          path: path.join(output, `files-${width}-${colorScheme}.png`),
-          animations: "disabled",
-        });
+        const selection = await selectSettingsTheme(page, colorScheme);
+        await ensureFilesVisible();
+        await captureThemeSurface(page, path.join(output, `files-${width}-${colorScheme}.png`), selection);
         const metrics = await page.evaluate(() => {
           const box = (selector) => {
             const bounds = document
