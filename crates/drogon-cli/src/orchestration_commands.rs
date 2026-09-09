@@ -957,17 +957,15 @@ pub async fn run(
                 json,
                 || {
                     if result.runs.is_empty() {
-                        return "No runs.".to_string();
+                        // Source run-list empty text.
+                        return "No Runs found.".to_string();
                     }
                     let mut lines = Vec::new();
                     for run in &result.runs {
-                        lines.push(format!(
-                            "{} {} (coordinator {}, generation {})",
-                            run.run_id, run.objective, run.coordinator_id, run.consumer_generation
-                        ));
+                        lines.push(format!("{} {}", run.run_id, run.objective));
                     }
                     if let Some(cursor) = &result.next_cursor {
-                        lines.push(format!("More runs: --cursor {}", cursor.0));
+                        lines.push(format!("More Runs: --cursor {}", cursor.0));
                     }
                     lines.join("\n")
                 },
@@ -998,12 +996,27 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    // Source run-show: `<id> <objective>` then the
+                    // generation/creation line; native ids use camelCase and
+                    // epoch-ms creation, rendered RFC3339 like the source's
+                    // `created_at` string.
+                    let secs = result.run.created_at_ms / 1000;
+                    let days = secs / 86_400;
+                    let rem = secs % 86_400;
+                    let (h, m, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+                    let z = days as i64 + 719_468;
+                    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+                    let doe = (z - era * 146_097) as u64;
+                    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+                    let y = yoe as i64 + era * 400;
+                    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                    let mp = (5 * doy + 2) / 153;
+                    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+                    let mo = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+                    let year = if mo <= 2 { y + 1 } else { y };
                     format!(
-                        "Run {} {} (coordinator {}, generation {})",
-                        result.run.run_id,
-                        result.run.objective,
-                        result.run.coordinator_id,
-                        result.run.consumer_generation
+                        "{} {}\nconsumer generation {}; created {year:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z",
+                        result.run.run_id, result.run.objective, result.run.consumer_generation,
                     )
                 },
                 0,

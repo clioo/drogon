@@ -161,6 +161,70 @@ fn coordinator_args() -> Vec<&'static str> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_list_human_output_matches_source_rows_and_cursor_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let _mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.runList",
+                json!({"runs":[
+                    {"runId":"run-1","objective":"first","coordinatorId":"c","consumerGeneration":1,"createdAtMs":1},
+                    {"runId":"run-2","objective":"second","coordinatorId":"c","consumerGeneration":1,"createdAtMs":2}
+                ],"nextCursor":"cursor-9"}),
+            )],
+        ),
+    );
+    let invocation = run_cli(dir.path(), &["orchestration", "run-list"], &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert_eq!(
+        invocation.stdout.trim_end(),
+        "run-1 first\nrun-2 second\nMore Runs: --cursor cursor-9"
+    );
+    let dir2 = tempfile::tempdir().unwrap();
+    let _mock2 = MockService::start(
+        dir2.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.runList",
+                json!({"runs":[],"nextCursor":null}),
+            )],
+        ),
+    );
+    let empty = run_cli(dir2.path(), &["orchestration", "run-list"], &[]);
+    assert_eq!(empty.exit_code, 0);
+    assert_eq!(empty.stdout.trim_end(), "No Runs found.");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_show_human_output_matches_source_two_line_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    // 2024-01-02T03:04:05Z = 1704164645000 ms.
+    let _mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.runShow",
+                json!({"run":{"runId":"run-1","objective":"Ship the release","coordinatorId":"coord-1","consumerGeneration":3,"createdAtMs":1_704_164_645_000_u64}}),
+            )],
+        ),
+    );
+    let invocation = run_cli(
+        dir.path(),
+        &["orchestration", "run-show", "--id", "run-1"],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert_eq!(
+        invocation.stdout.trim_end(),
+        "run-1 Ship the release\nconsumer generation 3; created 2024-01-02T03:04:05Z"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn send_to_run_id_and_at_group_use_source_target_spellings() {
     for (to, expected) in [
         ("run:run-1", json!({"kind": "runHome"})),
