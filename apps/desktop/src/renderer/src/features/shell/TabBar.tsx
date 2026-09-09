@@ -28,6 +28,8 @@ import { AgentStateIcon } from "./AgentStateIcon";
 import type { EditorTabState } from "./editor-tab";
 import { ShellIconButton } from "./ShellIconButton";
 import { SortableTab, TAB_STRIP_DRAG_ACTIVATION_PX } from "./SortableTab";
+import { HarnessMenuIcon } from "./TabCreateMenuIcons";
+import { formatRowHarnessLabel } from "./worktree-agent-rows";
 import {
   hydrateTerminalSplits,
   splitForTab,
@@ -497,7 +499,26 @@ export function TabBar({
                     ariaLabel={`${text} ${item.verdict}`}
                     closeLabel={`Close ${text} session`}
                     icon={
-                      <AgentStateIcon state={sessionDotState(item)} size={13} />
+                      <span className="mr-1 inline-flex shrink-0 items-center gap-1">
+                        {/* Why: status and identity answer different
+                            questions — TerminalTabLeadingIcon.tsx keeps the
+                            agent logo beside the state glyph so parallel
+                            tabs stay scannable; the state indicator here is
+                            unchanged, this only adds the harness identity. */}
+                        <AgentStateIcon state={sessionDotState(item)} size={13} />
+                        {item.harnessId && (
+                          <span
+                            className="inline-flex shrink-0"
+                            title={formatRowHarnessLabel(item.harnessId)}
+                          >
+                            <HarnessMenuIcon
+                              harnessId={item.harnessId}
+                              displayName={formatRowHarnessLabel(item.harnessId)}
+                              size={12}
+                            />
+                          </span>
+                        )}
+                      </span>
                     }
                     retry={
                       retryable ? (
