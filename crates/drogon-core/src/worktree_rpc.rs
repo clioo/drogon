@@ -1208,6 +1208,112 @@ impl Engine {
         Ok(json!({ "worktree": worktree }))
     }
 
+    /// `worktree.ps { limit? }`: compact cross-worktree summary (source
+    /// `worktree ps`). Each entry carries the worktree identity plus the
+    /// honest live-session count for its workspace; no sidebar/activity
+    /// concepts are invented. `limit` caps entries after ordering by
+    /// creation; `totalCount`/`truncated` report the pre-cap inventory.
+    pub(super) fn do_worktree_ps(&self, params: &Value) -> Result<Value, RpcError> {
+        let limit: Option<u64> = params
+            .get("limit")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .filter(|n| *n >= 1)
+                    .ok_or_else(|| error::invalid_argument("limit must be a positive integer"))
+            })
+            .transpose()?;
+        let conn = self.db.lock().unwrap();
+        let mut entries: Vec<Value> = Vec::new();
+        {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT w.id, w.project_id, w.workspace_id, w.path, w.branch, w.title, w.created_at, w.parent_worktree_id,
+                            (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.workspace_id AND s.verdict = 'live') AS live_sessions
+                     FROM worktrees w ORDER BY w.created_at",
+                )
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(json!({
+                        "worktreeId": r.get::<_, String>(0)?,
+                        "projectId": r.get::<_, String>(1)?,
+                        "workspaceId": r.get::<_, String>(2)?,
+                        "path": r.get::<_, String>(3)?,
+                        "branch": r.get::<_, String>(4)?,
+                        "displayName": r.get::<_, Option<String>>(5)?,
+                        "createdAt": r.get::<_, String>(6)?,
+                        "parentWorktreeId": r.get::<_, Option<String>>(7)?,
+                        "liveSessions": r.get::<_, i64>(8)?,
+                    }))
+                })
+                .map_err(error::from_sqlite)?;
+            for row in rows {
+                entries.push(row.map_err(error::from_sqlite)?);
+            }
+        }
+        // Folder projects contribute their implicit worktree row, matching
+        // worktree.list's synthetic row.
+        {
+            let mut stmt = conn
+                .prepare("SELECT id, path, created_at FROM projects WHERE kind = 'folder'")
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(error::from_sqlite)?;
+            for row in rows {
+                let (id, path, created_at) = row.map_err(error::from_sqlite)?;
+                let workspace: Option<(String, i64)> = conn
+                    .query_row(
+                        "SELECT id, (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = workspaces.id AND s.verdict = 'live') FROM workspaces WHERE path = ?1",
+                        [&path],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()
+                    .map_err(error::from_sqlite)?;
+                if let Some((workspace_id, live_sessions)) = workspace {
+                    entries.push(json!({
+                        "worktreeId": id,
+                        "projectId": id,
+                        "workspaceId": workspace_id,
+                        "path": path,
+                        "branch": "",
+                        "displayName": Value::Null,
+                        "createdAt": created_at,
+                        "parentWorktreeId": Value::Null,
+                        "liveSessions": live_sessions,
+                    }));
+                }
+            }
+        }
+        entries.sort_by(|a, b| {
+            a["createdAt"]
+                .as_str()
+                .cmp(&b["createdAt"].as_str())
+                .then_with(|| a["worktreeId"].as_str().cmp(&b["worktreeId"].as_str()))
+        });
+        let total = entries.len() as u64;
+        let truncated = limit.is_some_and(|cap| total > cap);
+        let entries = match limit {
+            Some(cap) => entries
+                .into_iter()
+                .take(cap.min(usize::MAX as u64) as usize)
+                .collect::<Vec<_>>(),
+            None => entries,
+        };
+        Ok(json!({
+            "worktrees": entries,
+            "totalCount": total,
+            "truncated": truncated,
+        }))
+    }
+
     pub(super) fn do_worktree_remove(&self, params: &Value) -> Result<Value, RpcError> {
         let id = require_str(params, "id")?.to_string();
         let force = optional_bool(params, "force", false)?;

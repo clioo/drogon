@@ -935,3 +935,95 @@ fn base64_decode_test(text: &str) -> String {
         .unwrap_or_default();
     String::from_utf8_lossy(&bytes).into_owned()
 }
+
+#[test]
+fn worktree_ps_summarizes_live_session_counts_with_limit() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "ps1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let first = ok(
+        &engine,
+        "worktree.create",
+        "ps2",
+        json!({"projectId": project_id, "name": "ps-first"}),
+    );
+    let second = ok(
+        &engine,
+        "worktree.create",
+        "ps3",
+        json!({"projectId": project_id, "name": "ps-second"}),
+    );
+    let first_workspace = first["workspaceId"].as_str().unwrap().to_string();
+
+    // One live session on the first worktree; none on the second.
+    let session = ok(
+        &engine,
+        "session.start",
+        "ps4",
+        json!({
+            "workspaceId": first_workspace,
+            "command": "/bin/sh",
+            "args": ["-c", "sleep 30"],
+            "cols": 80, "rows": 24
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+
+    let summary = ok(&engine, "worktree.ps", "ps5", json!({}));
+    let worktrees = summary["worktrees"].as_array().unwrap();
+    assert_eq!(worktrees.len(), 2);
+    assert_eq!(summary["totalCount"], json!(2));
+    assert_eq!(summary["truncated"], json!(false));
+    let by_id: std::collections::HashMap<&str, &Value> = worktrees
+        .iter()
+        .map(|w| (w["worktreeId"].as_str().unwrap(), w))
+        .collect();
+    assert_eq!(
+        by_id[first["id"].as_str().unwrap()]["liveSessions"],
+        json!(1)
+    );
+    assert_eq!(
+        by_id[second["id"].as_str().unwrap()]["liveSessions"],
+        json!(0)
+    );
+
+    // The cap truncates honestly.
+    let capped = ok(&engine, "worktree.ps", "ps6", json!({"limit": 1}));
+    assert_eq!(capped["worktrees"].as_array().unwrap().len(), 1);
+    assert_eq!(capped["totalCount"], json!(2));
+    assert_eq!(capped["truncated"], json!(true));
+
+    // A zero limit is a typed invalid argument, not silent clamping.
+    assert_eq!(
+        err_code(&engine, "worktree.ps", "ps7", json!({"limit": 0})),
+        "invalid_argument"
+    );
+
+    // Stopping the session drops the count to zero.
+    let _ = ok(
+        &engine,
+        "session.stop",
+        "ps8",
+        json!({"sessionId": session_id, "incarnation": session["incarnation"]}),
+    );
+    let after = ok(&engine, "worktree.ps", "ps9", json!({}));
+    let by_id: std::collections::HashMap<&str, &Value> = after["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| (w["worktreeId"].as_str().unwrap(), w))
+        .collect();
+    assert_eq!(
+        by_id[first["id"].as_str().unwrap()]["liveSessions"],
+        json!(0)
+    );
+}

@@ -670,6 +670,41 @@ async fn worktree(
                 Client::decode_checked(&call, "worktree.list", check_worktree_list)?;
             emit(call, json, || output::worktree_list(&list), 0, None)
         }
+        WorktreeAction::Ps { limit } => {
+            let params = match limit {
+                Some(cap) => json!({ "limit": cap }),
+                None => json!({}),
+            };
+            let call = client
+                .call("worktree.ps", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let human_lines = {
+                let entries = call
+                    .result
+                    .get("worktrees")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                if entries.is_empty() {
+                    "No worktrees.".to_string()
+                } else {
+                    entries
+                        .iter()
+                        .map(|entry| {
+                            format!(
+                                "{} {} [{}] live-sessions={}",
+                                entry["worktreeId"].as_str().unwrap_or(""),
+                                entry["path"].as_str().unwrap_or(""),
+                                entry["branch"].as_str().unwrap_or(""),
+                                entry["liveSessions"].as_i64().unwrap_or(0),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            };
+            emit(call, json, || human_lines, 0, None)
+        }
         WorktreeAction::Set {
             id,
             note,

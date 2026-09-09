@@ -436,6 +436,15 @@ pub enum WorktreeAction {
         #[arg(long, value_name = "ID")]
         project: String,
     },
+    /// Show a compact orchestration summary across worktrees
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree ps [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --request-id, --retry-request"
+    )]
+    Ps {
+        #[arg(long, value_name = "N")]
+        limit: Option<u64>,
+    },
     /// Update Orca metadata for a worktree (note, parent)
     #[command(
         args_override_self = true,
@@ -874,6 +883,13 @@ impl Cli {
                 WorktreeAction::Current => {}
                 WorktreeAction::List { project } => {
                     require_nonempty("project", project)?;
+                }
+                WorktreeAction::Ps { limit } => {
+                    if let Some(limit) = limit
+                        && *limit == 0
+                    {
+                        return Err(CliError::Usage("--limit must be a positive integer".into()));
+                    }
                 }
                 WorktreeAction::Set {
                     id,

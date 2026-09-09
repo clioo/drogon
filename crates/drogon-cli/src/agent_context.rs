@@ -216,6 +216,18 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[],
         ),
         entry(
+            "worktree ps",
+            &["worktree", "ps"],
+            "Show a compact orchestration summary across worktrees",
+            "drogon-cli worktree ps [--limit <N>]",
+            &["limit"],
+            &[],
+            &["drogon-cli worktree ps --json"],
+            &[
+                "Each entry carries the worktree identity plus the honest live-session count for its workspace; totalCount/truncated report the pre-cap inventory.",
+            ],
+        ),
+        entry(
             "worktree set",
             &["worktree", "set"],
             "Update Orca metadata for a worktree (note, parent)",
