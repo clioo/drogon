@@ -490,10 +490,34 @@ fn terminal_bound_coordinator_uses_source_commands_without_native_scope_flags() 
     assert_eq!(fenced["error"]["code"], "consumer_fenced");
     let (code, used) = coordinator_call(
         &data_dir,
-        &["orchestration", "run-use", "--id", &a, "--from", &session],
+        &[
+            "--request-id",
+            "source-use-a",
+            "orchestration",
+            "run-use",
+            "--id",
+            &a,
+            "--from",
+            &session,
+        ],
     );
     assert_ok(code, &used, &["run-use"]);
     assert_eq!(used["result"]["run"]["consumerGeneration"], 3);
+    let (code, replayed_use) = coordinator_call(
+        &data_dir,
+        &[
+            "--request-id",
+            "source-use-a",
+            "orchestration",
+            "run-use",
+            "--id",
+            &a,
+            "--from",
+            &session,
+        ],
+    );
+    assert_ok(code, &replayed_use, &["run-use", "replay"]);
+    assert_eq!(replayed_use["result"], used["result"]);
     let (code, tasks) = coordinator_call(
         &data_dir,
         &["orchestration", "task-list", "--from", &session],
@@ -519,6 +543,29 @@ fn terminal_bound_coordinator_uses_source_commands_without_native_scope_flags() 
         coordinator_call(&data_dir, &["orchestration", "task-list", "--run", &b]);
     assert_ok(code, &inspection, &["task-list", "--run"]);
     assert!(inspection["result"]["tasks"].as_array().unwrap().is_empty());
+    let (code, rebound) = coordinator_call(
+        &data_dir,
+        &["orchestration", "run-use", "--id", &b, "--from", &session],
+    );
+    assert_ok(code, &rebound, &["run-use"]);
+    let (code, late_replay) = coordinator_call(
+        &data_dir,
+        &[
+            "--request-id",
+            "source-use-a",
+            "orchestration",
+            "run-use",
+            "--id",
+            &a,
+            "--from",
+            &session,
+        ],
+    );
+    assert_ne!(
+        code, 0,
+        "replaying a fenced bind must not take the run over again: {late_replay}"
+    );
+    assert_eq!(late_replay["error"]["code"], "consumer_fenced");
     let closed = guard.close("terminal coordinator fixture");
     assert_eq!(closed["result"]["verdict"], "exited");
     let (code, missing) = coordinator_call(

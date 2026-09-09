@@ -23,8 +23,9 @@ use drogon_protocol::orchestration_question::{
     RequestLedgerState, RequestShowParams, RequestShowResult,
 };
 use drogon_protocol::orchestration_run::{
-    RunCreateParams, RunCreateResult, RunCurrentParams, RunCurrentResult, RunListParams,
-    RunListResult, RunShowParams, RunShowResult, RunSummary, RunUseParams, RunUseResult,
+    RunBindParams, RunCreateParams, RunCreateResult, RunCurrentParams, RunCurrentResult,
+    RunListParams, RunListResult, RunShowParams, RunShowResult, RunSummary, RunUseParams,
+    RunUseResult,
 };
 use drogon_protocol::orchestration_scope::{CoordinatorScope, HostScope};
 use drogon_protocol::orchestration_task::{
@@ -808,20 +809,44 @@ pub async fn run(
         OrchestrationCommand::RunUse {
             scope, takeover, ..
         } => {
-            let params = RunUseParams {
-                caller: caller.clone(),
-                host: host_scope(&host_id),
-                run_id: scope.run_id().to_owned(),
-                coordinator_id: scope.coordinator_id().to_owned(),
-                consumer_generation: scope.generation(),
-                takeover: *takeover,
-            };
-            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let (method, value, expected_generation) =
+                if scope.consumer_generation.is_none() && caller.is_some() {
+                    let params = RunBindParams {
+                        host: host_scope(&host_id),
+                        run_id: scope.run_id().to_owned(),
+                        coordinator_id: scope.coordinator_id().to_owned(),
+                        caller: caller.clone().unwrap(),
+                        takeover: *takeover,
+                    };
+                    (
+                        "orchestration.runBind",
+                        validate_params(&params, |p| p.validate_shape(&host_id), request_id)?,
+                        None,
+                    )
+                } else {
+                    let params = RunUseParams {
+                        caller: caller.clone(),
+                        host: host_scope(&host_id),
+                        run_id: scope.run_id().to_owned(),
+                        coordinator_id: scope.coordinator_id().to_owned(),
+                        consumer_generation: scope.generation(),
+                        takeover: *takeover,
+                    };
+                    let expected = scope
+                        .generation()
+                        .checked_add(u64::from(*takeover))
+                        .ok_or_else(|| usage("run-use generation overflow"))?;
+                    (
+                        "orchestration.runUse",
+                        validate_params(&params, |p| p.validate_shape(&host_id), request_id)?,
+                        Some(expected),
+                    )
+                };
             let call = client
-                .call("orchestration.runUse", value, request_id, DEFAULT_TIMEOUT)
+                .call(method, value, request_id, DEFAULT_TIMEOUT)
                 .await?;
             let result: RunUseResult =
-                Client::decode_checked(&call, "orchestration.runUse", |r: &RunUseResult| {
+                Client::decode_checked(&call, method, |r: &RunUseResult| {
                     check_run(&r.run)?;
                     if r.run.run_id != scope.run_id() {
                         return Err(format!(
@@ -830,12 +855,9 @@ pub async fn run(
                             scope.run_id()
                         ));
                     }
-                    let expected_generation = scope
-                        .generation()
-                        .checked_add(u64::from(*takeover))
-                        .ok_or("run-use generation overflow")?;
                     if r.run.coordinator_id != scope.coordinator_id()
-                        || r.run.consumer_generation != expected_generation
+                        || expected_generation
+                            .is_some_and(|expected| r.run.consumer_generation != expected)
                     {
                         return Err("run-use response does not match the requested binding".into());
                     }

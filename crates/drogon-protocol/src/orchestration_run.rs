@@ -126,6 +126,27 @@ pub struct RunUseResult {
     pub run: RunSummary,
 }
 
+/// Terminal binding intent whose fence is resolved atomically by the daemon.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunBindParams {
+    #[serde(flatten)]
+    pub host: HostScope,
+    pub run_id: String,
+    pub coordinator_id: String,
+    pub caller: SessionIdentity,
+    #[serde(default)]
+    pub takeover: bool,
+}
+impl RunBindParams {
+    pub fn validate_shape(&self, expected_host: &str) -> Result<(), RpcError> {
+        self.host.validate_target(expected_host)?;
+        validate_short_label(&self.run_id)?;
+        validate_short_label(&self.coordinator_id)?;
+        self.caller.validate_shape()
+    }
+}
+
 /// Bounded, cursor-paginated run listing (inspection, no state allocation).
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

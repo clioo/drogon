@@ -62,6 +62,38 @@ impl Engine {
                     |tx| encode(runs::use_run(tx, &params)?),
                 )
             }
+            "orchestration.runBind" => {
+                let params: RunBindParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                let actor = Actor::AdminBootstrap {
+                    host_id: params.host.host_id.clone(),
+                    coordinator_id: params.coordinator_id.clone(),
+                };
+                let key = actor.receipt_key(&request.request_id)?;
+                self.coordination_mutation(request, actor, |tx| {
+                    self.require_coordinator_caller(Some(&params.caller), &params.coordinator_id)?;
+                    let prior: Option<String> = tx.query_row(
+                        "SELECT result_json FROM requests WHERE request_id=?1 AND status='done' AND error_json IS NULL AND result_json IS NOT NULL",
+                        [&key], |row| row.get(0)).optional().map_err(error::from_sqlite)?;
+                    if let Some(prior) = prior {
+                        let receipt: RunUseResult = serde_json::from_str(&prior).map_err(|_| error::internal_error("Invalid binding receipt."))?;
+                        let current = runs::show(tx, &RunShowParams { host: params.host.clone(), run_id: params.run_id.clone() })?.run;
+                        if receipt.run != current {
+                            return Err(RpcError::new("consumer_fenced", "Coordinator binding has changed."));
+                        }
+                    }
+                    Ok(())
+                }, |tx| {
+                    let current = runs::show(tx, &RunShowParams { host: params.host.clone(), run_id: params.run_id.clone() })?.run;
+                    encode(runs::use_run(tx, &RunUseParams {
+                        host: params.host.clone(), run_id: params.run_id.clone(),
+                        coordinator_id: params.coordinator_id.clone(),
+                        consumer_generation: current.consumer_generation,
+                        takeover: params.takeover || current.coordinator_id != params.coordinator_id,
+                        caller: Some(params.caller.clone()),
+                    })?)
+                })
+            }
             "orchestration.runCurrent" => {
                 let params: RunCurrentParams = decode(&request.params)?;
                 params.validate_shape(&self.host_id)?;

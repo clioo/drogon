@@ -531,6 +531,7 @@ impl Engine {
             "mentu.cancel" => self.mentu_cancel(request),
             "orchestration.runCreate"
             | "orchestration.runUse"
+            | "orchestration.runBind"
             | "orchestration.runCurrent"
             | "orchestration.runList"
             | "orchestration.runShow"

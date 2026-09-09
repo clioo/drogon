@@ -340,7 +340,20 @@ pub(crate) async fn resolve(
             scope.coordinator_id.as_deref(),
         )
         .await?;
+        if matches!(command, OrchestrationCommand::RunUse { .. })
+            && caller.is_some()
+            && scope.consumer_generation.is_none()
+        {
+            scope.coordinator_id = Some(resolved_owner);
+            *command.coordinator_scope_mut().unwrap() = scope;
+            return Ok(Resolved { command, caller });
+        }
         let run = if matches!(command, OrchestrationCommand::RunUse { .. }) {
+            if scope.consumer_generation.is_none() {
+                return Err(usage(
+                    "Native run-use requires --consumer-generation or a verified --from terminal.",
+                ));
+            }
             show(client, id, status, scope.run_id()).await?
         } else {
             current(client, id, status, &resolved_owner, &caller).await?
