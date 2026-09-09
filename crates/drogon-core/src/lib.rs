@@ -20,6 +20,11 @@ mod coordination_mail_rpc;
 mod coordination_output;
 mod coordination_question_rpc;
 mod coordination_receipts;
+mod coordination_reset;
+#[path = "coordination_reset_tests.rs"]
+#[cfg(test)]
+mod coordination_reset_tests;
+
 mod coordination_runs;
 mod coordination_worker_control;
 mod coordination_worker_list;
@@ -564,6 +569,7 @@ impl Engine {
             | "orchestration.workerRetain" => self.dispatch_coordination_worker(request),
             "orchestration.workerList" => self.list_coordination_workers(request),
             "orchestration.requestShow" => self.show_coordination_receipt(request, None),
+            "orchestration.reset" => self.reset_orchestration(request),
             "orchestration.send" | "orchestration.check" => self.dispatch_admin_mail(request),
             "orchestration.ask" | "orchestration.reply" => {
                 self.dispatch_coordination_question(request, None)

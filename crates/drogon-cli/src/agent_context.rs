@@ -450,6 +450,38 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["Requires the service capability automation.v1."],
         ),
         entry(
+            "orchestration coordinator-start",
+            &["orchestration", "coordinator-start"],
+            "Retired: reports migration guidance without applying effects",
+            "drogon-cli orchestration coordinator-start [--spec <TEXT>]",
+            &[
+                "from",
+                "max-concurrent",
+                "poll-interval-ms",
+                "spec",
+                "worktree",
+            ],
+            &[],
+            &["drogon-cli orchestration coordinator-start --json"],
+            &[
+                "Always exits 1 with orchestration_migration_required; no daemon contact.",
+                "The error carries the skills-get recovery action; aliases: run.",
+            ],
+        ),
+        entry(
+            "orchestration coordinator-stop",
+            &["orchestration", "coordinator-stop"],
+            "Retired: reports migration guidance without applying effects",
+            "drogon-cli orchestration coordinator-stop",
+            &[],
+            &[],
+            &["drogon-cli orchestration coordinator-stop --json"],
+            &[
+                "Always exits 1 with orchestration_migration_required; no daemon contact.",
+                "The error carries the skills-get recovery action; aliases: run-stop.",
+            ],
+        ),
+        entry(
             "orchestration run-create",
             &["orchestration", "run-create"],
             "Create a run bound to a coordinator (initial generation is server-owned)",
@@ -813,6 +845,19 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "drogon-cli orchestration worker-list --run run-1 --terminal-state retained --json",
             ],
             &[ORCHESTRATION_CAPABILITY],
+        ),
+        entry(
+            "orchestration reset",
+            &["orchestration", "reset"],
+            "Reset orchestration domain state on this host (exactly one scope; coordinator-only)",
+            "drogon-cli orchestration reset (--all | --tasks | --messages)",
+            &["all", "tasks", "messages", "host"],
+            &[],
+            &["drogon-cli orchestration reset --tasks --json"],
+            &[
+                ORCHESTRATION_CAPABILITY,
+                "Host-scoped mutation: no coordinator binding. Refused while a live supervised worker attempt is active; stop it first. Mutation receipts are retained across reset.",
+            ],
         ),
         entry(
             "orchestration send",

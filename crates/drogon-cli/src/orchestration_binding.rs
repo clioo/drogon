@@ -318,6 +318,14 @@ pub(crate) async fn resolve(
                 caller: None,
             });
         }
+        // Host-scoped mutation: no coordinator binding, no current-run
+        // guess. The scope flags select the domain tables.
+        OrchestrationCommand::Reset { .. } => {
+            return Ok(Resolved {
+                command,
+                caller: None,
+            });
+        }
         _ => {}
     }
     if let Some(mut scope) = command.coordinator_scope().cloned() {

@@ -236,6 +236,24 @@ impl ReceiptScopeArg {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum OrchestrationCommand {
+    /// Retired: reports the migration guidance without applying effects
+    #[command(visible_alias = "run")]
+    CoordinatorStart {
+        /// Guidance text accepted for grammar compatibility (ignored)
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        spec: Option<String>,
+        #[arg(long, value_name = "HANDLE")]
+        from: Option<String>,
+        #[arg(long, value_name = "N")]
+        poll_interval_ms: Option<u64>,
+        #[arg(long, value_name = "N")]
+        max_concurrent: Option<u32>,
+        #[arg(long, value_name = "SELECTOR")]
+        worktree: Option<String>,
+    },
+    /// Retired: reports the migration guidance without applying effects
+    #[command(visible_alias = "run-stop")]
+    CoordinatorStop,
     /// Create a run bound to a coordinator (initial generation is server-owned)
     RunCreate {
         /// Run objective (free text, forwarded literally)
@@ -500,6 +518,21 @@ pub enum OrchestrationCommand {
         /// Filter to one terminal resource state
         #[arg(long, value_enum, value_name = "STATE")]
         terminal_state: Option<TerminalStateArg>,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// Reset orchestration domain state on this host (exactly one scope)
+    Reset {
+        /// Clear everything in the orchestration domain
+        #[arg(long, default_value_t = false, conflicts_with_all = ["tasks", "messages"])]
+        all: bool,
+        /// Clear tasks, gates, attempts, retention and run bindings; messages
+        /// survive and pending question threads are closed, not deleted
+        #[arg(long, default_value_t = false, conflicts_with_all = ["all", "messages"])]
+        tasks: bool,
+        /// Clear mail messages, deliveries and question threads only
+        #[arg(long, default_value_t = false, conflicts_with_all = ["all", "tasks"])]
+        messages: bool,
         #[command(flatten)]
         host: HostOpt,
     },

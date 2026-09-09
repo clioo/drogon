@@ -60,6 +60,18 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
     if let Command::AgentContext = &cli.command {
         return crate::agent_context::run(&request_id, json);
     }
+    // The retired coordinator verbs never contact the runtime: they report
+    // the migration guidance locally even when no daemon is listening. This
+    // must run before Client::open, which fails hard on a missing runtime.
+    if let Command::Orchestration { command } = &cli.command
+        && matches!(
+            &**command,
+            crate::orchestration_cli::OrchestrationCommand::CoordinatorStart { .. }
+                | crate::orchestration_cli::OrchestrationCommand::CoordinatorStop
+        )
+    {
+        return crate::orchestration_commands::retired_coordinator_result(&request_id, json);
+    }
     let client = Client::open(&data_dir, &request_id)?;
 
     match &cli.command {

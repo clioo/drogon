@@ -50,13 +50,14 @@ impl CliError {
     }
 
     /// The failure envelope to print on stdout under `--json`.
-    pub fn failure_envelope(&self) -> Option<Response> {
+    pub fn failure_envelope(&self) -> Option<Value> {
         match self {
             CliError::Usage(_) => None,
-            CliError::Server { raw, .. } => serde_json::from_value(raw.clone()).ok(),
-            CliError::Local { error, request_id } => {
-                Some(Response::failure(request_id.clone(), error.clone()))
-            }
+            CliError::Server { raw, .. } => Some(raw.clone()),
+            CliError::Local { error, request_id } => Some(
+                serde_json::to_value(Response::failure(request_id.clone(), error.clone()))
+                    .unwrap_or(Value::Null),
+            ),
         }
     }
 

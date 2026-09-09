@@ -161,6 +161,44 @@ fn coordinator_args() -> Vec<&'static str> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retired_coordinator_verbs_fail_before_any_runtime_contact_with_migration_data() {
+    for (verb, alias) in [
+        ("coordinator-start", "run"),
+        ("coordinator-stop", "run-stop"),
+    ] {
+        for path in [verb, alias] {
+            let dir = tempfile::tempdir().unwrap();
+            // No mock started: the socket is absent, so any runtime contact
+            // would fail transport — proving the retirement is client-side.
+            let invocation = run_cli(dir.path(), &["--json", "orchestration", path], &[]);
+            assert_eq!(invocation.exit_code, 1, "{path}: {}", invocation.stderr);
+            let value: Value = serde_json::from_str(&invocation.stdout).unwrap_or_else(|_| {
+                panic!("{path} must emit a JSON envelope: {}", invocation.stdout)
+            });
+            assert_eq!(value["ok"], json!(false));
+            assert_eq!(value["error"]["code"], "orchestration_migration_required");
+            assert!(
+                value["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("No effects were applied")
+            );
+            let data = &value["error"]["data"];
+            assert_eq!(data["reason"], "command_retired");
+            assert_eq!(data["effectsApplied"], json!(false));
+            assert_eq!(
+                data["nextCommandArgs"],
+                json!(["skills", "get", "orchestration", "--full"])
+            );
+            assert_eq!(
+                data["guide"],
+                json!({"topic": "orchestration", "full": true})
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retain_does_not_derive_mutation_authority_from_named_run_inspection() {
     let dir = tempfile::tempdir().unwrap();
     let mock = MockService::start(dir.path(), mock_behavior(true, vec![]));
@@ -3175,6 +3213,107 @@ async fn worker_list_refuses_worker_credential() {
     assert!(
         mock.captured().is_empty(),
         "refused credential never connects"
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// reset: typed mapping per scope, credential refusal, exactly-one-scope.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reset_maps_each_scope_flag_to_the_typed_reset_method() {
+    for (flag, scope) in [
+        ("--all", "all"),
+        ("--tasks", "tasks"),
+        ("--messages", "messages"),
+    ] {
+        let dir = temp_dir("reset-scope");
+        let mock = MockService::start(
+            &dir,
+            mock_behavior(true, vec![("orchestration.reset", json!({"reset": scope}))]),
+        );
+        let invocation = run_cli(&dir, &["orchestration", "reset", flag, "--json"], &[]);
+        assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+        let envelope: Value = serde_json::from_str(&invocation.stdout).expect("JSON envelope");
+        assert_eq!(envelope["ok"], true);
+        assert_eq!(envelope["result"]["reset"], scope);
+        let seen = mock.captured();
+        let call = seen
+            .iter()
+            .find(|request| request["method"] == "orchestration.reset")
+            .expect("mock saw orchestration.reset");
+        assert_eq!(call["params"]["scope"], scope);
+        assert_eq!(call["params"]["hostId"], HOST);
+        drop(mock);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reset_human_mode_prints_reset_scope() {
+    let dir = temp_dir("reset-human");
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![("orchestration.reset", json!({"reset": "tasks"}))],
+        ),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "reset", "--tasks"], &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert_eq!(invocation.stdout.trim(), "Reset: tasks");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reset_refuses_worker_credential() {
+    let dir = temp_dir("reset-cred");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let capability = os(SCOPED_CREDENTIAL);
+    let env = [("DROGON_DISPATCH_CAPABILITY", &capability)];
+    let invocation = run_cli(&dir, &["orchestration", "reset", "--tasks", "--json"], &env);
+    assert_eq!(invocation.exit_code, 2);
+    assert!(
+        invocation
+            .stderr
+            .contains("refuses DROGON_DISPATCH_CAPABILITY"),
+        "{}",
+        invocation.stderr
+    );
+    assert!(
+        mock.captured().is_empty(),
+        "refused credential never connects"
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reset_requires_exactly_one_scope_flag() {
+    // No scope flag: usage error, never connects.
+    let dir = temp_dir("reset-noscope");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let invocation = run_cli(&dir, &["orchestration", "reset", "--json"], &[]);
+    assert_eq!(invocation.exit_code, 2, "{}", invocation.stderr);
+    assert!(
+        invocation.stderr.contains("exactly one reset scope"),
+        "{}",
+        invocation.stderr
+    );
+    assert!(mock.captured().is_empty(), "usage error never connects");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+    // Two scope flags: clap conflict, never connects.
+    let dir = temp_dir("reset-twoscope");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let invocation = run_cli(&dir, &["orchestration", "reset", "--all", "--tasks"], &[]);
+    assert_eq!(invocation.exit_code, 2, "{}", invocation.stderr);
+    assert!(
+        mock.captured().is_empty(),
+        "conflicting flags never connect"
     );
     drop(mock);
     let _ = std::fs::remove_dir_all(&dir);

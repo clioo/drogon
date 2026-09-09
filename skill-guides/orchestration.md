@@ -149,6 +149,14 @@ terminal fills missing dispatch fields from scoped hints. Explicit worker
 fields must agree with those hints. Coordinator-only verbs refuse a worker credential
 outright. Take over a run explicitly with
 `drogon-cli orchestration run-use --run <ID> --coordinator-id <ID> --consumer-generation 3 --takeover`.
+`drogon-cli orchestration reset --tasks` clears
+orchestration domain state on this host only (exactly one of `--all`,
+`--tasks`, `--messages`): `--all` clears runs, tasks,
+gates, attempts, mail and retention; `--tasks` clears tasks, gates, attempts,
+retention and run bindings while closing (not deleting) pending question
+threads; `--messages` clears mail messages, deliveries and question threads.
+Reset needs no coordinator binding, keeps mutation receipts, and is refused
+while a live supervised worker attempt is active — stop it first.
 
 ## Liveness
 

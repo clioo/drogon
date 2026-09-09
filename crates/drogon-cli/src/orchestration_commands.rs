@@ -23,9 +23,9 @@ use drogon_protocol::orchestration_question::{
     RequestLedgerState, RequestShowParams, RequestShowResult,
 };
 use drogon_protocol::orchestration_run::{
-    RunBindParams, RunCreateParams, RunCreateResult, RunCurrentParams, RunCurrentResult,
-    RunListParams, RunListResult, RunShowParams, RunShowResult, RunSummary, RunUseParams,
-    RunUseResult,
+    ResetParams, ResetResult, ResetScope, RunBindParams, RunCreateParams, RunCreateResult,
+    RunCurrentParams, RunCurrentResult, RunListParams, RunListResult, RunShowParams, RunShowResult,
+    RunSummary, RunUseParams, RunUseResult,
 };
 use drogon_protocol::orchestration_scope::{CoordinatorScope, HostScope};
 use drogon_protocol::orchestration_task::{
@@ -75,6 +75,24 @@ fn usage(message: impl Into<String>) -> CliError {
 /// only the dispatch receipt scope; and reuse execution refuses fresh launch
 /// preferences.
 pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliError> {
+    // Reset takes exactly one scope flag (source: reset-handler usage check).
+    if let OrchestrationCommand::Reset {
+        all,
+        tasks,
+        messages,
+        ..
+    } = command
+    {
+        let scopes = [*all, *tasks, *messages]
+            .iter()
+            .filter(|flag| **flag)
+            .count();
+        if scopes != 1 {
+            return Err(usage(
+                "Choose exactly one reset scope: --all, --tasks, or --messages.",
+            ));
+        }
+    }
     let worker_credential = credential::dispatch_credential_present();
     // Scoped hints are local inputs: present-but-empty or non-UTF-8 values
     // fail closed before anything connects.
@@ -118,6 +136,7 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             | OrchestrationCommand::WorkerRelease { .. }
             | OrchestrationCommand::WorkerRetain { .. }
             | OrchestrationCommand::WorkerList { .. }
+            | OrchestrationCommand::Reset { .. }
     );
     if coordinator_only {
         if worker_credential {
@@ -596,6 +615,41 @@ fn check_dispatch_id(dispatch_id: &str) -> Result<(), String> {
     drogon_protocol::orchestration_common::validate_short_label(dispatch_id).map_err(|e| e.message)
 }
 
+/// The retired coordinator verbs report the migration guidance without any
+/// runtime contact (source: `coordinator-start`/`coordinator-stop` handlers
+/// throw before touching the client).
+pub fn retired_coordinator_result(request_id: &str, _json: bool) -> Result<RunOutcome, CliError> {
+    let error = drogon_protocol::RpcError {
+        code: "orchestration_migration_required".into(),
+        message: "The legacy automatic coordinator command is retired. No effects were applied."
+            .into(),
+        retryable: false,
+    };
+    let mut value = serde_json::to_value(drogon_protocol::Response::failure(
+        request_id.to_string(),
+        error,
+    ))
+    .map_err(|_| CliError::Usage("cannot build retirement envelope".into()))?;
+    // Source `orchestrationMigrationData('command_retired')`.
+    value["error"]["data"] = serde_json::json!({
+        "effectsApplied": false,
+        "guide": {"topic": "orchestration", "full": true},
+        "nextCommandArgs": ["skills", "get", "orchestration", "--full"],
+        "nextSteps": [
+            "Using this same Drogon CLI executable, run: skills get orchestration --full",
+            "Read the returned guide completely and do not retry the previous command unchanged."
+        ],
+        "reason": "command_retired",
+        "requiredContractVersion": drogon_protocol::orchestration_scope::COORDINATION_CONTRACT_VERSION
+    });
+    Err(CliError::Server {
+        error: serde_json::from_value(value["error"].clone()).unwrap_or_else(|_| {
+            drogon_protocol::RpcError::new("orchestration_migration_required", "retired")
+        }),
+        raw: value,
+    })
+}
+
 /// Entry point dispatched from `commands::run`.
 pub async fn run(
     client: &Client,
@@ -603,6 +657,12 @@ pub async fn run(
     json: bool,
     command: &OrchestrationCommand,
 ) -> Result<RunOutcome, CliError> {
+    if matches!(
+        command,
+        OrchestrationCommand::CoordinatorStart { .. } | OrchestrationCommand::CoordinatorStop
+    ) {
+        return retired_coordinator_result(request_id, json);
+    }
     let status = capability_preflight(client, request_id).await?;
     let explicit_host = match command {
         OrchestrationCommand::RunCreate { host, .. }
@@ -625,11 +685,15 @@ pub async fn run(
         | OrchestrationCommand::WorkerRelease { host, .. }
         | OrchestrationCommand::WorkerRetain { host, .. }
         | OrchestrationCommand::WorkerList { host, .. }
+        | OrchestrationCommand::Reset { host, .. }
         | OrchestrationCommand::Send { host, .. }
         | OrchestrationCommand::Check { host, .. }
         | OrchestrationCommand::Reply { host, .. }
         | OrchestrationCommand::Ask { host, .. }
         | OrchestrationCommand::RequestShow { host, .. } => host.host.as_deref(),
+        OrchestrationCommand::CoordinatorStart { .. } | OrchestrationCommand::CoordinatorStop => {
+            None
+        }
     };
     let host_id = resolve_host(explicit_host, &status.host_id, request_id)?;
     let resolved =
@@ -638,6 +702,9 @@ pub async fn run(
     let command = &resolved.command;
 
     match command {
+        OrchestrationCommand::CoordinatorStart { .. } | OrchestrationCommand::CoordinatorStop => {
+            unreachable!("retired coordinator verbs return before capability preflight")
+        }
         OrchestrationCommand::RunCreate {
             objective,
             coordinator_id,
@@ -1723,6 +1790,42 @@ pub async fn run(
                 },
                 0,
             )
+        }
+        OrchestrationCommand::Reset {
+            all,
+            tasks,
+            messages,
+            ..
+        } => {
+            // Exactly-one-scope is enforced in `validate_actor_flags` before
+            // any connection; clap conflicts reject multi-scope invocations.
+            let scope = if *all {
+                ResetScope::All
+            } else if *tasks {
+                ResetScope::Tasks
+            } else if *messages {
+                ResetScope::Messages
+            } else {
+                return Err(usage(
+                    "Choose exactly one reset scope: --all, --tasks, or --messages.",
+                ));
+            };
+            let params = ResetParams {
+                host: host_scope(&host_id),
+                scope,
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call("orchestration.reset", value, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let result: ResetResult =
+                Client::decode_checked(&call, "orchestration.reset", |r: &ResetResult| {
+                    if r.reset != params.scope_name() {
+                        return Err("reset response names a different scope".into());
+                    }
+                    Ok(())
+                })?;
+            emit(call, json, || format!("Reset: {}", result.reset), 0)
         }
         OrchestrationCommand::Send {
             actor,

@@ -179,6 +179,47 @@ pub struct RunListResult {
     pub next_cursor: Option<OpaqueCursor>,
 }
 
+/// Host-scoped reset scope: exactly one variant per request. Mirrors the
+/// source `orchestration.reset` flags (`--all`/`--tasks`/`--messages`).
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ResetScope {
+    All,
+    Tasks,
+    Messages,
+}
+
+/// Host-scoped orchestration reset. No coordinator binding: the scope selects
+/// which domain tables are cleared on the addressed host. The requests ledger
+/// is always preserved so a lost reset response stays replayable.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetParams {
+    #[serde(flatten)]
+    pub host: HostScope,
+    pub scope: ResetScope,
+}
+
+impl ResetParams {
+    pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
+        self.host.validate_target(execution_host_id)
+    }
+
+    pub fn scope_name(&self) -> &'static str {
+        match self.scope {
+            ResetScope::All => "all",
+            ResetScope::Tasks => "tasks",
+            ResetScope::Messages => "messages",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetResult {
+    pub reset: String,
+}
+
 /// Read-only run inspection.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
