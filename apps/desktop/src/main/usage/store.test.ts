@@ -1,4 +1,6 @@
-import { describe, expect, test } from "vitest";
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { describe, expect, test, vi } from "vitest";
 import type { ProviderUsage } from "../../shared/usage-contract";
 import { AwakeController } from "./awake";
 import {
@@ -218,22 +220,36 @@ describe("store fixture seam and dispose", () => {
   // R16-AY2: auto is a first-class mode and the watcher's activity report
   // lands in the served snapshot.
   test("setAwake carries auto and setAgentWorking updates the served snapshot", () => {
-    const controller = new AwakeController({ platform: "darwin" });
+    const child = Object.assign(new EventEmitter(), {
+      pid: 42000,
+      unref: vi.fn(),
+      kill: vi.fn(() => true),
+    });
+    const spawn = vi.fn(() => child as unknown as ChildProcess);
+    const controller = new AwakeController({ platform: "darwin", spawn });
     const store = new UsageStore({
       awake: controller,
       readWorkspaceProbes: () => Promise.resolve([]),
     });
-    const auto = store.setAwake("auto");
-    expect(auto.mode).toBe("auto");
-    expect(auto.active).toBe(false);
-    // Served snapshot reflects the mode switch.
-    expect(store.current().awake.mode).toBe("auto");
-    // An agent starts working: the served snapshot flips to active.
-    const working = store.setAgentWorking(true);
-    expect(working.active).toBe(true);
-    expect(store.current().awake.active).toBe(true);
-    // Idle releases it again.
-    expect(store.setAgentWorking(false).active).toBe(false);
-    expect(store.current().awake.active).toBe(false);
+    try {
+      const auto = store.setAwake("auto");
+      expect(auto.mode).toBe("auto");
+      expect(auto.active).toBe(false);
+      // Served snapshot reflects the mode switch.
+      expect(store.current().awake.mode).toBe("auto");
+      // An agent starts working: the served snapshot flips to active.
+      const working = store.setAgentWorking(true);
+      expect(working.active).toBe(true);
+      expect(store.current().awake.active).toBe(true);
+      expect(spawn).toHaveBeenCalledExactlyOnceWith("/usr/bin/caffeinate", ["-i", "-s"], {
+        stdio: "ignore", windowsHide: true,
+      });
+      // Idle releases it again.
+      expect(store.setAgentWorking(false).active).toBe(false);
+      expect(store.current().awake.active).toBe(false);
+      expect(child.kill).toHaveBeenCalledOnce();
+    } finally {
+      store.dispose();
+    }
   });
 });
