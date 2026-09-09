@@ -162,7 +162,7 @@ fn task_cursor_advances_while_brief_and_full_specs_preserve_unicode() {
 #[test]
 fn any_future_schema_version_refuses_startup_without_partial_tables() {
     let mut conn = Connection::open_in_memory().unwrap();
-    conn.execute_batch("CREATE TABLE orchestration_domain_meta(version INTEGER NOT NULL); INSERT INTO orchestration_domain_meta VALUES (1),(3);").unwrap();
+    conn.execute_batch(&format!("CREATE TABLE orchestration_domain_meta(version INTEGER NOT NULL); INSERT INTO orchestration_domain_meta VALUES (1),({});", schema::SCHEMA_VERSION + 1)).unwrap();
     let tx = conn.transaction().unwrap();
     assert!(schema::migrate_in_tx(&tx).is_err());
     let count: i64 = tx

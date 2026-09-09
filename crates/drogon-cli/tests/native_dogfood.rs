@@ -455,6 +455,40 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
         );
     }
 
+    let mut gate_args = vec!["orchestration".to_string(), "gate-create".to_string()];
+    scope_args(&mut gate_args);
+    gate_args.extend(
+        [
+            "--task",
+            &task_id,
+            "--question",
+            "Proceed?",
+            "--options",
+            "[\"yes\",\"no\"]",
+        ]
+        .map(String::from),
+    );
+    let args: Vec<_> = gate_args.iter().map(String::as_str).collect();
+    let (code, gate) = coordinator_call(&data_dir, &args);
+    assert_ok(code, &gate, &args);
+    let gate_id = text_field(&gate, "/result/gate/id").to_string();
+    assert_eq!(gate["result"]["gate"]["status"], "pending");
+    let mut list_args = vec!["orchestration".to_string(), "gate-list".to_string()];
+    scope_args(&mut list_args);
+    list_args.extend(["--task", &task_id, "--status", "pending"].map(String::from));
+    let args: Vec<_> = list_args.iter().map(String::as_str).collect();
+    let (code, gates) = coordinator_call(&data_dir, &args);
+    assert_ok(code, &gates, &args);
+    assert_eq!(gates["result"]["count"], 1);
+    assert_eq!(gates["result"]["gates"][0]["id"], gate_id);
+    let mut resolve_args = vec!["orchestration".to_string(), "gate-resolve".to_string()];
+    scope_args(&mut resolve_args);
+    resolve_args.extend(["--id", &gate_id, "--resolution", "yes"].map(String::from));
+    let args: Vec<_> = resolve_args.iter().map(String::as_str).collect();
+    let (code, resolved) = coordinator_call(&data_dir, &args);
+    assert_ok(code, &resolved, &args);
+    assert_eq!(resolved["result"]["gate"]["status"], "resolved");
+
     // --- attempt 1: fresh launch, fixture harness reports FAILURE ---
     let mut start1_args: Vec<String> = vec!["orchestration".into(), "worker-start".into()];
     scope_args(&mut start1_args);

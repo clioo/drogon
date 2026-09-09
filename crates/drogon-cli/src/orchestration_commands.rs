@@ -98,6 +98,9 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             | OrchestrationCommand::RunUse { .. }
             | OrchestrationCommand::TaskCreate { .. }
             | OrchestrationCommand::TaskUpdate { .. }
+            | OrchestrationCommand::GateCreate { .. }
+            | OrchestrationCommand::GateResolve { .. }
+            | OrchestrationCommand::GateList { .. }
             | OrchestrationCommand::TaskList { .. }
             | OrchestrationCommand::TaskShow { .. }
             | OrchestrationCommand::WorkerStart { .. }
@@ -340,7 +343,7 @@ fn host_scope(host_id: &str) -> HostScope {
 }
 
 /// Coordinator bindings are explicit-only: no hint filling, no defaults.
-fn coordinator_scope(host_id: &str, args: &CoordinatorScopeArgs) -> CoordinatorScope {
+pub(crate) fn coordinator_scope(host_id: &str, args: &CoordinatorScopeArgs) -> CoordinatorScope {
     CoordinatorScope {
         host: host_scope(host_id),
         run_id: args.run.clone(),
@@ -478,7 +481,7 @@ fn call_timeout(wait: Option<&WaitPolicy>) -> Duration {
     }
 }
 
-fn validate_params<T: serde::Serialize>(
+pub(crate) fn validate_params<T: serde::Serialize>(
     params: &T,
     validate: impl FnOnce(&T) -> Result<(), RpcError>,
     request_id: &str,
@@ -497,7 +500,7 @@ fn validate_params<T: serde::Serialize>(
     })
 }
 
-fn emit(
+pub(crate) fn emit(
     call: CallOk,
     json: bool,
     human: impl FnOnce() -> String,
@@ -588,6 +591,9 @@ pub async fn run(
         | OrchestrationCommand::RunUse { host, .. }
         | OrchestrationCommand::TaskCreate { host, .. }
         | OrchestrationCommand::TaskUpdate { host, .. }
+        | OrchestrationCommand::GateCreate { host, .. }
+        | OrchestrationCommand::GateResolve { host, .. }
+        | OrchestrationCommand::GateList { host, .. }
         | OrchestrationCommand::TaskList { host, .. }
         | OrchestrationCommand::TaskShow { host, .. }
         | OrchestrationCommand::WorkerStart { host, .. }
@@ -897,6 +903,12 @@ pub async fn run(
                 },
                 0,
             )
+        }
+        command @ (OrchestrationCommand::GateCreate { .. }
+        | OrchestrationCommand::GateResolve { .. }
+        | OrchestrationCommand::GateList { .. }) => {
+            crate::orchestration_gate_commands::run(client, request_id, json, &host_id, command)
+                .await
         }
         OrchestrationCommand::TaskList {
             scope,

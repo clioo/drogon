@@ -9,6 +9,7 @@ pub mod git;
 pub mod jira;
 pub mod mentu;
 pub mod orchestration_common;
+pub mod orchestration_gate;
 pub mod orchestration_mail;
 pub mod orchestration_question;
 pub mod orchestration_run;

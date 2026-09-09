@@ -257,6 +257,42 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+    /// Block a task on a durable decision gate
+    GateCreate {
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[arg(long, value_name = "ID")]
+        task: String,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        question: String,
+        /// JSON array of answer choices (not ask's CSV form)
+        #[arg(long, value_name = "JSON")]
+        options: Option<String>,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// Resolve a gate and return its task to ready
+    GateResolve {
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[arg(long, value_name = "ID")]
+        id: String,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        resolution: String,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// List decision gates in the bound run
+    GateList {
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[arg(long, value_name = "ID")]
+        task: Option<String>,
+        #[arg(long, value_parser = ["pending", "resolved", "timeout"])]
+        status: Option<String>,
+        #[command(flatten)]
+        host: HostOpt,
+    },
     /// List tasks in the bound run
     TaskList {
         #[command(flatten)]

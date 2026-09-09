@@ -313,6 +313,13 @@ fn task_update_cannot_settle_or_requeue_an_active_supervised_dispatch() {
             "task_not_startable"
         );
     }
+    let mut gate = coordinator_scope_params(&host, &run, "owner", 1);
+    gate["taskId"] = json!(task);
+    gate["question"] = json!("cannot block active worker");
+    assert_eq!(
+        err_code(&engine, "orchestration.gateCreate", "active-gate", gate),
+        "task_not_startable"
+    );
     let stored: (String, Option<String>) = conn
         .query_row(
             "SELECT status,result FROM orchestration_tasks WHERE task_id=?1",
@@ -388,7 +395,7 @@ fn task_result_schema_upgrade_preserves_v1_data_and_takes_a_backup() {
             .iter()
             .any(|m| m["component"] == "orchestration_domain"
                 && m["recorded_version"] == 1
-                && m["migrating_to"] == 2)
+                && m["migrating_to"] == drogon_orchestration::schema::SCHEMA_VERSION)
     );
     let backup = rusqlite::Connection::open(backups[0].join(drogon_core::DB_FILE_NAME)).unwrap();
     assert_eq!(

@@ -534,6 +534,9 @@ impl Engine {
             | "orchestration.runShow"
             | "orchestration.taskCreate"
             | "orchestration.taskUpdate"
+            | "orchestration.gateCreate"
+            | "orchestration.gateResolve"
+            | "orchestration.gateList"
             | "orchestration.taskList"
             | "orchestration.taskShow" => self.dispatch_run_task(request),
             "orchestration.workerStart"

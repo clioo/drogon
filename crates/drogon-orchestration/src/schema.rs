@@ -4,7 +4,7 @@ use drogon_protocol::RpcError;
 use rusqlite::{OptionalExtension, Transaction, params};
 
 /// Version stamped into `orchestration_domain_meta` for the DDL applied below.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 const DDL: &str = "
 CREATE TABLE IF NOT EXISTS orchestration_domain_meta (
@@ -50,6 +50,21 @@ CREATE TABLE IF NOT EXISTS orchestration_task_dependencies (
 
 CREATE INDEX IF NOT EXISTS orchestration_dependents
     ON orchestration_task_dependencies(depends_on_task_id, task_id);
+
+CREATE TABLE IF NOT EXISTS orchestration_gates (
+    id TEXT PRIMARY KEY,
+    host_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    question TEXT NOT NULL,
+    options TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','resolved','timeout')),
+    resolution TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS orchestration_gates_run ON orchestration_gates(host_id,run_id,created_at);
+
 ";
 
 /// Reads the applied domain schema version: `None` when the tables are absent.
@@ -94,6 +109,8 @@ pub fn migrate_in_tx(tx: &Transaction<'_>) -> Result<(), RpcError> {
     if applied == Some(1) {
         tx.execute_batch("ALTER TABLE orchestration_tasks ADD COLUMN result TEXT;")
             .map_err(store_error)?;
+    }
+    if applied.is_some_and(|version| version < SCHEMA_VERSION) {
         tx.execute(
             "UPDATE orchestration_domain_meta SET version = ?1",
             [SCHEMA_VERSION],

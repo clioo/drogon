@@ -1,6 +1,7 @@
 //! Engine-owned admission and receipts around transaction-only run/task operations.
 
-use drogon_orchestration::{runs, tasks};
+use drogon_orchestration::{gates, runs, tasks};
+use drogon_protocol::orchestration_gate::*;
 use drogon_protocol::orchestration_run::*;
 use drogon_protocol::orchestration_scope::CoordinatorScope;
 use drogon_protocol::orchestration_task::*;
@@ -76,30 +77,52 @@ impl Engine {
                     coordinator_actor(&params.scope),
                     |tx| runs::require_coordinator(tx, &params.scope),
                     |tx| {
-                        tasks::show(
-                            tx,
-                            &TaskShowParams {
-                                scope: params.scope.clone(),
-                                task_id: params.task_id.clone(),
-                            },
-                        )?;
-                        let active =
-                            coordination_attempts::history(tx, &params.scope, &params.task_id)?
-                                .iter()
-                                .any(|entry| entry.active);
-                        if active != (params.status == TaskStatus::Dispatched) {
-                            return Err(RpcError::new(
-                                "task_not_startable",
-                                if active {
-                                    "Stop or settle the active worker before changing task status."
-                                } else {
-                                    "A task cannot be dispatched without an active Dispatch."
-                                },
-                            ));
-                        }
+                        require_task_transition(tx, &params.scope, &params.task_id, params.status)?;
                         encode(tasks::update(tx, &params)?)
                     },
                 )
+            }
+            "orchestration.gateCreate" => {
+                let params: GateCreateParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.coordination_mutation(
+                    request,
+                    coordinator_actor(&params.scope),
+                    |tx| runs::require_coordinator(tx, &params.scope),
+                    |tx| {
+                        require_task_transition(
+                            tx,
+                            &params.scope,
+                            &params.task_id,
+                            TaskStatus::Blocked,
+                        )?;
+                        encode(gates::create(tx, &params, &new_id("gate"))?)
+                    },
+                )
+            }
+            "orchestration.gateResolve" => {
+                let params: GateResolveParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.coordination_mutation(
+                    request,
+                    coordinator_actor(&params.scope),
+                    |tx| runs::require_coordinator(tx, &params.scope),
+                    |tx| {
+                        let gate = gates::get(tx, &params.scope, &params.gate_id)?;
+                        require_task_transition(
+                            tx,
+                            &params.scope,
+                            &gate.task_id,
+                            TaskStatus::Ready,
+                        )?;
+                        encode(gates::resolve(tx, &params)?)
+                    },
+                )
+            }
+            "orchestration.gateList" => {
+                let params: GateListParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.coordination_read(|tx| encode(gates::list(tx, &params)?))
             }
             "orchestration.taskList" => {
                 let params: TaskListParams = decode(&request.params)?;
@@ -179,6 +202,35 @@ impl Engine {
         // Fence and payload share one snapshot; reads never allocate request receipts.
         read(&tx)
     }
+}
+
+fn require_task_transition(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    task_id: &str,
+    status: TaskStatus,
+) -> Result<(), RpcError> {
+    tasks::show(
+        tx,
+        &TaskShowParams {
+            scope: scope.clone(),
+            task_id: task_id.to_string(),
+        },
+    )?;
+    let active = coordination_attempts::history(tx, scope, task_id)?
+        .iter()
+        .any(|entry| entry.active);
+    if active != (status == TaskStatus::Dispatched) {
+        return Err(RpcError::new(
+            "task_not_startable",
+            if active {
+                "Stop or settle the active worker before changing task status."
+            } else {
+                "A task cannot be dispatched without an active Dispatch."
+            },
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn coordinator_actor(scope: &CoordinatorScope) -> Actor {
