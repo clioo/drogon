@@ -232,6 +232,49 @@ fn ignored_writes_cannot_report_success_or_partially_change_task_readiness() {
 }
 
 #[test]
+fn resolving_a_gate_twice_replays_the_resolution_and_conflicts_on_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let scope = scope(&engine, "owner");
+    let task = task(&engine, &scope, "task");
+    let mut create = scope.clone();
+    create["taskId"] = json!(task);
+    create["question"] = json!("Ship?");
+    let gate = ok(&engine, "orchestration.gateCreate", "gate", create)["gate"].clone();
+    let mut resolve = scope.clone();
+    resolve["gateId"] = gate["id"].clone();
+    resolve["resolution"] = json!("yes");
+    let first = ok(
+        &engine,
+        "orchestration.gateResolve",
+        "resolve-1",
+        resolve.clone(),
+    );
+    assert_eq!(first["gate"]["status"], "resolved");
+    // An exact repeat is a no-op read-back; a different resolution conflicts.
+    let replay = ok(
+        &engine,
+        "orchestration.gateResolve",
+        "resolve-2",
+        resolve.clone(),
+    );
+    assert_eq!(replay["gate"], first["gate"]);
+    resolve["resolution"] = json!("no");
+    let conflict = engine.dispatch(
+        serde_json::from_value(json!({
+            "protocol": drogon_protocol::PROTOCOL_VERSION, "requestId": "resolve-3",
+            "method": "orchestration.gateResolve", "params": resolve,
+        }))
+        .unwrap(),
+    );
+    assert!(!conflict.ok);
+    assert_eq!(conflict.error.unwrap().code, "answer_conflict");
+    let shown = ok(&engine, "orchestration.gateList", "list", scope)["gates"][0].clone();
+    assert_eq!(shown["resolution"], "yes");
+    assert_eq!(shown["status"], "resolved");
+}
+
+#[test]
 fn gate_mutations_are_run_scoped_and_fenced_before_receipt_replay() {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();

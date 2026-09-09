@@ -73,7 +73,19 @@ pub fn create(
 pub fn resolve(tx: &Transaction<'_>, params: &GateResolveParams) -> Result<GateResult, RpcError> {
     params.validate_shape(&params.scope.host.host_id)?;
     let gate = get(tx, &params.scope, &params.gate_id)?;
-    let changed = tx.execute("UPDATE orchestration_gates SET status='resolved',resolution=?2,resolved_at=datetime('now') WHERE id=?1",
+    if gate.status == GateStatus::Resolved {
+        // Re-resolving a settled gate is a no-op read-back (source: the
+        // unconditional UPDATE would overwrite a resolved gate; refuse a
+        // different resolution instead of silently rewriting it).
+        if gate.resolution.as_deref() != Some(params.resolution.as_str()) {
+            return Err(RpcError::new(
+                "answer_conflict",
+                "Gate is already resolved with a different resolution.",
+            ));
+        }
+        return Ok(GateResult { gate });
+    }
+    let changed = tx.execute("UPDATE orchestration_gates SET status='resolved',resolution=?2,resolved_at=datetime('now') WHERE id=?1 AND status='pending'",
         params![params.gate_id,params.resolution]).map_err(store_error)?;
     if changed != 1 {
         return Err(store_error("Gate resolution was not persisted."));
