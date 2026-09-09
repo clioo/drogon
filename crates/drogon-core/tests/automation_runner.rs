@@ -994,6 +994,90 @@ fn prepare(c: &Connection, event_identity: &str, attempt_at: f64) -> RunPlan {
 }
 
 #[test]
+fn record_run_outcome_assigns_fork_style_per_automation_ordinals() {
+    let c = conn();
+    seed_scheduled_bot(&c);
+
+    let live = RunnerOutcome::Observed {
+        session_id: "s1".to_string(),
+        incarnation: "inc-1".to_string(),
+        verdict: "live".to_string(),
+        exit_code: None,
+    };
+    let first_plan = prepare(&c, "due-100", 100.0);
+    record_run_outcome(&c, &first_plan, &live, 100.0).unwrap();
+    let first = automations::storage::get_automation_run(
+        &c,
+        &automation_run_id_for(&first_plan.request_id),
+    )
+    .unwrap()
+    .expect("row must exist");
+    assert_eq!(first.run_number, Some(1.0));
+
+    // A genuinely different due event for the SAME automation is a new run:
+    // the ordinal advances, matching the fork's nextAutomationRunNumber.
+    let second_plan = prepare(&c, "due-200", 200.0);
+    assert_ne!(
+        second_plan.request_id, first_plan.request_id,
+        "different due events must derive different request ids"
+    );
+    record_run_outcome(&c, &second_plan, &live, 200.0).unwrap();
+    let second = automations::storage::get_automation_run(
+        &c,
+        &automation_run_id_for(&second_plan.request_id),
+    )
+    .unwrap()
+    .expect("row must exist");
+    assert_eq!(
+        second.run_number,
+        Some(2.0),
+        "the second run of the same automation takes the next ordinal"
+    );
+
+    // A different automation numbers independently from 1.
+    insert_workspace(&c, "w2", HOST);
+    bstorage::create_bot(&c, HOST, FOLDER, &sample_bot("b2", "Bob", 0.0)).unwrap();
+    let other_automation = sample_automation("a2", "b2", Some("w2".to_string()));
+    let other_responsibility = scheduled_responsibility("r2", "a2", true);
+    bstorage::create_scheduled_responsibility(
+        &c,
+        HOST,
+        FOLDER,
+        "b2",
+        other_responsibility,
+        other_automation,
+    )
+    .unwrap();
+    let other_plan = ready_plan(
+        prepare_run_plan(
+            &c,
+            HOST,
+            FOLDER,
+            "b2",
+            "r2",
+            HOST,
+            &InvocationReason::ScheduledDue,
+            "due-300",
+            &harness_params(),
+            300.0,
+        )
+        .unwrap(),
+    );
+    record_run_outcome(&c, &other_plan, &live, 300.0).unwrap();
+    let other = automations::storage::get_automation_run(
+        &c,
+        &automation_run_id_for(&other_plan.request_id),
+    )
+    .unwrap()
+    .expect("row must exist");
+    assert_eq!(
+        other.run_number,
+        Some(1.0),
+        "ordinals are per automation, never global"
+    );
+}
+
+#[test]
 fn record_run_outcome_reopened_db_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("drogon-runner-history-idempotency.sqlite3");
@@ -1304,7 +1388,11 @@ fn record_run_outcome_retry_preserves_created_started_and_session_identity() {
     assert_eq!(first.created_at, 100.0);
     assert_eq!(first.started_at, Some(100.0));
     assert_eq!(first.dispatched_at, Some(100.0));
-    assert_eq!(first.run_number, None);
+    assert_eq!(
+        first.run_number,
+        Some(1.0),
+        "the fork's nextAutomationRunNumber ordinal is assigned once at creation"
+    );
 
     // A retry of the SAME event (same request_id), observed again later, at
     // a genuinely later wall-clock attempt time, re-admitting the same
@@ -1345,7 +1433,11 @@ fn record_run_outcome_retry_preserves_created_started_and_session_identity() {
         "dispatched_at is the FIRST dispatch time, frozen forever -- the retry's own \
          (later) attempt_at must never rewrite it"
     );
-    assert_eq!(retried.run_number, None, "run_number must stay untouched");
+    assert_eq!(
+        retried.run_number,
+        Some(1.0),
+        "run_number must stay untouched by the retry"
+    );
     assert_eq!(retried.terminal_session_id.as_deref(), Some("s1"));
     assert_eq!(retried.session_incarnation.as_deref(), Some("inc-1"));
     assert_eq!(

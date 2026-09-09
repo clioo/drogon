@@ -81,6 +81,7 @@ function historyEntry(
     responsibilityName: "Review duty",
     automationName: "Nightly review",
     automationRunNumber: 3,
+    automationRunStatus: "completed",
     ...overrides,
   };
 }
@@ -401,6 +402,7 @@ describe("BotsPanel render", () => {
           responsibilityName: null,
           automationName: null,
           automationRunNumber: null,
+          automationRunStatus: null,
         }),
         historyEntry(),
       ],
@@ -409,10 +411,10 @@ describe("BotsPanel render", () => {
     expect(markup).toContain("Removed responsibility");
     expect(markup).toContain("Recorded");
     expect(markup).toContain("Review duty");
-    expect(markup).toContain("Nightly review · run 3");
+    expect(markup).toContain("completed · run 3");
   });
 
-  it("renders per-bot history rows as evidence detail, never as success status", () => {
+  it("renders per-bot history rows with the linked run's raw verdict, never a synthesized success badge", () => {
     const markup = render({
       bots: [bot()],
       history: [
@@ -433,7 +435,10 @@ describe("BotsPanel render", () => {
     });
     expect(markup).toContain("Responsibility history");
     expect(markup).toContain("Review duty");
-    expect(markup).not.toContain("Completed");
+    // The fork's `status · id` evidence line, with the run ordinal standing
+    // in for the id: raw snake_case verdicts, not label-cased badges.
+    expect(markup).toContain("completed · run 3");
+    expect(markup).not.toContain(">Completed<");
     expect(markup).not.toContain("succeeded");
   });
 });

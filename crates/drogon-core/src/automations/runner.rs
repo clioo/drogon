@@ -762,7 +762,13 @@ fn upsert_linked_automation_run_in_tx(
                 started_at: observation.dispatched_at,
                 dispatched_at: observation.dispatched_at,
                 created_at: plan.attempt_at,
-                run_number: None,
+                // Fork parity: the ordinal is assigned once, here at
+                // creation (the fork's `nextAutomationRunNumber`), never
+                // on the merge/replay path below.
+                run_number: Some(automations_storage::next_automation_run_number(
+                    conn,
+                    &plan.automation_id,
+                )?),
                 occurrence_count: None,
                 last_occurrence_at: None,
                 session_incarnation: observation.session_incarnation.clone(),

@@ -70,6 +70,9 @@ const history = z.object({
   responsibilityName: z.string().nullable(),
   automationName: z.string().nullable(),
   automationRunNumber: z.number().finite().nullable(),
+  // The linked run's status verdict (snake_case) projected for the fork's
+  // `status · runRef` evidence line; null for joins predating it.
+  automationRunStatus: z.string().nullable(),
 });
 export const botSnapshotInputSchema = scope
   // #348: workspaceId "" is the app-global scope — the zero-workspace Bots

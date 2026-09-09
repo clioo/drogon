@@ -266,6 +266,11 @@ export type BotsPanelHistoryEntry = {
   responsibilityName: string | null;
   automationName: string | null;
   automationRunNumber: number | null;
+  /** The linked automation run's status verdict (snake_case, e.g.
+   *  "completed") — the fork's snapshot carries the full
+   *  `automationRun` row and its history row renders `status · id`;
+   *  `null` only for rows whose join predates the projection. */
+  automationRunStatus: string | null;
 };
 
 export type BotsPanelSnapshot = {

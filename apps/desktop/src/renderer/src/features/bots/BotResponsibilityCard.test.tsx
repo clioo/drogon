@@ -66,6 +66,7 @@ function historyEntry(
     responsibilityName: "Nightly review",
     automationName: "Nightly review",
     automationRunNumber: 3,
+    automationRunStatus: "completed",
     ...overrides,
   };
 }
@@ -250,24 +251,33 @@ describe("BotResponsibilityCard", () => {
     expect(recorded).toContain("Recorded");
   });
 
-  it("renders history rows as the source does: name plus evidence line, no invocation badge, no observation suffix", () => {
+  it("renders history rows as the source does: name plus the fork's `status · runRef` evidence line, no invocation badge, no observation suffix", () => {
     const markup = render({
       history: [
         historyEntry({
           run: { ...historyEntry().run, id: "done", hostObservation: "exited" },
         }),
         historyEntry({
+          automationRunStatus: "dispatched",
+          run: { ...historyEntry().run, id: "live", hostObservation: "live" },
+        }),
+        historyEntry({
+          automationRunStatus: null,
           run: { ...historyEntry().run, id: "sched", invocation: "scheduled" },
         }),
       ],
     });
+    // Fork evidence line `status · id`, ported with the run ordinal standing
+    // in for the raw id; raw snake_case verdict, never a label-cased badge.
+    expect(markup).toContain("completed · run 3");
+    expect(markup).toContain("dispatched · run 3");
+    // A linked row whose join predates the status projection keeps the
+    // adapter's name-and-ordinal form, never an invented verdict.
     expect(markup).toContain("Nightly review · run 3");
-    // The fork's evidence line carries no status verdict and no invocation
-    // badge — invented UI is not rendered.
+    // The fork's row carries no invocation badge and no observation suffix.
     expect(markup).not.toContain("· exited");
     expect(markup).not.toContain(">Scheduled<");
     expect(markup).not.toContain(">Manual<");
-    expect(markup).not.toContain("Completed");
     expect(markup).not.toContain("succeeded");
   });
 

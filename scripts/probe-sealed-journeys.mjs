@@ -360,21 +360,30 @@ async function openAgentsSettings(page) {
     .getByRole("button", { name: "Settings", exact: true })
     .click();
   await page.getByRole("button", { name: "Agents", exact: true }).click();
-  await page.getByRole("radiogroup", { name: "Default harness" }).waitFor();
+  // R17 settings parity (#365): the fork's "Default Agent" surface replaced
+  // the retired "Default harness" radiogroup.
+  await page
+    .getByRole("heading", { name: "Default Agent", exact: true })
+    .waitFor();
 }
 
 async function setPiDefaults(page) {
   await openAgentsSettings(page);
-  await page
-    .getByRole("radiogroup", { name: "Default harness" })
-    .getByRole("radio", { name: "Pi", exact: true })
-    .click();
-  await page.getByRole("textbox", { name: "Pi model" }).fill(PI_MODEL);
-  await page
-    .getByRole("radiogroup", { name: "Pi permission mode" })
-    .getByRole("radio", { name: "Unattended", exact: true })
-    .click();
-  // The store debounces saves by 1s: wait it out before leaving Settings.
+  // Interactive Pi launches resolve their model from the agent's default
+  // arguments (agent_settings::plan_with_settings), so the local model is
+  // seeded through the Pi row's Arguments field — the new surface's
+  // equivalent of the retired per-harness "Pi model" input.
+  const row = page.locator('[data-agent-id="pi"]');
+  await row.getByRole("button", { name: "Expand command override" }).click();
+  const args = row.getByRole("textbox", { name: "Arguments", exact: true });
+  await args.fill(`--model ${PI_MODEL}`);
+  await args.press("Tab");
+  await page.waitForFunction(
+    async (expected) =>
+      (await window.drogon.agentSettings.get()).result?.settings
+        ?.agentDefaultArgs?.pi === expected,
+    `--model ${PI_MODEL}`,
+  );
   await delay(2000);
   await page.getByRole("button", { name: "Back to app", exact: true }).click();
   // The folder workspace may still host the surfaces probe's terminal, so
@@ -1137,9 +1146,10 @@ export async function probeBotPresetManualRun({
   let ownedAutomationId = null;
   try {
     // The shared model server can answer 429 under load; each Run click
-    // records a real history row (a failed turn still exits and settles
-    // "· exited"), so retry boundedly until a run's output carries the
-    // marker — never silently, every attempt stays visible in history.
+    // records a real history row (a failed turn still terminates the run
+    // row at a terminal status verdict), so retry boundedly until a run's
+    // output carries the marker — never silently, every attempt stays
+    // visible in history.
     // automation.list intentionally omits Bot ownership from its public
     // summary. Re-read the exact scope through the real Bot snapshot bridge;
     // the scheduled responsibility trigger carries the owned automation id.
@@ -1204,14 +1214,17 @@ export async function probeBotPresetManualRun({
         await delay(500);
       }
       assert.ok(newHistoryTestId);
-      // The Bots page owns a snapshot, not a live run subscription. Refresh
-      // through its visible control while the exact new row transitions to
-      // the honest `Recorded · exited` projection; do not let an earlier
-      // attempt's history satisfy this attempt.
+      // The row settles when the linked run's status verdict turns
+      // terminal — the fork's evidence line is `status · id`
+      // (isFinalAutomationRunStatus), ported here as `status · run N`.
+      // Non-terminal rows read `dispatched · run N`, so this waits through
+      // the headless run exactly like the pre-R17-E observation suffix did.
+      const terminalRunRow =
+        /(?:completed|dispatch_failed|skipped_precheck|skipped_missed|skipped_unavailable|skipped_needs_interactive_auth) · run \d+/;
       for (;;) {
         const row = page.locator(`[data-testid="${newHistoryTestId}"]`);
         const text = await row.innerText().catch(() => "");
-        if (/Manual/.test(text) && /· exited/.test(text)) break;
+        if (terminalRunRow.test(text)) break;
         assert.ok(Date.now() < rowDeadline, `bot run never settled: ${text}`);
         await page
           .getByRole("button", { name: "Refresh Bots", exact: true })
@@ -1219,7 +1232,7 @@ export async function probeBotPresetManualRun({
         await delay(500);
       }
       if (attempt === 1)
-        await shot(page, output, "bots-history-row-exited.png");
+        await shot(page, output, "bots-history-row-settled.png");
       // The run's output must be visible: the responsibility is a
       // bot-owned automation, so its run detail page renders the saved
       // snapshot.

@@ -203,6 +203,10 @@ fn create_delete_snapshot_round_trip_with_orphaned_history() {
         json!(responsibility_id)
     );
     assert_eq!(entries[0]["run"]["invocation"], json!("manual"));
+    // The linked automation run projects the fork's verdict and per-
+    // automation ordinal for the row's `status · runRef` evidence line.
+    assert_eq!(entries[0]["automationRunNumber"].as_f64(), Some(1.0));
+    assert!(entries[0]["automationRunStatus"].as_str().is_some());
 
     // Delete removes the projection and the still-Bot-owned automation
     // (runs included) but preserves the responsibility-run row as
@@ -236,6 +240,7 @@ fn create_delete_snapshot_round_trip_with_orphaned_history() {
     assert_eq!(entries.len(), 1);
     assert!(entries[0].get("responsibilityName").unwrap().is_null());
     assert!(entries[0].get("automationName").unwrap().is_null());
+    assert!(entries[0].get("automationRunStatus").unwrap().is_null());
 }
 
 #[test]
@@ -441,6 +446,10 @@ fn scheduled_tick_fires_the_bot_owned_automation_through_the_seam() {
     assert_eq!(entry["run"]["invocation"], json!("scheduled"));
     assert_eq!(entry["responsibilityName"], json!("Nightly review"));
     assert_eq!(entry["automationName"], json!("Nightly review"));
+    // The scheduled fire also carries the fork-style ordinal and verdict
+    // projection for the row's evidence line.
+    assert_eq!(entry["automationRunNumber"].as_f64(), Some(1.0));
+    assert!(entry["automationRunStatus"].as_str().is_some());
 
     // The responsibility projection survives its automation's fire: the
     // schedule advanced past the fired slot.
