@@ -11,6 +11,7 @@ import {
   isMixedVersionDaemon,
   missingRequiredCapabilities,
   REQUIRED_DAEMON_CAPABILITIES,
+  shouldGateLaunchOnAgentSettingsReadiness,
 } from "./daemon-capabilities";
 
 describe("isAgentSettingsAvailable", () => {
@@ -63,5 +64,34 @@ describe("isMixedVersionDaemon", () => {
     expect(isMixedVersionDaemon([...REQUIRED_DAEMON_CAPABILITIES])).toBe(
       false,
     );
+  });
+});
+
+describe("shouldGateLaunchOnAgentSettingsReadiness", () => {
+  // Coordinator review (msg_c48e2acbef42): App.tsx's startHarnessTracked
+  // (the actual consumer -- every new session/harness launch) used to gate
+  // unconditionally on agentSettingsState ever becoming `ready`, which
+  // never happens against a daemon that will never answer
+  // agent.settings.get -- every launch failed opaque forever.
+
+  it("gates (true) while no status has connected yet -- can't tell old daemon from not-yet-connected", () => {
+    expect(shouldGateLaunchOnAgentSettingsReadiness(false, [])).toBe(true);
+    expect(
+      shouldGateLaunchOnAgentSettingsReadiness(false, [
+        AGENT_SETTINGS_CAPABILITY,
+      ]),
+    ).toBe(true);
+  });
+
+  it("does not gate once a connected status confirms the capability is absent", () => {
+    expect(shouldGateLaunchOnAgentSettingsReadiness(true, [])).toBe(false);
+  });
+
+  it("still gates when a connected status confirms the capability IS present -- unchanged behavior for a current daemon", () => {
+    expect(
+      shouldGateLaunchOnAgentSettingsReadiness(true, [
+        AGENT_SETTINGS_CAPABILITY,
+      ]),
+    ).toBe(true);
   });
 });

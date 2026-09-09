@@ -211,7 +211,10 @@ import {
   isBotsAvailable,
   registerBotsRoute,
 } from "./bots-mount";
-import { isAgentSettingsAvailable } from "./daemon-capabilities";
+import {
+  isAgentSettingsAvailable,
+  shouldGateLaunchOnAgentSettingsReadiness,
+} from "./daemon-capabilities";
 import { BOTS_PAGE_HOST_TESTID } from "./features/bots";
 import {
   planBrowserRehydrate,
@@ -1577,7 +1580,14 @@ export function App() {
   }, [status?.serviceInstanceId]);
   const harnessLaunchMemoryRef = useRef<HarnessLaunchMemory>(new Map());
   const startHarnessTracked = async (input: HarnessLaunchInput) => {
-    if (!(await agentSettingsState.ensureReady())) {
+    // User-feature-closure item 7 (coordinator review): a mixed-version old
+    // daemon missing agent.settings.v1 made every launch here fail opaque
+    // ("settings_unavailable") forever -- see
+    // shouldGateLaunchOnAgentSettingsReadiness's own doc for why.
+    if (
+      shouldGateLaunchOnAgentSettingsReadiness(status !== null, liveCapabilities) &&
+      !(await agentSettingsState.ensureReady())
+    ) {
       return {
         ok: false,
         error: { code: "settings_unavailable", message: agentSettingsState.getSnapshot().error ?? "Could not load agent settings. Retry the connection.", retryable: true },

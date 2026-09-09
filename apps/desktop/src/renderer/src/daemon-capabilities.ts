@@ -56,3 +56,26 @@ export function missingRequiredCapabilities(
 export function isMixedVersionDaemon(capabilities: readonly string[]): boolean {
   return missingRequiredCapabilities(capabilities).length > 0;
 }
+
+/** The real consumer this guard exists for: launching a new session/harness
+ *  (App.tsx's startHarnessTracked) used to gate on agentSettingsState ever
+ *  becoming `ready`, which -- against a daemon that will never answer
+ *  agent.settings.get -- never happens, so every launch attempt failed
+ *  opaque ("settings_unavailable") forever. `hasConnectedStatus` is
+ *  `status !== null`: with no status yet (still connecting, or genuinely
+ *  disconnected), this can't distinguish "old daemon" from "no daemon
+ *  answered yet", so it stays conservative and keeps gating -- only a
+ *  confirmed live status without the capability skips the gate. Starting a
+ *  session doesn't strictly need saved agent settings (the caller's launch
+ *  input already carries the harness/model choice), so skipping the gate
+ *  means the launch proceeds with agentSettingsState's client-side
+ *  AGENT_SETTINGS_DEFAULTS snapshot -- never a blocked launch, never a
+ *  repeated doomed RPC attempt, never a destructive daemon restart. A live
+ *  daemon that supports the capability but is merely slow/erroring still
+ *  gates (this returns true), unchanged from before this fix. */
+export function shouldGateLaunchOnAgentSettingsReadiness(
+  hasConnectedStatus: boolean,
+  capabilities: readonly string[],
+): boolean {
+  return !hasConnectedStatus || isAgentSettingsAvailable(capabilities);
+}
