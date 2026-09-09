@@ -426,7 +426,7 @@ fn parse_message_kind(name: &str) -> Option<MessageKind> {
         "question" => Some(MessageKind::Question),
         "answer" => Some(MessageKind::Answer),
         "heartbeat" => Some(MessageKind::Heartbeat),
-        "final-report" | "finalReport" => Some(MessageKind::FinalReport),
+        "final-report" | "finalReport" | "worker_done" => Some(MessageKind::FinalReport),
         "guidance" => Some(MessageKind::Guidance),
         "escalation" => Some(MessageKind::Escalation),
         _ => None,

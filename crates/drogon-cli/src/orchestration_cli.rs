@@ -48,10 +48,10 @@ pub struct ActorScopeArgs {
     #[arg(long, value_name = "N")]
     pub consumer_generation: Option<u64>,
     /// Dispatch binding: task id
-    #[arg(long, value_name = "ID")]
+    #[arg(long, visible_alias = "task-id", value_name = "ID")]
     pub task: Option<String>,
     /// Dispatch binding: dispatch id
-    #[arg(long, value_name = "ID")]
+    #[arg(long, visible_alias = "dispatch-id", value_name = "ID")]
     pub dispatch: Option<String>,
 }
 
@@ -118,6 +118,7 @@ pub enum MessageKindArg {
     Question,
     Answer,
     Heartbeat,
+    #[value(alias = "worker_done")]
     FinalReport,
     Guidance,
     Escalation,
@@ -211,7 +212,7 @@ pub enum OrchestrationCommand {
     },
     /// Show one run
     RunShow {
-        #[arg(long, value_name = "ID")]
+        #[arg(long, visible_alias = "id", value_name = "ID")]
         run: String,
         #[command(flatten)]
         host: HostOpt,
@@ -369,7 +370,7 @@ pub enum OrchestrationCommand {
         /// Actor scope: coordinator binding or dispatch binding
         #[command(flatten)]
         actor: ActorScopeArgs,
-        #[arg(long, value_enum)]
+        #[arg(long, visible_alias = "type", value_enum)]
         kind: MessageKindArg,
         #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
         subject: String,
@@ -412,7 +413,7 @@ pub enum OrchestrationCommand {
         #[arg(long, value_name = "MS")]
         timeout_ms: Option<u32>,
         /// Comma-separated wake kinds; never a local filter on consuming output
-        #[arg(long, value_name = "KIND,..")]
+        #[arg(long, visible_alias = "types", value_name = "KIND,..")]
         kinds: Option<String>,
         #[arg(long, default_value_t = false)]
         inject: bool,
@@ -429,7 +430,7 @@ pub enum OrchestrationCommand {
     Reply {
         #[command(flatten)]
         actor: ActorScopeArgs,
-        #[arg(long, value_name = "MSG-ID")]
+        #[arg(long, visible_alias = "id", value_name = "MSG-ID")]
         question: String,
         #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
         body: String,

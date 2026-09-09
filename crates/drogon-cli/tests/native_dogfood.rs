@@ -188,7 +188,7 @@ else
 fi
 
 "$DROGON_CLI_COMMAND" --data-dir "$DROGON_DATA_DIR" --json orchestration send \
-  --kind final-report --subject "fixture $mode" --outcome "$outcome" \
+  --type worker_done --subject "fixture $mode" --outcome "$outcome" \
   --body "fixture worker report" > first-report.json 2> first-report.stderr
 first_status=$?
 

@@ -1360,6 +1360,85 @@ async fn check_kinds_travel_as_filter_but_fifo_output_is_preserved() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn source_worker_done_alias_maps_send_and_check_without_changing_authority() {
+    let dir = temp_dir("source-worker-done");
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                (
+                    "orchestration.send",
+                    json!({
+                        "message": {"messageId": "msg-1", "sequence": 1, "runId": "run-1"},
+                        "lifecycle": {"action": "settled", "outcome": "succeeded", "duplicate": false},
+                        "warnings": []
+                    }),
+                ),
+                (
+                    "orchestration.check",
+                    json!({
+                        "messages": [], "timedOut": false, "cancelled": false, "connectionLost": false
+                    }),
+                ),
+            ],
+        ),
+    );
+    let env = worker_mail_env_ref();
+    let sent = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "send",
+            "--json",
+            "--type",
+            "worker_done",
+            "--subject",
+            "done",
+            "--outcome",
+            "succeeded",
+            "--task-id",
+            "task-1",
+            "--dispatch-id",
+            "dispatch-1",
+        ],
+        &env,
+    );
+    assert_eq!(sent.exit_code, 0, "{}", sent.stderr);
+    let checked = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "check",
+            "--json",
+            "--types",
+            "worker_done,escalation",
+        ],
+        &env,
+    );
+    assert_eq!(checked.exit_code, 0, "{}", checked.stderr);
+    let calls = mock.captured();
+    let send = calls
+        .iter()
+        .find(|r| r["method"] == "orchestration.send")
+        .unwrap();
+    assert_eq!(send["params"]["kind"], "finalReport");
+    assert_eq!(send["params"]["finalReport"]["outcome"], "succeeded");
+    assert_eq!(send["params"]["scope"]["dispatchId"], "dispatch-1");
+    assert_eq!(send["auth"], SCOPED_CREDENTIAL);
+    let check = calls
+        .iter()
+        .find(|r| r["method"] == "orchestration.check")
+        .unwrap();
+    assert_eq!(
+        check["params"]["kinds"],
+        json!(["finalReport", "escalation"])
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn additive_result_fields_survive_to_stdout() {
     let dir = temp_dir("additive");
     let mut result = json!({"runs": [], "nextCursor": null});
