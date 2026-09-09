@@ -28,6 +28,7 @@ import {
 } from "./menu/register-app-menu";
 import { setUnreadDockBadgeCount } from "./dock/unread-badge";
 import { suppressForegroundSideEffect } from "./background-test-mode";
+import { isAppWindowClipboardPermissionAllowed } from "./browser/browser-permission-policy";
 import {
   installWindowStateLifecycle,
   loadWindowState,
@@ -724,10 +725,29 @@ if (!holdsSingleInstanceLock) {
   });
   void app.whenReady().then(async () => {
     activityGuard.startIfNeeded();
+    // Why app-aware instead of deny-all: the terminal paste/copy pipeline
+    // (fork parity: window.api.ui.readClipboardText there) reads the
+    // clipboard through the async Clipboard API in this build, which the
+    // session permission gate controls. Only the app window's own frame
+    // gets the clipboard permissions; browser pane guests and any other
+    // frame stay denied exactly as before.
     session.defaultSession.setPermissionRequestHandler(
-      (_webContents, _permission, callback) => callback(false),
+      (webContents, permission, callback) =>
+        callback(
+          isAppWindowClipboardPermissionAllowed(
+            permission,
+            webContents,
+            window?.webContents.id ?? null,
+          ),
+        ),
     );
-    session.defaultSession.setPermissionCheckHandler(() => false);
+    session.defaultSession.setPermissionCheckHandler((webContents, permission) =>
+      isAppWindowClipboardPermissionAllowed(
+        permission,
+        webContents,
+        window?.webContents.id ?? null,
+      ),
+    );
     registerAppMenuBar();
     registerAppMenuIpc();
     registerBridge();
