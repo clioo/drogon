@@ -89,6 +89,26 @@ impl Fixture {
         )))
     }
 
+    fn create_responsibility_with_workspace(
+        &self,
+        id: &str,
+        workspace_id: &str,
+        bot_id: &str,
+    ) -> Response {
+        self.engine.dispatch(request(
+            id,
+            "bot.responsibility_create",
+            json!({
+                "workspaceId": workspace_id,
+                "hostId": self.host_id,
+                "botId": bot_id,
+                "name": "Nightly review",
+                "schedule": "* * * * *",
+                "prompt": "Review incoming work.",
+            }),
+        ))
+    }
+
     fn snapshot(&self) -> Value {
         ok(self.engine.dispatch(request(
             &uuid::Uuid::new_v4().to_string(),
@@ -109,6 +129,25 @@ impl Fixture {
                 "workspaceId": self.workspace_id,
                 "hostId": self.host_id,
                 "botId": bot_id,
+            }),
+        ))
+    }
+
+    fn delete_responsibility_with_workspace(
+        &self,
+        id: &str,
+        workspace_id: &str,
+        bot_id: &str,
+        responsibility_id: &str,
+    ) -> Response {
+        self.engine.dispatch(request(
+            id,
+            "bot.responsibility_delete",
+            json!({
+                "workspaceId": workspace_id,
+                "hostId": self.host_id,
+                "botId": bot_id,
+                "responsibilityId": responsibility_id,
             }),
         ))
     }
@@ -252,6 +291,195 @@ fn delete_succeeds_when_the_caller_names_a_different_registered_workspace() {
             .iter()
             .any(|entry| entry["id"] == json!(automation_id)),
         "bot delete must remove its owned automations"
+    );
+}
+
+// Coordinator review (msg_805784c99bef): the same missing-Bot-workspace-
+// identity gap bot.delete had also applied to bot.responsibility_create --
+// a responsibility is created FOR an existing bot, so its home workspace
+// is the bot's own, never an arbitrary caller-asserted one.
+
+#[test]
+fn responsibility_create_succeeds_with_the_host_global_empty_workspace_scope_and_uses_the_bots_own_workspace() {
+    let fx = Fixture::new();
+    let bot_id = fx.create_bot("bot-1")["id"].as_str().unwrap().to_string();
+    let created = ok(fx.create_responsibility_with_workspace("create-1", "", &bot_id));
+    // The empty caller scope must never leak into the new automation's own
+    // execution target -- it must resolve to the bot's real home workspace.
+    assert_eq!(created["workspaceId"], json!(fx.workspace_id));
+    assert_eq!(created["botId"], json!(bot_id));
+    assert!(created["responsibilityId"].as_str().is_some());
+    assert!(created["automationId"].as_str().is_some());
+}
+
+#[test]
+fn responsibility_create_succeeds_after_switching_to_a_different_registered_workspace() {
+    let fx = Fixture::new();
+    let bot_id = fx.create_bot("bot-1")["id"].as_str().unwrap().to_string();
+    let other_dir = tempfile::tempdir().unwrap();
+    let other_workspace_id = ok(fx.engine.dispatch(request(
+        "ws-register-2",
+        "workspace.register",
+        json!({"path": other_dir.path()}),
+    )))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let created = ok(fx.create_responsibility_with_workspace(
+        "create-1",
+        &other_workspace_id,
+        &bot_id,
+    ));
+    // Never the caller's mismatched workspace -- the bot's own.
+    assert_eq!(created["workspaceId"], json!(fx.workspace_id));
+    assert_ne!(created["workspaceId"], json!(other_workspace_id));
+}
+
+#[test]
+fn responsibility_create_still_rejects_a_genuinely_unknown_workspace() {
+    let fx = Fixture::new();
+    let bot_id = fx.create_bot("bot-1")["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        err(fx.create_responsibility_with_workspace(
+            "create-1",
+            "no-such-workspace",
+            &bot_id,
+        ))
+        .code,
+        "unknown_workspace"
+    );
+}
+
+#[test]
+fn responsibility_create_still_refuses_a_bot_id_that_genuinely_does_not_exist() {
+    let fx = Fixture::new();
+    assert_eq!(
+        err(fx.create_responsibility_with_workspace("create-1", "", "no-such-bot")).code,
+        "not_found"
+    );
+}
+
+#[test]
+fn responsibility_create_replays_the_stored_receipt_for_the_same_request_id() {
+    let fx = Fixture::new();
+    let bot_id = fx.create_bot("bot-1")["id"].as_str().unwrap().to_string();
+    let first = ok(fx.create_responsibility_with_workspace("create-once", "", &bot_id));
+    let replayed = ok(fx.create_responsibility_with_workspace("create-once", "", &bot_id));
+    assert_eq!(first, replayed);
+}
+
+// Coordinator review (msg_805784c99bef): the same missing-Bot-workspace-
+// identity gap bot.delete had also applied to bot.responsibility_delete --
+// consistent authoritative owner routing, not a one-off fix scoped to the
+// single failing assertion.
+
+#[test]
+fn responsibility_delete_succeeds_with_the_host_global_empty_workspace_scope() {
+    let fx = Fixture::new();
+    let bot_id = fx.create_bot("bot-1")["id"].as_str().unwrap().to_string();
+    let created = fx.create_responsibility("resp-1", &bot_id);
+    let responsibility_id = created["responsibilityId"].as_str().unwrap().to_string();
+    let automation_id = created["automationId"].as_str().unwrap().to_string();
+
+    let deleted = ok(fx.delete_responsibility_with_workspace(
+        "del-1",
+        "",
+        &bot_id,
+        &responsibility_id,
+    ));
+    assert_eq!(deleted["removed"], json!(true));
+    assert_eq!(deleted["automationId"], json!(automation_id.clone()));
+
+    let listed = ok(fx
+        .engine
+        .dispatch(request("auto-list", "automation.list", json!({}))));
+    assert!(
+        !listed["automations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["id"] == json!(automation_id)),
+        "responsibility delete must remove its owned automation"
+    );
+}
+
+#[test]
+fn responsibility_delete_succeeds_after_switching_to_a_different_registered_workspace() {
+    let fx = Fixture::new();
+    let bot_id = fx.create_bot("bot-1")["id"].as_str().unwrap().to_string();
+    let created = fx.create_responsibility("resp-1", &bot_id);
+    let responsibility_id = created["responsibilityId"].as_str().unwrap().to_string();
+
+    // The user (or a later acceptance journey) switched to a second,
+    // validly-registered workspace while the Bots panel, holding this Bot,
+    // stayed mounted (App.tsx's keep-alive) -- exactly bot.delete's own
+    // "different registered workspace" scenario.
+    let other_dir = tempfile::tempdir().unwrap();
+    let other_workspace_id = ok(fx.engine.dispatch(request(
+        "ws-register-2",
+        "workspace.register",
+        json!({"path": other_dir.path()}),
+    )))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let deleted = ok(fx.delete_responsibility_with_workspace(
+        "del-1",
+        &other_workspace_id,
+        &bot_id,
+        &responsibility_id,
+    ));
+    assert_eq!(deleted["removed"], json!(true));
+}
+
+#[test]
+fn responsibility_delete_replays_the_stored_receipt_after_the_bot_is_already_gone() {
+    // Same replay-must-never-require-existence constraint as bot.delete's
+    // own coverage: the first call succeeds and deletes the bot itself
+    // (deleting a bot removes its responsibilities too), the SAME
+    // request_id replayed afterward must return the cached receipt, not
+    // a fresh not_found from authorize re-running against a bot that
+    // (correctly) no longer exists.
+    let fx = Fixture::new();
+    let bot_id = fx.create_bot("bot-1")["id"].as_str().unwrap().to_string();
+    let created = fx.create_responsibility("resp-1", &bot_id);
+    let responsibility_id = created["responsibilityId"].as_str().unwrap().to_string();
+
+    let first = ok(fx.delete_responsibility_with_workspace(
+        "del-once",
+        "",
+        &bot_id,
+        &responsibility_id,
+    ));
+    ok(fx.delete_bot("del-bot", &bot_id));
+    let replayed = ok(fx.delete_responsibility_with_workspace(
+        "del-once",
+        "",
+        &bot_id,
+        &responsibility_id,
+    ));
+    assert_eq!(first, replayed);
+}
+
+#[test]
+fn responsibility_delete_still_rejects_a_genuinely_unknown_workspace() {
+    // Only the empty host-global sentinel and a real-but-different
+    // workspace are forgiven -- a typo'd/stale non-empty workspace id
+    // stays a rejected request, exactly like bot.delete's own contract.
+    let fx = Fixture::new();
+    let bot_id = fx.create_bot("bot-1")["id"].as_str().unwrap().to_string();
+    let created = fx.create_responsibility("resp-1", &bot_id);
+    let responsibility_id = created["responsibilityId"].as_str().unwrap().to_string();
+    assert_eq!(
+        err(fx.delete_responsibility_with_workspace(
+            "del-1",
+            "no-such-workspace",
+            &bot_id,
+            &responsibility_id,
+        ))
+        .code,
+        "unknown_workspace"
     );
 }
 

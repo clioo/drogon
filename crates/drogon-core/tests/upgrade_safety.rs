@@ -24,7 +24,7 @@ type ComponentFixtures = &'static [(&'static str, i64)];
 const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("bots", 3, &[("bots-v1", 1), ("bots-v2", 2)]),
     ("automations", 2, &[("automations-v1", 1)]),
-    ("projects", 3, &[("projects-v1", 1)]),
+    ("projects", 4, &[("projects-v1", 1)]),
     ("mentu", 1, &[]),
     ("coordination_access", 1, &[]),
     ("orchestration_mail", 1, &[]),
@@ -50,6 +50,12 @@ fn fixture_sql(fixture: &str) -> &'static str {
         "main-schema-v1" => include_str!("fixtures/upgrades/main-schema-v1.sql"),
         "workspaces-only-pre-projects" => {
             include_str!("fixtures/upgrades/workspaces-only-pre-projects.sql")
+        }
+        "projects-v3-with-pre-projects-orphan" => {
+            include_str!("fixtures/upgrades/projects-v3-with-pre-projects-orphan.sql")
+        }
+        "projects-v1-with-secondary-worktree" => {
+            include_str!("fixtures/upgrades/projects-v1-with-secondary-worktree.sql")
         }
         other => panic!("unknown fixture {other}"),
     }
@@ -388,7 +394,9 @@ fn old_folder_workspace_reappears_as_a_project_without_re_adding() {
     assert_eq!(backfilled["kind"], "folder");
     assert_eq!(backfilled["hostId"], "host-old");
     // Never a re-registration under a fresh id every reopen: the second
-    // open must be the `Some(3)` no-op branch, not another backfill pass.
+    // open must be the current-version no-op branch, not another backfill
+    // pass. The fixture also seeds an old git-kind workspace (next test),
+    // so both must be present and both must stay stable across reopen.
     let id_first_open = backfilled["id"].as_str().unwrap().to_string();
     drop(engine);
     let engine_again = Engine::open(dir.path()).unwrap();
@@ -403,15 +411,24 @@ fn old_folder_workspace_reappears_as_a_project_without_re_adding() {
     let projects_again = projects_again["projects"].as_array().unwrap();
     assert_eq!(
         projects_again.len(),
-        1,
-        "reopening must never duplicate the backfilled project: {projects_again:?}"
+        2,
+        "reopening must never duplicate a backfilled project: {projects_again:?}"
     );
-    assert_eq!(projects_again[0]["id"], Value::String(id_first_open));
+    let refound = projects_again
+        .iter()
+        .find(|p| p["path"] == "/tmp/seed-old-folder")
+        .unwrap();
+    assert_eq!(refound["id"], Value::String(id_first_open));
 }
 
+// Coordinator review (msg_4fea8de5f97c): "preserve registrations, not just
+// the easiest folder case" -- a pre-Projects daemon registered git-kind
+// paths as directly-attachable workspaces exactly like folder ones (no
+// Project/Worktree split existed yet), so the recovery must preserve them
+// too, not just quietly leave them un-invented.
 #[test]
-fn old_git_kind_workspace_is_not_backfilled_into_projects() {
-    let (_dir, engine) = open_seeded("pre-projects-git", "workspaces-only-pre-projects");
+fn old_git_kind_workspace_is_backfilled_with_its_own_attachable_worktree() {
+    let (dir, engine) = open_seeded("pre-projects-git", "workspaces-only-pre-projects");
     let response = engine.dispatch(Request {
         protocol: PROTOCOL_VERSION,
         request_id: "list-1".into(),
@@ -419,24 +436,209 @@ fn old_git_kind_workspace_is_not_backfilled_into_projects() {
         method: "project.list".into(),
         params: json!({}),
     });
-    let projects = response.result.unwrap();
-    let projects = projects["projects"].as_array().unwrap();
-    assert!(
-        !projects
-            .iter()
-            .any(|p| p["path"] == "/tmp/seed-old-git-worktree"),
-        "a bare pre-Projects git workspace (no Worktree row) must not become an invented Project: {projects:?}"
-    );
-    // The row itself is untouched, not silently dropped.
-    let conn = read_db(&_dir);
-    let still_there: i64 = conn
+    let listed = response.result.unwrap();
+    let projects = listed["projects"].as_array().unwrap();
+    let backfilled = projects
+        .iter()
+        .find(|p| p["path"] == "/tmp/seed-old-git-worktree")
+        .unwrap_or_else(|| panic!("old git workspace missing from project.list: {projects:?}"));
+    assert_eq!(backfilled["name"], "old-git-worktree");
+    assert_eq!(backfilled["kind"], "git");
+    assert_eq!(backfilled["hostId"], "host-old");
+    let project_id = backfilled["id"].as_str().unwrap().to_string();
+
+    // Preserved as immediately session-attachable, not merely visible:
+    // exactly one worktree, the primary checkout (path == project.path),
+    // reusing the SAME workspace_id the old daemon's registration used --
+    // never a new, second workspace row for the same path.
+    let worktrees = engine
+        .dispatch(Request {
+            protocol: PROTOCOL_VERSION,
+            request_id: "wt-list-1".into(),
+            auth: None,
+            method: "worktree.list".into(),
+            params: json!({"projectId": project_id}),
+        })
+        .result
+        .unwrap();
+    let worktrees = worktrees["worktrees"].as_array().unwrap();
+    assert_eq!(worktrees.len(), 1, "{worktrees:?}");
+    assert_eq!(worktrees[0]["path"], "/tmp/seed-old-git-worktree");
+    let workspace_id = worktrees[0]["workspaceId"].as_str().unwrap().to_string();
+
+    let conn = read_db(&dir);
+    let (ws_count, ws_id): (i64, String) = conn
         .query_row(
-            "SELECT COUNT(*) FROM workspaces WHERE path = '/tmp/seed-old-git-worktree'",
+            "SELECT COUNT(*), MIN(id) FROM workspaces WHERE path = '/tmp/seed-old-git-worktree'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(ws_count, 1, "must reuse the old workspace row, never duplicate it");
+    assert_eq!(ws_id, workspace_id);
+}
+
+// Regression: a `workspaces` row already referenced by a real
+// `worktrees.workspace_id` is an existing worktree, not an orphan --
+// worktrees existed even at the projects schema's v1, and a secondary
+// (non-primary-checkout) worktree's path never matches its project's own
+// `projects.path`, which alone made it look orphaned to the naive query.
+// Without excluding rows already claimed by `worktrees`, the backfill
+// inserted a colliding second project+worktree for this exact path and
+// opening the data dir failed outright (UNIQUE constraint on
+// worktrees.path) -- caught by the existing worktree_rename.rs migration
+// test, reproduced and pinned here directly against the recovery itself.
+#[test]
+fn an_existing_secondary_worktrees_workspace_is_never_mistaken_for_an_orphan() {
+    let (dir, engine) =
+        open_seeded("v1-secondary-worktree", "projects-v1-with-secondary-worktree");
+    let listed = engine
+        .dispatch(Request {
+            protocol: PROTOCOL_VERSION,
+            request_id: "list-1".into(),
+            auth: None,
+            method: "project.list".into(),
+            params: json!({}),
+        })
+        .result
+        .unwrap();
+    let projects = listed["projects"].as_array().unwrap();
+    // No second, invented project for the secondary worktree's path.
+    assert_eq!(
+        projects.len(),
+        1,
+        "the secondary worktree's workspace must never become its own project: {projects:?}"
+    );
+    assert_eq!(projects[0]["path"], "/tmp/seed-repo");
+    let project_id = projects[0]["id"].as_str().unwrap();
+
+    let worktrees = engine
+        .dispatch(Request {
+            protocol: PROTOCOL_VERSION,
+            request_id: "wt-list-1".into(),
+            auth: None,
+            method: "worktree.list".into(),
+            params: json!({"projectId": project_id}),
+        })
+        .result
+        .unwrap();
+    let worktrees = worktrees["worktrees"].as_array().unwrap();
+    assert_eq!(worktrees.len(), 1, "{worktrees:?}");
+    assert_eq!(worktrees[0]["id"], "wt-secondary");
+    assert_eq!(worktrees[0]["workspaceId"], "ws-secondary");
+
+    // No duplicate/second workspace row was created for the same path.
+    let conn = read_db(&dir);
+    let ws_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM workspaces WHERE path = '/tmp/seed-repo-secondary-wt'",
             [],
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(still_there, 1);
+    assert_eq!(ws_count, 1);
+}
+
+// Coordinator review: an already-upgraded store (recorded at projects
+// schema v3, from some intermediate build after Projects landed but
+// before this recovery existed) must still recover pre-Projects orphans
+// on the NEXT open with this fix installed -- not only a data dir this
+// build sees for the very first time.
+#[test]
+fn recovers_pre_projects_orphans_even_when_the_store_is_already_at_v3() {
+    let (dir, engine) = open_seeded("already-v3-with-orphans", "projects-v3-with-pre-projects-orphan");
+    let response = engine.dispatch(Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: "list-1".into(),
+        auth: None,
+        method: "project.list".into(),
+        params: json!({}),
+    });
+    let listed = response.result.unwrap();
+    let projects = listed["projects"].as_array().unwrap();
+    // The pre-existing v3 project is untouched.
+    assert!(
+        projects.iter().any(|p| p["path"] == "/tmp/seed-v3-repo"),
+        "the store's own pre-existing v3 project must survive: {projects:?}"
+    );
+    // The orphan predating even that build's Projects launch is recovered.
+    let recovered = projects
+        .iter()
+        .find(|p| p["path"] == "/tmp/seed-orphan-in-v3-store")
+        .unwrap_or_else(|| {
+            panic!("pre-Projects orphan never recovered from an already-v3 store: {projects:?}")
+        });
+    assert_eq!(recovered["kind"], "folder");
+
+    let conn = read_db(&dir);
+    assert_eq!(version_of(&conn, "projects"), 4);
+}
+
+// Coordinator review: a project the user genuinely removed (project.remove
+// deletes its workspaces row in the same transaction -- see project.rs's
+// `remove`) must never be resurrected by this recovery on a later open,
+// including from an already-v3 store.
+#[test]
+fn an_intentionally_removed_project_is_never_resurrected_by_recovery() {
+    let (dir, engine) = open_seeded(
+        "already-v3-removed-stays-removed",
+        "projects-v3-with-pre-projects-orphan",
+    );
+    let removed_id = {
+        let listed = engine
+            .dispatch(Request {
+                protocol: PROTOCOL_VERSION,
+                request_id: "list-1".into(),
+                auth: None,
+                method: "project.list".into(),
+                params: json!({}),
+            })
+            .result
+            .unwrap();
+        listed["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["path"] == "/tmp/seed-v3-repo")
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let removal = engine.dispatch(Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: "remove-1".into(),
+        auth: None,
+        method: "project.remove".into(),
+        params: json!({"id": removed_id}),
+    });
+    assert!(removal.ok, "{removal:?}");
+
+    // Reopen: recovery must run again for the still-orphaned row, but must
+    // never bring back the one the user just, deliberately, removed.
+    drop(engine);
+    let engine_again = Engine::open(dir.path()).unwrap();
+    let projects_again = engine_again
+        .dispatch(Request {
+            protocol: PROTOCOL_VERSION,
+            request_id: "list-2".into(),
+            auth: None,
+            method: "project.list".into(),
+            params: json!({}),
+        })
+        .result
+        .unwrap();
+    let projects_again = projects_again["projects"].as_array().unwrap();
+    assert!(
+        !projects_again.iter().any(|p| p["id"] == removed_id),
+        "an intentionally removed project must never come back: {projects_again:?}"
+    );
+    assert!(
+        projects_again
+            .iter()
+            .any(|p| p["path"] == "/tmp/seed-orphan-in-v3-store"),
+        "the unrelated orphan must still be recovered: {projects_again:?}"
+    );
 }
 
 #[test]

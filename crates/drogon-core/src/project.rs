@@ -19,7 +19,7 @@ pub(crate) const QUICK_SESSION_MARKER_OWNER: &str = "drogon";
 pub(crate) const QUICK_SESSION_DEFAULT_NAME: &str = "Quick Session";
 
 pub(crate) const PROJECTS_SCHEMA_COMPONENT: &str = "projects";
-pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 3;
+pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 4;
 
 fn create_v1_tables(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
@@ -126,7 +126,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             create_v1_tables(tx)?;
             apply_v2_title_column(tx)?;
             apply_v3_composer_columns(tx)?;
-            backfill_projects_from_pre_existing_folder_workspaces(tx)?;
+            backfill_projects_from_pre_existing_workspaces(tx)?;
             tx.execute(
                 "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -147,6 +147,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         Some(1) => {
             apply_v2_title_column(tx)?;
             apply_v3_composer_columns(tx)?;
+            backfill_projects_from_pre_existing_workspaces(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -154,6 +155,27 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         }
         Some(2) => {
             apply_v3_composer_columns(tx)?;
+            backfill_projects_from_pre_existing_workspaces(tx)?;
+            tx.execute(
+                "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
+                params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
+            )?;
+        }
+        // Coordinator review (msg_4fea8de5f97c): the v4 recovery originally
+        // ran only in the `None` branch, so a store that had already been
+        // opened by a build between c2deb28 (Projects landing) and this fix
+        // -- already recorded at v3 -- would never run it, permanently
+        // stranding orphan workspaces from before Projects existed even
+        // after installing this fix. Every already-versioned arm now runs
+        // the same recovery once on its way to v4, additive and idempotent
+        // (backfill_projects_from_pre_existing_workspaces only touches
+        // workspaces rows with no matching projects row by path, so a
+        // second run over an already-recovered store is a no-op, and an
+        // intentionally `project.remove`d folder/git project's workspace
+        // row is deleted together with it -- see `remove` below -- so
+        // there is nothing left to resurrect for a deliberate removal).
+        Some(3) => {
+            backfill_projects_from_pre_existing_workspaces(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -166,36 +188,101 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
 
 /// Upgrade safety (user-feature-closure item 5): a data dir written by a
 /// daemon from before Projects existed (dc12c7a and earlier -- this module
-/// was added in c2deb28) registered folder workspaces directly via
-/// `workspace::register`, with no owning `projects` row at all --
+/// was added in c2deb28) registered workspaces (folder AND git) directly
+/// via `workspace::register`, with no owning `projects` row at all --
 /// `project::list` only ever reads `projects`, so those workspaces silently
 /// disappeared from the sidebar after an upgrade even though the row (and
-/// the user's registration) was never lost. Runs once, only on the fresh
-/// "no recorded projects schema version" branch (a true fresh install has
-/// no `workspaces` rows either, so this is a no-op there): every `folder`
-/// `workspaces` row without a `projects` row at the same path gets one,
-/// mirroring `project::add`'s own folder-project shape exactly (new uuid,
-/// same path/name/host/created_at, no default_base_ref). `git` workspace
-/// rows are deliberately left alone -- only a folder project registers its
-/// own root as a Workspace (see `add`'s doc comment); a bare pre-Projects
-/// git workspace has no Worktree row to pair it with, so backfilling it as
-/// a Project would show zero attachable worktrees, a materially different
-/// (and confusing) shape from every other git Project in this schema.
-fn backfill_projects_from_pre_existing_folder_workspaces(
-    tx: &Transaction,
-) -> rusqlite::Result<()> {
-    let orphaned: Vec<(String, String, String, String)> = tx
+/// the user's registration) was never lost.
+///
+/// Runs on every schema-version arm on the way to `PROJECTS_SCHEMA_VERSION`
+/// (coordinator review, msg_4fea8de5f97c): a user who already opened a data
+/// dir with some intermediate build after Projects landed (c2deb28) but
+/// before this recovery existed already has projects schema v3 recorded,
+/// so gating this to only the fresh "no recorded version" branch would
+/// permanently strand their pre-Projects orphans even after installing
+/// this fix. Additive and idempotent either way -- it only ever inserts
+/// for a `workspaces` row with no matching `projects` row at the same
+/// path, so re-running it (every already-versioned arm, every future
+/// reopen once landed at current) is a no-op past the first real hit.
+///
+/// Never resurrects an intentional `project.remove`: that call deletes the
+/// project's `workspaces` row in the same transaction (see `remove` below),
+/// so a deliberately removed folder or git project's workspace is
+/// genuinely gone from `workspaces` too -- there is nothing left here to
+/// find and re-insert.
+///
+/// - `folder`: gets a `projects` row (new uuid, same path/name/host/
+///   created_at, no default_base_ref), mirroring `project::add`'s own
+///   folder-project shape. No `worktrees` row is created or needed --
+///   `worktree_rpc.rs`'s `do_worktree_list` synthesizes a folder project's
+///   one implicit worktree from the existing `workspaces` row at read
+///   time, exactly like any other folder project.
+/// - `git`: gets a `projects` row AND a `worktrees` row reusing the SAME
+///   `workspace_id` (never a new one -- the orphaned workspace becomes
+///   that worktree, not a sibling of it), so the registration is fully
+///   preserved as an immediately session-attachable primary checkout
+///   (`worktree.path == project.path`), not merely visible with zero
+///   usable worktrees. `branch`/`head` default to empty: migrations never
+///   shell out to git (`workspace.rs`'s own protocol invariant -- "Do not
+///   run Git mutations for registration"), so the real branch can't be
+///   read here; `WorktreeCard`'s live git-status probe (`git.status.v1`,
+///   session-side, not migration-side) corrects the displayed branch on
+///   first render.
+fn backfill_projects_from_pre_existing_workspaces(tx: &Transaction) -> rusqlite::Result<()> {
+    // A `workspaces` row already referenced by a real `worktrees.workspace_id`
+    // is NOT orphaned -- it is a git project's own (possibly non-primary)
+    // worktree, already correctly wired to its project (worktrees existed
+    // even at the projects schema's v1). Only its path failing to match
+    // any `projects.path` made it LOOK orphaned (a project's own root path
+    // is never the same as one of its secondary worktrees' paths); without
+    // this exclusion the backfill tried to insert a second, colliding
+    // project+worktree for an already-registered worktree (UNIQUE
+    // constraint on `worktrees.path`/`worktrees.workspace_id`).
+    let orphaned_folders: Vec<(String, String, String, String)> = tx
         .prepare(
             "SELECT path, name, host_id, created_at FROM workspaces
-             WHERE kind = 'folder' AND path NOT IN (SELECT path FROM projects)",
+             WHERE kind = 'folder'
+               AND path NOT IN (SELECT path FROM projects)
+               AND id NOT IN (SELECT workspace_id FROM worktrees)",
         )?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (path, name, host_id, created_at) in orphaned {
+    for (path, name, host_id, created_at) in orphaned_folders {
         tx.execute(
             "INSERT INTO projects (id, host_id, path, name, kind, default_base_ref, created_at)
              VALUES (?1, ?2, ?3, ?4, 'folder', NULL, ?5)",
             params![uuid::Uuid::new_v4().to_string(), host_id, path, name, created_at],
+        )?;
+    }
+
+    let orphaned_git: Vec<(String, String, String, String, String)> = tx
+        .prepare(
+            "SELECT id, path, name, host_id, created_at FROM workspaces
+             WHERE kind = 'git'
+               AND path NOT IN (SELECT path FROM projects)
+               AND id NOT IN (SELECT workspace_id FROM worktrees)",
+        )?
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (workspace_id, path, name, host_id, created_at) in orphaned_git {
+        let project_id = uuid::Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO projects (id, host_id, path, name, kind, default_base_ref, created_at)
+             VALUES (?1, ?2, ?3, ?4, 'git', NULL, ?5)",
+            params![project_id, host_id, path, name, created_at],
+        )?;
+        tx.execute(
+            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, created_at)
+             VALUES (?1, ?2, ?3, ?4, '', '', NULL, ?5)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project_id,
+                workspace_id,
+                path,
+                created_at
+            ],
         )?;
     }
     Ok(())
