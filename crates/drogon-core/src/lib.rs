@@ -377,7 +377,7 @@ impl Engine {
             Ok(_)
                 if matches!(
                     request.method.as_str(),
-                    "orchestration.send" | "orchestration.check"
+                    "orchestration.send" | "orchestration.check" | "orchestration.inbox"
                 ) =>
             {
                 match self.dispatch_worker_mail(&binding, &request) {
@@ -570,7 +570,9 @@ impl Engine {
             "orchestration.workerList" => self.list_coordination_workers(request),
             "orchestration.requestShow" => self.show_coordination_receipt(request, None),
             "orchestration.reset" => self.reset_orchestration(request),
-            "orchestration.send" | "orchestration.check" => self.dispatch_admin_mail(request),
+            "orchestration.send" | "orchestration.check" | "orchestration.inbox" => {
+                self.dispatch_admin_mail(request)
+            }
             "orchestration.ask" | "orchestration.reply" => {
                 self.dispatch_coordination_question(request, None)
             }

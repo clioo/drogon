@@ -1,5 +1,6 @@
 //! Preserve wire bytes in JSON and decode verified terminal chunks for humans.
 
+use drogon_protocol::orchestration_mail::{InboxResult, MessageSummary};
 use drogon_protocol::orchestration_worker::{OutputEntry, OutputSource};
 use serde::Deserialize;
 use serde_json::Value;
@@ -44,4 +45,50 @@ pub(crate) fn render(source: OutputSource, entry: &OutputEntry) -> String {
         Value::String(text) => text.clone(),
         content => content.to_string(),
     }
+}
+
+/// Source `formatMessageReadOnlyTag`: marks legacy inspect-only rows. Native
+/// mail has no legacy contract, so no retained row ever carries the tag; the
+/// helper exists so the inbox head format stays byte-aligned with source.
+pub(crate) fn format_inbox_read_only_tag(_message: &MessageSummary) -> &'static str {
+    ""
+}
+
+/// Source inbox sweep rendering: one head line per message, `--full` appends
+/// the body and a `[payload]` line, messages joined blank-line separated.
+/// Empty sweeps read `No messages.`
+pub(crate) fn format_inbox(result: &InboxResult, full: bool) -> String {
+    if result.count == 0 {
+        return "No messages.".to_string();
+    }
+    // Why: default output omits body/payload for at-a-glance sweeps; --full
+    // prints them for auditing.
+    result
+        .messages
+        .iter()
+        .map(|message| {
+            let head = format!(
+                "{}{} {} -> {}: \"{}\"",
+                message.message_id,
+                format_inbox_read_only_tag(message),
+                message.from_actor,
+                message.to_actor.as_deref().unwrap_or("?"),
+                message.subject
+            );
+            if !full {
+                return head;
+            }
+            let mut parts = vec![head];
+            if let Some(body) = &message.body
+                && !body.is_empty()
+            {
+                parts.push(body.clone());
+            }
+            if let Some(payload) = &message.payload {
+                parts.push(format!("[payload] {payload}"));
+            }
+            parts.join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join(if full { "\n\n" } else { "\n" })
 }

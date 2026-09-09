@@ -533,6 +533,44 @@ pub(crate) fn get_message_in_tx(
     .map_err(mail_storage_error)
 }
 
+/// Read-only newest-first sweep across the host's runs (source `getInbox`):
+/// every retained message regardless of read/delivered state, never flips a
+/// read bit. With `terminal`, only mail addressed to that dispatch (source
+/// `getAllMessagesForHandle`); a stale/unknown handle reads as empty.
+pub(crate) fn inbox_in_tx(
+    tx: &Transaction,
+    host_id: &str,
+    terminal: Option<&str>,
+    limit: u32,
+) -> Result<Vec<MessageSummary>, RpcError> {
+    let sql = match terminal {
+        Some(_) => format!(
+            "SELECT {} FROM orchestration_mail_messages
+              WHERE host_id = ?1 AND to_dispatch_id = ?2 ORDER BY sequence DESC LIMIT ?3",
+            message_columns()
+        ),
+        None => format!(
+            "SELECT {} FROM orchestration_mail_messages
+              WHERE host_id = ?1 ORDER BY sequence DESC LIMIT ?2",
+            message_columns()
+        ),
+    };
+    let mut stmt = tx.prepare(&sql).map_err(mail_storage_error)?;
+    let rows = match terminal {
+        Some(handle) => stmt
+            .query_map(params![host_id, handle, i64::from(limit)], decode_row)
+            .map_err(mail_storage_error)?,
+        None => stmt
+            .query_map(params![host_id, i64::from(limit)], decode_row)
+            .map_err(mail_storage_error)?,
+    };
+    let mut messages = Vec::new();
+    for row in rows {
+        messages.push(row.map_err(mail_storage_error)?.summary);
+    }
+    Ok(messages)
+}
+
 pub(crate) fn message_columns() -> &'static str {
     "message_id, sequence, kind, from_kind, from_coordinator_id, from_dispatch_id,
      to_dispatch_id, subject, body, payload_json, thread_id, origin_request_id"

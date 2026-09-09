@@ -3318,3 +3318,148 @@ async fn reset_requires_exactly_one_scope_flag() {
     drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbox_maps_limit_and_terminal_and_renders_heads() {
+    let dir = temp_dir("inbox");
+    let result = json!({
+        "messages": [
+            {"messageId": "m2", "sequence": 2, "kind": "guidance",
+             "fromActor": "coordinator:coord-1", "toActor": "dispatch:dispatch-1",
+             "subject": "second"},
+            {"messageId": "m1", "sequence": 1, "kind": "status",
+             "fromActor": "dispatch:dispatch-1", "subject": "first",
+             "body": "hidden without --full", "payload": {"a": 1}},
+        ],
+        "count": 2,
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.inbox", result)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "inbox",
+            "--limit",
+            "10",
+            "--terminal",
+            "dispatch-1",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    let inbox = mock
+        .captured()
+        .into_iter()
+        .find(|r| r["method"] == "orchestration.inbox")
+        .expect("inbox sent");
+    assert_eq!(inbox["params"]["limit"], json!(10));
+    assert_eq!(inbox["params"]["terminal"], json!("dispatch-1"));
+    // Source head format: `<id>[tag] <from> -> <to ? ?>: "<subject>"`.
+    assert!(
+        invocation
+            .stdout
+            .contains("m2 coordinator:coord-1 -> dispatch:dispatch-1: \"second\""),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation
+            .stdout
+            .contains("m1 dispatch:dispatch-1 -> ?: \"first\""),
+        "{}",
+        invocation.stdout
+    );
+    // Default sweep omits bodies and payloads.
+    assert!(!invocation.stdout.contains("hidden without --full"));
+    assert!(!invocation.stdout.contains("[payload]"));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbox_full_expands_body_and_payload() {
+    let dir = temp_dir("inbox-full");
+    let result = json!({
+        "messages": [
+            {"messageId": "m1", "sequence": 1, "kind": "status",
+             "fromActor": "dispatch:dispatch-1", "subject": "first",
+             "body": "the body", "payload": {"a": 1}},
+        ],
+        "count": 1,
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.inbox", result)]),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "inbox", "--full"], &[]);
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("the body"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("[payload]"),
+        "{}",
+        invocation.stdout
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbox_empty_reads_no_messages() {
+    let dir = temp_dir("inbox-empty");
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![("orchestration.inbox", json!({"messages": [], "count": 0}))],
+        ),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "inbox"], &[]);
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("No messages."),
+        "{}",
+        invocation.stdout
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbox_json_passes_the_envelope_through() {
+    let dir = temp_dir("inbox-json");
+    let result = json!({
+        "messages": [
+            {"messageId": "m1", "sequence": 1, "kind": "status",
+             "fromActor": "dispatch:dispatch-1", "subject": "first"},
+        ],
+        "count": 1,
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.inbox", result.clone())]),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "inbox", "--json"], &[]);
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    let envelope: Value = serde_json::from_str(&invocation.stdout).expect("json stdout");
+    assert_eq!(envelope["result"], result);
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbox_zero_limit_is_usage_error() {
+    let dir = temp_dir("inbox-zero");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let invocation = run_cli(&dir, &["orchestration", "inbox", "--limit", "0"], &[]);
+    assert_eq!(invocation.exit_code, 2, "stderr: {}", invocation.stderr);
+    assert!(mock.captured().is_empty(), "usage error never connects");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}

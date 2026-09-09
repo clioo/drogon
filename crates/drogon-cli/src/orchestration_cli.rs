@@ -597,6 +597,20 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+    /// Read-only newest-first sweep across the host's runs (no deliveries, no ACK)
+    Inbox {
+        /// Newest-first page bound (default 20; 100 with --terminal)
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
+        /// Only mail addressed to this dispatch (stale/unknown reads as empty)
+        #[arg(long, value_name = "HANDLE")]
+        terminal: Option<String>,
+        /// Print bodies and payloads, not just the one-line sweep
+        #[arg(long, default_value_t = false)]
+        full: bool,
+        #[command(flatten)]
+        host: HostOpt,
+    },
     /// Answer a question, retaining its correlation id
     Reply {
         #[command(flatten)]

@@ -14,6 +14,10 @@ use rusqlite::Transaction;
 use serde_json::Value;
 use std::sync::atomic::Ordering;
 
+#[cfg(test)]
+#[path = "coordination_mail_inbox_tests.rs"]
+mod coordination_mail_inbox_tests;
+
 use crate::coordination_access::{self, WorkerBinding};
 use crate::coordination_attempts::{self as attempts, Settlement};
 use crate::coordination_mail::{
@@ -86,6 +90,11 @@ impl Engine {
                 };
                 self.dispatch_check_coordinator(request, scope, &params)
             }
+            "orchestration.inbox" => {
+                let params: InboxParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.commit_inbox(&params)
+            }
             other => Err(error::method_not_found(other)),
         }
     }
@@ -130,8 +139,51 @@ impl Engine {
                 params.validate_shape(&self.host_id)?;
                 self.dispatch_check_worker(request, binding, &params)
             }
+            "orchestration.inbox" => {
+                let params: InboxParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                // Fail-closed scope binding (existing agreement rule): a
+                // worker credential may sweep the host, but a --terminal
+                // naming another terminal is refused, never silently
+                // re-scoped.
+                if let Some(terminal) = &params.terminal
+                    && terminal != &binding.dispatch_id
+                {
+                    return Err(error::invalid_argument(
+                        "The worker credential may only sweep its own terminal.",
+                    ));
+                }
+                self.coordination_read(|tx| {
+                    coordination_access::recheck_in_tx(tx, binding, &request.method)?;
+                    self.commit_inbox_in_tx(tx, &params)
+                })
+            }
             other => Err(error::method_not_found(other)),
         }
+    }
+
+    /// Read-only host sweep: one snapshot read, no deliveries, no read
+    /// pointers, no receipts. Shared by both actors; the worker arm binds
+    /// scope before calling.
+    fn commit_inbox(&self, params: &InboxParams) -> Result<Value, RpcError> {
+        self.coordination_read(|tx| self.commit_inbox_in_tx(tx, params))
+    }
+
+    fn commit_inbox_in_tx(
+        &self,
+        tx: &Transaction<'_>,
+        params: &InboxParams,
+    ) -> Result<Value, RpcError> {
+        let messages = coordination_mail::inbox_in_tx(
+            tx,
+            &params.scope.host_id,
+            params.terminal.as_deref(),
+            params.effective_limit(),
+        )?;
+        encode(InboxResult {
+            count: messages.len(),
+            messages,
+        })
     }
 
     /// Appends the message and, for a final report, settles the attempt,

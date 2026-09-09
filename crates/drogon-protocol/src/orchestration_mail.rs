@@ -8,6 +8,7 @@ use crate::orchestration_common::{
     ActorScope, MAX_SUBJECT_TEXT_BYTES, OpaqueCursor, ReportOutcome, WaitPolicy,
     validate_opaque_token, validate_task_text,
 };
+use crate::orchestration_scope::HostScope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -550,4 +551,62 @@ pub struct ReplyResult {
     pub message: MessageReceipt,
     /// Echo of the answered question for review tooling.
     pub question_message_id: String,
+}
+
+/// Global newest-first mail sweep across the host's runs (source:
+/// `orchestration.inbox`). Read-only: no deliveries, no read pointers, no
+/// receipts. With `terminal`, only mail addressed to that dispatch; a
+/// stale/unknown handle reads as empty, never an error.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxParams {
+    pub scope: HostScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Dispatch the sweep is filtered to (source: `--terminal` handle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<String>,
+}
+
+/// Source defaults: whole-host sweep reads 20, a terminal-filtered sweep
+/// reads 100 (source `getInbox`/`getAllMessagesForHandle`).
+pub const INBOX_DEFAULT_LIMIT: u32 = 20;
+pub const INBOX_TERMINAL_DEFAULT_LIMIT: u32 = 100;
+
+impl InboxParams {
+    pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
+        self.scope.validate_target(execution_host_id)?;
+        crate::orchestration_common::validate_page_limit(self.limit)?;
+        if let Some(terminal) = &self.terminal {
+            validate_opaque_token(terminal, 128, "Invalid terminal handle.")?;
+        }
+        Ok(())
+    }
+
+    pub fn effective_limit(&self) -> u32 {
+        self.limit.unwrap_or(if self.terminal.is_some() {
+            INBOX_TERMINAL_DEFAULT_LIMIT
+        } else {
+            INBOX_DEFAULT_LIMIT
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxResult {
+    pub messages: Vec<MessageSummary>,
+    pub count: usize,
+}
+
+impl InboxResult {
+    pub fn validate_shape(&self) -> Result<(), RpcError> {
+        if self.count != self.messages.len() {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Inbox count does not match the returned messages.",
+            ));
+        }
+        Ok(())
+    }
 }

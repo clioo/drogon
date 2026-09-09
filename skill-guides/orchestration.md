@@ -127,6 +127,11 @@ reported outcome, physical process verdict (`live`, `unverifiable` or
 `exited`; loss of contact never proves exit), and terminal resource state
 separate.
 
+`drogon-cli orchestration inbox --limit 20 --json`
+sweeps recent messages across this host's runs without consuming or acknowledging
+them. `--terminal <HANDLE>` narrows to one actor (a stale handle reads empty, never
+an error) and `--full` adds body and payload lines to the human output.
+
 ## Scope And Credentials
 
 Bound coordinator verbs (`run-use`, `task-create`, `task-update`, `task-list`,

@@ -15,8 +15,8 @@ use drogon_protocol::orchestration_common::{
     SessionIdentity, WaitPolicy,
 };
 use drogon_protocol::orchestration_mail::{
-    CheckMode, CheckParams, CheckResult, FinalReport, LifecycleVerdict, MessageKind, ReplyParams,
-    ReplyResult, SendParams, SendResult, SendTarget,
+    CheckMode, CheckParams, CheckResult, FinalReport, InboxParams, InboxResult, LifecycleVerdict,
+    MessageKind, ReplyParams, ReplyResult, SendParams, SendResult, SendTarget,
 };
 use drogon_protocol::orchestration_question::{
     AskIntent, AskParams, AskResult, AskWaitOutcome, BootstrapScope, ReceiptScope,
@@ -265,6 +265,17 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             {
                 return Err(usage("--limit is outside the supported range"));
             }
+        }
+        return Ok(());
+    }
+    // Mailbox observation needs no dispatch scope, so both actors may sweep;
+    // only the page bound is validated locally (fail-closed terminal binding
+    // is enforced by the engine against the worker credential).
+    if let OrchestrationCommand::Inbox { limit, .. } = command {
+        if let Some(limit) = limit
+            && (*limit == 0 || *limit > drogon_protocol::orchestration_common::MAX_PAGE_LIMIT)
+        {
+            return Err(usage("--limit is outside the supported range"));
         }
         return Ok(());
     }
@@ -688,6 +699,7 @@ pub async fn run(
         | OrchestrationCommand::Reset { host, .. }
         | OrchestrationCommand::Send { host, .. }
         | OrchestrationCommand::Check { host, .. }
+        | OrchestrationCommand::Inbox { host, .. }
         | OrchestrationCommand::Reply { host, .. }
         | OrchestrationCommand::Ask { host, .. }
         | OrchestrationCommand::RequestShow { host, .. } => host.host.as_deref(),
@@ -2071,6 +2083,32 @@ pub async fn run(
                 });
             }
             Ok(outcome)
+        }
+        OrchestrationCommand::Inbox {
+            limit,
+            terminal,
+            full,
+            ..
+        } => {
+            let params = InboxParams {
+                scope: host_scope(&host_id),
+                limit: *limit,
+                terminal: terminal.clone(),
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call("orchestration.inbox", value, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let result: InboxResult =
+                Client::decode_checked(&call, "orchestration.inbox", |r: &InboxResult| {
+                    r.validate_shape().map_err(|e| e.message)
+                })?;
+            emit(
+                call,
+                json,
+                || crate::orchestration_output::format_inbox(&result, *full),
+                0,
+            )
         }
         OrchestrationCommand::Reply {
             actor,

@@ -200,6 +200,7 @@ fn admin_existing_methods_are_not_in_the_worker_allowlist() {
         "orchestration.check",
         "orchestration.ask",
         "orchestration.reply",
+        "orchestration.inbox",
         "orchestration.requestShow",
     ] {
         assert!(super::is_allowed_worker_method(method));

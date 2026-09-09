@@ -21,6 +21,7 @@ const ALLOWED_WORKER_METHODS: &[&str] = &[
     "orchestration.check",
     "orchestration.ask",
     "orchestration.reply",
+    "orchestration.inbox",
     "orchestration.requestShow",
 ];
 

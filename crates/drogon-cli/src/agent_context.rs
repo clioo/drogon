@@ -893,6 +893,20 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
         ),
         entry(
+            "orchestration inbox",
+            &["orchestration", "inbox"],
+            "Sweep recent host-wide or terminal-scoped messages (read-only)",
+            "drogon-cli orchestration inbox [--limit <N>] [--terminal <HANDLE>] [--full]",
+            &["full", "host", "limit", "terminal"],
+            &[],
+            &["drogon-cli orchestration inbox --limit 20 --json"],
+            &[
+                "Read-only sweep: no receipts, deliveries or read pointers are touched.",
+                "--full adds body and payload lines; a stale terminal handle reads empty, never an error.",
+                "A worker credential may only name its own dispatch terminal.",
+            ],
+        ),
+        entry(
             "orchestration check",
             &["orchestration", "check"],
             "Consume or inspect the actor's mailbox (whole-FIFO batch, explicit ACK)",
