@@ -23,6 +23,7 @@ import { mentu } from "./mentu";
 import { botBridgeExtras } from "./bot";
 import { appMenu } from "./app-menu";
 import { ui } from "./workspace-ui-preferences";
+import { skills } from "./skills";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -120,8 +121,6 @@ Object.assign(
   botBridgeExtras,
   { appMenu },
   { filesWatch },
-  // Workspace Options shared UI-preferences namespace (runtime-only
-  // merge, same pattern as the namespaces above).
-  { ui },
+  { ui, skills },
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

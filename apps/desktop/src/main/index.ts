@@ -50,6 +50,7 @@ import { registerProjectBridge } from "./project-bridge";
 import { registerShellBridge } from "./shell-bridge";
 import { registerSettingsProbes } from "./settings-probes";
 import { registerSettingsCliBridge } from "./settings-bridge";
+import { registerSkillsBridge } from "./skills-bridge";
 import { registerAgentSettingsBridge } from "./agent-settings-bridge";
 import { registerWorkspaceUIPreferencesBridge } from "./workspace-ui-preferences-bridge";
 import { registerFontsBridge } from "./fonts";
@@ -266,6 +267,7 @@ function registerBridge() {
   registerShellBridge(() => window);
   registerSettingsProbes(() => window);
   registerSettingsCliBridge(() => window);
+  registerSkillsBridge(() => window);
   registerAgentSettingsBridge(() => window);
   registerFontsBridge(() => window);
   registerTasksBridge(() => window);
