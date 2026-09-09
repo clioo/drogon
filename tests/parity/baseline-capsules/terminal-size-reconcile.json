@@ -1,0 +1,22 @@
+{
+  "capsuleId": "terminal-size-reconcile",
+  "description": "Unchanged source grid-desynchronization tests; reviewed runtime and complete test closure.",
+  "sourceRevision": "34ae1a1c926fd1ce1f174f7c6ef2f65e0a0c4168",
+  "sourceRevisionNote": "Pinned read-only reference; verified again by capsule runner.",
+  "license": { "path": "LICENSE", "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3", "spdxId": "MIT", "copyright": "Copyright (c) 2026 Lovecast Inc." },
+  "entryTestFile": "src/renderer/src/components/terminal-pane/pty-size-reconcile.test.ts",
+  "files": [
+    { "path": "src/renderer/src/components/terminal-pane/pty-size-reconcile.test.ts", "role": "test", "sha256": "607bc65597805fdbb6dae8aca8010602e37db51405aa12adaa7611eb0a994c95" },
+    { "path": "src/renderer/src/components/terminal-pane/pty-size-reconcile.ts", "role": "module", "sha256": "c57a8fe1db310fb1868fafcfc9077bbbbcb10653a73d2bf42691fa29ef212fb7" }
+  ],
+  "dependencyClosureNote": "Runtime has no imports; tests inject scheduling and transport. No real frame scheduling, process, filesystem or network calls.",
+  "expectedTestCounts": { "files": 1, "tests": 19 },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "Node environment retained; source DOM/host-port setup files and unrelated feature-wall define omitted because neither closure file uses them.",
+    "Source suite timeouts and GC worker flags omitted; the closure uses injected synchronous frame scheduling and ordinary promises.",
+    "Installed capsule Vitest is 5.0.0 rather than source ^4.1.11. This receipt proves only these unchanged assertions under the stated capsule runtime, not the complete original suite/configuration."
+  ],
+  "isolationRationale": "Stage only under repository capsule tooling; never execute with the read-only reference as cwd. A source baseline is not candidate parity or evidence that unavailable applied-size reads confirm geometry."
+}

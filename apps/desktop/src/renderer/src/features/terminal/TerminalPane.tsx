@@ -22,6 +22,7 @@ import type { ILinkProvider, ILink } from "@xterm/xterm";
 import { TerminalInputQueue } from "./terminal-input-queue";
 import { preventTerminalBacktabNavigation } from "./terminal-backtab-navigation";
 import { createTerminalShiftEnterHandler } from "./terminal-shift-enter";
+import { createTerminalGeometrySync } from "./terminal-geometry-sync";
 import { TerminalKittyKeyboardModeTracker } from "../../../../shared/terminal-kitty-keyboard-mode-tracker";
 import { attachTerminalMouseWheelMultiplier } from "./terminal-tui-wheel";
 import { resolveTerminalJisYenInput } from "./terminal-jis-yen-input";
@@ -640,6 +641,7 @@ export function TerminalPane({
     // when cols/rows match, so the attach offer and the DPR repair must run
     // explicitly — they are the only path that rebuilds a stale backing
     // store and glyph atlas.
+    let geometrySync: ReturnType<typeof createTerminalGeometrySync> | null = null;
     const fitAndSyncTerminal = () => {
       if (disposed || !hasMeasurableTerminalBox(mount)) return;
       try {
@@ -649,6 +651,7 @@ export function TerminalPane({
       }
       if (webgl.addon === null) attachWebgl();
       repairTerminalWebglBackingStore(terminal);
+      geometrySync?.request({ cols: terminal.cols, rows: terminal.rows });
     };
     const osc52Handler = createOsc52OscHandler({
       // OSC 52 clipboard defaults on (source gate); queries stay blocked.
@@ -1058,6 +1061,7 @@ export function TerminalPane({
     // returning service resumes on its own; scrollback stays untouched.
     const scheduleReadRetry = () => {
       canWrite = false;
+      geometrySync?.invalidate();
       projectUnverifiable();
       if (!disposed) timeout = setTimeout(read, TERMINAL_READ_RETRY_MS);
     };
@@ -1097,15 +1101,15 @@ export function TerminalPane({
     // 0x0 containers stay deferred: the ResizeObserver below retries once
     // the pane has a live box (fork canMeasurePaneForFit).
     const fitTerminal = () => fitAndSyncTerminal();
-    const resize = terminal.onResize(({ cols, rows }) => {
-      if (canWrite && !disposed)
-        void window.drogon
-          .resize({ ...inputIdentity, cols, rows })
-          .then((result) => {
-            if (!result.ok) report(result.error.message);
-          })
-          .catch(() => report("Terminal resize could not be confirmed."));
+    geometrySync = createTerminalGeometrySync({
+      isReady: () => canWrite && !disposed && paneVisible.current,
+      send: async ({ cols, rows }) => {
+        const result = await window.drogon.resize({ ...inputIdentity, cols, rows });
+        if (!result.ok) throw new Error(result.error.message);
+      },
+      onError: (error) => report(error instanceof Error ? error.message : "Terminal resize could not be confirmed."),
     });
+    const resize = terminal.onResize((grid) => geometrySync?.request(grid));
     const observer = new ResizeObserver(fitTerminal);
     observer.observe(mount);
     // Reveal is a recovery boundary (fork terminal-visibility-resume): a pane
@@ -1250,6 +1254,8 @@ export function TerminalPane({
           }
           caughtUp.current = bytes.length < TERMINAL_READ_PAGE_BYTES;
           canWrite = value.session.verdict === "live";
+          if (canWrite) geometrySync?.flush();
+          else geometrySync?.invalidate();
           if (bytes.length > 0) lastActivityAt = Date.now();
           emitSessionUpdate(value.session);
           observeProcessExit(value.session);
@@ -1269,6 +1275,8 @@ export function TerminalPane({
         if (disposed) return;
         cursor = value.nextCursor;
         canWrite = value.session.verdict === "live";
+        if (canWrite) geometrySync?.flush();
+        else geometrySync?.invalidate();
         if (bytes.length > 0) lastActivityAt = Date.now();
         emitSessionUpdate(value.session);
         if (bytes.length < TERMINAL_READ_PAGE_BYTES) caughtUp.current = true;
@@ -1289,6 +1297,7 @@ export function TerminalPane({
       disposed = true;
       live.current = null;
       webglSyncRef.current = null;
+      geometrySync?.dispose();
       unregisterTerminalDebugHandle(session.id, terminal);
       setSearchAddon(null);
       clearTimeout(timeout);

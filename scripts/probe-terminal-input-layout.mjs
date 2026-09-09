@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
+import { rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { waitForSessionStripTab } from "./probe-rendered-harness.mjs";
 import path from "node:path";
 
 /** Actual Electron keyboard, xterm grid and kernel PTY size; no model requests. */
-export async function probeTerminalInputLayout({ page, session, output, expectedHome }) {
+export async function probeTerminalInputLayout({ page, session, output, expectedHome, dataDir }) {
   const previousViewport = page.viewportSize();
   const evidence = { layouts: [], backtab: null, shiftEnter: null };
   let sidebarToggles = 0;
@@ -27,8 +29,26 @@ export async function probeTerminalInputLayout({ page, session, output, expected
     evidence.privateHomeVerified = true;
     await page.keyboard.type("i=0; while [ \"$i\" -lt 60 ]; do printf '%080d\\n' 0; i=$((i+1)); done");
     await page.keyboard.press("Enter");
-    for (const [index, width] of [1200, 760, 1000, 1200].entries()) {
-      await page.setViewportSize({ width, height: 600 });
+    for (const [index, width] of [1200, 760, 1000, 1200, 760].entries()) {
+      if (index === 4) {
+        const socket = path.join(dataDir, "runtime-v1.sock");
+        const interrupted = path.join(dataDir, `geometry-outage-${randomUUID()}.sock`);
+        const beforeCols = await page.evaluate((id) => window.__drogonTerminals.get(id).cols, session.id);
+        await rename(socket, interrupted);
+        try {
+          await waitForSessionStripTab(page, session.id, "unverifiable");
+          await page.setViewportSize({ width, height: 600 });
+          await page.waitForFunction(({ id, beforeCols }) => window.__drogonTerminals.get(id).cols !== beforeCols, { id: session.id, beforeCols });
+        } finally { await rename(interrupted, socket); }
+        await waitForSessionStripTab(page, session.id, "live");
+        evidence.reconnected = await page.evaluate(async ({ id, workspaceId }) => {
+          const terminal = window.__drogonTerminals.get(id);
+          const reply = await window.drogon.sessions(workspaceId);
+          const current = reply.ok && reply.result.sessions.find((item) => item.id === id);
+          return { grid: { cols: terminal.cols, rows: terminal.rows }, service: { cols: current?.cols, rows: current?.rows } };
+        }, session);
+        await page.screenshot({ path: path.join(output, "terminal-reconnect-geometry.png"), animations: "disabled" });
+      } else await page.setViewportSize({ width, height: 600 });
       if (index === 1 || index === 3) {
         if (index === 1) await page.getByRole("button", { name: "Toggle right sidebar", exact: true }).click();
         else {

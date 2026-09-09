@@ -482,7 +482,7 @@ try {
   }, registered.id);
   assert.ok(original?.incarnation);
   if (process.platform !== "win32") {
-    report.checks.push(...await probeTerminalInputLayout({ page, session: original, output, expectedHome: privateEnvironment.home }));
+    report.checks.push(...await probeTerminalInputLayout({ page, session: original, output, expectedHome: privateEnvironment.home, dataDir }));
   }
   report.checks.push(await probeSessionNavigation({
     page, workspaceId: registered.id, session: original, marker,
