@@ -3,8 +3,7 @@
 //! Mirrors the fork's `mentu-runtime-identity.ts`, narrowed to this
 //! product's own simpler layout: `<data-dir>/mentu/runtime/bin/mentu-recipes`
 //! (or `DROGON_MENTU_RUNTIME` to override the exact executable path, the
-//! test/dev seam), verified against the lock copied from
-//! `.mentu/mentu-runtime-lock.json` in the read-only reference. A missing or
+//! test/dev seam), verified against the official mentu-ai release. A missing or
 //! mismatched runtime fails closed: `mentu.run`/`mentu.retry` never fall
 //! back to a workspace binary or a PATH lookup.
 
@@ -16,18 +15,13 @@ use std::sync::Mutex;
 use drogon_protocol::mentu::MentuRuntimeInfo;
 use sha2::{Digest, Sha256};
 
-/// Copied from the read-only reference's `.mentu/mentu-runtime-lock.json`
-/// (revision `b72a1203d46c1d930be1aead65388ddfbe9a8fc4`, mentu-recipes
-/// 0.4.0, darwin-arm64). This crate never re-derives these values from the
-/// reference at build time. The pinned runtime binary itself is built out
-/// of band (this repo never clones or builds `mentu-recipes`) and reaches a
-/// data directory either via `mentu.runtime_install` (see
-/// `crate::mentu::runtime_install`, journey J9 fresh-install usability) or
-/// by hand for local dev/tests.
-pub const MENTU_LOCK_REVISION: &str = "b72a1203d46c1d930be1aead65388ddfbe9a8fc4";
-pub const MENTU_LOCK_VERSION: &str = "0.4.0";
+/// Official mentu-ai/mentu-recipes v0.5.0, macos-arm64 release and checksum.
+/// Packaging downloads and verifies these exact bytes; the desktop installs
+/// its bundled copy through `mentu.runtime_install`, without PATH or network.
+pub const MENTU_LOCK_REVISION: &str = "c82ccfa0ebbe77d62193e068821ba6e74f87a8d3";
+pub const MENTU_LOCK_VERSION: &str = "0.5.0";
 pub const MENTU_LOCK_SHA256: &str =
-    "124ef7391cf060051f45307c88bb10509f5fd9e7d7a10e66516b3bdaf14aa504";
+    "f00528a940185e9433ad65b02e7de251d7d3d856c9d24d38f8b1474a1ca8bc5d";
 
 const RUNTIME_ENV_OVERRIDE: &str = "DROGON_MENTU_RUNTIME";
 

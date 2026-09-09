@@ -1,24 +1,14 @@
 #!/usr/bin/env node
 // MIT Copyright (c) 2026 Lovecast Inc.
 //
-// Mirrors the read-only reference's build-time provisioning mechanism
-// (`config/scripts/mentu-runtime-package.cjs`'s `provisionMentuRuntime`,
-// invoked by `config/scripts/mentu-runtime-provision.mjs`): given an
-// already-built `mentu-recipes` binary on this machine, verify its sha256
-// against the pinned lock and, only on a match, atomically stage it where
-// `scripts/package-desktop.mjs` can bundle it and the desktop app's
-// one-time install (`apps/desktop/src/main/mentu-bridge.ts`) can find it in
-// dev. This script never clones, builds or downloads `mentu-recipes`
-// itself — same division of labor as the reference, where the pinned
-// binary is always built out of band and only copied into place here.
-//
-// Adapted from the reference: this repo pins the lock as Rust constants in
-// `crates/drogon-core/src/mentu/runtime.rs` (`MENTU_LOCK_REVISION`/
-// `MENTU_LOCK_VERSION`/`MENTU_LOCK_SHA256`), not a checked-in
-// `.mentu/mentu-runtime-lock.json`, so those three values are duplicated
-// here — keep them in sync with that module.
+// Stage the unmodified official mentu-ai release at build time. Downloads
+// and cached copies must match the pinned digest; installed apps stay offline.
+// Keep the lock in sync with crates/drogon-core/src/mentu/runtime.rs and
+// apps/desktop/src/main/mentu-bridge.ts.
 
 import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import {
   chmodSync,
   copyFileSync,
@@ -33,10 +23,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Must match crates/drogon-core/src/mentu/runtime.rs.
-export const MENTU_LOCK_REVISION = "b72a1203d46c1d930be1aead65388ddfbe9a8fc4";
-export const MENTU_LOCK_VERSION = "0.4.0";
+export const MENTU_LOCK_REVISION = "c82ccfa0ebbe77d62193e068821ba6e74f87a8d3";
+export const MENTU_LOCK_VERSION = "0.5.0";
 export const MENTU_LOCK_SHA256 =
-  "124ef7391cf060051f45307c88bb10509f5fd9e7d7a10e66516b3bdaf14aa504";
+  "f00528a940185e9433ad65b02e7de251d7d3d856c9d24d38f8b1474a1ca8bc5d";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -99,6 +89,48 @@ export function provisionMentuRuntime(sourcePath, projectRoot = repoRoot) {
     if (existsSync(temporary)) rmSync(temporary, { force: true });
   }
   return { status: "provisioned", path: destination, sha256 };
+}
+
+export const MENTU_RELEASE_URL =
+  `https://github.com/mentu-ai/mentu-recipes/releases/download/v${MENTU_LOCK_VERSION}/mentu-recipes-macos-arm64`;
+const LICENSE_URL =
+  `https://raw.githubusercontent.com/mentu-ai/mentu-recipes/${MENTU_LOCK_REVISION}/LICENSE`;
+const LICENSE_SHA256 = "5d4ae61c014a23d64498a33c41c6d2288bd5e4f21e9e8ceaea452d8fd0715314";
+
+async function downloadVerified(url, digest, fetchImpl) {
+  const response = await fetchImpl(url, { signal: AbortSignal.timeout(120000) });
+  if (!response.ok) throw new Error(`Mentu download failed (${response.status}): ${url}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const actual = createHash("sha256").update(bytes).digest("hex");
+  if (actual !== digest) throw new Error(`Mentu download checksum mismatch: ${url}`);
+  return bytes;
+}
+
+/** Required for Apple Silicon packages; never trust an unchecked cached runtime. */
+export async function ensureOfficialMentuRuntime(projectRoot = repoRoot, fetchImpl = fetch) {
+  const destination = bundledRuntimeDestination(projectRoot);
+  const licensePath = join(dirname(dirname(destination)), "LICENSE");
+  if (existsSync(destination)) {
+    assertApprovedExecutable(destination, "cached runtime");
+    if (existsSync(licensePath) && sha256File(licensePath) === LICENSE_SHA256) {
+      return { status: "already-provisioned", path: destination, sha256: MENTU_LOCK_SHA256 };
+    }
+  }
+  const temporary = await mkdtemp(join(tmpdir(), "drogon-mentu-download-"));
+  try {
+    const license = await downloadVerified(LICENSE_URL, LICENSE_SHA256, fetchImpl);
+    let result = { status: "already-provisioned", path: destination, sha256: MENTU_LOCK_SHA256 };
+    if (!existsSync(destination)) {
+      const binary = await downloadVerified(MENTU_RELEASE_URL, MENTU_LOCK_SHA256, fetchImpl);
+      const source = join(temporary, "mentu-recipes");
+      await writeFile(source, binary, { mode: 0o755 });
+      result = provisionMentuRuntime(source, projectRoot);
+    }
+    await writeFile(licensePath, license);
+    return result;
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }
 
 function argumentValue(name) {
