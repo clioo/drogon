@@ -189,7 +189,9 @@ fi
 
 "$DROGON_CLI_COMMAND" --data-dir "$DROGON_DATA_DIR" --json orchestration send \
   --type worker_done --subject "fixture $mode" --outcome "$outcome" \
-  --body "fixture worker report" > first-report.json 2> first-report.stderr
+  --body "fixture worker report" \
+  --task-id "${DROGON_TASK_ID:-}" --dispatch-id "${DROGON_DISPATCH_ID:-}" \
+  --files-modified "artifact.txt,done" --report-path "artifact.txt" > first-report.json 2> first-report.stderr
 first_status=$?
 
 if [ "$mode" != "fixture-fail" ]; then
@@ -952,6 +954,22 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     assert_eq!(
         first_report_2_json["result"]["lifecycle"]["duplicate"],
         Value::Bool(false)
+    );
+    // The structured payload flags built the worker_done payload object.
+    let report_message = first_report_2_json["result"]["message"]["messageId"]
+        .as_str()
+        .expect("report message id")
+        .to_string();
+    let (code, inbox) = coordinator_call(&data_dir, &["orchestration", "inbox", "--limit", "5"]);
+    assert_ok(code, &inbox, &["orchestration", "inbox"]);
+    let report_row = inbox["result"]["messages"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["messageId"] == report_message))
+        .expect("inbox must list the worker_done message");
+    assert_eq!(report_row["payload"]["taskId"], task_id);
+    assert_eq!(
+        report_row["payload"]["filesModified"],
+        serde_json::json!(["artifact.txt", "done"])
     );
 
     // The core assertion: a late, conflicting final report from the exact
