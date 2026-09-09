@@ -67,11 +67,18 @@ fn ps_cmd(pid: &str) -> Command {
     cmd
 }
 
-/// Run `cmd` with a hard wall-clock bound. Unbounded `output()`/`status()`
-/// are never used in supervision paths (amendment D).
+/// Run `cmd` with a hard wall-clock bound and captured output: piped
+/// stdout/stderr are configured here (the caller cannot forget), and
+/// unbounded `output()`/`status()` are never used in supervision paths
+/// (amendment D). The deadline is taken at entry so spawn cost counts,
+/// and even the post-kill reap is bounded — a killed helper is never
+/// trusted to exit on its own.
 fn run_bounded(cmd: &mut Command, timeout: Duration) -> Result<std::process::Output, String> {
-    let mut child = cmd.spawn().map_err(|err| format!("spawn: {err}"))?;
     let deadline = Instant::now() + timeout;
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().map_err(|err| format!("spawn: {err}"))?;
     loop {
         match child.try_wait() {
             Ok(Some(_)) => {
@@ -82,7 +89,12 @@ fn run_bounded(cmd: &mut Command, timeout: Duration) -> Result<std::process::Out
             Ok(None) => {
                 if Instant::now() >= deadline {
                     let _ = child.kill();
-                    let _ = child.wait();
+                    let reap_deadline = Instant::now() + Duration::from_millis(200);
+                    while child.try_wait().ok().flatten().is_none()
+                        && Instant::now() < reap_deadline
+                    {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
                     return Err(format!("bounded command exceeded {timeout:?}"));
                 }
                 std::thread::sleep(Duration::from_millis(5));
@@ -97,14 +109,16 @@ fn run_bounded(cmd: &mut Command, timeout: Duration) -> Result<std::process::Out
 /// established (callers treat that as unverifiable, never as absence).
 fn birth_of(pid: u32) -> Option<String> {
     let output = run_bounded(&mut ps_cmd(&pid.to_string()), PS_TIMEOUT).ok()?;
+    if !output.status.success() {
+        return None;
+    }
     let line = String::from_utf8_lossy(&output.stdout);
     let line = line.trim();
-    let (birth, _) = line.rsplit_once(' ').unwrap_or((line, ""));
-    if birth.is_empty() {
-        None
-    } else {
-        Some(canonical_birth(birth))
+    let (birth, stat) = line.rsplit_once(' ').unwrap_or((line, ""));
+    if birth.is_empty() || stat.trim().is_empty() {
+        return None;
     }
+    Some(canonical_birth(birth))
 }
 
 /// Append-only ledger entry: a strictly positive PID plus its birth.
@@ -122,8 +136,14 @@ fn parse_ledger_line(line: &str) -> Result<LedgerEntry, String> {
         .trim()
         .parse()
         .map_err(|_| format!("pid is not a strictly positive integer: {line}"))?;
-    if pid == 0 {
-        return Err(format!("pid must be positive: {line}"));
+    // pid_t is a signed 32-bit type on every supported unix; values above
+    // i32::MAX must be rejected before any cast near a signal.
+    if pid == 0 || pid > i32::MAX as u32 {
+        return Err(format!("pid outside positive pid_t range: {line}"));
+    }
+    let birth = birth.trim();
+    if birth.is_empty() {
+        return Err(format!("missing birth identity: {line}"));
     }
     Ok(LedgerEntry {
         pid,
@@ -164,22 +184,41 @@ enum Identity {
 }
 
 #[cfg(unix)]
-fn check_identity(entry: &LedgerEntry) -> Identity {
-    let Ok(output) = run_bounded(&mut ps_cmd(&entry.pid.to_string()), PS_TIMEOUT) else {
+fn check_identity_with(entry: &LedgerEntry, budget: Duration) -> Identity {
+    let Ok(output) = run_bounded(&mut ps_cmd(&entry.pid.to_string()), budget) else {
         return Identity::Unverifiable;
     };
+    classify_ps(entry, &output)
+}
+
+/// Classify bounded ps output. Only a clean, non-signaled exit-1 with
+/// empty stdout AND empty stderr proves "no such process"; a complete
+/// live record requires successful exit plus one well-formed `birth stat`
+/// row. Everything else — signal termination, silent failure, partial or
+/// unparseable output — is unverifiable, never absence (amendment C).
+fn classify_ps(entry: &LedgerEntry, output: &std::process::Output) -> Identity {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let line = stdout.trim();
+    let exit_code = output.status.code();
+    // On unix a terminated-by-signal status has no exit code; treat that
+    // as signal termination on every platform.
+    let signaled = exit_code.is_none();
     if line.is_empty() {
-        if !output.status.success() && stderr.trim().is_empty() {
-            // ps ran and knows no such process.
+        if exit_code == Some(1) && stderr.trim().is_empty() && !signaled {
             return Identity::Gone;
         }
-        // A silent or diagnostic ps failure is not evidence of absence.
         return Identity::Unverifiable;
     }
-    let (birth, _) = line.rsplit_once(' ').unwrap_or((line, ""));
+    if !output.status.success() {
+        return Identity::Unverifiable;
+    }
+    let Some((birth, stat)) = line.rsplit_once(' ') else {
+        return Identity::Unverifiable;
+    };
+    if birth.is_empty() || stat.trim().is_empty() {
+        return Identity::Unverifiable;
+    }
     if canonical_birth(birth) == entry.birth {
         Identity::Alive
     } else {
@@ -310,10 +349,17 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
                 term_at: None,
             });
         }
-        let now = Instant::now();
         let mut resolved = Vec::new();
         for (index, item) in pending.iter_mut().enumerate() {
-            match check_identity(&item.entry) {
+            // Total-bound enforcement is per child, not per loop pass: a
+            // long line of identities can never outlive cleanup_deadline.
+            let now = Instant::now();
+            if now >= cleanup_deadline {
+                break;
+            }
+            let remaining = cleanup_deadline.saturating_duration_since(now);
+            let budget = remaining.min(PS_TIMEOUT).max(Duration::from_millis(10));
+            match check_identity_with(&item.entry, budget) {
                 Identity::Gone | Identity::Replaced => {
                     actions.push(format!("pid={} resolved-gone", item.entry.pid));
                     resolved.push(index);
@@ -322,7 +368,7 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
                     if item.term_at.is_none() {
                         // Recheck immediately before every signal
                         // (amendment C); TERM first (amendment D).
-                        if check_identity(&item.entry) == Identity::Alive {
+                        if check_identity_with(&item.entry, budget) == Identity::Alive {
                             match signal_pid(item.entry.pid, libc::SIGTERM) {
                                 Ok(()) => {
                                     actions.push(format!("pid={} SIGTERM", item.entry.pid));
@@ -332,7 +378,7 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
                             }
                         }
                     } else if now >= item.term_at.expect("term_at") + TERM_GRACE {
-                        if check_identity(&item.entry) == Identity::Alive {
+                        if check_identity_with(&item.entry, budget) == Identity::Alive {
                             match signal_pid(item.entry.pid, libc::SIGKILL) {
                                 Ok(()) => actions.push(format!("pid={} SIGKILL", item.entry.pid)),
                                 Err(err) => unverifiable.push(err),
@@ -353,7 +399,7 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
         for index in resolved.into_iter().rev() {
             pending.swap_remove(index);
         }
-        if pending.is_empty() || now >= cleanup_deadline {
+        if pending.is_empty() || Instant::now() >= cleanup_deadline {
             break;
         }
         std::thread::sleep(TICK);
@@ -1227,6 +1273,11 @@ fn ledger_lines_require_positive_pids_with_birth_identities() {
     assert!(parse_ledger_line("abc|Mon").is_err(), "non-numeric pid");
     assert!(parse_ledger_line("-5|Mon").is_err(), "negative pid");
     assert!(parse_ledger_line("0|Mon").is_err(), "zero pid");
+    assert!(parse_ledger_line("123|").is_err(), "empty birth");
+    assert!(
+        parse_ledger_line("9999999999|Mon").is_err(),
+        "pid above pid_t range"
+    );
     let entry = parse_ledger_line("123|  Mon   Sep  9  08:00:00   2026 ").unwrap();
     assert_eq!(entry.pid, 123);
     assert_eq!(entry.birth, "Mon Sep 9 08:00:00 2026");
