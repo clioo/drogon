@@ -43,7 +43,7 @@ export function SettingsSidebar({
   onSelectProject?: () => void;
 }): React.JSX.Element {
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col border-r border-border bg-sidebar">
+    <aside className="flex w-[280px] shrink-0 flex-col border-r border-worktree-sidebar-border bg-worktree-sidebar">
       <div className="border-b border-border px-3 py-3">
         <Button
           variant="ghost"

@@ -177,13 +177,17 @@ export function callSessionDaemon(
  * `session.list` poll) is the renderer's `applySessionStatePush`
  * (`agentStateAt` compare); this map only keeps the stream itself quiet.
  */
+type ForwardedSession = { state: string; at: string | null } &
+  Pick<PushedSessionEvent, "agentPromptPreview" | "cacheIdleAt">;
+
 export function shouldForwardSessionEvent(
-  forwarded: ReadonlyMap<string, { state: string; at: string | null }>,
+  forwarded: ReadonlyMap<string, ForwardedSession>,
   event: PushedSessionEvent,
 ): boolean {
   const prev = forwarded.get(event.sessionId);
   if (!prev) return true;
-  return prev.state !== event.agentState || prev.at !== event.agentStateAt;
+  return prev.state !== event.agentState || prev.at !== event.agentStateAt ||
+    prev.agentPromptPreview !== event.agentPromptPreview || prev.cacheIdleAt !== event.cacheIdleAt;
 }
 
 /** Exponential reconnect backoff, capped; exported so tests pin the curve. */
@@ -222,7 +226,7 @@ export function startSessionStatePush(deps: SessionStatePushDeps): () => void {
   let stopped = false;
   const call = deps.call ?? callSessionDaemon;
   const log = deps.log ?? ((message: string) => console.log(message));
-  const forwarded = new Map<string, { state: string; at: string | null }>();
+  const forwarded = new Map<string, ForwardedSession>();
   let afterSeq = 0;
   let bootId: string | null = null;
   let rounds = 0;
@@ -276,6 +280,8 @@ export function startSessionStatePush(deps: SessionStatePushDeps): () => void {
           forwarded.set(event.sessionId, {
             state: event.agentState,
             at: event.agentStateAt,
+            agentPromptPreview: event.agentPromptPreview,
+            cacheIdleAt: event.cacheIdleAt,
           });
           deps.onEvent?.(event);
           const window = deps.getWindow();
@@ -285,6 +291,8 @@ export function startSessionStatePush(deps: SessionStatePushDeps): () => void {
               workspaceId: event.workspaceId,
               agentState: event.agentState,
               agentStateAt: event.agentStateAt,
+              ...(event.agentPromptPreview !== undefined ? { agentPromptPreview: event.agentPromptPreview } : {}),
+              ...(event.cacheIdleAt !== undefined ? { cacheIdleAt: event.cacheIdleAt } : {}),
             });
         }
       }

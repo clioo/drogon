@@ -7,6 +7,8 @@
 // a native checkbox with role="switch" (same keyboard contract), classes
 // are plain strings.
 import type { ReactNode } from "react";
+import { Switch } from "../../components/ui/switch";
+import { Label } from "../../components/ui/label";
 
 export function SettingsSwitch({
   checked,
@@ -20,15 +22,7 @@ export function SettingsSwitch({
   disabled?: boolean;
 }): React.JSX.Element {
   return (
-    <input
-      type="checkbox"
-      role="switch"
-      className="settings-switch"
-      checked={checked}
-      aria-label={ariaLabel}
-      disabled={disabled}
-      onChange={onChange}
-    />
+    <Switch checked={checked} aria-label={ariaLabel} disabled={disabled} onCheckedChange={onChange} />
   );
 }
 
@@ -65,9 +59,9 @@ export function SettingsRow({
           description ? "min-w-0 flex-1 space-y-1" : "min-w-0 flex-1 space-y-0.5"
         }
       >
-        <span id={labelId} className="select-text text-sm font-medium">
+        <Label id={labelId} className="select-text">
           {label}
-        </span>
+        </Label>
         {description ? (
           <p className="select-text text-xs text-muted-foreground">
             {description}
@@ -126,11 +120,13 @@ export function SettingsSegmentedControl<T extends string | number>({
   onChange,
   options,
   ariaLabel,
+  size = "md",
 }: {
   value: T;
   onChange: (value: T) => void;
   options: readonly SettingsSegmentedOption<T>[];
   ariaLabel?: string;
+  size?: "sm" | "md";
 }): React.JSX.Element {
   return (
     <div
@@ -154,13 +150,12 @@ export function SettingsSegmentedControl<T extends string | number>({
             onClick={() => {
               if (!opt.disabled) onChange(opt.value);
             }}
-            className={
-              active
-                ? "rounded-sm bg-accent px-3 py-1 text-center text-sm font-medium text-accent-foreground outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                : opt.disabled
-                  ? "cursor-not-allowed rounded-sm px-3 py-1 text-center text-sm text-muted-foreground/50 outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  : "rounded-sm px-3 py-1 text-center text-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            }
+            className={[
+              "rounded-sm text-center outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
+              size === "sm" ? "px-2.5 py-0.5 text-xs" : "px-3 py-1 text-sm",
+              active ? "bg-accent font-medium text-accent-foreground" : opt.disabled
+                ? "cursor-not-allowed text-muted-foreground/50" : "text-muted-foreground hover:text-foreground",
+            ].join(" ")}
           >
             {opt.label}
           </button>
@@ -168,6 +163,17 @@ export function SettingsSegmentedControl<T extends string | number>({
       })}
     </div>
   );
+}
+
+export function SettingsBadge({ tone = "neutral", children, className }: {
+  tone?: "neutral" | "accent" | "muted"; children: ReactNode; className?: string;
+}): React.JSX.Element {
+  return <span className={[
+    "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
+    tone === "accent" ? "border-foreground/20 bg-foreground/10 text-foreground"
+      : tone === "muted" ? "border-border/40 bg-muted/30 text-muted-foreground"
+        : "border-border/50 bg-background/50 text-foreground/80", className,
+  ].filter(Boolean).join(" ")}>{children}</span>;
 }
 
 /** Consistent subsection header: h3 text-sm font-semibold + muted description. */

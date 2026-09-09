@@ -7,6 +7,7 @@
    tab-order.ts instead of the zustand tab slice; keyboard reorder runs on
    Ctrl/Cmd+arrows so the plain-arrow roving-tabindex model stays intact. */
 import { useLayoutEffect, useRef, useState } from "react";
+import { useGeneratedAgentTitles } from "../settings/agent-generated-titles";
 import { DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import type { DragEndEvent, DragOverEvent } from "@dnd-kit/core";
 import { SortableContext } from "@dnd-kit/sortable";
@@ -164,6 +165,7 @@ export function TabBar({
   /** Create-menu New Markdown row; hidden without it. */
   onNewMarkdown?: () => void;
 }) {
+  const generatedTitles = useGeneratedAgentTitles(sessions);
   const sessionById = new Map(sessions.map((item) => [item.id, item]));
   const browserById = new Map(browserTabs.map((tab) => [tab.tabId, tab]));
   const editorById = new Map(editorTabs.map((tab) => [tab.tabId, tab]));
@@ -475,7 +477,7 @@ export function TabBar({
                     item.id,
                     defaultTitleBySessionId.get(item.id) ??
                       defaultTerminalTabTitle(1),
-                    customTitles,
+                    { ...generatedTitles, ...customTitles },
                   ),
                   verdict: item.verdict,
                   id: item.id,

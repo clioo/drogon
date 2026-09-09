@@ -7,7 +7,8 @@
 //! data directory.  The user's real Codex home is a read-only source: selected
 //! resources and config are copied into the private home, user hook trust keys
 //! are rewritten for the copied `hooks.json`, and Drogon's own hook entries are
-//! added there.  No auth, history, or session database files are copied.
+//! added there. Auth and session databases are never copied; rollout history
+//! can be imported separately from the configured history source home.
 //!
 //! This is intentionally a filesystem adapter, not a Codex client.  The
 //! managed hooks invoke the already-installed `drogon-cli` with the same
@@ -128,6 +129,64 @@ pub(crate) fn install(
             install_hooks,
         );
         write_text_file(&home.join("config.toml"), &config)?;
+    }
+    Ok(())
+}
+
+// Source: codex-account-session-bridge.ts (rollout-relative paths). Copies,
+// rather than hardlinks, keep a resumed run from writing into the user's home.
+pub(crate) fn import_history(source_home: &Path, managed_home: &Path) -> Result<(), RpcError> {
+    let root = source_home.join("sessions");
+    if !root.is_dir() {
+        return Ok(());
+    }
+    let mut pending = vec![(root.clone(), 0)];
+    let mut bytes = 0u64;
+    let mut count = 0usize;
+    while let Some((dir, depth)) = pending.pop() {
+        if depth > 8 {
+            return Err(error::invalid_argument("Codex history tree is too deep"));
+        }
+        for entry in fs::read_dir(&dir).map_err(|_| error::io_error("Cannot read Codex history"))? {
+            let entry = entry.map_err(|_| error::io_error("Cannot inspect Codex history"))?;
+            count += 1;
+            if count > 10_000 {
+                return Err(error::invalid_argument(
+                    "Codex history exceeds the import limit",
+                ));
+            }
+            let kind = entry
+                .file_type()
+                .map_err(|_| error::io_error("Cannot inspect Codex history"))?;
+            if kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
+                pending.push((entry.path(), depth + 1));
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !kind.is_file() || !name.starts_with("rollout-") || !name.ends_with(".jsonl") {
+                continue;
+            }
+            bytes += entry
+                .metadata()
+                .map_err(|_| error::io_error("Cannot measure Codex history"))?
+                .len();
+            if bytes > 128 * 1024 * 1024 {
+                return Err(error::invalid_argument(
+                    "Codex history exceeds the 128 MiB import limit",
+                ));
+            }
+            let source = entry.path();
+            let relative = source
+                .strip_prefix(&root)
+                .map_err(|_| error::invalid_argument("Invalid Codex history path"))?;
+            let target = managed_home.join("sessions").join(relative);
+            fs::create_dir_all(target.parent().unwrap())
+                .map_err(|_| error::io_error("Cannot prepare Codex history"))?;
+            fs::copy(source, target).map_err(|_| error::io_error("Cannot import Codex history"))?;
+        }
     }
     Ok(())
 }

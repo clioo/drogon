@@ -71,18 +71,19 @@ pub(crate) fn extension_source() -> String {
 // `drogon-cli internal hook-event` instead of the source's HTTP loopback
 // hooks server; see harness_hooks::pi for what else is not ported.
 
-function report(eventName) {{
+function report(eventName, prompt) {{
   var cli = process.env.DROGON_HOOK_CLI || "drogon-cli"
   var sessionId = process.env.DROGON_SESSION_ID || ""
   var incarnation = process.env.DROGON_HOOK_INCARNATION || ""
   if (!sessionId || !incarnation) return
   try {{
-    require("node:child_process").execFile(
+    var child = require("node:child_process").execFile(
       cli,
       ["internal", "hook-event", "--session", sessionId, "--incarnation", incarnation, "--event", eventName],
       {{ stdio: "ignore" }},
       function () {{}}
     )
+    if (child.stdin) child.stdin.end(JSON.stringify({{ prompt: typeof prompt === "string" ? prompt.slice(0, 512) : undefined }}))
   }} catch (err) {{
     // Why: a hook-report failure must never fail the pi run.
   }}
@@ -99,7 +100,7 @@ try {{
 }}
 
 export default function (pi) {{
-  pi.on("before_agent_start", function () {{ report("{agent_start}") }})
+  pi.on("before_agent_start", function (event) {{ report("{agent_start}", event && event.prompt) }})
   pi.on("agent_start", function () {{ report("{agent_start}") }})
   pi.on("tool_execution_start", function () {{ report("{tool_start}") }})
   pi.on("tool_call", function () {{ report("{tool_start}") }})

@@ -17,6 +17,8 @@ export type PushedSessionState = {
   workspaceId: string;
   agentState: AgentState;
   agentStateAt: string | null;
+  agentPromptPreview?: string | null;
+  cacheIdleAt?: string | null;
 };
 
 export type SessionStatePushOutcome =
@@ -48,7 +50,14 @@ export function applySessionStatePush(
   const current = items[index]!;
   const state = current.agentState ?? "unknown";
   const at = current.agentStateAt ?? null;
-  if (state === event.agentState && at === event.agentStateAt)
+  const metadata = {
+    ...(event.agentPromptPreview !== undefined ? { agentPromptPreview: event.agentPromptPreview } : {}),
+    ...(event.cacheIdleAt !== undefined ? { cacheIdleAt: event.cacheIdleAt } : {}),
+  };
+  const metadataChanged = Object.entries(metadata).some(
+    ([key, value]) => current[key as keyof Session] !== value,
+  );
+  if (state === event.agentState && at === event.agentStateAt && !metadataChanged)
     return { applied: false, unknown: false, sessions: items };
   if (
     at !== null &&
@@ -60,6 +69,7 @@ export function applySessionStatePush(
   const next = items.slice();
   next[index] = {
     ...current,
+    ...metadata,
     agentState: event.agentState,
     agentStateAt: event.agentStateAt,
   };

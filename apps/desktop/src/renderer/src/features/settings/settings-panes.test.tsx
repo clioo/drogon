@@ -5,6 +5,7 @@
 // Terminal, Appearance, Notifications, Shortcuts).
 import { describe, expect, test } from "vitest";
 import { renderToString } from "react-dom/server";
+import { TooltipProvider } from "../../components/ui/tooltip";
 import { AgentsSection } from "./agents-section";
 import { AppearanceSection } from "./appearance-section";
 import { CliSection } from "./cli-section";
@@ -20,7 +21,7 @@ import {
 } from "./settings-sections";
 
 function render(node: React.ReactElement): string {
-  return renderToString(node).replace(/<!-- -->/g, "");
+  return renderToString(<TooltipProvider>{node}</TooltipProvider>).replace(/<!-- -->/g, "");
 }
 
 describe("settings sidebar order (source order for the MVP subset)", () => {
@@ -121,7 +122,7 @@ describe("appearance projection", () => {
 });
 
 describe("agents projection", () => {
-  test("renders default-harness select and per-harness editors (CLI lives in General)", () => {
+  test("renders the source defaults and status sections while detection is pending", () => {
     const html = render(
       <AgentsSection
         harnesses={[]}
@@ -132,16 +133,14 @@ describe("agents projection", () => {
       />,
     );
     expect(html).toContain("Agents");
-    // Default control is a pressed-button group like the fork's
-    // AgentDefaultSetting (honest subset: None + the five known harnesses).
-    expect(html).toContain('aria-label="Default harness"');
-    expect(html).toContain('role="radiogroup"');
-    expect(html).toContain('role="radio"');
-    expect(html).toContain("None");
-    // Per-harness editors: live list is empty, so the known ids render.
-    expect(html).toContain("Claude Code");
-    expect(html).toContain("Pi");
-    expect(html).toContain("Default");
+    expect(html).toContain("Default Agent");
+    expect(html).toContain("Auto");
+    expect(html).toContain("No agent (blank terminal)");
+    expect(html).toContain("Agent status hooks");
+    expect(html).toContain("Auto-generate tab titles");
+    expect(html).toContain("Prompt Cache Timer");
+    expect(html).toContain("Detecting installed agents…");
+    expect(html).not.toContain("Default harness");
     // The CLI section moved to the General pane (the fork's slot).
     expect(html).not.toContain("Drogon CLI");
   });

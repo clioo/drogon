@@ -15,6 +15,7 @@
 import { memo, useCallback } from "react";
 import { Terminal } from "lucide-react";
 import { AgentStateIcon } from "./AgentStateIcon";
+import { AgentCacheTimer } from "./AgentCacheTimer";
 import { HarnessMenuIcon } from "./TabCreateMenuIcons";
 import { agentStateLabel } from "./agent-state";
 import {
@@ -104,6 +105,7 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
           </span>
         )}
       </span>
+      <AgentCacheTimer session={row.session} />
       {row.relativeTime && (
         <span
           className={

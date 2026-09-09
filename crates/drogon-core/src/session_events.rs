@@ -53,6 +53,8 @@ pub(crate) struct SessionStateEvent {
     pub(crate) workspace_id: String,
     pub(crate) agent_state: String,
     pub(crate) agent_state_at: Option<String>,
+    pub(crate) agent_prompt_preview: Option<String>,
+    pub(crate) cache_idle_at: Option<String>,
 }
 
 impl SessionStateEvent {
@@ -63,6 +65,8 @@ impl SessionStateEvent {
             "workspaceId": self.workspace_id,
             "agentState": self.agent_state,
             "agentStateAt": self.agent_state_at,
+            "agentPromptPreview": self.agent_prompt_preview,
+            "cacheIdleAt": self.cache_idle_at,
         })
     }
 }
@@ -95,9 +99,19 @@ impl SessionEventLog {
             .get("agentStateAt")
             .and_then(Value::as_str)
             .map(str::to_string);
+        let agent_prompt_preview = snapshot
+            .get("agentPromptPreview")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let cache_idle_at = snapshot
+            .get("cacheIdleAt")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         if let Some(known) = self.latest.get(session_id)
             && known.agent_state == agent_state
             && known.agent_state_at == agent_state_at
+            && known.agent_prompt_preview == agent_prompt_preview
+            && known.cache_idle_at == cache_idle_at
         {
             return None;
         }
@@ -118,6 +132,8 @@ impl SessionEventLog {
             workspace_id: workspace_id.to_string(),
             agent_state: agent_state.to_string(),
             agent_state_at,
+            agent_prompt_preview,
+            cache_idle_at,
         };
         self.latest.insert(session_id.to_string(), event.clone());
         Some(event)
@@ -215,6 +231,22 @@ mod tests {
         assert_eq!(events[0].agent_state, "idle");
         assert!(log.since(2).is_empty());
         assert_eq!(log.current_seq(), 2);
+    }
+
+    #[test]
+    fn metadata_changes_push_without_an_agent_state_transition() {
+        let mut log = SessionEventLog::default();
+        let mut row = snapshot("s1", "working", Some("t1"));
+        log.record(&row).unwrap();
+        row["agentPromptPreview"] = json!("Refactor authentication");
+        assert_eq!(log.record(&row).unwrap().seq, 2);
+        assert!(log.record(&row).is_none());
+        row["cacheIdleAt"] = json!("t2");
+        assert_eq!(log.record(&row).unwrap().wire()["cacheIdleAt"], "t2");
+        row["cacheIdleAt"] = Value::Null;
+        let cleared = log.record(&row).unwrap();
+        assert_eq!(cleared.seq, 4);
+        assert!(cleared.wire()["cacheIdleAt"].is_null());
     }
 
     #[test]
@@ -452,6 +484,8 @@ mod tests {
                 "workspaceId": "w1",
                 "agentState": "needs_input",
                 "agentStateAt": "t9",
+                "agentPromptPreview": null,
+                "cacheIdleAt": null,
             })
         );
     }

@@ -13,6 +13,7 @@ import { project } from "./project";
 import { shell } from "./shell";
 import { browser } from "./browser";
 import { settings } from "./settings";
+import { agentSettings } from "./agent-settings";
 import { nativeTheme } from "./native-theme";
 import { notifications } from "./notifications";
 import { tasks } from "./tasks";
@@ -78,6 +79,7 @@ const bridge: DesktopBridge = {
     kill: (value) => ipcRenderer.invoke("drogon:workspacePortsKill", value),
   },
   settings,
+  agentSettings,
   // R16-AD3 (#241): additive nativeTheme relay (optional namespace; main
   // side in main/native-theme-bridge.ts).
   nativeTheme,

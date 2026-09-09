@@ -700,12 +700,11 @@ async fn internal(
             incarnation,
             event,
         } => {
-            // Claude Code pipes the hook payload JSON on stdin; drain and
-            // ignore it (session, incarnation and event already came from
-            // the generated hook command). A TTY stdin means a manual
-            // invocation, which must never block waiting for input.
-            drain_hook_stdin();
+            // Capture only the bounded prompt preview from hook JSON stdin;
+            // session identity remains in the managed command arguments.
+            let prompt_preview = read_hook_prompt_preview();
             let params = json!({
+                "promptPreview": prompt_preview,
                 "sessionId": session,
                 "incarnation": incarnation,
                 "event": event,
@@ -720,18 +719,36 @@ async fn internal(
     }
 }
 
-/// Discards piped hook stdin on a detached thread (best effort; a hook must
-/// never hang the agent because stdin stayed open — the payload is already
-/// fully described by the hook command's flags, and process exit ends the
-/// drain thread either way).
-fn drain_hook_stdin() {
-    use std::io::IsTerminal as _;
+/// Read bounded hook JSON without hanging the agent on an open stdin pipe.
+/// Only the first prompt preview is forwarded; the CLI exits the drain thread.
+fn read_hook_prompt_preview() -> Option<String> {
+    use std::io::{IsTerminal as _, Read as _};
     if std::io::stdin().is_terminal() {
-        return;
+        return None;
     }
-    std::thread::spawn(|| {
-        let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = std::io::stdin().lock().take(65_537).read_to_end(&mut bytes);
+        let preview = hook_prompt_preview(&bytes);
+        let _ = send.send(preview);
     });
+    receive
+        .recv_timeout(std::time::Duration::from_millis(100))
+        .ok()
+        .flatten()
+}
+
+fn hook_prompt_preview(bytes: &[u8]) -> Option<String> {
+    if bytes.len() > 65_536 {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    value
+        .get("prompt")
+        .or_else(|| value.get("user_prompt"))
+        .and_then(|value| value.as_str())
+        .map(|prompt| prompt.chars().take(512).collect())
 }
 
 /// Read-only status negotiation. The preflight request id is distinct from
@@ -893,6 +910,22 @@ fn emit_raw(call: CallOk) -> Result<RunOutcome, CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hook_previews_are_bounded_and_ignore_non_prompt_payloads() {
+        assert_eq!(
+            hook_prompt_preview(br#"{"prompt":"hello","transcript_path":"ignored"}"#).as_deref(),
+            Some("hello")
+        );
+        assert_eq!(
+            hook_prompt_preview(br#"{"user_prompt":"fallback"}"#).as_deref(),
+            Some("fallback")
+        );
+        assert_eq!(hook_prompt_preview(b"not json"), None);
+        assert_eq!(hook_prompt_preview(&vec![b' '; 65_537]), None);
+        let long = serde_json::to_vec(&json!({"prompt": "🦀".repeat(600)})).unwrap();
+        assert_eq!(hook_prompt_preview(&long).unwrap().chars().count(), 512);
+    }
 
     #[test]
     fn absolute_paths_pass_through_verbatim() {

@@ -68,6 +68,10 @@ export type Session = {
    */
   agentState?: AgentState;
   agentStateAt?: string | null;
+  /** Bounded first-known prompt preview, in memory only; used for stable tab names. */
+  agentPromptPreview?: string | null;
+  /** Claude Stop hook timestamp; never inferred from loss of contact. */
+  cacheIdleAt?: string | null;
   /**
    * Additive (R12-E terminal restart): which harness launched this session
    * (`harness.start`), so the exit overlay's Restart can re-launch the same

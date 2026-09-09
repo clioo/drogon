@@ -49,6 +49,7 @@ import { registerProjectBridge } from "./project-bridge";
 import { registerShellBridge } from "./shell-bridge";
 import { registerSettingsProbes } from "./settings-probes";
 import { registerSettingsCliBridge } from "./settings-bridge";
+import { registerAgentSettingsBridge } from "./agent-settings-bridge";
 import { registerFontsBridge } from "./fonts";
 import { registerTasksBridge } from "./tasks-bridge";
 // R17-A additive wiring: jira data-layer bridge (granted main/jira-bridge.ts).
@@ -263,6 +264,7 @@ function registerBridge() {
   registerShellBridge(() => window);
   registerSettingsProbes(() => window);
   registerSettingsCliBridge(() => window);
+  registerAgentSettingsBridge(() => window);
   registerFontsBridge(() => window);
   registerTasksBridge(() => window);
   // R17-A additive wiring (granted main/jira-bridge.ts).

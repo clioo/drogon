@@ -18,6 +18,13 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { Tooltip } from "radix-ui";
+import {
+  agentSettingsState,
+  migrateAgentPreferences,
+  saveAgentSettings,
+  useAgentSettings,
+} from "./features/settings/agent-settings-state";
+import { AGENT_CATALOG } from "./features/settings/agent-catalog";
 import type {
   AgentState,
   Harness,
@@ -457,6 +464,14 @@ export function MountedPanel({
 
 export function App() {
   const settings = uiSettings();
+  const agentPreferences = useAgentSettings();
+  useEffect(() => {
+    let legacy = {};
+    try {
+      legacy = parsePersistedSettings(window.localStorage.getItem(settingsStorageKey("ui")));
+    } catch { /* Fresh profile. */ }
+    void agentSettingsState.load(migrateAgentPreferences(legacy));
+  }, []);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selected, setSelected] = useState("");
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -508,12 +523,14 @@ export function App() {
   const [editorFontFamily, setEditorFontFamily] = useState(
     () => settings.get("editorFontFamily"),
   );
-  const [defaultHarnessId, setDefaultHarnessId] = useState(
+  const [legacyDefaultHarnessId, setDefaultHarnessId] = useState(
     () => settings.get("defaultHarnessId"),
   );
-  const [harnessDefaults, setHarnessDefaults] = useState(
+  const [legacyHarnessDefaults, setHarnessDefaults] = useState(
     () => settings.get("harnessDefaults"),
   );
+  // Native launch arguments take over after the one-time migration.
+  const harnessDefaults = agentPreferences.ready ? {} : legacyHarnessDefaults;
   const [notifyOnAgentNeedsInput, setNotifyOnAgentNeedsInput] = useState(
     () => settings.get("notifyOnAgentNeedsInput"),
   );
@@ -550,7 +567,26 @@ export function App() {
   );
   const [revision, setRevision] = useState(0);
   const [harnessCapability, setHarnessCapability] = useState(false);
-  const [harnesses, setHarnesses] = useState<Harness[]>([]);
+  const [detectedHarnesses, setHarnesses] = useState<Harness[]>([]);
+  const harnesses = useMemo(
+    () => detectedHarnesses.filter((harness) => !agentPreferences.settings.disabledTuiAgents.includes(harness.harnessId)),
+    [detectedHarnesses, agentPreferences.settings.disabledTuiAgents],
+  );
+  const preferredAgent = agentPreferences.settings.defaultTuiAgent;
+  const automaticAgent = AGENT_CATALOG.find((agent) =>
+    harnesses.some((harness) => harness.harnessId === agent.id && harness.availability === "available"),
+  )?.id ?? "";
+  const defaultHarnessId = !agentPreferences.ready
+    ? legacyDefaultHarnessId
+    : preferredAgent === "blank" ? "" : preferredAgent ?? automaticAgent;
+  useEffect(() => {
+    if (!agentPreferences.ready) return;
+    let cancelled = false;
+    void window.drogon.harnesses().then((result) => {
+      if (!cancelled && result.ok) setHarnesses(result.result.harnesses);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [agentPreferences.ready, agentPreferences.settings.agentCmdOverrides]);
   const [buildInfo, setBuildInfo] = useState<{
     revision: string;
     builtAt: string;
@@ -1536,6 +1572,12 @@ export function App() {
   // Restart overlay replay it through startHarnessTracked/restart below.
   const harnessLaunchMemoryRef = useRef<HarnessLaunchMemory>(new Map());
   const startHarnessTracked = async (input: HarnessLaunchInput) => {
+    if (!agentSettingsState.getSnapshot().ready) {
+      return {
+        ok: false,
+        error: { code: "settings_unavailable", message: "Load agent settings before launching an agent.", retryable: true },
+      } as const;
+    }
     const result = await window.drogon.startHarness(input);
     if (result.ok)
       rememberHarnessLaunch(harnessLaunchMemoryRef.current, result.result, input);
@@ -1759,6 +1801,8 @@ export function App() {
         workspaceId: event.workspaceId,
         agentState: event.agentState as AgentState,
         agentStateAt: event.agentStateAt ?? null,
+        agentPromptPreview: event.agentPromptPreview,
+        cacheIdleAt: event.cacheIdleAt,
       };
       const preview = applySessionStatePush(sessionsRef.current, pushed);
       if (preview.unknown) {
@@ -2899,6 +2943,7 @@ export function App() {
     settings.set("editorFontFamily", next);
   };
   const changeDefaultHarness = (next: string) => {
+    saveAgentSettings({ defaultTuiAgent: next === "" ? "blank" : next as Harness["harnessId"] });
     setDefaultHarnessId(next);
     settings.set("defaultHarnessId", next);
   };
@@ -3802,7 +3847,7 @@ export function App() {
                   onTitlebarAppNameVisibleChange={(visible) =>
                     setAppearanceFlag("titlebarAppNameVisible", visible)
                   }
-                  harnesses={harnesses}
+                  harnesses={detectedHarnesses}
                   defaultHarnessId={defaultHarnessId}
                   onDefaultHarnessChange={changeDefaultHarness}
                   harnessDefaults={harnessDefaults}

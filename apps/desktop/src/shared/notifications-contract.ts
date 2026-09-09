@@ -54,6 +54,8 @@ export const sessionStateChangedSchema = z.object({
   workspaceId: z.string().min(1).max(128),
   agentState: z.string().min(1).max(32),
   agentStateAt: z.string().nullable(),
+  agentPromptPreview: z.string().max(2048).nullable().optional(),
+  cacheIdleAt: z.string().nullable().optional(),
 });
 export type SessionStateChangedEvent = z.infer<
   typeof sessionStateChangedSchema

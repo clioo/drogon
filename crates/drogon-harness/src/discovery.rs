@@ -51,14 +51,42 @@ pub fn discover(search_path: Option<&OsStr>) -> Vec<HarnessInstallation> {
         .collect()
 }
 
+/// Resolve a configured binary without evaluating a shell command or using cwd.
+pub fn resolve_executable(command: &str, search_path: Option<&OsStr>) -> Option<PathBuf> {
+    let path = Path::new(command);
+    if path.is_absolute() {
+        return find_executable(path.parent()?, path.file_name()?.to_str()?);
+    }
+    if path.components().count() != 1 {
+        return None;
+    }
+    search_path
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .filter(|directory| directory.is_absolute())
+        .find_map(|directory| find_executable(&directory, command))
+}
+
 fn find_executable(directory: &Path, command: &str) -> Option<PathBuf> {
     #[cfg(windows)]
-    let names = [
-        format!("{command}.exe"),
-        format!("{command}.com"),
-        format!("{command}.cmd"),
-        format!("{command}.bat"),
-    ];
+    let names = if Path::new(command)
+        .extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|ext| {
+            ["exe", "com", "cmd", "bat"]
+                .iter()
+                .any(|known| ext.eq_ignore_ascii_case(known))
+        }) {
+        vec![command.to_owned()]
+    } else {
+        vec![
+            format!("{command}.exe"),
+            format!("{command}.com"),
+            format!("{command}.cmd"),
+            format!("{command}.bat"),
+        ]
+    };
     #[cfg(not(windows))]
     let names = [command.to_owned()];
     names.into_iter().find_map(|name| {
