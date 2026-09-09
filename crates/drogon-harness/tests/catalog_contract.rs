@@ -30,10 +30,16 @@ use drogon_harness::{
 const CHILD_MODE_ENV: &str = "DROGON_CATALOG_CHILD_MODE";
 const FIXTURE_DIR_ENV: &str = "DROGON_CATALOG_FIXTURE_DIR";
 const LEDGER_FILE: &str = "ledger.children";
-/// Independent declaration channel: fixtures record every pid they
-/// spawn here, separately from the identity ledger, so declared-vs-
+/// Independent declaration channel: fixtures record every identity
+/// they spawn here, separately from the identity ledger, so declared-vs-
 /// registered can be cross-checked from two sources.
 const DECLARED_FILE: &str = "declared.children";
+/// Explicit completion seal: the registrar writes its final declared/
+/// registered counts here when its registration source is closed. The
+/// parent requires the seal and cross-checks it against both observed
+/// channels — closure proof rests on this statement, never on matching
+/// consecutive reads or on runner exit.
+const SEALED_FILE: &str = "sealed.registrations";
 const RESULT_FILE: &str = "result.json";
 /// Overall budget measured from launch preparation (amendment A): spawn,
 /// bootstrap, and bounded ps/kill helpers all consume it.
@@ -560,6 +566,24 @@ fn read_report(dir: &Path) -> (Option<serde_json::Value>, Option<String>) {
     }
 }
 
+/// Read the registrar's explicit completion seal: parsed counts, or the
+/// reason it cannot serve as closure evidence (missing, unreadable,
+/// malformed).
+#[cfg(unix)]
+fn read_seal(dir: &Path) -> (Option<SealCounts>, Option<String>) {
+    let path = dir.join(SEALED_FILE);
+    if !path.exists() {
+        return (None, None);
+    }
+    match std::fs::read_to_string(&path) {
+        Err(err) => (None, Some(format!("unreadable ({err})"))),
+        Ok(text) => match parse_seal_counts(&text) {
+            Err(reason) => (None, Some(format!("malformed ({reason})"))),
+            Ok(seal) => (Some(seal), None),
+        },
+    }
+}
+
 /// Parsed declaration records plus whether the channel itself was lost.
 /// Declarations use the same `pid|birth` record shape as the ledger so
 /// the two sources cross-check identity-for-identity.
@@ -703,12 +727,39 @@ fn check_ack_content(expected_birth: &str, content: Option<&str>) -> Result<(), 
     }
 }
 
-/// Content fingerprint of the registration channels: raw ledger text,
-/// raw declaration text, and report arrival. Counts can stay the same
-/// while content changes, so stability is proven on content, never on
-/// counts.
-fn channel_fingerprint(ledger_text: &str, declared_text: &str, report_arrived: bool) -> String {
-    format!("{ledger_text}\0{declared_text}\0{report_arrived}")
+/// Registrar-declared final counts for one registration source, parsed
+/// strictly from the seal file (`declared=N registered=M`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SealCounts {
+    declared: usize,
+    registered: usize,
+}
+
+/// Strict parse of the seal file. Any shape deviation is a seal failure,
+/// never a default.
+fn parse_seal_counts(text: &str) -> Result<SealCounts, String> {
+    let mut declared = None;
+    let mut registered = None;
+    for field in text.split_whitespace() {
+        let (key, value) = field
+            .split_once('=')
+            .ok_or_else(|| format!("seal field without '=': {field:?}"))?;
+        let number: usize = value
+            .parse()
+            .map_err(|_| format!("seal field is not a number: {field:?}"))?;
+        match key {
+            "declared" => declared = Some(number),
+            "registered" => registered = Some(number),
+            _ => return Err(format!("unknown seal field: {key:?}")),
+        }
+    }
+    match (declared, registered) {
+        (Some(declared), Some(registered)) => Ok(SealCounts {
+            declared,
+            registered,
+        }),
+        _ => Err("seal missing declared= or registered=".to_string()),
+    }
 }
 
 /// Everything the parent observed for one registration verdict. Channel
@@ -736,10 +787,12 @@ struct RegistrationSnapshot {
     report: Option<ReportSummary>,
     report_problem: Option<String>,
     runner_exited: bool,
-    /// Ledger, declaration and report presence identical across two
-    /// consecutive post-exit reads: registrations finished, not merely
-    /// momentarily empty.
-    stable: bool,
+    /// Explicit source closure: the registrar's sealed final counts, and
+    /// the reason when the seal is missing, unreadable or malformed.
+    /// Completion rests on this statement plus no outstanding
+    /// registration — never on matching consecutive reads.
+    seal: Option<SealCounts>,
+    seal_problem: Option<String>,
     /// Identities the parent explicitly acknowledged.
     acked: Vec<LedgerEntry>,
 }
@@ -799,26 +852,48 @@ fn check_registration(snapshot: &RegistrationSnapshot) -> RegistrationVerdict {
             reason: "runner still running".to_string(),
         };
     }
-    // The runner is done so no more registrar writes can arrive: the
-    // report state is decided before anything else, and contradictory
-    // evidence fails closed even when nothing was expected. A missing
-    // report is only clean when the run expected, declared and observed
-    // nothing at all.
+    // The runner is done so no more registrar writes can arrive.
+    // Completion rests on the registrar's explicit seal, required here
+    // and cross-checked against both observed channels: a missing,
+    // unreadable or malformed seal fails closed, as does any seal that
+    // contradicts what the parent observed. Two matching reads could
+    // still precede future writes, so reads never prove closure.
     let quiet = snapshot.plan.declared == 0
         && snapshot.plan.registered == 0
         && snapshot.ledger.is_empty()
         && snapshot.declarations.is_empty();
-    match (&snapshot.report, &snapshot.report_problem) {
-        (Some(_), _) => {}
+    let seal = match (&snapshot.seal, &snapshot.seal_problem) {
+        (Some(seal), _) => {
+            if seal.declared != snapshot.declarations.len()
+                || seal.registered != snapshot.ledger.len()
+            {
+                return fail(format!(
+                    "seal contradicts observed channels: sealed declared={} registered={} but holds {} declared {} registered",
+                    seal.declared,
+                    seal.registered,
+                    snapshot.declarations.len(),
+                    snapshot.ledger.len()
+                ));
+            }
+            Some(seal)
+        }
+        (None, Some(problem)) => return fail(format!("registration source {problem}")),
+        (None, None) => None,
+    };
+    // The attempt's final statement, kept distinct from source closure:
+    // a sealed source still needs its report. A missing report is only
+    // clean with no seal, a zero plan and zero observed — while any
+    // retained failure or malformed report fails closed even then.
+    let report = match (&snapshot.report, &snapshot.report_problem) {
+        (Some(report), _) => report,
         (None, Some(problem)) => return fail(format!("final report {problem}")),
         (None, None) => {
-            if quiet {
+            if seal.is_none() && quiet {
                 return CleanNoFixtures;
             }
             return fail("missing final report".to_string());
         }
-    }
-    let report = snapshot.report.as_ref().expect("report checked present");
+    };
     if !report.failures.is_empty() {
         return fail(format!(
             "registration failures retained: {}",
@@ -827,13 +902,6 @@ fn check_registration(snapshot: &RegistrationSnapshot) -> RegistrationVerdict {
     }
     if !report.has_catalog {
         return fail("final report missing required catalog".to_string());
-    }
-    // Explicit channel completion: identical consecutive post-exit reads
-    // prove the channels finished instead of being sampled mid-write.
-    if !snapshot.stable {
-        return NotQuiescent {
-            reason: "channels not yet stable across consecutive reads".to_string(),
-        };
     }
     // Plan consistency, parent-owned: declarations and ledger against the
     // plan...
@@ -1136,11 +1204,6 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
     let mut runner_escalated = false;
     let mut runner_forced = false;
     let mut runner_term_at: Option<Instant> = None;
-    // Explicit channel completion: the content fingerprint of both
-    // channels plus report arrival must repeat across two consecutive
-    // post-exit reads before the channels count as finished.
-    let mut last_fingerprint: Option<String> = None;
-    let mut stable_reads: u32 = 0;
     // The first fail-closed accounting verdict, recorded once and
     // reported after the loop; resolution of acked identities continues
     // regardless so a failing run still contains its fixtures.
@@ -1387,13 +1450,12 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
         }
         // Registration verdict, parent-owned plan against parent-read
         // channels: only a terminal verdict with an empty resolution
-        // queue AND proven channel completion ends the loop. A live
-        // runner always waits (late registrations may still arrive);
-        // post-exit, identical content across consecutive reads proves
-        // the channels finished instead of being sampled mid-write. A
-        // recorded failure still keeps resolving: newly observed
-        // registrations keep their cleanup even on failure, so the
-        // failure break waits for an empty queue plus stability.
+        // queue ends the loop. A live runner always waits (late
+        // registrations may still arrive); post-exit, completion rests
+        // on the registrar's explicit seal plus no outstanding
+        // registration — never on matching reads. A recorded failure
+        // still keeps resolving: newly observed registrations keep
+        // their cleanup even on failure.
         if runner_done.is_some() {
             let (verdict_entries, verdict_malformed) = read_ledger(&fixture_path);
             if !duplicate_noted {
@@ -1409,22 +1471,7 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
                 unique.len() != verdict_declarations.len()
             };
             let (verdict_report, verdict_problem) = read_report(&fixture_path);
-            let ledger_text =
-                std::fs::read_to_string(fixture_path.join(LEDGER_FILE)).unwrap_or_default();
-            let declared_text =
-                std::fs::read_to_string(fixture_path.join(DECLARED_FILE)).unwrap_or_default();
-            let fingerprint = channel_fingerprint(
-                &ledger_text,
-                &declared_text,
-                verdict_report.is_some() || verdict_problem.is_some(),
-            );
-            if last_fingerprint.as_ref() == Some(&fingerprint) {
-                stable_reads += 1;
-            } else {
-                stable_reads = 0;
-                last_fingerprint = Some(fingerprint);
-            }
-            let stable = stable_reads >= 1;
+            let (verdict_seal, verdict_seal_problem) = read_seal(&fixture_path);
             let (verdict_summary, verdict_report_problem) = match verdict_report {
                 Some(value) => match parse_report_summary(&value) {
                     Ok(summary) => (Some(summary), None),
@@ -1444,12 +1491,13 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
                 report: verdict_summary,
                 report_problem: verdict_report_problem,
                 runner_exited: true,
-                stable,
+                seal: verdict_seal,
+                seal_problem: verdict_seal_problem,
                 acked: acked.clone(),
             };
             match check_registration(&snapshot) {
                 RegistrationVerdict::Complete | RegistrationVerdict::CleanNoFixtures
-                    if pending.is_empty() && stable =>
+                    if pending.is_empty() =>
                 {
                     passed = true;
                     break;
@@ -1458,13 +1506,13 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
                     if accounting_failure.is_none() {
                         accounting_failure = Some(reason);
                     }
-                    if pending.is_empty() && stable {
+                    if pending.is_empty() {
                         break;
                     }
                 }
-                // Anything still resolving, or channels not yet proven
-                // finished: keep the loop so every observed identity is
-                // contained and late writes are observed.
+                // Anything still resolving: keep the loop so every
+                // observed identity is contained and late writes are
+                // observed.
                 RegistrationVerdict::Complete
                 | RegistrationVerdict::CleanNoFixtures
                 | RegistrationVerdict::NotQuiescent { .. } => {}
@@ -1498,12 +1546,12 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
     }
 
     // Final registration record: the loop breaks on a passing verdict
-    // with an empty resolution queue and proven channel completion, on a
-    // recorded fail-closed verdict under the same conditions, or on the
-    // cleanup deadline. A recorded failure is reported; a pass needs no
+    // with an empty resolution queue and a sealed source, on a recorded
+    // fail-closed verdict under the same conditions, or on the cleanup deadline. A recorded failure is reported; a pass needs no
     // further evidence; anything else is evaluated once on fresh reads
     // so a run cannot pass on a stale loop observation.
     let (report, _) = read_report(&fixture_path);
+    let (seal, seal_problem) = read_seal(&fixture_path);
     let (entries, malformed) = read_ledger(&fixture_path);
     let (declarations, malformed_decls, decls_lost) = read_declarations(&fixture_path);
     let decl_duplicate = {
@@ -1550,7 +1598,8 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
             report: final_summary,
             report_problem: final_problem,
             runner_exited,
-            stable: false,
+            seal,
+            seal_problem,
             acked,
         };
         match check_registration(&final_snapshot) {
@@ -1840,7 +1889,8 @@ fn fixture_handshake_sh(pid: &str) -> String {
          echo \"{pid}|$_BIRTH\" >> \"$_FD/declared.children\"\n\
          echo \"{pid}|$_BIRTH\" >> \"$_FD/ledger.children\"\n\
          _I=0; while [ ! -f \"$_FD/ack.{pid}\" ] && [ \"$_I\" -lt 50 ]; do sleep 0.1; _I=$((_I+1)); done\n\
-         grep -qF -- \"$_BIRTH\" \"$_FD/ack.{pid}\" 2>/dev/null || exit 3\n"
+         grep -qF -- \"$_BIRTH\" \"$_FD/ack.{pid}\" 2>/dev/null || exit 3\n\
+         echo \"declared=1 registered=1\" > \"$_FD/sealed.registrations\"\n"
     )
 }
 
@@ -2564,6 +2614,20 @@ impl RegistrationLedger {
         Some(pid)
     }
 
+    /// Explicit source closure: write the final declared/registered
+    /// counts. The parent requires this seal and cross-checks it against
+    /// both observed channels; a failed seal write is failure evidence
+    /// that fails the run closed downstream (missing seal).
+    fn seal(&mut self, dir: &Path) {
+        let content = format!(
+            "declared={} registered={}\n",
+            self.declared, self.registered
+        );
+        if let Err(err) = std::fs::write(dir.join(SEALED_FILE), content) {
+            self.failures.push(format!("seal write failed: {err}"));
+        }
+    }
+
     /// Bounded reap of everything this child still owns, used by tests
     /// whose fixtures must NOT outlive the child. Returns the pids that
     /// could not be reaped within the deadline (visible uncertainty).
@@ -2693,6 +2757,7 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
         let pid = ledger.declare_only(&dir, "sleep 5").expect("fixture spawn");
         std::thread::sleep(Duration::from_millis(300));
         retain_late_registration(&mut ledger, &dir, pid);
+        ledger.seal(&dir);
         write_child_report(
             &dir,
             &ChildReport {
@@ -2742,6 +2807,7 @@ fn supervisor_term_resistant_child_is_forced_after_recheck() {
         let dir = fixture_dir_from_env();
         let mut ledger = RegistrationLedger::default();
         ledger.register(&dir, "trap '' TERM; sleep 30");
+        ledger.seal(&dir);
         write_child_report(
             &dir,
             &ChildReport {
@@ -2804,6 +2870,9 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
                 "owned fixture(s) not reaped before child exit: {stuck:?}"
             ));
         }
+        // The source honestly seals what it did: one declaration, zero
+        // registrations. The parent fails closed on the gap.
+        ledger.seal(&dir);
         write_child_report(
             &dir,
             &ChildReport {
@@ -2863,6 +2932,7 @@ fn supervisor_distinguishes_product_cleanup_from_rescue() {
         ledger.register(&dir, "sleep 0.2");
         std::thread::sleep(Duration::from_millis(500));
         ledger.register(&dir, "sleep 30");
+        ledger.seal(&dir);
         write_child_report(
             &dir,
             &ChildReport {
@@ -2933,6 +3003,7 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
         let mut ledger = RegistrationLedger::default();
         ledger.register(&dir, "sleep 0.2");
         std::thread::sleep(Duration::from_millis(500));
+        ledger.seal(&dir);
         write_child_report(
             &dir,
             &ChildReport {
@@ -3058,7 +3129,8 @@ mod registration_accounting {
             report: None,
             report_problem: None,
             runner_exited: false,
-            stable: false,
+            seal: None,
+            seal_problem: None,
             acked: Vec::new(),
         }
     }
@@ -3078,14 +3150,17 @@ mod registration_accounting {
     }
 
     #[test]
-    fn complete_when_plan_observed_acked_and_stable() {
+    fn complete_when_plan_observed_acked_and_sealed() {
         let observed = entry(4242, "Mon Sep  9 08:00:00 2026");
         let mut state = snapshot(plan(1, 1));
         state.ledger = vec![observed.clone()];
         state.declarations = vec![observed.clone()];
         state.report = Some(summary(1, 1));
         state.runner_exited = true;
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 1,
+        });
         state.acked = vec![observed];
         assert_eq!(check_registration(&state), RegistrationVerdict::Complete);
     }
@@ -3099,7 +3174,10 @@ mod registration_accounting {
         state.ledger = vec![observed.clone()];
         state.declarations = vec![observed.clone()];
         state.report = Some(summary(1, 1));
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 1,
+        });
         state.acked = vec![observed];
         let reason = not_quiescent(&check_registration(&state));
         assert!(reason.contains("runner still running"), "{reason}");
@@ -3116,7 +3194,10 @@ mod registration_accounting {
         state.declarations = vec![entry(4242, "Mon Sep  9 08:00:00 2026")];
         state.report = Some(summary(1, 1));
         state.runner_exited = true;
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 1,
+        });
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("never acknowledged"), "{reason}");
     }
@@ -3132,7 +3213,10 @@ mod registration_accounting {
         state.declarations = vec![observed.clone()];
         state.report = Some(summary(1, 1));
         state.runner_exited = true;
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 1,
+        });
         assert!(failed_closed(&check_registration(&state)).contains("never acknowledged"));
         validate_identity(&observed, &state.acked).expect("ack the observed identity");
         state.acked = vec![observed];
@@ -3159,7 +3243,10 @@ mod registration_accounting {
         state.declarations = vec![observed.clone()];
         state.report = Some(summary(1, 1));
         state.runner_exited = true;
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 1,
+        });
         state.acked = vec![observed.clone()];
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("duplicate"), "{reason}");
@@ -3188,10 +3275,13 @@ mod registration_accounting {
         let reason = not_quiescent(&check_registration(&state));
         assert!(reason.contains("runner still running"), "{reason}");
         state.runner_exited = true;
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 0,
+        });
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("incomplete registration"), "{reason}");
-        assert!(reason.contains("never registered"), "{reason}");
+        assert!(reason.contains("plan expects 1"), "{reason}");
     }
 
     #[test]
@@ -3200,7 +3290,10 @@ mod registration_accounting {
         state.ledger = vec![entry(4242, "Mon Sep  9 08:00:00 2026")];
         state.declarations = vec![entry(4242, "Mon Sep  9 08:00:00 2026")];
         state.runner_exited = true;
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 1,
+        });
         state.acked = state.ledger.clone();
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("missing final report"), "{reason}");
@@ -3219,7 +3312,10 @@ mod registration_accounting {
         state.ledger = vec![observed.clone()];
         state.declarations = vec![observed.clone()];
         state.runner_exited = true;
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 1,
+        });
         state.acked = vec![observed];
         // The report suppresses a declaration...
         state.report = Some(summary(0, 1));
@@ -3244,7 +3340,10 @@ mod registration_accounting {
         state.ledger = vec![observed.clone()];
         state.declarations = vec![observed.clone()];
         state.runner_exited = true;
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 1,
+        });
         state.acked = vec![observed];
         let mut failing = summary(1, 1);
         failing.failures = vec!["pid=4243 late registration failed: ps error".to_string()];
@@ -3324,12 +3423,19 @@ mod registration_accounting {
         state.declarations = Vec::new();
         state.report = Some(summary(0, 1));
         state.runner_exited = true;
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 0,
+            registered: 1,
+        });
         state.acked = vec![observed];
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("incomplete declaration"), "{reason}");
         // Same counts, but the ledger identity was never declared.
         state.declarations = vec![entry(4243, "Mon Sep  9 08:00:00 2026")];
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 1,
+        });
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("undeclared registration"), "{reason}");
         assert!(reason.contains("4242"), "{reason}");
@@ -3338,6 +3444,27 @@ mod registration_accounting {
         state.declarations = vec![entry(4242, "Mon Jan  1 00:00:00 2001")];
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("inconsistent identity"), "{reason}");
+    }
+
+    #[test]
+    fn declared_but_never_registered_fails_closed() {
+        // Asymmetric plan: every ledger identity declared, but one
+        // declaration never registered.
+        let observed = entry(4242, "Mon Sep  9 08:00:00 2026");
+        let mut state = snapshot(plan(2, 1));
+        state.ledger = vec![observed.clone()];
+        state.declarations = vec![observed.clone(), entry(4243, "Mon Sep  9 08:00:00 2026")];
+        state.seal = Some(SealCounts {
+            declared: 2,
+            registered: 1,
+        });
+        state.report = Some(summary(2, 1));
+        state.runner_exited = true;
+        state.acked = vec![observed];
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("incomplete registration"), "{reason}");
+        assert!(reason.contains("never registered"), "{reason}");
+        assert!(reason.contains("4243"), "{reason}");
     }
 
     #[test]
@@ -3351,7 +3478,10 @@ mod registration_accounting {
         state.duplicate_declarations = true;
         state.report = Some(summary(1, 1));
         state.runner_exited = true;
-        state.stable = true;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 1,
+        });
         state.acked = vec![observed];
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("duplicate declaration"), "{reason}");
@@ -3363,16 +3493,63 @@ mod registration_accounting {
     }
 
     #[test]
-    fn content_fingerprint_distinguishes_content_not_counts() {
-        // Finding 3 counterexample: equal counts with different content
-        // are different fingerprints, so stability cannot be faked by
-        // swapping one registration for another.
-        let a = channel_fingerprint("1|a\n", "1|a\n", true);
-        assert_eq!(channel_fingerprint("1|a\n", "1|a\n", true), a);
-        assert_ne!(channel_fingerprint("2|a\n", "1|a\n", true), a);
-        assert_ne!(channel_fingerprint("1|a\n", "1|b\n", true), a);
-        assert_ne!(channel_fingerprint("1|a\n", "1|a\n", false), a);
-        assert_ne!(channel_fingerprint("1|a\n1|a\n", "1|a\n", true), a);
+    fn seal_counts_parse_strictly() {
+        assert_eq!(
+            parse_seal_counts("declared=1 registered=1"),
+            Ok(SealCounts {
+                declared: 1,
+                registered: 1,
+            })
+        );
+        assert_eq!(
+            parse_seal_counts("  declared=0   registered=0\n"),
+            Ok(SealCounts {
+                declared: 0,
+                registered: 0,
+            })
+        );
+        for bad in [
+            "",
+            "declared=1",
+            "registered=1",
+            "declared=one registered=1",
+            "declared=1 registered=1 extra=2",
+            "1 1",
+            "declared = 1",
+        ] {
+            assert!(parse_seal_counts(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn missing_or_contradictory_seal_fails_closed() {
+        // Closure rests on the explicit seal: no seal with work expected
+        // fails, and a seal contradicting the observed channels fails —
+        // matching reads alone never close anything.
+        let observed = entry(4242, "Mon Sep  9 08:00:00 2026");
+        let mut state = snapshot(plan(1, 1));
+        state.ledger = vec![observed.clone()];
+        state.declarations = vec![observed.clone()];
+        state.runner_exited = true;
+        state.acked = vec![observed];
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("never sealed"), "{reason}");
+        state.seal_problem = Some("unreadable (permission denied)".to_string());
+        let reason = failed_closed(&check_registration(&state));
+        assert!(
+            reason.contains("registration source unreadable"),
+            "{reason}"
+        );
+        state.seal_problem = Some("malformed (seal missing declared= or registered=)".to_string());
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("registration source malformed"), "{reason}");
+        state.seal_problem = None;
+        state.seal = Some(SealCounts {
+            declared: 1,
+            registered: 0,
+        });
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("contradicts"), "{reason}");
     }
 
     #[test]
