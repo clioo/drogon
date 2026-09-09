@@ -216,6 +216,18 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[],
         ),
         entry(
+            "worktree set",
+            &["worktree", "set"],
+            "Update Orca metadata for a worktree (note, parent)",
+            "drogon-cli worktree set --id <ID> [--note <TEXT>|--no-note] [--parent <ID>|--no-parent]",
+            &["id", "no-note", "no-parent", "note", "parent"],
+            &[],
+            &["drogon-cli worktree set --id wt-1 --note investigating --json"],
+            &[
+                "Absent flags leave the stored value; --no-note/--no-parent clear explicitly. Parents must belong to the same project.",
+            ],
+        ),
+        entry(
             "worktree rm",
             &["worktree", "rm"],
             "Remove a worktree; refuses a dirty checkout unless --force",

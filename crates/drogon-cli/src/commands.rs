@@ -616,6 +616,34 @@ async fn worktree(
                 Client::decode_checked(&call, "worktree.list", check_worktree_list)?;
             emit(call, json, || output::worktree_list(&list), 0, None)
         }
+        WorktreeAction::Set {
+            id,
+            note,
+            no_note,
+            parent,
+            no_parent,
+        } => {
+            // Tri-state wire fields: absent leaves the stored value, explicit
+            // null clears it. `--note ""` trims to a clear daemon-side.
+            let mut params = json!({ "worktreeId": id });
+            if *no_note {
+                params["note"] = Value::Null;
+            } else if let Some(note) = note {
+                params["note"] = json!(note);
+            }
+            if *no_parent {
+                params["parentWorktreeId"] = Value::Null;
+            } else if let Some(parent) = parent {
+                params["parentWorktreeId"] = json!(parent);
+            }
+            let call = client
+                .call("worktree.update", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            // `worktree.update` returns the worktree record directly.
+            let worktree: Worktree =
+                Client::decode_checked(&call, "worktree.update", check_worktree)?;
+            emit(call, json, || output::worktree_created(&worktree), 0, None)
+        }
         WorktreeAction::Rm { id, force } => {
             let params = json!({ "id": id, "force": force });
             let call = client

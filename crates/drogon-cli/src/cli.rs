@@ -436,6 +436,27 @@ pub enum WorktreeAction {
         #[arg(long, value_name = "ID")]
         project: String,
     },
+    /// Update Orca metadata for a worktree (note, parent)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree set --id <ID> [--note <TEXT>|--no-note] [--parent <ID>|--no-parent]\nValid flags: --data-dir, --help, --id, --json, --no-note, --no-parent, --note, --parent, --request-id, --retry-request"
+    )]
+    Set {
+        #[arg(long, value_name = "ID")]
+        id: String,
+        /// Note text; empty after trimming clears the note
+        #[arg(long, value_name = "TEXT", conflicts_with = "no_note")]
+        note: Option<String>,
+        /// Clear the note explicitly
+        #[arg(long)]
+        no_note: bool,
+        /// Parent worktree id (same project only)
+        #[arg(long, value_name = "ID", conflicts_with = "no_parent")]
+        parent: Option<String>,
+        /// Clear the parent explicitly
+        #[arg(long)]
+        no_parent: bool,
+    },
     /// Remove a worktree; refuses a dirty checkout unless --force
     #[command(
         args_override_self = true,
@@ -844,6 +865,26 @@ impl Cli {
                 WorktreeAction::Current => {}
                 WorktreeAction::List { project } => {
                     require_nonempty("project", project)?;
+                }
+                WorktreeAction::Set {
+                    id,
+                    note,
+                    no_note,
+                    parent,
+                    no_parent,
+                } => {
+                    require_nonempty("id", id)?;
+                    if let Some(note) = note {
+                        require_nonempty("note", note)?;
+                    }
+                    if let Some(parent) = parent {
+                        require_nonempty("parent", parent)?;
+                    }
+                    if note.is_none() && !no_note && parent.is_none() && !no_parent {
+                        return Err(CliError::Usage(
+                            "worktree set requires --note/--no-note or --parent/--no-parent".into(),
+                        ));
+                    }
                 }
                 WorktreeAction::Rm { id, .. } => {
                     require_nonempty("id", id)?;

@@ -781,3 +781,79 @@ fn session_stop_workspace_sweeps_live_sessions_and_skips_exited() {
     );
     assert_eq!(other_sweep["stopped"], json!(0));
 }
+
+#[test]
+fn worktree_update_note_and_parent_roundtrip() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "pu1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let parent = ok(
+        &engine,
+        "worktree.create",
+        "pu2",
+        json!({"projectId": project_id, "name": "parent-wt"}),
+    );
+    let parent_id = parent["id"].as_str().unwrap().to_string();
+    let child = ok(
+        &engine,
+        "worktree.create",
+        "pu3",
+        json!({"projectId": project_id, "name": "child-wt"}),
+    );
+    let child_id = child["id"].as_str().unwrap().to_string();
+
+    // Set a note and a parent; the reply carries the updated row directly.
+    let updated = ok(
+        &engine,
+        "worktree.update",
+        "pu4",
+        json!({"worktreeId": child_id, "note": "investigating", "parentWorktreeId": parent_id}),
+    );
+    assert_eq!(updated["id"], json!(child_id));
+    assert_eq!(updated["note"], json!("investigating"));
+    assert_eq!(updated["parentWorktreeId"], json!(parent_id));
+
+    // Explicit null clears each field; absent leaves it unchanged.
+    let cleared = ok(
+        &engine,
+        "worktree.update",
+        "pu5",
+        json!({"worktreeId": child_id, "note": null, "parentWorktreeId": null}),
+    );
+    assert_eq!(cleared["note"], Value::Null);
+    assert_eq!(cleared["parentWorktreeId"], Value::Null);
+
+    // A parent from another project is refused.
+    let repo2 = tempfile::tempdir().unwrap();
+    init_repo(repo2.path());
+    let project2 = ok(
+        &engine,
+        "project.add",
+        "pu6",
+        json!({"path": repo2.path().to_string_lossy()}),
+    );
+    let other = ok(
+        &engine,
+        "worktree.create",
+        "pu7",
+        json!({"projectId": project2["id"], "name": "other-wt"}),
+    );
+    assert_eq!(
+        err_code(
+            &engine,
+            "worktree.update",
+            "pu8",
+            json!({"worktreeId": child_id, "parentWorktreeId": other["id"]}),
+        ),
+        "invalid_argument"
+    );
+}
