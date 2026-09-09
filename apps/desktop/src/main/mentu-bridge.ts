@@ -113,16 +113,13 @@ export function registerMentuBridge(
 
 // Must match `MENTU_LOCK_REVISION` in `crates/drogon-core/src/mentu/runtime.rs`
 // and `scripts/mentu-runtime-provision.mjs`.
-const MENTU_RUNTIME_LOCK_REVISION = "b72a1203d46c1d930be1aead65388ddfbe9a8fc4";
+const MENTU_RUNTIME_LOCK_REVISION = "c82ccfa0ebbe77d62193e068821ba6e74f87a8d3";
 
 /**
  * Where `scripts/mentu-runtime-provision.mjs` staged a runtime for this
  * build: `process.resourcesPath` once packaged (populated by
- * `scripts/package-desktop.mjs`'s conditional `extraResource`), or the
- * repo's own `apps/desktop/resources` in dev. Most installs have neither —
- * the fork ships the binary inside its own bundle; this repo instead
- * fetches it via this file's one-time install below, only when the
- * coordinator (or a developer) provisioned one.
+ * `scripts/package-desktop.mjs`), or the repo's own resources in dev.
+ * Apple Silicon packages include the verified official release by default.
  */
 function bundledMentuRuntimeSourcePath(): string {
   const resourcesRoot = app.isPackaged
@@ -141,8 +138,7 @@ function bundledMentuRuntimeSourcePath(): string {
 /**
  * One-time, local-only provisioning of the pinned Mentu runtime (journey J9
  * fresh-install usability) from this build's bundled copy, when one exists.
- * No-ops silently when it does not — most installs ship without one until
- * `scripts/mentu-runtime-provision.mjs` staged it — and never touches the
+ * No-ops when absent in an unprovisioned dev checkout. Never touches the
  * network, `PATH` or Homebrew: `mentu.runtime_install` only copies local
  * bytes that already match the lock's sha256. There is no renderer-facing
  * install affordance to wire this through: the read-only reference's own
