@@ -127,6 +127,7 @@ import {
 } from "./features/shell/sidebar-width";
 import { unreadDockBadgeCount } from "./features/shell/unread-badge-count";
 import { Landing } from "./features/landing/Landing";
+import { NewSessionDialog } from "./features/sessions/NewSessionDialog";
 import { NoWorkspacePage } from "./features/shell/NoWorkspacePage";
 import {
   findWorkspaceForPath,
@@ -567,6 +568,7 @@ export function App() {
   );
   const [revision, setRevision] = useState(0);
   const [harnessCapability, setHarnessCapability] = useState(false);
+  const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [detectedHarnesses, setHarnesses] = useState<Harness[]>([]);
   const harnesses = useMemo(
     () => detectedHarnesses.filter((harness) => !agentPreferences.settings.disabledTuiAgents.includes(harness.harnessId)),
@@ -3760,6 +3762,7 @@ export function App() {
         <div className="app-content">
         {chrome.showSidebar ? (
           <Sidebar
+            onNewSession={() => setNewSessionOpen(true)}
             open={sidebarOpen}
             width={sidebarWidth}
             onWidthChange={changeSidebarWidth}
@@ -3882,6 +3885,7 @@ export function App() {
               />
             ) : (
               <Landing
+                onNewSession={() => setNewSessionOpen(true)}
                 hasProjects={projectGroups.length > 0}
                 hasWorkspaces={false}
                 onAddProject={requestAddProject}
@@ -4528,9 +4532,18 @@ export function App() {
         onAddProject={requestAddProject}
         onOpenFile={openFileInFiles}
       />
+      {newSessionOpen && <NewSessionDialog
+        harnesses={harnesses}
+        defaultHarnessId={defaultHarnessId}
+        onClose={() => setNewSessionOpen(false)}
+        onCreate={(name, harnessId) => createComposerQuickSession({
+          name,
+          agent: { harnessId, model: "", provider: "" },
+        })}
+      />}
       {composer && (
         <NewWorkspaceComposerModal
-          groups={projectGroups}
+          groups={projectGroups.filter((group) => !group.project.quickSession)}
           workspaces={workspaces}
           initialProjectId={composer.initialProjectId}
           disabled={busy}

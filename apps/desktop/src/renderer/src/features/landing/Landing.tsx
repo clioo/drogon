@@ -4,7 +4,7 @@
    not stubbed; the star button keeps local state only, see
    github-star.tsx). Shortcut keycaps render through the keybinding labels
    formatter like the source's useShortcutKeyDetails + ShortcutKeyCombo. */
-import { FolderPlus, GitBranchPlus } from "lucide-react";
+import { FolderPlus, GitBranchPlus, SquarePen } from "lucide-react";
 import { ShortcutKeyCombo } from "../../components/ShortcutKeyCombo";
 import {
   useShortcutKeyDetails,
@@ -37,11 +37,13 @@ export function Landing({
   hasWorkspaces = true,
   onAddProject,
   onCreateWorkspace,
+  onNewSession,
 }: {
   hasProjects: boolean;
   hasWorkspaces?: boolean;
   onAddProject: () => void;
   onCreateWorkspace: () => void;
+  onNewSession?: () => void;
 }): React.JSX.Element {
   // Source chord sources: workspace.create, worktree.navigateUp,
   // worktree.navigateDown (definitions-core-1.ts).
@@ -68,7 +70,9 @@ export function Landing({
           </h1>
 
           <p className="text-sm text-muted-foreground text-center">
-            {hasProjects
+            {onNewSession && !hasProjects
+              ? "Start a session, or add a project to work in a repository."
+              : hasProjects
               ? hasWorkspaces
                 ? "Select a workspace from the sidebar to begin."
                 : "Create a workspace in one of your projects to get started."
@@ -76,6 +80,10 @@ export function Landing({
           </p>
 
           <div className="flex items-center justify-center gap-2.5 flex-wrap">
+            {onNewSession && <button
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              onClick={onNewSession}
+            ><SquarePen className="size-3.5" />New session</button>}
             <button
               className="inline-flex items-center gap-1.5 bg-secondary/70 border border-border/80 text-foreground font-medium text-sm px-4 py-2 rounded-md cursor-pointer hover:bg-accent transition-colors"
               onClick={onAddProject}

@@ -55,10 +55,14 @@ import {
   verifySealedBundle,
 } from "./desktop-artifacts.mjs";
 import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
+import { probeStandaloneSessions } from "./probe-standalone-sessions.mjs";
 
 const args = process.argv.slice(2);
 const bundle =
   args[0] === "--bundle" ? path.resolve(args.splice(0, 2)[1]) : null;
+const sessionsIndex = args.indexOf("--sessions");
+const withSessions = sessionsIndex !== -1;
+if (withSessions) args.splice(sessionsIndex, 1);
 const agentsIndex = args.indexOf("--agents");
 const withAgents = agentsIndex !== -1;
 if (withAgents) args.splice(agentsIndex, 1);
@@ -108,7 +112,7 @@ await writeFixtureGh(fixtureBin, [
   { number: 1, title: "Acceptance issue one" },
   { number: 2, title: "Acceptance issue two" },
 ]);
-if (withAgents) await writeAgentSettingsFixtures(fixtureBin);
+if (withAgents || withSessions) await writeAgentSettingsFixtures(fixtureBin);
 const output = path.join(
   root,
   ".preflight",
@@ -167,7 +171,7 @@ async function launchDesktop(overrideDataDir = null) {
         ...(withAgents ? { DROGON_WINDOW_BOUNDS: agentWindowBounds } : {}),
         PI_CODING_AGENT_DIR: piDir,
         ...(process.platform !== "win32" ? { SHELL: "/bin/sh" } : {}),
-        ...(packaged || withAgents
+        ...(packaged || withAgents || withSessions
           ? { PATH: `${fixtureBin}:/usr/bin:/bin:/usr/sbin:/sbin` }
           : {}),
         ...(withHarness
@@ -381,6 +385,7 @@ try {
   await page.getByRole("button", { name: "Sessions", exact: true }).click();
   await page.getByRole("heading", { name: "Drogon", exact: true }).waitFor();
   report.checks.push("no-workspace-sidebar-navigation-clicks");
+  if (withSessions) report.checks.push(await probeStandaloneSessions({ page, output, dataDir }));
 
   // Add Project dialog (ported folder picker): registers the folder as a
   // project AND its implicit workspace, so the sidebar renders its row
