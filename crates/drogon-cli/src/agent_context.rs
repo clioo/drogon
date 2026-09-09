@@ -802,6 +802,19 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[ORCHESTRATION_CAPABILITY, COORDINATOR_BINDING],
         ),
         entry(
+            "orchestration worker-list",
+            &["orchestration", "worker-list"],
+            "List worker attempts on this host (all runs unless --run; read-only)",
+            "drogon-cli orchestration worker-list [--run <ID>] [--terminal-state <STATE>]",
+            &["host", "run", "terminal-state"],
+            &[],
+            &[
+                "drogon-cli orchestration worker-list --json",
+                "drogon-cli orchestration worker-list --run run-1 --terminal-state retained --json",
+            ],
+            &[ORCHESTRATION_CAPABILITY],
+        ),
+        entry(
             "orchestration send",
             &["orchestration", "send"],
             "Send a scoped coordination message",

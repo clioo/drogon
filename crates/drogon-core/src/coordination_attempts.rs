@@ -69,6 +69,40 @@ fn encode(attempt: &Attempt) -> Result<String, RpcError> {
     serde_json::to_string(attempt).map_err(|_| error::internal_error("Invalid attempt state."))
 }
 
+/// Host-scoped read of one attempt by dispatch id, resolving its run from
+/// the stored row. Used by host-scoped listings that must not guess a run.
+pub(crate) fn show_by_dispatch(
+    tx: &Transaction<'_>,
+    host_id: &str,
+    dispatch_id: &str,
+) -> Result<Attempt, RpcError> {
+    let run_id: Option<String> = tx
+        .query_row(
+            "SELECT run_id FROM orchestration_attempts WHERE dispatch_id=?1 AND host_id=?2",
+            params![dispatch_id, host_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(error::from_sqlite)?;
+    let run_id = run_id.ok_or_else(|| error::not_found("Attempt does not exist on this host."))?;
+    let value: String = tx
+        .query_row(
+            "SELECT state_json FROM orchestration_attempts WHERE dispatch_id=?1 AND host_id=?2 AND run_id=?3",
+            params![dispatch_id, host_id, run_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(error::from_sqlite)?
+        .ok_or_else(|| error::internal_error("Stored attempt identity is inconsistent."))?;
+    let attempt = decode(value)?;
+    if attempt.result.run_id != run_id || attempt.result.dispatch_id != dispatch_id {
+        return Err(error::internal_error(
+            "Stored attempt identity is inconsistent.",
+        ));
+    }
+    Ok(attempt)
+}
+
 pub(crate) fn show(
     tx: &Transaction<'_>,
     scope: &CoordinatorScope,

@@ -181,6 +181,7 @@ fn forbidden_methods_are_unauthorized_before_any_scope_check() {
         "orchestration.workerStart",
         "orchestration.workerStop",
         "orchestration.workerRetain",
+        "orchestration.workerList",
         "unknown.method",
     ] {
         let err = authorize_worker(&conn, HOST, SECRET, method, &json!({})).unwrap_err();

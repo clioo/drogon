@@ -1035,6 +1035,38 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
         assert_eq!(retained_after["result"]["state"], "already_released");
     }
 
+    for state in [
+        "active",
+        "reclaimable",
+        "retained",
+        "release_pending",
+        "release_unknown",
+        "released",
+    ] {
+        let args = [
+            "orchestration",
+            "worker-list",
+            "--run",
+            &run_id,
+            "--terminal-state",
+            state,
+        ];
+        let (code, listed) = coordinator_call(&data_dir, &args);
+        assert_ok(code, &listed, &args);
+        assert_eq!(
+            listed["result"]["counts"],
+            serde_json::json!({"released": 2})
+        );
+        let workers = listed["result"]["workers"].as_array().unwrap();
+        assert_eq!(workers.len(), if state == "released" { 2 } else { 0 });
+        if state == "released" {
+            assert_eq!(workers[0]["workerState"], "failed");
+            assert_eq!(workers[0]["dispatchStatus"], "failed");
+            assert_eq!(workers[1]["workerState"], "succeeded");
+            assert_eq!(workers[1]["dispatchStatus"], "completed");
+        }
+    }
+
     // `daemon` and `scratch` drop here: the daemon process is signaled and
     // reaped (see `Daemon::drop`), then the ephemeral data/workspace
     // directories are removed. No process, socket file or workspace

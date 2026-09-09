@@ -191,6 +191,32 @@ impl OutputSourceArg {
     }
 }
 
+/// `orchestration worker-list --terminal-state` filter: the six terminal
+/// resource states (source: `worker-terminal-ownership.ts`).
+#[derive(ValueEnum, Debug, Clone, Copy)]
+#[value(rename_all = "snake_case")]
+pub enum TerminalStateArg {
+    Active,
+    Reclaimable,
+    Retained,
+    ReleasePending,
+    ReleaseUnknown,
+    Released,
+}
+
+impl TerminalStateArg {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            TerminalStateArg::Active => "active",
+            TerminalStateArg::Reclaimable => "reclaimable",
+            TerminalStateArg::Retained => "retained",
+            TerminalStateArg::ReleasePending => "release_pending",
+            TerminalStateArg::ReleaseUnknown => "release_unknown",
+            TerminalStateArg::Released => "released",
+        }
+    }
+}
+
 #[derive(ValueEnum, Debug, Clone, Copy)]
 pub enum ReceiptScopeArg {
     Bootstrap,
@@ -462,6 +488,18 @@ pub enum OrchestrationCommand {
         scope: CoordinatorScopeArgs,
         #[arg(long, value_name = "ID")]
         dispatch: String,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// List worker attempts on this host (all runs unless --run; read-only)
+    WorkerList {
+        /// Narrow to one run; without it all runs are listed (never a
+        /// current-run guess). Unknown runs read empty.
+        #[arg(long, value_name = "ID")]
+        run: Option<String>,
+        /// Filter to one terminal resource state
+        #[arg(long, value_enum, value_name = "STATE")]
+        terminal_state: Option<TerminalStateArg>,
         #[command(flatten)]
         host: HostOpt,
     },

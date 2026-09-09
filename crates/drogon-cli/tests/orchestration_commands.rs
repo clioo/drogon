@@ -2982,3 +2982,200 @@ async fn worker_retain_refuses_worker_credential() {
     drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---------------------------------------------------------------------------
+// worker-list: typed params, full render, credential refusal (mapping only;
+// engine parity is proved by native_worker_list in drogon-core).
+// ---------------------------------------------------------------------------
+
+fn list_result() -> Value {
+    json!({
+        "workers": [
+            {"dispatchId": "dispatch-1", "taskId": "task-1", "runId": "run-1",
+             "assignmentState": "ready", "outcome": null,
+             "processVerdict": "live", "workerState": "ready",
+             "dispatchStatus": "dispatched", "agentTerminalHandle": "sess-1",
+             "terminalState": "active",
+             "resource": {"state": "owned", "reason": "cleanup_owned"}},
+            {"dispatchId": "dispatch-2", "taskId": "task-2", "runId": "run-1",
+             "assignmentState": "stopped", "outcome": null,
+             "processVerdict": "exited", "workerState": "stopped",
+             "dispatchStatus": "completed", "agentTerminalHandle": "sess-2",
+             "terminalState": "retained",
+             "resource": {"state": "retained", "reason": "user_requested"}},
+        ],
+        "counts": {"active": 1, "retained": 1},
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_sends_host_scoped_params_without_coordinator_bindings() {
+    let dir = temp_dir("list-params");
+    let mut filtered = list_result();
+    filtered["workers"][0]["terminalState"] = json!("retained");
+    filtered["workers"][0]["resource"] = json!({"state": "retained", "reason": "user_requested"});
+    filtered["counts"] = json!({"retained": 2});
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.workerList", filtered)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "worker-list",
+            "--run",
+            "run-1",
+            "--terminal-state",
+            "retained",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    let captured = mock.captured();
+    let sent = captured
+        .iter()
+        .find(|r| r["method"] == "orchestration.workerList")
+        .expect("list sent");
+    assert_eq!(sent["params"]["run"], json!("run-1"));
+    assert_eq!(sent["params"]["terminalState"], json!("retained"));
+    assert_eq!(sent["params"]["hostId"], json!(HOST));
+    assert!(sent["params"].get("coordinatorId").is_none());
+    assert!(sent["params"].get("consumerGeneration").is_none());
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_human_output_renders_every_row_and_counts() {
+    let dir = temp_dir("list-human");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.workerList", list_result())]),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "worker-list"], &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("dispatch-1"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("dispatch-2"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("terminal=active"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("terminal=retained"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("active=1"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("retained=1"),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_empty_renders_no_workers_found() {
+    let dir = temp_dir("list-empty");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerList",
+                json!({"workers": [], "counts": {}}),
+            )],
+        ),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "worker-list"], &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("No workers found."),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_rejects_row_outside_requested_filter() {
+    let dir = temp_dir("list-mismatch");
+    let mut bad = list_result();
+    bad["workers"][0]["terminalState"] = json!("released");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.workerList", bad)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "worker-list",
+            "--terminal-state",
+            "retained",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_rejects_unknown_terminal_state() {
+    let dir = temp_dir("list-bad-state");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "worker-list",
+            "--terminal-state",
+            "bogus",
+            "--json",
+        ],
+        &[],
+    );
+    assert_ne!(invocation.exit_code, 0);
+    assert!(mock.captured().is_empty(), "invalid flag never connects");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_refuses_worker_credential() {
+    let dir = temp_dir("list-cred");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let capability = os(SCOPED_CREDENTIAL);
+    let env = [("DROGON_DISPATCH_CAPABILITY", &capability)];
+    let invocation = run_cli(&dir, &["orchestration", "worker-list", "--json"], &env);
+    assert_eq!(invocation.exit_code, 2);
+    assert!(
+        invocation
+            .stderr
+            .contains("refuses DROGON_DISPATCH_CAPABILITY"),
+        "{}",
+        invocation.stderr
+    );
+    assert!(
+        mock.captured().is_empty(),
+        "refused credential never connects"
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}

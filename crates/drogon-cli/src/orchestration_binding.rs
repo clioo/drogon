@@ -310,6 +310,14 @@ pub(crate) async fn resolve(
                 caller: None,
             });
         }
+        // Host-scoped read-only listing: no coordinator binding, no
+        // current-run guess. `--run` narrows; without it all runs list.
+        OrchestrationCommand::WorkerList { .. } => {
+            return Ok(Resolved {
+                command,
+                caller: None,
+            });
+        }
         _ => {}
     }
     if let Some(mut scope) = command.coordinator_scope().cloned() {

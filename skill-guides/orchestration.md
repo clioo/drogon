@@ -117,6 +117,16 @@ worker. An explicit `worker-release` clears that hold. Retain cannot undo a
 committed release; a pending release is distinct from an uncertain outcome.
 Retention never resurrects an exited process. Output archive parity is not yet implemented.
 
+`drogon-cli orchestration worker-list --run <ID> --terminal-state retained`
+lists worker attempts on this host without effects: without `--run` every run
+lists (never a current-run guess; an unknown run reads empty), and
+`--terminal-state` filters one of `active`, `reclaimable`, `retained`,
+`release_pending`, `release_unknown`, `released`. Counts cover the
+run-selected rows before the filter. Each row keeps assignment status,
+reported outcome, physical process verdict (`live`, `unverifiable` or
+`exited`; loss of contact never proves exit), and terminal resource state
+separate.
+
 ## Scope And Credentials
 
 Bound coordinator verbs (`run-use`, `task-create`, `task-update`, `task-list`,

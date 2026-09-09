@@ -34,9 +34,10 @@ use drogon_protocol::orchestration_task::{
 };
 use drogon_protocol::orchestration_worker::{
     OutputSource, ProcessAction, WorkerAbandonParams, WorkerAbandonResult, WorkerExecution,
-    WorkerPlacement, WorkerReadParams, WorkerReadResult, WorkerReleaseParams, WorkerReleaseResult,
-    WorkerRetainParams, WorkerRetainResult, WorkerShowParams, WorkerShowResult, WorkerStartParams,
-    WorkerStartResult, WorkerStopParams, WorkerStopResult,
+    WorkerListParams, WorkerListResult, WorkerPlacement, WorkerReadParams, WorkerReadResult,
+    WorkerReleaseParams, WorkerReleaseResult, WorkerRetainParams, WorkerRetainResult,
+    WorkerShowParams, WorkerShowResult, WorkerStartParams, WorkerStartResult, WorkerStopParams,
+    WorkerStopResult,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -49,6 +50,7 @@ use crate::error::{CliError, internal_error, method_not_found};
 use crate::orchestration_cli::{
     ActorScopeArgs, CoordinatorScopeArgs, MessageKindArg, OptionalCoordinatorScope,
     OrchestrationCommand, OutcomeArg, OutputSourceArg, ReceiptScopeArg, StatusArg,
+    TerminalStateArg,
 };
 use crate::transport::DEFAULT_TIMEOUT;
 
@@ -115,6 +117,7 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             | OrchestrationCommand::WorkerAbandon { .. }
             | OrchestrationCommand::WorkerRelease { .. }
             | OrchestrationCommand::WorkerRetain { .. }
+            | OrchestrationCommand::WorkerList { .. }
     );
     if coordinator_only {
         if worker_credential {
@@ -621,6 +624,7 @@ pub async fn run(
         | OrchestrationCommand::WorkerAbandon { host, .. }
         | OrchestrationCommand::WorkerRelease { host, .. }
         | OrchestrationCommand::WorkerRetain { host, .. }
+        | OrchestrationCommand::WorkerList { host, .. }
         | OrchestrationCommand::Send { host, .. }
         | OrchestrationCommand::Check { host, .. }
         | OrchestrationCommand::Reply { host, .. }
@@ -1615,6 +1619,109 @@ pub async fn run(
                     text
                 },
                 exit_code,
+            )
+        }
+        OrchestrationCommand::WorkerList {
+            run,
+            terminal_state,
+            ..
+        } => {
+            let params = WorkerListParams {
+                host: host_scope(&host_id),
+                run: run.clone(),
+                terminal_state: terminal_state.map(|state| match state {
+                    TerminalStateArg::Active => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::Active
+                    }
+                    TerminalStateArg::Reclaimable => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::Reclaimable
+                    }
+                    TerminalStateArg::Retained => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::Retained
+                    }
+                    TerminalStateArg::ReleasePending => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::ReleasePending
+                    }
+                    TerminalStateArg::ReleaseUnknown => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::ReleaseUnknown
+                    }
+                    TerminalStateArg::Released => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::Released
+                    }
+                }),
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call(
+                    "orchestration.workerList",
+                    value,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            // Full result, never silently truncated: every listed worker
+            // renders. Unknown runs read empty, never an error.
+            let result: WorkerListResult = Client::decode_checked(
+                &call,
+                "orchestration.workerList",
+                |r: &WorkerListResult| {
+                    for worker in &r.workers {
+                        check_dispatch_id(&worker.dispatch_id)?;
+                        if terminal_state.is_some()
+                            && worker.terminal_state.map(|s| s.as_str())
+                                != terminal_state.map(TerminalStateArg::as_wire)
+                        {
+                            return Err(
+                                "worker list returned a row outside the requested filter".into()
+                            );
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
+            emit(
+                call,
+                json,
+                || {
+                    if result.workers.is_empty() {
+                        return "No workers found.".to_string();
+                    }
+                    let mut text = String::new();
+                    for worker in &result.workers {
+                        use std::fmt::Write as _;
+                        let outcome = worker
+                            .outcome
+                            .map(|o| match o {
+                                drogon_protocol::orchestration_common::ReportOutcome::Succeeded => {
+                                    "succeeded"
+                                }
+                                drogon_protocol::orchestration_common::ReportOutcome::Failed => {
+                                    "failed"
+                                }
+                            })
+                            .unwrap_or("none");
+                        let _ = writeln!(
+                            text,
+                            "Dispatch {} run={} task={} [{}] outcome={} process={} terminal={}",
+                            worker.dispatch_id,
+                            worker.run_id,
+                            worker.task_id,
+                            wire_assignment(worker.assignment_state),
+                            outcome,
+                            wire_verdict(worker.process_verdict),
+                            worker.terminal_state.map(|s| s.as_str()).unwrap_or("none"),
+                        );
+                    }
+                    if !result.counts.is_empty() {
+                        text.push_str("Terminals:");
+                        for (state, count) in &result.counts {
+                            use std::fmt::Write as _;
+                            let _ = write!(text, " {state}={count}");
+                        }
+                    }
+                    text.trim_end().to_string()
+                },
+                0,
             )
         }
         OrchestrationCommand::Send {
