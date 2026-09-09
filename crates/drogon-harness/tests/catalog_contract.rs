@@ -30,6 +30,10 @@ use drogon_harness::{
 const CHILD_MODE_ENV: &str = "DROGON_CATALOG_CHILD_MODE";
 const FIXTURE_DIR_ENV: &str = "DROGON_CATALOG_FIXTURE_DIR";
 const LEDGER_FILE: &str = "ledger.children";
+/// Independent declaration channel: fixtures record every pid they
+/// spawn here, separately from the identity ledger, so declared-vs-
+/// registered can be cross-checked from two sources.
+const DECLARED_FILE: &str = "declared.children";
 const RESULT_FILE: &str = "result.json";
 /// Overall budget measured from launch preparation (amendment A): spawn,
 /// bootstrap, and bounded ps/kill helpers all consume it.
@@ -482,7 +486,7 @@ fn birth_of(pid: u32) -> Result<String, BoundedError> {
 
 /// Append-only ledger entry: a strictly positive PID (within the signed
 /// pid_t range) plus its birth.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct LedgerEntry {
     pid: u32,
     birth: String,
@@ -628,6 +632,9 @@ fn write_child_report(dir: &Path, report: &ChildReport) {
 enum ResolutionOutcome {
     NaturalExit,
     Replaced,
+    /// PID recycled AFTER the supervisor had already signaled: proves
+    /// signals went out, so this is NOT no-signal cleanup.
+    ReplacedAfterSignal,
     Terminated,
     ForceKilled,
     Unverifiable,
@@ -687,18 +694,28 @@ struct ChildRun {
     /// Parent-owned fixture directory, retained when containment is
     /// unverifiable (amendments B/F).
     retained_dir: Option<PathBuf>,
-    /// Bounded helpers whose own cleanup could not be confirmed; kept
-    /// (not dropped silently) as cleanup evidence until the run ends.
-    _unreaped_helpers: Vec<std::process::Child>,
+    /// Bounded helpers whose own cleanup could not be confirmed. Their
+    /// failure is already recorded in `cleanup.unverifiable` (the run is
+    /// failed and the fixture dir retained); the handles are held until
+    /// the run ends so the evidence outlives any single assertion.
+    unreaped_helpers: Vec<std::process::Child>,
 }
 
 /// Spawn this test binary in child mode under a fresh parent-owned
 /// fixture directory, bound the whole run, then clean up strictly.
 #[cfg(unix)]
 fn supervise(test_name: &str, overall: Duration) -> ChildRun {
-    let overall_deadline = Instant::now() + overall;
+    let launch = Instant::now();
+    let overall_deadline = launch + overall;
+    // The cleanup grace is an extension of the SAME absolute timeline
+    // decided at launch (amendment A): every later phase is min()ed into
+    // it, never a fresh now+ budget.
+    let cleanup_deadline = overall_deadline + CLEANUP_GRACE;
     let fixture_dir = tempfile::tempdir().expect("parent-owned fixture dir");
     let fixture_path = fixture_dir.path().to_path_buf();
+    // Parent-ready handshake: created BEFORE the child is spawned, so a
+    // registration can never be written before the parent is reading.
+    std::fs::write(fixture_path.join("parent.ready"), b"ready\n").expect("parent ready file");
 
     let mut child = std::process::Command::new(std::env::current_exe().expect("current_exe"))
         .args(["--exact", test_name, "--nocapture"])
@@ -710,226 +727,275 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
     // the strongest identity binding available (amendment B).
     let runner_pid = child.id();
 
-    let mut killed_by_parent = false;
-    while child.try_wait().expect("wait child").is_none() {
-        if Instant::now() >= overall_deadline {
-            killed_by_parent = true;
-            let _ = child.kill();
-            break;
-        }
-        std::thread::sleep(TICK);
-    }
-    // Bounded reap of the runner through the Child handle.
-    let reap_deadline = Instant::now() + REAP_RESERVE.max(Duration::from_millis(500));
-    let mut status = child.try_wait().expect("wait child");
-    while status.is_none() && Instant::now() < reap_deadline {
-        std::thread::sleep(TICK);
-        status = child.try_wait().expect("wait child");
-    }
-
-    // Cleanup phase: separate bounded grace (amendment A). Append-only
-    // ledger; late registrations keep arriving while the runner tears
-    // down, so the ledger is re-read every tick (amendment B).
-    let cleanup_deadline = Instant::now() + CLEANUP_GRACE;
-    let mut actions = vec![format!("runner pid={runner_pid} status={status:?}")];
-    let mut unverifiable: Vec<String> = Vec::new();
-    // Bounded helpers that could not confirm their own reap are retained
-    // here (evidence, not silently dropped) until the run ends.
-    let mut unreaped_helpers: Vec<std::process::Child> = Vec::new();
-    if status.is_none() {
-        unverifiable.push(format!("runner pid={runner_pid} could not be reaped"));
-    }
     struct Pending {
         entry: LedgerEntry,
         term_at: Option<Instant>,
         /// A SIGKILL was delivered: a later Gone resolution is
         /// ForceKilled, not Terminated.
         force_sent: bool,
+        /// Any signal was delivered: later Replaced resolutions must not
+        /// be mislabeled as no-signal cleanup.
+        signaled: bool,
     }
+
+    // The ledger is read from the very start: registrations can arrive
+    // while the runner is still working. `seen` dedups against EVERY
+    // entry ever observed, so a resolved identity is never re-added.
+    let mut seen: std::collections::HashSet<LedgerEntry> = std::collections::HashSet::new();
     let mut pending: Vec<Pending> = Vec::new();
     let mut resolutions: Vec<Resolution> = Vec::new();
+    let mut actions = vec![format!("runner pid={runner_pid} spawned")];
+    let mut unverifiable: Vec<String> = Vec::new();
+    // Bounded helpers whose own cleanup could not be confirmed; kept
+    // (not dropped silently) as cleanup evidence until the run ends.
+    let mut unreaped_helpers: Vec<std::process::Child> = Vec::new();
+    let mut killed_by_parent = false;
+
     loop {
+        let runner_done = match child.try_wait() {
+            Ok(done) => done,
+            Err(err) => {
+                unverifiable.push(format!("runner wait failed: {err}"));
+                None
+            }
+        };
+        if runner_done.is_none() && Instant::now() >= overall_deadline {
+            killed_by_parent = true;
+            let _ = child.kill();
+        }
+        // Ledger read every tick: late registrations keep arriving.
         let (entries, malformed) = read_ledger(&fixture_path);
         for bad in malformed {
-            if !unverifiable.iter().any(|u| u.contains(&bad)) {
-                unverifiable.push(format!("malformed ledger line: {bad}"));
+            let note = format!("malformed ledger line: {bad}");
+            if !unverifiable.iter().any(|u| u == &note) {
+                unverifiable.push(note);
             }
         }
         for entry in entries {
-            if pending.iter().any(|p| p.entry == entry) {
-                continue;
+            if seen.insert(entry.clone()) {
+                // First sight of this identity: resolve it once the
+                // runner is done (a live runner may still be using it).
+                pending.push(Pending {
+                    entry,
+                    term_at: None,
+                    force_sent: false,
+                    signaled: false,
+                });
             }
-            // Late-registered identity appearing after the runner exited:
-            // resolvable only if it checks out now.
-            pending.push(Pending {
-                entry,
-                term_at: None,
-                force_sent: false,
-            });
         }
-        let mut resolved = Vec::new();
-        for (index, item) in pending.iter_mut().enumerate() {
-            // Total-bound enforcement is per child, not per loop pass: a
-            // long line of identities can never outlive cleanup_deadline.
-            let now = Instant::now();
-            if now >= cleanup_deadline {
-                break;
-            }
-            // One absolute bound for this identity's whole operation:
-            // never beyond cleanup_deadline, never a fresh grace.
-            let op_deadline = std::cmp::min(cleanup_deadline, now + PS_TIMEOUT);
-            let (identity, probe_error) = identity_probe(&item.entry, op_deadline);
-            if let Some(err) = probe_error {
-                actions.push(format!(
-                    "pid={} probe error: {}",
-                    item.entry.pid, err.message
-                ));
-                if let Some(helper) = err.unreaped {
-                    unreaped_helpers.push(helper);
+        // Resolve pending identities only after the runner has exited.
+        if runner_done.is_some() {
+            let mut resolved = Vec::new();
+            for (index, item) in pending.iter_mut().enumerate() {
+                // Total-bound enforcement is per child, not per loop
+                // pass: a long line of identities can never outlive
+                // cleanup_deadline.
+                let now = Instant::now();
+                if now >= cleanup_deadline {
+                    break;
                 }
-            }
-            match identity {
-                Identity::Gone => {
-                    actions.push(format!("pid={} resolved-gone", item.entry.pid));
-                    let outcome = if item.force_sent {
-                        ResolutionOutcome::ForceKilled
-                    } else if item.term_at.is_some() {
-                        ResolutionOutcome::Terminated
-                    } else {
-                        ResolutionOutcome::NaturalExit
-                    };
-                    resolutions.push(Resolution {
-                        pid: item.entry.pid,
-                        outcome,
-                    });
-                    resolved.push(index);
-                }
-                Identity::Replaced => {
-                    actions.push(format!("pid={} resolved-replaced", item.entry.pid));
-                    resolutions.push(Resolution {
-                        pid: item.entry.pid,
-                        outcome: ResolutionOutcome::Replaced,
-                    });
-                    resolved.push(index);
-                }
-                Identity::Alive => {
-                    if item.term_at.is_none() {
-                        // Recheck immediately before every signal
-                        // (amendment C); TERM first (amendment D).
-                        let (recheck, recheck_error) = identity_probe(&item.entry, op_deadline);
-                        if let Some(err) = recheck_error {
-                            actions.push(format!(
-                                "pid={} pre-signal probe error: {}",
-                                item.entry.pid, err.message
-                            ));
-                            if let Some(helper) = err.unreaped {
-                                unreaped_helpers.push(helper);
-                            }
-                        }
-                        if recheck == Identity::Alive {
-                            match signal_pid(item.entry.pid, libc::SIGTERM) {
-                                Ok(()) => {
-                                    actions.push(format!("pid={} SIGTERM", item.entry.pid));
-                                    item.term_at = Some(now);
-                                }
-                                Err(err) => unverifiable.push(err),
-                            }
-                        }
-                    } else if Instant::now() >= item.term_at.expect("term_at") + TERM_GRACE {
-                        let op_deadline =
-                            std::cmp::min(cleanup_deadline, Instant::now() + PS_TIMEOUT);
-                        let (recheck, recheck_error) = identity_probe(&item.entry, op_deadline);
-                        if let Some(err) = recheck_error {
-                            actions.push(format!(
-                                "pid={} pre-force probe error: {}",
-                                item.entry.pid, err.message
-                            ));
-                            if let Some(helper) = err.unreaped {
-                                unreaped_helpers.push(helper);
-                            }
-                        }
-                        if recheck == Identity::Alive {
-                            match signal_pid(item.entry.pid, libc::SIGKILL) {
-                                Ok(()) => {
-                                    actions.push(format!("pid={} SIGKILL", item.entry.pid));
-                                    item.force_sent = true;
-                                }
-                                Err(err) => unverifiable.push(err),
-                            }
-                        }
-                        item.term_at = Some(Instant::now()); // re-grade the next force
+                // One absolute bound for this identity's whole operation:
+                // never beyond cleanup_deadline, never a fresh grace.
+                let op_deadline = std::cmp::min(cleanup_deadline, now + PS_TIMEOUT);
+                let (identity, probe_error) = identity_probe(&item.entry, op_deadline);
+                if let Some(err) = probe_error {
+                    actions.push(format!(
+                        "pid={} probe error: {}",
+                        item.entry.pid, err.message
+                    ));
+                    if let Some(helper) = err.unreaped {
+                        unreaped_helpers.push(helper);
                     }
                 }
-                Identity::Unverifiable => {
-                    unverifiable.push(format!(
-                        "pid={} identity unverifiable (ps error/silent failure)",
-                        item.entry.pid
-                    ));
-                    resolutions.push(Resolution {
-                        pid: item.entry.pid,
-                        outcome: ResolutionOutcome::Unverifiable,
-                    });
-                    resolved.push(index);
+                match identity {
+                    Identity::Gone => {
+                        actions.push(format!("pid={} resolved-gone", item.entry.pid));
+                        let outcome = if item.force_sent {
+                            ResolutionOutcome::ForceKilled
+                        } else if item.term_at.is_some() {
+                            ResolutionOutcome::Terminated
+                        } else {
+                            ResolutionOutcome::NaturalExit
+                        };
+                        resolutions.push(Resolution {
+                            pid: item.entry.pid,
+                            outcome,
+                        });
+                        resolved.push(index);
+                    }
+                    Identity::Replaced => {
+                        actions.push(format!("pid={} resolved-replaced", item.entry.pid));
+                        // A PID recycled AFTER we signaled still proves
+                        // signals went out: it is not no-signal cleanup.
+                        let outcome = if item.signaled {
+                            ResolutionOutcome::ReplacedAfterSignal
+                        } else {
+                            ResolutionOutcome::Replaced
+                        };
+                        resolutions.push(Resolution {
+                            pid: item.entry.pid,
+                            outcome,
+                        });
+                        resolved.push(index);
+                    }
+                    Identity::Alive => {
+                        if item.term_at.is_none() {
+                            // Recheck immediately before every signal
+                            // (amendment C); TERM first (amendment D).
+                            let (recheck, recheck_error) = identity_probe(&item.entry, op_deadline);
+                            if let Some(err) = recheck_error {
+                                actions.push(format!(
+                                    "pid={} pre-signal probe error: {}",
+                                    item.entry.pid, err.message
+                                ));
+                                if let Some(helper) = err.unreaped {
+                                    unreaped_helpers.push(helper);
+                                }
+                            }
+                            if recheck == Identity::Alive {
+                                match signal_pid(item.entry.pid, libc::SIGTERM) {
+                                    Ok(()) => {
+                                        actions.push(format!("pid={} SIGTERM", item.entry.pid));
+                                        item.term_at = Some(now);
+                                        item.signaled = true;
+                                    }
+                                    Err(err) => unverifiable.push(err),
+                                }
+                            }
+                        } else if Instant::now() >= item.term_at.expect("term_at") + TERM_GRACE {
+                            let op_deadline =
+                                std::cmp::min(cleanup_deadline, Instant::now() + PS_TIMEOUT);
+                            let (recheck, recheck_error) = identity_probe(&item.entry, op_deadline);
+                            if let Some(err) = recheck_error {
+                                actions.push(format!(
+                                    "pid={} pre-force probe error: {}",
+                                    item.entry.pid, err.message
+                                ));
+                                if let Some(helper) = err.unreaped {
+                                    unreaped_helpers.push(helper);
+                                }
+                            }
+                            if recheck == Identity::Alive {
+                                match signal_pid(item.entry.pid, libc::SIGKILL) {
+                                    Ok(()) => {
+                                        actions.push(format!("pid={} SIGKILL", item.entry.pid));
+                                        item.force_sent = true;
+                                        item.signaled = true;
+                                    }
+                                    Err(err) => unverifiable.push(err),
+                                }
+                            }
+                            item.term_at = Some(Instant::now()); // re-grade the next force
+                        }
+                    }
+                    Identity::Unverifiable => {
+                        unverifiable.push(format!(
+                            "pid={} identity unverifiable (ps error/silent failure)",
+                            item.entry.pid
+                        ));
+                        resolutions.push(Resolution {
+                            pid: item.entry.pid,
+                            outcome: ResolutionOutcome::Unverifiable,
+                        });
+                        resolved.push(index);
+                    }
                 }
             }
+            for index in resolved.into_iter().rev() {
+                pending.swap_remove(index);
+            }
         }
-        for index in resolved.into_iter().rev() {
-            pending.swap_remove(index);
-        }
-        if pending.is_empty() || Instant::now() >= cleanup_deadline {
+        // Exit only on QUIESCENCE, not merely an empty pending list: the
+        // runner must be done AND the ledger must hold no unseen entries.
+        // Otherwise late registrations would be missed.
+        let quiesced = runner_done.is_some()
+            && pending.is_empty()
+            && seen.len() >= read_ledger(&fixture_path).0.len();
+        if quiesced || Instant::now() >= cleanup_deadline {
+            for item in &pending {
+                unverifiable.push(format!(
+                    "pid={} still unresolved at cleanup deadline",
+                    item.entry.pid
+                ));
+            }
             break;
         }
-        std::thread::sleep(TICK);
+        sleep_capped(cleanup_deadline, TICK);
     }
-    for item in pending {
-        unverifiable.push(format!(
-            "pid={} still unresolved at cleanup deadline",
-            item.entry.pid
-        ));
+    // Bounded reap of the runner through the Child handle (real reaping;
+    // still min()ed into the absolute cleanup timeline).
+    let runner_reap_deadline = std::cmp::min(
+        Instant::now() + Duration::from_millis(500),
+        cleanup_deadline,
+    );
+    let mut status = child.try_wait().expect("wait child");
+    while status.is_none() && Instant::now() < runner_reap_deadline {
+        sleep_capped(runner_reap_deadline, TICK);
+        status = child.try_wait().expect("wait child");
+    }
+    actions.push(format!("runner pid={runner_pid} status={status:?}"));
+    if status.is_none() {
+        unverifiable.push(format!("runner pid={runner_pid} could not be reaped"));
     }
 
     // Registration accounting (amendment B), independent: the parent
     // reads the ledger ITSELF and cross-checks BOTH numbers the child
-    // reported - declared and registered. Neither side trusting the
-    // other: a child that under-reports declared, over-reports
-    // registered, or suppresses a registration failure is caught by the
-    // comparison, and any retained failure evidence is unverifiable.
+    // reported - declared and registered. Strict required schema: any
+    // missing field is unverifiable, never defaulted.
     let report: Option<serde_json::Value> = std::fs::read_to_string(fixture_path.join(RESULT_FILE))
         .ok()
         .and_then(|json| serde_json::from_str(&json).ok());
-    if let Some(value) = &report {
-        let declared = value
-            .get("declared_children")
-            .and_then(serde_json::Value::as_u64)
-            .map(|n| n as usize)
-            .unwrap_or(0);
-        let registered_reported = value
-            .get("registered_children")
-            .and_then(serde_json::Value::as_u64)
-            .map(|n| n as usize);
-        let (entries, _) = read_ledger(&fixture_path);
-        if declared > entries.len() {
-            unverifiable.push(format!(
-                "incomplete registration: child declared {declared} children but the ledger holds {}",
-                entries.len()
-            ));
-        }
-        if let Some(registered) = registered_reported
-            && registered != entries.len()
-        {
-            unverifiable.push(format!(
-                "registration accounting mismatch: child reports {registered} registered but the ledger holds {}",
-                entries.len()
-            ));
-        }
-        if let Some(failures) = value
-            .get("registration_failures")
-            .and_then(|f| f.as_array())
-        {
-            for failure in failures {
-                unverifiable.push(format!("registration failure retained: {failure}"));
+    let (entries, _) = read_ledger(&fixture_path);
+    match &report {
+        Some(value) => {
+            let declared = value
+                .get("declared_children")
+                .and_then(serde_json::Value::as_u64)
+                .map(|n| n as usize);
+            let registered_reported = value
+                .get("registered_children")
+                .and_then(serde_json::Value::as_u64)
+                .map(|n| n as usize);
+            let failures = value
+                .get("registration_failures")
+                .and_then(serde_json::Value::as_array);
+            let catalog_ok = value.get("catalog").is_some();
+            match (declared, registered_reported, failures, catalog_ok) {
+                (Some(declared), Some(registered), Some(failures), true) => {
+                    if declared > entries.len() {
+                        unverifiable.push(format!(
+                            "incomplete registration: child declared {declared} children but the ledger holds {}",
+                            entries.len()
+                        ));
+                    }
+                    // Independent declaration channel: if the fixtures
+                    // declared more than the child reported, the report
+                    // is suppressing evidence.
+                    if let Ok(text) = std::fs::read_to_string(fixture_path.join(DECLARED_FILE)) {
+                        let declared_channel = text.lines().filter(|l| !l.trim().is_empty()).count();
+                        if declared_channel != declared {
+                            unverifiable.push(format!(
+                                "declaration mismatch: fixtures declared {declared_channel} but the report says {declared}"
+                            ));
+                        }
+                    }
+                    if registered != entries.len() {
+                        unverifiable.push(format!(
+                            "registration accounting mismatch: child reports {registered} registered but the ledger holds {}",
+                            entries.len()
+                        ));
+                    }
+                    for failure in failures {
+                        unverifiable.push(format!("registration failure retained: {failure}"));
+                    }
+                }
+                _ => unverifiable.push(
+                    "result report missing required fields (catalog/declared_children/registered_children/registration_failures)"
+                        .to_string(),
+                ),
             }
         }
+        None => unverifiable.push("no result report from the child".to_string()),
     }
 
     // A bounded helper whose own reap could not be confirmed is recorded
@@ -960,15 +1026,31 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
             resolutions,
         },
         retained_dir,
-        _unreaped_helpers: unreaped_helpers,
+        unreaped_helpers,
     }
 }
 
 #[cfg(unix)]
 impl ChildRun {
+    /// Pids of bounded helpers whose own cleanup could not be confirmed;
+    /// every one already made the run unverifiable and retained the
+    /// fixture dir. Exposed so the evidence is inspectable, never
+    /// silently held.
+    fn unreaped_helper_pids(&self) -> Vec<u32> {
+        self.unreaped_helpers
+            .iter()
+            .map(|child| child.id())
+            .collect()
+    }
+
     /// Assert the supervision contract itself held: the child finished
     /// (not killed), wrote a report, and every known identity resolved.
     fn assert_clean(&self) {
+        assert!(
+            self.unreaped_helper_pids().is_empty(),
+            "unreaped bounded helpers: {:?}",
+            self.unreaped_helper_pids()
+        );
         assert!(
             !self.killed_by_parent,
             "supervised child exceeded its bound; actions: {:?}",
@@ -993,6 +1075,28 @@ impl ChildRun {
         assert!(
             self.retained_dir.is_none(),
             "clean run must not retain the fixture dir"
+        );
+    }
+
+    /// Product runs must clean up WITHOUT any supervisor rescue: every
+    /// identity exits through the product's own bounded machinery. A
+    /// rescue here means the product leaked containment and the
+    /// supervisor had to intervene - that is a failure, not a pass.
+    fn assert_clean_product(&self) {
+        self.assert_clean();
+        assert!(
+            self.cleanup.rescues().next().is_none(),
+            "product run must need zero supervisor rescues; resolutions: {:?}",
+            self.cleanup.resolutions
+        );
+        assert!(
+            !self
+                .cleanup
+                .resolutions
+                .iter()
+                .any(|r| r.outcome == ResolutionOutcome::ReplacedAfterSignal),
+            "product run must send no signals; resolutions: {:?}",
+            self.cleanup.resolutions
         );
     }
 
@@ -1162,15 +1266,18 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
     let pi = add_fixture(&dir, "pi", pi_script);
     let catalog = probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), budget);
     let (entries, _) = read_ledger(&dir);
-    // The adversarial fixtures self-register by appending `pid|lstart` to
-    // the ledger; there is no separate child-side registrar, so the
-    // counts derive from the ledger itself and no failure evidence is
-    // expected.
+    // Independent evidence: declared comes from the fixtures' OWN
+    // declaration channel (one pid per spawned fixture), registered
+    // from the identity ledger the parent also reads. Neither side
+    // derives one count from the other's source.
+    let declared = std::fs::read_to_string(dir.join(DECLARED_FILE))
+        .map(|text| text.lines().filter(|line| !line.trim().is_empty()).count())
+        .unwrap_or(0);
     write_child_report(
         &dir,
         &ChildReport {
             catalog,
-            declared_children: entries.len(),
+            declared_children: declared,
             registered_children: entries.len(),
             registration_failures: Vec::new(),
         },
@@ -1184,6 +1291,7 @@ fn timed_out_probe_is_killed_within_its_budget() {
         child_probe_and_report(
             "#!/bin/sh\n\
              if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
+             echo \"$$\" >> \"$(dirname \"$0\")/declared.children\"
              echo \"$$|$(LC_ALL=C TZ=UTC ps -p $$ -o lstart=)\" >> \"$(dirname \"$0\")/ledger.children\"\n\
              sleep 60\n",
             Duration::from_millis(300),
@@ -1194,16 +1302,17 @@ fn timed_out_probe_is_killed_within_its_budget() {
         "timed_out_probe_is_killed_within_its_budget",
         SUPERVISE_OVERALL,
     );
-    run.assert_clean();
+    run.assert_clean_product();
     let catalog = run.catalog();
     assert_eq!(catalog["status"], "timed_out");
+    // The TERM evidence is the PRODUCT's own bounded group cleanup,
+    // recorded in the catalog note - not a supervisor rescue.
     let note = catalog["note"].as_str().expect("note");
     assert!(note.contains("leader still running"), "{note}");
     assert!(note.contains("group-empty"), "{note}");
     assert!(
-        run.cleanup.actions.iter().any(|a| a.contains("SIGTERM")),
-        "expected TERM evidence: {:?}",
-        run.cleanup.actions
+        note.contains("SIGTERM") || note.contains("SIGKILL"),
+        "expected product TERM/KILL evidence in the note: {note}"
     );
 }
 
@@ -1331,7 +1440,8 @@ fn leader_exits_but_grandchild_holds_pipes_is_bounded_and_reported() {
 provider      model                            context  max-out  thinking  images\n\
 kimi-coding   kimi-for-coding                  262.1K   32.8K    yes       yes\n\
 PIEOF\n\
-             sleep 30 & echo \"$!|$(LC_ALL=C TZ=UTC ps -p $! -o lstart=)\" >> \"$(dirname \"$0\")/ledger.children\"\n\
+             sleep 30 & echo \"$!\" >> \"$(dirname \"$0\")/declared.children\"
+             echo \"$!|$(LC_ALL=C TZ=UTC ps -p $! -o lstart=)\" >> \"$(dirname \"$0\")/ledger.children\"\n\
              exit 0\n",
             Duration::from_secs(10),
         );
@@ -1341,7 +1451,7 @@ PIEOF\n\
         "leader_exits_but_grandchild_holds_pipes_is_bounded_and_reported",
         SUPERVISE_OVERALL,
     );
-    run.assert_clean();
+    run.assert_clean_product();
     let catalog = run.catalog();
     assert_eq!(catalog["status"], "enumerated");
     assert_eq!(catalog["entries"].as_array().expect("entries").len(), 1);
@@ -1373,7 +1483,8 @@ fn term_resistant_descendant_is_sigkilled_and_evidence_recorded() {
 provider      model                            context  max-out  thinking  images\n\
 kimi-coding   kimi-for-coding                  262.1K   32.8K    yes       yes\n\
 PIEOF\n\
-             ( trap '' TERM; sleep 60 ) & echo \"$!|$(LC_ALL=C TZ=UTC ps -p $! -o lstart=)\" >> \"$(dirname \"$0\")/ledger.children\"\n\
+             ( trap '' TERM; sleep 60 ) & echo \"$!\" >> \"$(dirname \"$0\")/declared.children\"
+             echo \"$!|$(LC_ALL=C TZ=UTC ps -p $! -o lstart=)\" >> \"$(dirname \"$0\")/ledger.children\"\n\
              exit 0\n",
             Duration::from_secs(10),
         );
@@ -1383,7 +1494,7 @@ PIEOF\n\
         "term_resistant_descendant_is_sigkilled_and_evidence_recorded",
         SUPERVISE_OVERALL,
     );
-    run.assert_clean();
+    run.assert_clean_product();
     let catalog = run.catalog();
     assert_eq!(catalog["status"], "enumerated");
     let note = catalog["note"].as_str().expect("note");
@@ -1406,7 +1517,8 @@ fn redirected_stdio_survivor_is_caught_after_eof_and_leader_exit() {
 provider      model                            context  max-out  thinking  images\n\
 kimi-coding   kimi-for-coding                  262.1K   32.8K    yes       yes\n\
 PIEOF\n\
-             sleep 45 </dev/null >/dev/null 2>&1 & echo \"$!|$(LC_ALL=C TZ=UTC ps -p $! -o lstart=)\" >> \"$(dirname \"$0\")/ledger.children\"\n\
+             sleep 45 </dev/null >/dev/null 2>&1 & echo \"$!\" >> \"$(dirname \"$0\")/declared.children\"
+             echo \"$!|$(LC_ALL=C TZ=UTC ps -p $! -o lstart=)\" >> \"$(dirname \"$0\")/ledger.children\"\n\
              exit 0\n",
             Duration::from_secs(10),
         );
@@ -1416,7 +1528,7 @@ PIEOF\n\
         "redirected_stdio_survivor_is_caught_after_eof_and_leader_exit",
         SUPERVISE_OVERALL,
     );
-    run.assert_clean();
+    run.assert_clean_product();
     let catalog = run.catalog();
     assert_eq!(catalog["status"], "enumerated");
     let note = catalog["note"].as_str().expect("note");
@@ -1434,6 +1546,7 @@ fn continuous_producer_respects_the_deadline_and_is_fully_reaped() {
         child_probe_and_report(
             "#!/bin/sh\n\
              if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
+             echo \"$$\" >> \"$(dirname \"$0\")/declared.children\"
              echo \"$$|$(LC_ALL=C TZ=UTC ps -p $$ -o lstart=)\" >> \"$(dirname \"$0\")/ledger.children\"\n\
              while :; do echo 'provider      model                            context  max-out  thinking  images'; done\n",
             Duration::from_millis(300),
@@ -1444,7 +1557,7 @@ fn continuous_producer_respects_the_deadline_and_is_fully_reaped() {
         "continuous_producer_respects_the_deadline_and_is_fully_reaped",
         SUPERVISE_OVERALL,
     );
-    run.assert_clean();
+    run.assert_clean_product();
     let catalog = run.catalog();
     assert_eq!(catalog["status"], "timed_out");
     let note = catalog["note"].as_str().expect("note");
@@ -1543,25 +1656,27 @@ fn append_ledger(dir: &Path, pid: u32) -> Result<(), BoundedError> {
 }
 
 /// Registration accounting owned by the child test process (lifecycle):
-/// how many fixture children it declared, how many it registered, and
-/// the retained failure detail for every registration that failed.
+/// how many fixture children it declared, how many it registered, the
+/// retained failure detail for every registration that failed, and -
+/// crucially - the actual Child handles of everything it spawned. An
+/// ancestor that is not the parent CANNOT reap a non-child via a PID
+/// ledger; the handles make ownership explicit so the child can bounded-
+/// reap what it owns where the test design allows, and the ledger+birth
+/// record is the ownership transfer for fixtures that must outlive it.
 #[cfg(unix)]
 #[derive(Default)]
 struct RegistrationLedger {
     declared: usize,
     registered: usize,
     failures: Vec<String>,
+    owned: Vec<std::process::Child>,
 }
 
 #[cfg(unix)]
 impl RegistrationLedger {
-    /// Declare a fixture child WITHOUT registering it (the
-    /// missing-registration self-test): the declared count rises but the
-    /// ledger stays empty, and accounting must expose the gap.
-    fn declare_only(&mut self, dir: &Path, script: &str) -> u32 {
+    fn spawn_owned(&mut self, dir: &Path, script: &str) -> Option<u32> {
         self.declared += 1;
-        #[allow(clippy::zombie_processes)]
-        let child = std::process::Command::new("/bin/sh")
+        match std::process::Command::new("/bin/sh")
             .arg("-c")
             .arg(script)
             .stdin(std::process::Stdio::null())
@@ -1569,53 +1684,102 @@ impl RegistrationLedger {
             .stderr(std::process::Stdio::null())
             .current_dir(dir)
             .spawn()
-            .expect("spawn shell child");
-        child.id()
+        {
+            Ok(child) => {
+                let pid = child.id();
+                self.owned.push(child);
+                Some(pid)
+            }
+            Err(err) => {
+                self.failures
+                    .push(format!("fixture spawn failed ({}): {err}", self.declared));
+                None
+            }
+        }
     }
 
-    /// Register one fixture child. Spawn/registration failures are
-    /// retained as evidence; an unreaped ps helper from a failed birth
-    /// capture is reaped HERE, in the process that owns it, with a
-    /// bounded wait - dropping that Child would leak a zombie.
-    fn register(&mut self, dir: &Path, script: &str) -> u32 {
-        self.declared += 1;
-        // The handle is intentionally not waited: the fixture child is
-        // reaped by the parent supervisor through the identity ledger,
-        // not this handle.
-        #[allow(clippy::zombie_processes)]
-        let child = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(script)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .current_dir(dir)
-            .spawn()
-            .expect("spawn shell child");
-        let pid = child.id();
+    /// Declare a fixture child WITHOUT registering it (the
+    /// missing-registration self-test): the declared count rises but the
+    /// ledger stays empty, and accounting must expose the gap. The
+    /// caller remains responsible for the child it owns.
+    fn declare_only(&mut self, dir: &Path, script: &str) -> Option<u32> {
+        self.spawn_owned(dir, script)
+    }
+
+    /// Register one fixture child: spawn (ownership retained) + ledger
+    /// append. Registration failures retain the full BoundedError; an
+    /// unreaped ps helper from a failed birth capture is reaped HERE, in
+    /// the process that owns it, bounded by an absolute deadline - and
+    /// if it still cannot be reaped, that uncertainty is recorded.
+    fn register(&mut self, dir: &Path, script: &str) -> Option<u32> {
+        let pid = self.spawn_owned(dir, script)?;
+        let op_deadline = Instant::now() + PS_TIMEOUT;
         match append_ledger(dir, pid) {
             Ok(()) => self.registered += 1,
             Err(err) => {
                 let mut note = format!("pid={pid} registration failed: {}", err.message);
                 if let Some(mut helper) = err.unreaped {
-                    // We own this helper: bounded reap, never a silent
-                    // drop.
-                    let reap_deadline = Instant::now() + Duration::from_secs(1);
-                    while helper.try_wait().ok().flatten().is_none()
-                        && Instant::now() < reap_deadline
+                    // We own this helper: bounded reap inside the
+                    // absolute op deadline, never a silent drop.
+                    while helper.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline
                     {
-                        sleep_capped(reap_deadline, Duration::from_millis(2));
+                        sleep_capped(op_deadline, Duration::from_millis(2));
                     }
                     if helper.try_wait().ok().flatten().is_some() {
                         note.push_str("; unreaped ps helper reaped by registrant");
                     } else {
                         note.push_str("; unreaped ps helper could NOT be reaped by registrant");
                     }
+                    self.owned.push(helper);
                 }
                 self.failures.push(note);
             }
         }
-        pid
+        Some(pid)
+    }
+
+    /// Bounded reap of everything this child still owns, used by tests
+    /// whose fixtures must NOT outlive the child. Returns the pids that
+    /// could not be reaped within the deadline (visible uncertainty).
+    fn reap_owned_bounded(&mut self, deadline: Instant) -> Vec<u32> {
+        let mut stuck = Vec::new();
+        for child in &mut self.owned {
+            if child.try_wait().ok().flatten().is_some() {
+                continue;
+            }
+            while child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
+                sleep_capped(deadline, Duration::from_millis(2));
+            }
+            if child.try_wait().ok().flatten().is_none() {
+                stuck.push(child.id());
+            }
+        }
+        stuck
+    }
+}
+
+/// Delayed registration (the delayed-registration self-test) goes
+/// through the same retention path: the BoundedError is never discarded.
+#[cfg(unix)]
+fn retain_late_registration(ledger: &mut RegistrationLedger, dir: &Path, pid: u32) {
+    match append_ledger(dir, pid) {
+        Ok(()) => ledger.registered += 1,
+        Err(err) => {
+            let mut note = format!("pid={pid} late registration failed: {}", err.message);
+            if let Some(mut helper) = err.unreaped {
+                let op_deadline = Instant::now() + PS_TIMEOUT;
+                while helper.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline {
+                    sleep_capped(op_deadline, Duration::from_millis(2));
+                }
+                if helper.try_wait().ok().flatten().is_some() {
+                    note.push_str("; unreaped ps helper reaped by registrant");
+                } else {
+                    note.push_str("; unreaped ps helper could NOT be reaped by registrant");
+                }
+                ledger.owned.push(helper);
+            }
+            ledger.failures.push(note);
+        }
     }
 }
 
@@ -1678,15 +1842,9 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
         // append-only ledger while tearing down (amendment B). A late
         // registration failure is retained as evidence, never dropped.
         let mut ledger = RegistrationLedger::default();
-        let pid = ledger.declare_only(&dir, "sleep 5");
+        let pid = ledger.declare_only(&dir, "sleep 5").expect("fixture spawn");
         std::thread::sleep(Duration::from_millis(300));
-        match append_ledger(&dir, pid) {
-            Ok(()) => ledger.registered += 1,
-            Err(err) => ledger.failures.push(format!(
-                "pid={pid} late registration failed: {}",
-                err.message
-            )),
-        }
+        retain_late_registration(&mut ledger, &dir, pid);
         write_child_report(
             &dir,
             &ChildReport {
@@ -1778,9 +1936,18 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
     if in_child_mode() {
         let dir = fixture_dir_from_env();
         // Spawn WITHOUT registering; the child honestly reports the gap.
-        // The child is short-lived so the scenario self-cleans.
+        // The child OWNS what it spawned: bounded-reap via the handle
+        // before exit (real exit evidence, no duration inference, no
+        // untracked orphan), while still reporting declared=1,
+        // registered=0.
         let mut ledger = RegistrationLedger::default();
         ledger.declare_only(&dir, "sleep 2");
+        let stuck = ledger.reap_owned_bounded(Instant::now() + Duration::from_secs(5));
+        if !stuck.is_empty() {
+            ledger.failures.push(format!(
+                "owned fixture(s) not reaped before child exit: {stuck:?}"
+            ));
+        }
         write_child_report(
             &dir,
             &ChildReport {
@@ -1922,7 +2089,7 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
         "supervisor_stale_identity_is_resolved_without_signaling",
         SUPERVISE_OVERALL,
     );
-    run.assert_clean();
+    run.assert_clean_product();
     assert!(
         run.cleanup
             .actions
