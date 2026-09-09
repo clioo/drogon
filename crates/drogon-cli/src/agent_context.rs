@@ -466,7 +466,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["orchestration", "run-show"],
             "Show one run",
             "drogon-cli orchestration run-show --run <ID>",
-            &["host", "run"],
+            &["host", "id", "run"],
             &[],
             &["drogon-cli orchestration run-show --run run-1 --json"],
             &[ORCHESTRATION_CAPABILITY],
@@ -691,6 +691,9 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "dispatch",
                 "host",
                 "kind",
+                "type",
+                "task-id",
+                "dispatch-id",
                 "outcome",
                 "payload",
                 "result",
@@ -724,6 +727,9 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "host",
                 "inject",
                 "kinds",
+                "types",
+                "task-id",
+                "dispatch-id",
                 "limit",
                 "peek",
                 "run",
@@ -751,6 +757,9 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "coordinator-id",
                 "dispatch",
                 "host",
+                "id",
+                "task-id",
+                "dispatch-id",
                 "question",
                 "run",
                 "task",
@@ -769,13 +778,16 @@ pub fn all_commands() -> Vec<AgentCommand> {
             "orchestration ask",
             &["orchestration", "ask"],
             "Ask a question (commit + bounded wait) or resume a pending one",
-            "drogon-cli orchestration ask --question <TEXT> --timeout-ms <MS>",
+            "drogon-cli orchestration ask --question <TEXT> [--options <CSV>] [--timeout-ms <MS>]",
             &[
                 "consumer-generation",
                 "coordinator-id",
                 "dispatch",
                 "host",
                 "option",
+                "options",
+                "task-id",
+                "dispatch-id",
                 "question",
                 "resume",
                 "run",
@@ -804,6 +816,8 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "dispatch",
                 "host",
                 "request",
+                "task-id",
+                "dispatch-id",
                 "run",
                 "scope",
                 "task",
@@ -961,6 +975,36 @@ mod tests {
                 find(&root, &entry.path).is_some(),
                 "agent-context path {:?} has no clap subcommand",
                 entry.path
+            );
+        }
+    }
+
+    #[test]
+    fn orchestration_flags_and_visible_aliases_match_the_agent_schema() {
+        let mut root = Cli::command();
+        root.build();
+        for entry in all_commands()
+            .into_iter()
+            .filter(|e| e.path[0] == "orchestration")
+        {
+            let mut command = &root;
+            for segment in &entry.path {
+                command = command.find_subcommand(*segment).unwrap();
+            }
+            let mut grammar = std::collections::BTreeSet::new();
+            for arg in command.get_arguments() {
+                if let Some(long) = arg.get_long() {
+                    grammar.insert(long);
+                }
+                if let Some(aliases) = arg.get_visible_aliases() {
+                    grammar.extend(aliases);
+                }
+            }
+            let advertised: std::collections::BTreeSet<_> = entry.flags.into_iter().collect();
+            assert_eq!(
+                advertised, grammar,
+                "{} flags drifted from the parser",
+                entry.command
             );
         }
     }

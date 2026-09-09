@@ -1659,6 +1659,7 @@ pub async fn run(
             actor,
             question,
             option,
+            options,
             to,
             resume,
             timeout_ms,
@@ -1667,11 +1668,21 @@ pub async fn run(
             let intent = match (question, resume) {
                 (Some(question), None) => AskIntent::New {
                     question: question.clone(),
-                    options: option.clone(),
+                    options: match options {
+                        Some(csv) => csv
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|choice| !choice.is_empty())
+                            .map(str::to_owned)
+                            .collect(),
+                        None => option.clone(),
+                    },
                 },
                 (None, Some(message_id)) => {
-                    if !option.is_empty() {
-                        return Err(usage("--option is only valid when asking a new question"));
+                    if !option.is_empty() || options.is_some() {
+                        return Err(usage(
+                            "--option/--options are only valid when asking a new question",
+                        ));
                     }
                     if to.is_some() {
                         return Err(usage("--to is only valid when asking a new question"));

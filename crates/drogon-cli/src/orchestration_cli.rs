@@ -448,14 +448,17 @@ pub enum OrchestrationCommand {
         /// Answer choice; repeatable (new questions only)
         #[arg(long, value_name = "TEXT")]
         option: Vec<String>,
+        /// Comma-separated answer choices (source CLI spelling; new questions only)
+        #[arg(long, value_name = "CSV", conflicts_with = "option")]
+        options: Option<String>,
         /// run-home | dispatch:ID (new questions only)
         #[arg(long, value_name = "TARGET")]
         to: Option<String>,
         /// Resume an existing pending question by its message id
         #[arg(long, value_name = "MSG-ID")]
         resume: Option<String>,
-        /// Positive bounded wait budget in ms (<= 900000)
-        #[arg(long, value_name = "MS")]
+        /// Positive bounded wait budget in ms (default 10 minutes, <= 900000)
+        #[arg(long, value_name = "MS", default_value_t = 600_000)]
         timeout_ms: u32,
         #[command(flatten)]
         host: HostOpt,

@@ -921,7 +921,7 @@ async fn check_mode_contradictions_are_usage_errors() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn ask_modes_are_exclusive_and_timeout_required() {
+async fn ask_modes_are_exclusive_with_default_and_explicit_timeout() {
     let dir = temp_dir("ask-conflict");
     let mock = MockService::start(&dir, mock_behavior(true, vec![]));
     let (run_id, task_id, dispatch_id, capability) = (
@@ -939,20 +939,125 @@ async fn ask_modes_are_exclusive_and_timeout_required() {
     for conflicting in [
         vec!["--resume", "msg-1", "--question", "q"],
         vec!["--resume", "msg-1", "--option", "a"],
+        vec!["--resume", "msg-1", "--options", "a,b"],
+        vec!["--resume", "msg-1", "--options="],
         vec!["--resume", "msg-1", "--to", "run-home"],
-        vec!["--question", "q"],
+        vec![],
     ] {
-        let mut args = vec!["orchestration", "ask", "--json"];
-        args.extend(conflicting.iter().copied());
-        let invocation = run_cli(&dir, &args, &worker_env);
-        assert_eq!(invocation.exit_code, 2, "args {conflicting:?}");
-        assert!(invocation.stdout.is_empty());
+        for timeout in [vec![], vec!["--timeout-ms", "1000"]] {
+            let mut args = vec!["orchestration", "ask", "--json"];
+            args.extend(conflicting.iter().copied());
+            args.extend(timeout);
+            let invocation = run_cli(&dir, &args, &worker_env);
+            assert_eq!(invocation.exit_code, 2, "args {args:?}");
+            assert!(invocation.stdout.is_empty());
+        }
     }
     let captured = mock.captured();
     assert!(
         !captured.iter().any(|r| r["method"] == "orchestration.ask"),
         "contradictory asks never reach the wire"
     );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ask_source_csv_trims_and_omits_empty_choices_without_splitting_literal_options() {
+    let dir = temp_dir("ask-options");
+    let pending = json!({
+        "questionMessageId": "question-1", "threadId": "thread-1",
+        "wait": {"outcome": "pending"},
+        "effectiveTimeoutMs": 1000, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                ("orchestration.ask", pending.clone()),
+                ("orchestration.ask", pending),
+            ],
+        ),
+    );
+    let env = worker_mail_env_ref();
+    for (flag, choices) in [
+        ("--options", "yes, no,, más tarde ,"),
+        ("--option", "yes, no"),
+    ] {
+        let invocation = run_cli(
+            &dir,
+            &[
+                "orchestration",
+                "ask",
+                "--json",
+                "--question",
+                "continue?",
+                "--timeout-ms",
+                "1000",
+                flag,
+                choices,
+            ],
+            &env,
+        );
+        assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+        assert!(invocation.stdout.contains("question-1"));
+    }
+    let calls = mock.captured();
+    let asks: Vec<_> = calls
+        .iter()
+        .filter(|r| r["method"] == "orchestration.ask")
+        .collect();
+    assert_eq!(asks.len(), 2);
+    assert_eq!(
+        asks[0]["params"]["options"],
+        json!(["yes", "no", "más tarde"])
+    );
+    assert_eq!(asks[1]["params"]["options"], json!(["yes, no"]));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ask_default_timeout_reaches_runtime_for_new_and_resumed_questions() {
+    let dir = temp_dir("ask-default");
+    let pending = json!({
+        "questionMessageId": "question-1", "threadId": "thread-1",
+        "wait": {"outcome": "pending"},
+        "effectiveTimeoutMs": 600_000, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                ("orchestration.ask", pending.clone()),
+                ("orchestration.ask", pending),
+            ],
+        ),
+    );
+    let env = worker_mail_env_ref();
+    for intent in [["--question", "continue?"], ["--resume", "question-1"]] {
+        let invocation = run_cli(
+            &dir,
+            &["orchestration", "ask", "--json", intent[0], intent[1]],
+            &env,
+        );
+        assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+        assert!(invocation.stdout.contains("question-1"));
+    }
+    let calls = mock.captured();
+    let asks: Vec<_> = calls
+        .iter()
+        .filter(|r| r["method"] == "orchestration.ask")
+        .collect();
+    assert_eq!(asks.len(), 2);
+    assert_eq!(asks[0]["params"]["intent"], "new");
+    assert_eq!(asks[1]["params"]["intent"], "resume");
+    for ask in asks {
+        assert_eq!(ask["params"]["wait"]["timeoutMs"], 600_000);
+        assert_eq!(ask["auth"], SCOPED_CREDENTIAL);
+    }
     drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
 }

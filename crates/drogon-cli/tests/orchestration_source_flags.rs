@@ -55,6 +55,43 @@ fn source_reply_id_is_the_question_not_the_request_envelope() {
 }
 
 #[test]
+fn source_ask_csv_options_are_distinct_from_literal_repeatable_options() {
+    let command = parse(&[
+        "orchestration",
+        "ask",
+        "--question",
+        "continue?",
+        "--options",
+        "yes, no,,",
+    ]);
+    assert!(matches!(command, OrchestrationCommand::Ask { .. }));
+    assert!(
+        Cli::try_parse_from([
+            "drogon-cli",
+            "orchestration",
+            "ask",
+            "--question",
+            "continue?",
+            "--options",
+            "yes,no",
+            "--option",
+            "later",
+        ])
+        .is_err()
+    );
+}
+
+#[test]
+fn source_ask_uses_ten_minute_default_without_timeout_flag() {
+    let OrchestrationCommand::Ask { timeout_ms, .. } =
+        parse(&["orchestration", "ask", "--question", "continue?"])
+    else {
+        panic!("expected ask")
+    };
+    assert_eq!(timeout_ms, 600_000);
+}
+
+#[test]
 fn source_run_show_id_is_supported() {
     let OrchestrationCommand::RunShow { run, .. } =
         parse(&["orchestration", "run-show", "--id", "run-1"])
