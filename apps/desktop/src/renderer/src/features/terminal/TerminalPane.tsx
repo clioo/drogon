@@ -20,6 +20,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ILinkProvider, ILink } from "@xterm/xterm";
 import { TerminalInputQueue } from "./terminal-input-queue";
+import { preventTerminalBacktabNavigation } from "./terminal-backtab-navigation";
 import { attachTerminalMouseWheelMultiplier } from "./terminal-tui-wheel";
 import { resolveTerminalJisYenInput } from "./terminal-jis-yen-input";
 import {
@@ -866,6 +867,7 @@ export function TerminalPane({
     );
     let optionKeyLocations: TerminalOptionKeyLocation = 0;
     terminal.attachCustomKeyEventHandler((event) => {
+      if (canWrite) preventTerminalBacktabNavigation(event);
       optionKeyLocations = updateTerminalOptionKeyLocation(
         optionKeyLocations,
         event,
