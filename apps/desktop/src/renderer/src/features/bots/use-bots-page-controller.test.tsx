@@ -190,22 +190,19 @@ describe("use-bots-page-controller", () => {
 
   it("passes the bot's stored harness with the run and reloads history after it settles", async () => {
     const onRunResponsibility = vi.fn(async () => {});
-    const fake = fakeBridge([]);
+    // The mount load replaces the caller snapshot with the bridge's, so the
+    // fake is seeded with the same bot.
+    const seeded = bot({
+      harnessPolicy: {
+        defaultHarness: "pi",
+        explicitModel: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+      },
+      responsibilities: [responsibility({ name: "Nightly duty" })],
+    });
+    const fake = fakeBridge([seeded]);
     render(
       <BotsPanel
-        snapshot={{
-          bots: [
-            bot({
-              id: "bot-1",
-              harnessPolicy: {
-                defaultHarness: "pi",
-                explicitModel: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
-              },
-              responsibilities: [responsibility({ name: "Nightly duty" })],
-            }),
-          ],
-          history: [],
-        }}
+        snapshot={{ bots: [seeded], history: [] }}
         bridge={fake.bridge}
         scope={scope}
         onRunResponsibility={onRunResponsibility}
@@ -224,23 +221,24 @@ describe("use-bots-page-controller", () => {
         },
       }),
     );
-    // The reload after settlement is what makes the new history row appear.
-    await waitFor(() => expect(fake.snapshots()).toBeGreaterThan(0));
+    // The reload after settlement is what makes the new history row appear
+    // (mount load + the post-run reload).
+    await waitFor(() => expect(fake.snapshots()).toBeGreaterThanOrEqual(2));
   });
 
   it("surfaces a failed run as an alert instead of silence", async () => {
     const onRunResponsibility = vi.fn(async () => {
       throw new Error("Run refused.");
     });
-    const fake = fakeBridge([]);
+    // The mount load replaces the caller snapshot with the bridge's, so the
+    // fake is seeded with the same bot.
+    const seeded = bot({
+      responsibilities: [responsibility({ name: "Nightly duty" })],
+    });
+    const fake = fakeBridge([seeded]);
     render(
       <BotsPanel
-        snapshot={{
-          bots: [
-            bot({ responsibilities: [responsibility({ name: "Nightly duty" })] }),
-          ],
-          history: [],
-        }}
+        snapshot={{ bots: [seeded], history: [] }}
         bridge={fake.bridge}
         scope={scope}
         onRunResponsibility={onRunResponsibility}
@@ -268,11 +266,15 @@ describe("use-bots-page-controller", () => {
       target: { value: "Acceptance Bot" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create Bot" }));
-    await waitFor(() => expect(screen.getByTestId("bot-detail")).toBeTruthy());
-    expect(screen.getByTestId("bot-detail").textContent).toContain(
+    // The fork-parity card is keyed by its bot id, and the create reload
+    // (mount load + post-create reload) refreshes the list.
+    await waitFor(() =>
+      expect(screen.getByTestId("bot-bot-new")).toBeTruthy(),
+    );
+    expect(screen.getByTestId("bot-bot-new").textContent).toContain(
       "Acceptance Bot",
     );
-    expect(fake.snapshots()).toBe(1);
+    expect(fake.snapshots()).toBe(2);
   });
 
   it("surfaces a failed create as an alert and keeps the form open", async () => {
@@ -419,7 +421,7 @@ describe("use-bots-page-controller", () => {
         scope={scope}
       />,
     );
-    fireEvent.click(screen.getByTestId("open-session-bot-1"));
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
     fireEvent.click(screen.getByTestId("add-responsibility-bot-1"));
     const form = screen.getByTestId("responsibility-form");
     fireEvent.change(within(form).getByLabelText("Name"), {
@@ -437,10 +439,13 @@ describe("use-bots-page-controller", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("responsibility-form")).toBeNull(),
     );
-    expect(fake.snapshots()).toBe(1);
+    // Mount load + the post-mutation reload.
+    expect(fake.snapshots()).toBe(2);
   });
 
-  it("deletes the selected bot through its confirm and reloads", async () => {
+  it("deletes the bot immediately, like the source, and reloads (#348)", async () => {
+    // Fork parity: the header Delete acts immediately — the pre-parity
+    // confirm dialog was invented UI and is gone.
     const fake = fakeBridge([bot()]);
     render(
       <BotsPanel
@@ -449,15 +454,10 @@ describe("use-bots-page-controller", () => {
         scope={scope}
       />,
     );
-    fireEvent.click(screen.getByTestId("open-session-bot-1"));
-    fireEvent.click(screen.getByTestId("delete-bot-bot-1"));
-    fireEvent.click(
-      within(screen.getByTestId("bot-delete-confirm")).getByRole("button", {
-        name: "Delete",
-      }),
-    );
+    fireEvent.click(await screen.findByTestId("delete-bot-bot-1"));
     await waitFor(() => expect(screen.getByTestId("bots-empty")).toBeTruthy());
-    expect(fake.snapshots()).toBe(1);
+    // Mount load + the post-delete reload.
+    expect(fake.snapshots()).toBe(2);
   });
 
   // #237: the mount registers over a placeholder snapshot while the live

@@ -50,19 +50,19 @@ export async function loadBotSnapshot(
   bridge: BotsSnapshotBridge,
   scope: BotsLoadScope,
 ): Promise<BotsLoadResult> {
-  if (
-    scope.hostId.length === 0 ||
-    scope.workspaceId.length === 0 ||
-    scope.locale.length === 0
-  ) {
+  if (scope.hostId.length === 0 || scope.locale.length === 0) {
     return {
       scope,
       status: "error",
       code: "invalid_scope",
-      message: "hostId, workspaceId and locale must be non-empty",
+      message: "hostId and locale must be non-empty",
       retryable: false,
     };
   }
+  // workspaceId "" is the app-global scope (#348, fixes the zero-workspace
+  // Bots page): the fork's controller lists bots app-globally via
+  // window.api.bots.list(), so an empty workspace scope asks the daemon for
+  // the host-wide snapshot. Non-empty scopes stay exact-workspace reads.
   const invalidScope = (message: string): BotsLoadResult => ({
     scope,
     status: "error",

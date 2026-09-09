@@ -26,10 +26,7 @@ export function BotLoadingState(): React.JSX.Element {
 export function BotsEmptyState({
   onCreate,
 }: {
-  // Optional so capability-gated callers can render the read-only empty
-  // view (no control without a real capability behind it); the fork always
-  // passes it.
-  onCreate?: () => void;
+  onCreate: () => void;
 }): React.JSX.Element {
   return (
     <div

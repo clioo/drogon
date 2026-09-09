@@ -1,21 +1,22 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/bots/BotResponsibilityCard.tsx onto the Card
    and Badge primitives the fork uses (Card, CardHeader, CardTitle,
-   CardDescription, CardContent, Badge) with the fork's header/content
-   classes, icons, copy and ARIA.
-   Adapters for this repo (all pre-existing, kept): getAgentLabel is the
-   local botHarnessLabel; DrogonBotAvatar renders initials on the source's
-   frame (character artwork rights unverified); the header Delete confirms
-   first (the source deletes immediately — the copy states this repo's own
-   native `bot.delete` effects); each responsibility row gains a Delete
-   control for `bot.responsibility_delete` and a mono trigger summary naming
-   the real automation/event behind it; history rows keep the
-   Scheduled/Manual invocation badge the source omits; observed liveness
-   renders only from the caller's observation map, never the stored record.
-   The `data-testid` hooks stay: the packaged probe and contract tests
-   address the card through them. */
+   CardDescription, CardContent, Badge).
+   R17-E #348: the fork's exact card surface is restored — the header Delete
+   acts immediately (no confirm dialog — invented UI removed), the
+   responsibility rows carry only the fork's icon/name/kind-badge plus the
+   Run control, the history rows carry the fork's name + evidence line
+   (invocation badge and observation suffix removed), and "Open session" +
+   Delete + Add responsibility render unconditionally with the fork's copy
+   ("No session yet"). `data-testid` hooks stay: the packaged probe and
+   contract tests address the card through them.
+   Adapters for this repo (data layer, declared): getAgentLabel is the
+   local botHarnessLabel; history evidence names the automation run NUMBER
+   (this store keeps no status verdict on the snapshot join, unlike the
+   fork's `status · id`); `preset` narrows the transport string to the
+   preset union at the avatar boundary — native owns preset validation and
+   an unknown preset falls to the Bot glyph exactly like the fork's `none`. */
 
-import { useEffect, useId, useState } from "react";
 import { CalendarClock, Play, Plus, Zap } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -29,127 +30,50 @@ import {
 import type {
   BotsPanelBot,
   BotsPanelHistoryEntry,
-  BotsPanelHostObservation,
 } from "./bots-panel-contracts";
 import {
+  HARNESS_DEFAULT_MODEL_LABEL,
   SESSION_LINKED_LABEL,
   SESSION_NONE_LABEL,
-  botDescription,
-  historyTriggerLabel,
-  modelLabel,
-  triggerLabel,
 } from "./bots-panel-projection";
 import { DrogonBotAvatar } from "./DrogonBotAvatar";
 import { botHarnessLabel } from "./bots-page-model";
+import type { DrogonBotCharacterPreset } from "./bot-characters";
 
-function kindIcon(kind: "reactive" | "scheduled") {
-  return kind === "scheduled" ? (
-    <CalendarClock
-      className="size-3.5 text-muted-foreground"
-      aria-hidden="true"
-    />
-  ) : (
-    <Zap className="size-3.5 text-muted-foreground" aria-hidden="true" />
-  );
-}
-
-/** Right-hand evidence line for one history row. The snapshot join carries
- *  names and the automation run number (never a status verdict): an
- *  automation-linked row names it, else a Mentu run id, else a bare
- *  recorded marker. Orphaned rows (deleted responsibility/automation)
- *  keep their null joins visible, never invented. A stored terminal
- *  observation (`exited` once the headless run's session exit is observed,
- *  `unverifiable` when its observation failed) is appended as the row's
- *  final state; a stored `live`/absent observation says nothing about
- *  current liveness, so it stays unshown (the header session line owns
- *  live observation from the caller's observation map). */
+/** Right-hand evidence line for one history row: the automation-linked
+ *  form names the run (this store joins the run number, never a status
+ *  verdict), else a Mentu run id, else a bare recorded marker. Orphaned
+ *  rows (deleted responsibility/automation) keep their null joins visible,
+ *  never invented. */
 function historyDetail(entry: BotsPanelHistoryEntry): string {
-  const observation = entry.run.hostObservation;
-  const finalState =
-    observation === "exited" || observation === "unverifiable"
-      ? ` · ${observation}`
-      : "";
   if (
     entry.automationRunNumber !== null &&
     entry.automationRunNumber !== undefined
   ) {
-    return `${entry.automationName ?? "automation"} · run ${entry.automationRunNumber}${finalState}`;
+    return `${entry.automationName ?? "automation"} · run ${entry.automationRunNumber}`;
   }
   if (entry.run.recipe?.runId) {
-    return `Mentu run ${entry.run.recipe.runId}${finalState}`;
+    return `Mentu run ${entry.run.recipe.runId}`;
   }
-  return `Recorded${finalState}`;
-}
-
-/** Inline confirm for the header bot Delete. Pure (no hooks of its own
- *  besides `useId` for ARIA wiring) so tests render it directly. The
- *  source deletes immediately with no confirm; the copy here states this
- *  repo's native `bot.delete` effects instead. */
-export function BotDeleteConfirmDialog({
-  botName,
-  onConfirm,
-  onCancel,
-}: {
-  botName: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}): React.JSX.Element {
-  const titleId = useId();
-  const descriptionId = useId();
-  return (
-    <div
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      aria-describedby={descriptionId}
-      data-testid="bot-delete-confirm"
-      className="mt-3 rounded-md border border-border bg-muted/50 px-3 py-2"
-    >
-      <p id={titleId} className="text-sm font-medium">
-        Delete &ldquo;{botName}&rdquo;?
-      </p>
-      <p id={descriptionId} className="mt-1 text-xs text-muted-foreground">
-        This removes the bot, its responsibilities and their scheduled
-        automations. Past runs stay in history.
-      </p>
-      <div className="mt-2 flex items-center justify-end gap-2">
-        <Button variant="outline" size="sm" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button variant="default" size="sm" onClick={onConfirm}>
-          Delete
-        </Button>
-      </div>
-    </div>
-  );
+  return "Recorded";
 }
 
 export function BotResponsibilityCard({
   bot,
   history,
-  observedLiveness,
-  onOpenSession,
   onAddResponsibility,
-  onDeleteBot,
-  onDeleteResponsibility,
+  onDelete,
   onRunResponsibility,
+  onLaunch,
 }: {
   bot: BotsPanelBot;
   history: BotsPanelHistoryEntry[];
-  observedLiveness?: BotsPanelHostObservation | null;
-  onOpenSession?: () => void;
-  onAddResponsibility?: () => void;
-  /** Header bot delete (`bot.delete`); the card confirms first. Rendered
-   *  only when supplied, like every other mutation control here. */
-  onDeleteBot?: () => void;
-  onDeleteResponsibility?: (responsibilityId: string) => void;
-  onRunResponsibility?: (responsibilityId: string) => void;
+  onAddResponsibility: () => void;
+  onDelete: () => void;
+  onRunResponsibility: (responsibilityId: string) => void;
+  onLaunch: () => void;
 }): React.JSX.Element {
   const botHistory = history.filter((entry) => entry.run.botId === bot.id);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  useEffect(() => {
-    setConfirmingDelete(false);
-  }, [bot.id]);
   return (
     <Card data-testid={`bot-${bot.id}`}>
       <CardHeader className="border-b">
@@ -157,7 +81,7 @@ export function BotResponsibilityCard({
           <div className="min-w-0">
             <CardTitle className="flex items-center gap-2 text-sm">
               <DrogonBotAvatar
-                preset={bot.characterPreset}
+                preset={bot.characterPreset as DrogonBotCharacterPreset}
                 alt={`${bot.displayIdentity.displayName} avatar`}
                 className="size-9"
               />
@@ -172,48 +96,32 @@ export function BotResponsibilityCard({
               className="mt-2"
               data-testid={`bot-description-${bot.id}`}
             >
-              {botDescription(bot)}
+              {(bot.displayIdentity.title ?? bot.instructions) ||
+                "Ready for a purpose"}
               {bot.displayIdentity.handle
                 ? ` · @${bot.displayIdentity.handle}`
                 : ""}
             </CardDescription>
-            {onOpenSession ? (
-              <Button
-                className="mt-3"
-                variant="outline"
-                size="sm"
-                data-testid={`open-session-${bot.id}`}
-                onClick={onOpenSession}
-              >
-                <Play />
-                Open session
-              </Button>
-            ) : null}
-          </div>
-          {onDeleteBot ? (
             <Button
-              variant="ghost"
+              className="mt-3"
+              variant="outline"
               size="sm"
-              data-testid={`delete-bot-${bot.id}`}
-              aria-label={`Delete ${bot.displayIdentity.displayName}`}
-              onClick={() => setConfirmingDelete(true)}
+              data-testid={`open-session-${bot.id}`}
+              onClick={onLaunch}
             >
-              Delete
+              <Play />
+              Open session
             </Button>
-          ) : null}
-        </div>
-        {onDeleteBot && confirmingDelete ? (
-          <div className="pt-4">
-            <BotDeleteConfirmDialog
-              botName={bot.displayIdentity.displayName}
-              onConfirm={() => {
-                setConfirmingDelete(false);
-                onDeleteBot();
-              }}
-              onCancel={() => setConfirmingDelete(false)}
-            />
           </div>
-        ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid={`delete-bot-${bot.id}`}
+            onClick={onDelete}
+          >
+            Delete
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-5 pt-6">
         <div className="grid gap-3 text-sm sm:grid-cols-3">
@@ -226,18 +134,13 @@ export function BotResponsibilityCard({
           <div>
             <p className="text-xs text-muted-foreground">Model policy</p>
             <p className="mt-1 font-medium">
-              {modelLabel(bot.harnessPolicy)}
+              {bot.harnessPolicy.explicitModel ?? HARNESS_DEFAULT_MODEL_LABEL}
             </p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Session</p>
             <p className="mt-1 font-medium">
-              {bot.currentSession !== null
-                ? SESSION_LINKED_LABEL
-                : SESSION_NONE_LABEL}
-              {observedLiveness
-                ? ` · Observed liveness: ${observedLiveness}`
-                : ""}
+              {bot.currentSession ? SESSION_LINKED_LABEL : SESSION_NONE_LABEL}
             </p>
           </div>
         </div>
@@ -248,61 +151,48 @@ export function BotResponsibilityCard({
               data-testid={`responsibility-${responsibility.id}`}
               className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs"
             >
-              {kindIcon(responsibility.kind)}
+              {responsibility.kind === "scheduled" ? (
+                <CalendarClock
+                  className="size-3.5 text-muted-foreground"
+                  aria-hidden
+                />
+              ) : (
+                <Zap className="size-3.5 text-muted-foreground" aria-hidden />
+              )}
               <span>{responsibility.name}</span>
               <Badge variant="outline">
                 {responsibility.kind === "scheduled" ? "scheduled" : "reactive"}
               </Badge>
-              <span className="font-mono text-muted-foreground">
-                {triggerLabel(responsibility.trigger)}
-              </span>
               {responsibility.kind === "scheduled" ? (
-                onRunResponsibility ? (
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={`Run ${responsibility.name}`}
-                    data-bot-id={bot.id}
-                    data-responsibility-id={responsibility.id}
-                    disabled={!responsibility.enabled}
-                    onClick={() => onRunResponsibility(responsibility.id)}
-                  >
-                    <Play />
-                  </Button>
-                ) : null
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Run ${responsibility.name}`}
+                  data-bot-id={bot.id}
+                  data-responsibility-id={responsibility.id}
+                  disabled={!responsibility.enabled}
+                  onClick={() => onRunResponsibility(responsibility.id)}
+                >
+                  <Play />
+                </Button>
               ) : (
                 <span className="text-muted-foreground">
                   Event adapter not connected
                 </span>
               )}
-              {onDeleteResponsibility ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Delete ${responsibility.name}`}
-                  data-testid={`delete-responsibility-${responsibility.id}`}
-                  data-bot-id={bot.id}
-                  data-responsibility-id={responsibility.id}
-                  onClick={() => onDeleteResponsibility(responsibility.id)}
-                >
-                  Delete
-                </Button>
-              ) : null}
             </div>
           ))}
-          {onAddResponsibility ? (
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid={`add-responsibility-${bot.id}`}
-              onClick={onAddResponsibility}
-            >
-              <Plus />
-              Add responsibility
-            </Button>
-          ) : null}
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid={`add-responsibility-${bot.id}`}
+            onClick={onAddResponsibility}
+          >
+            <Plus />
+            Add responsibility
+          </Button>
         </div>
-        {botHistory.length > 0 ? (
+        {botHistory.length ? (
           <div className="border-t border-border pt-4">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -313,27 +203,24 @@ export function BotResponsibilityCard({
               </div>
               <Badge variant="secondary">{botHistory.length}</Badge>
             </div>
-            <div className="mt-3 space-y-2">
-              {botHistory.slice(0, 3).map((entry) => (
-                <div
-                  key={entry.run.id}
-                  data-testid={`history-${entry.run.id}`}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs"
-                >
-                  <span className="flex flex-wrap items-center gap-1.5">
+            {botHistory.length ? (
+              <div className="mt-3 space-y-2">
+                {botHistory.slice(0, 3).map((entry) => (
+                  <div
+                    key={entry.run.id}
+                    data-testid={`history-${entry.run.id}`}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs"
+                  >
                     <span>
                       {entry.responsibilityName ?? "Removed responsibility"}
                     </span>
-                    <Badge variant="outline">
-                      {historyTriggerLabel(entry.run.invocation)}
-                    </Badge>
-                  </span>
-                  <span className="text-muted-foreground">
-                    {historyDetail(entry)}
-                  </span>
-                </div>
-              ))}
-            </div>
+                    <span className="text-muted-foreground">
+                      {historyDetail(entry)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </CardContent>

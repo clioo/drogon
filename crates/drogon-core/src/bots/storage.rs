@@ -656,6 +656,27 @@ pub fn list_bots(
     Ok(bots)
 }
 
+/// Every Bot across all of `host_id`'s folders, each paired with its own
+/// folder, locale-ordered by display name. Serves exactly one read: the
+/// app-global Bot snapshot scope (empty `workspaceId`, R17-E #348 -- the
+/// fork's Bots page lists app-globally). Same-host reads only; the module
+/// doc's "no cross-host reads" rule is unchanged.
+pub fn list_bots_with_folders(
+    conn: &Connection,
+    host_id: &str,
+    host_locale: &str,
+) -> Result<Vec<(String, Bot)>> {
+    let mut pairs: Vec<(String, Bot)> = all_bots_unordered(conn)?
+        .into_iter()
+        .filter(|(bot_host, _, _, _)| bot_host == host_id)
+        .map(|(_, folder, bot, _)| (folder, bot))
+        .collect();
+    locale_ordering::sort_by_display_name_stable(&mut pairs, host_locale, |(_, bot)| {
+        bot.display_identity.display_name.as_str()
+    })?;
+    Ok(pairs)
+}
+
 /// Compare-and-swap write: succeeds only if `expected_rev` still matches
 /// the row's current internal `rev` (see the module doc's
 /// "Cross-connection contention" -- **not** keyed off `updated_at`, which

@@ -36,10 +36,11 @@ describe("isFullPageRoute", () => {
 
 describe("no-workspace page routing", () => {
   it("keeps workspace-scoped navigation visible without a workspace", () => {
-    assert.deepEqual(noWorkspacePageCopy(BOTS_ROUTE_ID), {
-      title: "Bots",
-      description: "Your team of agents, with memory and a purpose.",
-    });
+    // #348 (R17-E): the fork renders its full Bots surface with zero
+    // workspaces (AppWorkspaceShell.tsx mounts BotsPage with no workspace
+    // condition), so Bots no longer routes through NoWorkspacePage — the
+    // copy is null and the real page mounts. Automations stays gated.
+    assert.equal(noWorkspacePageCopy(BOTS_ROUTE_ID), null);
     assert.deepEqual(noWorkspacePageCopy(AUTOMATIONS_ROUTE_ID), {
       title: "Automations",
       description: "Schedule repeatable work for your workspaces.",

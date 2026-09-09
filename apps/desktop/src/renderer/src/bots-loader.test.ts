@@ -121,10 +121,9 @@ describe("loadBotSnapshot", () => {
     expect(result.scope).toEqual(scopeA);
   });
 
-  it("rejects an empty scope without calling the bridge", async () => {
+  it("rejects an empty hostId or locale without calling the bridge", async () => {
     for (const empty of [
       { hostId: "", workspaceId: "w1", locale: "en" },
-      { hostId: "local", workspaceId: "", locale: "en" },
       { hostId: "local", workspaceId: "w1", locale: "" },
     ]) {
       const bridge = fakeBridge(async () => {
@@ -137,6 +136,22 @@ describe("loadBotSnapshot", () => {
       expect(result.scope).toEqual(empty);
       expect(bridge.calls).toHaveLength(0);
     }
+  });
+
+  it("treats an empty workspaceId as the app-global scope (#348)", async () => {
+    // The fork's controller lists Bots app-globally via
+    // window.api.bots.list(), so a zero-workspace Bots page asks the
+    // daemon for the host-wide snapshot: workspaceId "" must reach the
+    // bridge, never be rejected as an empty scope.
+    const globalScope = { hostId: "local", workspaceId: "", locale: "en" };
+    const bridge = fakeBridge(async (input) => ({
+      ok: true,
+      result: { hostId: input.hostId, workspaceId: input.workspaceId, ...snapshot },
+    }));
+    const result = await loadBotSnapshot(bridge, globalScope);
+    expect(result.status).toBe("loaded");
+    expect(bridge.calls).toHaveLength(1);
+    expect(bridge.calls[0].workspaceId).toBe("");
   });
 
   it("treats retry as a fresh call: error then success succeeds", async () => {

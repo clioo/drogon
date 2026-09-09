@@ -25,19 +25,17 @@ export type NoWorkspacePageCopy = {
 };
 
 /**
- * Bots and Automations are workspace-scoped, but their navigation should not
- * become inert while the first project is being added. Tasks is intentionally
- * excluded: its page is project-scoped and can mount before any workspace
- * exists so the first task can create one.
+ * Automations is workspace-scoped, but its navigation should not
+ * become inert while the first project is being added. Bots is excluded
+ * too (fixes #348): the fork renders its Bots surface regardless of
+ * workspaces (AppWorkspaceShell.tsx:81 mounts BotsPage for activeView
+ * 'bots' with no workspace condition), so its route mounts the real page.
+ * Tasks is likewise excluded: its page is project-scoped and can mount
+ * before any workspace exists so the first task can create one.
  */
 export function noWorkspacePageCopy(
   route: string | null,
 ): NoWorkspacePageCopy | null {
-  if (route === BOTS_ROUTE_ID)
-    return {
-      title: "Bots",
-      description: "Your team of agents, with memory and a purpose.",
-    };
   if (route === AUTOMATIONS_ROUTE_ID)
     return {
       title: "Automations",

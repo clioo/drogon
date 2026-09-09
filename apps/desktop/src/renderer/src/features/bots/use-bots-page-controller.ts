@@ -1,17 +1,16 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/bots/use-bots-page-controller.ts.
-   Adapters for this repo: no zustand store and no `window.api` — the
-   snapshot, bridge, scope and run callback are injected by the caller (the
-   mount owns snapshot loading and validation upstream, so the controller
-   starts from props and reloads through `bridge.botSnapshot`). Selection
-   opens this repo's detail view (list plus conversation surface) instead of
-   highlighting a list row; the reload-after-every-mutation, error-alert,
-   busy-gate and Escape semantics are the source's. `launchBot` is omitted:
-   this surface has no worktree-session launcher — opening a session is the
-   caller's `onRunResponsibility`-independent `onOpenSession`. `run` invokes
-   the caller's fire-and-forget callback (`bot.run` settles asynchronously
-   behind the mount), so unlike the source it cannot reload after the run
-   settles. */
+   R17-E #348: the fork's exact controller semantics are restored — one
+   shared busy/error channel for every action, first-bot auto-selection,
+   selection falling back to the first bot, and the fork's Escape chain
+   (create form → responsibility form → close the page). `launchBot` keeps
+   the fork's no-workspace refusal copy verbatim; with a workspace selected
+   it selects the bot (this repo has no worktree-session launcher yet — the
+   fork's launch-drogon-bot-session path, declared in the PR). Data-layer
+   adaptations (no zustand store, no window.api): the snapshot, bridge and
+   scope are injected by the caller; the reload-after-every-mutation and
+   busy-gate rules are the source's; the keep-alive host visibility gate on
+   Escape is this repo's (#270 — the fork unmounts the page instead). */
 
 import { useCallback, useEffect, useState } from "react";
 import type {
@@ -25,16 +24,16 @@ import {
   emptyBotCreateForm,
   emptyResponsibilityForm,
 } from "./bots-page-model";
+import type {
+  BotCreateFormValues,
+  ResponsibilityFormValues,
+} from "./bots-page-model";
 
 /** The App keep-alive host for the Bots page. Single source of truth
  *  shared by the host element and the Escape visibility check (same
  *  adaptation as features/tasks/task-page-global-escape.ts). */
 export const BOTS_PAGE_HOST_TESTID = "bots-page-host";
 export const BOTS_PAGE_HOST_SELECTOR = `[data-testid="${BOTS_PAGE_HOST_TESTID}"]`;
-import type {
-  BotCreateFormValues,
-  ResponsibilityFormValues,
-} from "./bots-page-model";
 
 export type BotsPageControllerDeps = {
   snapshot: BotsPanelSnapshot;
@@ -87,183 +86,48 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] =
     useState<BotCreateFormValues>(emptyBotCreateForm());
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const [showResponsibilityForm, setShowResponsibilityForm] = useState(false);
   const [responsibilityForm, setResponsibilityForm] =
     useState<ResponsibilityFormValues>(emptyResponsibilityForm());
-  const [responsibilityBusy, setResponsibilityBusy] = useState(false);
+  const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const refreshSnapshot = useCallback(async () => {
-    if (!bridge?.botSnapshot || !scope) return;
-    const response = await bridge.botSnapshot(scope);
-    if (response.ok) {
-      setLocalSnapshot({
-        bots: response.result.bots,
-        history: response.result.history,
-      });
-    }
-    return response;
-  }, [bridge, scope]);
-
-  const refresh = useCallback(async (): Promise<void> => {
+  // The fork's load(): one loader for mount, refresh and every post-mutation
+  // reload; the fork auto-selects the first bot on a fresh snapshot (drives
+  // the selection ring and the responsibility form). Without a bridge/scope
+  // (capability-gated caller) there is nothing to load and the caller-
+  // supplied snapshot stands; the fork always has window.api.
+  const load = useCallback(async (): Promise<void> => {
     setLoading(true);
     setLoadError(null);
     try {
-      const response = await refreshSnapshot();
-      if (response && !response.ok) {
+      if (!bridge?.botSnapshot || !scope) {
+        return;
+      }
+      const response = await bridge.botSnapshot(scope);
+      if (response.ok) {
+        const next: BotsPanelSnapshot = {
+          bots: response.result.bots,
+          history: response.result.history,
+        };
+        setLocalSnapshot(next);
+        setSelectedBotId((current) => current ?? next.bots[0]?.id ?? null);
+      } else {
         setLoadError(response.error.message);
       }
-    } catch (refreshError) {
-      setLoadError(errorMessage(refreshError));
+    } catch (loadError_) {
+      setLoadError(errorMessage(loadError_));
     } finally {
       setLoading(false);
     }
-  }, [refreshSnapshot]);
+  }, [bridge, scope]);
 
-  const submitCreate = useCallback(async (): Promise<void> => {
-    if (!bridge?.botCreate || !scope) return;
-    setCreateBusy(true);
-    setCreateError(null);
-    try {
-      const response = await bridge.botCreate({
-        ...scope,
-        requestId: mintRequestId("bot-create"),
-        body: buildBotCreateBody(createForm),
-      });
-      if (!response.ok) {
-        setCreateError(response.error.message);
-        return;
-      }
-      setShowCreateForm(false);
-      setCreateForm(emptyBotCreateForm());
-      setSelectedBotId(response.result.id);
-      await refreshSnapshot();
-    } catch (createFailure) {
-      setCreateError(errorMessage(createFailure));
-    } finally {
-      setCreateBusy(false);
-    }
-  }, [bridge, scope, createForm, refreshSnapshot]);
-
-  const submitResponsibility = useCallback(
-    async (botId: string): Promise<void> => {
-      if (!bridge?.botResponsibilityCreate || !scope) return;
-      setResponsibilityBusy(true);
-      setActionError(null);
-      try {
-        const response = await bridge.botResponsibilityCreate({
-          ...scope,
-          requestId: mintRequestId("bot-responsibility"),
-          botId,
-          name: responsibilityForm.name.trim(),
-          schedule: responsibilityForm.cron.trim(),
-          prompt: responsibilityForm.prompt,
-        });
-        if (!response.ok) {
-          setActionError(response.error.message);
-          return;
-        }
-        setShowResponsibilityForm(false);
-        setResponsibilityForm(emptyResponsibilityForm());
-        await refreshSnapshot();
-      } catch (responsibilityFailure) {
-        setActionError(errorMessage(responsibilityFailure));
-      } finally {
-        setResponsibilityBusy(false);
-      }
-    },
-    [bridge, scope, responsibilityForm, refreshSnapshot],
-  );
-
-  const deleteResponsibility = useCallback(
-    async (botId: string, responsibilityId: string): Promise<void> => {
-      if (!bridge?.botResponsibilityDelete || !scope) return;
-      setActionError(null);
-      try {
-        const response = await bridge.botResponsibilityDelete({
-          ...scope,
-          requestId: mintRequestId("bot-responsibility"),
-          botId,
-          responsibilityId,
-        });
-        if (!response.ok) {
-          setActionError(response.error.message);
-          return;
-        }
-        await refreshSnapshot();
-      } catch (deleteFailure) {
-        setActionError(errorMessage(deleteFailure));
-      }
-    },
-    [bridge, scope, refreshSnapshot],
-  );
-
-  const deleteBot = useCallback(
-    async (botId: string): Promise<void> => {
-      if (!bridge?.botDelete || !scope) return;
-      setActionError(null);
-      try {
-        const response = await bridge.botDelete({
-          ...scope,
-          requestId: mintRequestId("bot-delete"),
-          botId,
-        });
-        if (!response.ok) {
-          setActionError(response.error.message);
-          return;
-        }
-        if (selectedBotId === botId) {
-          setSelectedBotId(null);
-          setShowResponsibilityForm(false);
-        }
-        await refreshSnapshot();
-      } catch (deleteFailure) {
-        setActionError(errorMessage(deleteFailure));
-      }
-    },
-    [bridge, scope, selectedBotId, refreshSnapshot],
-  );
-
-  // Manual run (R16-S): resolves the harness from the LIVE snapshot (never
-  // the mount-time one, which predates in-panel mutations), awaits the
-  // mount's `bot.run` call, then reloads so the new history row appears --
-  // the fork's `await runResponsibility(); await load()`. Failures surface
-  // in the action-error alert instead of vanishing into a void promise.
-  const runResponsibility = useCallback(
-    async (botId: string, responsibilityId: string): Promise<void> => {
-      if (!onRunResponsibility) return;
-      const bot = (localSnapshot ?? snapshot).bots.find(
-        (candidate) => candidate.id === botId,
-      );
-      if (!bot) {
-        setActionError("That bot is no longer in the snapshot; refresh and retry.");
-        return;
-      }
-      setActionError(null);
-      try {
-        await onRunResponsibility({
-          botId,
-          responsibilityId,
-          harness: {
-            harnessId: bot.harnessPolicy.defaultHarness,
-            explicitModel: bot.harnessPolicy.explicitModel,
-          },
-        });
-        await refreshSnapshot();
-      } catch (runFailure) {
-        setActionError(errorMessage(runFailure));
-      }
-    },
-    [onRunResponsibility, localSnapshot, snapshot, refreshSnapshot],
-  );
-
-  const closeDetail = useCallback((): void => {
-    setSelectedBotId(null);
-    setShowResponsibilityForm(false);
-    setActionError(null);
+  useEffect(() => {
+    void load();
+    // The fork intentionally reloads only on mount or an explicit refresh;
+    // snapshot hydration is the caller's (keep-alive mount) concern.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -287,8 +151,6 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
           setShowCreateForm(false);
         } else if (showResponsibilityForm) {
           setShowResponsibilityForm(false);
-        } else if (selectedBotId !== null) {
-          closeDetail();
         } else {
           onClose?.();
         }
@@ -296,12 +158,166 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, showCreateForm, showResponsibilityForm, selectedBotId, closeDetail]);
+  }, [onClose, showCreateForm, showResponsibilityForm]);
 
   const selectedBot =
-    selectedBotId !== null
-      ? (effective.bots.find((bot) => bot.id === selectedBotId) ?? null)
-      : null;
+    effective.bots.find((bot) => bot.id === selectedBotId) ??
+    effective.bots[0] ??
+    null;
+
+  const submitCreate = useCallback(async (): Promise<void> => {
+    if (busy) {
+      return;
+    }
+    if (!bridge?.botCreate || !scope) {
+      setActionError(
+        "Install or refresh a supported harness before creating a Bot.",
+      );
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    try {
+      const response = await bridge.botCreate({
+        ...scope,
+        requestId: mintRequestId("bot-create"),
+        body: buildBotCreateBody(createForm),
+      });
+      if (!response.ok) {
+        setActionError(response.error.message);
+        return;
+      }
+      setSelectedBotId(response.result.id);
+      setShowCreateForm(false);
+      setCreateForm(emptyBotCreateForm());
+      await load();
+    } catch (createFailure) {
+      setActionError(errorMessage(createFailure));
+    } finally {
+      setBusy(false);
+    }
+  }, [bridge, scope, busy, createForm, load]);
+
+  const submitResponsibility = useCallback(
+    async (botId: string): Promise<void> => {
+      if (busy) {
+        return;
+      }
+      if (!bridge?.botResponsibilityCreate || !scope) {
+        return;
+      }
+      setBusy(true);
+      setActionError(null);
+      try {
+        const response = await bridge.botResponsibilityCreate({
+          ...scope,
+          requestId: mintRequestId("bot-responsibility"),
+          botId,
+          name: responsibilityForm.name.trim(),
+          schedule: responsibilityForm.cron.trim(),
+          prompt: responsibilityForm.prompt,
+        });
+        if (!response.ok) {
+          setActionError(response.error.message);
+          return;
+        }
+        setShowResponsibilityForm(false);
+        setResponsibilityForm(emptyResponsibilityForm());
+        await load();
+      } catch (responsibilityFailure) {
+        setActionError(errorMessage(responsibilityFailure));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [bridge, scope, busy, responsibilityForm, load],
+  );
+
+  const deleteBot = useCallback(
+    async (botId: string): Promise<void> => {
+      if (busy) {
+        return;
+      }
+      if (!bridge?.botDelete || !scope) {
+        return;
+      }
+      setBusy(true);
+      setActionError(null);
+      try {
+        const response = await bridge.botDelete({
+          ...scope,
+          requestId: mintRequestId("bot-delete"),
+          botId,
+        });
+        if (!response.ok) {
+          setActionError(response.error.message);
+          return;
+        }
+        await load();
+      } catch (deleteFailure) {
+        setActionError(errorMessage(deleteFailure));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [bridge, scope, busy, load],
+  );
+
+  // Manual run (R16-S): resolves the harness from the LIVE snapshot (never
+  // the mount-time one, which predates in-panel mutations), awaits the
+  // mount's `bot.run` call, then reloads so the new history row appears --
+  // the fork's `await runResponsibility(); await load()`. Failures surface
+  // in the action-error alert instead of vanishing into a void promise.
+  const runResponsibility = useCallback(
+    async (botId: string, responsibilityId: string): Promise<void> => {
+      if (busy) {
+        return;
+      }
+      if (!onRunResponsibility) return;
+      const bot = (localSnapshot ?? snapshot).bots.find(
+        (candidate) => candidate.id === botId,
+      );
+      if (!bot) {
+        setActionError(
+          "That bot is no longer in the snapshot; refresh and retry.",
+        );
+        return;
+      }
+      setBusy(true);
+      setActionError(null);
+      try {
+        await onRunResponsibility({
+          botId,
+          responsibilityId,
+          harness: {
+            harnessId: bot.harnessPolicy.defaultHarness,
+            explicitModel: bot.harnessPolicy.explicitModel,
+          },
+        });
+        await load();
+      } catch (runFailure) {
+        setActionError(errorMessage(runFailure));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, onRunResponsibility, localSnapshot, snapshot, load],
+  );
+
+  // The fork's launchBot: launching needs a workspace, and the refusal copy
+  // is verbatim. This repo has no worktree-session launcher (the fork's
+  // launch-drogon-bot-session path is not ported), so with a workspace
+  // selected the closest in-surface action is selecting the bot.
+  const launchBot = useCallback(
+    async (bot: { id: string }): Promise<void> => {
+      if (!scope || scope.workspaceId === "") {
+        setActionError("Open a workspace before launching a Bot session.");
+        return;
+      }
+      setSelectedBotId(bot.id);
+    },
+    [scope],
+  );
 
   return {
     effective,
@@ -311,8 +327,6 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     setShowCreateForm,
     createForm,
     setCreateForm,
-    createBusy,
-    createError,
     selectedBotId,
     setSelectedBotId,
     selectedBot,
@@ -320,15 +334,14 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     setShowResponsibilityForm,
     responsibilityForm,
     setResponsibilityForm,
-    responsibilityBusy,
+    busy,
     actionError,
-    refresh,
+    refresh: load,
     submitCreate,
     submitResponsibility,
-    deleteResponsibility,
     deleteBot,
     runResponsibility,
-    closeDetail,
+    launchBot,
   };
 }
 
