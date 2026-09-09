@@ -34,6 +34,13 @@
 //! [`opencode_events::QUESTION_REPLIED`] and [`pi_events::AGENT_START`]/
 //! [`pi_events::TOOL_START`]/[`pi_events::TOOL_APPROVAL_RESOLVED`] — via
 //! [`classify_hook_event`]. Exit takes precedence over either mechanism.
+//!
+//! Those same explicit-clear sessions also derive `Working` from their
+//! hook lifecycle ([`HookTurn`]), not from the raw activity clock: a turn
+//! reported by a clear hook stays `Working` through silent thinking past
+//! the activity window, and the user's own echo at an idle prompt never
+//! manufactures a spinner the agent's hooks never reported (#358 fork
+//! parity — Orca's sidebar status is hook-driven, never output-driven).
 
 use std::time::Duration;
 
@@ -177,6 +184,25 @@ impl AgentState {
     }
 }
 
+/// Hook-authoritative turn fact for sessions that opted into explicit
+/// wait clearing (OpenCode/Pi/interactive Codex). `Untracked` keeps the
+/// purely activity-based derivation (Claude, plain shells): without a
+/// hook lifecycle there is no other truth to report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HookTurn {
+    /// No hook lifecycle governs this session; the activity clock decides.
+    Untracked,
+    /// A clear hook fired with no later wait hook: the agent's turn is
+    /// running. `Working` is then truthful for the whole turn — including
+    /// silent stretches past the activity window — until the next wait
+    /// hook hands the session back to the user.
+    Active,
+    /// Hook-governed but no turn is known live (before the first hook
+    /// event, or after a daemon restart lost the in-memory fact): fall
+    /// back to the activity clock rather than guess.
+    Inactive,
+}
+
 /// What this module knows about a session's PTY output history, independent
 /// of wall-clock/`Instant` specifics so [`derive`] stays a pure function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,14 +216,23 @@ pub(crate) enum Activity {
 /// Exit takes precedence over everything (a session can exit mid-burst of
 /// buffered output, including while waiting for input); a live session with
 /// an uncleared hook signal is `NeedsInput` regardless of the activity
-/// clock; a never-observed session without a signal is `Unknown` rather
+/// clock; a hook-tracked live turn is `Working` regardless of output
+/// silence; a never-observed session without a signal is `Unknown` rather
 /// than guessed as idle, since idle implies activity once happened.
-pub(crate) fn derive(exited: bool, activity: Activity, needs_input: bool) -> AgentState {
+pub(crate) fn derive(
+    exited: bool,
+    activity: Activity,
+    needs_input: bool,
+    hook_turn: HookTurn,
+) -> AgentState {
     if exited {
         return AgentState::Exited;
     }
     if needs_input {
         return AgentState::NeedsInput;
+    }
+    if matches!(hook_turn, HookTurn::Active) {
+        return AgentState::Working;
     }
     match activity {
         Activity::NeverObserved => AgentState::Unknown,
@@ -213,14 +248,15 @@ mod tests {
     #[test]
     fn exited_wins_over_any_activity_fact() {
         assert_eq!(
-            derive(true, Activity::NeverObserved, false),
+            derive(true, Activity::NeverObserved, false, HookTurn::Untracked),
             AgentState::Exited
         );
         assert_eq!(
             derive(
                 true,
                 Activity::LastActiveAgo(Duration::from_millis(1)),
-                false
+                false,
+                HookTurn::Untracked
             ),
             AgentState::Exited
         );
@@ -229,7 +265,7 @@ mod tests {
     #[test]
     fn exited_wins_over_an_uncleared_hook_signal() {
         assert_eq!(
-            derive(true, Activity::NeverObserved, true),
+            derive(true, Activity::NeverObserved, true, HookTurn::Untracked),
             AgentState::Exited
         );
     }
@@ -237,14 +273,15 @@ mod tests {
     #[test]
     fn hook_signal_wins_over_any_activity_fact() {
         assert_eq!(
-            derive(false, Activity::NeverObserved, true),
+            derive(false, Activity::NeverObserved, true, HookTurn::Untracked),
             AgentState::NeedsInput
         );
         assert_eq!(
             derive(
                 false,
                 Activity::LastActiveAgo(Duration::from_millis(0)),
-                true
+                true,
+                HookTurn::Untracked
             ),
             AgentState::NeedsInput
         );
@@ -252,7 +289,8 @@ mod tests {
             derive(
                 false,
                 Activity::LastActiveAgo(ACTIVITY_WINDOW + Duration::from_secs(60)),
-                true
+                true,
+                HookTurn::Untracked
             ),
             AgentState::NeedsInput
         );
@@ -261,7 +299,7 @@ mod tests {
     #[test]
     fn never_observed_is_unknown_not_idle() {
         assert_eq!(
-            derive(false, Activity::NeverObserved, false),
+            derive(false, Activity::NeverObserved, false, HookTurn::Untracked),
             AgentState::Unknown
         );
     }
@@ -272,7 +310,8 @@ mod tests {
             derive(
                 false,
                 Activity::LastActiveAgo(Duration::from_millis(0)),
-                false
+                false,
+                HookTurn::Untracked
             ),
             AgentState::Working
         );
@@ -280,21 +319,98 @@ mod tests {
             derive(
                 false,
                 Activity::LastActiveAgo(ACTIVITY_WINDOW - Duration::from_millis(1)),
-                false
+                false,
+                HookTurn::Untracked
             ),
             AgentState::Working
         );
         assert_eq!(
-            derive(false, Activity::LastActiveAgo(ACTIVITY_WINDOW), false),
+            derive(
+                false,
+                Activity::LastActiveAgo(ACTIVITY_WINDOW),
+                false,
+                HookTurn::Untracked
+            ),
             AgentState::Idle
         );
         assert_eq!(
             derive(
                 false,
                 Activity::LastActiveAgo(ACTIVITY_WINDOW + Duration::from_secs(60)),
-                false
+                false,
+                HookTurn::Untracked
             ),
             AgentState::Idle
+        );
+    }
+
+    #[test]
+    fn active_hook_turn_is_working_through_output_silence() {
+        // A silent thinking stretch past the activity window must not drop
+        // a hook-reported turn to idle mid-turn (#358: flickering spinner).
+        assert_eq!(
+            derive(
+                false,
+                Activity::LastActiveAgo(ACTIVITY_WINDOW + Duration::from_secs(60)),
+                false,
+                HookTurn::Active
+            ),
+            AgentState::Working
+        );
+        assert_eq!(
+            derive(false, Activity::NeverObserved, false, HookTurn::Active),
+            AgentState::Working
+        );
+    }
+
+    #[test]
+    fn needs_input_wins_over_an_active_hook_turn() {
+        // The wait hook hands the session back to the user even while the
+        // turn fact has not been cleared yet (ordering races between the
+        // two hook events resolve toward asking, never spinning).
+        assert_eq!(
+            derive(
+                false,
+                Activity::LastActiveAgo(Duration::from_millis(0)),
+                true,
+                HookTurn::Active
+            ),
+            AgentState::NeedsInput
+        );
+    }
+
+    #[test]
+    fn inactive_hook_turn_falls_back_to_the_activity_clock() {
+        // Before the first hook event (or after a restart lost the
+        // in-memory turn fact) a hook-governed session reports exactly
+        // what an untracked one would.
+        for hook_turn in [HookTurn::Inactive, HookTurn::Untracked] {
+            assert_eq!(
+                derive(
+                    false,
+                    Activity::LastActiveAgo(Duration::from_millis(0)),
+                    false,
+                    hook_turn
+                ),
+                AgentState::Working
+            );
+            assert_eq!(
+                derive(
+                    false,
+                    Activity::LastActiveAgo(ACTIVITY_WINDOW + Duration::from_secs(60)),
+                    false,
+                    hook_turn
+                ),
+                AgentState::Idle
+            );
+        }
+    }
+
+    #[test]
+    fn exited_wins_over_an_active_hook_turn() {
+        assert_eq!(
+            derive(true, Activity::NeverObserved, false, HookTurn::Active),
+            AgentState::Exited
         );
     }
 

@@ -85,6 +85,13 @@ pub(crate) struct SessionHandle {
     /// `needs_input_at` would make "waiting for you" a lie. Claude and plain
     /// sessions keep the default generic-activity clear.
     explicit_wait_clear: AtomicBool,
+    /// In-memory turn fact for `explicit_wait_clear` sessions: set by
+    /// `clear_hook_event`, cleared by `note_hook_event`. Backs
+    /// [`agent_state::HookTurn::Active`] so a hook-reported turn reads
+    /// `working` for its whole duration — never flickering idle during
+    /// silent thinking, never spun up by the user's own echo at an idle
+    /// prompt (#358 fork parity: Orca's row status is hook-driven).
+    turn_active: AtomicBool,
     /// Daemon-run mode (bot/automation headless launches: `pi -p`,
     /// `claude -p`, `opencode run`, `codex exec`, `agy -p`). Set once by
     /// `harness.start` right after launch. A headless run has no approval-answer surface,
@@ -134,6 +141,7 @@ impl SessionHandle {
             needs_input_at: Mutex::new(None),
             hook_cleanup_paths: Mutex::new(Vec::new()),
             explicit_wait_clear: AtomicBool::new(false),
+            turn_active: AtomicBool::new(false),
             headless: AtomicBool::new(false),
             db,
         })
@@ -145,6 +153,9 @@ impl SessionHandle {
     /// daemon restart keeps reporting a still-waiting session as
     /// `needs_input` instead of `unknown`.
     pub(crate) fn note_hook_event(&self) {
+        // The wait hook hands the session back to the user: any turn the
+        // clear hook opened is over (Pi AgentEnd, Codex Stop, ...).
+        self.turn_active.store(false, Ordering::Release);
         let stamp = crate::now_rfc3339();
         *self.needs_input_at.lock().unwrap() = Some(stamp.clone());
         persist_wait_signal(self, Some(&stamp));
@@ -155,6 +166,10 @@ impl SessionHandle {
     /// activity. The only way `needs_input_at` clears for a session that
     /// opted out of the generic clear.
     pub(crate) fn clear_hook_event(&self) {
+        // A resumption event is the harness's own "the agent is on it":
+        // the turn stays authoritative until the next wait hook, through
+        // output silence that would otherwise flip the row idle mid-turn.
+        self.turn_active.store(true, Ordering::Release);
         *self.needs_input_at.lock().unwrap() = None;
         persist_wait_signal(self, None);
     }
@@ -164,6 +179,15 @@ impl SessionHandle {
     /// OpenCode/Pi/Codex sessions — see the field doc for why.
     pub(crate) fn set_explicit_wait_clear(&self) {
         self.explicit_wait_clear.store(true, Ordering::Release);
+    }
+
+    /// Hook-authoritative turn fact backing [`agent_state::HookTurn`]: a
+    /// clear hook opens the turn, the next wait hook closes it. In-memory
+    /// only — after a daemon restart the session falls back to the
+    /// activity clock (`HookTurn::Inactive`) rather than claiming a turn
+    /// nobody re-observed.
+    pub(crate) fn hook_turn_active(&self) -> bool {
+        self.turn_active.load(Ordering::Acquire)
     }
 
     /// Marks this session as a headless daemon run. Admission sets it before
@@ -1017,7 +1041,19 @@ fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, O
         Some((instant, at)) => (Activity::LastActiveAgo(instant.elapsed()), Some(at.clone())),
     };
     let needs_input_at = handle.needs_input_at.lock().unwrap().clone();
-    let state = agent_state::derive(verdict == "exited", activity, needs_input_at.is_some());
+    let hook_turn = if !handle.explicit_wait_clear.load(Ordering::Acquire) {
+        agent_state::HookTurn::Untracked
+    } else if handle.hook_turn_active() {
+        agent_state::HookTurn::Active
+    } else {
+        agent_state::HookTurn::Inactive
+    };
+    let state = agent_state::derive(
+        verdict == "exited",
+        activity,
+        needs_input_at.is_some(),
+        hook_turn,
+    );
     let at = match state {
         AgentState::Working | AgentState::Idle => wall_clock_at,
         AgentState::NeedsInput => needs_input_at,
@@ -1509,5 +1545,47 @@ mod wait_signal_activity_tests {
             )
             .unwrap();
         assert_eq!(stamp, None);
+    }
+
+    /// #358 fork parity (Orca's row status is hook-driven, never
+    /// output-driven): for `explicit_wait_clear` sessions a clear hook's
+    /// turn reports `working` on its own — no PTY output required — and a
+    /// later wait hook reports `needs_input` again, with the user's own
+    /// echo never manufacturing a spinner in between.
+    #[test]
+    fn hook_turn_drives_working_for_explicit_wait_clear_sessions() {
+        let (_dir, _engine, handle) = started_handle();
+        handle.set_explicit_wait_clear();
+        // No hook event yet: nothing hook-authoritative to report, so the
+        // activity fallback still rules (sleep produced no output).
+        assert_eq!(snapshot(&handle)["agentState"], "unknown");
+        assert!(!handle.hook_turn_active());
+        // The resumption hook opens the turn: working with zero PTY output.
+        handle.clear_hook_event();
+        assert!(handle.hook_turn_active());
+        assert_eq!(snapshot(&handle)["agentState"], "working");
+        // The wait hook hands the session back to the user.
+        handle.note_hook_event();
+        assert!(!handle.hook_turn_active());
+        assert_eq!(snapshot(&handle)["agentState"], "needs_input");
+        // Kernel echo of the user's own keystroke (the tty is in canonical
+        // mode; `sleep` never reads it) neither clears the wait nor
+        // manufactures working — it is not hook evidence.
+        crate::session::write(&handle, b"x").unwrap();
+        assert_eq!(snapshot(&handle)["agentState"], "needs_input");
+    }
+
+    /// Sessions without a hook lifecycle (plain shells, Claude) keep the
+    /// purely activity-based derivation: no turn fact ever accumulates,
+    /// and the generic activity clear stays the only wait-release path.
+    #[test]
+    fn untracked_sessions_never_accumulate_a_hook_turn() {
+        let (_dir, _engine, handle) = started_handle();
+        handle.note_hook_event();
+        assert_eq!(snapshot(&handle)["agentState"], "needs_input");
+        assert!(clear_wait_signal_on_activity(&handle));
+        assert!(!handle.hook_turn_active());
+        // No output was ever observed: unknown, not a guessed idle.
+        assert_eq!(snapshot(&handle)["agentState"], "unknown");
     }
 }
