@@ -584,7 +584,49 @@ fn read_seal(dir: &Path) -> (Option<SealCounts>, Option<String>) {
     }
 }
 
-/// Parsed declaration records plus whether the channel itself was lost.
+/// Registrar-visible ACKs re-read from disk for verdict coverage:
+/// every `ack.<pid>` file whose content binds the exact birth. This is
+/// independent of the parent's in-memory write record — coverage never
+/// trusts the clone. A malformed ACK file simply covers nothing (its
+/// registrar times out and unwinds with failure evidence).
+#[cfg(unix)]
+fn read_acks(dir: &Path) -> Vec<LedgerEntry> {
+    let mut acks = Vec::new();
+    let Ok(files) = std::fs::read_dir(dir) else {
+        return acks;
+    };
+    for file in files.flatten() {
+        let name = file.file_name();
+        let Some(pid) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix("ack."))
+            .and_then(|pid| pid.parse::<u32>().ok())
+            .filter(|pid| *pid > 0 && *pid <= i32::MAX as u32)
+        else {
+            continue;
+        };
+        let content = std::fs::read_to_string(file.path()).ok();
+        // Content shape is `"<birth> alive|gone"`: recover the birth the
+        // same way the registrar matches it. Coverage is still exact:
+        // an ACK only covers a ledger identity with the same pid AND
+        // birth.
+        let Some(line) = content.as_deref().map(str::trim_end) else {
+            continue;
+        };
+        let Some(birth) = line
+            .strip_suffix(" alive")
+            .or_else(|| line.strip_suffix(" gone"))
+        else {
+            continue;
+        };
+        if let Ok(entry) = parse_ledger_line(&format!("{pid}|{birth}"))
+            && !acks.contains(&entry)
+        {
+            acks.push(entry);
+        }
+    }
+    acks
+}
 /// Declarations use the same `pid|birth` record shape as the ledger so
 /// the two sources cross-check identity-for-identity.
 #[cfg(unix)]
@@ -852,7 +894,11 @@ fn check_registration(snapshot: &RegistrationSnapshot) -> RegistrationVerdict {
             reason: "runner still running".to_string(),
         };
     }
-    // The runner is done so no more registrar writes can arrive.
+    // The runner is done. Runner exit ends the REGISTRAR's writes (its
+    // seal and report are its last writes in program order), but proves
+    // nothing about descendants: a late write contradicts the seal and
+    // fails closed instead of being missed, and late arrivals keep the
+    // queue's cleanup obligation until the loop breaks.
     // Completion rests on the registrar's explicit seal, required here
     // and cross-checked against both observed channels: a missing,
     // unreadable or malformed seal fails closed, as does any seal that
@@ -1185,11 +1231,11 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
     // while the runner is still working. `seen` dedups against EVERY
     // entry ever observed, so a resolved identity is never re-added.
     let mut seen: std::collections::HashSet<LedgerEntry> = std::collections::HashSet::new();
-    // Explicit per-identity ACKs: every ledger identity the parent
-    // captured and validated. Coverage is checked at the verdict, so an
-    // observed-but-unacked identity fails closed instead of passing
-    // silently.
-    let mut acked: Vec<LedgerEntry> = Vec::new();
+    // In-memory record of ACK files the parent WROTE (prevents duplicate
+    // writes and drives upgrades). Verdict coverage instead re-reads the
+    // ACK files from disk (read_acks), so the two concepts stay separate:
+    // coverage never trusts this clone.
+    let mut acks_written: Vec<LedgerEntry> = Vec::new();
     let mut pending: Vec<Pending> = Vec::new();
     let mut resolutions: Vec<Resolution> = Vec::new();
     let mut actions = vec![format!("runner pid={runner_pid} spawned")];
@@ -1248,47 +1294,46 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
                 Err(err) => unverifiable.push(format!("runner SIGKILL failed: {err}")),
             }
         }
-        // Ledger read every tick: late registrations keep arriving.
+        // Ledger AND declaration reads every tick: late registrations
+        // keep arriving on either channel.
         let (entries, malformed) = read_ledger(&fixture_path);
-        for bad in malformed {
+        for bad in &malformed {
             let note = format!("malformed ledger line: {bad}");
             if !unverifiable.iter().any(|u| u == &note) {
                 unverifiable.push(note);
             }
         }
-        for entry in entries {
-            if !seen.insert(entry.clone()) {
-                continue;
+        let (decl_entries, decl_malformed, _) = read_declarations(&fixture_path);
+        for bad in &decl_malformed {
+            let note = format!("malformed declaration record: {bad}");
+            if !unverifiable.iter().any(|u| u == &note) {
+                unverifiable.push(note);
             }
-            // First sight of this identity. The shape pre-gate keeps
-            // signals away from garbage pids; rejected identities are
-            // still contained through the resolution queue below, but
-            // never acknowledged.
-            match validate_identity(&entry, &acked) {
-                Ok(()) => {}
-                Err(reason) => {
-                    let note = format!("registration rejected: {reason}");
-                    if !unverifiable.iter().any(|u| u == &note) {
-                        unverifiable.push(note);
-                    }
-                    pending.push(Pending {
-                        entry,
-                        term_at: None,
-                        force_sent: false,
-                        signaled: false,
-                    });
-                    continue;
+        }
+        // Probe one newly observed identity and, for ledger arrivals
+        // with a verified outcome, write the registrar-visible ACK.
+        // Declarations (no registrar waits on them) are verified and
+        // contained without one.
+        let mut verify_identity = |entry: &LedgerEntry, from_ledger: bool| {
+            // Already ACK-written: nothing to upgrade.
+            if from_ledger && acks_written.contains(entry) {
+                return;
+            }
+            // Shape pre-gate keeps signals away from garbage pids.
+            if let Err(reason) = validate_identity(entry, &acks_written) {
+                let note = format!("registration rejected: {reason}");
+                if !unverifiable.iter().any(|u| u == &note) {
+                    unverifiable.push(note);
                 }
+                return;
             }
-            // Real verification + registrar-visible ACK: probe the
-            // identity now (runner alive or not — the registrar is
-            // waiting) and write the ACK file only on a verified
-            // outcome. `acked` therefore proves parent observation of
-            // that exact registration, not bookkeeping. Alive and gone
-            // both unblock the registrar; replaced and unverifiable
-            // never do, but stay contained through the queue.
+            // Real verification: probe now (runner alive or not — a
+            // registrar may be waiting) and write the ACK file, for
+            // ledger arrivals only, on a verified outcome. Alive and
+            // gone both unblock their registrar; replaced and
+            // unverifiable never do.
             let verify_deadline = std::cmp::min(cleanup_deadline, Instant::now() + PS_TIMEOUT);
-            let (identity, probe_error) = identity_probe(&entry, verify_deadline);
+            let (identity, probe_error) = identity_probe(entry, verify_deadline);
             if let Some(err) = probe_error {
                 actions.push(format!(
                     "pid={} verify probe error: {}",
@@ -1298,22 +1343,55 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
                     unreaped_helpers.push(helper);
                 }
             }
-            match identity {
-                Identity::Alive => {
-                    write_ack(&mut acked, &fixture_path, &entry, true, &mut actions);
+            let outcome = match identity {
+                Identity::Alive => Some(true),
+                Identity::Gone => Some(false),
+                Identity::Replaced => {
+                    actions.push(format!(
+                        "pid={} recycled before verification; no ack, contained without signaling",
+                        entry.pid
+                    ));
+                    None
                 }
-                Identity::Gone => {
-                    write_ack(&mut acked, &fixture_path, &entry, false, &mut actions);
+                Identity::Unverifiable => {
+                    actions.push(format!(
+                        "pid={} unverifiable at verification; no ack",
+                        entry.pid
+                    ));
+                    None
                 }
-                Identity::Replaced => actions.push(format!(
-                    "pid={} recycled before verification; no ack, contained without signaling",
+            };
+            match (outcome, from_ledger) {
+                (Some(alive), true) => {
+                    write_ack(&mut acks_written, &fixture_path, entry, alive, &mut actions);
+                }
+                (Some(_), false) => actions.push(format!(
+                    "pid={} declaration verified (contained without ack)",
                     entry.pid
                 )),
-                Identity::Unverifiable => actions.push(format!(
-                    "pid={} unverifiable at verification; no ack",
-                    entry.pid
-                )),
+                (None, _) => {}
             }
+        };
+        // Unified admission from BOTH channels through one containment
+        // queue, so safety ownership never depends on the ledger being
+        // complete. A ledger arrival for a declaration-admitted identity
+        // upgrades to an ACK without double-pending.
+        for (entry, from_ledger) in entries
+            .iter()
+            .cloned()
+            .map(|entry| (entry, true))
+            .chain(decl_entries.iter().cloned().map(|entry| (entry, false)))
+        {
+            if !seen.insert(entry.clone()) {
+                // Seen before: only a ledger arrival for a queued,
+                // not-yet-acked identity needs work (ACK upgrade
+                // without double-pending); everything else is owned.
+                if from_ledger && pending.iter().any(|p| p.entry == entry) {
+                    verify_identity(&entry, true);
+                }
+                continue;
+            }
+            verify_identity(&entry, from_ledger);
             // Resolution itself waits for runner exit (a live runner may
             // still be using it).
             pending.push(Pending {
@@ -1493,7 +1571,9 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
                 runner_exited: true,
                 seal: verdict_seal,
                 seal_problem: verdict_seal_problem,
-                acked: acked.clone(),
+                // Coverage re-reads the registrar-visible ACK files from
+                // disk: independent of the in-memory write record.
+                acked: read_acks(&fixture_path),
             };
             match check_registration(&snapshot) {
                 RegistrationVerdict::Complete | RegistrationVerdict::CleanNoFixtures
@@ -1579,8 +1659,8 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
         unverifiable.push(reason);
     } else if !passed {
         // Deadline break without any terminal verdict: one fresh
-        // evaluation for the record (a single read cannot prove
-        // stability, so only a fail-closed verdict is reported here).
+        // evaluation for the record. A single read proves nothing about
+        // closure, so only a fail-closed verdict is reported here.
         let runner_exited = child
             .try_wait()
             .ok()
@@ -1600,7 +1680,7 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
             runner_exited,
             seal,
             seal_problem,
-            acked,
+            acked: read_acks(&fixture_path),
         };
         match check_registration(&final_snapshot) {
             RegistrationVerdict::FailedClosed { reason } => unverifiable.push(reason),
@@ -1874,22 +1954,32 @@ fn missing_executable_is_not_installed() {
 #[cfg(unix)]
 #[cfg(unix)]
 /// Shell handshake for self-registering fixtures: declare and register
-/// this pid with its captured birth, then wait boundedly (5s) for the
-/// parent's verification ACK before proceeding. No ACK — or an ACK for
-/// another birth — fails visibly with exit 3 instead of running
-/// unowned. The short poll sleeps are transient group members,
-/// contained by the product's own bounded group cleanup exactly like
-/// any other fixture descendant.
+/// this pid with its captured birth, then wait for the parent's
+/// verification ACK before proceeding. No ACK — or an ACK for another
+/// birth or outcome — fails visibly with exit 3 instead of running
+/// unowned. Every helper this spawns is bounded: one `dirname`, one
+/// `ps`, one `date`-bounded ACK wait (wall-clock deadline immune to
+/// fork-latency stretch, plus an iteration backstop), and one exact
+/// whole-line `grep -F -e "<birth> alive" -e "<birth> gone"` — the
+/// shell twin of `check_ack_content`, binding attempt and outcome, not
+/// a substring. Birth canonicalization is fork-free word-splitting in
+/// a function scope (the script's own `$1` is untouched). The short
+/// poll sleeps are transient group members, contained by the product's
+/// bounded group cleanup exactly like any other fixture descendant;
+/// they are never registered and never outlive the wait by more than
+/// one interval.
 #[cfg(unix)]
 fn fixture_handshake_sh(pid: &str) -> String {
     format!(
         "_FD=\"$(dirname \"$0\")\"\n\
-         _BIRTH=\"$(LC_ALL=C TZ=UTC ps -p {pid} -o lstart= | tr -s ' ' | sed 's/^ //')\"\n\
+         _canon() {{ set -f; set -- $1; set +f; printf '%s' \"$*\"; }}\n\
+         _BIRTH=\"$(_canon \"$(LC_ALL=C TZ=UTC ps -p {pid} -o lstart=)\")\"\n\
          [ -n \"$_BIRTH\" ] || exit 3\n\
          echo \"{pid}|$_BIRTH\" >> \"$_FD/declared.children\"\n\
          echo \"{pid}|$_BIRTH\" >> \"$_FD/ledger.children\"\n\
-         _I=0; while [ ! -f \"$_FD/ack.{pid}\" ] && [ \"$_I\" -lt 50 ]; do sleep 0.1; _I=$((_I+1)); done\n\
-         grep -qF -- \"$_BIRTH\" \"$_FD/ack.{pid}\" 2>/dev/null || exit 3\n\
+         _END=$(($(date +%s) + 5)); _I=0\n\
+         while [ ! -f \"$_FD/ack.{pid}\" ] && [ \"$(date +%s)\" -lt \"$_END\" ] && [ \"$_I\" -lt 500 ]; do sleep 0.1; _I=$((_I+1)); done\n\
+         grep -qFx -e \"$_BIRTH alive\" -e \"$_BIRTH gone\" \"$_FD/ack.{pid}\" 2>/dev/null || exit 3\n\
          echo \"declared=1 registered=1\" > \"$_FD/sealed.registrations\"\n"
     )
 }
@@ -2362,13 +2452,22 @@ fn append_ledger(dir: &Path, pid: u32) -> Result<String, BoundedError> {
         });
     }
     let birth = birth_of(pid)?;
+    // File failures here return instead of panicking: a panic between
+    // spawn and the ledger append would orphan a live fixture nobody
+    // recorded. The caller unwinds the owned handle on any error.
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
         .open(dir.join(LEDGER_FILE))
-        .expect("open ledger");
-    writeln!(file, "{pid}|{birth}").expect("append ledger");
+        .map_err(|err| BoundedError {
+            message: format!("open ledger: {err}"),
+            unreaped: None,
+        })?;
+    writeln!(file, "{pid}|{birth}").map_err(|err| BoundedError {
+        message: format!("append ledger: {err}"),
+        unreaped: None,
+    })?;
     Ok(birth)
 }
 
@@ -2420,19 +2519,25 @@ fn settle_helper(
 /// unobserved.
 #[cfg(unix)]
 fn await_ack(dir: &Path, pid: u32, birth: &str, deadline: Instant) -> Result<(), String> {
+    // Deadline first: an ACK observed after the bound expired is late
+    // evidence, not evidence — succeeding on it would let the
+    // registrar proceed on borrowed time (same rule as run_until's
+    // work window).
     loop {
-        let content = std::fs::read_to_string(ack_path(dir, pid)).ok();
-        match check_ack_content(birth, content.as_deref()) {
-            Ok(()) => return Ok(()),
-            Err(first) => {
-                if Instant::now() >= deadline {
-                    return Err(format!(
-                        "no parent acknowledgement within bound for pid={pid}: {first}"
-                    ));
-                }
-                sleep_capped(deadline, Duration::from_millis(25));
-            }
+        if Instant::now() >= deadline {
+            let content = std::fs::read_to_string(ack_path(dir, pid)).ok();
+            let last = check_ack_content(birth, content.as_deref())
+                .map(|()| "matching ACK arrived too late".to_string())
+                .unwrap_or_else(|reason| reason);
+            return Err(format!(
+                "no parent acknowledgement within bound for pid={pid}: {last}"
+            ));
         }
+        let content = std::fs::read_to_string(ack_path(dir, pid)).ok();
+        if check_ack_content(birth, content.as_deref()).is_ok() {
+            return Ok(());
+        }
+        sleep_capped(deadline, Duration::from_millis(25));
     }
 }
 
@@ -2448,31 +2553,62 @@ fn unwind_owned(ledger: &mut RegistrationLedger, pid: u32, deadline: Instant) ->
     let mut child = ledger.owned.remove(index);
     // Our own unreaped child: the pid cannot be recycled under us, so
     // signaling it is safe without a further identity probe.
-    let term = signal_pid(pid, libc::SIGTERM);
+    let term_result = signal_pid(pid, libc::SIGTERM);
     let term_at = Instant::now();
-    while child.try_wait().ok().flatten().is_none()
-        && Instant::now() < term_at + TERM_GRACE
-        && Instant::now() < deadline
-    {
+    // Grace is the signal grace cut by the absolute deadline — never a
+    // fresh budget. When the deadline already expired, TERM still goes
+    // out but no grace remains; that cut is recorded, not hidden.
+    let grace_end = std::cmp::min(term_at + TERM_GRACE, deadline);
+    while child.try_wait().ok().flatten().is_none() && Instant::now() < grace_end {
         sleep_capped(deadline, Duration::from_millis(10));
     }
+    let grace_cut = term_at + TERM_GRACE > deadline;
     if child.try_wait().ok().flatten().is_none() {
         let kill_result = child.kill();
         while child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
             sleep_capped(deadline, Duration::from_millis(2));
         }
-        let _ = kill_result;
-    }
-    match child.try_wait().ok().flatten() {
-        Some(status) => {
-            format!("pid={pid} unwound after failed registration (term={term:?}, status={status})")
+        match child.try_wait() {
+            Ok(Some(status)) => format!(
+                "pid={pid} unwound after failed registration \
+                 (term={term_result:?}, grace_cut={grace_cut}, kill={kill_result:?}, \
+                 status={status})"
+            ),
+            Ok(None) => {
+                ledger.owned.push(child);
+                format!(
+                    "pid={pid} could NOT be unwound after failed registration \
+                     (term={term_result:?}, grace_cut={grace_cut}, kill={kill_result:?}); \
+                     handle retained"
+                )
+            }
+            Err(err) => {
+                // The wait itself failed: ownership is uncertain, so the
+                // handle is retained and the error recorded, never
+                // swallowed.
+                ledger.owned.push(child);
+                format!(
+                    "pid={pid} unwind wait failed after failed registration \
+                     (term={term_result:?}, kill={kill_result:?}, wait={err}); \
+                     handle retained"
+                )
+            }
         }
-        None => {
-            ledger.owned.push(child);
-            format!(
-                "pid={pid} could NOT be unwound after failed registration \
-                 (term={term:?}); handle retained"
-            )
+    } else {
+        match child.try_wait() {
+            Ok(Some(status)) => format!(
+                "pid={pid} unwound after failed registration \
+                 (term={term_result:?}, grace_cut={grace_cut}, status={status})"
+            ),
+            // try_wait just reported None above; a concurrent reaper is
+            // the only honest reading of any other outcome here.
+            Ok(None) | Err(_) => {
+                ledger.owned.push(child);
+                format!(
+                    "pid={pid} unwind raced a concurrent reaper after failed registration \
+                     (term={term_result:?}); handle retained"
+                )
+            }
         }
     }
 }
@@ -2483,7 +2619,7 @@ fn unwind_owned(ledger: &mut RegistrationLedger, pid: u32, deadline: Instant) ->
 /// unacked and fails closed downstream instead of passing on a claim.
 #[cfg(unix)]
 fn write_ack(
-    acked: &mut Vec<LedgerEntry>,
+    acks_written: &mut Vec<LedgerEntry>,
     dir: &Path,
     entry: &LedgerEntry,
     alive: bool,
@@ -2492,7 +2628,7 @@ fn write_ack(
     let outcome = if alive { "alive" } else { "gone" };
     match std::fs::write(ack_path(dir, entry.pid), ack_content(&entry.birth, alive)) {
         Ok(()) => {
-            acked.push(entry.clone());
+            acks_written.push(entry.clone());
             actions.push(format!("pid={} ack-{outcome} (verified)", entry.pid));
         }
         Err(err) => actions.push(format!(
@@ -2628,6 +2764,20 @@ impl RegistrationLedger {
         }
     }
 
+    /// Explicit transfer of outliving fixtures to the parent supervisor:
+    /// every handle this child still owns is released WITHOUT waiting
+    /// (waiting would hang on fixtures the parent must contain), and the
+    /// ledger plus declaration records the parent reads stay the
+    /// ownership record. Call at every normal child-branch end so no
+    /// usable handle drops silently on a report path; failure paths
+    /// unwind-or-retain instead, and panic paths still fail the run
+    /// closed through the missing-report/dead-runner evidence. Dropping
+    /// a Child only closes our handle — the processes keep running
+    /// under parent supervision.
+    fn release_transferred(&mut self) {
+        self.owned.clear();
+    }
+
     /// Bounded reap of everything this child still owns, used by tests
     /// whose fixtures must NOT outlive the child. Returns the pids that
     /// could not be reaped within the deadline (visible uncertainty).
@@ -2758,6 +2908,7 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
         std::thread::sleep(Duration::from_millis(300));
         retain_late_registration(&mut ledger, &dir, pid);
         ledger.seal(&dir);
+        ledger.release_transferred();
         write_child_report(
             &dir,
             &ChildReport {
@@ -2808,6 +2959,7 @@ fn supervisor_term_resistant_child_is_forced_after_recheck() {
         let mut ledger = RegistrationLedger::default();
         ledger.register(&dir, "trap '' TERM; sleep 30");
         ledger.seal(&dir);
+        ledger.release_transferred();
         write_child_report(
             &dir,
             &ChildReport {
@@ -2873,6 +3025,9 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
         // The source honestly seals what it did: one declaration, zero
         // registrations. The parent fails closed on the gap.
         ledger.seal(&dir);
+        // Nothing outlives here (reaped above); the call documents the
+        // transfer point like every other branch.
+        ledger.release_transferred();
         write_child_report(
             &dir,
             &ChildReport {
@@ -2933,6 +3088,7 @@ fn supervisor_distinguishes_product_cleanup_from_rescue() {
         std::thread::sleep(Duration::from_millis(500));
         ledger.register(&dir, "sleep 30");
         ledger.seal(&dir);
+        ledger.release_transferred();
         write_child_report(
             &dir,
             &ChildReport {
@@ -3004,6 +3160,7 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
         ledger.register(&dir, "sleep 0.2");
         std::thread::sleep(Duration::from_millis(500));
         ledger.seal(&dir);
+        ledger.release_transferred();
         write_child_report(
             &dir,
             &ChildReport {
