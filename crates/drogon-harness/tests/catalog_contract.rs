@@ -534,6 +534,272 @@ fn read_ledger(dir: &Path) -> (Vec<LedgerEntry>, Vec<String>) {
     (entries, malformed)
 }
 
+/// Read the child's final report: present-and-parsed, or the reason it
+/// cannot serve as evidence (missing, unreadable, malformed). Callers
+/// fail closed on anything but a parsed value with a valid schema.
+#[cfg(unix)]
+fn read_report(dir: &Path) -> (Option<serde_json::Value>, Option<String>) {
+    let path = dir.join(RESULT_FILE);
+    if !path.exists() {
+        return (None, None);
+    }
+    match std::fs::read_to_string(&path) {
+        Err(err) => (None, Some(format!("unreadable ({err})"))),
+        Ok(text) => match serde_json::from_str(&text) {
+            Err(err) => (None, Some(format!("malformed ({err})"))),
+            Ok(value) => (Some(value), None),
+        },
+    }
+}
+
+/// Count the independent declaration channel; `None` when the file is
+/// missing or unreadable (lost input, never zero).
+#[cfg(unix)]
+fn read_declared_channel(dir: &Path) -> Option<usize> {
+    std::fs::read_to_string(dir.join(DECLARED_FILE))
+        .ok()
+        .map(|text| text.lines().filter(|line| !line.trim().is_empty()).count())
+}
+
+// ---------------------------------------------------------------------
+// Parent-owned registration accounting (C01-A Checkpoint A).
+//
+// The parent owns the EXPECTED plan (how many fixtures the child was
+// instructed to declare and register: visible literally at the
+// supervise call site), and proves capture of every observed identity
+// with an explicit per-identity ACK. Child-written artifacts (ledger
+// lines, the declaration channel, the final report) are evidence, never
+// authority: anything missing, unreadable, malformed, duplicated or
+// inconsistent with the plan fails closed. This section is pure
+// state/validation over literals so record/event tests pin it without
+// spawning anything; the supervised loop only feeds snapshots in.
+
+/// How many fixture children the parent instructed the child to declare
+/// and register. Owned by the parent call site, never derived from
+/// child-written artifacts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExpectedPlan {
+    declared: usize,
+    registered: usize,
+}
+
+/// The required final-report schema, already extracted from JSON. Any
+/// missing or mistyped field is a schema failure, never a default.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReportSummary {
+    declared: usize,
+    registered: usize,
+    failures: Vec<String>,
+    has_catalog: bool,
+}
+
+/// Extract the required schema from a parsed report value.
+fn parse_report_summary(value: &serde_json::Value) -> Result<ReportSummary, String> {
+    let number = |field: &str| {
+        value
+            .get(field)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok())
+            .ok_or_else(|| format!("report missing required field {field}"))
+    };
+    let failures = value
+        .get("registration_failures")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "report missing required field registration_failures".to_string())?
+        .iter()
+        .map(|failure| match failure {
+            serde_json::Value::String(text) => text.clone(),
+            other => other.to_string(),
+        })
+        .collect();
+    Ok(ReportSummary {
+        declared: number("declared_children")?,
+        registered: number("registered_children")?,
+        failures,
+        has_catalog: value.get("catalog").is_some(),
+    })
+}
+
+/// Per-identity acknowledgement gate: the parent proves it captured and
+/// validated THIS registration (positive pid_t range, non-empty birth,
+/// not already acked). A duplicate or out-of-range identity is rejected,
+/// never silently deduped.
+fn validate_identity(entry: &LedgerEntry, already_acked: &[LedgerEntry]) -> Result<(), String> {
+    if entry.pid == 0 || entry.pid > i32::MAX as u32 {
+        return Err(format!("pid outside positive pid_t range: {}", entry.pid));
+    }
+    if entry.birth.trim().is_empty() {
+        return Err(format!(
+            "pid={} registration has no birth identity",
+            entry.pid
+        ));
+    }
+    if already_acked.contains(entry) {
+        return Err(format!(
+            "pid={} duplicate registration of an acked identity",
+            entry.pid
+        ));
+    }
+    Ok(())
+}
+
+/// Parent-ready handshake, child side: no registration may precede proof
+/// the parent prepared and is reading. `None` means the file is missing
+/// or unreadable; anything but the exact handshake line is a mismatch.
+fn check_parent_ready(content: Option<&str>) -> Result<(), String> {
+    match content {
+        Some("ready\n") => Ok(()),
+        Some(other) => Err(format!("parent.ready handshake mismatch: {other:?}")),
+        None => Err("parent.ready missing: parent is not provably reading".to_string()),
+    }
+}
+
+/// Everything the parent observed for one registration verdict. Channel
+/// reads are explicit: `None` means missing/unreadable, which fails
+/// closed whenever the plan expects input (never defaults to zero).
+#[derive(Clone, Debug)]
+struct RegistrationSnapshot {
+    plan: ExpectedPlan,
+    /// Parent-read validated ledger lines; malformed lines are counted
+    /// separately so they fail closed instead of vanishing.
+    ledger: Vec<LedgerEntry>,
+    malformed_lines: usize,
+    /// The same ledger line observed twice within one read.
+    duplicate_lines: bool,
+    /// Independent declaration-channel line count; `None` when the file
+    /// is missing or unreadable.
+    declared_channel: Option<usize>,
+    /// Final report; `None` when missing, unreadable or malformed (the
+    /// reason records which).
+    report: Option<ReportSummary>,
+    report_problem: Option<String>,
+    runner_exited: bool,
+    /// Ledger, declaration and report presence identical across two
+    /// consecutive post-exit reads: registrations finished, not merely
+    /// momentarily empty.
+    stable: bool,
+    /// Identities the parent explicitly acknowledged.
+    acked: Vec<LedgerEntry>,
+}
+
+/// The registration verdict for one snapshot. Only `Complete` (and the
+/// no-fixture `CleanNoFixtures`) let a run pass; anything unexpected
+/// fails closed, and anything still in flight waits.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RegistrationVerdict {
+    Complete,
+    /// Runner done with nothing declared, registered or expected and an
+    /// empty declaration channel: a bounded kill or early failure with
+    /// no fixtures is clean (nothing to contain; no report can exist
+    /// after a parent kill).
+    CleanNoFixtures,
+    NotQuiescent {
+        reason: String,
+    },
+    FailedClosed {
+        reason: String,
+    },
+}
+
+fn check_registration(snapshot: &RegistrationSnapshot) -> RegistrationVerdict {
+    use RegistrationVerdict::{CleanNoFixtures, Complete, FailedClosed, NotQuiescent};
+    let fail = |reason: String| FailedClosed { reason };
+    // Malformed or duplicated input poisons the channels immediately:
+    // nothing observed afterwards can be trusted.
+    if snapshot.malformed_lines > 0 {
+        return fail(format!(
+            "{} malformed ledger line(s)",
+            snapshot.malformed_lines
+        ));
+    }
+    if snapshot.duplicate_lines {
+        return fail("duplicate ledger registration".to_string());
+    }
+    // A lost declaration channel fails closed whenever the plan expects
+    // declarations; with a zero plan there is nothing to declare.
+    let declared = match snapshot.declared_channel {
+        Some(count) => count,
+        None if snapshot.plan.declared > 0 => {
+            return fail(
+                "lost declaration channel: declared.children missing or unreadable".to_string(),
+            );
+        }
+        None => 0,
+    };
+    // A live runner may still be registering: wait for it.
+    if !snapshot.runner_exited {
+        return NotQuiescent {
+            reason: "runner still running".to_string(),
+        };
+    }
+    if snapshot.plan.declared == 0
+        && snapshot.plan.registered == 0
+        && snapshot.ledger.is_empty()
+        && declared == 0
+    {
+        return CleanNoFixtures;
+    }
+    // The runner is done so no more writes can arrive: a missing,
+    // unreadable or malformed final report fails closed, as does any
+    // retained registration failure.
+    let report = match (&snapshot.report, &snapshot.report_problem) {
+        (Some(report), _) => report,
+        (None, Some(problem)) => return fail(format!("final report {problem}")),
+        (None, None) => return fail("missing final report".to_string()),
+    };
+    if !report.failures.is_empty() {
+        return fail(format!(
+            "registration failures retained: {}",
+            report.failures.join("; ")
+        ));
+    }
+    // Explicit channel completion: identical consecutive post-exit reads
+    // prove the channels finished instead of being sampled mid-write.
+    if !snapshot.stable {
+        return NotQuiescent {
+            reason: "channels not yet stable across consecutive reads".to_string(),
+        };
+    }
+    // Plan consistency, parent-owned: declaration and ledger against the
+    // plan, the report against both observed channels.
+    if declared != snapshot.plan.declared {
+        return fail(format!(
+            "incomplete declaration: channel holds {declared}, plan expects {}",
+            snapshot.plan.declared
+        ));
+    }
+    if snapshot.ledger.len() != snapshot.plan.registered {
+        return fail(format!(
+            "incomplete registration: ledger holds {}, plan expects {}",
+            snapshot.ledger.len(),
+            snapshot.plan.registered
+        ));
+    }
+    if report.declared != declared {
+        return fail(format!(
+            "declaration mismatch: fixtures declared {declared} but the report says {}",
+            report.declared
+        ));
+    }
+    if report.registered != snapshot.ledger.len() {
+        return fail(format!(
+            "registration accounting mismatch: report says {} registered but the ledger holds {}",
+            report.registered,
+            snapshot.ledger.len()
+        ));
+    }
+    if !report.has_catalog {
+        return fail("final report missing required catalog".to_string());
+    }
+    // Per-identity ACK coverage: every observed identity acknowledged.
+    for entry in &snapshot.ledger {
+        if !snapshot.acked.contains(entry) {
+            return fail(format!("pid={} observed but never acknowledged", entry.pid));
+        }
+    }
+    Complete
+}
+
 /// What a bounded identity check could prove. Only a clean, non-signaled
 /// exit-1 with empty stdout AND empty stderr proves "no such process".
 /// A live or replaced identity is decided ONLY by the strict single-record
@@ -704,7 +970,7 @@ struct ChildRun {
 /// Spawn this test binary in child mode under a fresh parent-owned
 /// fixture directory, bound the whole run, then clean up strictly.
 #[cfg(unix)]
-fn supervise(test_name: &str, overall: Duration) -> ChildRun {
+fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun {
     let launch = Instant::now();
     let overall_deadline = launch + overall;
     // The cleanup grace is an extension of the SAME absolute timeline
@@ -742,6 +1008,11 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
     // while the runner is still working. `seen` dedups against EVERY
     // entry ever observed, so a resolved identity is never re-added.
     let mut seen: std::collections::HashSet<LedgerEntry> = std::collections::HashSet::new();
+    // Explicit per-identity ACKs: every ledger identity the parent
+    // captured and validated. Coverage is checked at the verdict, so an
+    // observed-but-unacked identity fails closed instead of passing
+    // silently.
+    let mut acked: Vec<LedgerEntry> = Vec::new();
     let mut pending: Vec<Pending> = Vec::new();
     let mut resolutions: Vec<Resolution> = Vec::new();
     let mut actions = vec![format!("runner pid={runner_pid} spawned")];
@@ -750,6 +1021,20 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
     // (not dropped silently) as cleanup evidence until the run ends.
     let mut unreaped_helpers: Vec<std::process::Child> = Vec::new();
     let mut killed_by_parent = false;
+    // Explicit channel completion: the (ledger, malformed, declaration,
+    // report-arrival) fingerprint must repeat across two consecutive
+    // post-exit reads before the channels count as finished.
+    let mut last_fingerprint: Option<(usize, usize, Option<usize>, bool)> = None;
+    let mut stable_reads: u32 = 0;
+    // The first fail-closed accounting verdict, recorded once and
+    // reported after the loop; resolution of acked identities continues
+    // regardless so a failing run still contains its fixtures.
+    let mut accounting_failure: Option<String> = None;
+    // Whether the loop ended on a passing registration verdict.
+    let mut passed = false;
+    // A ledger line repeated within one read: child-written duplication
+    // is failure evidence, never silently deduped.
+    let mut duplicate_noted = false;
 
     loop {
         let runner_done = match child.try_wait() {
@@ -773,14 +1058,29 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
         }
         for entry in entries {
             if seen.insert(entry.clone()) {
-                // First sight of this identity: resolve it once the
-                // runner is done (a live runner may still be using it).
-                pending.push(Pending {
-                    entry,
-                    term_at: None,
-                    force_sent: false,
-                    signaled: false,
-                });
+                // First sight of this identity: explicit per-identity
+                // ACK after validation. Rejected identities are failure
+                // evidence and never enter the resolution queue, so no
+                // signal can go to an unvalidated identity. Resolution
+                // itself waits for runner exit (a live runner may still
+                // be using it).
+                match validate_identity(&entry, &acked) {
+                    Ok(()) => {
+                        acked.push(entry.clone());
+                        pending.push(Pending {
+                            entry,
+                            term_at: None,
+                            force_sent: false,
+                            signaled: false,
+                        });
+                    }
+                    Err(reason) => {
+                        let note = format!("registration rejected: {reason}");
+                        if !unverifiable.iter().any(|u| u == &note) {
+                            unverifiable.push(note);
+                        }
+                    }
+                }
             }
         }
         // Resolve pending identities only after the runner has exited.
@@ -905,13 +1205,76 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
                 pending.swap_remove(index);
             }
         }
-        // Exit only on QUIESCENCE, not merely an empty pending list: the
-        // runner must be done AND the ledger must hold no unseen entries.
-        // Otherwise late registrations would be missed.
-        let quiesced = runner_done.is_some()
-            && pending.is_empty()
-            && seen.len() >= read_ledger(&fixture_path).0.len();
-        if quiesced || Instant::now() >= cleanup_deadline {
+        // Registration verdict, parent-owned plan against parent-read
+        // channels: only a terminal verdict with an empty resolution
+        // queue ends the loop. A live runner always waits (late
+        // registrations may still arrive); post-exit, stability across
+        // consecutive reads proves the channels finished instead of
+        // being sampled mid-write.
+        if runner_done.is_some() {
+            let (verdict_entries, verdict_malformed) = read_ledger(&fixture_path);
+            if !duplicate_noted {
+                let unique: std::collections::HashSet<&LedgerEntry> =
+                    verdict_entries.iter().collect();
+                duplicate_noted = unique.len() != verdict_entries.len();
+            }
+            let verdict_declared = read_declared_channel(&fixture_path);
+            let (verdict_report, verdict_problem) = read_report(&fixture_path);
+            let fingerprint = (
+                verdict_entries.len(),
+                verdict_malformed.len(),
+                verdict_declared,
+                verdict_report.is_some() || verdict_problem.is_some(),
+            );
+            if last_fingerprint == Some(fingerprint) {
+                stable_reads += 1;
+            } else {
+                stable_reads = 0;
+                last_fingerprint = Some(fingerprint);
+            }
+            let (verdict_summary, verdict_report_problem) = match verdict_report {
+                Some(value) => match parse_report_summary(&value) {
+                    Ok(summary) => (Some(summary), None),
+                    Err(reason) => (None, Some(format!("malformed ({reason})"))),
+                },
+                None => (None, verdict_problem),
+            };
+            let snapshot = RegistrationSnapshot {
+                plan,
+                ledger: verdict_entries,
+                malformed_lines: verdict_malformed.len(),
+                duplicate_lines: duplicate_noted,
+                declared_channel: verdict_declared,
+                report: verdict_summary,
+                report_problem: verdict_report_problem,
+                runner_exited: true,
+                stable: stable_reads >= 1,
+                acked: acked.clone(),
+            };
+            match check_registration(&snapshot) {
+                RegistrationVerdict::Complete | RegistrationVerdict::CleanNoFixtures
+                    if pending.is_empty() =>
+                {
+                    passed = true;
+                    break;
+                }
+                RegistrationVerdict::FailedClosed { reason } => {
+                    if accounting_failure.is_none() {
+                        accounting_failure = Some(reason);
+                    }
+                    if pending.is_empty() {
+                        break;
+                    }
+                }
+                // Complete/Clean with identities still resolving, or
+                // channels not yet stable: keep the loop so every acked
+                // identity is contained and late writes are observed.
+                RegistrationVerdict::Complete
+                | RegistrationVerdict::CleanNoFixtures
+                | RegistrationVerdict::NotQuiescent { .. } => {}
+            }
+        }
+        if Instant::now() >= cleanup_deadline {
             for item in &pending {
                 unverifiable.push(format!(
                     "pid={} still unresolved at cleanup deadline",
@@ -938,64 +1301,60 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
         unverifiable.push(format!("runner pid={runner_pid} could not be reaped"));
     }
 
-    // Registration accounting (amendment B), independent: the parent
-    // reads the ledger ITSELF and cross-checks BOTH numbers the child
-    // reported - declared and registered. Strict required schema: any
-    // missing field is unverifiable, never defaulted.
-    let report: Option<serde_json::Value> = std::fs::read_to_string(fixture_path.join(RESULT_FILE))
-        .ok()
-        .and_then(|json| serde_json::from_str(&json).ok());
-    let (entries, _) = read_ledger(&fixture_path);
-    match &report {
-        Some(value) => {
-            let declared = value
-                .get("declared_children")
-                .and_then(serde_json::Value::as_u64)
-                .map(|n| n as usize);
-            let registered_reported = value
-                .get("registered_children")
-                .and_then(serde_json::Value::as_u64)
-                .map(|n| n as usize);
-            let failures = value
-                .get("registration_failures")
-                .and_then(serde_json::Value::as_array);
-            let catalog_ok = value.get("catalog").is_some();
-            match (declared, registered_reported, failures, catalog_ok) {
-                (Some(declared), Some(registered), Some(failures), true) => {
-                    if declared > entries.len() {
-                        unverifiable.push(format!(
-                            "incomplete registration: child declared {declared} children but the ledger holds {}",
-                            entries.len()
-                        ));
-                    }
-                    // Independent declaration channel: if the fixtures
-                    // declared more than the child reported, the report
-                    // is suppressing evidence.
-                    if let Ok(text) = std::fs::read_to_string(fixture_path.join(DECLARED_FILE)) {
-                        let declared_channel = text.lines().filter(|l| !l.trim().is_empty()).count();
-                        if declared_channel != declared {
-                            unverifiable.push(format!(
-                                "declaration mismatch: fixtures declared {declared_channel} but the report says {declared}"
-                            ));
-                        }
-                    }
-                    if registered != entries.len() {
-                        unverifiable.push(format!(
-                            "registration accounting mismatch: child reports {registered} registered but the ledger holds {}",
-                            entries.len()
-                        ));
-                    }
-                    for failure in failures {
-                        unverifiable.push(format!("registration failure retained: {failure}"));
-                    }
-                }
-                _ => unverifiable.push(
-                    "result report missing required fields (catalog/declared_children/registered_children/registration_failures)"
-                        .to_string(),
-                ),
+    // Final registration record: the loop breaks on a passing verdict
+    // with an empty resolution queue, on a recorded fail-closed verdict,
+    // or on the cleanup deadline. A recorded failure is reported; a pass
+    // needs no further evidence; anything else is evaluated once on
+    // fresh reads so a run cannot pass on a stale loop observation.
+    // This REPLACES the former ad-hoc accounting block: every check now
+    // goes through the parent-owned plan verdict above, so there is one
+    // accounting path instead of two.
+    let (report, _) = read_report(&fixture_path);
+    let (entries, malformed) = read_ledger(&fixture_path);
+    let declared_channel = read_declared_channel(&fixture_path);
+    let (final_summary, final_problem) = match &report {
+        Some(value) => match parse_report_summary(value) {
+            Ok(summary) => (Some(summary), None),
+            Err(reason) => (None, Some(format!("malformed ({reason})"))),
+        },
+        None => {
+            if fixture_path.join(RESULT_FILE).exists() {
+                (None, Some("present but unreadable".to_string()))
+            } else {
+                (None, None)
             }
         }
-        None => unverifiable.push("no result report from the child".to_string()),
+    };
+    if let Some(reason) = accounting_failure {
+        unverifiable.push(reason);
+    } else if !passed {
+        // Deadline break without any terminal verdict: one fresh
+        // evaluation for the record (a single read cannot prove
+        // stability, so only a fail-closed verdict is reported here).
+        let runner_exited = child
+            .try_wait()
+            .ok()
+            .map(|status| status.is_some())
+            .unwrap_or(false);
+        let final_snapshot = RegistrationSnapshot {
+            plan,
+            ledger: entries,
+            malformed_lines: malformed.len(),
+            duplicate_lines: duplicate_noted,
+            declared_channel,
+            report: final_summary,
+            report_problem: final_problem,
+            runner_exited,
+            stable: false,
+            acked,
+        };
+        match check_registration(&final_snapshot) {
+            RegistrationVerdict::FailedClosed { reason } => unverifiable.push(reason),
+            _ => unverifiable.push(
+                "registration never reached a terminal verdict before the cleanup deadline"
+                    .to_string(),
+            ),
+        }
     }
 
     // A bounded helper whose own reap could not be confirmed is recorded
@@ -1008,8 +1367,10 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
         ));
     }
     // Keep the parent-owned directory until the runner and every known
-    // identity are verified exited; retain on uncertainty (amendment B).
-    let retain = !unverifiable.is_empty() || (!killed_by_parent && report.is_none());
+    // identity are verified exited; retain on uncertainty. A passing
+    // verdict (Complete or CleanNoFixtures) is verified containment, so
+    // even a report-less bounded kill retains nothing.
+    let retain = !unverifiable.is_empty() || (!passed && !killed_by_parent && report.is_none());
     let retained_dir = if retain {
         Some(fixture_dir.keep())
     } else {
@@ -1263,23 +1624,38 @@ fn missing_executable_is_not_installed() {
 /// write the report the parent will assert on.
 fn child_probe_and_report(pi_script: &str, budget: Duration) {
     let dir = fixture_dir_from_env();
+    let mut registration_failures: Vec<String> = Vec::new();
+    // The handshake is READ here, not assumed: no registration may
+    // precede proof the parent prepared and is reading.
+    if let Err(reason) = check_parent_ready(
+        std::fs::read_to_string(dir.join("parent.ready"))
+            .ok()
+            .as_deref(),
+    ) {
+        registration_failures.push(reason);
+    }
     let pi = add_fixture(&dir, "pi", pi_script);
     let catalog = probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), budget);
     let (entries, _) = read_ledger(&dir);
     // Independent evidence: declared comes from the fixtures' OWN
     // declaration channel (one pid per spawned fixture), registered
     // from the identity ledger the parent also reads. Neither side
-    // derives one count from the other's source.
-    let declared = std::fs::read_to_string(dir.join(DECLARED_FILE))
-        .map(|text| text.lines().filter(|line| !line.trim().is_empty()).count())
-        .unwrap_or(0);
+    // derives one count from the other's source. An unreadable channel
+    // is failure evidence, never a silent zero.
+    let declared = match std::fs::read_to_string(dir.join(DECLARED_FILE)) {
+        Ok(text) => text.lines().filter(|line| !line.trim().is_empty()).count(),
+        Err(err) => {
+            registration_failures.push(format!("declaration channel unreadable: {err}"));
+            0
+        }
+    };
     write_child_report(
         &dir,
         &ChildReport {
             catalog,
             declared_children: declared,
             registered_children: entries.len(),
-            registration_failures: Vec::new(),
+            registration_failures,
         },
     );
 }
@@ -1301,6 +1677,10 @@ fn timed_out_probe_is_killed_within_its_budget() {
     let run = supervise(
         "timed_out_probe_is_killed_within_its_budget",
         SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
     );
     run.assert_clean_product();
     let catalog = run.catalog();
@@ -1450,6 +1830,10 @@ PIEOF\n\
     let run = supervise(
         "leader_exits_but_grandchild_holds_pipes_is_bounded_and_reported",
         SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
     );
     run.assert_clean_product();
     let catalog = run.catalog();
@@ -1493,6 +1877,10 @@ PIEOF\n\
     let run = supervise(
         "term_resistant_descendant_is_sigkilled_and_evidence_recorded",
         SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
     );
     run.assert_clean_product();
     let catalog = run.catalog();
@@ -1527,6 +1915,10 @@ PIEOF\n\
     let run = supervise(
         "redirected_stdio_survivor_is_caught_after_eof_and_leader_exit",
         SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
     );
     run.assert_clean_product();
     let catalog = run.catalog();
@@ -1556,6 +1948,10 @@ fn continuous_producer_respects_the_deadline_and_is_fully_reaped() {
     let run = supervise(
         "continuous_producer_respects_the_deadline_and_is_fully_reaped",
         SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
     );
     run.assert_clean_product();
     let catalog = run.catalog();
@@ -1644,6 +2040,20 @@ fn isolation_setup_failure_fails_closed_without_probing() {
 /// path.
 #[cfg(unix)]
 fn append_ledger(dir: &Path, pid: u32) -> Result<(), BoundedError> {
+    // No registration precedes proof the parent is reading: the
+    // handshake file the parent wrote before spawn is READ on every
+    // registration, and a missing or mismatched handshake fails the
+    // registration instead of racing an unobserved parent.
+    if let Err(reason) = check_parent_ready(
+        std::fs::read_to_string(dir.join("parent.ready"))
+            .ok()
+            .as_deref(),
+    ) {
+        return Err(BoundedError {
+            message: reason,
+            unreaped: None,
+        });
+    }
     let birth = birth_of(pid)?;
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
@@ -1663,6 +2073,20 @@ fn append_ledger(dir: &Path, pid: u32) -> Result<(), BoundedError> {
 /// ledger; the handles make ownership explicit so the child can bounded-
 /// reap what it owns where the test design allows, and the ledger+birth
 /// record is the ownership transfer for fixtures that must outlive it.
+/// Append one pid line to the independent declaration channel. The
+/// parent counts this channel itself; a write failure is failure
+/// evidence at the call site, never silent.
+#[cfg(unix)]
+fn append_declaration(dir: &Path, pid: u32) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(dir.join(DECLARED_FILE))?;
+    writeln!(file, "{pid}")?;
+    Ok(())
+}
+
 #[cfg(unix)]
 #[derive(Default)]
 struct RegistrationLedger {
@@ -1687,6 +2111,14 @@ impl RegistrationLedger {
         {
             Ok(child) => {
                 let pid = child.id();
+                // Every declared fixture is recorded on the independent
+                // declaration channel (separately from the identity
+                // ledger), so the parent cross-checks declared-vs-
+                // registered from two sources.
+                if let Err(err) = append_declaration(dir, pid) {
+                    self.failures
+                        .push(format!("pid={pid} declaration write failed: {err}"));
+                }
                 self.owned.push(child);
                 Some(pid)
             }
@@ -1794,6 +2226,11 @@ fn supervisor_stalled_child_is_bounded_and_reaped() {
     let run = supervise(
         "supervisor_stalled_child_is_bounded_and_reaped",
         Duration::from_secs(3),
+        // No fixtures: a bounded kill with nothing to contain is clean.
+        ExpectedPlan {
+            declared: 0,
+            registered: 0,
+        },
     );
     assert!(
         run.killed_by_parent,
@@ -1819,6 +2256,11 @@ fn supervisor_child_failure_keeps_parent_bounded_and_cleans_up() {
     let run = supervise(
         "supervisor_child_failure_keeps_parent_bounded_and_cleans_up",
         SUPERVISE_OVERALL,
+        // No fixtures: an early failure with nothing to contain is clean.
+        ExpectedPlan {
+            declared: 0,
+            registered: 0,
+        },
     );
     let status = run.status.expect("reaped child exit evidence");
     assert!(
@@ -1867,6 +2309,10 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
     let run = supervise(
         "supervisor_delayed_registration_is_collected_during_teardown",
         SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
     );
     run.assert_clean();
     assert!(
@@ -1912,6 +2358,10 @@ fn supervisor_term_resistant_child_is_forced_after_recheck() {
     let run = supervise(
         "supervisor_term_resistant_child_is_forced_after_recheck",
         SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
     );
     // Genuine rescue: the TERM-trapped fixture needed the force path,
     // recorded as a structured ForceKilled resolution.
@@ -1970,6 +2420,13 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
     let run = supervise(
         "supervisor_missing_registration_is_unverifiable_not_pass",
         SUPERVISE_OVERALL,
+        // The parent EXPECTED this fixture to register: a ledger that
+        // never holds it fails closed, even though the child honestly
+        // reports declared=1, registered=0.
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
     );
     assert!(
         !run.cleanup.is_clean(),
@@ -2022,6 +2479,10 @@ fn supervisor_distinguishes_product_cleanup_from_rescue() {
     let run = supervise(
         "supervisor_distinguishes_product_cleanup_from_rescue",
         SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 2,
+            registered: 2,
+        },
     );
     run.assert_clean();
     // The distinction is structural, not string-matching: exactly one
@@ -2088,6 +2549,10 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
     let run = supervise(
         "supervisor_stale_identity_is_resolved_without_signaling",
         SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
     );
     run.assert_clean_product();
     assert!(
@@ -2138,6 +2603,345 @@ fn ledger_lines_require_positive_pids_with_birth_identities() {
     let entry = parse_ledger_line("123|  Mon   Sep  9  08:00:00   2026 ").unwrap();
     assert_eq!(entry.pid, 123);
     assert_eq!(entry.birth, "Mon Sep 9 08:00:00 2026");
+}
+
+/// Literal record/event tests for the registration accounting above:
+/// every case is built from struct and JSON literals and decided by the
+/// pure helpers only. No processes, files, sleeps or clocks: nothing here
+/// can hang, leak or signal, so these pin the fail-closed contract
+/// without the execution-gate cost of the supervised tests. Under-test
+/// registration (the plan, the ledger, the report) and the parent's
+/// independent safety ownership (the ACK set) are separate fields, so a
+/// test that confuses the two cannot compile into a pass.
+mod registration_accounting {
+    use super::*;
+
+    fn plan(declared: usize, registered: usize) -> ExpectedPlan {
+        ExpectedPlan {
+            declared,
+            registered,
+        }
+    }
+
+    fn entry(pid: u32, birth: &str) -> LedgerEntry {
+        LedgerEntry {
+            pid,
+            birth: canonical_birth(birth),
+        }
+    }
+
+    fn summary(declared: usize, registered: usize) -> ReportSummary {
+        ReportSummary {
+            declared,
+            registered,
+            failures: Vec::new(),
+            has_catalog: true,
+        }
+    }
+
+    fn snapshot(plan: ExpectedPlan) -> RegistrationSnapshot {
+        RegistrationSnapshot {
+            plan,
+            ledger: Vec::new(),
+            malformed_lines: 0,
+            duplicate_lines: false,
+            declared_channel: Some(0),
+            report: None,
+            report_problem: None,
+            runner_exited: false,
+            stable: false,
+            acked: Vec::new(),
+        }
+    }
+
+    fn failed_closed(verdict: &RegistrationVerdict) -> String {
+        match verdict {
+            RegistrationVerdict::FailedClosed { reason } => reason.clone(),
+            other => panic!("expected fail-closed, got {other:?}"),
+        }
+    }
+
+    fn not_quiescent(verdict: &RegistrationVerdict) -> String {
+        match verdict {
+            RegistrationVerdict::NotQuiescent { reason } => reason.clone(),
+            other => panic!("expected not-quiescent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn complete_when_plan_observed_acked_and_stable() {
+        let observed = entry(4242, "Mon Sep  9 08:00:00 2026");
+        let mut state = snapshot(plan(1, 1));
+        state.ledger = vec![observed.clone()];
+        state.declared_channel = Some(1);
+        state.report = Some(summary(1, 1));
+        state.runner_exited = true;
+        state.stable = true;
+        state.acked = vec![observed];
+        assert_eq!(check_registration(&state), RegistrationVerdict::Complete);
+    }
+
+    #[test]
+    fn live_runner_is_not_quiescent_never_complete() {
+        // Everything matches except the runner is still working: late
+        // registrations may still arrive, so this waits.
+        let observed = entry(4242, "Mon Sep  9 08:00:00 2026");
+        let mut state = snapshot(plan(1, 1));
+        state.ledger = vec![observed.clone()];
+        state.declared_channel = Some(1);
+        state.report = Some(summary(1, 1));
+        state.stable = true;
+        state.acked = vec![observed];
+        let reason = not_quiescent(&check_registration(&state));
+        assert!(reason.contains("runner still running"), "{reason}");
+    }
+
+    #[test]
+    fn missing_ack_fails_closed() {
+        // The identity is observed, planned and reported, but the parent
+        // never acknowledged it: no proof the parent captured it.
+        let observed = entry(4242, "Mon Sep  9 08:00:00 2026");
+        let mut state = snapshot(plan(1, 1));
+        state.ledger = vec![observed];
+        state.declared_channel = Some(1);
+        state.report = Some(summary(1, 1));
+        state.runner_exited = true;
+        state.stable = true;
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("never acknowledged"), "{reason}");
+    }
+
+    #[test]
+    fn delayed_ack_completes_once_acked() {
+        // A delayed ACK is an event, not a state: unacked fails closed,
+        // acked completes. Both halves are the same snapshot except for
+        // the independent safety-ownership field.
+        let observed = entry(4242, "Mon Sep  9 08:00:00 2026");
+        let mut state = snapshot(plan(1, 1));
+        state.ledger = vec![observed.clone()];
+        state.declared_channel = Some(1);
+        state.report = Some(summary(1, 1));
+        state.runner_exited = true;
+        state.stable = true;
+        assert!(failed_closed(&check_registration(&state)).contains("never acknowledged"));
+        validate_identity(&observed, &state.acked).expect("ack the observed identity");
+        state.acked = vec![observed];
+        assert_eq!(check_registration(&state), RegistrationVerdict::Complete);
+    }
+
+    #[test]
+    fn lost_declaration_fails_closed() {
+        // The plan expects a declaration but the channel is gone: this
+        // is lost input, never a zero count.
+        let mut state = snapshot(plan(1, 1));
+        state.declared_channel = None;
+        state.runner_exited = true;
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("lost declaration channel"), "{reason}");
+    }
+
+    #[test]
+    fn duplicate_registration_fails_closed() {
+        let observed = entry(4242, "Mon Sep  9 08:00:00 2026");
+        let mut state = snapshot(plan(1, 1));
+        state.ledger = vec![observed.clone(), observed.clone()];
+        state.duplicate_lines = true;
+        state.declared_channel = Some(1);
+        state.report = Some(summary(1, 1));
+        state.runner_exited = true;
+        state.stable = true;
+        state.acked = vec![observed.clone()];
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("duplicate"), "{reason}");
+        // The ACK gate itself refuses the second acknowledgement.
+        assert!(validate_identity(&observed, std::slice::from_ref(&observed)).is_err());
+    }
+
+    #[test]
+    fn malformed_ledger_input_fails_closed() {
+        let mut state = snapshot(plan(1, 1));
+        state.malformed_lines = 1;
+        state.runner_exited = true;
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("malformed ledger"), "{reason}");
+    }
+
+    #[test]
+    fn late_registration_waits_then_missing_fails() {
+        // A short ledger with a live runner is a late registration in
+        // flight: wait. The same short ledger with a dead runner and a
+        // final report is a missing registration: fail closed.
+        let mut state = snapshot(plan(1, 1));
+        state.declared_channel = Some(1);
+        state.report = Some(summary(1, 0));
+        let reason = not_quiescent(&check_registration(&state));
+        assert!(reason.contains("runner still running"), "{reason}");
+        state.runner_exited = true;
+        state.stable = true;
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("incomplete registration"), "{reason}");
+        assert!(reason.contains("plan expects 1"), "{reason}");
+    }
+
+    #[test]
+    fn missing_unreadable_malformed_report_fail_closed_distinctly() {
+        let mut state = snapshot(plan(1, 1));
+        state.ledger = vec![entry(4242, "Mon Sep  9 08:00:00 2026")];
+        state.declared_channel = Some(1);
+        state.runner_exited = true;
+        state.stable = true;
+        state.acked = state.ledger.clone();
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("missing final report"), "{reason}");
+        state.report_problem = Some("unreadable (permission denied)".to_string());
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("final report unreadable"), "{reason}");
+        state.report_problem = Some("malformed (expected value)".to_string());
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("final report malformed"), "{reason}");
+    }
+
+    #[test]
+    fn report_inconsistent_with_observed_fails_closed() {
+        let observed = entry(4242, "Mon Sep  9 08:00:00 2026");
+        let mut state = snapshot(plan(1, 1));
+        state.ledger = vec![observed.clone()];
+        state.declared_channel = Some(1);
+        state.runner_exited = true;
+        state.stable = true;
+        state.acked = vec![observed];
+        // The report suppresses a declaration...
+        state.report = Some(summary(0, 1));
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("declaration mismatch"), "{reason}");
+        // ...or over-reports registrations.
+        state.report = Some(summary(1, 2));
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("accounting mismatch"), "{reason}");
+        // ...or drops the required catalog.
+        let mut bare = summary(1, 1);
+        bare.has_catalog = false;
+        state.report = Some(bare);
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("missing required catalog"), "{reason}");
+    }
+
+    #[test]
+    fn registration_failure_evidence_fails_closed() {
+        let observed = entry(4242, "Mon Sep  9 08:00:00 2026");
+        let mut state = snapshot(plan(1, 1));
+        state.ledger = vec![observed.clone()];
+        state.declared_channel = Some(1);
+        state.runner_exited = true;
+        state.stable = true;
+        state.acked = vec![observed];
+        let mut failing = summary(1, 1);
+        failing.failures = vec!["pid=4243 late registration failed: ps error".to_string()];
+        state.report = Some(failing);
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("failures retained"), "{reason}");
+        assert!(reason.contains("pid=4243"), "{reason}");
+    }
+
+    #[test]
+    fn clean_no_fixtures_when_nothing_expected_or_observed() {
+        // A bounded kill or early failure with no fixtures is clean:
+        // nothing to contain, and no report can exist after a kill.
+        let mut state = snapshot(plan(0, 0));
+        state.declared_channel = None;
+        state.runner_exited = true;
+        assert_eq!(
+            check_registration(&state),
+            RegistrationVerdict::CleanNoFixtures
+        );
+        // But a live runner is still in flight, even with a zero plan.
+        state.runner_exited = false;
+        let reason = not_quiescent(&check_registration(&state));
+        assert!(reason.contains("runner still running"), "{reason}");
+        // And a declaration nobody expected is a gap, not a clean run.
+        state.runner_exited = true;
+        state.declared_channel = Some(1);
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("missing final report"), "{reason}");
+    }
+
+    #[test]
+    fn validate_identity_rejects_duplicates_and_bad_identities() {
+        let good = entry(4242, "Mon Sep  9 08:00:00 2026");
+        assert!(validate_identity(&good, &[]).is_ok());
+        assert!(
+            validate_identity(&good, std::slice::from_ref(&good))
+                .unwrap_err()
+                .contains("duplicate"),
+        );
+        let zero = LedgerEntry {
+            pid: 0,
+            birth: "Mon Sep 9 08:00:00 2026".to_string(),
+        };
+        assert!(validate_identity(&zero, &[]).is_err());
+        let huge = LedgerEntry {
+            pid: u32::MAX,
+            birth: "Mon Sep 9 08:00:00 2026".to_string(),
+        };
+        assert!(validate_identity(&huge, &[]).is_err());
+        let birthless = LedgerEntry {
+            pid: 4242,
+            birth: "   ".to_string(),
+        };
+        assert!(validate_identity(&birthless, &[]).is_err());
+        // A PID-recycled lookalike (same pid, different birth) is a
+        // different identity, not a duplicate.
+        let recycled = entry(4242, "Mon Jan  1 00:00:00 2001");
+        assert!(validate_identity(&recycled, &[good]).is_ok());
+    }
+
+    #[test]
+    fn parent_ready_handshake_is_read_not_assumed() {
+        assert!(check_parent_ready(Some("ready\n")).is_ok());
+        assert!(check_parent_ready(None).is_err());
+        assert!(check_parent_ready(Some("")).is_err());
+        assert!(check_parent_ready(Some("ready")).is_err());
+        assert!(check_parent_ready(Some("ready\nextra\n")).is_err());
+    }
+
+    #[test]
+    fn parse_report_summary_requires_all_fields() {
+        let full = serde_json::json!({
+            "catalog": {},
+            "declared_children": 1,
+            "registered_children": 1,
+            "registration_failures": ["kept"],
+        });
+        let summary = parse_report_summary(&full).expect("full report parses");
+        assert_eq!(summary.declared, 1);
+        assert_eq!(summary.registered, 1);
+        assert_eq!(summary.failures, vec!["kept".to_string()]);
+        assert!(summary.has_catalog);
+        for missing in [
+            serde_json::json!({
+                "registered_children": 1,
+                "registration_failures": [],
+            }),
+            serde_json::json!({
+                "catalog": {},
+                "declared_children": 1,
+                "registration_failures": [],
+            }),
+            serde_json::json!({
+                "catalog": {},
+                "declared_children": 1,
+                "registered_children": 1,
+            }),
+            serde_json::json!({
+                "catalog": {},
+                "declared_children": "one",
+                "registered_children": 1,
+                "registration_failures": [],
+            }),
+        ] {
+            assert!(parse_report_summary(&missing).is_err(), "{missing}");
+        }
+    }
 }
 
 /// Pure parser/classifier tests: every `ExitStatus` is constructed with
