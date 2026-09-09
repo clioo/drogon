@@ -41,6 +41,18 @@ and orchestration reference; older files under `docs/migration/` are history.
 - Workers with a live Orca dispatch preamble send `worker_done` exactly once
   after the PR exists; if the send fails, the PR is still the deliverable.
 
+## Build fresh main
+
+- Run `./scripts/build-main.sh` to package fresh `origin/main` in an isolated
+  checkout; add `--verify` to run packaged acceptance in the background.
+  This builds remote main, NOT uncommitted changes or the current feature branch.
+- The command prepares Node 24 when available at the path above, installs the
+  source's pinned pnpm locally and locked dependencies, then runs the official
+  packager. Build directories and receipts remain in `.preflight/build-main/`.
+  It never replaces an installed app, changes the caller's branch, stashes work,
+  or stops user sessions. The package receipt identifies the revision and bundle.
+- Regression tests: `node --test scripts/build-main.test.mjs`.
+
 ## Keep agent validation out of the foreground
 
 - All agents and subagents must preserve the developer's OS focus, including
