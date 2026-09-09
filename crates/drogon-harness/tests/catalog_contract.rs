@@ -790,8 +790,18 @@ fn parse_seal_counts(text: &str) -> Result<SealCounts, String> {
             .parse()
             .map_err(|_| format!("seal field is not a number: {field:?}"))?;
         match key {
-            "declared" => declared = Some(number),
-            "registered" => registered = Some(number),
+            "declared" => {
+                if declared.is_some() {
+                    return Err("duplicate seal field: \"declared\"".to_string());
+                }
+                declared = Some(number);
+            }
+            "registered" => {
+                if registered.is_some() {
+                    return Err("duplicate seal field: \"registered\"".to_string());
+                }
+                registered = Some(number);
+            }
             _ => return Err(format!("unknown seal field: {key:?}")),
         }
     }
@@ -924,7 +934,16 @@ fn check_registration(snapshot: &RegistrationSnapshot) -> RegistrationVerdict {
             Some(seal)
         }
         (None, Some(problem)) => return fail(format!("registration source {problem}")),
-        (None, None) => None,
+        // No seal with work expected or observed fails closed: the seal
+        // is required on every non-quiet path, with or without a
+        // report present.
+        (None, None) => {
+            if quiet {
+                None
+            } else {
+                return fail("registration source never sealed".to_string());
+            }
+        }
     };
     // The attempt's final statement, kept distinct from source closure:
     // a sealed source still needs its report. A missing report is only
@@ -3525,11 +3544,13 @@ mod registration_accounting {
         state.runner_exited = false;
         let reason = not_quiescent(&check_registration(&state));
         assert!(reason.contains("runner still running"), "{reason}");
-        // And a declaration nobody expected is a gap, not a clean run.
+        // And a declaration nobody expected is a gap, not a clean run:
+        // without a seal the source never closed, so this fails on the
+        // missing seal before any report reasoning.
         state.runner_exited = true;
         state.declarations = vec![entry(4242, "Mon Sep  9 08:00:00 2026")];
         let reason = failed_closed(&check_registration(&state));
-        assert!(reason.contains("missing final report"), "{reason}");
+        assert!(reason.contains("never sealed"), "{reason}");
     }
 
     #[test]
@@ -3673,6 +3694,8 @@ mod registration_accounting {
             "declared=1 registered=1 extra=2",
             "1 1",
             "declared = 1",
+            "declared=1 declared=2 registered=1",
+            "declared=1 registered=1 registered=1",
         ] {
             assert!(parse_seal_counts(bad).is_err(), "{bad:?}");
         }
@@ -3691,6 +3714,11 @@ mod registration_accounting {
         state.acked = vec![observed];
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("never sealed"), "{reason}");
+        // A present report does not excuse a missing seal either.
+        state.report = Some(summary(1, 1));
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("never sealed"), "{reason}");
+        state.report = None;
         state.seal_problem = Some("unreadable (permission denied)".to_string());
         let reason = failed_closed(&check_registration(&state));
         assert!(
