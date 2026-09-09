@@ -122,6 +122,8 @@ import {
   createReplayTailBuffer,
   createSessionUpdateCoalescer,
   shouldKeepSeeking,
+  TERMINAL_ACTIVE_POLL_MS,
+  TERMINAL_ACTIVE_WINDOW_MS,
   TERMINAL_HIDDEN_POLL_MS,
   TERMINAL_LIVE_POLL_MS,
   TERMINAL_READ_PAGE_BYTES,
@@ -873,7 +875,10 @@ export function TerminalPane({
         isMac,
       });
       if (jisAction) {
-        if (jisAction.type === "input") void queue.enqueue(jisAction.data);
+        if (jisAction.type === "input") {
+          noteTerminalInput();
+          void queue.enqueue(jisAction.data);
+        }
         return false;
       }
       const optionAction = isMac
@@ -888,6 +893,7 @@ export function TerminalPane({
           )
         : null;
       if (optionAction) {
+        noteTerminalInput();
         void queue.enqueue(optionAction.data);
         return false;
       }
@@ -992,6 +998,11 @@ export function TerminalPane({
     let seeking = true;
     let seekPages = 0;
     let readInFlight = false;
+    // Hot-window state for the echo path (TERMINAL_ACTIVE_* in
+    // terminal-read-pacing): user input and fresh output arm a short
+    // ~1-frame poll cadence so typing echo lands like the fork's push
+    // delivery instead of up to TERMINAL_LIVE_POLL_MS late.
+    let lastActivityAt = 0;
     const emitSessionUpdate = (value: Session) => {
       const signal: SessionSignal = {
         verdict: value.verdict,
@@ -1029,10 +1040,36 @@ export function TerminalPane({
       projectUnverifiable();
       if (!disposed) timeout = setTimeout(read, TERMINAL_READ_RETRY_MS);
     };
+    // Visible cadence: hot while input/output is fresh, the quiet 120 ms
+    // otherwise, the hidden cadence when the pane has no viewport.
+    const livePollDelay = () => {
+      if (!paneVisible.current) return TERMINAL_HIDDEN_POLL_MS;
+      return Date.now() - lastActivityAt < TERMINAL_ACTIVE_WINDOW_MS
+        ? TERMINAL_ACTIVE_POLL_MS
+        : TERMINAL_LIVE_POLL_MS;
+    };
+    // User input arms the hot window and pulls the next read forward so
+    // the echo is picked up within a frame or two. A seeking, hidden or
+    // retrying pane keeps its own cadence (the retry timeout must not be
+    // cleared here, so canWrite gates the pull).
+    const noteTerminalInput = () => {
+      lastActivityAt = Date.now();
+      if (
+        disposed ||
+        seeking ||
+        readInFlight ||
+        !canWrite ||
+        !paneVisible.current
+      )
+        return;
+      clearTimeout(timeout);
+      timeout = setTimeout(read, TERMINAL_ACTIVE_POLL_MS);
+    };
     const subscription = terminal.onData((text) => {
       // Source parity: Ctrl+C can leave xterm's bracketed-paste bit stale;
       // the mark lets the next single-line paste skip the wrappers.
       if (text === "\x03") markTerminalBracketedPasteInterrupted(terminal);
+      noteTerminalInput();
       void queue.enqueue(text);
     });
     // 0x0 containers stay deferred: the ResizeObserver below retries once
@@ -1192,13 +1229,11 @@ export function TerminalPane({
           }
           caughtUp.current = bytes.length < TERMINAL_READ_PAGE_BYTES;
           canWrite = value.session.verdict === "live";
+          if (bytes.length > 0) lastActivityAt = Date.now();
           emitSessionUpdate(value.session);
           const exit = projectTerminalProcessExit(value.session);
           if (exit) showExit(exit);
-          timeout = setTimeout(
-            read,
-            paneVisible.current ? TERMINAL_LIVE_POLL_MS : TERMINAL_HIDDEN_POLL_MS,
-          );
+          timeout = setTimeout(read, livePollDelay());
           return;
         }
         if (value.truncated)
@@ -1213,6 +1248,7 @@ export function TerminalPane({
         if (disposed) return;
         cursor = value.nextCursor;
         canWrite = value.session.verdict === "live";
+        if (bytes.length > 0) lastActivityAt = Date.now();
         emitSessionUpdate(value.session);
         if (bytes.length < TERMINAL_READ_PAGE_BYTES) caughtUp.current = true;
         const exit = projectTerminalProcessExit(value.session);
@@ -1220,11 +1256,7 @@ export function TerminalPane({
         if (value.session.verdict === "exited" && bytes.length === 0) return;
         timeout = setTimeout(
           read,
-          bytes.length === TERMINAL_READ_PAGE_BYTES
-            ? 0
-            : paneVisible.current
-              ? TERMINAL_LIVE_POLL_MS
-              : TERMINAL_HIDDEN_POLL_MS,
+          bytes.length === TERMINAL_READ_PAGE_BYTES ? 0 : livePollDelay(),
         );
       } catch {
         scheduleReadRetry();

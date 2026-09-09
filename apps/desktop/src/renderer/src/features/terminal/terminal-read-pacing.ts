@@ -34,6 +34,18 @@ export const TERMINAL_SEEK_MAX_PAGES = 64;
 export const TERMINAL_LIVE_POLL_MS = 120;
 
 /**
+ * Hot cadence right after user input or fresh output. The fork delivers
+ * output by push (pty onData → IPC → xterm write, effectively one frame);
+ * this repo's transport is a poll, so the only way typing echo lands
+ * within a frame or two instead of up to `TERMINAL_LIVE_POLL_MS` late is
+ * a short hot window while the pane is demonstrably active.
+ */
+export const TERMINAL_ACTIVE_POLL_MS = 24;
+
+/** How long after the last input or output byte the hot cadence stays armed. */
+export const TERMINAL_ACTIVE_WINDOW_MS = 1_500;
+
+/**
  * Hidden-pane (tab switched away, still mounted behind a browser/editor
  * tab) poll cadence. The pane stays alive by design — the strip can switch
  * back without a remount — but a hidden pane has no viewport to repaint and
