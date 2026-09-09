@@ -4,7 +4,9 @@
 //! settings file per session under `<data-dir>/hooks/` and passes it to
 //! claude with `--settings <file>`. The file carries `Notification` and
 //! `Stop` hooks that invoke `drogon-cli internal hook-event`, which calls
-//! back into `session.hook_event` and marks the session `needs_input`.
+//! back into `session.hook_event`: `Notification` marks the session
+//! `needs_input`, `Stop` clears it (the fork maps Claude's `Stop` to done —
+//! issue #360).
 //! Later PTY output clears the signal; the settings file is removed when
 //! the session exits. Nothing is ever written under `~/.claude`.
 //!
@@ -17,8 +19,8 @@
 //! same per-session install/cleanup slot through their own installers in
 //! `harness_hooks::{codex, opencode, pi}`, driven by `harness.rs`. Only the
 //! event *names* differ per harness — see
-//! `agent_state::classify_hook_event` for the full set and the wait/clear
-//! split.
+//! `agent_state::classify_hook_event` for the full set and the wait /
+//! turn-start / turn-end split.
 
 use std::path::{Path, PathBuf};
 
@@ -177,7 +179,8 @@ impl Engine {
             // Its exit is the completion signal, not a hook event.
             HookSignal::Wait if handle.is_headless() => {}
             HookSignal::Wait => handle.note_hook_event(),
-            HookSignal::Clear => handle.clear_hook_event(),
+            HookSignal::TurnStart => handle.clear_hook_event(),
+            HookSignal::TurnEnd => handle.end_hook_event(),
         }
         // R16-BF2 push: the hook signal moves the agent state now, so the
         // card/badge must learn about it now — not on the next poll.
@@ -192,10 +195,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_stop_and_notification_are_wait_signals() {
+    fn claude_notification_is_a_wait_signal_and_stop_is_a_turn_end() {
         use crate::agent_state::{HookSignal, classify_hook_event};
-        assert_eq!(classify_hook_event("Stop"), Some(HookSignal::Wait));
-        assert_eq!(classify_hook_event("Notification"), Some(HookSignal::Wait));
+        // Issue #360 fork parity: Claude's Stop means the turn concluded
+        // (the fork maps it to done), never needs_input; Notification stays
+        // this install's genuine-wait surface.
+        assert_eq!(
+            classify_hook_event("Notification"),
+            Some(HookSignal::Wait)
+        );
+        assert_eq!(classify_hook_event("Stop"), Some(HookSignal::TurnEnd));
     }
 
     #[test]

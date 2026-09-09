@@ -702,6 +702,36 @@ impl Engine {
             None => workspace_cwd,
         };
 
+        // Additive (issue #359, subagent nesting): the optional parent
+        // session — the fork records `orchestration.parentPaneKey` at spawn
+        // time; this repo's equivalent is a `drogon-cli` invoked inside a
+        // terminal reporting its inherited `DROGON_SESSION_ID`. The parent
+        // must name an existing session on this host; a parent in another
+        // workspace is recorded but renders flat (the sidebar nests only
+        // when the parent is in the same row set, like the fork's
+        // unreachable-row normalization).
+        let parent_session_id = match optional_str(params, "parentSessionId")? {
+            Some(parent) => {
+                if parent == "\0" || parent.is_empty() {
+                    return Err(error::invalid_argument("parentSessionId must not be empty"));
+                }
+                let conn = self.db.lock().unwrap();
+                let exists: bool = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM sessions WHERE id = ?1 AND host_id = ?2",
+                        rusqlite::params![parent, self.host_id],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .map_err(error::from_sqlite)?
+                    > 0;
+                if !exists {
+                    return Err(error::not_found("parentSessionId names no session on this host"));
+                }
+                Some(parent.to_string())
+            }
+            None => None,
+        };
+
         // `session::spawn` durably records the pending admission before it
         // touches the PTY at all, and reconciles the row's terminal state
         // (`live` vs. an already-observed `exited`) itself — see its doc
@@ -715,6 +745,7 @@ impl Engine {
             command,
             args,
             None,
+            parent_session_id,
             cols,
             rows,
         )?;
@@ -733,7 +764,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at FROM sessions ORDER BY created_at",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id FROM sessions ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
         let rows: Vec<_> = stmt
@@ -871,7 +902,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let row = conn
             .query_row(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at FROM sessions WHERE id = ?1",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id FROM sessions WHERE id = ?1",
                 [session_id],
                 row_to_session_json,
             )
@@ -960,6 +991,7 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "agentPromptPreview": null,
             "cacheIdleAt": null,
             "harnessId": r.get::<_, Option<String>>(11)?,
+            "parentSessionId": r.get::<_, Option<String>>(13)?,
         }),
     ))
 }

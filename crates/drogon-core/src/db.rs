@@ -126,7 +126,8 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
             exit_code INTEGER,
             created_at TEXT NOT NULL,
             harness_id TEXT,
-            needs_input_at TEXT
+            needs_input_at TEXT,
+            parent_session_id TEXT
         );
         CREATE TABLE IF NOT EXISTS requests (
             request_id TEXT PRIMARY KEY,
@@ -242,10 +243,10 @@ fn pending_forward_migrations(conn: &Connection) -> rusqlite::Result<Vec<Pending
         }
     }
     // Main-schema additive columns: an older data dir's `sessions` table
-    // lacks them; a fresh or current one already has both.
+    // lacks them; a fresh or current one already has all three.
     if let Ok(Some((_, cols))) = table_columns(conn, "sessions") {
         let has = |name: &str| cols.iter().any(|c| c == name);
-        if !(has("harness_id") && has("needs_input_at")) {
+        if !(has("harness_id") && has("needs_input_at") && has("parent_session_id")) {
             pending.push(PendingMigration {
                 component: "sessions (main schema columns)".to_string(),
                 recorded: 1,
@@ -424,6 +425,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     crate::coordination_mail::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;
     migrate_sessions_harness_id(&tx)?;
     migrate_sessions_needs_input(&tx)?;
+    migrate_sessions_parent_session_id(&tx)?;
     recover_from_prior_instance(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
     tx.commit()?;
@@ -467,6 +469,26 @@ fn migrate_sessions_needs_input(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         .map(|count| count > 0)?;
     if !has_column {
         tx.execute_batch("ALTER TABLE sessions ADD COLUMN needs_input_at TEXT;")?;
+    }
+    Ok(())
+}
+
+/// Additive migration for subagent nesting (issue #359): `parent_session_id`
+/// records which session's PTY spawned this one (a `drogon-cli` invoked
+/// inside a terminal reports its inherited `DROGON_SESSION_ID`), so the
+/// sidebar can render the fork's nested child-agent box. `NULL` for
+/// UI-spawned and other parentless sessions. Idempotent: fresh databases
+/// already created the column in [`create_tables`].
+fn migrate_sessions_parent_session_id(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    let has_column: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'parent_session_id'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)?;
+    if !has_column {
+        tx.execute_batch("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;")?;
     }
     Ok(())
 }

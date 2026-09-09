@@ -141,6 +141,29 @@ impl Engine {
         };
         let cols = require_dimension(params, "cols", 80)?;
         let rows = require_dimension(params, "rows", 24)?;
+        // Issue #359: same optional parent-session record as
+        // `session.start` — a harness launched by `drogon-cli` inside a
+        // terminal carries the PTY's inherited `DROGON_SESSION_ID`.
+        let parent_session_id = match crate::optional_str(params, "parentSessionId")? {
+            Some(parent) => {
+                let conn = self.db.lock().unwrap();
+                let exists: bool = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM sessions WHERE id = ?1 AND host_id = ?2",
+                        rusqlite::params![parent, self.host_id],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .map_err(crate::error::from_sqlite)?
+                    > 0;
+                if !exists {
+                    return Err(crate::error::not_found(
+                        "parentSessionId names no session on this host",
+                    ));
+                }
+                Some(parent.to_string())
+            }
+            None => None,
+        };
         let cwd = {
             let conn = self.db.lock().unwrap();
             crate::workspace::get_path(&conn, workspace_id)?
@@ -164,6 +187,7 @@ impl Engine {
                 &plan.command,
                 &args,
                 Some(harness_id_wire(request.harness_id).to_string()),
+                parent_session_id,
                 cols,
                 rows,
             )?;

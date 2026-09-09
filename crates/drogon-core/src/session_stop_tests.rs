@@ -122,7 +122,7 @@ fn hook_wait_stamp_is_durable_and_clear_removes_it() {
     let session = start_sleep_session(&engine, &dir, "30");
     let id = session["id"].as_str().unwrap();
 
-    let waited = hook_event(&engine, &session, "AgentEnd");
+    let waited = hook_event(&engine, &session, "ToolApprovalRequested");
     assert_eq!(waited["agentState"], "needs_input");
     let stamp = waited["agentStateAt"].as_str().unwrap().to_string();
     assert_eq!(session_row(&dir, id).1.as_deref(), Some(stamp.as_str()));
@@ -141,7 +141,7 @@ fn restart_keeps_reporting_an_uncleared_wait_with_its_stamp() {
     let (id, stamp) = {
         let engine = Engine::open(dir.path()).unwrap();
         let session = start_sleep_session(&engine, &dir, "30");
-        let waited = hook_event(&engine, &session, "AgentEnd");
+        let waited = hook_event(&engine, &session, "ToolApprovalRequested");
         assert_eq!(waited["agentState"], "needs_input");
         // The engine drops without `stop`: the orphaned `sleep` keeps the
         // row `live` so the next open must recover it as `unverifiable`
@@ -184,7 +184,7 @@ fn exit_clears_a_stale_wait_so_restart_lists_the_exited_session() {
     let id = {
         let engine = Engine::open(dir.path()).unwrap();
         let session = start_sleep_session(&engine, &dir, "30");
-        let waited = hook_event(&engine, &session, "AgentEnd");
+        let waited = hook_event(&engine, &session, "ToolApprovalRequested");
         assert_eq!(waited["agentState"], "needs_input");
         let id = waited["id"].as_str().unwrap().to_string();
         let handle = engine.sessions.lock().unwrap()[id.as_str()].clone();
@@ -225,7 +225,8 @@ fn old_schema_without_needs_input_gains_the_column_on_open() {
                 id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, host_id TEXT NOT NULL,
                 incarnation TEXT NOT NULL, command TEXT NOT NULL, args_json TEXT NOT NULL,
                 cols INTEGER NOT NULL, rows INTEGER NOT NULL, verdict TEXT NOT NULL,
-                exit_code INTEGER, created_at TEXT NOT NULL, harness_id TEXT
+                exit_code INTEGER, created_at TEXT NOT NULL, harness_id TEXT,
+                parent_session_id TEXT
             );
             CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
         )

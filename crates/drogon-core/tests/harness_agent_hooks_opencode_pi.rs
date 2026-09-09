@@ -461,9 +461,13 @@ fn pi_harness_start_installs_extension_and_removes_it_on_exit() {
 
 /// The core J1 correctness guard: OpenCode/Pi are full TUIs that can repaint
 /// while genuinely still waiting, so unlike claude they must not clear
-/// `needs_input` on generic PTY output — only their own hook's resumption
-/// event may. Drives the wait/clear events directly through
-/// `session.hook_event`, the same RPC a real plugin/extension would call.
+/// `needs_input` on generic PTY output — only their own hook's events may.
+/// Drives the wait/clear events directly through `session.hook_event`, the
+/// same RPC a real plugin/extension would call. Issue #360 fork parity:
+/// the wait events are the genuine user-response signals
+/// (`PermissionRequest` / `ToolApprovalRequested`), and the turn-end
+/// events (`SessionIdle` / `AgentEnd`) are clears that return a finished
+/// turn to the activity-based state, never needs_input.
 #[test]
 fn opencode_and_pi_needs_input_is_cleared_only_by_the_matching_event_not_by_pty_output() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -478,9 +482,9 @@ fn opencode_and_pi_needs_input_is_cleared_only_by_the_matching_event_not_by_pty_
     }
     prepend_fixture_bin(bin.path());
 
-    for (harness_id, wait_event, clear_event) in [
-        ("opencode", "SessionIdle", "NewTurn"),
-        ("pi", "AgentEnd", "AgentStart"),
+    for (harness_id, wait_event, clear_event, turn_end_event) in [
+        ("opencode", "PermissionRequest", "NewTurn", "SessionIdle"),
+        ("pi", "ToolApprovalRequested", "AgentStart", "AgentEnd"),
     ] {
         let launched = ok(
             &engine,
@@ -524,6 +528,15 @@ fn opencode_and_pi_needs_input_is_cleared_only_by_the_matching_event_not_by_pty_
         assert_eq!(
             cleared["agentState"], "working",
             "{harness_id}'s {clear_event} must clear needs_input back to activity-based state"
+        );
+
+        // Issue #360: the turn-end signal itself never marks needs_input —
+        // a finished turn reads as the activity-based state (working while
+        // output is fresh, idle after the silence window).
+        let turn_ended = hook_event(&engine, &session_id, &incarnation, turn_end_event);
+        assert_ne!(
+            turn_ended["agentState"], "needs_input",
+            "{harness_id}'s {turn_end_event} is a turn-end clear, never needs_input"
         );
 
         ok(

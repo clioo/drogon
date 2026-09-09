@@ -174,6 +174,11 @@ impl Engine {
         let cwd = cwd.ok_or_else(|| {
             error::not_found("Workspace is not registered on this execution host.")
         })?;
+        // Issue #359 deviation: the fork derives a worker's parent from the
+        // orchestration DB's `created_by_pane_key` recorded at task-create
+        // time; this repo's coordination protocol carries no creator-session
+        // identity, so daemon-spawned workers have no parent to record (CLI-
+        // spawned terminals do — see `do_session_start`).
         let prepared = session_admission::reserve(
             tx,
             &self.host_id,
@@ -181,6 +186,7 @@ impl Engine {
             &cwd,
             &plan.harness.command,
             &plan.harness.args,
+            None,
             None,
             100,
             32,

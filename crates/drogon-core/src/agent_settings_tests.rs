@@ -172,7 +172,10 @@ fn live_hooks_are_removed_restored_and_feed_titles_and_cache() {
     assert_eq!(first.result.unwrap()["agentPromptPreview"], prompt);
     let stopped = event("Stop", None).result.unwrap();
     assert!(stopped["cacheIdleAt"].is_string());
-    assert_eq!(stopped["agentState"], "needs_input");
+    // Issue #360 fork parity: Claude's Stop concludes the turn (the
+    // reference maps it to done), never needs_input; with no PTY output
+    // observed the turn-end hook itself is the idle authority.
+    assert_eq!(stopped["agentState"], "idle");
     assert!(
         invoke(
             &engine,
