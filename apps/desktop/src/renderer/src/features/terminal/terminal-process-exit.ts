@@ -5,6 +5,7 @@
 // verbatim so the overlay copy stays exact).
 export type TerminalProcessExitReason =
   | "process-failed"
+  | "process-completed"
   | "git-bash-console-capacity"
   // R16-AL2 (issue #228): offered after an explicit Retry connection click
   // re-listed the session and it is still `unverifiable` — the tab cannot
@@ -27,10 +28,13 @@ export function projectTerminalProcessExit(session: {
   verdict: "live" | "unverifiable" | "exited";
   exitCode: number | null;
 }): TerminalProcessExit | null {
-  // Source pty-exit-hibernate.ts only offers the failure overlay for
-  // nonzero exits; a successful shell exit is not a process failure.
-  if (session.verdict !== "exited" || session.exitCode === 0) return null;
-  return { exitCode: session.exitCode, reason: "process-failed" };
+  // Unlike Orca's PTY lifecycle, Drogon restores durable completed rows.
+  // They still need Restart/Close; hiding their overlay strands a dead pane.
+  if (session.verdict !== "exited") return null;
+  return {
+    exitCode: session.exitCode,
+    reason: session.exitCode === 0 ? "process-completed" : "process-failed",
+  };
 }
 
 /** Pure copy projection for the overlay (title + detail), kept beside the

@@ -22,8 +22,15 @@ describe("projectTerminalProcessExit", () => {
     ).toBeNull();
   });
 
-  it("does not present a successful exit as a process failure", () => {
-    expect(projectTerminalProcessExit({ verdict: "exited", exitCode: 0 })).toBeNull();
+  it("keeps recovery actions for restored successful exits without classifying them as failures", () => {
+    const processExit = projectTerminalProcessExit({ verdict: "exited", exitCode: 0 });
+    expect(processExit).toEqual({ exitCode: 0, reason: "process-completed" });
+    const html = renderToString(createElement(TerminalProcessExitOverlay, {
+      processExit: processExit!, onRestart: () => {}, onClose: () => {},
+    }));
+    expect(html).toContain("exit code 0");
+    expect(html).toContain("Restart");
+    expect(html).toContain("Close");
   });
 
   it("projects exited sessions with their code", () => {
