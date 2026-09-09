@@ -15,14 +15,16 @@ use drogon_protocol::orchestration_run::{
 use drogon_protocol::orchestration_scope::{CoordinatorScope, HostScope, MAX_CONSUMER_GENERATION};
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
+// Source ordering: newest first (`ORDER BY created_at DESC, id DESC`),
+// so the cursor walks older rows by descending key.
 const RUN_PAGE_FIRST: &str = "SELECT run_id, host_id, coordinator_id, consumer_generation, \
      objective, created_at_ms FROM orchestration_runs \
-     WHERE host_id = ?1 ORDER BY created_at_ms ASC, run_id ASC LIMIT ?2";
+     WHERE host_id = ?1 ORDER BY created_at_ms DESC, run_id DESC LIMIT ?2";
 
 const RUN_PAGE_NEXT: &str = "SELECT run_id, host_id, coordinator_id, consumer_generation, \
      objective, created_at_ms FROM orchestration_runs \
-     WHERE host_id = ?1 AND (created_at_ms > ?2 OR (created_at_ms = ?2 AND run_id > ?3)) \
-     ORDER BY created_at_ms ASC, run_id ASC LIMIT ?4";
+     WHERE host_id = ?1 AND (created_at_ms < ?2 OR (created_at_ms = ?2 AND run_id < ?3)) \
+     ORDER BY created_at_ms DESC, run_id DESC LIMIT ?4";
 
 /// A run's persisted coordinator binding, which is what every fenced call checks.
 struct RunBinding {

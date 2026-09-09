@@ -110,7 +110,8 @@ fn run_cursor_advances_same_timestamp_rows_without_repeating_or_skipping() {
         },
     )
     .unwrap();
-    assert_eq!(first.runs[0].run_id, "run-a");
+    // Source order is newest-first; identical timestamps walk ids descending.
+    assert_eq!(first.runs[0].run_id, "run-c");
     let second = runs::list(
         &tx,
         &RunListParams {
@@ -130,7 +131,7 @@ fn run_cursor_advances_same_timestamp_rows_without_repeating_or_skipping() {
         },
     )
     .unwrap();
-    assert_eq!(third.runs[0].run_id, "run-c");
+    assert_eq!(third.runs[0].run_id, "run-a");
     assert!(third.next_cursor.is_none());
 }
 
