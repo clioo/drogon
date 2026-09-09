@@ -2618,7 +2618,6 @@ pub async fn run(
                     fields.remove("questionMessageId");
                     fields.remove("effectiveTimeoutMs");
                     fields.remove("wait");
-                    fields.remove("answerMessageId");
                 }
                 source["answer"] = serde_json::json!(result.answer.as_ref().map(|a| &a.body));
                 source["messageId"] = serde_json::json!(result.question_message_id);
