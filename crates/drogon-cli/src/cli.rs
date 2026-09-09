@@ -548,6 +548,15 @@ pub enum TerminalAction {
         #[arg(long)]
         rows: u16,
     },
+    /// Show a session's metadata and output preview
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal show --session <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --session"
+    )]
+    Show {
+        #[arg(long, value_name = "ID")]
+        session: String,
+    },
     /// Stop every live session in a workspace (source `terminal stop`)
     #[command(
         args_override_self = true,
@@ -957,6 +966,9 @@ impl Cli {
                     require_nonempty("incarnation", incarnation)?;
                     validate_dimension("cols", *cols)?;
                     validate_dimension("rows", *rows)?;
+                }
+                TerminalAction::Show { session } => {
+                    require_nonempty("session", session)?;
                 }
                 TerminalAction::Stop { workspace } => {
                     require_nonempty("workspace", workspace)?;

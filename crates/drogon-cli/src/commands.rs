@@ -322,6 +322,60 @@ async fn terminal(
             )
             .await
         }
+        TerminalAction::Show { session } => {
+            let call = client
+                .call(
+                    "session.show",
+                    json!({ "sessionId": session }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            // The reply is the session record plus an optional preview tail.
+            let mut value = call.result.clone();
+            let preview = value
+                .as_object_mut()
+                .and_then(|obj| obj.remove("previewBase64"))
+                .and_then(|v| v.as_str().map(str::to_string));
+            let session_value: Session = serde_json::from_value(value).map_err(|_| {
+                CliError::local(
+                    crate::error::internal_error(
+                        "service returned a malformed session.show result; refusing to guess",
+                    ),
+                    &call.request_id,
+                )
+            })?;
+            check_session(&session_value).map_err(|violation| {
+                CliError::local(
+                    crate::error::internal_error(format!(
+                        "session.show violates protocol invariants: {violation}"
+                    )),
+                    &call.request_id,
+                )
+            })?;
+            let preview_text = preview
+                .map(|b64| {
+                    STANDARD
+                        .decode(b64.as_bytes())
+                        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+            emit(
+                call,
+                json,
+                || {
+                    let mut line = output::session_started(&session_value);
+                    if !preview_text.is_empty() {
+                        line.push('\n');
+                        line.push_str(&preview_text);
+                    }
+                    line
+                },
+                0,
+                None,
+            )
+        }
         TerminalAction::Stop { workspace } => {
             let call = client
                 .call(

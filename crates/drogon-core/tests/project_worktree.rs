@@ -857,3 +857,81 @@ fn worktree_update_note_and_parent_roundtrip() {
         "invalid_argument"
     );
 }
+
+#[test]
+fn session_show_returns_metadata_and_a_bounded_preview() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let workspace = ok(
+        &engine,
+        "workspace.register",
+        "ws-show",
+        json!({"path": data_dir.path().to_string_lossy()}),
+    );
+    let workspace_id = workspace["id"].as_str().unwrap().to_string();
+    let session = ok(
+        &engine,
+        "session.start",
+        "sh1",
+        json!({
+            "workspaceId": workspace_id,
+            "command": "/bin/sh",
+            "args": ["-c", "echo show-marker-42; sleep 30"],
+            "cols": 80, "rows": 24
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+
+    // Wait for the marker to land in the ring before showing.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let shown = loop {
+        let shown = ok(
+            &engine,
+            "session.show",
+            "sh2",
+            json!({"sessionId": session_id}),
+        );
+        let preview = shown["previewBase64"].as_str().unwrap_or("");
+        let decoded = base64_decode_test(preview);
+        if decoded.contains("show-marker-42") {
+            break shown;
+        }
+        assert!(Instant::now() < deadline, "preview never showed the marker");
+        sleep(Duration::from_millis(50));
+    };
+    assert_eq!(shown["id"], json!(session_id));
+    assert_eq!(shown["verdict"], json!("live"));
+
+    // Unknown session is a typed not_found.
+    assert_eq!(
+        err_code(&engine, "session.show", "sh3", json!({"sessionId": "nope"})),
+        "not_found"
+    );
+
+    // A closed session's row reports its honest verdict with a null preview
+    // only when no handle remains; here close forgets the row entirely.
+    let closed = ok(
+        &engine,
+        "session.close",
+        "sh4",
+        json!({"sessionId": session_id, "incarnation": session["incarnation"]}),
+    );
+    let _ = closed;
+    assert_eq!(
+        err_code(
+            &engine,
+            "session.show",
+            "sh5",
+            json!({"sessionId": session_id})
+        ),
+        "not_found"
+    );
+}
+
+fn base64_decode_test(text: &str) -> String {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(text.as_bytes())
+        .unwrap_or_default();
+    String::from_utf8_lossy(&bytes).into_owned()
+}

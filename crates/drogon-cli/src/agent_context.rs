@@ -238,6 +238,18 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["Refuses a dirty checkout unless --force is passed."],
         ),
         entry(
+            "terminal show",
+            &["terminal", "show"],
+            "Show a session's metadata and output preview",
+            "drogon-cli terminal show --session <ID>",
+            &["session"],
+            &[],
+            &["drogon-cli terminal show --session sess-1 --json"],
+            &[
+                "Read-only: no incarnation needed. The preview is the last 4 KiB of ring output as previewBase64 in JSON, decoded inline in human output.",
+            ],
+        ),
+        entry(
             "terminal stop",
             &["terminal", "stop"],
             "Stop every live session in a workspace (best-effort sweep)",

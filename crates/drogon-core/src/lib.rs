@@ -98,6 +98,9 @@ use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use session::SessionHandle;
 
+/// `session.show` preview tail budget: the last 4 KiB of ring output.
+const SHOW_PREVIEW_BYTES: usize = 4096;
+
 const CAPABILITIES: &[&str] = &[
     "automation.v1",
     "orchestration.native.v1",
@@ -474,6 +477,7 @@ impl Engine {
             "session.read" => self.do_session_read(&request.params),
             "session.write" => self.mutating(request, Self::do_session_write),
             "session.stop_workspace" => self.mutating(request, Self::do_session_stop_workspace),
+            "session.show" => self.do_session_show(&request.params),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
             // R16-AL2 (issue #228): the user-initiated close paths. `close`
@@ -878,6 +882,45 @@ impl Engine {
         let cols = require_dimension(params, "cols", 80)?;
         let rows = require_dimension(params, "rows", 24)?;
         session::resize(&handle, cols, rows)
+    }
+
+    /// `session.show { sessionId }`: read-only metadata plus an output tail
+    /// preview. The durable row carries the identity; a live in-memory handle
+    /// refreshes the verdict and supplies the tail (bounded, base64 on the
+    /// wire like `session.read`). No incarnation is required: showing is not
+    /// acting, and a stale row reports its recorded verdict honestly.
+    fn do_session_show(&self, params: &Value) -> Result<Value, RpcError> {
+        let session_id = require_str(params, "sessionId")?;
+        let mut value = {
+            let conn = self.db.lock().unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id FROM sessions WHERE id = ?1",
+                )
+                .map_err(error::from_sqlite)?;
+            let row = stmt
+                .query_row([session_id], row_to_session_json)
+                .optional()
+                .map_err(error::from_sqlite)?;
+            row.ok_or_else(|| error::not_found("session not found"))?.1
+        };
+        let handle = self.sessions.lock().unwrap().get(session_id).cloned();
+        let preview = if let Some(handle) = handle {
+            value = session::snapshot(&handle);
+            let tail = session::read_tail(&handle);
+            let bytes = tail.bytes;
+            let start = bytes.len().saturating_sub(SHOW_PREVIEW_BYTES);
+            // Never split a UTF-8 sequence at the tail cut.
+            let mut boundary = start;
+            while boundary < bytes.len() && (bytes[boundary] & 0b1100_0000) == 0b1000_0000 {
+                boundary += 1;
+            }
+            Some(Value::String(session::base64_encode(&bytes[boundary..])))
+        } else {
+            None
+        };
+        value["previewBase64"] = preview.unwrap_or(Value::Null);
+        Ok(value)
     }
 
     /// `session.stop_workspace { workspaceId }`: source `terminal.stop` —
