@@ -71,6 +71,52 @@ pub struct MentuStepVerification {
     pub warnings: Vec<String>,
 }
 
+/// Why one recorded usage value could not be accepted as a measurement.
+/// Malformed, negative, nonfinite and out-of-range numbers are visibly
+/// marked, never silently dropped and never summed into totals.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MentuUsageInvalidReason {
+    NotANumber,
+    NotAnInteger,
+    Negative,
+    NotFinite,
+    OutOfRange,
+}
+
+/// One rejected usage field: the run-record key exactly as written there
+/// (e.g. `input_tokens`) and why its value is not a usable measurement.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuUsageIssue {
+    pub field: String,
+    pub reason: MentuUsageInvalidReason,
+}
+
+/// The usage one run-record step entry observed, mirroring the fork's
+/// per-step fields (`src/shared/mentu-run-contract.ts`'s `usage_known`,
+/// `input_tokens`, `output_tokens`) with this product's honesty rules: a
+/// recorded `0` is a genuine measured zero only when the entry carries
+/// `usage_known: true`; anything rejected is marked in `invalid` and
+/// excluded from totals. Each `steps[]` entry carries its own attempt's
+/// token counts — the record has no separate aggregated run-level usage
+/// object, so these per-entry values are the only source there is.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuStepUsage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    /// The entry's `usage_known` flag, when recorded as a boolean: the only
+    /// basis on which a recorded 0 counts as measured. `None` when the
+    /// record carries no boolean flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_known: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invalid: Vec<MentuUsageIssue>,
+}
+
 /// A parsed recipe plus its raw source text (the client-local "draft" seed)
 /// and the sha256 of its exact on-disk bytes, which `mentu.approve` binds
 /// approval to.
@@ -192,6 +238,14 @@ pub struct MentuStepRun {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification: Option<MentuStepVerification>,
+    /// The model the runtime recorded for this entry, when a string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Observed usage for this recorded entry; `None` when the record
+    /// carries none (older schemas, shell-only steps) so the desktop can
+    /// show "unavailable" rather than an invented zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<MentuStepUsage>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -495,6 +549,8 @@ mod tests {
                 error_path: Some("say-hello.stderr".into()),
                 error: None,
                 verification: None,
+                model: None,
+                usage: None,
             }],
             error: None,
             retry_of: None,
@@ -529,6 +585,56 @@ mod tests {
         );
         let back: MentuRun = serde_json::from_value(value).unwrap();
         assert_eq!(back, sample_run());
+    }
+
+    #[test]
+    fn step_usage_round_trips_with_exact_wire_keys_and_marks_invalid_values() {
+        let mut run = sample_run();
+        run.steps[0].model = Some("glm-5.3-flash".into());
+        run.steps[0].usage = Some(MentuStepUsage {
+            input_tokens: Some(0),
+            output_tokens: None,
+            usage_known: Some(true),
+            invalid: vec![MentuUsageIssue {
+                field: "output_tokens".into(),
+                reason: MentuUsageInvalidReason::Negative,
+            }],
+        });
+        let value = serde_json::to_value(&run).unwrap();
+        assert_eq!(value["steps"][0]["model"], json!("glm-5.3-flash"));
+        assert_eq!(
+            value["steps"][0]["usage"],
+            json!({
+                "inputTokens": 0,
+                "usageKnown": true,
+                "invalid": [{"field": "output_tokens", "reason": "negative"}],
+            })
+        );
+        let back: MentuRun = serde_json::from_value(value).unwrap();
+        assert_eq!(back, run);
+    }
+
+    #[test]
+    fn responses_without_usage_deserialize_as_absent_not_zero() {
+        // Older daemons (and older run records replayed through them) omit
+        // `model`/`usage` entirely: they must default to None, never to a
+        // fabricated zero measurement.
+        let legacy = serde_json::from_value::<MentuRun>(json!({
+            "id": "internal-1",
+            "workspaceId": "ws1",
+            "recipeId": "hello",
+            "approvalId": "approval-1",
+            "status": "succeeded",
+            "startedAt": "2026-09-07T20:25:09Z",
+            "steps": [{
+                "label": "say-hello",
+                "backend": "shell",
+                "status": "succeeded",
+            }],
+        }))
+        .unwrap();
+        assert_eq!(legacy.steps[0].model, None);
+        assert_eq!(legacy.steps[0].usage, None);
     }
 
     #[test]
