@@ -213,7 +213,10 @@ fn worktree_create_accepts_and_persists_the_automation_creator_across_reopen() {
             "worktree.create",
             json!({"projectId": project_id, "name": "from-desktop"}),
         );
-        assert!(desktop_created["creator"].is_null(), "desktop create leaves creator absent");
+        assert!(
+            desktop_created["creator"].is_null(),
+            "desktop create leaves creator absent"
+        );
         (
             project_id,
             automation_created["id"].as_str().unwrap().to_string(),
