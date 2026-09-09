@@ -145,7 +145,7 @@ describe("buildKanbanWorktrees", () => {
       workspaceById: new Map([["ws", { ...workspace, hostId: "ssh:box" }]]),
     })[0]!;
     expect(getWorktreeHostIdentity(localRow)).toBe("local|shared");
-    expect(getWorktreeHostIdentity(remoteRow)).toBe("ssh:box|shared");
+    expect(getWorktreeHostIdentity(remoteRow)).toBe("ssh%3Abox|shared");
 
     // The controlled status map keys by identity: only the local row is assigned.
     const assigned = buildKanbanWorktrees({
@@ -173,7 +173,7 @@ describe("buildKanbanWorktrees", () => {
     ).toEqual(["local|shared"]);
     expect(
       grouped.get("in-progress")?.map((row) => getWorktreeHostIdentity(row)),
-    ).toEqual(["ssh:box|shared"]);
+    ).toEqual(["ssh%3Abox|shared"]);
   });
 
   it("retains controlled order across adapter reruns", () => {
