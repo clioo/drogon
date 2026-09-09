@@ -1,15 +1,39 @@
-//! Host-local harness discovery and argv planning; never starts a process.
+//! Host-local harness discovery and argv planning; never starts a harness
+//! session.
+//!
+//! The `catalog`, `selection` and `mentu_contract` modules are the C01-A
+//! catalog/selection/translation slice: pure planning over bounded,
+//! provenance-recording enumeration probes. Those probes spawn the harness
+//! CLIs' own read-only enumeration commands (`--version`,
+//! `--list-models`, `models`) inside private, credential-free isolation —
+//! never an interactive or headless harness *session*, and never model
+//! inference.
 
+mod catalog;
 mod discovery;
 mod headless_env;
 mod known_tui_agents;
 mod launch;
+mod mentu_contract;
+mod selection;
 
+pub use catalog::{
+    CatalogEntry, EnumerationStatus, HostCatalog, PROBE_OUTPUT_CAP, PROBE_TIMEOUT_DEFAULT,
+    ProbeProvenance, freshness_token, probe_host_catalog, probe_host_catalog_with_budget,
+};
 pub use discovery::{HarnessAvailability, HarnessInstallation, discover, resolve_executable};
 pub use headless_env::{HeadlessEnvPlan, plan_headless_env};
 pub use known_tui_agents::{KNOWN_TUI_AGENT_IDS, is_known_tui_agent};
 pub use launch::{
     HarnessLaunchPlan, HarnessLaunchRequest, PermissionMode, plan_launch, plan_launch_with_args,
+};
+pub use mentu_contract::{
+    AdapterEvidence, CONTRACT_DERIVED_FROM_REVISION, CONTRACT_DERIVED_FROM_VERSION,
+    MentuProviderConfig, MentuRuntimeIdentity, MentuStepPlan, MentuTranslation, PiProviderBinding,
+    parse_adapters_json, translate_selection,
+};
+pub use selection::{
+    HarnessSelection, SelectionRecord, SelectionVerdict, allowed_efforts, validate_selection,
 };
 
 use serde::{Deserialize, Serialize};
