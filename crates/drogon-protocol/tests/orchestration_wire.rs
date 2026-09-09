@@ -214,7 +214,10 @@ fn task_methods_round_trip_with_decided_status_vocabulary() {
         spec: "Run the audit steps".into(),
         spec_truncated: false,
         title: Some("Audit".into()),
+        display_name: None,
         depends_on: Some(vec!["task-0".into()]),
+        assignee_handle: None,
+        dispatch_id: None,
     };
     assert_camel_case_round_trip(&summary, "specTruncated");
 
@@ -264,6 +267,8 @@ fn task_methods_round_trip_with_decided_status_vocabulary() {
             status: TaskStatus::Pending,
             depends_on: vec!["task-0".into()],
             result: None,
+            title: None,
+            display_name: None,
         },
     };
     assert_camel_case_round_trip(&created, "task");
@@ -1532,4 +1537,62 @@ fn ensure_process_action_variants_round_trip() {
             serde_json::from_value(serde_json::to_value(action).unwrap()).unwrap();
         assert_eq!(round, action);
     }
+}
+
+#[test]
+fn task_record_and_summary_new_fields_are_optional_for_old_records() {
+    use drogon_protocol::orchestration_task::{TaskRecord, TaskStatus, TaskSummary};
+    // Old records predate title/display_name/assignee keys: they must decode
+    // with those fields absent, and must not serialize them when unset.
+    let old_record: TaskRecord = serde_json::from_value(serde_json::json!({
+        "taskId": "task-1", "runId": "run-1", "status": "pending",
+        "dependsOn": [],
+    }))
+    .unwrap();
+    assert_eq!(old_record.title, None);
+    assert_eq!(old_record.display_name, None);
+    let wire = serde_json::to_value(&old_record).unwrap();
+    assert!(!wire.as_object().unwrap().contains_key("title"));
+    assert!(!wire.as_object().unwrap().contains_key("displayName"));
+
+    let old_summary: TaskSummary = serde_json::from_value(serde_json::json!({
+        "taskId": "task-1", "status": "dispatched", "spec": "do it",
+        "specTruncated": false, "title": "Work",
+    }))
+    .unwrap();
+    assert_eq!(old_summary.display_name, None);
+    assert_eq!(old_summary.assignee_handle, None);
+    assert_eq!(old_summary.dispatch_id, None);
+
+    // New records round-trip with exact camelCase keys.
+    let record = TaskRecord {
+        task_id: "task-1".into(),
+        run_id: "run-1".into(),
+        status: TaskStatus::Ready,
+        depends_on: vec![],
+        result: None,
+        title: Some("Work".into()),
+        display_name: Some("Shown".into()),
+    };
+    let wire = serde_json::to_value(&record).unwrap();
+    assert_eq!(wire["title"], serde_json::json!("Work"));
+    assert_eq!(wire["displayName"], serde_json::json!("Shown"));
+    assert_eq!(record, serde_json::from_value(wire).unwrap());
+
+    let summary = TaskSummary {
+        task_id: "task-1".into(),
+        status: TaskStatus::Dispatched,
+        spec: "do it".into(),
+        spec_truncated: false,
+        title: Some("Work".into()),
+        display_name: Some("Shown".into()),
+        depends_on: None,
+        assignee_handle: Some("sess-1".into()),
+        dispatch_id: Some("dispatch-1".into()),
+    };
+    let wire = serde_json::to_value(&summary).unwrap();
+    assert_eq!(wire["displayName"], serde_json::json!("Shown"));
+    assert_eq!(wire["assigneeHandle"], serde_json::json!("sess-1"));
+    assert_eq!(wire["dispatchId"], serde_json::json!("dispatch-1"));
+    assert_eq!(summary, serde_json::from_value(wire).unwrap());
 }

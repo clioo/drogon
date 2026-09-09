@@ -3848,3 +3848,143 @@ async fn check_json_envelope_passes_result_through() {
     drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_list_human_output_matches_source_label_rules() {
+    let dir = temp_dir("task-list-human");
+    let long_display: String = "d".repeat(70);
+    let long_spec: String = "界".repeat(100);
+    let result = json!({"tasks": [
+        {"taskId": "task-1", "status": "dispatched",
+         "spec": "ignored spec", "specTruncated": false,
+         "title": "Title One", "displayName": "Shown One",
+         "assigneeHandle": "sess-1", "dispatchId": "dispatch-1"},
+        {"taskId": "task-2", "status": "ready",
+         "spec": "ignored spec", "specTruncated": false,
+         "title": "Title Two"},
+        {"taskId": "task-3", "status": "pending",
+         "spec": "fallback spec", "specTruncated": false},
+        {"taskId": "task-4", "status": "pending",
+         "spec": "x", "specTruncated": true,
+         "displayName": long_display},
+        {"taskId": "task-5", "status": "pending",
+         "spec": long_spec, "specTruncated": true},
+    ]});
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.taskList", result)]),
+    );
+    let mut args = vec!["orchestration", "task-list"];
+    args.extend(coordinator_args());
+    let invocation = run_cli(&dir, &args, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    let lines: Vec<&str> = invocation.stdout.lines().collect();
+    // display_name wins over title and spec; dispatched rows carry the
+    // assignee suffix with the dispatch id.
+    assert!(
+        lines.contains(&"task-1 [dispatched] Shown One -> sess-1 (dispatch-1)"),
+        "dispatched line: {}",
+        invocation.stdout
+    );
+    // Title wins over spec when no display name is present.
+    assert!(
+        lines.contains(&"task-2 [ready] Title Two"),
+        "title line: {}",
+        invocation.stdout
+    );
+    // Spec is the fallback label.
+    assert!(
+        lines.contains(&"task-3 [pending] fallback spec"),
+        "spec line: {}",
+        invocation.stdout
+    );
+    // 60-character truncation, counted in characters, with no marker.
+    let display_line = lines
+        .iter()
+        .find(|line| line.starts_with("task-4 "))
+        .expect("task-4 line");
+    assert_eq!(
+        *display_line,
+        &format!("task-4 [pending] {}", "d".repeat(60)),
+        "display truncation: {display_line}",
+    );
+    let spec_line = lines
+        .iter()
+        .find(|line| line.starts_with("task-5 "))
+        .expect("task-5 line");
+    assert_eq!(
+        *spec_line,
+        &format!("task-5 [pending] {}", "界".repeat(60)),
+        "multibyte truncation: {spec_line}",
+    );
+    assert!(
+        !invocation.stdout.contains('…'),
+        "source human lines print no truncation marker: {}",
+        invocation.stdout
+    );
+    drop(_mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_list_human_output_empty_reports_no_tasks() {
+    let dir = temp_dir("task-list-empty");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.taskList", json!({"tasks": []}))]),
+    );
+    let mut args = vec!["orchestration", "task-list"];
+    args.extend(coordinator_args());
+    let invocation = run_cli(&dir, &args, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert_eq!(invocation.stdout.trim(), "No tasks.");
+    drop(_mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_create_and_update_human_output_match_source_lines() {
+    let dir = temp_dir("task-created-updated");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                (
+                    "orchestration.taskCreate",
+                    json!({"task": {"taskId": "task-1", "runId": "run-1",
+                                     "status": "pending", "dependsOn": []}}),
+                ),
+                (
+                    "orchestration.taskUpdate",
+                    json!({"task": {"taskId": "task-9", "runId": "run-1",
+                                     "status": "completed", "dependsOn": []}}),
+                ),
+            ],
+        ),
+    );
+    let mut create = vec![
+        "orchestration",
+        "task-create",
+        "--instructions",
+        "Do the work",
+    ];
+    create.extend(coordinator_args());
+    let created = run_cli(&dir, &create, &[]);
+    assert_eq!(created.exit_code, 0, "{}", created.stderr);
+    assert_eq!(created.stdout.trim(), "Created task-1 [pending]");
+    let mut update = vec![
+        "orchestration",
+        "task-update",
+        "--task",
+        "task-9",
+        "--status",
+        "completed",
+    ];
+    update.extend(coordinator_args());
+    let updated = run_cli(&dir, &update, &[]);
+    assert_eq!(updated.exit_code, 0, "{}", updated.stderr);
+    assert_eq!(updated.stdout.trim(), "Updated task-9 -> completed");
+    drop(_mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}

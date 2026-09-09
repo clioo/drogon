@@ -1046,3 +1046,58 @@ fn concurrent_run_creation_reuses_one_durable_receipt_after_reopen() {
     );
     assert_eq!(listed["runs"].as_array().unwrap().len(), 1);
 }
+
+#[test]
+fn task_list_with_dispatched_task_reports_assignee_and_dispatch_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let host = real_host_id(&engine);
+    let run = ok(
+        &engine,
+        "orchestration.runCreate",
+        "assignee-run",
+        run_create_params(&host, "owner", "assignee"),
+    )["run"]["runId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let task = ok(
+        &engine,
+        "orchestration.taskCreate",
+        "assignee-task",
+        task_create_params(&host, &run, "owner", 1, "dispatched work", &[]),
+    )["task"]["taskId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let state = json!({
+        "result": {"runId": run, "taskId": task, "dispatchId": "dispatch-7",
+            "consumerGeneration": 1, "workspaceId": "folder",
+            "assignmentState": "ready", "readiness": "notObserved",
+            "processVerdict": "live",
+            "sessionIdentity": {"sessionId": "sess-4", "incarnation": "1"},
+            "effects": [], "residualResources": []},
+        "launch": {"harnessId": "claude", "permissionMode": "inherit"},
+        "outcome": null, "report_message_id": null, "cleanup_owned": true,
+    });
+    let conn = rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+    conn.execute(
+        "INSERT INTO orchestration_attempts(dispatch_id,host_id,run_id,task_id,is_current,fenced,retry_of,state_json) VALUES (?1,?2,?3,?4,1,0,NULL,?5)",
+        rusqlite::params!["dispatch-7", host, run, task, state.to_string()],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE orchestration_tasks SET status='dispatched' WHERE task_id=?1 AND run_id=?2",
+        rusqlite::params![task, run],
+    )
+    .unwrap();
+    drop(conn);
+    let mut params = coordinator_scope_params(&host, &run, "owner", 1);
+    params["brief"] = json!(false);
+    let result = ok(&engine, "orchestration.taskList", "assignee-list", params);
+    let rows = result["tasks"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["status"], "dispatched");
+    assert_eq!(rows[0]["assigneeHandle"], "sess-4");
+    assert_eq!(rows[0]["dispatchId"], "dispatch-7");
+}

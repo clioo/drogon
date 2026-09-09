@@ -1101,7 +1101,7 @@ pub async fn run(
                 json,
                 || {
                     format!(
-                        "Task {} ({})",
+                        "Created {} [{}]",
                         result.task.task_id,
                         wire_task_status(result.task.status)
                     )
@@ -1208,15 +1208,34 @@ pub async fn run(
                     }
                     let mut lines = Vec::new();
                     for task in &result.tasks {
-                        let title = task.title.clone().unwrap_or_else(|| task.spec.clone());
-                        let truncated = if task.spec_truncated { "…" } else { "" };
-                        lines.push(format!(
-                            "{} [{}] {}{}",
+                        // Source label order: display_name ?? task_title ?? spec,
+                        // sliced to 60 characters (JS string slice counts UTF-16
+                        // units; chars are the native equivalent). No truncation
+                        // marker: the source human line prints none.
+                        let label = task
+                            .display_name
+                            .clone()
+                            .or_else(|| task.title.clone())
+                            .unwrap_or_else(|| task.spec.clone());
+                        let head: String = label.chars().take(60).collect();
+                        let head = format!(
+                            "{} [{}] {}",
                             task.task_id,
                             wire_task_status(task.status),
-                            title,
-                            truncated
-                        ));
+                            head
+                        );
+                        if task.status == TaskStatus::Dispatched
+                            && let Some(handle) = &task.assignee_handle
+                        {
+                            lines.push(format!(
+                                "{} -> {} ({})",
+                                head,
+                                handle,
+                                task.dispatch_id.as_deref().unwrap_or("?")
+                            ));
+                        } else {
+                            lines.push(head);
+                        }
                     }
                     if let Some(cursor) = &result.next_cursor {
                         lines.push(format!("More tasks: --cursor {}", cursor.0));
