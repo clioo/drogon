@@ -49,6 +49,9 @@ const PS_TIMEOUT: Duration = Duration::from_secs(2);
 const REAP_RESERVE: Duration = Duration::from_millis(100);
 #[cfg(unix)]
 const TICK: Duration = Duration::from_millis(25);
+/// Combined bytes one bounded helper may retain across both streams.
+#[cfg(unix)]
+const HELPER_OUTPUT_CAP: usize = 1 << 20;
 
 fn in_child_mode() -> bool {
     std::env::var_os(CHILD_MODE_ENV).is_some()
@@ -60,8 +63,8 @@ fn fixture_dir_from_env() -> PathBuf {
 
 /// Canonical birth identity: `lstart` under a pinned locale/TZ (amendment
 /// C). The fixture children capture births with the same pinned
-/// environment, so string comparison is meaningful.
-#[cfg(unix)]
+/// environment, so string comparison is meaningful. Pure string code,
+/// kept platform-neutral because `parse_ledger_line` is platform-neutral.
 fn canonical_birth(raw: &str) -> String {
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -139,10 +142,25 @@ fn run_until(
         },
     ];
     for pipe in &pipes {
-        // SAFETY: fcntl on a live, owned pipe fd.
-        unsafe {
-            let flags = libc::fcntl(pipe.fd, libc::F_GETFL);
-            libc::fcntl(pipe.fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        // SAFETY: fcntl on a live, owned pipe fd. Nonblocking setup must
+        // succeed or the drain could block: fail closed.
+        let flags = unsafe { libc::fcntl(pipe.fd, libc::F_GETFL) };
+        if flags == -1
+            || unsafe { libc::fcntl(pipe.fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
+        {
+            let _ = child.kill();
+            let reap_deadline = Instant::now() + REAP_RESERVE;
+            while child.try_wait().ok().flatten().is_none() && Instant::now() < reap_deadline {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let reaped = child.try_wait().ok().flatten().is_some();
+            return Err(BoundedError {
+                message: format!(
+                    "set_nonblocking failed: {}",
+                    std::io::Error::last_os_error()
+                ),
+                unreaped: if reaped { None } else { Some(child) },
+            });
         }
     }
     let mut status: Option<std::process::ExitStatus> = None;
@@ -184,21 +202,57 @@ fn run_until(
         // SAFETY: poll_fds is valid for its length; fds stay open.
         let ready =
             unsafe { libc::poll(poll_fds.as_mut_ptr(), poll_fds.len() as libc::nfds_t, 10) };
+        if ready < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() != std::io::ErrorKind::Interrupted {
+                let _ = child.kill();
+                let reap_deadline = Instant::now() + REAP_RESERVE;
+                while child.try_wait().ok().flatten().is_none() && Instant::now() < reap_deadline {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let reaped = child.try_wait().ok().flatten().is_some();
+                return Err(BoundedError {
+                    message: format!("poll failed: {err}"),
+                    unreaped: if reaped { None } else { Some(child) },
+                });
+            }
+            continue;
+        }
         if ready > 0 {
             for poll_fd in &poll_fds {
                 let Some(pipe) = pipes.iter_mut().find(|p| p.fd == poll_fd.fd) else {
                     continue;
                 };
-                let mut chunk = [0u8; 8192];
-                loop {
+                // Finite work per ready fd per cycle: bounded chunk count
+                // and a combined cap, with the deadline re-checked between
+                // chunks, so a continuously-producing helper can neither
+                // monopolize the loop nor grow memory without limit.
+                let mut chunks = 0u32;
+                while chunks < 16 {
+                    if Instant::now() >= work_deadline {
+                        break;
+                    }
+                    let mut chunk = [0u8; 8192];
                     // SAFETY: live nonblocking pipe fd.
                     let n = unsafe { libc::read(pipe.fd, chunk.as_mut_ptr().cast(), chunk.len()) };
                     if n > 0 {
-                        pipe.bytes.extend_from_slice(&chunk[..n as usize]);
+                        let room = HELPER_OUTPUT_CAP.saturating_sub(pipe.bytes.len());
+                        pipe.bytes
+                            .extend_from_slice(&chunk[..(n as usize).min(room)]);
+                        chunks += 1;
                         continue;
                     }
                     if n == 0 {
                         pipe.open = false;
+                    } else {
+                        let err = std::io::Error::last_os_error();
+                        if err.kind() == std::io::ErrorKind::Interrupted {
+                            continue;
+                        }
+                        if err.kind() != std::io::ErrorKind::WouldBlock {
+                            // EIO and friends: no more useful data.
+                            pipe.open = false;
+                        }
                     }
                     break;
                 }
@@ -469,6 +523,7 @@ impl CleanupReport {
     }
 }
 
+#[cfg(unix)]
 struct ChildRun {
     /// Exit evidence from the direct Child handle (no raw waitpid mixed
     /// into the Child lifecycle, amendment D).
@@ -671,6 +726,15 @@ fn supervise(test_name: &str, overall: Duration) -> ChildRun {
         }
     }
 
+    // A bounded helper whose own reap could not be confirmed is recorded
+    // as unverifiable evidence: dropping a Child is not a reap, so the
+    // run fails and the directory is retained.
+    if !unreaped_helpers.is_empty() {
+        unverifiable.push(format!(
+            "{} bounded helper(s) could not confirm their own reap",
+            unreaped_helpers.len()
+        ));
+    }
     // Keep the parent-owned directory until the runner and every known
     // identity are verified exited; retain on uncertainty (amendment B).
     let retain = !unverifiable.is_empty() || (!killed_by_parent && report.is_none());
@@ -1253,10 +1317,8 @@ fn isolation_setup_failure_fails_closed_without_probing() {
 /// to the ledger (it could not be rechecked before a signal); the caller
 /// reports the gap through declared-vs-registered accounting instead.
 #[cfg(unix)]
-fn append_ledger(dir: &Path, pid: u32) -> bool {
-    let Ok(birth) = birth_of(pid) else {
-        return false;
-    };
+fn append_ledger(dir: &Path, pid: u32) -> Result<(), BoundedError> {
+    let birth = birth_of(pid)?;
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .append(true)
@@ -1264,7 +1326,7 @@ fn append_ledger(dir: &Path, pid: u32) -> bool {
         .open(dir.join(LEDGER_FILE))
         .expect("open ledger");
     writeln!(file, "{pid}|{birth}").expect("append ledger");
-    true
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -1283,7 +1345,12 @@ fn spawn_shell_child(dir: &Path, script: &str, register: bool) -> u32 {
         .expect("spawn shell child");
     let pid = child.id();
     if register {
-        append_ledger(dir, pid);
+        // Registration failure must NOT silently drop the BoundedError:
+        // the caller reports the gap via declared-vs-registered
+        // accounting (amendment B), which makes the run unverifiable.
+        if let Err(err) = append_ledger(dir, pid) {
+            panic!("register child with birth identity failed: {}", err.message);
+        }
     }
     pid
 }
@@ -1347,7 +1414,12 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
         // append-only ledger while tearing down (amendment B).
         let pid = spawn_shell_child(&dir, "sleep 5", false);
         std::thread::sleep(Duration::from_millis(300));
-        append_ledger(&dir, pid);
+        if let Err(err) = append_ledger(&dir, pid) {
+            panic!(
+                "late registration with birth identity failed: {}",
+                err.message
+            );
+        }
         write_child_report(
             &dir,
             &ChildReport {
@@ -1555,16 +1627,18 @@ mod ps_classification {
     const VALID: &[u8] = b"Mon Sep  9 08:00:00 2026 S\n";
 
     fn entry(birth: &str) -> LedgerEntry {
+        // Production entries are canonicalized at parse time; the test
+        // helper applies the same invariant.
         LedgerEntry {
             pid: 4242,
-            birth: birth.to_string(),
+            birth: canonical_birth(birth),
         }
     }
 
     #[test]
     fn valid_record_decides_alive_and_replaced() {
         let parsed = parse_ps_record(&output(0, VALID, b"")).expect("valid record");
-        assert_eq!(parsed.0, "Mon Sep  9 08:00:00 2026");
+        assert_eq!(parsed.0, "Mon Sep 9 08:00:00 2026");
         assert_eq!(
             classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &output(0, VALID, b"")),
             Identity::Alive
