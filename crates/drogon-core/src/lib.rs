@@ -957,6 +957,8 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "createdAt": r.get::<_, String>(10)?,
             "agentState": agent_state,
             "agentStateAt": needs_input_at,
+            "agentPromptPreview": null,
+            "cacheIdleAt": null,
             "harnessId": r.get::<_, Option<String>>(11)?,
         }),
     ))
