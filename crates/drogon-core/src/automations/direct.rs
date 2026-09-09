@@ -601,12 +601,19 @@ pub fn reconcile_decision(
             exit_code: evidence.exit_code,
         };
     }
-    if evidence.agent_state == "needs_input" {
-        // The stamp is second-truncated at write time, so it can read up
-        // to just under a second *before* the true signal instant; the
-        // +999 ms tolerance makes the edge exact, not approximate: a
-        // signal stamped a full second (or more) before dispatch can only
-        // predate this run.
+    if evidence.agent_state == "idle" || evidence.agent_state == "needs_input" {
+        // The reference's busy-to-idle edge (issue #360 parity): a run
+        // dispatched against a live interactive session finalizes when the
+        // session's agent state reads `idle` (turn concluded — the fork
+        // maps every turn-end hook to done/idle) with a stamp proven not
+        // to predate this run. The `needs_input` arm stays for
+        // interactive sessions whose harness reported a genuine wait that
+        // also ended the turn (and for rows written before the turn-end
+        // reclassification); a stamp seconds-truncated at write time can
+        // read up to just under a second *before* the true signal instant,
+        // so the +999 ms tolerance makes the edge exact, not approximate:
+        // a signal stamped a full second (or more) before dispatch can
+        // only predate this run.
         let edge_proven = match (
             evidence.agent_state_at.as_deref().and_then(rfc3339_to_secs),
             run.dispatched_at,

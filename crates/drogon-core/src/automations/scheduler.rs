@@ -471,9 +471,10 @@ fn session_evidence(engine: &Engine, session_id: &str) -> Option<SessionEvidence
 }
 
 /// Finalizes previously `Dispatched` runs whose terminal state is now
-/// provable: an exited session, or a live session whose agent turn ended
-/// after dispatch (the reference's busy-to-idle edge, adapted to this
-/// build's hook wait-signal). Sessions gone from this process close out
+/// provable: an exited session, or a live session whose agent went
+/// `idle` (the reference's busy-to-idle edge, restored for issue #360)
+/// or reported a turn-ending wait signal after dispatch. Sessions gone
+/// from this process close out
 /// as stranded, never as completed. Holds no database guard across the
 /// per-handle snapshot reads; each row finalizes in its own transaction.
 fn reconcile_outstanding(engine: &Engine, now_ms: f64, summary: &mut TickSummary) {

@@ -35,6 +35,10 @@ const session = z.object({
   agentStateAt: z.string().nullable().optional(),
   agentPromptPreview: z.string().max(2048).nullable().optional(),
   cacheIdleAt: z.string().nullable().optional(),
+  // Sidebar lineage (#359): the daemon reports the orchestrator-spawned
+  // parent when the spawn carried DROGON_SESSION_ID; optional so an older
+  // service without the column still validates.
+  parentSessionId: z.string().nullable().optional(),
 });
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const harness = z

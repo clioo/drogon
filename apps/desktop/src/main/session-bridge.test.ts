@@ -65,4 +65,13 @@ describe("isolateSessionList", () => {
     expect(isolated.sessions).toEqual([]);
     expect(isolated.warnings).toHaveLength(1);
   });
+
+  // Issue #359: the daemon reports the orchestrator-spawned parent; the
+  // zod parse must keep it (unknown keys are stripped by default).
+  it("keeps a child session's parentSessionId for the sidebar lineage", () => {
+    const child = { ...live, id: "child-1", parentSessionId: "live-1" };
+    const isolated = isolateSessionList({ sessions: [live, child] });
+    expect(isolated.warnings).toEqual([]);
+    expect(isolated.sessions[1]?.parentSessionId).toBe("live-1");
+  });
 });

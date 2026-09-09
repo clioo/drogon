@@ -18,34 +18,52 @@
 //!   `agent_end`/`agent_settled`/`tool_approval_requested` as
 //!   [`pi_events::AGENT_END`]/[`pi_events::TOOL_APPROVAL_REQUESTED`].
 //! - codex: a private `CODEX_HOME/hooks.json` command hook, reporting
-//!   [`codex_events::PERMISSION_REQUEST`] and [`codex_events::STOP`] as wait
-//!   signals and its turn/tool lifecycle events as clears.
+//!   [`codex_events::PERMISSION_REQUEST`] and [`codex_events::STOP`].
+//!
+//! The fork's exact wait/clear split (issue #360, 100% parity with the
+//! reference's agent-hook listeners): a session is `needs_input` only
+//! while the harness is genuinely waiting on the user — claude
+//! `Notification` (this repo's install surface for the fork's
+//! `PermissionRequest`), opencode `permission.asked`/`question.asked`, pi
+//! `tool_approval_requested`, codex `PermissionRequest`. Turn-end and
+//! idle signals are CLEARS, never waits: claude `Stop`, opencode
+//! `session.idle`, pi `agent_end`/`agent_settled` and codex `Stop` all
+//! mean the turn concluded (the reference maps every one of them to
+//! `done`), so a finished Pi turn reads `idle`, never `needs_input`.
 //!
 //! For claude, later PTY output alone clears the signal back to
 //! activity-based derivation (`session.rs`'s reader thread clears it
 //! unconditionally on every chunk) — a plain CLI that only redraws in
 //! response to real input. OpenCode, Pi, and interactive Codex can repaint
 //! while genuinely still waiting, so generic PTY output would clear a real
-//! wait signal within a frame or two and make "the agent is waiting for you"
-//! a lie. Their sessions opt out of the generic clear
+//! wait signal within a frame or two and make "the agent is waiting for
+//! you" a lie. Their sessions opt out of the generic clear
 //! (`SessionHandle::set_explicit_wait_clear`) and are cleared only by their
-//! own hook's resumption events — [`opencode_events::NEW_TURN`]/
+//! own hook's events — the resumption events [`opencode_events::NEW_TURN`]/
 //! [`opencode_events::TOOL_START`]/[`opencode_events::PERMISSION_REPLIED`]/
 //! [`opencode_events::QUESTION_REPLIED`] and [`pi_events::AGENT_START`]/
-//! [`pi_events::TOOL_START`]/[`pi_events::TOOL_APPROVAL_RESOLVED`] — via
-//! [`classify_hook_event`]. Exit takes precedence over either mechanism.
+//! [`pi_events::TOOL_START`]/[`pi_events::TOOL_APPROVAL_RESOLVED`], plus the
+//! turn-end clears [`opencode_events::SESSION_IDLE`] and
+//! [`pi_events::AGENT_END`] — via [`classify_hook_event`]. Exit takes
+//! precedence over either mechanism.
 //!
 //! Those same explicit-clear sessions also derive `Working` from their
 //! hook lifecycle ([`HookTurn`]), not from the raw activity clock: a turn
-//! reported by a clear hook stays `Working` through silent thinking past
-//! the activity window, and the user's own echo at an idle prompt never
-//! manufactures a spinner the agent's hooks never reported (#358 fork
-//! parity — Orca's sidebar status is hook-driven, never output-driven).
+//! reported by a resumption hook stays `Working` through silent thinking
+//! past the activity window, and the user's own echo at an idle prompt
+//! never manufactures a spinner the agent's hooks never reported (#358
+//! fork parity — Orca's sidebar status is hook-driven, never
+//! output-driven). The turn-end clears conclude that lifecycle: they
+//! close the turn and read `idle` on the harness's own authority, so the
+//! user's echo at the idle prompt after a finished turn does not spin the
+//! row back to `working` either.
 
 use std::time::Duration;
 
 /// Claude Code `--settings` hook event names (`hooks.rs`'s
-/// `settings_json`/`hook_command`). Unchanged by this task.
+/// `settings_json`/`hook_command`). `Notification` stays the wait signal
+/// (this install's surface for the fork's `PermissionRequest`); `Stop` is
+/// a turn-end clear — the fork maps Claude's `Stop` to `done`.
 pub(crate) mod claude_events {
     pub(crate) const STOP: &str = "Stop";
     pub(crate) const NOTIFICATION: &str = "Notification";
@@ -57,8 +75,8 @@ pub(crate) mod claude_events {
 /// `harness_hooks::opencode` for what's deliberately not ported: child
 /// session ownership, busy/retry backoff, message previews).
 pub(crate) mod opencode_events {
-    /// `session.idle`: the agent stopped and is waiting for the user, like
-    /// Claude's `Stop`.
+    /// `session.idle`: the agent stopped and its turn concluded (the
+    /// reference maps this to `done`) — a CLEAR, never a wait (#360).
     pub(crate) const SESSION_IDLE: &str = "SessionIdle";
     /// `permission.asked`.
     pub(crate) const PERMISSION_REQUEST: &str = "PermissionRequest";
@@ -79,9 +97,11 @@ pub(crate) mod opencode_events {
 /// `src/main/pi/agent-status-handler-source.ts` (`pi.on(...)` names only).
 pub(crate) mod pi_events {
     /// `agent_end` (without `willContinue`) or `agent_settled`: the agent's
-    /// turn concluded and it is waiting for the user, like Claude's `Stop`.
+    /// turn concluded (the reference maps this to `done`) — a CLEAR, never
+    /// a wait (issue #360: a finished turn must read `idle`).
     pub(crate) const AGENT_END: &str = "AgentEnd";
-    /// `tool_approval_requested`.
+    /// `tool_approval_requested`: the run is parked on a permission prompt —
+    /// the only genuine Pi wait signal.
     pub(crate) const TOOL_APPROVAL_REQUESTED: &str = "ToolApprovalRequested";
     /// `before_agent_start` or `agent_start`: a new turn started.
     pub(crate) const AGENT_START: &str = "AgentStart";
@@ -92,9 +112,10 @@ pub(crate) mod pi_events {
 }
 
 /// Codex hook event names. Codex uses the same names in hooks.json and in the
-/// stdin payload sent to a command hook. `PermissionRequest` and `Stop` are
-/// the only events that mean the root session is waiting for the user;
-/// `SubagentStop` merely completes a child and must not make the root red dot.
+/// stdin payload sent to a command hook. `PermissionRequest` is the only
+/// event that means the root session is waiting for the user; `Stop` is a
+/// turn-end clear (the reference maps it to `done`), and `SubagentStop`
+/// merely completes a child.
 pub(crate) mod codex_events {
     pub(crate) const SESSION_START: &str = "SessionStart";
     pub(crate) const USER_PROMPT_SUBMIT: &str = "UserPromptSubmit";
@@ -107,18 +128,16 @@ pub(crate) mod codex_events {
 }
 
 const WAIT_EVENTS: &[&str] = &[
-    claude_events::STOP,
+    // Fork parity (issue #360): only genuine user-response waits. Turn-end
+    // and idle signals are clears, never waits.
     claude_events::NOTIFICATION,
-    opencode_events::SESSION_IDLE,
     opencode_events::PERMISSION_REQUEST,
     opencode_events::ASK_USER_QUESTION,
-    pi_events::AGENT_END,
     pi_events::TOOL_APPROVAL_REQUESTED,
     codex_events::PERMISSION_REQUEST,
-    codex_events::STOP,
 ];
 
-const CLEAR_EVENTS: &[&str] = &[
+const RESUMPTION_EVENTS: &[&str] = &[
     opencode_events::NEW_TURN,
     opencode_events::TOOL_START,
     opencode_events::PERMISSION_REPLIED,
@@ -134,13 +153,26 @@ const CLEAR_EVENTS: &[&str] = &[
     codex_events::SUBAGENT_STOP,
 ];
 
-/// What a `session.hook_event` name means: set the wait signal, or clear it.
-/// `None` (an unrecognized name) is refused by the caller before this is
-/// reached — see `hooks::do_session_hook_event`.
+/// Turn-end / idle clears (the fork maps every one of these to `done`).
+/// Kept apart from the resumption events because they also CLOSE the hook
+/// turn: a resumption hook keeps `HookTurn::Active`, a turn-end hook moves
+/// it to `HookTurn::Ended`.
+const TURN_END_EVENTS: &[&str] = &[
+    claude_events::STOP,
+    opencode_events::SESSION_IDLE,
+    pi_events::AGENT_END,
+    codex_events::STOP,
+];
+
+/// What a `session.hook_event` name means: park the session on a genuine
+/// user wait, report turn activity, or conclude the turn. `None` (an
+/// unrecognized name) is refused by the caller before this is reached —
+/// see `hooks::do_session_hook_event`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HookSignal {
     Wait,
-    Clear,
+    TurnStart,
+    TurnEnd,
 }
 
 /// Classifies a `session.hook_event` event name. A single flat namespace
@@ -151,8 +183,10 @@ pub(crate) enum HookSignal {
 pub(crate) fn classify_hook_event(event: &str) -> Option<HookSignal> {
     if WAIT_EVENTS.contains(&event) {
         Some(HookSignal::Wait)
-    } else if CLEAR_EVENTS.contains(&event) {
-        Some(HookSignal::Clear)
+    } else if RESUMPTION_EVENTS.contains(&event) {
+        Some(HookSignal::TurnStart)
+    } else if TURN_END_EVENTS.contains(&event) {
+        Some(HookSignal::TurnEnd)
     } else {
         None
     }
@@ -192,7 +226,7 @@ impl AgentState {
 pub(crate) enum HookTurn {
     /// No hook lifecycle governs this session; the activity clock decides.
     Untracked,
-    /// A clear hook fired with no later wait hook: the agent's turn is
+    /// A resumption hook fired with no later wait hook: the agent's turn is
     /// running. `Working` is then truthful for the whole turn — including
     /// silent stretches past the activity window — until the next wait
     /// hook hands the session back to the user.
@@ -201,6 +235,12 @@ pub(crate) enum HookTurn {
     /// event, or after a daemon restart lost the in-memory fact): fall
     /// back to the activity clock rather than guess.
     Inactive,
+    /// A turn-end hook concluded the turn (`AgentEnd`/`SessionIdle`/`Stop`,
+    /// issue #360): the row reads `Idle` on the harness's own authority
+    /// and stays there — the user's echo at the idle prompt does not spin
+    /// it back to `Working` — until the next resumption hook opens a new
+    /// turn.
+    Ended,
 }
 
 /// What this module knows about a session's PTY output history, independent
@@ -217,7 +257,8 @@ pub(crate) enum Activity {
 /// buffered output, including while waiting for input); a live session with
 /// an uncleared hook signal is `NeedsInput` regardless of the activity
 /// clock; a hook-tracked live turn is `Working` regardless of output
-/// silence; a never-observed session without a signal is `Unknown` rather
+/// silence; a hook-tracked concluded turn is `Idle` regardless of later
+/// echo; a never-observed session without a signal is `Unknown` rather
 /// than guessed as idle, since idle implies activity once happened.
 pub(crate) fn derive(
     exited: bool,
@@ -233,6 +274,9 @@ pub(crate) fn derive(
     }
     if matches!(hook_turn, HookTurn::Active) {
         return AgentState::Working;
+    }
+    if matches!(hook_turn, HookTurn::Ended) {
+        return AgentState::Idle;
     }
     match activity {
         Activity::NeverObserved => AgentState::Unknown,
@@ -415,15 +459,15 @@ mod tests {
     }
 
     #[test]
-    fn classify_hook_event_covers_every_harness_wait_and_clear_name() {
+    fn classify_hook_event_covers_every_harness_wait_and_turn_name() {
+        // Issue #360 fork parity: a session is needs_input only while the
+        // harness is genuinely waiting on the user.
         for event in [
-            claude_events::STOP,
             claude_events::NOTIFICATION,
-            opencode_events::SESSION_IDLE,
             opencode_events::PERMISSION_REQUEST,
             opencode_events::ASK_USER_QUESTION,
-            pi_events::AGENT_END,
             pi_events::TOOL_APPROVAL_REQUESTED,
+            codex_events::PERMISSION_REQUEST,
         ] {
             assert_eq!(
                 classify_hook_event(event),
@@ -431,6 +475,21 @@ mod tests {
                 "{event} must be a wait signal"
             );
         }
+        // Turn-end/idle signals conclude the turn (the reference maps
+        // every one to `done`).
+        for event in [
+            claude_events::STOP,
+            opencode_events::SESSION_IDLE,
+            pi_events::AGENT_END,
+            codex_events::STOP,
+        ] {
+            assert_eq!(
+                classify_hook_event(event),
+                Some(HookSignal::TurnEnd),
+                "{event} must be a turn-end signal"
+            );
+        }
+        // Resumption events report turn activity.
         for event in [
             opencode_events::NEW_TURN,
             opencode_events::TOOL_START,
@@ -439,11 +498,17 @@ mod tests {
             pi_events::AGENT_START,
             pi_events::TOOL_START,
             pi_events::TOOL_APPROVAL_RESOLVED,
+            codex_events::SESSION_START,
+            codex_events::USER_PROMPT_SUBMIT,
+            codex_events::PRE_TOOL_USE,
+            codex_events::POST_TOOL_USE,
+            codex_events::SUBAGENT_START,
+            codex_events::SUBAGENT_STOP,
         ] {
             assert_eq!(
                 classify_hook_event(event),
-                Some(HookSignal::Clear),
-                "{event} must be a clear signal"
+                Some(HookSignal::TurnStart),
+                "{event} must be a turn-start signal"
             );
         }
     }
@@ -453,19 +518,32 @@ mod tests {
         for event in ["NotificationSent", "ToolResult", "bogus", ""] {
             assert_eq!(classify_hook_event(event), None, "{event} must be unknown");
         }
-        for event in [
-            codex_events::SESSION_START,
-            codex_events::USER_PROMPT_SUBMIT,
-            codex_events::PRE_TOOL_USE,
-            codex_events::POST_TOOL_USE,
-            codex_events::SUBAGENT_START,
-            codex_events::SUBAGENT_STOP,
+    }
+
+    #[test]
+    fn ended_hook_turn_reads_idle_and_ignores_echo() {
+        // #360: after a turn-end hook the row is idle on the harness's own
+        // authority — even for recent activity (the user's echo at the
+        // idle prompt) and even with no observed activity at all.
+        for activity in [
+            Activity::NeverObserved,
+            Activity::LastActiveAgo(Duration::from_millis(0)),
+            Activity::LastActiveAgo(ACTIVITY_WINDOW + Duration::from_secs(60)),
         ] {
-            assert_eq!(classify_hook_event(event), Some(HookSignal::Clear));
+            assert_eq!(
+                derive(false, activity, false, HookTurn::Ended),
+                AgentState::Idle
+            );
         }
-        for event in [codex_events::PERMISSION_REQUEST, codex_events::STOP] {
-            assert_eq!(classify_hook_event(event), Some(HookSignal::Wait));
-        }
+        assert_eq!(
+            derive(
+                true,
+                Activity::LastActiveAgo(Duration::from_millis(0)),
+                false,
+                HookTurn::Ended
+            ),
+            AgentState::Exited
+        );
     }
 
     #[test]

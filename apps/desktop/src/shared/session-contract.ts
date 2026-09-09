@@ -79,6 +79,16 @@ export type Session = {
    * re-uses `command`/`args` verbatim instead.
    */
   harnessId?: HarnessId | null;
+  /**
+   * Additive (#359, subagent nesting): the session whose PTY spawned this
+   * one (a `drogon-cli` invoked inside a terminal reports its inherited
+   * `DROGON_SESSION_ID` — the fork's env-inheritance lineage). The sidebar
+   * nests the row under the parent session's row when both attach to the
+   * same worktree, like the fork's `orchestration.parentPaneKey` tree.
+   * `null`/absent for parentless (UI-spawned) sessions; a parent outside
+   * the row set renders flat (the fork's unreachable-row normalization).
+   */
+  parentSessionId?: string | null;
 };
 export type Status = {
   hostId: string;

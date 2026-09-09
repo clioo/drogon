@@ -4,7 +4,7 @@
    pure props card over this repo's Worktree/Session contract; the title
    is the inline-rename editor, the meta row is the badges projection,
    and right-click / Menu-key / kebab open the worktree context menu.) */
-import { useState, useSyncExternalStore } from "react";
+import { Fragment, useState, useSyncExternalStore } from "react";
 import { MoreHorizontal, StickyNote } from "lucide-react";
 import type { Session, Worktree } from "../../../../shared/session-contract";
 import { AgentStateIcon } from "./AgentStateIcon";
@@ -25,9 +25,96 @@ import {
 import type { WorktreeCardPrDisplay } from "./worktree-card-pr-display";
 import { useWorktreeGitStatus } from "./use-worktree-git-status";
 import { buildWorktreeAgentRows } from "./worktree-agent-rows";
+import type { WorktreeAgentRow as WorktreeAgentRowData } from "./worktree-agent-rows";
 import { WorktreeAgentRow } from "./WorktreeAgentRow";
 import { useGeneratedAgentTitles } from "../settings/agent-generated-titles";
+import { buildWorktreeAgentRowTree } from "./worktree-agent-lineage";
 import type { TabStripState } from "./tab-order";
+
+// Fork worktree-card-agents-expansion-state.ts adaptation (issue #359):
+// disclosure state keyed by worktree id in a module map so a card remount
+// (project collapse, sidebar rebuild) does not reset the user's collapsed
+// parents — the source keeps it out of component state for the same reason.
+const collapsedLineageParentsByWorktree = new Map<string, Set<string>>();
+
+function readCollapsedParents(worktreeId: string): Set<string> {
+  let collapsed = collapsedLineageParentsByWorktree.get(worktreeId);
+  if (!collapsed) {
+    collapsed = new Set();
+    collapsedLineageParentsByWorktree.set(worktreeId, collapsed);
+  }
+  return collapsed;
+}
+
+type AgentBranchContext = {
+  row: WorktreeAgentRowData;
+  ancestorSessionIds: ReadonlySet<string>;
+  childrenByParentSessionId: ReadonlyMap<string, WorktreeAgentRowData[]>;
+  collapsedLineageParents: ReadonlySet<string>;
+  onToggleParent: (sessionId: string) => void;
+  anyRootHasChildren: boolean;
+  disabled: boolean;
+  onSelect: (sessionId: string) => void;
+  depth?: number;
+};
+
+/**
+ * One fork lineage branch (WorktreeCardAgents.renderAgentBranch): the row,
+ * then — while expanded — its children inside the boxed
+ * `worktree-agent-lineage-children` group. Cycles bail instead of
+ * recursing forever (the fork's ancestor-set guard).
+ */
+function renderAgentBranch(
+  context: AgentBranchContext,
+): React.ReactNode {
+  const { row } = context;
+  if (context.ancestorSessionIds.has(row.session.id)) {
+    return null;
+  }
+  const childRows =
+    context.childrenByParentSessionId.get(row.session.id) ?? [];
+  const hasChildAgents = childRows.length > 0;
+  const depth = context.depth ?? 0;
+  const isRootRow = depth === 0;
+  // Why: the fork defaults branches to expanded; only an explicit user
+  // collapse folds them ("spawned child agents are actionable work").
+  const expanded = !context.collapsedLineageParents.has(row.session.id);
+  const descendantAncestorSessionIds = new Set(context.ancestorSessionIds);
+  descendantAncestorSessionIds.add(row.session.id);
+  const childContext: AgentBranchContext = {
+    ...context,
+    ancestorSessionIds: descendantAncestorSessionIds,
+    depth: depth + 1,
+  };
+  return (
+    <Fragment key={row.session.id}>
+      <WorktreeAgentRow
+        row={row}
+        disabled={context.disabled}
+        onSelect={context.onSelect}
+        childCount={hasChildAgents ? childRows.length : undefined}
+        childrenExpanded={expanded}
+        onToggleChildren={
+          hasChildAgents
+            ? () => context.onToggleParent(row.session.id)
+            : undefined
+        }
+        reserveDisclosureGutter={
+          isRootRow && context.anyRootHasChildren && !hasChildAgents
+        }
+        // Why: the fork's isLineageChild is depth === 1 exactly.
+        isChildRow={depth === 1}
+      />
+      {hasChildAgents && expanded ? (
+        <div className="worktree-agent-lineage-children">
+          {childRows.map((childRow) =>
+            renderAgentBranch({ ...childContext, row: childRow }),
+          )}
+        </div>
+      ) : null}
+    </Fragment>
+  );
+}
 
 /**
  * One worktree card: inline-rename title, agent-state dot, unread marker
@@ -94,6 +181,7 @@ export function WorktreeCard({
   onRename: ((name: string) => Promise<string | null>) | null;
 }) {
   const [beginEditing, setBeginEditing] = useState(false);
+  const [, forceCollapsedParentsBump] = useState(0);
   const attached = sessions.filter(
     (session) => session.workspaceId === worktree.workspaceId,
   );
@@ -107,6 +195,29 @@ export function WorktreeCard({
     customTitles: { ...generatedTitles, ...tabStrip?.titles },
     activeSessionId,
   });
+  // Issue #359 (#359 parity): nest rows under the recorded parent session
+  // like the fork's buildAgentRowLineageTree — children render inside a
+  // boxed group under the parent row, with the fork's disclosure chrome.
+  // The summary below still derives from every row, so counts can never
+  // disagree with the tree (same source the fork summarizes).
+  const { rootRows, childrenByParentSessionId } =
+    buildWorktreeAgentRowTree(rows);
+  const collapsedLineageParents = readCollapsedParents(worktree.id);
+  const toggleLineageParent = (sessionId: string) => {
+    if (collapsedLineageParents.has(sessionId)) {
+      collapsedLineageParents.delete(sessionId);
+    } else {
+      collapsedLineageParents.add(sessionId);
+    }
+    forceCollapsedParentsBump((n) => n + 1);
+  };
+  // Why: root leaf siblings reserve a leading spacer when any root has a
+  // chevron, keeping the state-dot column aligned (fork's
+  // anyRootHasChildren rule).
+  const anyRootHasChildren = rootRows.some(
+    (row) =>
+      (childrenByParentSessionId.get(row.session.id) ?? []).length > 0,
+  );
   const rowSessions = rows.map((row) => row.session);
   const summary = summarizeCardSessions(rowSessions);
   const agentSummary = summarizeCardAgentStates(rowSessions);
@@ -231,21 +342,29 @@ export function WorktreeCard({
           </button>
           {/* Nested session rows (the fork's inline agent list): one row per
             session underneath the summary line, outside the select button
-            so rows stay real buttons. */}
+            so rows stay real buttons. Issue #359: rows with a recorded
+            parent session render as a fork lineage branch — a disclosure
+            chevron on the parent row and a boxed, indented children group
+            beneath it (worktree-card-compact-agent-row.tsx /
+            WorktreeCardAgents.renderCompactAgentBranch). */}
           {rows.length > 0 ? (
             <div
               className="shell-worktree-card-rows"
               role="group"
               aria-label={`${name} sessions`}
             >
-              {rows.map((row) => (
-                <WorktreeAgentRow
-                  key={row.session.id}
-                  row={row}
-                  disabled={disabled}
-                  onSelect={handleSelectSession}
-                />
-              ))}
+              {rootRows.map((row) =>
+                renderAgentBranch({
+                  row,
+                  ancestorSessionIds: new Set(),
+                  childrenByParentSessionId,
+                  collapsedLineageParents,
+                  onToggleParent: toggleLineageParent,
+                  anyRootHasChildren,
+                  disabled,
+                  onSelect: handleSelectSession,
+                }),
+              )}
             </div>
           ) : null}
         </div>

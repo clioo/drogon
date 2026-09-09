@@ -1576,6 +1576,51 @@ footer[data-testid="status-bar"] {
 .worktree-agent-row-hover:disabled {
   cursor: default;
 }
+/* Subagent nesting box (issue #359, ported from the fork's
+   .worktree-agent-lineage-* rules in the reference main.css, compact-card
+   scope): children render in an indented group under the parent row; the
+   parent row carries the disclosure chevron. The rewrite's card rows are
+   the fork's compact inline list, so the compact-list overrides apply
+   verbatim (transparent row surfaces — the box is the indent border, not
+   stacked row cards). */
+.shell-worktree-card-rows .worktree-agent-lineage-parent-row,
+.shell-worktree-card-rows .worktree-agent-lineage-child-row {
+  background: transparent;
+  box-shadow: none;
+}
+
+.shell-worktree-card-rows .worktree-agent-lineage-child-row::before {
+  content: none;
+}
+
+.shell-worktree-card-rows .worktree-agent-lineage-parent-row:hover:not(:disabled),
+.shell-worktree-card-rows .worktree-agent-lineage-child-row:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 1.25%, transparent);
+}
+
+.worktree-agent-lineage-children {
+  margin-left: 0.75rem;
+  padding-left: 0.25rem;
+  border-left: 1px solid color-mix(in srgb, var(--foreground) 16%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 2px;
+}
+
+.dark .worktree-agent-lineage-children {
+  border-left-color: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.dark .shell-worktree-card-rows .worktree-agent-lineage-parent-row:hover:not(:disabled),
+.dark .shell-worktree-card-rows .worktree-agent-lineage-child-row:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.compact-agent-child-disclosure-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ring) 60%, transparent);
+}
 /* Agent-state glyphs moved to the fork-literal `.agent-working-spinner`
    section appended at the end of this file (R16-I); the retired
    `.shell-agent-*` classes above are gone with it. */

@@ -93,7 +93,7 @@ fn hook_event_marks_needs_input_and_output_clears_it() {
     let session_id = session["id"].as_str().unwrap().to_string();
     let incarnation = session["incarnation"].as_str().unwrap().to_string();
 
-    let marked = hook_event(&engine, &session_id, &incarnation, "Stop");
+    let marked = hook_event(&engine, &session_id, &incarnation, "Notification");
     assert_eq!(marked["agentState"], "needs_input");
     assert!(
         marked["agentStateAt"]

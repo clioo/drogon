@@ -613,6 +613,13 @@ fn record_skip_writes_a_skipped_row_and_reschedules() {
 
 // --- Real-Engine RPC tests ----------------------------------------------------
 
+fn base64_decode(text: &str) -> Vec<u8> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(text)
+        .unwrap()
+}
+
 fn request(id: &str, method: &str, params: Value) -> Request {
     Request {
         protocol: PROTOCOL_VERSION,
@@ -1294,6 +1301,20 @@ fn reconcile_decision_finalizes_only_on_proven_terminal_evidence() {
         ),
         ReconcileOutcome::TurnEnded
     );
+    // Issue #360 fork parity: the reference's busy-to-idle edge — a live
+    // agent that went idle after dispatch ended its turn.
+    assert_eq!(
+        reconcile_decision(
+            &run,
+            Some(&live_evidence("idle", Some(SIGNAL_AFTER_DISPATCH)))
+        ),
+        ReconcileOutcome::TurnEnded
+    );
+    // ...but idle without a stamp proves no edge.
+    assert_eq!(
+        reconcile_decision(&run, Some(&live_evidence("idle", None))),
+        ReconcileOutcome::Running
+    );
     // Same-second truncation edge: a dispatch 500 ms into a second and a
     // signal stamped that same second are indistinguishable at this
     // resolution, so the edge is (conservatively) accepted.
@@ -1519,17 +1540,41 @@ fn tick_finalizes_a_turn_ended_live_session_as_completed() {
     )));
     let run_id = result["runId"].as_str().unwrap().to_string();
 
-    // A live sleeper stands in for the agent's session: re-link the run
-    // row to it (no public RPC re-links runs), then report the harness
-    // turn-end hook the pi extension would send on AgentEnd.
+    // A live session stands in for the agent's session: it emits output
+    // (its activity stamp) and then idles. Re-link the run row to it (no
+    // public RPC re-links runs), then report the turn-end hook the pi
+    // extension sends on AgentEnd — a clear (#360), so the session
+    // returns to activity-based derivation and reads `idle` once the
+    // silence window passes; that idle edge is what the tick finalizes.
     let sleeper = ok(engine.dispatch(request(
         "fin2-sleep",
         "session.start",
-        json!({"workspaceId": workspace_id, "command": "sleep",
-               "args": ["120"], "cols": 80, "rows": 24}),
+        json!({"workspaceId": workspace_id, "command": "/bin/sh",
+               "args": ["-c", "echo turn-ended-marker; exec sleep 120"], "cols": 80, "rows": 24}),
     )));
     let sleeper_id = sleeper["id"].as_str().unwrap().to_string();
     let sleeper_inc = sleeper["incarnation"].as_str().unwrap().to_string();
+    // The echo must land before the relink and the turn-end report so its
+    // stamp provably belongs to this run's dispatch window.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut cursor = 0u64;
+    loop {
+        let read = ok(engine.dispatch(request(
+            "fin2-read",
+            "session.read",
+            json!({"sessionId": sleeper_id, "incarnation": sleeper_inc, "cursor": cursor}),
+        )));
+        let text = String::from_utf8(base64_decode(read["dataBase64"].as_str().unwrap())).unwrap();
+        if text.contains("turn-ended-marker") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "sleeper must echo its marker"
+        );
+        cursor = read["nextCursor"].as_u64().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
     let db = open_engine_db(&dir);
     let mut payload = read_run_payload(&db, &run_id);
     payload["status"] = json!("dispatched");
@@ -1548,6 +1593,31 @@ fn tick_finalizes_a_turn_ended_live_session_as_completed() {
         "session.hook_event",
         json!({"sessionId": sleeper_id, "incarnation": sleeper_inc, "event": "AgentEnd"}),
     )));
+    // Wait out the activity window so the turn-ended session reports the
+    // idle edge the scheduler finalizes on.
+    let idle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        let listed = ok(engine.dispatch(request(
+            "fin2-list",
+            "session.list",
+            json!({"workspaceId": workspace_id}),
+        )));
+        let row = listed["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == sleeper_id)
+            .expect("sleeper must be listed");
+        if row["agentState"] == "idle" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < idle_deadline,
+            "turn-ended session must settle to idle, saw {}",
+            row["agentState"]
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     let summary = scheduler::tick_once(&engine, now_ms());
     assert_eq!(summary.completed, 1);
     assert_eq!(summary.stranded, 0);

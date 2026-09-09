@@ -383,7 +383,7 @@ mod tests {
                 &engine,
                 "hook-wait",
                 "session.hook_event",
-                json!({"sessionId": id, "incarnation": incarnation, "event": "AgentEnd"}),
+                json!({"sessionId": id, "incarnation": incarnation, "event": "ToolApprovalRequested"}),
             );
             assert_eq!(waited["agentState"], "needs_input");
             let pushed = invoke(
