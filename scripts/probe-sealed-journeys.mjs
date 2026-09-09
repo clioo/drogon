@@ -7,11 +7,12 @@
 // relaunch. J12's segment assertions live in probe-packaged-surfaces.mjs.
 //
 // Every probe is a real CDP journey against the running app: no mocked
-// service, no mocked UI. Inference runs only on the team-local free model
-// (dgx-spark/qwen3.8-flash-next-nvidia-nvfp4, seeded through the isolated
-// PI_CODING_AGENT_DIR the accept harness sets up); Tasks rides a
-// deterministic gh fixture on the daemon PATH. Each probe deletes the
-// bots, automations and worktrees it created before returning.
+// service, no mocked UI. Inference runs only against the sealed, loopback,
+// test-owned model fixture (scripts/sealed-model-fixture.mjs; never a real
+// network endpoint), seeded through the isolated PI_CODING_AGENT_DIR the
+// accept harness sets up; Tasks rides a deterministic gh fixture on the
+// daemon PATH. Each probe deletes the bots, automations and worktrees it
+// created before returning.
 
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -27,6 +28,11 @@ import {
   renderedPiIsReady,
   waitForSessionStripTab,
 } from "./probe-rendered-harness.mjs";
+import {
+  assertLoopbackHost,
+  healthUrlFor,
+  isOwnedFixtureHealth,
+} from "./sealed-model-fixture.mjs";
 
 // Local-only model for every in-app agent launch in acceptance: never a
 // paid model. Same route probe-rendered-harness.mjs seeds for --harness pi.
@@ -132,17 +138,63 @@ export function mentuStepsAll(steps, expected) {
 // Setup helpers (used by accept-desktop.mjs before the daemon spawns)
 // ---------------------------------------------------------------------------
 
-/** Seeds the isolated Pi config dir with the team-local free model route. */
-export async function seedLocalPiProvider(piDir) {
+// The sealed model fixture's baseUrl, communicated from accept-desktop.mjs
+// (which owns starting/stopping scripts/sealed-model-fixture.mjs) to this
+// script's process. Both seedLocalPiProvider and waitForFixtureReady accept
+// an explicit baseUrl argument for tests/direct callers; this env var is
+// only the default plumbing for the real acceptance harness.
+export const SEALED_MODEL_FIXTURE_BASE_URL_ENV =
+  "DROGON_SEALED_MODEL_FIXTURE_BASE_URL";
+
+function assertLoopbackBaseUrl(baseUrl) {
+  let parsed;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error(
+      `seedLocalPiProvider: baseUrl must be a valid URL, got ${JSON.stringify(baseUrl)}`,
+    );
+  }
+  assertLoopbackHost(parsed.hostname);
+}
+
+/**
+ * Seeds the isolated Pi config dir with the team-local model route --
+ * ALWAYS the sealed, test-owned loopback fixture (scripts/sealed-model-
+ * fixture.mjs), never a real network endpoint. `baseUrl` is required,
+ * explicitly: pass it directly, or set SEALED_MODEL_FIXTURE_BASE_URL_ENV.
+ * A missing or non-loopback baseUrl throws -- there is no default that
+ * could silently reintroduce a real-network/paid-inference dependency.
+ *
+ * Coordinator review (fail-closed lifecycle correction): a caller that
+ * seeds with an explicit `baseUrl` argument, without also setting the env
+ * var itself, would otherwise leave every later argument-less
+ * waitForFixtureReady() call reading an unset env and failing closed even
+ * though the fixture is genuinely up. This function is the one place the
+ * baseUrl becomes known, so it is also the one place responsible for
+ * keeping the env var -- the default source every wait call falls back to
+ * -- consistent with whatever baseUrl was actually seeded.
+ */
+export async function seedLocalPiProvider(
+  piDir,
+  baseUrl = process.env[SEALED_MODEL_FIXTURE_BASE_URL_ENV],
+) {
+  if (!baseUrl) {
+    throw new Error(
+      `seedLocalPiProvider requires an explicit loopback baseUrl for the sealed model fixture (pass it as the second argument, or set ${SEALED_MODEL_FIXTURE_BASE_URL_ENV}); there is no default network endpoint.`,
+    );
+  }
+  assertLoopbackBaseUrl(baseUrl);
+  process.env[SEALED_MODEL_FIXTURE_BASE_URL_ENV] = baseUrl;
   await mkdir(piDir, { recursive: true });
   await writeFile(
     path.join(piDir, "models.json"),
     JSON.stringify({
       providers: {
         [PI_PROVIDER]: {
-          baseUrl: "http://100.85.64.21:9292/v1",
+          baseUrl,
           api: "openai-completions",
-          apiKey: "local",
+          apiKey: "sealed-fixture-local",
           models: [
             {
               id: PI_MODEL_ID,
@@ -262,35 +314,42 @@ async function openPaletteWithRegistryChord(page, root) {
 }
 
 // ---------------------------------------------------------------------------
-// Node-side model-server quiet wait: between bounded attempts the probes
-// wait for a slot on the shared team-local server instead of burning a
-// retry into a 429 wall. Returns false on timeout so runs stay bounded.
+// Node-side fixture readiness: there is no shared, load-bearing real model
+// server left to wait out (the sealed fixture answers every recognized
+// prompt immediately, deterministically, and never returns 429). What
+// remains worth checking, cheaply, before spending one of a probe's bounded
+// attempts is that the fixture we are about to talk to is actually reachable
+// and is genuinely OUR owned fixture -- not a stale process, and never a
+// real endpoint. Returns false on timeout so runs stay bounded.
 // ---------------------------------------------------------------------------
 
-export const LOCAL_MODEL_BASE = "http://100.85.64.21:9292/v1";
-
-const MODEL_PROBE_BODY = JSON.stringify({
-  model: PI_MODEL_ID,
-  messages: [{ role: "user", content: "say OK" }],
-  max_tokens: 8,
-});
-
-export async function waitForModelQuiet(timeoutMs) {
+export async function waitForFixtureReady(
+  timeoutMs,
+  baseUrl = process.env[SEALED_MODEL_FIXTURE_BASE_URL_ENV],
+  expectedInstanceId,
+) {
+  if (!baseUrl) return false;
+  assertLoopbackBaseUrl(baseUrl);
+  const healthUrl = healthUrlFor(baseUrl);
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
-      const response = await fetch(`${LOCAL_MODEL_BASE}/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: MODEL_PROBE_BODY,
-        signal: AbortSignal.timeout(10000),
+      // "error" on redirect: a health check must never silently follow a
+      // redirect to a different, possibly non-loopback/external base --
+      // that would defeat the whole point of pinning ownership below.
+      const response = await fetch(healthUrl, {
+        redirect: "error",
+        signal: AbortSignal.timeout(5000),
       });
-      if (response.ok) return true;
+      if (response.ok) {
+        const body = await response.json();
+        if (isOwnedFixtureHealth(body, expectedInstanceId)) return true;
+      }
     } catch {
-      // unreachable or timed out: keep waiting
+      // unreachable, redirected, or timed out: keep waiting
     }
     if (Date.now() > deadline) return false;
-    await delay(4000);
+    await delay(250);
   }
 }
 
@@ -952,11 +1011,12 @@ export async function probeAutomationRunNowDetail({
     let markerVisible = false;
     for (let attempt = 1; attempt <= 3 && !markerVisible; attempt += 1) {
       succeededRow = null;
-      // Spend a Run Now click only once the shared model server has a
-      // free slot (bounded), so attempts are not wasted into 429 walls.
+      // Spend a Run Now click only once the sealed model fixture answers
+      // as itself (bounded), so an attempt is never wasted on a fixture
+      // that is not actually up yet.
       assert.ok(
-        await waitForModelQuiet(60000),
-        `local model stayed overloaded before Run Now attempt ${attempt}`,
+        await waitForFixtureReady(60000),
+        `sealed model fixture was not ready before Run Now attempt ${attempt}`,
       );
       await page.getByRole("tab", { name: "Overview", exact: true }).click();
       await page
@@ -1184,11 +1244,10 @@ export async function probeBotPresetManualRun({
     let markerVisible = false;
     ownedAutomationId = owned.id;
     for (let attempt = 1; attempt <= 3 && !markerVisible; attempt += 1) {
-      // Same bounded quiet-wait as J7: one manual run click per free
-      // slot on the shared model server.
+      // Same bounded fixture-readiness check as J7.
       assert.ok(
-        await waitForModelQuiet(60000),
-        `local model stayed overloaded before bot run attempt ${attempt}`,
+        await waitForFixtureReady(60000),
+        `sealed model fixture was not ready before bot run attempt ${attempt}`,
       );
       const panelButton = page
         .locator('[data-testid="bots-panel"]')
@@ -1317,9 +1376,11 @@ export async function probeBotPresetManualRun({
     ];
   } finally {
     // Leave nothing behind: bot delete removes its responsibilities and
-    // their automations (the confirm dialog's own copy states this). If an
-    // earlier UI action closed the renderer, preserve that original failure
-    // and let the outer acceptance cleanup own the daemon/session teardown.
+    // their automations, acting immediately with no confirm step (the
+    // fork-parity direct-delete controller; the pre-parity confirm dialog
+    // and its `bot-delete-confirm` testid are gone). If an earlier UI
+    // action closed the renderer, preserve that original failure and let
+    // the outer acceptance cleanup own the daemon/session teardown.
     if (!page.isClosed()) {
       await page
         .getByRole("button", { name: "Bots", exact: true })
@@ -1327,19 +1388,32 @@ export async function probeBotPresetManualRun({
         .click()
         .catch(() => {});
       await panel.waitFor().catch(() => {});
+      // Returning to the Bots route re-triggers App.tsx's fresh
+      // botSnapshot load (route re-entry clears the prior result to the
+      // pending placeholder before the reload lands), so this SAME
+      // kept-alive panel can genuinely paint its loading state -- with no
+      // bot card, and no Delete control, in the DOM -- for a real window
+      // right after the panel container itself exists. A one-shot count()
+      // taken in that window reads 0 and looks exactly like "already
+      // gone," silently skipping the delete outright. Wait for the real
+      // control to actually appear (retrying, not a single snapshot)
+      // before deciding it's missing.
       const deleteButton = panel.locator(`[data-testid="delete-bot-${botId}"]`);
-      if ((await deleteButton.count().catch(() => 0)) > 0) {
+      const deleteButtonReady = await deleteButton
+        .first()
+        .waitFor({ state: "visible", timeout: 30000 })
+        .then(() => true)
+        .catch(() => false);
+      if (deleteButtonReady) {
         await deleteButton.first().click().catch(() => {});
-        const confirm = page.locator('[data-testid="bot-delete-confirm"]');
-        if ((await confirm.count().catch(() => 0)) > 0)
-          await confirm
-            .getByRole("button", { name: "Delete", exact: true })
-            .click()
-            .catch(() => {});
         await panel
           .getByText(botName, { exact: true })
           .waitFor({ state: "hidden", timeout: 30000 })
           .catch(() => {});
+      } else {
+        console.error(
+          `probeBotPresetManualRun cleanup: delete-bot-${botId} never became visible; skipping the delete click (diagnostic only, the automation-list assertion below still enforces real cleanup).`,
+        );
       }
     }
     const listed = await runCliJson(
