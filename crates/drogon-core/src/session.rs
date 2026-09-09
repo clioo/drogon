@@ -1751,10 +1751,7 @@ mod wait_signal_activity_tests {
         handle.note_hook_event();
         assert_eq!(snapshot(&handle)["agentState"], "needs_input");
         assert!(clear_wait_signal_on_activity(&handle));
-        assert_eq!(
-            handle.hook_turn_fact(),
-            agent_state::HookTurn::Inactive
-        );
+        assert_eq!(handle.hook_turn_fact(), agent_state::HookTurn::Inactive);
         // No output was ever observed: unknown, not a guessed idle.
         assert_eq!(snapshot(&handle)["agentState"], "unknown");
     }
