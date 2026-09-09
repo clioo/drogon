@@ -53,6 +53,15 @@ const TICK: Duration = Duration::from_millis(25);
 #[cfg(unix)]
 const HELPER_OUTPUT_CAP: usize = 1 << 20;
 
+/// Sleep at most `cap`, and never past `deadline`: a fixed sleep would
+/// otherwise let a bounded loop overshoot its own active deadline by up
+/// to the sleep length.
+#[cfg(unix)]
+fn sleep_capped(deadline: Instant, cap: Duration) {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    std::thread::sleep(remaining.min(cap));
+}
+
 fn in_child_mode() -> bool {
     std::env::var_os(CHILD_MODE_ENV).is_some()
 }
@@ -157,13 +166,19 @@ fn run_until(
         // Errno is captured at the instant of failure, before any
         // cleanup syscall can overwrite it.
         let fcntl_err = (flags == -1).then(std::io::Error::last_os_error);
-        let set_rc = unsafe { libc::fcntl(pipe.fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
-        let fcntl_err = fcntl_err.or((set_rc == -1).then(std::io::Error::last_os_error));
+        // F_SETFL is never attempted with a failed F_GETFL result.
+        let set_rc = if flags == -1 {
+            -1
+        } else {
+            unsafe { libc::fcntl(pipe.fd, libc::F_SETFL, flags | libc::O_NONBLOCK) }
+        };
+        let fcntl_err =
+            fcntl_err.or((set_rc == -1 && flags != -1).then(std::io::Error::last_os_error));
         if let Some(err) = fcntl_err {
             let _ = child.kill();
             // Cleanup stays inside the ONE absolute operation deadline.
             while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline {
-                std::thread::sleep(Duration::from_millis(2));
+                sleep_capped(op_deadline, Duration::from_millis(2));
             }
             let reaped = child.try_wait().ok().flatten().is_some();
             return Err(BoundedError {
@@ -194,7 +209,7 @@ fn run_until(
         if Instant::now() >= work_deadline {
             let _ = child.kill();
             while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline {
-                std::thread::sleep(Duration::from_millis(2));
+                sleep_capped(op_deadline, Duration::from_millis(2));
             }
             let reaped = child.try_wait().ok().flatten().is_some();
             return Err(BoundedError {
@@ -231,7 +246,7 @@ fn run_until(
                 let _ = child.kill();
                 // Cleanup stays inside the ONE absolute operation deadline.
                 while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline {
-                    std::thread::sleep(Duration::from_millis(2));
+                    sleep_capped(op_deadline, Duration::from_millis(2));
                 }
                 let reaped = child.try_wait().ok().flatten().is_some();
                 return Err(BoundedError {
@@ -249,7 +264,7 @@ fn run_until(
                     let _ = child.kill();
                     while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline
                     {
-                        std::thread::sleep(Duration::from_millis(2));
+                        sleep_capped(op_deadline, Duration::from_millis(2));
                     }
                     let reaped = child.try_wait().ok().flatten().is_some();
                     return Err(BoundedError {
@@ -280,7 +295,7 @@ fn run_until(
                             while child.try_wait().ok().flatten().is_none()
                                 && Instant::now() < op_deadline
                             {
-                                std::thread::sleep(Duration::from_millis(2));
+                                sleep_capped(op_deadline, Duration::from_millis(2));
                             }
                             let reaped = child.try_wait().ok().flatten().is_some();
                             return Err(BoundedError {
@@ -310,7 +325,7 @@ fn run_until(
                             while child.try_wait().ok().flatten().is_none()
                                 && Instant::now() < op_deadline
                             {
-                                std::thread::sleep(Duration::from_millis(2));
+                                sleep_capped(op_deadline, Duration::from_millis(2));
                             }
                             let reaped = child.try_wait().ok().flatten().is_some();
                             return Err(BoundedError {
@@ -337,13 +352,13 @@ fn run_until(
                     break;
                 }
                 Ok(None) if Instant::now() < fallback_deadline => {
-                    std::thread::sleep(Duration::from_millis(2));
+                    sleep_capped(op_deadline, Duration::from_millis(2));
                 }
                 Ok(None) => {
                     let _ = child.kill();
                     while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline
                     {
-                        std::thread::sleep(Duration::from_millis(2));
+                        sleep_capped(op_deadline, Duration::from_millis(2));
                     }
                     let reaped = child.try_wait().ok().flatten().is_some();
                     return Err(BoundedError {
@@ -366,7 +381,7 @@ fn run_until(
     if Instant::now() >= work_deadline {
         let _ = child.kill();
         while child.try_wait().ok().flatten().is_none() && Instant::now() < op_deadline {
-            std::thread::sleep(Duration::from_millis(2));
+            sleep_capped(op_deadline, Duration::from_millis(2));
         }
         let reaped = child.try_wait().ok().flatten().is_some();
         return Err(BoundedError {
