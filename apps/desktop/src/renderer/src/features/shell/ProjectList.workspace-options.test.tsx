@@ -6,7 +6,14 @@
    TabCreateMenu.test.tsx uses), flips one real control, and asserts the
    sidebar's actual rendered cards changed accordingly. */
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type {
   Project,
   Session,
@@ -15,13 +22,47 @@ import type {
 } from "../../../../shared/session-contract";
 import type { ProjectGroup } from "./project-adapter";
 import { ProjectList } from "./ProjectList";
+import { INITIAL_SHARED_UI_PREFERENCES } from "./workspace-options-state";
+import type {
+  WorkspaceUIPreferences,
+  WorkspaceUIPreferencesBridge,
+} from "../../../../shared/workspace-ui-preferences-contract";
 import { EMPTY_TAB_STRIP_STATE } from "./tab-order";
 import { TooltipProvider } from "../../components/ui/tooltip";
 
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  delete (window as unknown as { drogon?: unknown }).drogon;
 });
+
+/**
+ * A real, stateful `window.drogon.ui` double: its closure variable plays
+ * exactly the role `main/workspace-ui-preferences.ts`'s own JSON file
+ * plays in production -- a value that outlives one renderer mount and is
+ * read back unchanged by the next. Used only to prove ProjectList.tsx's
+ * OWN hydration/persistence wiring (`toSharedUIPreferences`/
+ * `fromSharedUIPreferences`/the migration effect); this is the "stub
+ * external transport" allowance, not a stub of any grouping/product
+ * logic -- the store applies the update exactly as given, same as the
+ * main process would.
+ */
+function makeUiStore(seed: WorkspaceUIPreferences = INITIAL_SHARED_UI_PREFERENCES): {
+  ui: WorkspaceUIPreferencesBridge;
+  current: () => WorkspaceUIPreferences;
+} {
+  let current = seed;
+  return {
+    current: () => current,
+    ui: {
+      get: async () => current,
+      set: async (partial) => {
+        current = { ...current, ...partial };
+        return current;
+      },
+    },
+  };
+}
 
 function project(overrides: Partial<Project> = {}): Project {
   return {
@@ -70,6 +111,8 @@ function baseProps(overrides: {
   groups?: ProjectGroup[];
   sessions?: Session[];
   workspaces?: Workspace[];
+  onOpenAction?: (action: { kind: string; worktreeId?: string; projectId?: string }) => void;
+  onSubmitRemove?: (worktree: Worktree, force: boolean) => Promise<string | null>;
 }) {
   return {
     groups: overrides.groups ?? [],
@@ -89,12 +132,12 @@ function baseProps(overrides: {
     onSelectWorkspace: () => {},
     onAddProject: () => {},
     onCreateWorkspace: () => {},
-    onOpenAction: () => {},
+    onOpenAction: overrides.onOpenAction ?? (() => {}),
     onCloseAction: () => {},
     onOpenProjectSettings: () => {},
     onBrowse: async () => null,
     onSubmitAdd: async () => null,
-    onSubmitRemove: async () => null,
+    onSubmitRemove: overrides.onSubmitRemove ?? (async () => null),
     onSubmitRemoveProject: async () => null,
     onSubmitRename: async () => null,
   };
@@ -104,6 +147,8 @@ function mount(overrides: {
   groups?: ProjectGroup[];
   sessions?: Session[];
   workspaces?: Workspace[];
+  onOpenAction?: (action: { kind: string; worktreeId?: string; projectId?: string }) => void;
+  onSubmitRemove?: (worktree: Worktree, force: boolean) => Promise<string | null>;
 }) {
   (window as unknown as { drogon?: unknown }).drogon ??= {};
   return render(
@@ -198,15 +243,46 @@ describe("Workspace options: Hide", () => {
     expect(screen.getByText("OnFeature")).toBeTruthy();
   });
 
-  test("the not-yet-tracked Automation-created / CLI-created rows are disabled, not silently fake", () => {
-    mount({ groups: [{ project: project(), worktrees: [worktree()] }] });
+  test("hiding CLI-created worktrees removes only the card the CLI created (real Worktree.creator, schema v5)", () => {
+    const groups: ProjectGroup[] = [
+      {
+        project: project(),
+        worktrees: [
+          worktree({ id: "wt-cli", title: "FromCli", creator: "cli" }),
+          worktree({ id: "wt-desktop", title: "FromDesktop", creator: null }),
+        ],
+      },
+    ];
+    mount({ groups });
+    const cliRow = () =>
+      screen.getByRole("menuitemcheckbox", { name: "CLI-created" });
+    expect(screen.getByText("FromCli")).toBeTruthy();
+
+    openWorkspaceOptionsMenu();
+    expect(cliRow().getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(cliRow());
+
+    expect(screen.queryByText("FromCli")).toBeNull();
+    expect(screen.getByText("FromDesktop")).toBeTruthy();
+  });
+
+  test("the Automation-created row is real (not disabled) even though no producer exists in this build yet", () => {
+    // RunUnsupported::NewPerRunWorkspaceMode is unwired everywhere in the
+    // automations subsystem today, so no worktree in this fixture can
+    // ever carry creator: "automation" -- the control still must not be
+    // presented as disabled/fake, since the filter itself is real.
+    const groups: ProjectGroup[] = [
+      { project: project(), worktrees: [worktree({ title: "Only" })] },
+    ];
+    mount({ groups });
     openWorkspaceOptionsMenu();
     const automationRow = screen.getByRole("menuitemcheckbox", {
       name: "Automation-created",
     });
-    const cliRow = screen.getByRole("menuitemcheckbox", { name: "CLI-created" });
-    expect(automationRow.getAttribute("aria-disabled")).toBe("true");
-    expect(cliRow.getAttribute("aria-disabled")).toBe("true");
+    expect(automationRow.getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(automationRow);
+    // Nothing in this fixture is automation-created, so nothing is hidden.
+    expect(screen.getByText("Only")).toBeTruthy();
   });
 });
 
@@ -270,21 +346,318 @@ describe("Workspace options: Show properties", () => {
 });
 
 describe("Workspace options: persistence", () => {
-  test("a chosen option survives remount (localStorage, drogon:shell:workspace-options)", () => {
+  test("a chosen option survives remount through the shared window.drogon.ui store, not a private localStorage authority", async () => {
     const groups: ProjectGroup[] = [
       {
         project: project({ id: "a", name: "Alpha Repo" }),
         worktrees: [worktree({ projectId: "a" })],
       },
     ];
+    const store = makeUiStore();
+    (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+      ui: store.ui,
+    };
     const { unmount } = mount({ groups });
+    await waitFor(() => expect(store.current().groupBy).toBe("repo"));
     openWorkspaceOptionsMenu();
     fireEvent.click(within(screen.getByRole("menu")).getByText("None"));
-    expect(projectHeaders()).toEqual([]);
+    await waitFor(() => expect(projectHeaders()).toEqual([]));
+    // The write landed on the SHARED store (main/workspace-ui-preferences.ts's
+    // real would-be persistence target), not a parallel localStorage key.
+    expect(store.current().groupBy).toBe("none");
+    expect(localStorage.getItem("drogon:shell:workspace-options")).toBeNull();
     unmount();
     cleanup();
 
+    // "Reload": a fresh mount against the SAME store (its closure variable
+    // outlived the unmount, exactly like the main process's own JSON file
+    // outlives a renderer reload).
     mount({ groups });
-    expect(projectHeaders()).toEqual([]);
+    await waitFor(() => expect(projectHeaders()).toEqual([]));
+  });
+
+  test("a legacy localStorage profile migrates into the shared store exactly once", async () => {
+    const groups: ProjectGroup[] = [
+      {
+        project: project({ id: "a", name: "Alpha Repo" }),
+        worktrees: [worktree({ projectId: "a" })],
+      },
+    ];
+    localStorage.setItem(
+      "drogon:shell:workspace-options",
+      JSON.stringify({
+        groupBy: "none",
+        sortBy: "name",
+        projectOrderBy: "manual",
+        cardLayout: "comfortable",
+        showProperties: { branch: true, pr: true },
+        hide: {
+          sleeping: false,
+          defaultBranch: false,
+          detachedHead: false,
+          automationCreated: false,
+          cliCreated: false,
+        },
+      }),
+    );
+    const store = makeUiStore();
+    (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+      ui: store.ui,
+    };
+    mount({ groups });
+    await waitFor(() => expect(store.current().groupBy).toBe("none"));
+    expect(store.current().sortBy).toBe("name");
+  });
+});
+
+/** Finds the specific card by worktree id, right-clicks its own context
+ *  menu scope (`.closest`, since every card renders the same generic
+ *  `data-worktree-context-menu-scope="worktree"` marker -- there is one
+ *  per card, not one for the whole list), and clicks "Delete". Mirrors
+ *  worktree-delete-menu.test.tsx's own gesture. */
+function clickDeleteForWorktree(worktreeId: string): void {
+  const cardRoot = document.querySelector(`[data-worktree-card-id="${worktreeId}"]`);
+  expect(cardRoot).toBeTruthy();
+  const scope = (cardRoot as HTMLElement).closest(
+    '[data-worktree-context-menu-scope="worktree"]',
+  ) as HTMLElement;
+  expect(scope).toBeTruthy();
+  fireEvent.contextMenu(scope, { clientX: 50, clientY: 50 });
+  const item = Array.from(
+    document.querySelectorAll<HTMLElement>(".shell-worktree-context-menu-item-destructive"),
+  ).find((el) => el.textContent?.includes("Delete"));
+  expect(item).toBeTruthy();
+  fireEvent.pointerDown(item!, { pointerType: "mouse", button: 0 });
+  fireEvent.pointerUp(item!, { pointerType: "mouse", button: 0 });
+  fireEvent.click(item!);
+}
+
+describe("Workspace options: Group by (cross-project)", () => {
+  test("Group by Workspace status moves cards from two different projects under one real status label, and an action still targets the real owning worktree", () => {
+    const groups: ProjectGroup[] = [
+      {
+        project: project({ id: "a", name: "Alpha Repo" }),
+        worktrees: [
+          worktree({
+            id: "wa",
+            projectId: "a",
+            branch: "feature-a",
+            workspaceStatus: "in-review",
+            title: "Card A",
+          }),
+        ],
+      },
+      {
+        project: project({ id: "b", name: "Bravo Repo" }),
+        worktrees: [
+          worktree({
+            id: "wb",
+            projectId: "b",
+            branch: "feature-b",
+            workspaceStatus: "in-review",
+            title: "Card B",
+          }),
+        ],
+      },
+    ];
+    const onOpenAction = vi.fn();
+    mount({ groups, onOpenAction });
+
+    // The real default (groupBy: "repo") shows two separate real project headers.
+    expect(projectHeaders()).toEqual(["Alpha Repo", "Bravo Repo"]);
+
+    openWorkspaceOptionsMenu();
+    fireEvent.click(within(screen.getByRole("menu")).getByText("Workspace status"));
+
+    // One real status label header; both projects' cards render under it.
+    expect(projectHeaders()).toEqual(["In review"]);
+    expect(cardTitlesInOrder()).toEqual(["Card A", "Card B"]);
+
+    // Delete on project B's card must still target project B's real
+    // worktree, never project A's or a synthetic bucket id, even though
+    // both now render under the same "In review" header.
+    clickDeleteForWorktree("wb");
+    expect(onOpenAction).toHaveBeenCalledWith({ kind: "remove", worktreeId: "wb" });
+    expect(onOpenAction).not.toHaveBeenCalledWith({ kind: "remove", worktreeId: "wa" });
+  });
+
+  test("Group by PR status buckets by real fetched pull-request state per project; an unfetched/failed project's cards land under 'PR status unavailable', never a false 'no pull request'", async () => {
+    const groups: ProjectGroup[] = [
+      {
+        project: project({ id: "a", name: "Alpha Repo" }),
+        worktrees: [
+          worktree({ id: "wa", projectId: "a", branch: "feature-a", title: "Card A" }),
+        ],
+      },
+      {
+        project: project({ id: "b", name: "Bravo Repo" }),
+        worktrees: [
+          worktree({ id: "wb", projectId: "b", branch: "feature-b", title: "Card B" }),
+        ],
+      },
+    ];
+    const tasksList = vi.fn(async ({ projectId }: { projectId: string }) => {
+      if (projectId === "a") {
+        return {
+          ok: true,
+          result: {
+            repo: "example/alpha",
+            issues: [],
+            pulls: [
+              {
+                number: 1,
+                title: "Add the feature",
+                state: "open",
+                labels: [],
+                assignees: [],
+                isDraft: false,
+                headRefName: "feature-a",
+                updatedAt: "2026-09-09T00:00:00Z",
+                url: "https://github.com/example/alpha/pull/1",
+              },
+            ],
+            page: 1,
+            perPage: 36,
+            hasNextPage: false,
+          },
+        };
+      }
+      // Project B's own fetch genuinely fails (gh missing/unauthenticated).
+      return {
+        ok: false,
+        error: { code: "gh_unavailable", message: "gh is not installed", retryable: false },
+      };
+    });
+    (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+      tasks: { tasksList },
+    };
+    mount({ groups });
+
+    openWorkspaceOptionsMenu();
+    fireEvent.click(within(screen.getByRole("menu")).getByText("PR status"));
+
+    await waitFor(() => expect(tasksList).toHaveBeenCalled());
+    await waitFor(() =>
+      expect([...projectHeaders()].sort()).toEqual(["Open", "PR status unavailable"].sort()),
+    );
+    const openHeader = screen.getByText("Open").closest(".shell-project") as HTMLElement;
+    expect(within(openHeader).getByText("Card A")).toBeTruthy();
+    const unavailableHeader = screen
+      .getByText("PR status unavailable")
+      .closest(".shell-project") as HTMLElement;
+    expect(within(unavailableHeader).getByText("Card B")).toBeTruthy();
+  });
+});
+
+describe("Workspace options: manual reorder persists canonical ranks", () => {
+  /** Gives an element a fixed `getBoundingClientRect` -- the standard
+   *  jsdom technique for driving pixel-geometry-dependent code (jsdom
+   *  itself always returns an all-zero rect). */
+  function stubRect(
+    element: Element,
+    rect: { top: number; bottom: number; left?: number; right?: number },
+  ): void {
+    vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
+      top: rect.top,
+      bottom: rect.bottom,
+      left: rect.left ?? 0,
+      right: rect.right ?? 200,
+      width: (rect.right ?? 200) - (rect.left ?? 0),
+      height: rect.bottom - rect.top,
+      x: rect.left ?? 0,
+      y: rect.top,
+      toJSON: () => ({}),
+    });
+  }
+
+  test("dragging the top card to the end of its project persists the canonical manualOrder ranks, surviving a reload", async () => {
+    const groups: ProjectGroup[] = [
+      {
+        project: project({ id: "a", name: "Alpha Repo" }),
+        worktrees: [
+          worktree({ id: "w1", projectId: "a", title: "One" }),
+          worktree({ id: "w2", projectId: "a", title: "Two" }),
+          worktree({ id: "w3", projectId: "a", title: "Three" }),
+        ],
+      },
+    ];
+    const worktreeUpdate = vi.fn(
+      async ({ worktreeId, manualOrder }: { worktreeId: string; manualOrder: number }) => ({
+        ok: true,
+        result: { id: worktreeId, manualOrder },
+      }),
+    );
+    (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+      project: { worktreeUpdate },
+    };
+
+    const { container } = render(
+      <TooltipProvider>
+        <div className="shell-sidebar-scroll">
+          <ProjectList {...baseProps({ groups })} />
+        </div>
+      </TooltipProvider>,
+    );
+    const scrollContainer = container.querySelector(".shell-sidebar-scroll") as HTMLElement;
+    stubRect(scrollContainer, { top: 0, bottom: 400 });
+    Object.defineProperty(scrollContainer, "scrollTop", { value: 0, configurable: true });
+    Object.defineProperty(scrollContainer, "scrollHeight", { value: 400, configurable: true });
+    Object.defineProperty(scrollContainer, "clientHeight", { value: 400, configurable: true });
+
+    // Three 40px-tall bands, top to bottom, in their initial render order.
+    const cardBands: Record<string, { top: number; bottom: number }> = {
+      w1: { top: 0, bottom: 40 },
+      w2: { top: 40, bottom: 80 },
+      w3: { top: 80, bottom: 120 },
+    };
+    for (const [id, band] of Object.entries(cardBands)) {
+      const cardEl = container.querySelector(`[data-worktree-card-id="${id}"]`) as HTMLElement;
+      stubRect(cardEl, band);
+    }
+    const sourceRow = container.querySelector(
+      '[data-worktree-card-id="w1"]',
+    ) as HTMLElement;
+
+    // Drag card "w1" (top) from its own top edge down past every other
+    // card's bottom -- an unambiguous "drop at the end" gesture.
+    fireEvent.pointerDown(sourceRow, {
+      pointerId: 1,
+      button: 0,
+      pointerType: "mouse",
+      clientX: 10,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 10, clientY: 180 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 180 });
+
+    await waitFor(() => expect(worktreeUpdate).toHaveBeenCalled());
+    // The canonical stride-1000 ranks for the new order [w2, w3, w1]
+    // (higher renders first): w2=3000, w3=2000, w1=1000.
+    expect(worktreeUpdate).toHaveBeenCalledWith({ worktreeId: "w2", manualOrder: 3000 });
+    expect(worktreeUpdate).toHaveBeenCalledWith({ worktreeId: "w3", manualOrder: 2000 });
+    expect(worktreeUpdate).toHaveBeenCalledWith({ worktreeId: "w1", manualOrder: 1000 });
+
+    // The rendered order reflects the new arrangement immediately (the
+    // optimistic overlay), before any reload.
+    await waitFor(() => expect(cardTitlesInOrder()).toEqual(["Two", "Three", "One"]));
+
+    cleanup();
+
+    // "Reload": a fresh mount fed the worktrees with the EXACT
+    // `manualOrder` values just persisted (what a real `groups` refresh
+    // would carry back down) -- the canonical rank, read back from the
+    // real Worktree fields, not the transient drag-session state.
+    const reloaded: ProjectGroup[] = [
+      {
+        project: project({ id: "a", name: "Alpha Repo" }),
+        worktrees: [
+          worktree({ id: "w1", projectId: "a", title: "One", manualOrder: 1000 }),
+          worktree({ id: "w2", projectId: "a", title: "Two", manualOrder: 3000 }),
+          worktree({ id: "w3", projectId: "a", title: "Three", manualOrder: 2000 }),
+        ],
+      },
+    ];
+    mount({ groups: reloaded });
+    expect(cardTitlesInOrder()).toEqual(["Two", "Three", "One"]);
   });
 });
