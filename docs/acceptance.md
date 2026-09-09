@@ -7,12 +7,22 @@ names something the probe observed in the rendered app; the check names of
 the final green run are the report.
 
 Every wait is bounded; nothing in a run may depend on paid inference. The
-model-dependent journeys talk only to the team-local model
-`dgx-spark/qwen3.8-flash-next-nvidia-nvfp4` (`http://100.85.64.21:9292/v1`),
-seeded per run through the daemon's provider store and a fixture
-`PI_CODING_AGENT_DIR` so `pi` resolves it unattended. Journeys that create
-bots, automations, worktrees or projects remove them again before the run
-ends (`leave nothing behind`).
+default sealed run (`--bundle`, with or without `--files`) never talks to a
+real model at all: `scripts/sealed-model-fixture.mjs` starts a loopback-only,
+deterministic OpenAI-compatible provider fixture per run (real HTTP/SSE, real
+Pi client, real daemon/session/automation/bot RPCs -- only the model
+provider's response is a fixture), and `scripts/accept-desktop.mjs` seeds the
+isolated `PI_CODING_AGENT_DIR` with that fixture's own loopback `baseUrl` so
+`pi` resolves it unattended. This deterministic fixture answers only the
+fixed prompts these journeys send and proves the product's real behavior
+around a model turn (working/idle transitions, run history, marker output
+persistence); it never proves anything about actual model quality. The
+separate `--harness pi` dev-mode route (`probe-rendered-harness.mjs`) still
+seeds the real team-local model server
+(`dgx-spark/qwen3.8-flash-next-nvidia-nvfp4`, `http://100.85.64.21:9292/v1`)
+and is NOT covered or authorized by this document's default sealed run.
+Journeys that create bots, automations, worktrees or projects remove them
+again before the run ends (`leave nothing behind`).
 
 ## J1 — Sessions (Pi local model, working → settled)
 
@@ -49,7 +59,7 @@ two post-turn states (never a premature `Working`).
 | `automations-cli-create-lists-new-automation` | CLI creation lists in the UI (pre-existing) |
 | `automations-page-renders-created-row` | the created row renders (pre-existing) |
 | `automations-manual-run-recorded-once:dispatched` | a manual run is recorded exactly once (pre-existing) |
-| `automations-run-now-button-records-succeeded-run-row` | the UI Run Now button records a new run row that settles as the UI's `Done` (`succeeded`) state on the free local model (bounded retries while the shared server is busy) |
+| `automations-run-now-button-records-succeeded-run-row` | the UI Run Now button records a new run row that settles as the UI's `Done` (`succeeded`) state against the sealed model fixture (bounded retries while it becomes ready) |
 | `automations-run-detail-renders-output-snapshot-with-marker` | the run detail page renders the persisted output snapshot containing the run's marker |
 
 ## J8 — Bots (preset create + manual run)
@@ -60,7 +70,7 @@ two post-turn states (never a premature `Working`).
 | `bots-ui-create-renders-bot-in-list` | creating the preset bot (`dgx-spark/qwen3.8-flash-next-nvidia-nvfp4`) renders it in the list |
 | `bots-responsibility-card-renders-saved-duty-with-run` | the saved responsibility card renders with its Run button |
 | `bots-preset-create-with-local-pi-model` | the bot persists with the free local model selected (CLI cross-check) |
-| `bots-manual-responsibility-run-history-row-exited` | a manual run records a visible history row whose evidence line turns terminal (`completed · run N`, the fork's `status · id`; bounded retries while the shared server is busy) |
+| `bots-manual-responsibility-run-history-row-exited` | a manual run records a visible history row whose evidence line turns terminal (`completed · run N`, the fork's `status · id`; bounded retries while the sealed model fixture becomes ready) |
 | `bots-run-output-visible-in-automation-detail` | the responsibility persists as a bot-owned automation whose run detail shows the model output |
 
 The created bot and its responsibility are deleted through the UI before

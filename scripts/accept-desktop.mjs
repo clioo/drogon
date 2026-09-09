@@ -46,6 +46,10 @@ import {
   seedLocalPiProvider,
   writeFixtureGh,
 } from "./probe-sealed-journeys.mjs";
+import {
+  closeModelFixtureForReport,
+  startAndSeedModelFixture,
+} from "./sealed-model-fixture-lifecycle.mjs";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import { probeSessionNavigation } from "./probe-session-navigation.mjs";
 import {
@@ -104,13 +108,15 @@ let fixtureDaemon = packaged
   : null;
 const workspace = path.join(fixture, "folder");
 await mkdir(workspace);
-// R16-BB: the sealed journeys run every in-app agent launch on the
-// team-local free model (Pi resolves its config from this isolated dir,
-// never the user's ~/.pi) and the Tasks journey rides a deterministic gh
-// fixture that must be on the daemon PATH before it spawns.
+// R16-BB: the sealed journeys run every in-app agent launch against the
+// sealed, loopback, test-owned model fixture (scripts/sealed-model-
+// fixture.mjs) -- never a real network endpoint (Pi resolves its config
+// from this isolated dir, never the user's ~/.pi) -- and the Tasks
+// journey rides a deterministic gh fixture that must be on the daemon
+// PATH before it spawns.
 const piDir = path.join(fixture, "pi");
 const fixtureBin = path.join(fixture, "bin");
-await seedLocalPiProvider(piDir);
+let modelFixture = null;
 await writeFixtureGh(fixtureBin, [
   { number: 1, title: "Acceptance issue one" },
   { number: 2, title: "Acceptance issue two" },
@@ -264,6 +270,10 @@ async function relaunchDesktop() {
   throw lastError;
 }
 try {
+  // Every operation after the server starts is covered by final cleanup.
+  modelFixture = await startAndSeedModelFixture((baseUrl) =>
+    seedLocalPiProvider(piDir, baseUrl),
+  );
   if (process.env.DROGON_VERIFY_OS_FOCUS === "1") {
     foregroundObservation = await startForegroundObservation(output);
   }
@@ -1327,6 +1337,23 @@ try {
     } catch (error) {
       report.status = "FAILED";
       report.cleanup.push(`packaged fixture cleanup: ${error.message}`);
+    }
+  }
+  if (modelFixture) {
+    // Never swallowed: closeModelFixtureForReport() never throws, and by
+    // this point every client that could hold a real connection to the
+    // fixture (the app/Pi, already stopped above) is gone -- so any
+    // outstanding stream or socket it reports is genuine leaked work, not
+    // a normal keep-alive artifact, and fails the run same as an
+    // unverifiable verdict does. The original functional error (if any)
+    // is preserved and appended to, never replaced.
+    const fixtureResult = await closeModelFixtureForReport(modelFixture);
+    report.cleanup.push(fixtureResult.cleanupLine);
+    if (fixtureResult.failed) {
+      report.status = "FAILED";
+      report.error = [report.error, fixtureResult.errorDetail]
+        .filter(Boolean)
+        .join("; ");
     }
   }
   if (foregroundObservation) {

@@ -323,22 +323,33 @@ export async function startSealedModelFixture({
   /**
    * Bounded, structured, never-throwing teardown: aborts every in-flight
    * stream immediately (no waiting out its own pacing), then closes the
-   * listener. If sockets are still open past closeDeadlineMs, force-
-   * destroys them and gives close() one more bounded window to settle.
-   * Returns { verdict: "stopped" | "unverifiable", forced, error? } --
-   * the same shape packaged-fixture-daemon.mjs's stop() reports -- so a
-   * caller can log/combine this with an earlier test failure instead of
-   * needing to swallow it with a bare .catch(() => {}).
+   * listener. If sockets are still open past a short flush instant,
+   * force-destroys them and gives close() one bounded window to settle.
+   *
+   * Returns { verdict: "stopped" | "unverifiable", forced,
+   * outstandingStreams, outstandingSockets, error? } -- the same
+   * verdict/forced shape packaged-fixture-daemon.mjs's stop() reports,
+   * plus explicit counts so a caller can decide for itself that ANY
+   * outstanding stream or socket (not just a bad verdict) is a real
+   * problem worth failing on: by the time a real acceptance run's final
+   * cleanup reaches this close(), every client that could hold one open
+   * (the app/Pi) has already been torn down, so a nonzero count here is
+   * genuine leaked-work evidence, never a normal keep-alive artifact.
+   * Never throws, so a caller can always combine this result with an
+   * earlier functional failure instead of needing to swallow it with a
+   * bare .catch(() => {}).
    */
   async function close() {
+    const outstandingStreams = activeStreams.size;
     for (const controller of activeStreams) controller.abort();
-    // A short, fixed instant for a just-aborted stream's res.end()/FIN to
-    // flush before anything is forced -- not a wait for natural
-    // connection idle, which a keep-alive socket may never reach on its
-    // own within any useful bound.
+    // A short, fixed instant for a just-aborted stream's res.end()/FIN, or
+    // an already-finishing exchange, to close itself before anything is
+    // forced -- not a wait for natural keep-alive idle, which a socket may
+    // never reach on its own within any useful bound.
     await delay(20);
-    const hadOpenSockets = sockets.size > 0;
-    if (hadOpenSockets) {
+    const outstandingSockets = sockets.size;
+    const forced = outstandingSockets > 0;
+    if (forced) {
       if (typeof server.closeAllConnections === "function") {
         server.closeAllConnections();
       } else {
@@ -352,11 +363,13 @@ export async function startSealedModelFixture({
     if (!settled) {
       return {
         verdict: "unverifiable",
-        forced: hadOpenSockets,
+        forced,
+        outstandingStreams,
+        outstandingSockets,
         error: "sealed-model-fixture: server.close() did not settle within the bounded deadline",
       };
     }
-    return { verdict: "stopped", forced: hadOpenSockets };
+    return { verdict: "stopped", forced, outstandingStreams, outstandingSockets };
   }
 
   return {

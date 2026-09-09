@@ -323,16 +323,21 @@ describe("startSealedModelFixture", () => {
     }
   });
 
-  it("actually stops listening after close() -- owned socket cleanup, not a leaked server", async () => {
+  it("actually stops listening after close() -- owned socket cleanup, not a leaked server, with zero outstanding resources when nothing was ever in flight", async () => {
     const fixture = await startSealedModelFixture();
     const result = await fixture.close();
-    assert.deepEqual(result, { verdict: "stopped", forced: false });
+    assert.deepEqual(result, {
+      verdict: "stopped",
+      forced: false,
+      outstandingStreams: 0,
+      outstandingSockets: 0,
+    });
     await assert.rejects(
       fetch(healthUrlFor(fixture.baseUrl), { signal: AbortSignal.timeout(2000) }),
     );
   });
 
-  it("close() never throws and settles quickly even with a request in flight, and is safe to call twice", async () => {
+  it("close() never throws, settles quickly, and reports the real outstanding stream/socket it had to cut short -- even with a request in flight -- and is safe to call twice", async () => {
     const fixture = await startSealedModelFixture();
     // A long-paced stream (many chunks, comfortably longer than the
     // close() deadline below) that must never be waited out.
@@ -360,14 +365,22 @@ describe("startSealedModelFixture", () => {
       result.verdict === "stopped" || result.verdict === "unverifiable",
       `close() must always return a structured verdict, got ${JSON.stringify(result)}`,
     );
+    // The real point of this correction: a caller must be able to see
+    // that something was genuinely still in flight, not just infer it
+    // from a boolean.
+    assert.equal(result.outstandingStreams, 1);
+    assert.ok(result.outstandingSockets >= 1);
+    assert.equal(result.forced, true);
     assert.ok(
       elapsedMs < 1000,
       `close() must not wait out an in-flight stream's own pacing (took ${elapsedMs}ms)`,
     );
     // Calling close() again (as a defensive caller might) must also never
-    // throw or hang.
+    // throw or hang, and must report zero outstanding the second time.
     const second = await fixture.close();
     assert.ok(second.verdict === "stopped" || second.verdict === "unverifiable");
+    assert.equal(second.outstandingStreams, 0);
+    assert.equal(second.outstandingSockets, 0);
     await inFlight;
   });
 });
