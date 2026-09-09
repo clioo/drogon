@@ -692,14 +692,44 @@ async fn worktree(
                 Client::decode_checked(&call, "worktree.create", check_worktree)?;
             emit(call, json, || output::worktree_created(&worktree), 0, None)
         }
-        WorktreeAction::List { project } => {
+        WorktreeAction::List { project, limit } => {
             let params = json!({ "projectId": project });
             let call = client
                 .call("worktree.list", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
             let list: WorktreeList =
                 Client::decode_checked(&call, "worktree.list", check_worktree_list)?;
-            emit(call, json, || output::worktree_list(&list), 0, None)
+            // Source `--limit` caps the listing client-side after ordering.
+            let list = match limit {
+                Some(cap) => WorktreeList {
+                    worktrees: list
+                        .worktrees
+                        .into_iter()
+                        .take((*cap).min(usize::MAX as u64) as usize)
+                        .collect(),
+                },
+                None => list,
+            };
+            if json {
+                // The cap changes the payload; rebuild the JSON from the
+                // capped list rather than echoing the daemon's full array.
+                let mut raw = call.raw.clone();
+                raw["result"]["worktrees"] =
+                    serde_json::to_value(&list.worktrees).map_err(|err| {
+                        CliError::local(
+                            crate::error::internal_error(format!("cannot encode response: {err}")),
+                            &call.request_id,
+                        )
+                    })?;
+                let call = CallOk {
+                    request_id: call.request_id,
+                    raw,
+                    result: call.result,
+                };
+                emit(call, json, || output::worktree_list(&list), 0, None)
+            } else {
+                emit(call, json, || output::worktree_list(&list), 0, None)
+            }
         }
         WorktreeAction::Ps { limit } => {
             let params = match limit {

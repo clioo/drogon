@@ -121,7 +121,7 @@ pub struct ProjectList {
 /// that is the folder itself — `branch`/`head` are then empty strings, never
 /// null (the wire type keeps them non-nullable; `baseRef` is the nullable
 /// field).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Worktree {
     pub id: String,

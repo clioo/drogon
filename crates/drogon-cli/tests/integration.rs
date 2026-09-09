@@ -2004,3 +2004,42 @@ async fn diagnostics_memory_reports_the_daemon_footprint() {
     assert_eq!(envelope["result"]["rssBytes"], 104857600u64);
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_list_limit_caps_the_json_payload() {
+    let dir = temp_data_dir("wt-list-limit");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("worktree.list") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"worktrees": [
+                    {"id":"w1","projectId":"p1","workspaceId":"ws1","path":"/a","branch":"main","head":"h1","baseRef":null,"createdAt":"2026-09-05T12:00:00Z"},
+                    {"id":"w2","projectId":"p1","workspaceId":"ws2","path":"/b","branch":"dev","head":"h2","baseRef":null,"createdAt":"2026-09-05T12:00:00Z"}
+                ]}),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "--json",
+            "worktree",
+            "list",
+            "--project",
+            "p1",
+            "--limit",
+            "1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let worktrees = envelope["result"]["worktrees"].as_array().unwrap();
+    assert_eq!(worktrees.len(), 1);
+    assert_eq!(worktrees[0]["id"], "w1");
+    drop(service);
+}

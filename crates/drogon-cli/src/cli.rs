@@ -445,11 +445,14 @@ pub enum WorktreeAction {
     /// List a Project's worktrees
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree list --project <ID>\nValid flags: --data-dir, --help, --json, --project, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree list --project <ID> [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --project, --request-id, --retry-request"
     )]
     List {
         #[arg(long, value_name = "ID")]
         project: String,
+        /// Cap the number of worktrees returned
+        #[arg(long, value_name = "N")]
+        limit: Option<u64>,
     },
     /// Show a compact orchestration summary across worktrees
     #[command(
@@ -896,8 +899,13 @@ impl Cli {
                     require_nonempty("id", id)?;
                 }
                 WorktreeAction::Current => {}
-                WorktreeAction::List { project } => {
+                WorktreeAction::List { project, limit } => {
                     require_nonempty("project", project)?;
+                    if let Some(limit) = limit
+                        && *limit == 0
+                    {
+                        return Err(CliError::Usage("--limit must be a positive integer".into()));
+                    }
                 }
                 WorktreeAction::Ps { limit } => {
                     if let Some(limit) = limit
