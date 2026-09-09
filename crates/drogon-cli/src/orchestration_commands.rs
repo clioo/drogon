@@ -923,11 +923,10 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    // Source run-create: `Run <id> created and bound: <objective>`.
                     format!(
-                        "Run {} bound to coordinator {} (generation {})",
-                        result.run.run_id,
-                        result.run.coordinator_id,
-                        result.run.consumer_generation
+                        "Run {} created and bound: {}",
+                        result.run.run_id, result.run.objective
                     )
                 },
                 0,
@@ -1124,12 +1123,8 @@ pub async fn run(
                 call,
                 json,
                 || {
-                    format!(
-                        "Bound to run {} as coordinator {} (generation {})",
-                        result.run.run_id,
-                        result.run.coordinator_id,
-                        result.run.consumer_generation
-                    )
+                    // Source run-use: `Using Run <id>: <objective>`.
+                    format!("Using Run {}: {}", result.run.run_id, result.run.objective)
                 },
                 0,
             )
