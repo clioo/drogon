@@ -18,6 +18,7 @@ pub mod orchestration_cli;
 pub mod orchestration_commands;
 mod orchestration_gate_commands;
 mod orchestration_output;
+mod orchestration_task_dependencies;
 mod orchestration_timeout;
 pub mod output;
 pub mod paths;

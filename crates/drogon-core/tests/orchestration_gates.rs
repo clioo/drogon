@@ -186,6 +186,52 @@ fn gates_upgrade_v2_storage_without_losing_task_results() {
 }
 
 #[test]
+fn ignored_writes_cannot_report_success_or_partially_change_task_readiness() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let scope = scope(&engine, "owner");
+    let task = task(&engine, &scope, "task");
+    let conn = rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+    conn.execute_batch("CREATE TRIGGER ignore_task_result BEFORE UPDATE OF result ON orchestration_tasks BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+    let mut update = scope.clone();
+    update["taskId"] = json!(task);
+    update["status"] = json!("completed");
+    update["result"] = json!("must be durable");
+    let failed = call(&engine, "orchestration.taskUpdate", "ignore-result", update);
+    assert!(!failed.ok, "ignored result write cannot be success");
+    let mut show = scope.clone();
+    show["taskId"] = json!(task);
+    assert_eq!(
+        ok(
+            &engine,
+            "orchestration.taskShow",
+            "unchanged-task",
+            show.clone()
+        )["task"]["status"],
+        "ready"
+    );
+    conn.execute_batch("DROP TRIGGER ignore_task_result;")
+        .unwrap();
+    let mut create = scope.clone();
+    create["taskId"] = json!(task);
+    create["question"] = json!("Review?");
+    let before = ok(&engine, "orchestration.gateCreate", "gate", create)["gate"].clone();
+    conn.execute_batch("CREATE TRIGGER ignore_gate BEFORE UPDATE ON orchestration_gates BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+    let mut resolve = scope.clone();
+    resolve["gateId"] = before["id"].clone();
+    resolve["resolution"] = json!("must be durable");
+    assert!(!call(&engine, "orchestration.gateResolve", "ignore-gate", resolve).ok);
+    assert_eq!(
+        ok(&engine, "orchestration.gateList", "unchanged-gate", scope)["gates"][0],
+        before
+    );
+    assert_eq!(
+        ok(&engine, "orchestration.taskShow", "still-blocked", show)["task"]["status"],
+        "blocked"
+    );
+}
+
+#[test]
 fn gate_mutations_are_run_scoped_and_fenced_before_receipt_replay() {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();

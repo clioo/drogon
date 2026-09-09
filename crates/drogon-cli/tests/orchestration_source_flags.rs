@@ -114,6 +114,35 @@ fn source_ask_uses_ten_minute_default_without_timeout_flag() {
 }
 
 #[test]
+fn source_task_create_flags_parse_without_changing_native_scope_requirements() {
+    let OrchestrationCommand::TaskCreate {
+        instructions,
+        title,
+        ..
+    } = parse(&[
+        "orchestration",
+        "task-create",
+        "--run",
+        "run-1",
+        "--coordinator-id",
+        "coord-1",
+        "--consumer-generation",
+        "1",
+        "--spec",
+        "Implement the change",
+        "--task-title",
+        "Fix",
+        "--deps",
+        "[\"task_123456abcdef\"]",
+    ])
+    else {
+        panic!("expected task-create")
+    };
+    assert_eq!(instructions, "Implement the change");
+    assert_eq!(title.as_deref(), Some("Fix"));
+}
+
+#[test]
 fn source_run_show_id_is_supported() {
     let OrchestrationCommand::RunShow { run, .. } =
         parse(&["orchestration", "run-show", "--id", "run-1"])

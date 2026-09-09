@@ -73,8 +73,11 @@ pub fn create(
 pub fn resolve(tx: &Transaction<'_>, params: &GateResolveParams) -> Result<GateResult, RpcError> {
     params.validate_shape(&params.scope.host.host_id)?;
     let gate = get(tx, &params.scope, &params.gate_id)?;
-    tx.execute("UPDATE orchestration_gates SET status='resolved',resolution=?2,resolved_at=datetime('now') WHERE id=?1",
+    let changed = tx.execute("UPDATE orchestration_gates SET status='resolved',resolution=?2,resolved_at=datetime('now') WHERE id=?1",
         params![params.gate_id,params.resolution]).map_err(store_error)?;
+    if changed != 1 {
+        return Err(store_error("Gate resolution was not persisted."));
+    }
     tasks::set_status_in_tx(
         tx,
         &params.scope.host.host_id,

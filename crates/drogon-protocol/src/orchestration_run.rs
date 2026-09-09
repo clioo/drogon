@@ -57,6 +57,25 @@ pub struct RunCreateResult {
     pub run: RunSummary,
 }
 
+/// Inspect the explicit persisted binding for one coordinator identity.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCurrentParams {
+    #[serde(flatten)]
+    pub host: HostScope,
+    pub coordinator_id: String,
+}
+impl RunCurrentParams {
+    pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
+        self.host.validate_target(execution_host_id)?;
+        validate_short_label(&self.coordinator_id)
+    }
+}
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RunCurrentResult {
+    pub run: Option<RunSummary>,
+}
+
 /// Binds a coordinator to an existing run. Every coordinator mutation supplies
 /// the caller's known generation; the store checks the fence in the changing
 /// transaction. `takeover` is the explicit admin-only generation advance —

@@ -23,8 +23,8 @@ use drogon_protocol::orchestration_question::{
     RequestLedgerState, RequestShowParams, RequestShowResult,
 };
 use drogon_protocol::orchestration_run::{
-    RunCreateParams, RunCreateResult, RunListParams, RunListResult, RunShowParams, RunShowResult,
-    RunSummary, RunUseParams, RunUseResult,
+    RunCreateParams, RunCreateResult, RunCurrentParams, RunCurrentResult, RunListParams,
+    RunListResult, RunShowParams, RunShowResult, RunSummary, RunUseParams, RunUseResult,
 };
 use drogon_protocol::orchestration_scope::{CoordinatorScope, HostScope};
 use drogon_protocol::orchestration_task::{
@@ -93,6 +93,7 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
     let coordinator_only = matches!(
         command,
         OrchestrationCommand::RunCreate { .. }
+            | OrchestrationCommand::RunCurrent { .. }
             | OrchestrationCommand::RunList { .. }
             | OrchestrationCommand::RunShow { .. }
             | OrchestrationCommand::RunUse { .. }
@@ -586,6 +587,7 @@ pub async fn run(
     let status = capability_preflight(client, request_id).await?;
     let explicit_host = match command {
         OrchestrationCommand::RunCreate { host, .. }
+        | OrchestrationCommand::RunCurrent { host, .. }
         | OrchestrationCommand::RunList { host, .. }
         | OrchestrationCommand::RunShow { host, .. }
         | OrchestrationCommand::RunUse { host, .. }
@@ -743,6 +745,43 @@ pub async fn run(
                 0,
             )
         }
+        OrchestrationCommand::RunCurrent { coordinator_id, .. } => {
+            let params = RunCurrentParams {
+                host: host_scope(&host_id),
+                coordinator_id: coordinator_id.clone(),
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call(
+                    "orchestration.runCurrent",
+                    value,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result: RunCurrentResult = Client::decode_checked(
+                &call,
+                "orchestration.runCurrent",
+                |r: &RunCurrentResult| {
+                    if let Some(run) = &r.run {
+                        check_run(run)?;
+                        if run.coordinator_id != *coordinator_id {
+                            return Err("run-current response names a different coordinator".into());
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
+            emit(
+                call,
+                json,
+                || match &result.run {
+                    Some(run) => format!("{} {}", run.run_id, run.objective),
+                    None => "No Run is bound to this terminal.".into(),
+                },
+                0,
+            )
+        }
         OrchestrationCommand::RunUse {
             scope, takeover, ..
         } => {
@@ -795,6 +834,7 @@ pub async fn run(
             scope,
             instructions,
             title,
+            deps,
             depends_on,
             parent,
             display_name,
@@ -803,9 +843,12 @@ pub async fn run(
             let spec = TaskSpec {
                 title: title.clone(),
                 instructions: instructions.clone(),
-                depends_on: match depends_on {
-                    Some(list) => list.split(',').map(str::to_string).collect(),
-                    None => Vec::new(),
+                depends_on: match deps {
+                    Some(raw) => crate::orchestration_task_dependencies::parse(raw)?,
+                    None => match depends_on {
+                        Some(list) => list.split(',').map(str::to_string).collect(),
+                        None => Vec::new(),
+                    },
                 },
                 parent: parent.clone(),
                 display_name: display_name.clone(),

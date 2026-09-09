@@ -409,6 +409,17 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     let run_id = text_field(&run, "/result/run/runId").to_string();
     let coordinator_id = text_field(&run, "/result/run/coordinatorId").to_string();
     assert_eq!(run["result"]["run"]["consumerGeneration"], Value::from(1));
+    let (code, current) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "run-current",
+            "--coordinator-id",
+            &coordinator_id,
+        ],
+    );
+    assert_ok(code, &current, &["orchestration", "run-current"]);
+    assert_eq!(current["result"]["run"], run["result"]["run"]);
 
     let scope_args = |args: &mut Vec<String>| {
         args.push("--run".into());
@@ -423,9 +434,9 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     scope_args(&mut task_args);
     task_args.extend(
         [
-            "--instructions",
+            "--spec",
             "Write a fixture artifact file and report the exact outcome.",
-            "--title",
+            "--task-title",
             "V1 dogfood fixture task",
         ]
         .map(String::from),
@@ -435,6 +446,26 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     assert_ok(code, &task, &["orchestration", "task-create"]);
     let task_id = text_field(&task, "/result/task/taskId").to_string();
     assert_eq!(text_field(&task, "/result/task/status"), "ready");
+
+    let mut dependent_ids = Vec::new();
+    for deps in [
+        serde_json::json!([task_id]).to_string(),
+        format!("[{task_id}]"),
+    ] {
+        let mut dependent_args = vec!["orchestration".to_string(), "task-create".to_string()];
+        scope_args(&mut dependent_args);
+        dependent_args
+            .extend(["--spec", "wait for the worker report", "--deps", &deps].map(String::from));
+        let args: Vec<_> = dependent_args.iter().map(String::as_str).collect();
+        let (code, dependent) = coordinator_call(&data_dir, &args);
+        assert_ok(code, &dependent, &args);
+        assert_eq!(dependent["result"]["task"]["status"], "pending");
+        assert_eq!(
+            dependent["result"]["task"]["dependsOn"],
+            serde_json::json!([task_id])
+        );
+        dependent_ids.push(text_field(&dependent, "/result/task/taskId").to_string());
+    }
 
     // Source ask is bare JSON; a durable answer makes the long-budget resume immediate.
     let mut ask_args = vec!["orchestration".to_string(), "ask".to_string()];
@@ -605,6 +636,15 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     let (code, task_show_1) = coordinator_call(&data_dir, &task_show_ref);
     assert_ok(code, &task_show_1, &["orchestration", "task-show"]);
     assert_eq!(text_field(&task_show_1, "/result/task/status"), "failed");
+    for id in &dependent_ids {
+        let mut args = vec!["orchestration".to_string(), "task-show".to_string()];
+        scope_args(&mut args);
+        args.extend(["--task", id].map(String::from));
+        let args: Vec<_> = args.iter().map(String::as_str).collect();
+        let (code, dependent) = coordinator_call(&data_dir, &args);
+        assert_ok(code, &dependent, &args);
+        assert_eq!(dependent["result"]["task"]["status"], "pending");
+    }
 
     // --- attempt 2: explicit retry of the failed attempt, fixture harness
     // reports SUCCESS and additionally sends a genuine late/conflicting
@@ -714,6 +754,15 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     let (code, task_show_2) = coordinator_call(&data_dir, &task_show_2_ref);
     assert_ok(code, &task_show_2, &["orchestration", "task-show"]);
     assert_eq!(text_field(&task_show_2, "/result/task/status"), "completed");
+    for id in dependent_ids {
+        let mut args = vec!["orchestration".to_string(), "task-show".to_string()];
+        scope_args(&mut args);
+        args.extend(["--task", &id].map(String::from));
+        let args: Vec<_> = args.iter().map(String::as_str).collect();
+        let (code, dependent) = coordinator_call(&data_dir, &args);
+        assert_ok(code, &dependent, &args);
+        assert_eq!(dependent["result"]["task"]["status"], "ready");
+    }
 
     // --- exact release: both settled attempts release their session
     // resources; the process already exited on its own after reporting ---

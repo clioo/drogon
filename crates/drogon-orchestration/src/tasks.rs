@@ -366,11 +366,15 @@ pub fn update(
         params.status,
     )?;
     if let Some(result) = &params.result {
-        tx.execute(
-            "UPDATE orchestration_tasks SET result=?3 WHERE task_id=?1 AND run_id=?2",
-            params![params.task_id, params.scope.run_id, result],
-        )
-        .map_err(store_error)?;
+        let changed = tx
+            .execute(
+                "UPDATE orchestration_tasks SET result=?3 WHERE task_id=?1 AND run_id=?2",
+                params![params.task_id, params.scope.run_id, result],
+            )
+            .map_err(store_error)?;
+        if changed != 1 {
+            return Err(store_error("Task result was not persisted."));
+        }
     }
     Ok(TaskUpdateResult {
         task: load_task_in_run(tx, &params.task_id, &params.scope.run_id)?.record(),

@@ -201,6 +201,13 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+    /// Show the run explicitly bound to a coordinator identity
+    RunCurrent {
+        #[arg(long, value_name = "ID")]
+        coordinator_id: String,
+        #[command(flatten)]
+        host: HostOpt,
+    },
     /// List runs (bounded pagination, default limit 100)
     RunList {
         #[arg(long, value_name = "N")]
@@ -230,10 +237,18 @@ pub enum OrchestrationCommand {
     TaskCreate {
         #[command(flatten)]
         scope: CoordinatorScopeArgs,
-        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        #[arg(
+            long,
+            visible_alias = "spec",
+            value_name = "TEXT",
+            allow_hyphen_values = true
+        )]
         instructions: String,
-        #[arg(long, value_name = "TEXT")]
+        #[arg(long, visible_alias = "task-title", value_name = "TEXT")]
         title: Option<String>,
+        /// Source JSON array of prerequisite task ids
+        #[arg(long, value_name = "JSON", conflicts_with = "depends_on")]
+        deps: Option<String>,
         /// Comma-separated prerequisite task ids
         #[arg(long, value_name = "ID,..")]
         depends_on: Option<String>,

@@ -49,6 +49,11 @@ impl Engine {
                     |tx| encode(runs::use_run(tx, &params)?),
                 )
             }
+            "orchestration.runCurrent" => {
+                let params: RunCurrentParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.coordination_read(|tx| encode(runs::current(tx, &params)?))
+            }
             "orchestration.runList" => {
                 let params: RunListParams = decode(&request.params)?;
                 params.validate_shape(&self.host_id)?;

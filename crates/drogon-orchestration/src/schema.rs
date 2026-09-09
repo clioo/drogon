@@ -4,7 +4,7 @@ use drogon_protocol::RpcError;
 use rusqlite::{OptionalExtension, Transaction, params};
 
 /// Version stamped into `orchestration_domain_meta` for the DDL applied below.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 const DDL: &str = "
 CREATE TABLE IF NOT EXISTS orchestration_domain_meta (
@@ -22,6 +22,14 @@ CREATE TABLE IF NOT EXISTS orchestration_runs (
 
 CREATE INDEX IF NOT EXISTS orchestration_runs_page
     ON orchestration_runs(host_id, created_at_ms, run_id);
+
+CREATE TABLE IF NOT EXISTS orchestration_run_bindings (
+    host_id TEXT NOT NULL,
+    coordinator_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    consumer_generation INTEGER NOT NULL,
+    PRIMARY KEY (host_id, coordinator_id)
+);
 
 CREATE TABLE IF NOT EXISTS orchestration_tasks (
     task_id TEXT PRIMARY KEY,

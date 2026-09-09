@@ -171,6 +171,7 @@ fn forbidden_methods_are_unauthorized_before_any_scope_check() {
         "harness.list",
         "runtime.shutdown",
         "orchestration.runCreate",
+        "orchestration.runCurrent",
         "orchestration.taskCreate",
         "orchestration.taskUpdate",
         "orchestration.gateCreate",
