@@ -940,6 +940,8 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[
                 ORCHESTRATION_CAPABILITY,
                 "Dual-actor verb: pass either the coordinator binding or the dispatch binding.",
+                "Valid kinds: status, dispatch, worker_done, merge_ready, escalation, handoff, decision_gate, question, heartbeat.",
+                "--task-id/--dispatch-id/--files-modified/--report-path/--phase build the structured payload; never mix them with --payload.",
             ],
         ),
         entry(
