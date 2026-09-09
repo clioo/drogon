@@ -296,6 +296,106 @@ fn pi_translation_requires_an_executable_shaped_binding() {
 }
 
 #[test]
+fn pi_selected_model_must_match_the_binding_model() {
+    // Pinned mapping: the recipe executes request.model ?? config.model
+    // with both set to one effective value, so selection A into binding
+    // B is refused, never substituted. Omitted selection models resolve
+    // to the binding's exact ID through the provider-default verdict.
+    let catalog = enumerated_catalog(
+        HarnessId::Pi,
+        vec![
+            entry("kimi-coding", "kimi-for-coding", Some(true)),
+            entry("kimi-coding", "kimi-for-review", Some(true)),
+        ],
+    );
+    let binding = PiProviderBinding {
+        provider_name: "kimi-coding".to_string(),
+        base_url: "https://kimi.example.com/v1".to_string(),
+        model: "kimi-for-coding".to_string(),
+        api_key_env: Some("KIMI_FIXTURE_KEY".to_string()),
+        api_key_vault: None,
+    };
+    // Matching selection and binding: the effective model is emitted in
+    // both the step and the providers entry, with the provider-identity
+    // limit noted (provider_name is a recipe-map key, not an
+    // attestation).
+    let translation = translate_selection(
+        &locked_identity(),
+        &adapters(),
+        &selection(
+            HarnessId::Pi,
+            Some("kimi-coding"),
+            Some("kimi-for-coding"),
+            None,
+        ),
+        &catalog,
+        Some(&binding),
+    );
+    let MentuTranslation::Translated(plan) = translation else {
+        panic!("expected Translated, got {translation:?}");
+    };
+    assert_eq!(plan.model.as_deref(), Some("kimi-for-coding"));
+    let (_, config) = plan.providers_entry.as_ref().expect("providers entry");
+    assert_eq!(config.model.as_deref(), Some("kimi-for-coding"));
+    assert!(
+        plan.notes
+            .iter()
+            .any(|note| note.contains("not verified against the binding")),
+        "provider-identity limit must be noted: {:?}",
+        plan.notes
+    );
+    // Mismatching explicit selection: blocked naming both IDs.
+    let translation = translate_selection(
+        &locked_identity(),
+        &adapters(),
+        &selection(
+            HarnessId::Pi,
+            Some("kimi-coding"),
+            Some("kimi-for-review"),
+            None,
+        ),
+        &catalog,
+        Some(&binding),
+    );
+    let MentuTranslation::Blocked { reason, evidence } = translation else {
+        panic!("expected Blocked, got {translation:?}");
+    };
+    assert!(reason.contains("kimi-for-review"), "{reason}");
+    assert!(reason.contains("kimi-for-coding"), "{reason}");
+    assert!(evidence.contains("PiCLIAdapter"), "{evidence}");
+    // Omitted selection model: resolves to the binding's exact ID with
+    // a note, through the provider-default verdict.
+    let translation = translate_selection(
+        &locked_identity(),
+        &adapters(),
+        &selection(HarnessId::Pi, Some("kimi-coding"), None, None),
+        &catalog,
+        Some(&binding),
+    );
+    let MentuTranslation::Translated(plan) = translation else {
+        panic!("expected Translated, got {translation:?}");
+    };
+    assert_eq!(plan.model.as_deref(), Some("kimi-for-coding"));
+    assert!(
+        plan.notes.iter().any(|note| note.contains("omitted")),
+        "omitted model must be noted: {:?}",
+        plan.notes
+    );
+    // Bare harness default: same resolution.
+    let translation = translate_selection(
+        &locked_identity(),
+        &adapters(),
+        &selection(HarnessId::Pi, None, None, None),
+        &catalog,
+        Some(&binding),
+    );
+    let MentuTranslation::Translated(plan) = translation else {
+        panic!("expected Translated, got {translation:?}");
+    };
+    assert_eq!(plan.model.as_deref(), Some("kimi-for-coding"));
+}
+
+#[test]
 fn opencode_and_antigravity_have_no_adapter_and_stay_blocked() {
     let catalog = no_surface_catalog(HarnessId::Opencode);
     let translation = translate_selection(

@@ -27,6 +27,18 @@
 //!   embedded credentials/query/fragment, a credential via
 //!   `api_key_env`/`api_key_vault`, Pi ≥ 0.84.1, Node ≥ 22.19, and tools
 //!   restricted to read/bash/edit/write/grep/find/ls.
+//! - `Sources/MentuRecipesCore/PiCLIAdapter.swift` (`execute`, model
+//!   resolution): the executed model is `request.model ?? config.model`.
+//!   Drogon sets step `model` and provider-config `model` to one
+//!   effective value, so an explicit selection for model A is REFUSED
+//!   rather than silently translated into a binding carrying model B;
+//!   an omitted selection model resolves to the binding's exact ID.
+//!   Provider identity is an explicitly OPEN decision: the adapter
+//!   resolves the step `backend` name to a provider-config entry (the
+//!   name is a recipe-map key, possibly an alias) and never sees a
+//!   harness provider name, so `selection.provider` cannot be verified
+//!   against the binding's `base_url` here — translations carry that
+//!   limit as a note instead of a claim.
 //! - `Sources/MentuRecipesCore/RecipeDoctor.swift`: `doctor --strict`
 //!   surfaces `unknown_backend` (observed for `opencode`) and
 //!   `unsupported_thinking` (observed for a thinking field on a pi-shaped
@@ -637,8 +649,9 @@ pub fn translate_selection(
             }
             let verdict = validate_selection(selection, catalog);
             match &verdict {
-                SelectionVerdict::Enumerated { .. } | SelectionVerdict::ManualUnverified { .. } => {
-                }
+                SelectionVerdict::Enumerated { .. }
+                | SelectionVerdict::ProviderDefault { .. }
+                | SelectionVerdict::ManualUnverified { .. } => {}
                 other => {
                     return blocked(
                         format!("the host catalog refutes this selection: {other:?}"),
@@ -646,6 +659,28 @@ pub fn translate_selection(
                     );
                 }
             }
+            // Effective-model rule (pinned adapter mapping: the recipe
+            // executes `request.model ?? config.model`, and this
+            // translation sets BOTH to one value). An explicit selection
+            // for model A must never silently become the binding's
+            // model B; an omitted selection model resolves to the
+            // binding's exact ID, which the caller's credential
+            // resolution owns.
+            let effective_model = match &selection.model {
+                Some(selected) if *selected != binding.model => {
+                    return blocked(
+                        format!(
+                            "the selection names model {selected:?} but the Pi binding carries \
+                             exact model ID {:?}; translating would silently substitute one for \
+                             the other. Align the selection with the binding.",
+                            binding.model
+                        ),
+                        "PiCLIAdapter.swift request.model ?? config.model mapping",
+                    );
+                }
+                Some(selected) => selected.clone(),
+                None => binding.model.clone(),
+            };
             let mut notes = vec![
                 "pi step executes through a provider-config adapter, not bare 'pi'".to_string(),
                 "PiCLIAdapter requires Pi >= 0.84.1 and Node >= 22.19 on the execution \
@@ -655,6 +690,27 @@ pub fn translate_selection(
             if matches!(verdict, SelectionVerdict::ManualUnverified { .. }) {
                 notes.push("model id is manual-unverified against this host catalog".to_string());
             }
+            if selection.model.is_none() {
+                notes.push(
+                    "model omitted in the selection; executing the binding's exact model ID, \
+                     owned by the caller's credential resolution"
+                        .to_string(),
+                );
+            }
+            if selection.provider.is_some() {
+                // Explicitly open provider-identity decision (module
+                // docs): provider_name is a recipe-map key the runtime
+                // resolves to a provider config — possibly an alias —
+                // and the adapter never sees a harness provider name, so
+                // the selection provider cannot be verified against the
+                // binding's base_url here.
+                notes.push(
+                    "the selection provider is not verified against the binding: provider_name \
+                     is a recipe-map key, not a harness provider attestation — the binding's \
+                     base_url decides where this runs"
+                        .to_string(),
+                );
+            }
             MentuTranslation::Translated(Box::new(MentuStepPlan {
                 backend: binding.provider_name.clone(),
                 providers_entry: Some((
@@ -663,13 +719,13 @@ pub fn translate_selection(
                         api: "cli".to_string(),
                         agent: Some("pi".to_string()),
                         base_url: binding.base_url.clone(),
-                        model: Some(binding.model.clone()),
+                        model: Some(effective_model.clone()),
                         api_key_env: binding.api_key_env.clone(),
                         api_key_vault: binding.api_key_vault.clone(),
                         context_window: None,
                     },
                 )),
-                model: Some(binding.model.clone()),
+                model: Some(effective_model),
                 reasoning: None,
                 thinking: None,
                 notes,

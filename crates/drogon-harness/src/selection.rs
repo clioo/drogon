@@ -285,8 +285,10 @@ fn validate_against_entries(
     }
 }
 
-/// Pi's `--thinking` effort rides on the model's thinking capability; the
-/// catalog reports it per entry. A thinking override on a `thinking: no`
+/// Pi's `--thinking` effort rides on the model's thinking capability —
+/// but only when the effort actually ENABLES thinking. `off` explicitly
+/// disables it, so a `thinking: no` model runs fine with `off` (or with
+/// no effort override at all); only an enabled thinking level on such a
 /// model is a capability mismatch, not a confirmation.
 fn capability_check(
     selection: &HarnessSelection,
@@ -294,7 +296,10 @@ fn capability_check(
     scope: String,
 ) -> SelectionVerdict {
     if selection.harness == HarnessId::Pi
-        && selection.effort.is_some()
+        && selection
+            .effort
+            .as_deref()
+            .is_some_and(|effort| effort != "off")
         && entry.thinking == Some(false)
     {
         return SelectionVerdict::CapabilityUnsupported {

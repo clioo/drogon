@@ -209,6 +209,81 @@ fn thinking_override_on_a_non_thinking_model_is_a_capability_mismatch() {
 }
 
 #[test]
+fn pi_effort_off_does_not_require_thinking_support() {
+    // `pi --thinking off` explicitly DISABLES thinking: a thinking:false
+    // model is fully capable of running with it (or with no effort
+    // override at all). Only an ENABLED thinking level on such a model
+    // mismatches. Mentu-side effort limits live in mentu_contract, not
+    // here.
+    let catalog = enumerated_catalog(
+        HarnessId::Pi,
+        vec![entry(
+            "dgx-spark",
+            "qwen3.8-flash-next-nvidia-nvfp4",
+            Some(false),
+        )],
+    );
+    let verdict = validate_selection(
+        &selection(
+            HarnessId::Pi,
+            Some("dgx-spark"),
+            Some("qwen3.8-flash-next-nvidia-nvfp4"),
+            Some("off"),
+        ),
+        &catalog,
+    );
+    assert!(
+        matches!(verdict, SelectionVerdict::Enumerated { .. }),
+        "off disables thinking, no capability needed: {verdict:?}"
+    );
+    let verdict = validate_selection(
+        &selection(
+            HarnessId::Pi,
+            Some("dgx-spark"),
+            Some("qwen3.8-flash-next-nvidia-nvfp4"),
+            None,
+        ),
+        &catalog,
+    );
+    assert!(
+        matches!(verdict, SelectionVerdict::Enumerated { .. }),
+        "no effort means no thinking requirement: {verdict:?}"
+    );
+    for effort in ["low", "minimal", "max"] {
+        let verdict = validate_selection(
+            &selection(
+                HarnessId::Pi,
+                Some("dgx-spark"),
+                Some("qwen3.8-flash-next-nvidia-nvfp4"),
+                Some(effort),
+            ),
+            &catalog,
+        );
+        assert!(
+            matches!(verdict, SelectionVerdict::CapabilityUnsupported { .. }),
+            "enabled thinking on a non-thinking model must reject ({effort}): {verdict:?}"
+        );
+    }
+    let capable = enumerated_catalog(
+        HarnessId::Pi,
+        vec![entry("kimi-coding", "kimi-for-coding", Some(true))],
+    );
+    let verdict = validate_selection(
+        &selection(
+            HarnessId::Pi,
+            Some("kimi-coding"),
+            Some("kimi-for-coding"),
+            Some("off"),
+        ),
+        &capable,
+    );
+    assert!(
+        matches!(verdict, SelectionVerdict::Enumerated { .. }),
+        "off on a capable model: {verdict:?}"
+    );
+}
+
+#[test]
 fn auth_empty_catalog_degrades_selections_to_manual_unverified() {
     // Exactly what the real credential-free Pi probe reports: enumerated,
     // zero entries. The selection must NOT be confirmed.
