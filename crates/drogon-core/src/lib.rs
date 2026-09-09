@@ -293,6 +293,14 @@ impl Engine {
         self.quiescent.load(Ordering::Acquire)
     }
 
+    /// Whether this process still tracks the session handle. Test-facing:
+    /// the automation reconcile treats a missing handle as stranded rather
+    /// than exited, so tests that force a row back to `dispatched` must know
+    /// which branch the tick will take.
+    pub fn session_is_tracked(&self, session_id: &str) -> bool {
+        self.sessions.lock().unwrap().contains_key(session_id)
+    }
+
     /// The data directory this instance opened. Used by `mentu_rpc` to
     /// resolve the pinned `mentu-recipes` runtime at
     /// `<data_dir>/mentu/runtime/bin/mentu-recipes`.
