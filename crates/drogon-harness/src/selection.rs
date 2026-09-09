@@ -156,13 +156,14 @@ pub fn validate_selection(selection: &HarnessSelection, catalog: &HostCatalog) -
             "this harness exposes no model enumeration surface; the id will be \
              passed to the harness unverified",
         ),
-        EnumerationStatus::TimedOut | EnumerationStatus::ParseFailed => {
-            SelectionVerdict::CatalogUnavailable {
-                reason: catalog.note.clone().unwrap_or_else(|| {
-                    "the catalog probe failed; try again before launching".to_string()
-                }),
-            }
-        }
+        EnumerationStatus::TimedOut
+        | EnumerationStatus::ParseFailed
+        | EnumerationStatus::ProbeFailed
+        | EnumerationStatus::IsolationFailed => SelectionVerdict::CatalogUnavailable {
+            reason: catalog.note.clone().unwrap_or_else(|| {
+                "the catalog probe failed; try again before launching".to_string()
+            }),
+        },
         EnumerationStatus::NotInstalled => SelectionVerdict::NotInstalled,
     }
 }

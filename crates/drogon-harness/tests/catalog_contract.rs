@@ -293,3 +293,159 @@ fn probe_output_beyond_the_cap_is_drained_not_kept() {
         "a chatty child must still be drained and reaped promptly"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn leader_exits_but_grandchild_holds_pipes_is_bounded_and_reported() {
+    // The leader prints the table and exits zero, but a background child
+    // inherits stdout and sleeps: the drain must not hang on the open
+    // pipe, must escalate the GROUP after the post-exit grace, and must
+    // report the cleanup in the catalog note.
+    let bin = FixtureBin::new();
+    let pi = bin.add(
+        "pi",
+        "#!/bin/sh\n\
+         if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
+         cat <<'PIEOF'\n\
+provider      model                            context  max-out  thinking  images\n\
+kimi-coding   kimi-for-coding                  262.1K   32.8K    yes       yes\n\
+PIEOF\n\
+         sleep 30 &\n\
+         exit 0\n",
+    );
+    let start = Instant::now();
+    let catalog = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    assert!(
+        start.elapsed() < Duration::from_secs(20),
+        "drain must stay bounded with a pipe-holding grandchild"
+    );
+    assert_eq!(catalog.status, EnumerationStatus::Enumerated);
+    assert_eq!(catalog.entries.len(), 1);
+    let note = catalog.note.expect("cleanup note");
+    assert!(note.contains("post-exit descendant cleanup"), "{note}");
+    assert!(
+        note.contains("group-empty after escalation: true"),
+        "evidence must record verified group exit, not assumed: {note}"
+    );
+    // No fixture descendant may survive.
+    let check = Command::new("/usr/bin/pgrep")
+        .args(["-f", &pi.display().to_string()])
+        .output()
+        .expect("pgrep");
+    assert!(
+        check.stdout.is_empty(),
+        "fixture descendants must be reaped: {:?}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn term_resistant_descendant_is_sigkilled_and_evidence_recorded() {
+    // A grandchild that traps and ignores TERM must be escalated to
+    // SIGKILL, and the note must say the group survived TERM rather than
+    // claiming signal success as verified exit.
+    let bin = FixtureBin::new();
+    let pi = bin.add(
+        "pi",
+        "#!/bin/sh\n\
+         if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
+         cat <<'PIEOF'\n\
+provider      model                            context  max-out  thinking  images\n\
+kimi-coding   kimi-for-coding                  262.1K   32.8K    yes       yes\n\
+PIEOF\n\
+         ( trap '' TERM; sleep 60 ) &\n\
+         exit 0\n",
+    );
+    let start = Instant::now();
+    let catalog = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    assert!(
+        start.elapsed() < Duration::from_secs(25),
+        "TERM-resistant descendant must be KILL-escalated within bounds"
+    );
+    assert_eq!(catalog.status, EnumerationStatus::Enumerated);
+    let note = catalog.note.expect("cleanup note");
+    assert!(
+        note.contains("group survived SIGTERM"),
+        "the TERM survival must be recorded: {note}"
+    );
+    assert!(
+        note.contains("group-empty after escalation: true"),
+        "{note}"
+    );
+    let check = Command::new("/usr/bin/pgrep")
+        .args(["-f", &pi.display().to_string()])
+        .output()
+        .expect("pgrep");
+    assert!(
+        check.stdout.is_empty(),
+        "fixture descendants must be reaped: {:?}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+}
+
+#[test]
+fn nonzero_exit_is_probe_failed_never_model_rows() {
+    // A failing enumeration (e.g. an auth error) must not parse partial
+    // stdout into catalog rows.
+    let bin = FixtureBin::new();
+    let pi = bin.add(
+        "pi",
+        "#!/bin/sh\n\
+         if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
+         echo 'provider      model'\n\
+         echo 'kimi-coding   should-not-appear' \n\
+         echo 'token refresh failed' >&2\n\
+         exit 1\n",
+    );
+    let catalog = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    assert_eq!(catalog.status, EnumerationStatus::ProbeFailed);
+    assert!(catalog.entries.is_empty(), "no rows from a failed probe");
+    let note = catalog.note.expect("failure note");
+    assert!(note.contains("exited"), "{note}");
+    assert!(note.contains("token refresh failed"), "{note}");
+}
+
+#[cfg(unix)]
+#[test]
+fn isolation_setup_failure_fails_closed_without_probing() {
+    // Seeded child: TMPDIR points at a read-only dir, so the private probe
+    // root cannot be created. The probe must fail closed
+    // (IsolationFailed) and never spawn the executable.
+    const SEED: &str = "DROGON_CATALOG_TEST_ISOLATION_FAIL";
+    if std::env::var_os(SEED).is_none() {
+        let guard = tempfile::tempdir().expect("parent temp dir");
+        let ro = guard.path().join("read-only");
+        std::fs::create_dir(&ro).unwrap();
+        let fixture = guard.path().join("pi");
+        // A fixture that would print a catalog if it ever ran.
+        std::fs::write(
+            &fixture,
+            "#!/bin/sh\necho 'provider      model'\necho 'kimi-coding   kimi-for-coding'\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fixture, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let status = std::process::Command::new(exe)
+            .arg("isolation_setup_failure_fails_closed_without_probing")
+            .arg("--exact")
+            .arg("--nocapture")
+            .env(SEED, "1")
+            .env("TMPDIR", &ro)
+            .env("DROGON_CATALOG_TEST_FIXTURE", &fixture)
+            .status()
+            .expect("spawn seeded child");
+        assert!(status.success(), "seeded child must pass");
+        return;
+    }
+    let fixture = PathBuf::from(std::env::var("DROGON_CATALOG_TEST_FIXTURE").unwrap());
+    let catalog = probe_host_catalog(HarnessId::Pi, Some(&fixture));
+    assert_eq!(
+        catalog.status,
+        EnumerationStatus::IsolationFailed,
+        "probe isolation failure must fail closed: {catalog:?}"
+    );
+    assert!(catalog.entries.is_empty());
+}
