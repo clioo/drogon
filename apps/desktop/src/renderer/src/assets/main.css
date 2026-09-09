@@ -1484,6 +1484,13 @@ footer[data-testid="status-bar"] {
   border: 1px solid transparent;
   border-radius: calc(var(--radius) * 0.8);
 }
+/* Workspace options "Card layout: Compact" (workspace-options-state.ts) --
+   density only, no structural change: WorktreeCard's own markup/tests are
+   untouched, this wrapper class just tightens the card's own padding/gap. */
+.shell-workspace-card-compact .shell-worktree-card {
+  padding: 4px 8px;
+  gap: 2px;
+}
 .shell-worktree-card:hover:not(:disabled) {
   background: color-mix(in srgb, var(--foreground) 4%, transparent);
 }

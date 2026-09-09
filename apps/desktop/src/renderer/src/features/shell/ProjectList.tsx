@@ -61,6 +61,15 @@ import {
   saveSidebarProjectOrder,
   saveSidebarWorktreeOrder,
 } from "./sidebar-order";
+import {
+  applyWorkspaceHideFilters,
+  DEFAULT_WORKSPACE_OPTIONS_STATE,
+  loadWorkspaceOptionsState,
+  saveWorkspaceOptionsState,
+  sortWorktreesForDisplay,
+  type WorkspaceOptionsState,
+} from "./workspace-options-state";
+import { WorkspaceOptionsMenuSections } from "./WorkspaceOptionsMenuSections";
 import { useProjectHeaderDrag } from "./project-header-drag";
 import { useWorktreeCardDrag } from "./worktree-card-drag";
 import { WorktreeCard } from "./WorktreeCard";
@@ -94,6 +103,32 @@ function readStoredProjectOrder(): string[] {
 function readStoredWorktreeOrder(): Record<string, string[]> {
   if (typeof localStorage === "undefined") return {};
   return loadSidebarWorktreeOrder(localStorage);
+}
+
+function readStoredWorkspaceOptions(): WorkspaceOptionsState {
+  if (typeof localStorage === "undefined")
+    return DEFAULT_WORKSPACE_OPTIONS_STATE;
+  return loadWorkspaceOptionsState(localStorage);
+}
+
+/** Most-recent session activity for a worktree, falling back to its
+ *  creation time so an ever-quiet worktree still ranks (oldest last)
+ *  under Sort by: Recent instead of colliding at "no activity". */
+function latestWorktreeActivityAt(
+  worktree: Worktree,
+  sessions: readonly Session[],
+): string {
+  let freshest = worktree.createdAt;
+  let freshestMs = Date.parse(worktree.createdAt);
+  for (const session of sessions) {
+    if (session.workspaceId !== worktree.workspaceId) continue;
+    if (!session.agentStateAt) continue;
+    const at = Date.parse(session.agentStateAt);
+    if (Number.isNaN(at) || at <= freshestMs) continue;
+    freshestMs = at;
+    freshest = session.agentStateAt;
+  }
+  return freshest;
 }
 
 /** Which project dialog the sidebar currently shows, if any. */
@@ -157,6 +192,8 @@ function OptionsMenuContent({
   onFilterChange,
   addDisabled,
   onAddProject,
+  workspaceOptions,
+  onWorkspaceOptionsChange,
 }: {
   groups: ProjectGroup[];
   selectedProjectIds: readonly string[];
@@ -166,6 +203,8 @@ function OptionsMenuContent({
   onFilterChange: (value: string) => void;
   addDisabled: boolean;
   onAddProject: () => void;
+  workspaceOptions: WorkspaceOptionsState;
+  onWorkspaceOptionsChange: (next: WorkspaceOptionsState) => void;
 }): React.JSX.Element {
   const projects = groups.map((group) => group.project);
   const selectedCount = projects.filter((project) =>
@@ -231,6 +270,10 @@ function OptionsMenuContent({
           <DropdownMenuSeparator />
         </>
       )}
+      <WorkspaceOptionsMenuSections
+        state={workspaceOptions}
+        onChange={onWorkspaceOptionsChange}
+      />
       <DropdownMenu.Item
         className="sidebar-menu-item"
         disabled={addDisabled}
@@ -333,6 +376,17 @@ export function ProjectList({
   const [worktreeOrder, setWorktreeOrder] = useState<Record<string, string[]>>(
     readStoredWorktreeOrder,
   );
+  // Workspace options (#user-feature-closure item 4): Group by / Sort by /
+  // Card layout / Show properties / Hide, persisted the same way as the
+  // project/worktree order just above.
+  const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceOptionsState>(
+    readStoredWorkspaceOptions,
+  );
+  const commitWorkspaceOptions = useCallback((next: WorkspaceOptionsState) => {
+    setWorkspaceOptions(next);
+    if (typeof localStorage !== "undefined")
+      saveWorkspaceOptionsState(localStorage, next);
+  }, []);
   const sectionRef = useRef<HTMLElement | null>(null);
   const getScrollContainer = useCallback(
     (): HTMLElement | null =>
@@ -441,6 +495,31 @@ export function ProjectList({
     onCommitWorktreeOrder: commitWorktreeOrder,
     getScrollContainer,
   });
+  // Workspace options apply to what's *rendered*, never to the drag
+  // geometry above (allProjectIds/visibleProjectIds/visibleCardIdsByProject
+  // stay driven by `active`): a card hidden by a filter simply isn't drawn
+  // to pick up, and its position in the underlying manual order is
+  // untouched, so turning a filter back off restores it exactly where it
+  // was. "Group by: None" hides each project's header (ProjectRow's
+  // `hideHeader`) rather than merging into a synthetic project, so every
+  // card's remove/rename/settings action keeps targeting its real project.
+  const displayed = useMemo(
+    () =>
+      active.map((group) => ({
+        ...group,
+        worktrees: sortWorktreesForDisplay(
+          applyWorkspaceHideFilters(
+            group.worktrees,
+            group.project,
+            sessions,
+            workspaceOptions.hide,
+          ),
+          workspaceOptions.sortBy,
+          (worktree) => latestWorktreeActivityAt(worktree, sessions),
+        ),
+      })),
+    [active, sessions, workspaceOptions.hide, workspaceOptions.sortBy],
+  );
   return (
     <section ref={sectionRef} className="shell-projects">
       <div className="mt-2 flex h-8 min-w-0 items-center justify-between gap-1.5 px-2">
@@ -513,6 +592,8 @@ export function ProjectList({
                     onFilterChange={setFilter}
                     addDisabled={addDisabled}
                     onAddProject={onAddProject}
+                    workspaceOptions={workspaceOptions}
+                    onWorkspaceOptionsChange={commitWorkspaceOptions}
                   />
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
@@ -577,6 +658,8 @@ export function ProjectList({
                     onFilterChange={setFilter}
                     addDisabled={addDisabled}
                     onAddProject={onAddProject}
+                    workspaceOptions={workspaceOptions}
+                    onWorkspaceOptionsChange={commitWorkspaceOptions}
                   />
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
@@ -600,10 +683,14 @@ export function ProjectList({
       cardDrag.state.dropIndicatorY !== null ? (
         <SidebarDropIndicator y={cardDrag.state.dropIndicatorY} />
       ) : null}
-      {active.map((group, headerIndex) => (
+      {displayed.map((group, headerIndex) => (
         <ProjectRow
           key={group.project.id}
           group={group}
+          hideHeader={workspaceOptions.groupBy === "none"}
+          showBranch={workspaceOptions.showProperties.branch}
+          showPr={workspaceOptions.showProperties.pr}
+          cardLayout={workspaceOptions.cardLayout}
           headerIndex={headerIndex}
           workspaces={workspaces}
           sessions={sessions}
@@ -731,6 +818,10 @@ function ProjectRow({
   onRenameWorktree,
   onOpenProjectSettings,
   onRemoveProject,
+  hideHeader = false,
+  showBranch = true,
+  showPr = true,
+  cardLayout = "comfortable",
 }: {
   group: ProjectGroup;
   /** Index among the rendered project headers (drag geometry). */
@@ -762,6 +853,20 @@ function ProjectRow({
   ) => Promise<string | null>;
   onOpenProjectSettings: (project: Project) => void;
   onRemoveProject: (project: Project) => void;
+  /** Workspace options "Group by: None" (workspace-options-state.ts):
+   *  renders this project's cards with no header row, so consecutive
+   *  projects read as one flat list. Every handler below is still wired
+   *  to the *real* project (unlike a synthetic merged group), so per-card
+   *  remove/rename/settings keep acting on the correct project even
+   *  though its name and kebab menu are not shown here. */
+  hideHeader?: boolean;
+  /** Workspace options "Show properties" -- passed straight through to
+   *  each card (WorktreeCard's own doc comment). */
+  showBranch?: boolean;
+  showPr?: boolean;
+  /** Workspace options "Card layout": toggles a density class on each
+   *  card's wrapper only -- WorktreeCard's own markup is untouched. */
+  cardLayout?: "comfortable" | "compact";
 }) {
   const project: Project = group.project;
   const canCreate =
@@ -770,6 +875,7 @@ function ProjectRow({
     !project.id.startsWith("folder:");
   return (
     <div className="shell-project">
+      {hideHeader ? null : (
       <div
         className="shell-project-row group relative"
         title={project.path}
@@ -808,6 +914,7 @@ function ProjectRow({
           />
         </div>
       </div>
+      )}
       <div className="shell-project-cards">
         {(() => {
           let cardIndex = 0;
@@ -822,9 +929,12 @@ function ProjectRow({
             return (
               <div
                 key={worktree.id}
-                className={
-                  depth > 0 ? "ml-3 border-l border-border/50 pl-2" : undefined
-                }
+                className={[
+                  depth > 0 ? "ml-3 border-l border-border/50 pl-2" : "",
+                  cardLayout === "compact" ? "shell-workspace-card-compact" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined}
                 data-worktree-nesting-depth={depth}
               >
                 <WorktreeCard
@@ -845,6 +955,8 @@ function ProjectRow({
                   onSelectSession={onSelectSession}
                   activeSessionId={activeSessionId}
                   tabStrip={tabStrip}
+                  showBranch={showBranch}
+                  showPr={showPr}
                   onRemove={
                     !worktreesAvailable
                       ? null

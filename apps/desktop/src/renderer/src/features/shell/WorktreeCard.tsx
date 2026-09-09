@@ -144,6 +144,8 @@ export function WorktreeCard({
   onSelectSession = null,
   activeSessionId = "",
   tabStrip,
+  showBranch = true,
+  showPr = true,
 }: {
   worktree: Worktree;
   workspaces: Workspace[];
@@ -179,6 +181,11 @@ export function WorktreeCard({
    * Null for implicit folder worktrees, whose title is the folder.
    */
   onRename: ((name: string) => Promise<string | null>) | null;
+  /** Workspace options "Show properties" (workspace-options-state.ts):
+   *  suppresses the branch name + ahead/behind badges, or the PR chip.
+   *  Defaults preserve the card exactly as before this option existed. */
+  showBranch?: boolean;
+  showPr?: boolean;
 }) {
   const [beginEditing, setBeginEditing] = useState(false);
   const [, forceCollapsedParentsBump] = useState(0);
@@ -297,12 +304,12 @@ export function WorktreeCard({
               )}
             </span>
             <WorktreeCardMetaBadges
-              branch={worktree.branch}
-              ahead={gitStatus?.branch.ahead ?? null}
-              behind={gitStatus?.branch.behind ?? null}
-              upstream={gitStatus?.branch.upstream ?? null}
+              branch={showBranch ? worktree.branch : ""}
+              ahead={showBranch ? (gitStatus?.branch.ahead ?? null) : null}
+              behind={showBranch ? (gitStatus?.branch.behind ?? null) : null}
+              upstream={showBranch ? (gitStatus?.branch.upstream ?? null) : null}
               issueNumber={issueNumber}
-              pr={pr}
+              pr={showPr ? pr : null}
             />
             {worktree.baseRef ? (
               <span
