@@ -1500,19 +1500,16 @@ pub async fn run(
                 },
             )?;
             let human = || {
+                // Source worker-start: `Worker <dispatch> [<state>] for <task>`
+                // plus a failure stage line or warning.
                 let mut text = format!(
-                    "Dispatch {} for task {} ({}; readiness {}; process {})",
+                    "Worker {} [{}] for {}",
                     result.dispatch_id,
-                    result.task_id,
                     wire_assignment(result.assignment_state),
-                    wire_readiness(result.readiness),
-                    wire_verdict(result.process_verdict)
+                    result.task_id,
                 );
                 if let Some(failure) = &result.failure {
-                    text.push_str(&format!(
-                        "\nfailure: {} at {}: {}",
-                        failure.code, failure.stage, failure.message
-                    ));
+                    text.push_str(&format!("\n{}: {}", failure.stage, failure.message));
                 }
                 text.push_str(&human_extras(&result.warning, &result.residual_resources));
                 text
@@ -2768,17 +2765,6 @@ fn wire_assignment(state: drogon_protocol::orchestration_common::AssignmentState
         Failed => "failed",
         Stopped => "stopped",
         Abandoned => "abandoned",
-    }
-}
-
-fn wire_readiness(
-    readiness: drogon_protocol::orchestration_common::ReadinessObservation,
-) -> &'static str {
-    use drogon_protocol::orchestration_common::ReadinessObservation::*;
-    match readiness {
-        NotObserved => "not observed",
-        PromptObserved => "prompt observed",
-        WorkerObserved => "worker observed",
     }
 }
 
