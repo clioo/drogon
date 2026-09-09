@@ -143,6 +143,12 @@ pub struct WorktreeList {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorktreeEnvelope {
+    pub worktree: Worktree,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Removed {
     pub id: String,
     pub removed: bool,

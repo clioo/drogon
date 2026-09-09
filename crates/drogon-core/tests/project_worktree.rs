@@ -626,3 +626,70 @@ fn session_agent_state_is_unknown_before_any_output() {
     assert_eq!(session["agentState"], "unknown");
     assert!(session["agentStateAt"].is_null());
 }
+
+#[test]
+fn worktree_get_returns_one_row_and_current_resolves_the_enclosing_worktree() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "pg1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let created = ok(
+        &engine,
+        "worktree.create",
+        "wg1",
+        json!({"projectId": project_id, "name": "feature-show"}),
+    );
+    let worktree_id = created["id"].as_str().unwrap().to_string();
+    let worktree_path = created["path"].as_str().unwrap().to_string();
+
+    // worktree.get by id returns exactly that row.
+    let shown = ok(&engine, "worktree.get", "wg2", json!({"id": worktree_id}));
+    assert_eq!(shown["worktree"]["id"], json!(worktree_id));
+    assert_eq!(shown["worktree"]["path"], json!(worktree_path));
+
+    // Unknown id is a typed not_found, never a null row.
+    assert_eq!(
+        err_code(&engine, "worktree.get", "wg3", json!({"id": "nope"})),
+        "not_found"
+    );
+
+    // worktree.current resolves a nested directory to the enclosing worktree.
+    let nested = Path::new(&worktree_path).join("a/b");
+    std::fs::create_dir_all(&nested).unwrap();
+    let current = ok(
+        &engine,
+        "worktree.current",
+        "wg4",
+        json!({"path": nested.to_string_lossy()}),
+    );
+    assert_eq!(current["worktree"]["id"], json!(worktree_id));
+
+    // The exact worktree root also resolves.
+    let root = ok(
+        &engine,
+        "worktree.current",
+        "wg5",
+        json!({"path": worktree_path}),
+    );
+    assert_eq!(root["worktree"]["id"], json!(worktree_id));
+
+    // A path no managed worktree encloses is a typed not_found, never a guess.
+    let outside = tempfile::tempdir().unwrap();
+    assert_eq!(
+        err_code(
+            &engine,
+            "worktree.current",
+            "wg6",
+            json!({"path": outside.path().to_string_lossy()}),
+        ),
+        "not_found"
+    );
+}

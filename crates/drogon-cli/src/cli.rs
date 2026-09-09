@@ -343,6 +343,21 @@ pub enum ProjectAction {
 
 #[derive(Subcommand, Debug)]
 pub enum WorktreeAction {
+    /// Show one worktree by id (a folder Project's id addresses its implicit worktree)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree show --id <ID>\nValid flags: --data-dir, --help, --id, --json, --request-id, --retry-request"
+    )]
+    Show {
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+    /// Show the Orca-managed worktree enclosing the current directory
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree current\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    Current,
     /// Create a git worktree for a Project on branch NAME
     #[command(
         args_override_self = true,
@@ -761,6 +776,10 @@ impl Cli {
                         require_nonempty("base", base)?;
                     }
                 }
+                WorktreeAction::Show { id } => {
+                    require_nonempty("id", id)?;
+                }
+                WorktreeAction::Current => {}
                 WorktreeAction::List { project } => {
                     require_nonempty("project", project)?;
                 }

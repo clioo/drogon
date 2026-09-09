@@ -17,11 +17,12 @@ use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
     BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, Project,
     ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Verdict, Workspace,
-    WorkspaceList, Worktree, WorktreeList, WriteResult, check_automation, check_automation_history,
-    check_automation_list, check_automation_run_now, check_browser_snapshot, check_browser_tab,
-    check_browser_tabs, check_harness_catalog, check_project, check_project_list, check_read,
-    check_removed, check_session, check_status, check_workspace, check_workspace_list,
-    check_worktree, check_worktree_list, check_write, partition_session_list,
+    WorkspaceList, Worktree, WorktreeEnvelope, WorktreeList, WriteResult, check_automation,
+    check_automation_history, check_automation_list, check_automation_run_now,
+    check_browser_snapshot, check_browser_tab, check_browser_tabs, check_harness_catalog,
+    check_project, check_project_list, check_read, check_removed, check_session, check_status,
+    check_workspace, check_workspace_list, check_worktree, check_worktree_list, check_write,
+    partition_session_list,
 };
 use crate::error::{CliError, method_not_found, timeout};
 use crate::output;
@@ -503,6 +504,62 @@ async fn worktree(
     action: &WorktreeAction,
 ) -> Result<RunOutcome, CliError> {
     match action {
+        WorktreeAction::Show { id } => {
+            let call = client
+                .call(
+                    "worktree.get",
+                    json!({ "id": id }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let envelope: WorktreeEnvelope =
+                Client::decode_checked(&call, "worktree.get", |env: &WorktreeEnvelope| {
+                    check_worktree(&env.worktree)
+                })?;
+            emit(
+                call,
+                json,
+                || output::worktree_created(&envelope.worktree),
+                0,
+                None,
+            )
+        }
+        WorktreeAction::Current => {
+            let cwd = std::env::current_dir().map_err(|err| {
+                CliError::local(
+                    crate::error::internal_error(format!(
+                        "cannot read the current directory: {err}"
+                    )),
+                    request_id,
+                )
+            })?;
+            let path = cwd.to_str().ok_or_else(|| {
+                CliError::local(
+                    crate::error::invalid_argument("current directory is not valid UTF-8"),
+                    request_id,
+                )
+            })?;
+            let call = client
+                .call(
+                    "worktree.current",
+                    json!({ "path": path }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let envelope: WorktreeEnvelope =
+                Client::decode_checked(&call, "worktree.current", |env: &WorktreeEnvelope| {
+                    check_worktree(&env.worktree)
+                })?;
+            emit(
+                call,
+                json,
+                || output::worktree_created(&envelope.worktree),
+                0,
+                None,
+            )
+        }
         WorktreeAction::Create {
             project,
             name,

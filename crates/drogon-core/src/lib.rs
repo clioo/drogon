@@ -513,6 +513,8 @@ impl Engine {
             "worktree.issueLinks" => self.do_worktree_issue_links(&request.params),
             "worktree.linkIssue" => self.mutating(request, Self::do_worktree_link_issue),
             "worktree.unlinkIssue" => self.mutating(request, Self::do_worktree_unlink_issue),
+            "worktree.get" => self.do_worktree_get(&request.params),
+            "worktree.current" => self.do_worktree_current(&request.params),
             "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
             "worktree.rename" => self.mutating(request, Self::do_worktree_rename),
             "worktree.update" => self.mutating(request, Self::do_worktree_update),

@@ -184,6 +184,28 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
         ),
         entry(
+            "worktree show",
+            &["worktree", "show"],
+            "Show one worktree by id",
+            "drogon-cli worktree show --id <ID>",
+            &["id"],
+            &[],
+            &["drogon-cli worktree show --id wt-1 --json"],
+            &["A folder Project's id addresses its implicit worktree."],
+        ),
+        entry(
+            "worktree current",
+            &["worktree", "current"],
+            "Show the Orca-managed worktree enclosing the current directory",
+            "drogon-cli worktree current",
+            &[],
+            &[],
+            &["drogon-cli worktree current --json"],
+            &[
+                "Resolves the shell's cwd to the longest-prefix managed worktree; outside every managed worktree it is a typed not_found, never a guess.",
+            ],
+        ),
+        entry(
             "worktree list",
             &["worktree", "list"],
             "List a Project's worktrees",

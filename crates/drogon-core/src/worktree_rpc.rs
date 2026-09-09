@@ -1054,6 +1054,160 @@ impl Engine {
         Ok(json!({ "worktrees": worktrees }))
     }
 
+    /// `worktree.get { id }`: one worktree row by id. The folder-project
+    /// implicit worktree is addressable by the project id, matching
+    /// `worktree.list`'s synthetic row.
+    pub(super) fn do_worktree_get(&self, params: &Value) -> Result<Value, RpcError> {
+        let id = require_str(params, "id")?.to_string();
+        let conn = self.db.lock().unwrap();
+        if let Some(project) = crate::project::get(&conn, &id).ok()
+            && project.kind == "folder"
+        {
+            let workspace_id: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM workspaces WHERE path = ?1",
+                    [&project.path],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(error::from_sqlite)?;
+            let workspace_id = workspace_id.ok_or_else(|| {
+                error::internal_error("folder project's implicit workspace is missing")
+            })?;
+            return Ok(json!({
+                "worktree": worktree_json(
+                    &project.id, &project.id, &workspace_id, &project.path, "", "", None, None,
+                    None, None, &project.created_at,
+                )
+            }));
+        }
+        let row = conn
+            .query_row(
+                "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at FROM worktrees WHERE id = ?1",
+                [&id],
+                |r| {
+                    Ok(worktree_json(
+                        &r.get::<_, String>(0)?,
+                        &r.get::<_, String>(1)?,
+                        &r.get::<_, String>(2)?,
+                        &r.get::<_, String>(3)?,
+                        &r.get::<_, String>(4)?,
+                        &r.get::<_, String>(5)?,
+                        r.get::<_, Option<String>>(6)?.as_deref(),
+                        r.get::<_, Option<String>>(7)?.as_deref(),
+                        r.get::<_, Option<String>>(8)?.as_deref(),
+                        r.get::<_, Option<String>>(9)?.as_deref(),
+                        &r.get::<_, String>(10)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(error::from_sqlite)?;
+        let worktree = row.ok_or_else(|| error::not_found("worktree not found"))?;
+        Ok(json!({ "worktree": worktree }))
+    }
+
+    /// `worktree.current { path }`: resolve a shell cwd to the enclosing
+    /// Orca-managed worktree by longest canonical path-prefix match across
+    /// worktree rows and folder projects. No guesses: nothing enclosing the
+    /// path is a typed `not_found`, never a nearest/first worktree.
+    pub(super) fn do_worktree_current(&self, params: &Value) -> Result<Value, RpcError> {
+        let path = require_str(params, "path")?;
+        let cwd = canonical_or_raw(path);
+        let conn = self.db.lock().unwrap();
+        let mut candidates: Vec<Value> = Vec::new();
+        {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at FROM worktrees",
+                )
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(worktree_json(
+                        &r.get::<_, String>(0)?,
+                        &r.get::<_, String>(1)?,
+                        &r.get::<_, String>(2)?,
+                        &r.get::<_, String>(3)?,
+                        &r.get::<_, String>(4)?,
+                        &r.get::<_, String>(5)?,
+                        r.get::<_, Option<String>>(6)?.as_deref(),
+                        r.get::<_, Option<String>>(7)?.as_deref(),
+                        r.get::<_, Option<String>>(8)?.as_deref(),
+                        r.get::<_, Option<String>>(9)?.as_deref(),
+                        &r.get::<_, String>(10)?,
+                    ))
+                })
+                .map_err(error::from_sqlite)?;
+            for row in rows {
+                candidates.push(row.map_err(error::from_sqlite)?);
+            }
+        }
+        {
+            let mut stmt = conn
+                .prepare("SELECT id, path, created_at FROM projects WHERE kind = 'folder'")
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(error::from_sqlite)?;
+            for row in rows {
+                let (id, path, created_at) = row.map_err(error::from_sqlite)?;
+                let workspace_id: Option<String> = conn
+                    .query_row("SELECT id FROM workspaces WHERE path = ?1", [&path], |r| {
+                        r.get(0)
+                    })
+                    .optional()
+                    .map_err(error::from_sqlite)?;
+                if let Some(workspace_id) = workspace_id {
+                    candidates.push(worktree_json(
+                        &id,
+                        &id,
+                        &workspace_id,
+                        &path,
+                        "",
+                        "",
+                        None,
+                        None,
+                        None,
+                        None,
+                        &created_at,
+                    ));
+                }
+            }
+        }
+        let mut best: Option<Value> = None;
+        for candidate in candidates {
+            let candidate_path = canonical_or_raw(candidate["path"].as_str().unwrap_or(""));
+            let encloses = cwd == candidate_path
+                || (cwd.len() > candidate_path.len()
+                    && cwd.starts_with(&candidate_path)
+                    && cwd.as_bytes()[candidate_path.len()] == b'/');
+            if !encloses {
+                continue;
+            }
+            let is_longer = match &best {
+                Some(current) => {
+                    candidate_path.len()
+                        > canonical_or_raw(current["path"].as_str().unwrap_or("")).len()
+                }
+                None => true,
+            };
+            if is_longer {
+                best = Some(candidate);
+            }
+        }
+        let worktree = best.ok_or_else(|| {
+            error::not_found("no Orca-managed worktree encloses the current directory")
+        })?;
+        Ok(json!({ "worktree": worktree }))
+    }
+
     pub(super) fn do_worktree_remove(&self, params: &Value) -> Result<Value, RpcError> {
         let id = require_str(params, "id")?.to_string();
         let force = optional_bool(params, "force", false)?;
