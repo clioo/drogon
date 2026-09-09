@@ -122,6 +122,38 @@ impl Engine {
             .as_ref()
             .map(|credential| credential.as_secret_str().to_owned());
         let digest = credential.as_ref().map(|credential| credential.digest());
+        // Source `findActiveDispatchForAssignee`: one live terminal hosts at
+        // most one active dispatch; a second one on the same pane is refused
+        // before any state effect. The check lives in the admission
+        // transaction so a retry's receipt lookup precedes it. The occupancy
+        // probe must not run against the replay path: run_staged looks the
+        // receipt up first and returns it before calling this closure again.
+        let prepare = |tx: &rusqlite::Transaction<'_>| {
+            let occupied: bool = tx
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM orchestration_attempts a
+                        WHERE a.host_id=?1 AND a.fenced=0
+                          AND json_extract(a.state_json,'$.result.sessionIdentity.sessionId')=?2
+                          AND NOT EXISTS(
+                            SELECT 1 FROM requests r
+                            WHERE r.request_id=?3 AND r.status='done' AND r.error_json IS NULL
+                              AND r.result_json IS NOT NULL
+                              AND json_extract(r.result_json,'$.dispatch.dispatchId') = a.dispatch_id
+                          )
+                    )",
+                    rusqlite::params![&self.host_id, &target.session_id, &key],
+                    |row| row.get(0),
+                )
+                .map_err(error::from_sqlite)?;
+            if occupied {
+                return Err(RpcError::new(
+                    "attempt_active",
+                    format!("Terminal {} already has an active dispatch.", to),
+                ));
+            }
+            Ok(())
+        };
         self.ledger.run_staged(
             &self.db,
             &key,
@@ -129,6 +161,7 @@ impl Engine {
             &request.params,
             |tx| {
                 runs::require_coordinator(tx, &params.scope)?;
+                prepare(tx)?;
                 if self.quiescent.load(Ordering::Acquire) {
                     return Err(error::runtime_busy(
                         "service admission is frozen for shutdown",

@@ -81,7 +81,7 @@ fn seed_run_task(fixture: &Fixture) -> (Value, String) {
     };
     let task = ok(
         &fixture.engine,
-        "seed-task",
+        &format!("seed-task-{}", run_id),
         "orchestration.taskCreate",
         json!({
             "contractVersion": COORDINATION_CONTRACT_VERSION,
@@ -288,7 +288,7 @@ fn dispatch_records_unsupervised_attempt_with_receipt_replay() {
         "orchestration.dispatch",
         params.clone(),
     );
-    assert_eq!(replay, first);
+    assert_eq!(replay, first, "replayed receipt, not a fresh dispatch");
     // Same request id with different params is a conflict, not a dispatch.
     let mut conflict = params.clone();
     conflict["returnPreamble"] = true.into();
@@ -296,6 +296,50 @@ fn dispatch_records_unsupervised_attempt_with_receipt_replay() {
         err_code(&fixture.engine, "d1", "orchestration.dispatch", conflict),
         "request_conflict"
     );
+
+    // Source `findActiveDispatchForAssignee`: a second dispatch onto the same
+    // live terminal is refused before any state change.
+    let second_task = {
+        static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let id = format!(
+            "seed-task-2-{}",
+            NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let task = ok(
+            &fixture.engine,
+            &id,
+            "orchestration.taskCreate",
+            json!({
+                "contractVersion": COORDINATION_CONTRACT_VERSION,
+                "hostId": fixture.host_id,
+                "runId": scope["runId"],
+                "coordinatorId": "coord-1",
+                "consumerGeneration": 1,
+                "spec": {"instructions": "occupy a different task"},
+            }),
+        );
+        task["task"]["taskId"].as_str().unwrap().to_string()
+    };
+    assert_eq!(
+        task_status(&fixture, &scope, &second_task),
+        "ready",
+        "second_task={second_task} first_task={task_id}"
+    );
+    let mut occupied = dispatch_params(&scope, &second_task);
+    occupied["to"] = session["id"].clone();
+    assert_eq!(
+        err_code(
+            &fixture.engine,
+            "occupied",
+            "orchestration.dispatch",
+            occupied
+        ),
+        "attempt_active"
+    );
+    assert_eq!(task_status(&fixture, &scope, &second_task), "ready");
+    // The first task stays dispatched; the refused second dispatch never
+    // rewrote it.
+    assert_eq!(task_status(&fixture, &scope, &task_id), "dispatched");
     // Worker-stop fences an unsupervised dispatch without signalling it.
     let mut stop = scope.clone();
     stop["dispatchId"] = dispatch_id.clone().into();
