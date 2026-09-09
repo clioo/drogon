@@ -693,3 +693,91 @@ fn worktree_get_returns_one_row_and_current_resolves_the_enclosing_worktree() {
         "not_found"
     );
 }
+
+#[test]
+fn session_stop_workspace_sweeps_live_sessions_and_skips_exited() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let workspace = ok(
+        &engine,
+        "workspace.register",
+        "ws-stop",
+        json!({"path": data_dir.path().to_string_lossy()}),
+    );
+    let workspace_id = workspace["id"].as_str().unwrap().to_string();
+
+    let mut session_ids = Vec::new();
+    let mut incarnations = Vec::new();
+    for i in 0..2 {
+        let session = ok(
+            &engine,
+            "session.start",
+            &format!("ss{i}"),
+            json!({
+                "workspaceId": workspace_id,
+                "command": "/bin/sh",
+                "args": ["-c", "sleep 30"],
+                "cols": 80, "rows": 24
+            }),
+        );
+        session_ids.push(session["id"].as_str().unwrap().to_string());
+        incarnations.push(session["incarnation"].as_str().unwrap().to_string());
+    }
+
+    // Stop the second session directly so the sweep must skip its
+    // already-exited handle (still durable, verdict exited).
+    let stopped_row = ok(
+        &engine,
+        "session.stop",
+        "sc1",
+        json!({"sessionId": session_ids[1], "incarnation": incarnations[1]}),
+    );
+    assert_eq!(stopped_row["verdict"], "exited");
+
+    let result = ok(
+        &engine,
+        "session.stop_workspace",
+        "sweep1",
+        json!({"workspaceId": workspace_id}),
+    );
+    // One live session (ss0) is signalled; the exited row is skipped.
+    assert_eq!(result["stopped"], json!(1));
+
+    // A repeat sweep finds no live sessions to stop.
+    let again = ok(
+        &engine,
+        "session.stop_workspace",
+        "sweep2",
+        json!({"workspaceId": workspace_id}),
+    );
+    assert_eq!(again["stopped"], json!(0));
+
+    // Sessions in another workspace are untouched.
+    std::fs::create_dir_all(data_dir.path().join("other")).unwrap();
+    let other_ws = ok(
+        &engine,
+        "workspace.register",
+        "ws-other",
+        json!({"path": data_dir.path().join("other").to_string_lossy()}),
+    );
+    let other_ws_id = other_ws["id"].as_str().unwrap().to_string();
+    let other = ok(
+        &engine,
+        "session.start",
+        "so1",
+        json!({
+            "workspaceId": other_ws_id,
+            "command": "/bin/sh",
+            "args": ["-c", "sleep 30"],
+            "cols": 80, "rows": 24
+        }),
+    );
+    let _ = other;
+    let other_sweep = ok(
+        &engine,
+        "session.stop_workspace",
+        "sweep3",
+        json!({"workspaceId": workspace_id}),
+    );
+    assert_eq!(other_sweep["stopped"], json!(0));
+}

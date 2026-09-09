@@ -473,6 +473,7 @@ impl Engine {
             "session.list" => self.do_session_list(&request.params),
             "session.read" => self.do_session_read(&request.params),
             "session.write" => self.mutating(request, Self::do_session_write),
+            "session.stop_workspace" => self.mutating(request, Self::do_session_stop_workspace),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
             // R16-AL2 (issue #228): the user-initiated close paths. `close`
@@ -877,6 +878,40 @@ impl Engine {
         let cols = require_dimension(params, "cols", 80)?;
         let rows = require_dimension(params, "rows", 24)?;
         session::resize(&handle, cols, rows)
+    }
+
+    /// `session.stop_workspace { workspaceId }`: source `terminal.stop` —
+    /// best-effort sweep of every live session in one workspace. Each
+    /// session's own stop is isolated (a failure on one never aborts the
+    /// sweep); the reply counts sessions this process signalled. Exited
+    /// sessions keep their true verdict and are not counted.
+    fn do_session_stop_workspace(&self, params: &Value) -> Result<Value, RpcError> {
+        let workspace_id = require_str(params, "workspaceId")?;
+        let session_ids: Vec<String> = {
+            let conn = self.db.lock().unwrap();
+            let mut stmt = conn
+                .prepare("SELECT id FROM sessions WHERE workspace_id = ?1")
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([workspace_id], |r| r.get(0))
+                .map_err(error::from_sqlite)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(error::from_sqlite)?
+        };
+        let mut stopped = 0u64;
+        for session_id in session_ids {
+            let handle = self.sessions.lock().unwrap().get(&session_id).cloned();
+            let Some(handle) = handle else { continue };
+            // A confirmed-exited session is already stopped; counting it
+            // would overstate the sweep's effect.
+            if session::snapshot(&handle)["verdict"] == "exited" {
+                continue;
+            }
+            if session::stop(&handle).is_ok() {
+                stopped += 1;
+            }
+        }
+        Ok(json!({ "stopped": stopped }))
     }
 
     fn do_session_stop(&self, params: &Value) -> Result<Value, RpcError> {

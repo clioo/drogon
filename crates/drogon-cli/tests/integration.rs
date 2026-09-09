@@ -416,6 +416,31 @@ async fn send_encodes_utf8_text_to_base64_exactly_once() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_stop_sweeps_a_workspace_and_reports_the_count() {
+    let dir = temp_data_dir("terminal-stop");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("session.stop_workspace") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"stopped": 2}),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let human = run_cli(dir.path(), &["terminal", "stop", "--workspace", "ws-1"]);
+    assert_eq!(human.status.code(), Some(0), "stderr: {}", stderr(&human));
+    assert!(stdout(&human).contains("Stopped 2 terminals."));
+    let request = service.first_captured();
+    assert_eq!(request["method"], "session.stop_workspace");
+    assert_eq!(request["params"]["workspaceId"], "ws-1");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_limit_caps_the_returned_inventory() {
     let dir = temp_data_dir("list-limit");
     let service = MockService::start(

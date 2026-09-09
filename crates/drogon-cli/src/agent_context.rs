@@ -226,6 +226,18 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["Refuses a dirty checkout unless --force is passed."],
         ),
         entry(
+            "terminal stop",
+            &["terminal", "stop"],
+            "Stop every live session in a workspace (best-effort sweep)",
+            "drogon-cli terminal stop --workspace <ID>",
+            &["workspace"],
+            &[],
+            &["drogon-cli terminal stop --workspace ws-1 --json"],
+            &[
+                "Best-effort per session: one failing stop never aborts the sweep; exited sessions are skipped. Human output is `Stopped N terminals.`",
+            ],
+        ),
+        entry(
             "terminal create",
             &["terminal", "create"],
             "Start a PTY session running COMMAND with ARGS (after --)",

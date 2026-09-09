@@ -322,6 +322,32 @@ async fn terminal(
             )
             .await
         }
+        TerminalAction::Stop { workspace } => {
+            let call = client
+                .call(
+                    "session.stop_workspace",
+                    json!({ "workspaceId": workspace }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let stopped = call.result["stopped"].as_u64().ok_or_else(|| {
+                CliError::local(
+                    crate::error::internal_error(
+                        "session.stop_workspace reply is missing a numeric `stopped` count",
+                    ),
+                    &call.request_id,
+                )
+            })?;
+            // Source copy: `Stopped N terminals.` (terminal.ts handler).
+            emit(
+                call,
+                json,
+                || format!("Stopped {stopped} terminals."),
+                0,
+                None,
+            )
+        }
         TerminalAction::Close {
             session,
             incarnation,

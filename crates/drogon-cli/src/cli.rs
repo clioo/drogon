@@ -474,6 +474,15 @@ pub enum TerminalAction {
         #[arg(long)]
         rows: u16,
     },
+    /// Stop every live session in a workspace (source `terminal stop`)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal stop --workspace <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+    )]
+    Stop {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+    },
     /// Stop a session and wait for the observed exit
     #[command(
         args_override_self = true,
@@ -854,6 +863,9 @@ impl Cli {
                     require_nonempty("incarnation", incarnation)?;
                     validate_dimension("cols", *cols)?;
                     validate_dimension("rows", *rows)?;
+                }
+                TerminalAction::Stop { workspace } => {
+                    require_nonempty("workspace", workspace)?;
                 }
                 TerminalAction::Close {
                     session,
