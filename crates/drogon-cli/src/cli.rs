@@ -12,7 +12,7 @@ use crate::orchestration_cli::OrchestrationCommand;
 #[command(
     name = "drogon-cli",
     version,
-    about = "Start with `drogon-cli skills get drogon-cli` for the version-matched agent guide.\nCommand-line client for the Drogon runtime (protocol v1)",
+    about = "Start with `drogon-cli skills get --topic drogon-cli` for the version-matched agent guide.\nCommand-line client for the Drogon runtime (protocol v1)",
     args_override_self = true,
     override_usage = "drogon-cli [OPTIONS] <COMMAND>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
 )]
@@ -610,11 +610,59 @@ pub enum SkillsAction {
     /// Print a version-matched skill guide as Markdown
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli skills get <NAME>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+        override_usage = "drogon-cli skills get --topic <TOPIC> [--full]\nValid flags: --data-dir, --full, --help, --json, --request-id, --retry-request, --topic"
     )]
     Get {
-        /// Guide name, e.g. drogon-cli
-        name: String,
+        /// Guide topic, e.g. drogon-cli
+        #[arg(long)]
+        topic: String,
+        /// Print the full guide including bundled reference documents
+        #[arg(long)]
+        full: bool,
+    },
+    /// Install skills into the coding agents detected on this host
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli skills install (--skill <NAME> [--skill <NAME> ...] | --all) [--agent <NAME>[,<NAME>...]] [--local] [--dry-run]\nValid flags: --agent, --all, --data-dir, --dry-run, --help, --json, --local, --request-id, --retry-request, --skill"
+    )]
+    Install {
+        /// Skill to install; repeat for several
+        #[arg(long = "skill", value_name = "NAME")]
+        skills: Vec<String>,
+        /// Install every bundled skill
+        #[arg(long)]
+        all: bool,
+        /// Comma-separated skills-CLI agent keys; defaults to host detection
+        // Why allow_hyphen_values: the reference rejects values like `-y` with
+        // its own copy because the skills CLI would silently drop them; clap
+        // would otherwise answer with a parse error before that check runs.
+        #[arg(long, allow_hyphen_values = true)]
+        agent: Option<String>,
+        /// Install into the current project instead of globally
+        #[arg(long)]
+        local: bool,
+        /// Print the command without running it
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Update already-installed skills
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli skills update (--skill <NAME> [--skill <NAME> ...] | --all) [--local] [--dry-run]\nValid flags: --all, --data-dir, --dry-run, --help, --json, --local, --request-id, --retry-request, --skill"
+    )]
+    Update {
+        /// Skill to update; repeat for several
+        #[arg(long = "skill", value_name = "NAME")]
+        skills: Vec<String>,
+        /// Update every bundled skill
+        #[arg(long)]
+        all: bool,
+        /// Update the current project's copy instead of the global one
+        #[arg(long)]
+        local: bool,
+        /// Print the command without running it
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -933,8 +981,13 @@ impl Cli {
             }
             Command::Skills { action } => match action {
                 SkillsAction::List => {}
-                SkillsAction::Get { name } => {
-                    require_nonempty("name", name)?;
+                SkillsAction::Get { topic, .. } => {
+                    require_nonempty("topic", topic)?;
+                }
+                SkillsAction::Install { skills, .. } | SkillsAction::Update { skills, .. } => {
+                    for skill in skills {
+                        require_nonempty("skill", skill)?;
+                    }
                 }
             },
             Command::Orchestration { command } => {
@@ -1460,17 +1513,101 @@ mod tests {
         ));
         assert!(cli.validate().is_ok());
 
-        let cli = parse(&["skills", "get", "drogon-cli"]).unwrap();
+        let cli = parse(&["skills", "get", "--topic", "drogon-cli"]).unwrap();
         let Command::Skills {
-            action: SkillsAction::Get { name },
+            action: SkillsAction::Get { topic, full },
         } = &cli.command
         else {
             panic!("wrong subcommand");
         };
-        assert_eq!(name, "drogon-cli");
+        assert_eq!(topic, "drogon-cli");
+        assert!(!*full);
         assert!(cli.validate().is_ok());
 
-        let cli = parse(&["skills", "get", ""]).unwrap();
+        let cli = parse(&["skills", "get", "--topic", "orchestration", "--full"]).unwrap();
+        let Command::Skills {
+            action: SkillsAction::Get { full, .. },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert!(*full);
+
+        let cli = parse(&["skills", "get", "--topic", ""]).unwrap();
+        assert!(matches!(cli.validate(), Err(CliError::Usage(_))));
+    }
+
+    #[test]
+    fn skills_install_and_update_parse() {
+        let cli = parse(&[
+            "skills",
+            "install",
+            "--skill",
+            "drogon-cli",
+            "--agent",
+            "universal",
+        ])
+        .unwrap();
+        let Command::Skills {
+            action:
+                SkillsAction::Install {
+                    skills,
+                    all,
+                    agent,
+                    local,
+                    dry_run,
+                },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(skills, &["drogon-cli".to_string()]);
+        assert!(!*all);
+        assert_eq!(agent.as_deref(), Some("universal"));
+        assert!(!*local);
+        assert!(!*dry_run);
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&[
+            "skills",
+            "install",
+            "--all",
+            "--local",
+            "--dry-run",
+            "--skill",
+            "drogon-cli",
+            "--skill",
+            "orchestration",
+        ])
+        .unwrap();
+        let Command::Skills {
+            action:
+                SkillsAction::Install {
+                    all,
+                    local,
+                    dry_run,
+                    ..
+                },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert!(*all);
+        assert!(*local);
+        assert!(*dry_run);
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["skills", "update", "--all"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Skills {
+                action: SkillsAction::Update { .. }
+            }
+        ));
+        assert!(cli.validate().is_ok());
+
+        // An empty --skill value is a bad invocation, like an empty topic.
+        let cli = parse(&["skills", "install", "--skill", ""]).unwrap();
         assert!(matches!(cli.validate(), Err(CliError::Usage(_))));
     }
 
