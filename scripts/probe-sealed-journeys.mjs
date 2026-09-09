@@ -2,19 +2,20 @@
 // (R16-BB): J1 agent state (Pi local-model session working → idle), J5 jump
 // palette workspace switch, J6 Tasks start-from-issue, J7 Automations Run
 // now with a real agent run + detail snapshot, J8 Bots preset create +
-// manual responsibility run on the free local model, J9 Mentu approve & run
+// manual responsibility run on the owned provider fixture, J9 Mentu approve & run
 // with step evidence, and J10 Settings theme persisting across a packaged
 // relaunch. J12's segment assertions live in probe-packaged-surfaces.mjs.
 //
 // Every probe is a real CDP journey against the running app: no mocked
 // service, no mocked UI. Inference runs only against the sealed, loopback,
 // test-owned model fixture (scripts/sealed-model-fixture.mjs; never a real
-// network endpoint), seeded through the isolated PI_CODING_AGENT_DIR the
-// accept harness sets up; Tasks rides a deterministic gh fixture on the
+// network endpoint), seeded in both private HOME and PI_CODING_AGENT_DIR.
+// Tasks rides a deterministic gh fixture on the
 // daemon PATH. Each probe deletes the bots, automations and worktrees it
 // created before returning.
 
 import assert from "node:assert/strict";
+import { probePiShiftEnter } from "./probe-pi-terminal-input.mjs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -36,9 +37,8 @@ import {
 
 // Local-only model for every in-app agent launch in acceptance: never a
 // paid model. Same route probe-rendered-harness.mjs seeds for --harness pi.
-export const PI_PROVIDER = "dgx-spark";
-export const PI_MODEL_ID = "qwen3.8-flash-next-nvidia-nvfp4";
-export const PI_MODEL = `${PI_PROVIDER}/${PI_MODEL_ID}`;
+import { PI_PROVIDER, PI_MODEL_ID, PI_MODEL } from "./sealed-model-route.mjs";
+export { PI_PROVIDER, PI_MODEL_ID, PI_MODEL } from "./sealed-model-route.mjs";
 
 // A cron that never fires during the run: responsibilities must exist (the
 // Run control needs one) without the scheduler racing the manual run.
@@ -164,7 +164,7 @@ function assertLoopbackBaseUrl(baseUrl) {
 }
 
 /**
- * Seeds the isolated Pi config dir with the team-local model route --
+ * Seeds the isolated Pi config dir with the owned loopback fixture route --
  * ALWAYS the sealed, test-owned loopback fixture (scripts/sealed-model-
  * fixture.mjs), never a real network endpoint. `baseUrl` is required,
  * explicitly: pass it directly, or set SEALED_MODEL_FIXTURE_BASE_URL_ENV.
@@ -569,7 +569,7 @@ async function waitForTabAgentStateOutcome(page, sessionId, timeoutMs) {
  * written after `armLines` so a previous attempt's error text cannot
  * false-positive.
  */
-async function runTurnUntilWorking(page, sessionId, prompt, armLines) {
+async function runTurnUntilWorking(page, sessionId, prompt, armLines, getFixtureReceipt) {
   // The strip's selection restore can hand the focus back to a previously
   // selected editor tab right after the launch revision; select the Pi
   // tab explicitly and prove the keystrokes land in ITS xterm (the
@@ -586,27 +586,9 @@ async function runTurnUntilWorking(page, sessionId, prompt, armLines) {
     { timeout: 10000 },
   );
   await page.keyboard.type(prompt);
+  const shiftEnter = await probePiShiftEnter(page, sessionId, getFixtureReceipt);
+  console.log(`[j1] Pi newline without submission: ${JSON.stringify(shiftEnter)}`);
   await page.keyboard.press("Enter");
-  // The prompt echo's exact placement is a pi TUI detail (the submitted
-  // line may repaint away); the focus check above is the real guard. Do
-  // not await an echo here: a fast successful reply could otherwise finish
-  // before the 2s state poll observes Working.
-  void page
-    .waitForFunction(
-      ({ id, text }) => {
-        const terminal = window.__drogonTerminals?.get(id);
-        if (!terminal) return false;
-        const buffer = terminal.buffer.active;
-        for (let row = 0; row < buffer.length; row += 1) {
-          const line = buffer.getLine(row)?.translateToString(true) ?? "";
-          if (line.includes(text)) return true;
-        }
-        return false;
-      },
-      { id: sessionId, text: prompt.slice(0, 24) },
-      { timeout: 15000 },
-    )
-    .catch(() => console.log("[j1] prompt echo not observed; continuing"));
   const outcome = await page.waitForFunction(
     ({ id, afterLines }) => {
       const tab = document.querySelector(
@@ -681,7 +663,7 @@ async function j1Diagnostics(page, workspaceId) {
   }, workspaceId);
 }
 
-export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }) {
+export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, getFixtureReceipt }) {
   // The packaged-surfaces prelude ends on Tasks; return through the real
   // Sessions nav before using the session header to set Pi defaults.
   await page
@@ -751,7 +733,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
       for (;;) {
         let outcome;
         try {
-          outcome = await runTurnUntilWorking(page, launched.id, prompt, armLines);
+          outcome = await runTurnUntilWorking(page, launched.id, prompt, armLines, getFixtureReceipt);
         } catch (error) {
           const diag = await j1Diagnostics(page, workspaceId).catch(
             () => "diagnostics unavailable",
@@ -854,6 +836,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
       .catch(() => {});
   }
   return [
+    "pi-shift-enter-inserts-a-real-editor-newline-without-submitting",
     "pi-local-session-shows-working-then-idle-in-tab-badge",
     "pi-local-session-shows-working-then-idle-in-worktree-card-row",
   ];

@@ -117,10 +117,10 @@ describe("mentuStepsAll", () => {
 });
 
 describe("model constants", () => {
-  it("pins the free local model route", () => {
-    assert.equal(PI_PROVIDER, "dgx-spark");
-    assert.equal(PI_MODEL_ID, "qwen3.8-flash-next-nvidia-nvfp4");
-    assert.equal(PI_MODEL, "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4");
+  it("uses fixture-only identities, never aliases a configured real provider", () => {
+    assert.equal(PI_PROVIDER, "drogon-sealed-fixture");
+    assert.equal(PI_MODEL_ID, "acceptance-only");
+    assert.equal(PI_MODEL, "drogon-sealed-fixture/acceptance-only");
     assert.equal(FAR_FUTURE_CRON, "0 0 1 1 *");
   });
 });

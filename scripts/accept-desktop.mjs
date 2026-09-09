@@ -53,6 +53,8 @@ import {
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import { probeSessionNavigation } from "./probe-session-navigation.mjs";
 import { probeTerminalInputLayout } from "./probe-terminal-input-layout.mjs";
+import { installPrivateAcceptanceEnvironment } from "./acceptance-private-environment.mjs";
+import { PI_PROVIDER, PI_MODEL_ID } from "./sealed-model-route.mjs";
 import {
   BUNDLE_ICON_FILE,
   bundlePaths,
@@ -115,9 +117,10 @@ await mkdir(workspace);
 // from this isolated dir, never the user's ~/.pi) -- and the Tasks
 // journey rides a deterministic gh fixture that must be on the daemon
 // PATH before it spawns.
-const piDir = path.join(fixture, "pi");
+const piDir = path.join(fixture, "home", ".pi", "agent");
 const fixtureBin = path.join(fixture, "bin");
 let modelFixture = null;
+let privateEnvironment = null;
 await writeFixtureGh(fixtureBin, [
   { number: 1, title: "Acceptance issue one" },
   { number: 2, title: "Acceptance issue two" },
@@ -194,7 +197,7 @@ async function launchDesktop(overrideDataDir = null) {
           ? { PATH: `${fixtureBin}:/usr/bin:/bin:/usr/sbin:/sbin` }
           : {}),
         ...(withHarness
-          ? { PI_CODING_AGENT_DIR: path.join(fixture, "pi") }
+          ? { PI_CODING_AGENT_DIR: piDir }
           : {}),
       },
     },
@@ -272,6 +275,8 @@ async function relaunchDesktop() {
 }
 try {
   // Every operation after the server starts is covered by final cleanup.
+  privateEnvironment = await installPrivateAcceptanceEnvironment(fixture);
+  assert.equal(privateEnvironment.piDir, piDir);
   modelFixture = await startAndSeedModelFixture((baseUrl, instanceId) =>
     seedLocalPiProvider(piDir, baseUrl, instanceId),
   );
@@ -477,7 +482,7 @@ try {
   }, registered.id);
   assert.ok(original?.incarnation);
   if (process.platform !== "win32") {
-    report.checks.push(...await probeTerminalInputLayout({ page, session: original, output }));
+    report.checks.push(...await probeTerminalInputLayout({ page, session: original, output, expectedHome: privateEnvironment.home }));
   }
   report.checks.push(await probeSessionNavigation({
     page, workspaceId: registered.id, session: original, marker,
@@ -876,19 +881,20 @@ try {
           "debug",
           process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli",
         );
-    // The model-dependent journeys (J1/J7/J8) run real inference on the
-    // team-local server; DROGON_SKIP_MODEL_JOURNEYS=1 exists only for
-    // local iteration when that server is unavailable — it never defaults.
-    // J1 runs first: it boots right after app launch, closest to a fresh
-    // model-server window, and warms the model for J7/J8 below.
+    // Product Pi execution uses the owned deterministic provider, never a
+    // real model endpoint. A state transition alone cannot prove that route.
     if (process.env.DROGON_SKIP_MODEL_JOURNEYS !== "1") {
+      const countingBefore = modelFixture.receipt().byKind.counting;
       report.checks.push(
         ...(await probePiAgentStateWorkingIdle({
+          getFixtureReceipt: () => modelFixture.receipt(),
           page,
           workspaceId: registered.id,
           output,
         })),
       );
+      assert.ok(modelFixture.receipt().byKind.counting > countingBefore, "interactive Pi must actually call the owned counting fixture");
+      report.checks.push("interactive-pi-turn-proven-by-owned-provider-receipt");
     }
     report.checks.push(
       ...(await probeJumpPaletteSwitch({ page, root, output })),
@@ -1152,7 +1158,7 @@ try {
         ]);
         assert.equal(session.ok, true, "shell session seed failed");
       }
-      // The free LOCAL model only (never paid): Pi on dgx-spark.
+      // Upgrade history uses the same owned provider, including older builds.
       const piSession = await oldCli([
         "harness",
         "start",
@@ -1161,11 +1167,11 @@ try {
         "--harness",
         "pi",
         "--provider",
-        "dgx-spark",
+        PI_PROVIDER,
         "--model",
-        "qwen3.8-flash-next-nvidia-nvfp4",
+        PI_MODEL_ID,
         "--prompt",
-        "reply with the single word ready",
+        "Reply with exactly this acceptance marker and nothing else: UPGRADE_SEEDED",
       ]);
       assert.equal(piSession.ok, true, `local Pi seed failed: ${piSession.error?.message ?? ""}`);
       const automation = await oldCli([
@@ -1351,6 +1357,7 @@ try {
     // a normal keep-alive artifact, and fails the run same as an
     // unverifiable verdict does. The original functional error (if any)
     // is preserved and appended to, never replaced.
+    report.modelFixtureReceipt = modelFixture.receipt();
     const fixtureResult = await closeModelFixtureForReport(modelFixture);
     report.cleanup.push(fixtureResult.cleanupLine);
     if (fixtureResult.failed) {
@@ -1371,6 +1378,7 @@ try {
       report.error = [report.error, error.message].filter(Boolean).join("; ");
     }
   }
+  privateEnvironment?.restore();
   report.finishedAt = new Date().toISOString();
   await writeFile(
     path.join(output, "report.json"),

@@ -3,13 +3,28 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /** Actual Electron keyboard, xterm grid and kernel PTY size; no model requests. */
-export async function probeTerminalInputLayout({ page, session, output }) {
+export async function probeTerminalInputLayout({ page, session, output, expectedHome }) {
   const previousViewport = page.viewportSize();
   const evidence = { layouts: [], backtab: null, shiftEnter: null };
   let sidebarToggles = 0;
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   try {
+    assert.ok(expectedHome, "the real session must prove its private HOME before any provider journey");
     await page.locator(".xterm-helper-textarea").focus();
+    const quotedHome = "'" + expectedHome.replaceAll("'", "'\\''") + "'";
+    await page.keyboard.type(`if [ "$HOME" = ${quotedHome} ]; then printf 'PRIVATE_HOME_OK\\n'; else printf 'PRIVATE_HOME_BAD\\n'; fi`);
+    await page.keyboard.press("Enter");
+    const homeProof = await page.waitForFunction((id) => {
+      const buffer = window.__drogonTerminals?.get(id)?.buffer.active;
+      if (!buffer) return null;
+      for (let row = 0; row < buffer.length; row++) {
+        const text = buffer.getLine(row)?.translateToString(true);
+        if (text === "PRIVATE_HOME_OK" || text === "PRIVATE_HOME_BAD") return text;
+      }
+      return null;
+    }, session.id);
+    assert.equal(await homeProof.jsonValue(), "PRIVATE_HOME_OK", "interactive admission must not recover the real user's HOME");
+    evidence.privateHomeVerified = true;
     await page.keyboard.type("i=0; while [ \"$i\" -lt 60 ]; do printf '%080d\\n' 0; i=$((i+1)); done");
     await page.keyboard.press("Enter");
     for (const [index, width] of [1200, 760, 1000, 1200].entries()) {
