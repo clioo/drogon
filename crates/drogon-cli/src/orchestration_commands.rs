@@ -2719,17 +2719,39 @@ pub async fn run(
                 call,
                 json,
                 || {
-                    let state = match result.state {
-                        RequestLedgerState::Pending => "pending",
-                        RequestLedgerState::Committed => "committed",
-                        RequestLedgerState::Failed => "failed",
-                        RequestLedgerState::Absent => {
-                            "absent (no record; absence is not proof of no effects)"
-                        }
+                    // Source states are completed/pending/absent; the
+                    // committed ledger state maps to `completed` and a failed
+                    // mutation still answers honestly rather than absent.
+                    let (state, detail) = match result.state {
+                        RequestLedgerState::Committed => (
+                            "completed",
+                            result
+                                .method
+                                .clone()
+                                .map(|m| format!(" {m}"))
+                                .unwrap_or_default(),
+                        ),
+                        RequestLedgerState::Pending => (
+                            "pending",
+                            result
+                                .method
+                                .clone()
+                                .map(|m| format!(" {m}"))
+                                .unwrap_or_default(),
+                        ),
+                        RequestLedgerState::Failed => (
+                            "failed",
+                            result
+                                .method
+                                .clone()
+                                .map(|m| format!(" {m}"))
+                                .unwrap_or_default(),
+                        ),
+                        RequestLedgerState::Absent => ("absent", String::new()),
                     };
                     format!(
-                        "{} [{}] {}",
-                        result.request_id, state, result.interpretation
+                        "{} [{}]{}\n{}",
+                        result.request_id, state, detail, result.interpretation
                     )
                 },
                 0,
