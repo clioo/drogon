@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { probeAgentTabCreation } from "./probe-agent-tab-creation.mjs";
 import { access, realpath } from "node:fs/promises";
 import path from "node:path";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
@@ -85,6 +86,7 @@ export async function probeStandaloneSessions({ page, output, dataDir }) {
     await page.screenshot({
       path: path.join(output, "standalone-sessions.png"),
     });
+    await probeAgentTabCreation({ page, workspaceId: created[1].workspaceId });
     return "standalone-sessions-harness-private-folders-recents-reload-and-bots-return";
   } finally {
     for (const project of created) {

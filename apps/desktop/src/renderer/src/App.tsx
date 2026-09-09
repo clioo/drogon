@@ -1572,12 +1572,15 @@ export function App() {
   // record carries only harnessId, so every launch App makes remembers
   // its exact input under the resulting session id; retry and the pane's
   // Restart overlay replay it through startHarnessTracked/restart below.
+  useEffect(() => {
+    if (status?.serviceInstanceId) void agentSettingsState.load();
+  }, [status?.serviceInstanceId]);
   const harnessLaunchMemoryRef = useRef<HarnessLaunchMemory>(new Map());
   const startHarnessTracked = async (input: HarnessLaunchInput) => {
-    if (!agentSettingsState.getSnapshot().ready) {
+    if (!(await agentSettingsState.ensureReady())) {
       return {
         ok: false,
-        error: { code: "settings_unavailable", message: "Load agent settings before launching an agent.", retryable: true },
+        error: { code: "settings_unavailable", message: agentSettingsState.getSnapshot().error ?? "Could not load agent settings. Retry the connection.", retryable: true },
       } as const;
     }
     const result = await window.drogon.startHarness(input);
@@ -1591,6 +1594,7 @@ export function App() {
         .filter((item) => item.verdict === "unverifiable")
         .map((item) => retryOfferKey(item)),
     );
+    void agentSettingsState.load();
     void refresh();
   }, [refresh]);
   // Per-tab retry (the strip hands over the clicked session): a harness
@@ -2908,7 +2912,9 @@ export function App() {
       launched = true;
       if (!contextMatches(captured, contextRef.current)) return;
       setSessions((items) => appendOrReplaceSession(items, result));
-      setActive(result.id);
+      // Source useTabGroupCreationCommands: a new agent activates its
+      // terminal surface, not only the background session identifier.
+      selectSessionTab(result.id);
     }).then(() => launched);
   };
   // Single write path for both the toolbar controls and the Settings panel:
