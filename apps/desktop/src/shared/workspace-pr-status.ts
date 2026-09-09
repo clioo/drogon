@@ -1,8 +1,7 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Workspace Options "Group by: PR
-   status" real data producer (coordinator review, msg_cc2acea0c485: "PR-
-   status grouping cannot be replaced with linked-number-only grouping;
-   implement real status input via existing provider bridge"). The existing
-   provider bridge is `tasks.list`'s `mode: "pulls"` (tasks_rpc.rs,
+   status" real data producer: PR-status grouping requires a real status
+   input, not a linked-number-only stand-in. The existing provider bridge
+   is `tasks.list`'s `mode: "pulls"` (tasks_rpc.rs,
    TasksBridge.tasksList in tasks-contract.ts): a real, already-shipped
    `gh`-CLI-backed pull-request listing per project, complete with
    open/draft/merged/closed state and headRefName. This module only

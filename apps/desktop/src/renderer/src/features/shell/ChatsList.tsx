@@ -12,8 +12,8 @@
    behaves like any other card except for the copy naming what deleting it
    actually does (see remove-project-dialog-copy.ts).
 
-   Coordinator review (msg_c48e2acbef42) caught a real duplication: the
-   pre-existing RecentSessions section (features/sessions/RecentSessions.tsx)
+   A real duplication existed here: the pre-existing RecentSessions section
+   (features/sessions/RecentSessions.tsx)
    already listed every quick-session group -- unconditionally, its whole
    `groups.filter((g) => g.project.quickSession)` -- above Projects, with a
    "New session" trigger and no delete affordance. Sidebar mounted it AND

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* MIT Copyright (c) 2026 Lovecast Inc.
-   User-feature-closure item 3, coordinator review (msg_c48e2acbef42):
-   ChatsList-only tests proved the section itself works, but not that
+   User-feature-closure item 3: ChatsList-only tests proved the section
+   itself works, but not that
    Sidebar wires it correctly with `onNewSession` present -- the exact
    condition that used to also mount RecentSessions (now deleted), which
    rendered every quick session a second time above Projects. This suite

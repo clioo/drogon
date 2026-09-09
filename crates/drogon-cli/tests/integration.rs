@@ -1722,8 +1722,8 @@ fn worktree_created_result(creator: &Value) -> Value {
 }
 
 /// `drogon-cli worktree create` is the one real, durable producer of
-/// `creator: "cli"` (coordinator review, msg_cc2acea0c485: "Wire creator
-/// at actual worktree.create producer boundary"). The mock daemon echoes
+/// `creator: "cli"`, tagged at the actual worktree.create producer
+/// boundary. The mock daemon echoes
 /// back exactly what it was asked to store, so this proves the CLI sends
 /// the tag on every call, not merely that the CLI *could*.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1,6 +1,6 @@
 //! REAL `Engine::dispatch`/staged-ledger coverage for `bot.run`'s owner
-//! resolution (coordinator review, msg_0d23f294d5b5): the `native_bot_run.rs`
-//! pure-bridge tests prove `authorized_prepare`/`revalidate_run_scope` in
+//! resolution: the `native_bot_run.rs` pure-bridge tests prove
+//! `authorized_prepare`/`revalidate_run_scope` in
 //! isolation, but every one of its REAL-ENGINE tests dispatches an
 //! intentionally-unknown harness id, so none of them ever launches an
 //! actual session whose real cwd can be checked. This file closes that gap:

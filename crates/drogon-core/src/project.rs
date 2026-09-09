@@ -165,8 +165,8 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
             )?;
         }
-        // Coordinator review (msg_4fea8de5f97c): the v4 recovery originally
-        // ran only in the `None` branch, so a store that had already been
+        // The v4 recovery originally ran only in the `None` branch, so a
+        // store that had already been
         // opened by a build between c2deb28 (Projects landing) and this fix
         // -- already recorded at v3 -- would never run it, permanently
         // stranding orphan workspaces from before Projects existed even
@@ -222,9 +222,9 @@ fn apply_v5_workspace_options_columns(tx: &Transaction) -> rusqlite::Result<()> 
     // A folder Project has no `worktrees` row at all -- `worktree.list`
     // synthesizes its one implicit worktree straight from the `projects`
     // row (see `worktree_rpc::do_worktree_list`). Its Workspace Options
-    // metadata is real, durable state too (coordinator review,
-    // msg_cc2acea0c485: "status/manual order must work for folder
-    // workspaces with real identity"), so it lives on `projects` itself --
+    // metadata (status/manual order) is real, durable state too, and must
+    // work for folder workspaces with real identity, so it lives on
+    // `projects` itself --
     // the row that IS that implicit worktree's real identity -- rather
     // than being defaulted every read. `sort_order`/`linked_pr`/`creator`
     // are meaningless here: a folder project has exactly one worktree (no
@@ -286,10 +286,10 @@ fn backfill_sort_order_and_last_activity(tx: &Transaction) -> rusqlite::Result<(
 /// disappeared from the sidebar after an upgrade even though the row (and
 /// the user's registration) was never lost.
 ///
-/// Runs on every schema-version arm on the way to `PROJECTS_SCHEMA_VERSION`
-/// (coordinator review, msg_4fea8de5f97c): a user who already opened a data
-/// dir with some intermediate build after Projects landed (c2deb28) but
-/// before this recovery existed already has projects schema v3 recorded,
+/// Runs on every schema-version arm on the way to `PROJECTS_SCHEMA_VERSION`:
+/// a user who already opened a data dir with some intermediate build after
+/// Projects landed (c2deb28) but before this recovery existed already has
+/// projects schema v3 recorded,
 /// so gating this to only the fresh "no recorded version" branch would
 /// permanently strand their pre-Projects orphans even after installing
 /// this fix. Additive and idempotent either way -- it only ever inserts

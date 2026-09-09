@@ -2229,6 +2229,14 @@ footer[data-testid="status-bar"] {
 }
 .sidebar-menu {
   min-width: 200px;
+  /* Why: an unbounded menu can grow past the real window height with no
+     scroll affordance, stranding trailing items (e.g. "Add Project")
+     outside the viewport. Bound it to Radix's own measured available
+     space and let it scroll, same as the ui/dropdown-menu.tsx wrapper's
+     DropdownMenuContent already does. */
+  max-height: var(--radix-dropdown-menu-content-available-height);
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--background);
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) * 0.8);

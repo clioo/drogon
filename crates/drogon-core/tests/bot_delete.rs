@@ -294,10 +294,10 @@ fn delete_succeeds_when_the_caller_names_a_different_registered_workspace() {
     );
 }
 
-// Coordinator review (msg_805784c99bef): the same missing-Bot-workspace-
-// identity gap bot.delete had also applied to bot.responsibility_create --
-// a responsibility is created FOR an existing bot, so its home workspace
-// is the bot's own, never an arbitrary caller-asserted one.
+// The same missing-Bot-workspace-identity gap bot.delete had also applied
+// to bot.responsibility_create -- a responsibility is created FOR an
+// existing bot, so its home workspace is the bot's own, never an
+// arbitrary caller-asserted one.
 
 #[test]
 fn responsibility_create_succeeds_with_the_host_global_empty_workspace_scope_and_uses_the_bots_own_workspace()
@@ -362,10 +362,9 @@ fn responsibility_create_replays_the_stored_receipt_for_the_same_request_id() {
     assert_eq!(first, replayed);
 }
 
-// Coordinator review (msg_805784c99bef): the same missing-Bot-workspace-
-// identity gap bot.delete had also applied to bot.responsibility_delete --
-// consistent authoritative owner routing, not a one-off fix scoped to the
-// single failing assertion.
+// The same missing-Bot-workspace-identity gap bot.delete had also applied
+// to bot.responsibility_delete -- consistent authoritative owner routing,
+// not a one-off fix scoped to the single failing assertion.
 
 #[test]
 fn responsibility_delete_succeeds_with_the_host_global_empty_workspace_scope() {

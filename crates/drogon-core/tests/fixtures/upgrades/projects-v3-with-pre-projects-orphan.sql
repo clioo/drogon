@@ -1,4 +1,4 @@
--- Recorded past shape (coordinator review, msg_4fea8de5f97c): a store that
+-- Recorded past shape: a store that
 -- was already opened by some intermediate build after Projects landed
 -- (c2deb28) but before the pre-Projects recovery existed -- schema_versions
 -- already records "projects" at v3, with a real v3-shaped project already

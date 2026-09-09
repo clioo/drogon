@@ -68,11 +68,11 @@ describe("isMixedVersionDaemon", () => {
 });
 
 describe("shouldGateLaunchOnAgentSettingsReadiness", () => {
-  // Coordinator review (msg_c48e2acbef42): App.tsx's startHarnessTracked
-  // (the actual consumer -- every new session/harness launch) used to gate
-  // unconditionally on agentSettingsState ever becoming `ready`, which
-  // never happens against a daemon that will never answer
-  // agent.settings.get -- every launch failed opaque forever.
+  // App.tsx's startHarnessTracked (the actual consumer -- every new
+  // session/harness launch) used to gate unconditionally on
+  // agentSettingsState ever becoming `ready`, which never happens against
+  // a daemon that will never answer agent.settings.get -- every launch
+  // failed opaque forever.
 
   it("gates (true) while no status has connected yet -- can't tell old daemon from not-yet-connected", () => {
     expect(shouldGateLaunchOnAgentSettingsReadiness(false, [])).toBe(true);

@@ -180,6 +180,75 @@ function cardTitlesInOrder(): string[] {
     .map((el) => (el.getAttribute("aria-label") ?? "").replace(/^Select /, ""));
 }
 
+describe("Workspace options: viewport/keyboard reachability (packaged acceptance regression)", () => {
+  /** The real hidden desktop acceptance run failed a real Playwright
+   *  locator.click() on "Add Project" -- "element is outside of the
+   *  viewport" -- because the menu body (Group by/Sort by/Project
+   *  order/Card layout/Show properties/Hide) had grown past the real
+   *  600px-tall test window with no scroll affordance. jsdom does no
+   *  real layout, so the pixel-geometry failure itself can't be
+   *  reproduced here; these tests instead pin the two guarantees that
+   *  together make it unreachable-by-pointer impossible in the real
+   *  browser: (1) the live container Radix actually renders is the CSS
+   *  class carrying the height bound + scroll (sidebar-menu-viewport.
+   *  test.ts pins the rule itself), and (2) every trailing control,
+   *  "Add Project" included, is still reachable by real keyboard
+   *  navigation regardless of scroll position. */
+  test("the real rendered menu container is the CSS-bounded, scrollable one (not an unbounded stand-in)", () => {
+    const groups: ProjectGroup[] = [
+      { project: project(), worktrees: [worktree()] },
+    ];
+    mount({ groups });
+    openWorkspaceOptionsMenu();
+    const menu = screen.getByRole("menu");
+    expect(menu.className).toContain("sidebar-menu");
+  });
+
+  test("every option, Add Project, and the filter box are all real descendants of that one bounded/scrollable menu", () => {
+    const groups: ProjectGroup[] = [
+      { project: project(), worktrees: [worktree()] },
+    ];
+    mount({ groups });
+    openWorkspaceOptionsMenu();
+    const menu = screen.getByRole("menu");
+    // Group by / Sort by / Project order / Card layout options (one
+    // unambiguous label picked per section -- several labels repeat
+    // verbatim across sections, e.g. "Repo"/"Recent activity"/"Manual
+    // (drag order)", so those are covered via the count below instead).
+    expect(within(menu).getByRole("menuitemradio", { name: "Workspace status" })).toBeTruthy();
+    expect(within(menu).getByRole("menuitemradio", { name: "Smart" })).toBeTruthy();
+    expect(within(menu).getByRole("menuitemradio", { name: "Compact" })).toBeTruthy();
+    expect(
+      within(menu).getAllByRole("menuitemradio", { name: "Manual (drag order)" }),
+    ).toHaveLength(2); // Sort by + Project order
+    // Show properties / Hide checkboxes.
+    expect(within(menu).getByRole("menuitemcheckbox", { name: "Pull request" })).toBeTruthy();
+    expect(within(menu).getByRole("menuitemcheckbox", { name: "CLI-created" })).toBeTruthy();
+    // The two controls the real acceptance run could not reach.
+    expect(within(menu).getByRole("menuitem", { name: "Add Project" })).toBeTruthy();
+    expect(
+      within(menu).getByRole("textbox", { name: "Filter projects and worktrees" }),
+    ).toBeTruthy();
+  });
+
+  test("keyboard End from inside the menu reaches Add Project without depending on scroll position or pointer geometry", () => {
+    const groups: ProjectGroup[] = [
+      { project: project(), worktrees: [worktree()] },
+    ];
+    mount({ groups });
+    openWorkspaceOptionsMenu();
+    const menu = screen.getByRole("menu");
+    const addProject = within(menu).getByRole("menuitem", { name: "Add Project" });
+
+    // Radix's roving-focus group auto-focuses the first real item on
+    // open; jump to the end of that same real keyboard order.
+    expect(menu.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "End" });
+
+    expect(document.activeElement).toBe(addProject);
+  });
+});
+
 describe("Workspace options: Hide", () => {
   test("hiding sleeping worktrees removes only the sleeping card, live", () => {
     const groups: ProjectGroup[] = [

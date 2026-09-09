@@ -440,10 +440,10 @@ fn folder_project_implicit_worktree_defaults_workspace_options_metadata() {
 }
 
 /// `worktree.update` against a folder Project's implicit-worktree id
-/// (`project.id`, no real `worktrees` row -- coordinator review,
-/// msg_cc2acea0c485: "status/manual order must work for folder workspaces
-/// with real identity") persists workspace status/pin/archive/manual
-/// order for real, durably, and the change survives a fresh `list` read
+/// (`project.id`, no real `worktrees` row -- status/manual order must work
+/// for folder workspaces with real identity) persists workspace
+/// status/pin/archive/manual order for real, durably, and the change
+/// survives a fresh `list` read
 /// and an engine reopen -- not just an in-memory echo.
 #[test]
 fn worktree_update_sets_workspace_options_for_a_folder_projects_implicit_worktree() {

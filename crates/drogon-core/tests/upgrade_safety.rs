@@ -421,8 +421,8 @@ fn old_folder_workspace_reappears_as_a_project_without_re_adding() {
     assert_eq!(refound["id"], Value::String(id_first_open));
 }
 
-// Coordinator review (msg_4fea8de5f97c): "preserve registrations, not just
-// the easiest folder case" -- a pre-Projects daemon registered git-kind
+// Preserve registrations, not just the easiest folder case -- a
+// pre-Projects daemon registered git-kind
 // paths as directly-attachable workspaces exactly like folder ones (no
 // Project/Worktree split existed yet), so the recovery must preserve them
 // too, not just quietly leave them un-invented.

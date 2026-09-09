@@ -353,9 +353,9 @@ fn parse_responsibility_params<T: serde::de::DeserializeOwned>(
 /// mutation scoped to an EXISTING bot -- `bot.delete`,
 /// `bot.responsibility_delete`, and `bot.responsibility_create` (a
 /// responsibility is created FOR an existing bot, so its home workspace is
-/// the bot's own, never an arbitrary caller-asserted one -- coordinator
-/// review, msg_805784c99bef: "run/responsibility create/delete share
-/// missing Bot workspace identity"; this is the consistent
+/// the bot's own, never an arbitrary caller-asserted one -- run,
+/// responsibility create, and responsibility delete all share the same
+/// missing-Bot-workspace-identity gap, so this is the consistent
 /// authoritative-owner routing for all three. `bot.run`'s own workspace
 /// resolution is entangled with session-launch targeting in a separate,
 /// larger staged-ledger pipeline (`bot_run_rpc`); its `authorized_prepare`
