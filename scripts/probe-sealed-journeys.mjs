@@ -1377,7 +1377,15 @@ export async function probeBotPresetManualRun({
     assert.ok(markerVisible, "a bot run attempt must record the marker");
     for (const colorScheme of ["light", "dark"]) {
       const selection = await selectSettingsTheme(page, colorScheme);
-      await page.getByText(marker, { exact: false }).first().waitFor();
+      // Settings navigation remounts run details; reopen the actual saved run.
+      await page.getByRole("button", { name: "Automations", exact: true }).first().click();
+      const breadcrumb = page.getByRole("navigation", { name: "Automations breadcrumb" })
+        .getByRole("button", { name: "Automations", exact: true });
+      if (await breadcrumb.isVisible()) await breadcrumb.click();
+      await page.locator(`[data-testid="automation-row-${ownedAutomationId}"]`).click();
+      await page.getByRole("tab", { name: /^Runs / }).click();
+      await page.locator('[data-testid^="history-run-"]').first().click();
+      await page.waitForFunction((wanted) => document.body.innerText.includes(wanted), marker, { timeout: 15000 });
       await captureThemeSurface(page, path.join(output, `bots-run-detail-${colorScheme}.png`), selection);
     }
     await selectSettingsTheme(page, "light");
