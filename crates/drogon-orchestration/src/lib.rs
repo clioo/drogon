@@ -8,6 +8,7 @@
 //! are likewise supplied by the trusted engine, so nothing here can drift from
 //! the host's identity or timeline.
 
+pub mod gates;
 pub mod pagination;
 pub mod runs;
 pub mod schema;

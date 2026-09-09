@@ -1,4 +1,6 @@
 //! Runs: creation, takeover and bounded inspection of a coordination run.
+// MIT Copyright (c) 2026 Lovecast Inc.
+// Terminal rebinding behavior: src/main/runtime/orchestration/db/runs/run-lookup.ts.
 
 use crate::pagination::{
     CursorScope, PAGE_RESULT_BUDGET_BYTES, decode_cursor, encode_cursor, fit_page, page_limit,
@@ -7,11 +9,11 @@ use crate::pagination::{
 use crate::schema::store_error;
 use drogon_protocol::RpcError;
 use drogon_protocol::orchestration_run::{
-    RunCreateParams, RunCreateResult, RunListParams, RunListResult, RunShowParams, RunShowResult,
-    RunSummary, RunUseParams, RunUseResult,
+    RunCreateParams, RunCreateResult, RunCurrentParams, RunCurrentResult, RunListParams,
+    RunListResult, RunShowParams, RunShowResult, RunSummary, RunUseParams, RunUseResult,
 };
-use drogon_protocol::orchestration_scope::{CoordinatorScope, MAX_CONSUMER_GENERATION};
-use rusqlite::{Row, Transaction, params};
+use drogon_protocol::orchestration_scope::{CoordinatorScope, HostScope, MAX_CONSUMER_GENERATION};
+use rusqlite::{OptionalExtension, Row, Transaction, params};
 
 const RUN_PAGE_FIRST: &str = "SELECT run_id, host_id, coordinator_id, consumer_generation, \
      objective, created_at_ms FROM orchestration_runs \
@@ -146,14 +148,72 @@ pub fn create(
     if inserted != 1 {
         return Err(store_error("run creation did not persist exactly one row"));
     }
-    Ok(RunCreateResult {
-        run: RunSummary {
-            run_id: run_id.to_string(),
-            objective: params.objective.clone(),
-            coordinator_id: params.coordinator_id.clone(),
-            consumer_generation: 1,
-            created_at_ms: now_ms,
-        },
+    let run = RunSummary {
+        run_id: run_id.to_string(),
+        objective: params.objective.clone(),
+        coordinator_id: params.coordinator_id.clone(),
+        consumer_generation: 1,
+        created_at_ms: now_ms,
+    };
+    bind_current(tx, &params.host, &run, params.caller.is_some())?;
+    Ok(RunCreateResult { run })
+}
+
+fn bind_current(
+    tx: &Transaction<'_>,
+    host: &HostScope,
+    run: &RunSummary,
+    exclusive: bool,
+) -> Result<(), RpcError> {
+    if exclusive {
+        let prior = current(
+            tx,
+            &RunCurrentParams {
+                host: host.clone(),
+                coordinator_id: run.coordinator_id.clone(),
+                caller: None,
+            },
+        )?
+        .run;
+        if let Some(prior) = prior
+            && prior.run_id != run.run_id
+        {
+            let next = prior
+                .consumer_generation
+                .checked_add(1)
+                .filter(|n| *n <= MAX_CONSUMER_GENERATION)
+                .ok_or_else(|| {
+                    RpcError::new("consumer_fenced", "Previous run generation cannot advance.")
+                })?;
+            let changed = tx.execute("UPDATE orchestration_runs SET coordinator_id=?2,consumer_generation=?3 WHERE run_id=?1 AND coordinator_id=?4 AND consumer_generation=?5",
+                params![prior.run_id, format!("unbound-{}", uuid::Uuid::new_v4()), next as i64, prior.coordinator_id, prior.consumer_generation as i64]).map_err(store_error)?;
+            if changed != 1 {
+                return Err(store_error("Previous run binding was not fenced."));
+            }
+        }
+    }
+    let generation = i64::try_from(run.consumer_generation).map_err(store_error)?;
+    let changed = tx.execute("INSERT INTO orchestration_run_bindings(host_id,coordinator_id,run_id,consumer_generation) VALUES (?1,?2,?3,?4)
+        ON CONFLICT(host_id,coordinator_id) DO UPDATE SET run_id=excluded.run_id,consumer_generation=excluded.consumer_generation",
+        params![host.host_id,run.coordinator_id,run.run_id,generation]).map_err(store_error)?;
+    if changed != 1 {
+        return Err(store_error("Current run binding was not persisted."));
+    }
+    Ok(())
+}
+
+pub fn current(
+    tx: &Transaction<'_>,
+    params: &RunCurrentParams,
+) -> Result<RunCurrentResult, RpcError> {
+    params.validate_shape(&params.host.host_id)?;
+    let run = tx.query_row("SELECT r.run_id,r.host_id,r.coordinator_id,r.consumer_generation,r.objective,r.created_at_ms
+        FROM orchestration_run_bindings AS b JOIN orchestration_runs AS r ON r.run_id=b.run_id
+        WHERE b.host_id=?1 AND b.coordinator_id=?2 AND r.host_id=b.host_id
+            AND r.coordinator_id=b.coordinator_id AND r.consumer_generation=b.consumer_generation",
+        params![params.host.host_id,params.coordinator_id], read_run_row).optional().map_err(store_error)?;
+    Ok(RunCurrentResult {
+        run: run.map(|row| row.summary),
     })
 }
 
@@ -264,6 +324,7 @@ pub fn use_run(tx: &Transaction<'_>, params: &RunUseParams) -> Result<RunUseResu
         params.consumer_generation,
     )?;
     if !params.takeover {
+        bind_current(tx, &params.host, &current.summary, params.caller.is_some())?;
         return Ok(RunUseResult {
             run: current.summary,
         });
@@ -300,6 +361,7 @@ pub fn use_run(tx: &Transaction<'_>, params: &RunUseParams) -> Result<RunUseResu
     }
     // Why re-read rather than echo the computed value: the compare-and-swap guard
     let updated = load_run(tx, &params.run_id)?;
+    bind_current(tx, &params.host, &updated.summary, params.caller.is_some())?;
     Ok(RunUseResult {
         run: updated.summary,
     })

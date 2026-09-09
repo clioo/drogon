@@ -1,5 +1,5 @@
 //! Clap grammar for the native orchestration subcommands, split out of
-//! `cli.rs` so the nested 18-verb surface stays domain-specific. Scope flags
+//! `cli.rs` so the nested command surface stays domain-specific. Scope flags
 //! are flattened arg groups shared by the verbs that need them. All
 //! orchestration validation lives in `orchestration_commands` (it needs
 //! environment hints); only pure grammar goes here.
@@ -9,7 +9,7 @@ use clap::{Args, Subcommand, ValueEnum};
 /// Explicit execution-host override. Absent means: use the scoped
 /// `DROGON_HOST_ID` hint when present, else the connected runtime's own host
 /// identity from the read-only preflight.
-#[derive(Args, Debug, Default)]
+#[derive(Args, Debug, Default, Clone)]
 pub struct HostOpt {
     /// Execution host id (defaults to the scoped hint or the connected host)
     #[arg(long, value_name = "ID")]
@@ -19,17 +19,34 @@ pub struct HostOpt {
 /// Coordinator binding flags. There is no client binding store and no
 /// default-to-latest behavior: these are required verbatim on every
 /// coordinator-scope verb.
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct CoordinatorScopeArgs {
-    /// Run id of the coordination run
+    /// Run id (defaults to the caller's explicitly bound run)
     #[arg(long, value_name = "ID")]
-    pub run: String,
-    /// Coordinator binding id (opaque, returned by run-create)
+    pub run: Option<String>,
+    /// Explicit native coordinator binding id
     #[arg(long, value_name = "ID")]
-    pub coordinator_id: String,
-    /// Consumer generation fence known to this coordinator
+    pub coordinator_id: Option<String>,
+    /// Explicit known generation; never silently replaced if stale
     #[arg(long, value_name = "N")]
-    pub consumer_generation: u64,
+    pub consumer_generation: Option<u64>,
+    /// Coordinator terminal id (defaults to the current Drogon terminal)
+    #[arg(long, value_name = "HANDLE")]
+    pub from: Option<String>,
+}
+impl CoordinatorScopeArgs {
+    pub fn run_id(&self) -> &str {
+        self.run.as_deref().unwrap_or_default()
+    }
+    pub fn coordinator_id(&self) -> &str {
+        self.coordinator_id.as_deref().unwrap_or_default()
+    }
+    pub fn generation(&self) -> u64 {
+        self.consumer_generation.unwrap_or(0)
+    }
+    pub fn is_complete(&self) -> bool {
+        self.run.is_some() && self.coordinator_id.is_some() && self.consumer_generation.is_some()
+    }
 }
 
 /// Why one flat group: dual-actor verbs (send/check/reply/ask/request-show)
@@ -38,7 +55,7 @@ pub struct CoordinatorScopeArgs {
 /// Scoped worker context environment hints (DROGON_RUN_ID/TASK_ID/
 /// DISPATCH_ID) fill dispatch-scope gaps; explicit flags and hints must
 /// agree, and hints never grant authority.
-#[derive(Args, Debug, Default)]
+#[derive(Args, Debug, Default, Clone)]
 pub struct ActorScopeArgs {
     /// Coordinator binding: run id
     #[arg(long, value_name = "ID")]
@@ -48,11 +65,14 @@ pub struct ActorScopeArgs {
     #[arg(long, value_name = "N")]
     pub consumer_generation: Option<u64>,
     /// Dispatch binding: task id
-    #[arg(long, value_name = "ID")]
+    #[arg(long, visible_alias = "task-id", value_name = "ID")]
     pub task: Option<String>,
     /// Dispatch binding: dispatch id
-    #[arg(long, value_name = "ID")]
+    #[arg(long, visible_alias = "dispatch-id", value_name = "ID")]
     pub dispatch: Option<String>,
+    /// Caller terminal; check also accepts the source --terminal spelling
+    #[arg(long, visible_alias = "terminal", value_name = "HANDLE")]
+    pub from: Option<String>,
 }
 
 impl ActorScopeArgs {
@@ -118,6 +138,7 @@ pub enum MessageKindArg {
     Question,
     Answer,
     Heartbeat,
+    #[value(alias = "worker_done")]
     FinalReport,
     Guidance,
     Escalation,
@@ -187,7 +208,7 @@ impl ReceiptScopeArg {
     }
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum OrchestrationCommand {
     /// Create a run bound to a coordinator (initial generation is server-owned)
     RunCreate {
@@ -197,6 +218,17 @@ pub enum OrchestrationCommand {
         /// Coordinator binding id; generated and returned when omitted
         #[arg(long, value_name = "ID")]
         coordinator_id: Option<String>,
+        #[arg(long, value_name = "HANDLE")]
+        from: Option<String>,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// Show the run explicitly bound to a coordinator identity
+    RunCurrent {
+        #[arg(long, value_name = "ID")]
+        coordinator_id: Option<String>,
+        #[arg(long, value_name = "HANDLE")]
+        from: Option<String>,
         #[command(flatten)]
         host: HostOpt,
     },
@@ -211,7 +243,7 @@ pub enum OrchestrationCommand {
     },
     /// Show one run
     RunShow {
-        #[arg(long, value_name = "ID")]
+        #[arg(long, visible_alias = "id", value_name = "ID")]
         run: String,
         #[command(flatten)]
         host: HostOpt,
@@ -220,6 +252,9 @@ pub enum OrchestrationCommand {
     RunUse {
         #[command(flatten)]
         scope: CoordinatorScopeArgs,
+        /// Source spelling for the target run
+        #[arg(long, value_name = "ID")]
+        id: Option<String>,
         #[arg(long, default_value_t = false)]
         takeover: bool,
         #[command(flatten)]
@@ -229,10 +264,18 @@ pub enum OrchestrationCommand {
     TaskCreate {
         #[command(flatten)]
         scope: CoordinatorScopeArgs,
-        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        #[arg(
+            long,
+            visible_alias = "spec",
+            value_name = "TEXT",
+            allow_hyphen_values = true
+        )]
         instructions: String,
-        #[arg(long, value_name = "TEXT")]
+        #[arg(long, visible_alias = "task-title", value_name = "TEXT")]
         title: Option<String>,
+        /// Source JSON array of prerequisite task ids
+        #[arg(long, value_name = "JSON", conflicts_with = "depends_on")]
+        deps: Option<String>,
         /// Comma-separated prerequisite task ids
         #[arg(long, value_name = "ID,..")]
         depends_on: Option<String>,
@@ -240,6 +283,55 @@ pub enum OrchestrationCommand {
         parent: Option<String>,
         #[arg(long, value_name = "TEXT")]
         display_name: Option<String>,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// Update task status after its active worker has stopped or settled
+    TaskUpdate {
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[arg(long, visible_alias = "id", value_name = "ID")]
+        task: String,
+        #[arg(long, value_enum)]
+        status: StatusArg,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        result: Option<String>,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// Block a task on a durable decision gate
+    GateCreate {
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[arg(long, value_name = "ID")]
+        task: String,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        question: String,
+        /// JSON array of answer choices (not ask's CSV form)
+        #[arg(long, value_name = "JSON")]
+        options: Option<String>,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// Resolve a gate and return its task to ready
+    GateResolve {
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[arg(long, value_name = "ID")]
+        id: String,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        resolution: String,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// List decision gates in the bound run
+    GateList {
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[arg(long, value_name = "ID")]
+        task: Option<String>,
+        #[arg(long, value_parser = ["pending", "resolved", "timeout"])]
+        status: Option<String>,
         #[command(flatten)]
         host: HostOpt,
     },
@@ -364,12 +456,21 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+    /// Retain a worker's resources (durable user-requested hold, no process effects)
+    WorkerRetain {
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[arg(long, value_name = "ID")]
+        dispatch: String,
+        #[command(flatten)]
+        host: HostOpt,
+    },
     /// Send a scoped coordination message
     Send {
         /// Actor scope: coordinator binding or dispatch binding
         #[command(flatten)]
         actor: ActorScopeArgs,
-        #[arg(long, value_enum)]
+        #[arg(long, visible_alias = "type", value_enum)]
         kind: MessageKindArg,
         #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
         subject: String,
@@ -412,7 +513,7 @@ pub enum OrchestrationCommand {
         #[arg(long, value_name = "MS")]
         timeout_ms: Option<u32>,
         /// Comma-separated wake kinds; never a local filter on consuming output
-        #[arg(long, value_name = "KIND,..")]
+        #[arg(long, visible_alias = "types", value_name = "KIND,..")]
         kinds: Option<String>,
         #[arg(long, default_value_t = false)]
         inject: bool,
@@ -429,7 +530,7 @@ pub enum OrchestrationCommand {
     Reply {
         #[command(flatten)]
         actor: ActorScopeArgs,
-        #[arg(long, value_name = "MSG-ID")]
+        #[arg(long, visible_alias = "id", value_name = "MSG-ID")]
         question: String,
         #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
         body: String,
@@ -447,14 +548,17 @@ pub enum OrchestrationCommand {
         /// Answer choice; repeatable (new questions only)
         #[arg(long, value_name = "TEXT")]
         option: Vec<String>,
+        /// Comma-separated answer choices (source CLI spelling; new questions only)
+        #[arg(long, value_name = "CSV", conflicts_with = "option")]
+        options: Option<String>,
         /// run-home | dispatch:ID (new questions only)
         #[arg(long, value_name = "TARGET")]
         to: Option<String>,
         /// Resume an existing pending question by its message id
         #[arg(long, value_name = "MSG-ID")]
         resume: Option<String>,
-        /// Positive bounded wait budget in ms (<= 900000)
-        #[arg(long, value_name = "MS")]
+        /// Positive safe integer budget in ms (default 10 minutes; clamped to 30)
+        #[arg(long, value_name = "MS", default_value_t = 600_000, value_parser = crate::orchestration_timeout::ask_timeout)]
         timeout_ms: u32,
         #[command(flatten)]
         host: HostOpt,
@@ -475,4 +579,57 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+}
+
+impl OrchestrationCommand {
+    pub(crate) fn coordinator_scope(&self) -> Option<&CoordinatorScopeArgs> {
+        match self {
+            Self::RunUse { scope, .. }
+            | Self::TaskCreate { scope, .. }
+            | Self::TaskUpdate { scope, .. }
+            | Self::TaskList { scope, .. }
+            | Self::TaskShow { scope, .. }
+            | Self::GateCreate { scope, .. }
+            | Self::GateResolve { scope, .. }
+            | Self::GateList { scope, .. }
+            | Self::WorkerStart { scope, .. }
+            | Self::WorkerShow { scope, .. }
+            | Self::WorkerRead { scope, .. }
+            | Self::WorkerStop { scope, .. }
+            | Self::WorkerAbandon { scope, .. }
+            | Self::WorkerRelease { scope, .. }
+            | Self::WorkerRetain { scope, .. } => Some(scope),
+            _ => None,
+        }
+    }
+    pub(crate) fn coordinator_scope_mut(&mut self) -> Option<&mut CoordinatorScopeArgs> {
+        match self {
+            Self::RunUse { scope, .. }
+            | Self::TaskCreate { scope, .. }
+            | Self::TaskUpdate { scope, .. }
+            | Self::TaskList { scope, .. }
+            | Self::TaskShow { scope, .. }
+            | Self::GateCreate { scope, .. }
+            | Self::GateResolve { scope, .. }
+            | Self::GateList { scope, .. }
+            | Self::WorkerStart { scope, .. }
+            | Self::WorkerShow { scope, .. }
+            | Self::WorkerRead { scope, .. }
+            | Self::WorkerStop { scope, .. }
+            | Self::WorkerAbandon { scope, .. }
+            | Self::WorkerRelease { scope, .. }
+            | Self::WorkerRetain { scope, .. } => Some(scope),
+            _ => None,
+        }
+    }
+    pub(crate) fn actor_scope_mut(&mut self) -> Option<&mut ActorScopeArgs> {
+        match self {
+            Self::Send { actor, .. }
+            | Self::Check { actor, .. }
+            | Self::Ask { actor, .. }
+            | Self::Reply { actor, .. }
+            | Self::RequestShow { actor, .. } => Some(actor),
+            _ => None,
+        }
+    }
 }

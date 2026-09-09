@@ -2,7 +2,7 @@
 //!
 //! Real compiled `drogon-cli` binary against an isolated mock transport
 //! (protocol peer only). These tests prove CLI behavior — argument mapping to
-//! the exact 18 typed RPC contracts, scope/credential handling, preflight and
+//! the typed RPC contracts, scope/credential handling, preflight and
 //! exit codes — NOT native engine parity. Data dirs, sockets and token files
 //! are real; every child runs with a cleared environment and a hard timeout
 //! with exact owned cleanup. All credentials are synthetic test literals.
@@ -158,6 +158,58 @@ fn coordinator_args() -> Vec<&'static str> {
         "--consumer-generation",
         "3",
     ]
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retain_does_not_derive_mutation_authority_from_named_run_inspection() {
+    let dir = tempfile::tempdir().unwrap();
+    let mock = MockService::start(dir.path(), mock_behavior(true, vec![]));
+    let invocation = run_cli(
+        dir.path(),
+        &[
+            "orchestration",
+            "worker-retain",
+            "--run",
+            "run-1",
+            "--dispatch",
+            "dispatch-1",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 2);
+    assert!(
+        mock.captured().is_empty(),
+        "retention must not guess coordinator ownership via run-show"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_binding_capability_is_required_before_any_mutation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mock = MockService::start(dir.path(), mock_behavior(true, vec![]));
+    let invocation = run_cli(
+        dir.path(),
+        &[
+            "--json",
+            "orchestration",
+            "run-create",
+            "--objective",
+            "fixture",
+            "--from",
+            "terminal-1",
+        ],
+        &[],
+    );
+    assert_ne!(invocation.exit_code, 0);
+    let value: Value = serde_json::from_str(&invocation.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "unsupported_feature");
+    assert_eq!(
+        mock.captured()
+            .iter()
+            .map(|r| r["method"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["status"]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -395,6 +447,35 @@ async fn review_wrong_dispatch_result_is_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn review_legacy_release_without_state_exits_1() {
+    // Regression: a legacy `workerRelease` answer with no `state` field and
+    // an `unverifiable` disposition is an honestly uncertain operation and
+    // must exit 1 (restored fallback when state cannot distinguish
+    // `release_pending` from `release_unknown`).
+    let dir = tempfile::tempdir().unwrap();
+    let _mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRelease",
+                json!({"dispatchId":"dispatch-1",
+        "disposition":"unverifiable", "processVerdict":"unverifiable"}),
+            )],
+        ),
+    );
+    let mut args = vec![
+        "orchestration",
+        "worker-release",
+        "--dispatch",
+        "dispatch-1",
+    ];
+    args.extend(coordinator_args());
+    let output = run_cli(dir.path(), &args, &[]);
+    assert_eq!(output.exit_code, 1, "{} {}", output.stdout, output.stderr);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_run_create_retry_preserves_generated_actor() {
     let dir = tempfile::tempdir().unwrap();
     let base = mock_behavior(true, vec![]);
@@ -540,7 +621,7 @@ async fn run_use_maps_scope_and_generation_fence() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn run_use_without_explicit_binding_is_not_silently_defaulted() {
+async fn run_use_without_target_or_caller_does_not_guess_a_binding() {
     let dir = temp_dir("run-use-default");
     let mock = MockService::start(&dir, mock_behavior(true, vec![]));
     let invocation = run_cli(&dir, &["orchestration", "run-use", "--json"], &[]);
@@ -921,7 +1002,7 @@ async fn check_mode_contradictions_are_usage_errors() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn ask_modes_are_exclusive_and_timeout_required() {
+async fn ask_modes_are_exclusive_with_default_and_explicit_timeout() {
     let dir = temp_dir("ask-conflict");
     let mock = MockService::start(&dir, mock_behavior(true, vec![]));
     let (run_id, task_id, dispatch_id, capability) = (
@@ -939,14 +1020,19 @@ async fn ask_modes_are_exclusive_and_timeout_required() {
     for conflicting in [
         vec!["--resume", "msg-1", "--question", "q"],
         vec!["--resume", "msg-1", "--option", "a"],
+        vec!["--resume", "msg-1", "--options", "a,b"],
+        vec!["--resume", "msg-1", "--options="],
         vec!["--resume", "msg-1", "--to", "run-home"],
-        vec!["--question", "q"],
+        vec![],
     ] {
-        let mut args = vec!["orchestration", "ask", "--json"];
-        args.extend(conflicting.iter().copied());
-        let invocation = run_cli(&dir, &args, &worker_env);
-        assert_eq!(invocation.exit_code, 2, "args {conflicting:?}");
-        assert!(invocation.stdout.is_empty());
+        for timeout in [vec![], vec!["--timeout-ms", "1000"]] {
+            let mut args = vec!["orchestration", "ask", "--json"];
+            args.extend(conflicting.iter().copied());
+            args.extend(timeout);
+            let invocation = run_cli(&dir, &args, &worker_env);
+            assert_eq!(invocation.exit_code, 2, "args {args:?}");
+            assert!(invocation.stdout.is_empty());
+        }
     }
     let captured = mock.captured();
     assert!(
@@ -955,6 +1041,168 @@ async fn ask_modes_are_exclusive_and_timeout_required() {
     );
     drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ask_source_csv_trims_and_omits_empty_choices_without_splitting_literal_options() {
+    let dir = temp_dir("ask-options");
+    let pending = json!({
+        "questionMessageId": "question-1", "threadId": "thread-1",
+        "wait": {"outcome": "pending"},
+        "effectiveTimeoutMs": 1000, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                ("orchestration.ask", pending.clone()),
+                ("orchestration.ask", pending),
+            ],
+        ),
+    );
+    let env = worker_mail_env_ref();
+    for (flag, choices) in [
+        ("--options", "yes, no,, más tarde ,"),
+        ("--option", "yes, no"),
+    ] {
+        let invocation = run_cli(
+            &dir,
+            &[
+                "orchestration",
+                "ask",
+                "--json",
+                "--question",
+                "continue?",
+                "--timeout-ms",
+                "1000",
+                flag,
+                choices,
+            ],
+            &env,
+        );
+        assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+        assert!(invocation.stdout.contains("question-1"));
+    }
+    let calls = mock.captured();
+    let asks: Vec<_> = calls
+        .iter()
+        .filter(|r| r["method"] == "orchestration.ask")
+        .collect();
+    assert_eq!(asks.len(), 2);
+    assert_eq!(
+        asks[0]["params"]["options"],
+        json!(["yes", "no", "más tarde"])
+    );
+    assert_eq!(asks[1]["params"]["options"], json!(["yes, no"]));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ask_default_timeout_reaches_runtime_for_new_and_resumed_questions() {
+    let dir = temp_dir("ask-default");
+    let pending = json!({
+        "questionMessageId": "question-1", "threadId": "thread-1",
+        "wait": {"outcome": "pending"},
+        "effectiveTimeoutMs": 600_000, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                ("orchestration.ask", pending.clone()),
+                ("orchestration.ask", pending),
+            ],
+        ),
+    );
+    let env = worker_mail_env_ref();
+    for intent in [["--question", "continue?"], ["--resume", "question-1"]] {
+        let invocation = run_cli(
+            &dir,
+            &["orchestration", "ask", "--json", intent[0], intent[1]],
+            &env,
+        );
+        assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+        assert!(invocation.stdout.contains("question-1"));
+    }
+    let calls = mock.captured();
+    let asks: Vec<_> = calls
+        .iter()
+        .filter(|r| r["method"] == "orchestration.ask")
+        .collect();
+    assert_eq!(asks.len(), 2);
+    assert_eq!(asks[0]["params"]["intent"], "new");
+    assert_eq!(asks[1]["params"]["intent"], "resume");
+    for ask in asks {
+        assert_eq!(ask["params"]["wait"]["timeoutMs"], 600_000);
+        assert_eq!(ask["auth"], SCOPED_CREDENTIAL);
+    }
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ask_json_preserves_the_source_bare_answer_contract_and_wait_verdicts() {
+    for (outcome, answer, lost, code) in [
+        ("answered", Some("approved ✓"), false, 0),
+        ("pending", None, false, 1),
+        ("cancelled", None, true, 1),
+    ] {
+        let dir = temp_dir("ask-source-json");
+        let mut result = json!({
+            "questionMessageId": "question-1", "threadId": "thread-1",
+            "wait": {"outcome": outcome}, "effectiveTimeoutMs": 1_800_000,
+            "connectionLost": lost, "futureField": "preserved"
+        });
+        if let Some(answer) = answer {
+            result["answer"] = json!({"body": answer, "answerMessageId": "answer-1"});
+        }
+        let mock = MockService::start(
+            &dir,
+            mock_behavior(true, vec![("orchestration.ask", result)]),
+        );
+        let invocation = run_cli(
+            &dir,
+            &[
+                "orchestration",
+                "ask",
+                "--json",
+                "--question",
+                "continue?",
+                "--timeout-ms",
+                "9007199254740991",
+                "--options",
+                "yes,yes,no",
+            ],
+            &worker_mail_env_ref(),
+        );
+        assert_eq!(invocation.exit_code, code, "{}", invocation.stderr);
+        let value: Value = serde_json::from_str(&invocation.stdout).unwrap();
+        assert_eq!(value["answer"], json!(answer));
+        assert_eq!(value["messageId"], "question-1");
+        assert_eq!(value["threadId"], "thread-1");
+        assert_eq!(value["timedOut"], outcome == "pending");
+        assert_eq!(value["cancelled"], outcome == "cancelled");
+        assert_eq!(value["connectionLost"], lost);
+        assert_eq!(value["timeoutMs"], 1_800_000);
+        assert_eq!(value["futureField"], "preserved");
+        assert!(value.get("result").is_none());
+        assert!(value.get("wait").is_none());
+        if answer.is_some() {
+            assert_eq!(value["answerMessageId"], "answer-1");
+        }
+        let calls = mock.captured();
+        let ask = calls
+            .iter()
+            .find(|r| r["method"] == "orchestration.ask")
+            .unwrap();
+        assert_eq!(ask["params"]["wait"]["timeoutMs"], 1_800_000);
+        assert_eq!(ask["params"]["options"], json!(["yes", "yes", "no"]));
+        drop(mock);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1355,6 +1603,85 @@ async fn check_kinds_travel_as_filter_but_fifo_output_is_preserved() {
     // The whole FIFO batch comes back regardless of the wake filter.
     assert!(invocation.stdout.contains("first"));
     assert!(invocation.stdout.contains("second"));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn source_worker_done_alias_maps_send_and_check_without_changing_authority() {
+    let dir = temp_dir("source-worker-done");
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                (
+                    "orchestration.send",
+                    json!({
+                        "message": {"messageId": "msg-1", "sequence": 1, "runId": "run-1"},
+                        "lifecycle": {"action": "settled", "outcome": "succeeded", "duplicate": false},
+                        "warnings": []
+                    }),
+                ),
+                (
+                    "orchestration.check",
+                    json!({
+                        "messages": [], "timedOut": false, "cancelled": false, "connectionLost": false
+                    }),
+                ),
+            ],
+        ),
+    );
+    let env = worker_mail_env_ref();
+    let sent = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "send",
+            "--json",
+            "--type",
+            "worker_done",
+            "--subject",
+            "done",
+            "--outcome",
+            "succeeded",
+            "--task-id",
+            "task-1",
+            "--dispatch-id",
+            "dispatch-1",
+        ],
+        &env,
+    );
+    assert_eq!(sent.exit_code, 0, "{}", sent.stderr);
+    let checked = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "check",
+            "--json",
+            "--types",
+            "worker_done,escalation",
+        ],
+        &env,
+    );
+    assert_eq!(checked.exit_code, 0, "{}", checked.stderr);
+    let calls = mock.captured();
+    let send = calls
+        .iter()
+        .find(|r| r["method"] == "orchestration.send")
+        .unwrap();
+    assert_eq!(send["params"]["kind"], "finalReport");
+    assert_eq!(send["params"]["finalReport"]["outcome"], "succeeded");
+    assert_eq!(send["params"]["scope"]["dispatchId"], "dispatch-1");
+    assert_eq!(send["auth"], SCOPED_CREDENTIAL);
+    let check = calls
+        .iter()
+        .find(|r| r["method"] == "orchestration.check")
+        .unwrap();
+    assert_eq!(
+        check["params"]["kinds"],
+        json!(["finalReport", "escalation"])
+    );
     drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -2105,7 +2432,10 @@ async fn red_worker_release_unverifiable_exits_failure() {
     let result = json!({
         "dispatchId": "dispatch-1",
         "disposition": "unverifiable",
+        "state": "release_unknown",
         "processVerdict": "unverifiable",
+        "processAction": "none",
+        "archive": null,
         "residualResources": [
             {"kind": "session", "resourceId": "session-1",
              "incarnation": "f2b4c995-0e6c-4a0a-9e6f-1f2a3b4c5d6e",
@@ -2363,5 +2693,292 @@ async fn red_worker_start_completed_with_live_process_is_success() {
         invocation.stderr
     );
     assert!(invocation.stdout.contains("unverifiable"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// worker-retain: typed params, schema checks, exit codes, credential refusal.
+// ---------------------------------------------------------------------------
+
+fn retain_result(disposition: &str, reason: &str) -> Value {
+    let state = match reason {
+        "already_released" => "already_released",
+        "release_committed" => "release_unknown",
+        _ => "retained",
+    };
+    json!({
+        "dispatchId": "dispatch-1",
+        "disposition": disposition,
+        "reason": reason,
+        "state": state,
+        "processVerdict": "exited",
+        "processAction": "none",
+        "archive": null,
+        "residualResources": [],
+    })
+}
+
+fn retain_args(extra: &[&str]) -> Vec<String> {
+    let mut args = vec![
+        "orchestration".to_string(),
+        "worker-retain".to_string(),
+        "--dispatch".to_string(),
+        "dispatch-1".to_string(),
+    ];
+    args.extend(extra.iter().map(|s| s.to_string()));
+    args.extend(coordinator_args().iter().map(|s| s.to_string()));
+    args
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_records_user_requested_hold() {
+    let dir = temp_dir("retain-ok");
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                retain_result("retained", "user_requested"),
+            )],
+        ),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    let captured = mock.captured();
+    let sent = captured
+        .iter()
+        .find(|r| r["method"] == "orchestration.workerRetain")
+        .expect("retain sent");
+    assert_eq!(sent["params"]["dispatchId"], json!("dispatch-1"));
+    assert_eq!(sent["params"]["runId"], json!("run-1"));
+    assert_eq!(sent["params"]["coordinatorId"], json!("coord-1"));
+    assert_eq!(sent["params"]["consumerGeneration"], json!(3));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_human_output_names_reason() {
+    let dir = temp_dir("retain-human");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                retain_result("retained", "user_requested"),
+            )],
+        ),
+    );
+    let args = retain_args(&[]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("retained"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("user_requested"),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_already_released_is_settled_success() {
+    let dir = temp_dir("retain-released");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                retain_result("released", "already_released"),
+            )],
+        ),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("already_released"),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_committed_release_exits_failure() {
+    let dir = temp_dir("retain-committed");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                retain_result("unverifiable", "release_committed"),
+            )],
+        ),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(
+        invocation.exit_code, 1,
+        "a committed release cannot be retained over: {}",
+        invocation.stderr
+    );
+    assert!(
+        invocation.stdout.contains("release_committed"),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_release_pending_exits_success() {
+    let dir = temp_dir("retain-pending");
+    let pending = json!({
+        "dispatchId": "dispatch-1",
+        "disposition": "unverifiable",
+        "reason": "release_committed",
+        "state": "release_pending",
+        "processVerdict": "live",
+        "processAction": "none",
+        "archive": null,
+        "residualResources": [],
+    });
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.workerRetain", pending)]),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(
+        invocation.exit_code, 0,
+        "release_pending is not a failure: {}",
+        invocation.stderr
+    );
+    assert!(
+        invocation.stdout.contains("release_pending"),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_wrong_dispatch_result_is_rejected() {
+    let dir = temp_dir("retain-mismatch");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                json!({"dispatchId": "unrelated-dispatch",
+                       "disposition": "retained", "reason": "user_requested",
+                       "state": "retained", "processVerdict": "live",
+                       "processAction": "none", "archive": null}),
+            )],
+        ),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_validates_state_without_discarding_additive_archive_metadata() {
+    for (contradictory, expected) in [(false, 0), (true, 1)] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut result = retain_result("retained", "user_requested");
+        result["archive"] = json!({"available": true, "futureMetadata": "preserved"});
+        if contradictory {
+            result["disposition"] = json!("released");
+        }
+        let _mock = MockService::start(
+            dir.path(),
+            mock_behavior(true, vec![("orchestration.workerRetain", result)]),
+        );
+        let args = retain_args(&["--json"]);
+        let args: Vec<_> = args.iter().map(String::as_str).collect();
+        let invocation = run_cli(dir.path(), &args, &[]);
+        assert_eq!(
+            invocation.exit_code, expected,
+            "{} {}",
+            invocation.stdout, invocation.stderr
+        );
+        if !contradictory {
+            let value: Value = serde_json::from_str(&invocation.stdout).unwrap();
+            assert_eq!(value["result"]["archive"]["futureMetadata"], "preserved");
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_unknown_reason_is_rejected() {
+    let dir = temp_dir("retain-reason");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerRetain",
+                json!({"dispatchId": "dispatch-1",
+                       "disposition": "retained", "reason": "bogus",
+                       "processVerdict": "live"}),
+            )],
+        ),
+    );
+    let args = retain_args(&["--json"]);
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let invocation = run_cli(&dir, &args_ref, &[]);
+    assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_retain_refuses_worker_credential() {
+    let dir = temp_dir("retain-cred");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let capability = os(SCOPED_CREDENTIAL);
+    let env = [("DROGON_DISPATCH_CAPABILITY", &capability)];
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "worker-retain",
+            "--dispatch",
+            "dispatch-1",
+            "--json",
+        ],
+        &env,
+    );
+    assert_eq!(invocation.exit_code, 2);
+    assert!(
+        invocation
+            .stderr
+            .contains("refuses DROGON_DISPATCH_CAPABILITY"),
+        "{}",
+        invocation.stderr
+    );
+    assert!(
+        mock.captured().is_empty(),
+        "refused credential never connects"
+    );
+    drop(mock);
     let _ = std::fs::remove_dir_all(&dir);
 }

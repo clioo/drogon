@@ -77,6 +77,8 @@ pub struct TaskRecord {
     pub status: TaskStatus,
     #[serde(default)]
     pub depends_on: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
 }
 
 /// Creates a task in an existing run. Source anchor: `taskCreate` carried
@@ -101,6 +103,43 @@ impl TaskCreateParams {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskCreateResult {
+    pub task: TaskRecord,
+}
+
+/// Coordinator status transition. The engine checks active attempt ownership
+/// atomically; a caller cannot forge a dispatched task or settle a live worker.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskUpdateParams {
+    #[serde(flatten)]
+    pub scope: CoordinatorScope,
+    pub task_id: String,
+    pub status: TaskStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+}
+
+impl TaskUpdateParams {
+    pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
+        self.scope.validate_shape(execution_host_id)?;
+        validate_opaque_token(&self.task_id, 128, "Invalid task id.")?;
+        if self
+            .result
+            .as_ref()
+            .is_some_and(|text| text.len() > MAX_TASK_TEXT_BYTES)
+        {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Task result is too long.",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskUpdateResult {
     pub task: TaskRecord,
 }
 

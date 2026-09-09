@@ -23,19 +23,20 @@ use drogon_protocol::orchestration_question::{
     RequestLedgerState, RequestShowParams, RequestShowResult,
 };
 use drogon_protocol::orchestration_run::{
-    RunCreateParams, RunCreateResult, RunListParams, RunListResult, RunShowParams, RunShowResult,
-    RunSummary, RunUseParams, RunUseResult,
+    RunBindParams, RunCreateParams, RunCreateResult, RunCurrentParams, RunCurrentResult,
+    RunListParams, RunListResult, RunShowParams, RunShowResult, RunSummary, RunUseParams,
+    RunUseResult,
 };
 use drogon_protocol::orchestration_scope::{CoordinatorScope, HostScope};
 use drogon_protocol::orchestration_task::{
     TaskCreateParams, TaskCreateResult, TaskListParams, TaskListResult, TaskShowParams,
-    TaskShowResult, TaskSpec, TaskStatus,
+    TaskShowResult, TaskSpec, TaskStatus, TaskUpdateParams, TaskUpdateResult,
 };
 use drogon_protocol::orchestration_worker::{
     OutputSource, ProcessAction, WorkerAbandonParams, WorkerAbandonResult, WorkerExecution,
     WorkerPlacement, WorkerReadParams, WorkerReadResult, WorkerReleaseParams, WorkerReleaseResult,
-    WorkerShowParams, WorkerShowResult, WorkerStartParams, WorkerStartResult, WorkerStopParams,
-    WorkerStopResult,
+    WorkerRetainParams, WorkerRetainResult, WorkerShowParams, WorkerShowResult, WorkerStartParams,
+    WorkerStartResult, WorkerStopParams, WorkerStopResult,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -80,6 +81,9 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
         "DROGON_TASK_ID",
         "DROGON_DISPATCH_ID",
         "DROGON_HOST_ID",
+        "DROGON_SESSION_ID",
+        "DROGON_SESSION_INCARNATION",
+        "DROGON_HOOK_INCARNATION",
     ] {
         if let Some(raw) = std::env::var_os(key) {
             let value = raw
@@ -93,10 +97,15 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
     let coordinator_only = matches!(
         command,
         OrchestrationCommand::RunCreate { .. }
+            | OrchestrationCommand::RunCurrent { .. }
             | OrchestrationCommand::RunList { .. }
             | OrchestrationCommand::RunShow { .. }
             | OrchestrationCommand::RunUse { .. }
             | OrchestrationCommand::TaskCreate { .. }
+            | OrchestrationCommand::TaskUpdate { .. }
+            | OrchestrationCommand::GateCreate { .. }
+            | OrchestrationCommand::GateResolve { .. }
+            | OrchestrationCommand::GateList { .. }
             | OrchestrationCommand::TaskList { .. }
             | OrchestrationCommand::TaskShow { .. }
             | OrchestrationCommand::WorkerStart { .. }
@@ -105,11 +114,23 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             | OrchestrationCommand::WorkerStop { .. }
             | OrchestrationCommand::WorkerAbandon { .. }
             | OrchestrationCommand::WorkerRelease { .. }
+            | OrchestrationCommand::WorkerRetain { .. }
     );
     if coordinator_only {
         if worker_credential {
             return Err(usage(
                 "this command is coordinator-only and refuses DROGON_DISPATCH_CAPABILITY; there is no administrator fallback",
+            ));
+        }
+        if let Some(scope) = command.coordinator_scope()
+            && !scope.is_complete()
+            && scope.from.is_none()
+            && scope.coordinator_id.is_none()
+            && !crate::orchestration_binding::terminal_hint()
+            && !(crate::orchestration_binding::named_inspection(command) && scope.run.is_some())
+        {
+            return Err(usage(
+                "Coordinator context is required: pass --from or explicit --run, --coordinator-id and --consumer-generation.",
             ));
         }
         if let OrchestrationCommand::WorkerStart {
@@ -331,20 +352,20 @@ fn resolve_host(
     Ok(chosen)
 }
 
-fn host_scope(host_id: &str) -> HostScope {
+pub(crate) fn host_scope(host_id: &str) -> HostScope {
     HostScope {
         contract_version: drogon_protocol::orchestration_scope::COORDINATION_CONTRACT_VERSION,
         host_id: host_id.to_string(),
     }
 }
 
-/// Coordinator bindings are explicit-only: no hint filling, no defaults.
-fn coordinator_scope(host_id: &str, args: &CoordinatorScopeArgs) -> CoordinatorScope {
+/// Convert a binding after explicit validation or authoritative runtime resolution.
+pub(crate) fn coordinator_scope(host_id: &str, args: &CoordinatorScopeArgs) -> CoordinatorScope {
     CoordinatorScope {
         host: host_scope(host_id),
-        run_id: args.run.clone(),
-        coordinator_id: args.coordinator_id.clone(),
-        consumer_generation: args.consumer_generation,
+        run_id: args.run_id().to_owned(),
+        coordinator_id: args.coordinator_id().to_owned(),
+        consumer_generation: args.generation(),
     }
 }
 
@@ -426,7 +447,7 @@ fn parse_message_kind(name: &str) -> Option<MessageKind> {
         "question" => Some(MessageKind::Question),
         "answer" => Some(MessageKind::Answer),
         "heartbeat" => Some(MessageKind::Heartbeat),
-        "final-report" | "finalReport" => Some(MessageKind::FinalReport),
+        "final-report" | "finalReport" | "worker_done" => Some(MessageKind::FinalReport),
         "guidance" => Some(MessageKind::Guidance),
         "escalation" => Some(MessageKind::Escalation),
         _ => None,
@@ -477,7 +498,7 @@ fn call_timeout(wait: Option<&WaitPolicy>) -> Duration {
     }
 }
 
-fn validate_params<T: serde::Serialize>(
+pub(crate) fn validate_params<T: serde::Serialize>(
     params: &T,
     validate: impl FnOnce(&T) -> Result<(), RpcError>,
     request_id: &str,
@@ -496,7 +517,7 @@ fn validate_params<T: serde::Serialize>(
     })
 }
 
-fn emit(
+pub(crate) fn emit(
     call: CallOk,
     json: bool,
     human: impl FnOnce() -> String,
@@ -524,7 +545,7 @@ fn emit(
 }
 
 /// Shared invariant checks for run summaries on any run method result.
-fn check_run(run: &RunSummary) -> Result<(), String> {
+pub(crate) fn check_run(run: &RunSummary) -> Result<(), String> {
     drogon_protocol::orchestration_common::validate_short_label(&run.run_id)
         .map_err(|e| e.message)?;
     drogon_protocol::orchestration_common::validate_short_label(&run.coordinator_id)
@@ -582,10 +603,15 @@ pub async fn run(
     let status = capability_preflight(client, request_id).await?;
     let explicit_host = match command {
         OrchestrationCommand::RunCreate { host, .. }
+        | OrchestrationCommand::RunCurrent { host, .. }
         | OrchestrationCommand::RunList { host, .. }
         | OrchestrationCommand::RunShow { host, .. }
         | OrchestrationCommand::RunUse { host, .. }
         | OrchestrationCommand::TaskCreate { host, .. }
+        | OrchestrationCommand::TaskUpdate { host, .. }
+        | OrchestrationCommand::GateCreate { host, .. }
+        | OrchestrationCommand::GateResolve { host, .. }
+        | OrchestrationCommand::GateList { host, .. }
         | OrchestrationCommand::TaskList { host, .. }
         | OrchestrationCommand::TaskShow { host, .. }
         | OrchestrationCommand::WorkerStart { host, .. }
@@ -594,6 +620,7 @@ pub async fn run(
         | OrchestrationCommand::WorkerStop { host, .. }
         | OrchestrationCommand::WorkerAbandon { host, .. }
         | OrchestrationCommand::WorkerRelease { host, .. }
+        | OrchestrationCommand::WorkerRetain { host, .. }
         | OrchestrationCommand::Send { host, .. }
         | OrchestrationCommand::Check { host, .. }
         | OrchestrationCommand::Reply { host, .. }
@@ -601,6 +628,10 @@ pub async fn run(
         | OrchestrationCommand::RequestShow { host, .. } => host.host.as_deref(),
     };
     let host_id = resolve_host(explicit_host, &status.host_id, request_id)?;
+    let resolved =
+        crate::orchestration_binding::resolve(client, request_id, &status, command.clone()).await?;
+    let caller = resolved.caller;
+    let command = &resolved.command;
 
     match command {
         OrchestrationCommand::RunCreate {
@@ -618,6 +649,7 @@ pub async fn run(
                 )
             });
             let params = RunCreateParams {
+                caller: caller.clone(),
                 host: host_scope(&host_id),
                 objective: objective.clone(),
                 coordinator_id: coordinator_id.clone(),
@@ -735,35 +767,99 @@ pub async fn run(
                 0,
             )
         }
-        OrchestrationCommand::RunUse {
-            scope, takeover, ..
-        } => {
-            let params = RunUseParams {
+        OrchestrationCommand::RunCurrent { coordinator_id, .. } => {
+            let coordinator_id = coordinator_id
+                .as_ref()
+                .ok_or_else(|| usage("run-current needs a coordinator or terminal identity"))?;
+            let params = RunCurrentParams {
+                caller: caller.clone(),
                 host: host_scope(&host_id),
-                run_id: scope.run.clone(),
-                coordinator_id: scope.coordinator_id.clone(),
-                consumer_generation: scope.consumer_generation,
-                takeover: *takeover,
+                coordinator_id: coordinator_id.clone(),
             };
             let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
             let call = client
-                .call("orchestration.runUse", value, request_id, DEFAULT_TIMEOUT)
+                .call(
+                    "orchestration.runCurrent",
+                    value,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result: RunCurrentResult = Client::decode_checked(
+                &call,
+                "orchestration.runCurrent",
+                |r: &RunCurrentResult| {
+                    if let Some(run) = &r.run {
+                        check_run(run)?;
+                        if run.coordinator_id != *coordinator_id {
+                            return Err("run-current response names a different coordinator".into());
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
+            emit(
+                call,
+                json,
+                || match &result.run {
+                    Some(run) => format!("{} {}", run.run_id, run.objective),
+                    None => "No Run is bound to this terminal.".into(),
+                },
+                0,
+            )
+        }
+        OrchestrationCommand::RunUse {
+            scope, takeover, ..
+        } => {
+            let (method, value, expected_generation) =
+                if scope.consumer_generation.is_none() && caller.is_some() {
+                    let params = RunBindParams {
+                        host: host_scope(&host_id),
+                        run_id: scope.run_id().to_owned(),
+                        coordinator_id: scope.coordinator_id().to_owned(),
+                        caller: caller.clone().unwrap(),
+                        takeover: *takeover,
+                    };
+                    (
+                        "orchestration.runBind",
+                        validate_params(&params, |p| p.validate_shape(&host_id), request_id)?,
+                        None,
+                    )
+                } else {
+                    let params = RunUseParams {
+                        caller: caller.clone(),
+                        host: host_scope(&host_id),
+                        run_id: scope.run_id().to_owned(),
+                        coordinator_id: scope.coordinator_id().to_owned(),
+                        consumer_generation: scope.generation(),
+                        takeover: *takeover,
+                    };
+                    let expected = scope
+                        .generation()
+                        .checked_add(u64::from(*takeover))
+                        .ok_or_else(|| usage("run-use generation overflow"))?;
+                    (
+                        "orchestration.runUse",
+                        validate_params(&params, |p| p.validate_shape(&host_id), request_id)?,
+                        Some(expected),
+                    )
+                };
+            let call = client
+                .call(method, value, request_id, DEFAULT_TIMEOUT)
                 .await?;
             let result: RunUseResult =
-                Client::decode_checked(&call, "orchestration.runUse", |r: &RunUseResult| {
+                Client::decode_checked(&call, method, |r: &RunUseResult| {
                     check_run(&r.run)?;
-                    if r.run.run_id != scope.run {
+                    if r.run.run_id != scope.run_id() {
                         return Err(format!(
                             "run-use response names {:?}, not the requested {:?}",
-                            r.run.run_id, scope.run
+                            r.run.run_id,
+                            scope.run_id()
                         ));
                     }
-                    let expected_generation = scope
-                        .consumer_generation
-                        .checked_add(u64::from(*takeover))
-                        .ok_or("run-use generation overflow")?;
-                    if r.run.coordinator_id != scope.coordinator_id
-                        || r.run.consumer_generation != expected_generation
+                    if r.run.coordinator_id != scope.coordinator_id()
+                        || expected_generation
+                            .is_some_and(|expected| r.run.consumer_generation != expected)
                     {
                         return Err("run-use response does not match the requested binding".into());
                     }
@@ -787,6 +883,7 @@ pub async fn run(
             scope,
             instructions,
             title,
+            deps,
             depends_on,
             parent,
             display_name,
@@ -795,9 +892,12 @@ pub async fn run(
             let spec = TaskSpec {
                 title: title.clone(),
                 instructions: instructions.clone(),
-                depends_on: match depends_on {
-                    Some(list) => list.split(',').map(str::to_string).collect(),
-                    None => Vec::new(),
+                depends_on: match deps {
+                    Some(raw) => crate::orchestration_task_dependencies::parse(raw)?,
+                    None => match depends_on {
+                        Some(list) => list.split(',').map(str::to_string).collect(),
+                        None => Vec::new(),
+                    },
                 },
                 parent: parent.clone(),
                 display_name: display_name.clone(),
@@ -821,7 +921,7 @@ pub async fn run(
                 "orchestration.taskCreate",
                 |r: &TaskCreateResult| {
                     check_task_id(&r.task.task_id)?;
-                    if r.task.run_id != scope.run {
+                    if r.task.run_id != scope.run_id() {
                         return Err("task-create response names a different run".into());
                     }
                     Ok(())
@@ -839,6 +939,68 @@ pub async fn run(
                 },
                 0,
             )
+        }
+        OrchestrationCommand::TaskUpdate {
+            scope,
+            task,
+            status,
+            result,
+            ..
+        } => {
+            let params = TaskUpdateParams {
+                scope: coordinator_scope(&host_id, scope),
+                task_id: task.clone(),
+                status: wire_status_arg(*status),
+                result: result.clone(),
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call(
+                    "orchestration.taskUpdate",
+                    value,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let updated: TaskUpdateResult = Client::decode_checked(
+                &call,
+                "orchestration.taskUpdate",
+                |r: &TaskUpdateResult| {
+                    if r.task.task_id != *task
+                        || r.task.run_id != scope.run_id()
+                        || r.task.status != params.status
+                    {
+                        return Err(
+                            "task-update response does not match the requested task/run/status"
+                                .into(),
+                        );
+                    }
+                    if params.result.is_some() && r.task.result != params.result {
+                        return Err(
+                            "task-update response does not match the requested result".into()
+                        );
+                    }
+                    Ok(())
+                },
+            )?;
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "Updated {} -> {}",
+                        updated.task.task_id,
+                        wire_task_status(updated.task.status)
+                    )
+                },
+                0,
+            )
+        }
+        command @ (OrchestrationCommand::GateCreate { .. }
+        | OrchestrationCommand::GateResolve { .. }
+        | OrchestrationCommand::GateList { .. }) => {
+            crate::orchestration_gate_commands::run(client, request_id, json, &host_id, command)
+                .await
         }
         OrchestrationCommand::TaskList {
             scope,
@@ -907,7 +1069,7 @@ pub async fn run(
             let result: TaskShowResult =
                 Client::decode_checked(&call, "orchestration.taskShow", |r: &TaskShowResult| {
                     check_task_id(&r.task.task_id)?;
-                    if r.task.task_id != *task || r.task.run_id != scope.run {
+                    if r.task.task_id != *task || r.task.run_id != scope.run_id() {
                         return Err(
                             "task-show response does not match the requested task scope".into()
                         );
@@ -1031,7 +1193,7 @@ pub async fn run(
                 )
                 .await?;
             let requested_workspace = workspace.clone();
-            let requested_scope = (scope.run.clone(), scope.consumer_generation);
+            let requested_scope = (scope.run_id().to_owned(), scope.generation());
             let result: WorkerStartResult = Client::decode_checked(
                 &call,
                 "orchestration.workerStart",
@@ -1351,12 +1513,12 @@ pub async fn run(
                     Ok(())
                 },
             )?;
-            // Intentional retained/no-owned-resource releases succeed; an
-            // unverifiable disposition is an honestly uncertain operation.
-            let exit_code = u8::from(
-                result.disposition
-                    == drogon_protocol::orchestration_common::ResourceDisposition::Unverifiable,
-            );
+            // Only a committed-but-unproven release is a failure:
+            // `release_unknown` exits 1, while `release_pending`, retained,
+            // released and no-owned-resource answers are settled successes.
+            // Disposition alone cannot distinguish pending from unknown.
+            let exit_code = u8::from(result.state == "release_unknown"
+                || (result.state.is_empty() && result.disposition == drogon_protocol::orchestration_common::ResourceDisposition::Unverifiable));
             emit(
                 call,
                 json,
@@ -1365,6 +1527,88 @@ pub async fn run(
                         "Dispatch {}: {} (process {})",
                         result.dispatch_id,
                         wire_disposition(result.disposition),
+                        wire_verdict(result.process_verdict)
+                    );
+                    text.push_str(&human_extras(&None, &result.residual_resources));
+                    text
+                },
+                exit_code,
+            )
+        }
+        OrchestrationCommand::WorkerRetain {
+            scope, dispatch, ..
+        } => {
+            let params = WorkerRetainParams {
+                scope: coordinator_scope(&host_id, scope),
+                dispatch_id: dispatch.clone(),
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call(
+                    "orchestration.workerRetain",
+                    value,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result: WorkerRetainResult = Client::decode_checked(
+                &call,
+                "orchestration.workerRetain",
+                |r: &WorkerRetainResult| {
+                    check_dispatch_id(&r.dispatch_id)?;
+                    if r.dispatch_id != *dispatch {
+                        return Err(
+                            "worker retain response does not match the requested dispatch".into(),
+                        );
+                    }
+                    if !matches!(
+                        r.reason.as_str(),
+                        "user_requested"
+                            | "already_released"
+                            | "release_committed"
+                            | "no_owned_resource"
+                    ) {
+                        return Err("worker retain response carries an unknown reason".into());
+                    }
+                    if !matches!(
+                        r.state.as_str(),
+                        "retained" | "already_released" | "release_pending" | "release_unknown"
+                    ) {
+                        return Err("worker retain response carries an unknown state".into());
+                    }
+                    if r.process_action != ProcessAction::None {
+                        return Err("worker retain never signals a process".into());
+                    }
+                    use drogon_protocol::orchestration_common::ResourceDisposition as D;
+                    if !matches!(
+                        (r.state.as_str(), r.reason.as_str(), r.disposition),
+                        ("retained", "user_requested", D::Retained)
+                            | ("retained", "no_owned_resource", D::NoOwnedResource)
+                            | ("already_released", "already_released", D::Released)
+                            | (
+                                "release_pending" | "release_unknown",
+                                "release_committed",
+                                D::Unverifiable
+                            )
+                    ) {
+                        return Err("worker retain state contradicts its disposition".into());
+                    }
+                    Ok(())
+                },
+            )?;
+            // Only a committed-but-unproven release is a failure; retained,
+            // already-released and no-owned-resource are settled answers.
+            // `release_pending` also exits 0: only `release_unknown` is 1.
+            let exit_code = u8::from(result.state == "release_unknown");
+            emit(
+                call,
+                json,
+                || {
+                    let mut text = format!(
+                        "Dispatch {}: {} ({}) (process {})",
+                        result.dispatch_id,
+                        wire_disposition(result.disposition),
+                        result.reason,
                         wire_verdict(result.process_verdict)
                     );
                     text.push_str(&human_extras(&None, &result.residual_resources));
@@ -1659,6 +1903,7 @@ pub async fn run(
             actor,
             question,
             option,
+            options,
             to,
             resume,
             timeout_ms,
@@ -1667,11 +1912,21 @@ pub async fn run(
             let intent = match (question, resume) {
                 (Some(question), None) => AskIntent::New {
                     question: question.clone(),
-                    options: option.clone(),
+                    options: match options {
+                        Some(csv) => csv
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|choice| !choice.is_empty())
+                            .map(str::to_owned)
+                            .collect(),
+                        None => option.clone(),
+                    },
                 },
                 (None, Some(message_id)) => {
-                    if !option.is_empty() {
-                        return Err(usage("--option is only valid when asking a new question"));
+                    if !option.is_empty() || options.is_some() {
+                        return Err(usage(
+                            "--option/--options are only valid when asking a new question",
+                        ));
                     }
                     if to.is_some() {
                         return Err(usage("--to is only valid when asking a new question"));
@@ -1729,17 +1984,43 @@ pub async fn run(
             };
             let note = match result.wait {
                 AskWaitOutcome::Pending => Some(format!(
-                    "question {} stays pending; resume with --resume {}",
-                    result.question_message_id, result.question_message_id
+                    "ask timeout after {}ms (thread {})",
+                    result.effective_timeout_ms.unwrap_or(*timeout_ms),
+                    result.thread_id
                 )),
                 AskWaitOutcome::Cancelled => Some(format!(
-                    "question {} wait was interrupted",
+                    "ask {} (question {})",
+                    if result.connection_lost {
+                        "connection closed"
+                    } else {
+                        "cancelled"
+                    },
                     result.question_message_id
                 )),
                 AskWaitOutcome::Answered => None,
             };
             if json {
-                let stdout = serde_json::to_string_pretty(&call.raw).map_err(|err| {
+                // Source ask is deliberately bare: callers use jq -r .answer.
+                let mut source = call.raw["result"].clone();
+                if let Some(fields) = source.as_object_mut() {
+                    fields.remove("questionMessageId");
+                    fields.remove("effectiveTimeoutMs");
+                    fields.remove("wait");
+                    fields.remove("answerMessageId");
+                }
+                source["answer"] = serde_json::json!(result.answer.as_ref().map(|a| &a.body));
+                source["messageId"] = serde_json::json!(result.question_message_id);
+                source["threadId"] = serde_json::json!(result.thread_id);
+                source["timedOut"] = serde_json::json!(result.wait == AskWaitOutcome::Pending);
+                source["cancelled"] = serde_json::json!(result.wait == AskWaitOutcome::Cancelled);
+                source["connectionLost"] = serde_json::json!(result.connection_lost);
+                if let Some(budget) = result.effective_timeout_ms {
+                    source["timeoutMs"] = serde_json::json!(budget);
+                }
+                if let Some(answer) = &result.answer {
+                    source["answerMessageId"] = serde_json::json!(answer.answer_message_id);
+                }
+                let stdout = serde_json::to_string_pretty(&source).map_err(|err| {
                     CliError::local(
                         internal_error(format!("cannot encode response: {err}")),
                         call.request_id.clone(),

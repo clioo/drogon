@@ -171,9 +171,16 @@ fn forbidden_methods_are_unauthorized_before_any_scope_check() {
         "harness.list",
         "runtime.shutdown",
         "orchestration.runCreate",
+        "orchestration.runCurrent",
+        "orchestration.runBind",
         "orchestration.taskCreate",
+        "orchestration.taskUpdate",
+        "orchestration.gateCreate",
+        "orchestration.gateResolve",
+        "orchestration.gateList",
         "orchestration.workerStart",
         "orchestration.workerStop",
+        "orchestration.workerRetain",
         "unknown.method",
     ] {
         let err = authorize_worker(&conn, HOST, SECRET, method, &json!({})).unwrap_err();

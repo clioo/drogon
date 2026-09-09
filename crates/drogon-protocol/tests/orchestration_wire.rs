@@ -29,7 +29,7 @@ use drogon_protocol::orchestration_scope::{
 };
 use drogon_protocol::orchestration_task::{
     TaskCreateParams, TaskCreateResult, TaskListParams, TaskListResult, TaskRecord, TaskShowParams,
-    TaskShowResult, TaskSpec, TaskStatus, TaskSummary,
+    TaskShowResult, TaskSpec, TaskStatus, TaskSummary, TaskUpdateParams, TaskUpdateResult,
 };
 use drogon_protocol::orchestration_worker::{
     OutputEntry, OutputSource, ProcessAction, WorkerAbandonParams, WorkerAbandonResult,
@@ -93,6 +93,7 @@ where
 #[test]
 fn run_methods_round_trip_with_explicit_host_and_generation() {
     let params = RunCreateParams {
+        caller: None,
         host: host_scope(),
         objective: "Coordinate the release audit".into(),
         coordinator_id: "coordinator-1".into(),
@@ -147,6 +148,7 @@ fn run_methods_round_trip_with_explicit_host_and_generation() {
         "runId",
     );
     let use_params = RunUseParams {
+        caller: None,
         host: host_scope(),
         run_id: "run-1".into(),
         coordinator_id: "coordinator-1".into(),
@@ -260,9 +262,29 @@ fn task_methods_round_trip_with_decided_status_vocabulary() {
             run_id: "run-1".into(),
             status: TaskStatus::Pending,
             depends_on: vec!["task-0".into()],
+            result: None,
         },
     };
     assert_camel_case_round_trip(&created, "task");
+    let mut update = TaskUpdateParams {
+        scope: coordinator_scope(),
+        task_id: "task-1".into(),
+        status: TaskStatus::Completed,
+        result: Some("done ✓".into()),
+    };
+    update.validate_shape("host-a").unwrap();
+    assert_camel_case_round_trip(&update, "taskId");
+    assert_camel_case_round_trip(
+        &TaskUpdateResult {
+            task: created.task.clone(),
+        },
+        "task",
+    );
+    update.result = Some("".into());
+    update.validate_shape("host-a").unwrap();
+    update.result =
+        Some("x".repeat(drogon_protocol::orchestration_common::MAX_TASK_TEXT_BYTES + 1));
+    assert!(update.validate_shape("host-a").is_err());
     let shown = TaskShowResult {
         task: created.task,
         spec: params.spec,
@@ -455,7 +477,10 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
     let release = WorkerReleaseResult {
         dispatch_id: "dispatch-1".into(),
         disposition: ResourceDisposition::NoOwnedResource,
+        state: "retained".into(),
         process_verdict: ProcessVerdict::Exited,
+        process_action: ProcessAction::None,
+        archive: None,
         residual_resources: vec![],
     };
     assert_camel_case_round_trip(&release, "disposition");
@@ -726,6 +751,30 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
 }
 
 #[test]
+fn source_ask_budget_and_duplicate_choices_do_not_use_generic_wait_constraints() {
+    let mut ask = AskParams {
+        scope: ActorScope::Dispatch(dispatch_scope()),
+        intent: AskIntent::New {
+            question: "Continue?".into(),
+            options: vec!["yes".into(), "yes".into()],
+        },
+        to: None,
+        wait: WaitPolicy {
+            timeout_ms: 1_800_000,
+        },
+    };
+    ask.validate_shape("host-a").unwrap();
+    assert!(
+        ask.wait.validate().is_err(),
+        "the generic check wait limit is unchanged"
+    );
+    ask.wait.timeout_ms = 0;
+    assert!(ask.validate_shape("host-a").is_err());
+    ask.wait.timeout_ms = 1_800_001;
+    assert!(ask.validate_shape("host-a").is_err());
+}
+
+#[test]
 fn question_and_receipt_methods_round_trip_with_explicit_scope() {
     let ask = AskParams {
         scope: ActorScope::Dispatch(dispatch_scope()),
@@ -822,6 +871,7 @@ fn question_and_receipt_methods_round_trip_with_explicit_scope() {
 #[test]
 fn additive_params_and_result_fields_are_ignored_not_identity() {
     let mut run_use = serde_json::to_value(RunUseParams {
+        caller: None,
         host: host_scope(),
         run_id: "run-1".into(),
         coordinator_id: "coordinator-1".into(),
@@ -867,6 +917,7 @@ fn additive_params_and_result_fields_are_ignored_not_identity() {
 #[test]
 fn scopes_are_required_and_refuse_wrong_host_or_version() {
     let mut run_create = serde_json::to_value(RunCreateParams {
+        caller: None,
         host: host_scope(),
         objective: "obj".into(),
         coordinator_id: "coordinator-1".into(),
@@ -876,6 +927,7 @@ fn scopes_are_required_and_refuse_wrong_host_or_version() {
     assert!(serde_json::from_value::<RunCreateParams>(run_create).is_err());
 
     let params = RunCreateParams {
+        caller: None,
         host: host_scope(),
         objective: "obj".into(),
         coordinator_id: "coordinator-1".into(),
@@ -982,6 +1034,7 @@ fn actor_scopes_reject_contradictory_reserved_fields_but_keep_additive_ones() {
 fn generation_fences_refuse_unsafe_values() {
     for generation in [0u64, MAX_CONSUMER_GENERATION + 1, u64::MAX] {
         let params = RunUseParams {
+            caller: None,
             host: host_scope(),
             run_id: "run-1".into(),
             coordinator_id: "coordinator-1".into(),
@@ -995,6 +1048,7 @@ fn generation_fences_refuse_unsafe_values() {
         );
     }
     let mut raw = serde_json::to_value(RunUseParams {
+        caller: None,
         host: host_scope(),
         run_id: "run-1".into(),
         coordinator_id: "coordinator-1".into(),
@@ -1377,6 +1431,7 @@ fn process_liveness_has_exactly_three_verdicts_and_cursors_are_bounded() {
 fn no_params_or_results_serde_shape_carries_a_credential() {
     let samples: Vec<Value> = vec![
         serde_json::to_value(RunCreateParams {
+            caller: None,
             host: host_scope(),
             objective: "obj".into(),
             coordinator_id: "coordinator-1".into(),

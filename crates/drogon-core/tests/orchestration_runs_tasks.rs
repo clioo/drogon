@@ -151,6 +151,274 @@ fn task_show_retains_attempt_order_retry_links_and_honest_liveness_after_reopen(
 /// Mirrors `crates/drogon-core/tests/engine.rs`'s own
 /// `workspace_register_is_idempotent_by_path`.
 #[test]
+fn task_update_persists_results_promotes_dependencies_and_replays_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let host = real_host_id(&engine);
+    let run = ok(
+        &engine,
+        "orchestration.runCreate",
+        "update-run",
+        run_create_params(&host, "owner", "update tasks"),
+    )["run"]["runId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let first = ok(
+        &engine,
+        "orchestration.taskCreate",
+        "first-task",
+        task_create_params(&host, &run, "owner", 1, "prerequisite", &[]),
+    )["task"]["taskId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let child = ok(
+        &engine,
+        "orchestration.taskCreate",
+        "child-task",
+        task_create_params(&host, &run, "owner", 1, "dependent", &[&first]),
+    )["task"]["taskId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut update = coordinator_scope_params(&host, &run, "owner", 1);
+    update["taskId"] = json!(first);
+    update["status"] = json!("completed");
+    update["result"] = json!("Listo ✓\noutput retained");
+    let result = ok(
+        &engine,
+        "orchestration.taskUpdate",
+        "update-one",
+        update.clone(),
+    );
+    assert_eq!(result["task"]["status"], "completed");
+    assert_eq!(result["task"]["result"], "Listo ✓\noutput retained");
+    assert_eq!(
+        ok(
+            &engine,
+            "orchestration.taskUpdate",
+            "update-one",
+            update.clone()
+        ),
+        result
+    );
+    let mut different = update.clone();
+    different["status"] = json!("failed");
+    assert_eq!(
+        err_code(&engine, "orchestration.taskUpdate", "update-one", different),
+        "request_conflict"
+    );
+    drop(engine);
+    let engine = Engine::open(dir.path()).unwrap();
+    let mut show = coordinator_scope_params(&host, &run, "owner", 1);
+    show["taskId"] = json!(first);
+    assert_eq!(
+        ok(
+            &engine,
+            "orchestration.taskShow",
+            "updated-show",
+            show.clone()
+        )["task"]["result"],
+        "Listo ✓\noutput retained"
+    );
+    show["taskId"] = json!(child);
+    assert_eq!(
+        ok(&engine, "orchestration.taskShow", "child-show", show)["task"]["status"],
+        "ready"
+    );
+    update["status"] = json!("blocked");
+    update.as_object_mut().unwrap().remove("result");
+    assert_eq!(
+        ok(
+            &engine,
+            "orchestration.taskUpdate",
+            "update-two",
+            update.clone()
+        )["task"]["result"],
+        "Listo ✓\noutput retained"
+    );
+    update["result"] = json!("");
+    assert_eq!(
+        ok(
+            &engine,
+            "orchestration.taskUpdate",
+            "clear-result",
+            update.clone()
+        )["task"]["result"],
+        ""
+    );
+    update["status"] = json!("dispatched");
+    assert_eq!(
+        err_code(
+            &engine,
+            "orchestration.taskUpdate",
+            "no-dispatch",
+            update.clone()
+        ),
+        "task_not_startable"
+    );
+    update["coordinatorId"] = json!("other-owner");
+    assert_eq!(
+        err_code(&engine, "orchestration.taskUpdate", "wrong-owner", update),
+        "consumer_fenced"
+    );
+}
+
+#[test]
+fn task_update_cannot_settle_or_requeue_an_active_supervised_dispatch() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let host = real_host_id(&engine);
+    let run = ok(
+        &engine,
+        "orchestration.runCreate",
+        "active-run",
+        run_create_params(&host, "owner", "active worker"),
+    )["run"]["runId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let task = ok(
+        &engine,
+        "orchestration.taskCreate",
+        "active-task",
+        task_create_params(&host, &run, "owner", 1, "work", &[]),
+    )["task"]["taskId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let state = json!({
+        "result": {"runId": run, "taskId": task, "dispatchId": "active-dispatch",
+            "consumerGeneration": 1, "workspaceId": "folder", "assignmentState": "ready",
+            "readiness": "notObserved", "processVerdict": "unverifiable", "effects": [], "residualResources": []},
+        "launch": {"harnessId": "claude", "permissionMode": "inherit"},
+        "outcome": null, "report_message_id": null, "cleanup_owned": true
+    });
+    let conn = rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+    conn.execute("INSERT INTO orchestration_attempts(dispatch_id,host_id,run_id,task_id,is_current,fenced,state_json) VALUES ('active-dispatch',?1,?2,?3,1,0,?4)",
+        rusqlite::params![host,run,task,state.to_string()]).unwrap();
+    let mut update = coordinator_scope_params(&host, &run, "owner", 1);
+    update["taskId"] = json!(task);
+    update["result"] = json!("must not overwrite");
+    for status in ["completed", "failed", "ready", "pending", "blocked"] {
+        update["status"] = json!(status);
+        assert_eq!(
+            err_code(
+                &engine,
+                "orchestration.taskUpdate",
+                &format!("deny-{status}"),
+                update.clone()
+            ),
+            "task_not_startable"
+        );
+    }
+    let mut gate = coordinator_scope_params(&host, &run, "owner", 1);
+    gate["taskId"] = json!(task);
+    gate["question"] = json!("cannot block active worker");
+    assert_eq!(
+        err_code(&engine, "orchestration.gateCreate", "active-gate", gate),
+        "task_not_startable"
+    );
+    let stored: (String, Option<String>) = conn
+        .query_row(
+            "SELECT status,result FROM orchestration_tasks WHERE task_id=?1",
+            [&task],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(stored, ("ready".to_string(), None));
+    update["status"] = json!("dispatched");
+    assert_eq!(
+        ok(
+            &engine,
+            "orchestration.taskUpdate",
+            "keep-dispatched",
+            update
+        )["task"]["status"],
+        "dispatched"
+    );
+    let after: String = conn
+        .query_row(
+            "SELECT state_json FROM orchestration_attempts WHERE dispatch_id='active-dispatch'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&after).unwrap(), state);
+}
+
+#[test]
+fn task_result_schema_upgrade_preserves_v1_data_and_takes_a_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let host = real_host_id(&engine);
+    let run = ok(
+        &engine,
+        "orchestration.runCreate",
+        "upgrade-run",
+        run_create_params(&host, "owner", "existing run"),
+    )["run"]["runId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let task = ok(
+        &engine,
+        "orchestration.taskCreate",
+        "upgrade-task",
+        task_create_params(&host, &run, "owner", 1, "existing instruction ✓", &[]),
+    )["task"]["taskId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    drop(engine);
+    let conn = rusqlite::Connection::open(dir.path().join(drogon_core::DB_FILE_NAME)).unwrap();
+    conn.execute_batch("ALTER TABLE orchestration_tasks DROP COLUMN result; UPDATE orchestration_domain_meta SET version=1;").unwrap();
+    drop(conn);
+    let engine = Engine::open(dir.path()).unwrap();
+    let mut show = coordinator_scope_params(&host, &run, "owner", 1);
+    show["taskId"] = json!(task);
+    let result = ok(&engine, "orchestration.taskShow", "upgraded-show", show);
+    assert_eq!(result["spec"]["instructions"], "existing instruction ✓");
+    assert!(result["task"].get("result").is_none());
+    let backups: Vec<_> = std::fs::read_dir(dir.path().join("backups"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(backups.len(), 1);
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(backups[0].join("manifest.json")).unwrap()).unwrap();
+    assert!(
+        manifest["pending_migrations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["component"] == "orchestration_domain"
+                && m["recorded_version"] == 1
+                && m["migrating_to"] == drogon_orchestration::schema::SCHEMA_VERSION)
+    );
+    let backup = rusqlite::Connection::open(backups[0].join(drogon_core::DB_FILE_NAME)).unwrap();
+    assert_eq!(
+        backup
+            .query_row(
+                "SELECT MAX(version) FROM orchestration_domain_meta",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
+    drop(engine);
+    drop(Engine::open(dir.path()).unwrap());
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("backups"))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn engine_still_serves_status_and_workspace_control() {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();

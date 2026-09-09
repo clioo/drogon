@@ -188,7 +188,7 @@ else
 fi
 
 "$DROGON_CLI_COMMAND" --data-dir "$DROGON_DATA_DIR" --json orchestration send \
-  --kind final-report --subject "fixture $mode" --outcome "$outcome" \
+  --type worker_done --subject "fixture $mode" --outcome "$outcome" \
   --body "fixture worker report" > first-report.json 2> first-report.stderr
 first_status=$?
 
@@ -348,6 +348,247 @@ fn text_field<'a>(value: &'a Value, pointer: &str) -> &'a str {
 }
 
 #[test]
+fn terminal_bound_coordinator_uses_source_commands_without_native_scope_flags() {
+    let binary = build_drogond();
+    let root = tempfile::tempdir().unwrap();
+    let data_dir = root.path().join("data");
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let daemon = Daemon::start(&binary, &data_dir, None);
+    let (code, ws) = coordinator_call(
+        &data_dir,
+        &["workspace", "add", workspace.to_str().unwrap()],
+    );
+    assert_ok(code, &ws, &["workspace", "add"]);
+    let (code, terminal) = coordinator_call(
+        &data_dir,
+        &[
+            "terminal",
+            "create",
+            "--workspace",
+            ws["result"]["id"].as_str().unwrap(),
+            "--",
+            "/bin/sh",
+            "-c",
+            "while read line; do :; done",
+        ],
+    );
+    assert_ok(code, &terminal, &["terminal", "create"]);
+    let session = text_field(&terminal, "/result/id").to_string();
+    let guard = SessionGuard {
+        data_dir: data_dir.clone(),
+        session_id: session.clone(),
+        incarnation: text_field(&terminal, "/result/incarnation").to_string(),
+        closed: false,
+    };
+    let create_a = [
+        "--request-id",
+        "terminal-run-a",
+        "orchestration",
+        "run-create",
+        "--objective",
+        "first",
+        "--from",
+        &session,
+    ];
+    let (code, first) = coordinator_call(&data_dir, &create_a);
+    assert_ok(code, &first, &create_a);
+    let a = text_field(&first, "/result/run/runId").to_string();
+    let owner = text_field(&first, "/result/run/coordinatorId").to_string();
+    let (code, task) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "task-create",
+            "--spec",
+            "fixture task",
+            "--from",
+            &session,
+        ],
+    );
+    assert_ok(code, &task, &["task-create"]);
+    assert_eq!(task["result"]["task"]["runId"], a);
+    let task_id = text_field(&task, "/result/task/taskId").to_string();
+    let (code, second) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "run-create",
+            "--objective",
+            "second",
+            "--from",
+            &session,
+        ],
+    );
+    assert_ok(code, &second, &["run-create"]);
+    let b = text_field(&second, "/result/run/runId").to_string();
+    let (code, replay) = coordinator_call(&data_dir, &create_a);
+    assert_ok(code, &replay, &create_a);
+    assert_eq!(replay["result"], first["result"]);
+    let (code, current) = coordinator_call(
+        &data_dir,
+        &["orchestration", "run-current", "--from", &session],
+    );
+    assert_ok(code, &current, &["run-current"]);
+    assert_eq!(current["result"]["run"]["runId"], b);
+    let from_env = common::run_cli_with(
+        &data_dir,
+        &["--json", "orchestration", "run-current"],
+        &[
+            ("DROGON_SESSION_ID", &session),
+            (
+                "DROGON_SESSION_INCARNATION",
+                text_field(&terminal, "/result/incarnation"),
+            ),
+        ],
+    );
+    assert!(from_env.status.success(), "{}", stderr(&from_env));
+    let from_env: Value = serde_json::from_slice(&from_env.stdout).unwrap();
+    assert_eq!(from_env["result"]["run"]["runId"], b);
+    let stale = common::run_cli_with(
+        &data_dir,
+        &["--json", "orchestration", "run-current"],
+        &[
+            ("DROGON_SESSION_ID", &session),
+            ("DROGON_SESSION_INCARNATION", "wrong-birth"),
+        ],
+    );
+    assert!(!stale.status.success());
+    let stale: Value = serde_json::from_slice(&stale.stdout).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_incarnation");
+    // A raw client cannot bypass the daemon's physical caller recheck.
+    let forged = serde_json::json!({"contractVersion": 1, "hostId": terminal["result"]["hostId"], "coordinatorId": owner,
+        "objective": "forged", "caller": {"sessionId": session, "incarnation": "wrong-birth"}}).to_string();
+    let (code, refused) = coordinator_call(
+        &data_dir,
+        &["rpc", "orchestration.runCreate", "--params", &forged],
+    );
+    assert_ne!(code, 0);
+    assert_eq!(refused["error"]["code"], "invalid_argument");
+    let (code, old) = coordinator_call(&data_dir, &["orchestration", "run-show", "--id", &a]);
+    assert_ok(code, &old, &["run-show"]);
+    assert_eq!(old["result"]["run"]["consumerGeneration"], 2);
+    assert_ne!(old["result"]["run"]["coordinatorId"], owner);
+    let (code, fenced) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "task-update",
+            "--id",
+            &task_id,
+            "--status",
+            "completed",
+            "--run",
+            &a,
+            "--coordinator-id",
+            &owner,
+            "--consumer-generation",
+            "1",
+        ],
+    );
+    assert_ne!(code, 0);
+    assert_eq!(fenced["error"]["code"], "consumer_fenced");
+    let (code, used) = coordinator_call(
+        &data_dir,
+        &[
+            "--request-id",
+            "source-use-a",
+            "orchestration",
+            "run-use",
+            "--id",
+            &a,
+            "--from",
+            &session,
+        ],
+    );
+    assert_ok(code, &used, &["run-use"]);
+    assert_eq!(used["result"]["run"]["consumerGeneration"], 3);
+    let (code, replayed_use) = coordinator_call(
+        &data_dir,
+        &[
+            "--request-id",
+            "source-use-a",
+            "orchestration",
+            "run-use",
+            "--id",
+            &a,
+            "--from",
+            &session,
+        ],
+    );
+    assert_ok(code, &replayed_use, &["run-use", "replay"]);
+    assert_eq!(replayed_use["result"], used["result"]);
+    let (code, tasks) = coordinator_call(
+        &data_dir,
+        &["orchestration", "task-list", "--from", &session],
+    );
+    assert_ok(code, &tasks, &["task-list"]);
+    assert_eq!(tasks["result"]["tasks"][0]["taskId"], task_id);
+    let (code, refused) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "task-create",
+            "--spec",
+            "wrong run",
+            "--run",
+            &b,
+            "--from",
+            &session,
+        ],
+    );
+    assert_ne!(code, 0);
+    assert_eq!(refused["error"]["code"], "consumer_fenced");
+    let (code, inspection) =
+        coordinator_call(&data_dir, &["orchestration", "task-list", "--run", &b]);
+    assert_ok(code, &inspection, &["task-list", "--run"]);
+    assert!(inspection["result"]["tasks"].as_array().unwrap().is_empty());
+    let (code, rebound) = coordinator_call(
+        &data_dir,
+        &["orchestration", "run-use", "--id", &b, "--from", &session],
+    );
+    assert_ok(code, &rebound, &["run-use"]);
+    let (code, late_replay) = coordinator_call(
+        &data_dir,
+        &[
+            "--request-id",
+            "source-use-a",
+            "orchestration",
+            "run-use",
+            "--id",
+            &a,
+            "--from",
+            &session,
+        ],
+    );
+    assert_ne!(
+        code, 0,
+        "replaying a fenced bind must not take the run over again: {late_replay}"
+    );
+    assert_eq!(late_replay["error"]["code"], "consumer_fenced");
+    let closed = guard.close("terminal coordinator fixture");
+    assert_eq!(closed["result"]["verdict"], "exited");
+    let (code, missing) = coordinator_call(
+        &data_dir,
+        &["orchestration", "run-current", "--from", &session],
+    );
+    assert_ne!(code, 0);
+    assert_eq!(missing["error"]["code"], "not_found");
+    let closed_caller = serde_json::json!({"contractVersion": 1, "hostId": terminal["result"]["hostId"], "coordinatorId": owner,
+        "objective": "closed caller", "caller": {"sessionId": session, "incarnation": terminal["result"]["incarnation"]}}).to_string();
+    let (code, refused) = coordinator_call(
+        &data_dir,
+        &["rpc", "orchestration.runCreate", "--params", &closed_caller],
+    );
+    assert_ne!(code, 0);
+    assert_eq!(refused["error"]["code"], "unverifiable");
+    let (code, runs) = coordinator_call(&data_dir, &["orchestration", "run-list"]);
+    assert_ok(code, &runs, &["run-list"]);
+    assert_eq!(runs["result"]["runs"].as_array().unwrap().len(), 2);
+    drop(daemon);
+}
+
+#[test]
 fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     let drogond_path = build_drogond();
 
@@ -409,6 +650,17 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     let run_id = text_field(&run, "/result/run/runId").to_string();
     let coordinator_id = text_field(&run, "/result/run/coordinatorId").to_string();
     assert_eq!(run["result"]["run"]["consumerGeneration"], Value::from(1));
+    let (code, current) = coordinator_call(
+        &data_dir,
+        &[
+            "orchestration",
+            "run-current",
+            "--coordinator-id",
+            &coordinator_id,
+        ],
+    );
+    assert_ok(code, &current, &["orchestration", "run-current"]);
+    assert_eq!(current["result"]["run"], run["result"]["run"]);
 
     let scope_args = |args: &mut Vec<String>| {
         args.push("--run".into());
@@ -423,9 +675,9 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     scope_args(&mut task_args);
     task_args.extend(
         [
-            "--instructions",
+            "--spec",
             "Write a fixture artifact file and report the exact outcome.",
-            "--title",
+            "--task-title",
             "V1 dogfood fixture task",
         ]
         .map(String::from),
@@ -435,6 +687,116 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     assert_ok(code, &task, &["orchestration", "task-create"]);
     let task_id = text_field(&task, "/result/task/taskId").to_string();
     assert_eq!(text_field(&task, "/result/task/status"), "ready");
+
+    let mut dependent_ids = Vec::new();
+    for deps in [
+        serde_json::json!([task_id]).to_string(),
+        format!("[{task_id}]"),
+    ] {
+        let mut dependent_args = vec!["orchestration".to_string(), "task-create".to_string()];
+        scope_args(&mut dependent_args);
+        dependent_args
+            .extend(["--spec", "wait for the worker report", "--deps", &deps].map(String::from));
+        let args: Vec<_> = dependent_args.iter().map(String::as_str).collect();
+        let (code, dependent) = coordinator_call(&data_dir, &args);
+        assert_ok(code, &dependent, &args);
+        assert_eq!(dependent["result"]["task"]["status"], "pending");
+        assert_eq!(
+            dependent["result"]["task"]["dependsOn"],
+            serde_json::json!([task_id])
+        );
+        dependent_ids.push(text_field(&dependent, "/result/task/taskId").to_string());
+    }
+
+    // Source ask is bare JSON; a durable answer makes the long-budget resume immediate.
+    let mut ask_args = vec!["orchestration".to_string(), "ask".to_string()];
+    scope_args(&mut ask_args);
+    ask_args.extend(
+        [
+            "--question",
+            "Proceed?",
+            "--options",
+            "yes,yes,no",
+            "--timeout-ms",
+            "1",
+        ]
+        .map(String::from),
+    );
+    let args: Vec<_> = ask_args.iter().map(String::as_str).collect();
+    let (code, pending) = coordinator_call(&data_dir, &args);
+    assert_eq!(code, 1, "{pending:#}");
+    assert_eq!(pending["timedOut"], true);
+    let question = text_field(&pending, "/messageId").to_string();
+    let mut reply_args = vec!["orchestration".to_string(), "reply".to_string()];
+    scope_args(&mut reply_args);
+    reply_args.extend(["--id", &question, "--body", "approved ✓"].map(String::from));
+    let args: Vec<_> = reply_args.iter().map(String::as_str).collect();
+    let (code, replied) = coordinator_call(&data_dir, &args);
+    assert_ok(code, &replied, &args);
+    let mut resume_args = vec!["orchestration".to_string(), "ask".to_string()];
+    scope_args(&mut resume_args);
+    resume_args
+        .extend(["--resume", &question, "--timeout-ms", "9007199254740991"].map(String::from));
+    let args: Vec<_> = resume_args.iter().map(String::as_str).collect();
+    let (code, answered) = coordinator_call(&data_dir, &args);
+    assert_eq!(code, 0, "{answered:#}");
+    assert_eq!(answered["answer"], "approved ✓");
+    assert_eq!(answered["messageId"], question);
+    assert_eq!(answered["timeoutMs"], 1_800_000);
+    assert!(answered.get("result").is_none());
+
+    // Status updates traverse the real CLI and daemon, preserving an explicit
+    // result across a later update that omits --result.
+    for (status, report) in [("blocked", Some("review before launch ✓")), ("ready", None)] {
+        let mut update_args = vec!["orchestration".to_string(), "task-update".to_string()];
+        scope_args(&mut update_args);
+        update_args.extend(["--id", &task_id, "--status", status].map(String::from));
+        if let Some(report) = report {
+            update_args.extend(["--result", report].map(String::from));
+        }
+        let args: Vec<_> = update_args.iter().map(String::as_str).collect();
+        let (code, updated) = coordinator_call(&data_dir, &args);
+        assert_ok(code, &updated, &args);
+        assert_eq!(updated["result"]["task"]["status"], status);
+        assert_eq!(
+            updated["result"]["task"]["result"],
+            "review before launch ✓"
+        );
+    }
+
+    let mut gate_args = vec!["orchestration".to_string(), "gate-create".to_string()];
+    scope_args(&mut gate_args);
+    gate_args.extend(
+        [
+            "--task",
+            &task_id,
+            "--question",
+            "Proceed?",
+            "--options",
+            "[\"yes\",\"no\"]",
+        ]
+        .map(String::from),
+    );
+    let args: Vec<_> = gate_args.iter().map(String::as_str).collect();
+    let (code, gate) = coordinator_call(&data_dir, &args);
+    assert_ok(code, &gate, &args);
+    let gate_id = text_field(&gate, "/result/gate/id").to_string();
+    assert_eq!(gate["result"]["gate"]["status"], "pending");
+    let mut list_args = vec!["orchestration".to_string(), "gate-list".to_string()];
+    scope_args(&mut list_args);
+    list_args.extend(["--task", &task_id, "--status", "pending"].map(String::from));
+    let args: Vec<_> = list_args.iter().map(String::as_str).collect();
+    let (code, gates) = coordinator_call(&data_dir, &args);
+    assert_ok(code, &gates, &args);
+    assert_eq!(gates["result"]["count"], 1);
+    assert_eq!(gates["result"]["gates"][0]["id"], gate_id);
+    let mut resolve_args = vec!["orchestration".to_string(), "gate-resolve".to_string()];
+    scope_args(&mut resolve_args);
+    resolve_args.extend(["--id", &gate_id, "--resolution", "yes"].map(String::from));
+    let args: Vec<_> = resolve_args.iter().map(String::as_str).collect();
+    let (code, resolved) = coordinator_call(&data_dir, &args);
+    assert_ok(code, &resolved, &args);
+    assert_eq!(resolved["result"]["gate"]["status"], "resolved");
 
     // --- attempt 1: fresh launch, fixture harness reports FAILURE ---
     let mut start1_args: Vec<String> = vec!["orchestration".into(), "worker-start".into()];
@@ -515,6 +877,15 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     let (code, task_show_1) = coordinator_call(&data_dir, &task_show_ref);
     assert_ok(code, &task_show_1, &["orchestration", "task-show"]);
     assert_eq!(text_field(&task_show_1, "/result/task/status"), "failed");
+    for id in &dependent_ids {
+        let mut args = vec!["orchestration".to_string(), "task-show".to_string()];
+        scope_args(&mut args);
+        args.extend(["--task", id].map(String::from));
+        let args: Vec<_> = args.iter().map(String::as_str).collect();
+        let (code, dependent) = coordinator_call(&data_dir, &args);
+        assert_ok(code, &dependent, &args);
+        assert_eq!(dependent["result"]["task"]["status"], "pending");
+    }
 
     // --- attempt 2: explicit retry of the failed attempt, fixture harness
     // reports SUCCESS and additionally sends a genuine late/conflicting
@@ -624,6 +995,15 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     let (code, task_show_2) = coordinator_call(&data_dir, &task_show_2_ref);
     assert_ok(code, &task_show_2, &["orchestration", "task-show"]);
     assert_eq!(text_field(&task_show_2, "/result/task/status"), "completed");
+    for id in dependent_ids {
+        let mut args = vec!["orchestration".to_string(), "task-show".to_string()];
+        scope_args(&mut args);
+        args.extend(["--task", &id].map(String::from));
+        let args: Vec<_> = args.iter().map(String::as_str).collect();
+        let (code, dependent) = coordinator_call(&data_dir, &args);
+        assert_ok(code, &dependent, &args);
+        assert_eq!(dependent["result"]["task"]["status"], "ready");
+    }
 
     // --- exact release: both settled attempts release their session
     // resources; the process already exited on its own after reporting ---
@@ -631,6 +1011,18 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
         let mut release_args: Vec<String> = vec!["orchestration".into(), "worker-release".into()];
         scope_args(&mut release_args);
         release_args.extend(["--dispatch".to_string(), dispatch.clone()]);
+        let mut retain_args = release_args.clone();
+        retain_args[1] = "worker-retain".into();
+        let retain_ref: Vec<_> = retain_args.iter().map(String::as_str).collect();
+        let (code, retained) = coordinator_call(&data_dir, &retain_ref);
+        assert_ok(code, &retained, &retain_ref);
+        assert_eq!(retained["result"]["state"], "retained");
+        assert_eq!(retained["result"]["processAction"], "none");
+        for resource in retained["result"]["residualResources"].as_array().unwrap() {
+            if resource["kind"] == "session" {
+                assert_eq!(resource["disposition"], "retained");
+            }
+        }
         let release_ref: Vec<&str> = release_args.iter().map(String::as_str).collect();
         let (code, release) = coordinator_call(&data_dir, &release_ref);
         assert_eq!(
@@ -638,6 +1030,9 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
             "release of a settled, already-exited attempt must succeed: {release:#}"
         );
         assert_eq!(text_field(&release, "/result/disposition"), "released");
+        let (code, retained_after) = coordinator_call(&data_dir, &retain_ref);
+        assert_ok(code, &retained_after, &retain_ref);
+        assert_eq!(retained_after["result"]["state"], "already_released");
     }
 
     // `daemon` and `scratch` drop here: the daemon process is signaled and

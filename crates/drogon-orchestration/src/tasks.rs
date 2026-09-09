@@ -10,7 +10,7 @@ use drogon_protocol::RpcError;
 use drogon_protocol::orchestration_common::MAX_TASK_TEXT_BYTES;
 use drogon_protocol::orchestration_task::{
     TaskCreateParams, TaskCreateResult, TaskListParams, TaskListResult, TaskRecord, TaskShowParams,
-    TaskShowResult, TaskSpec, TaskStatus, TaskSummary,
+    TaskShowResult, TaskSpec, TaskStatus, TaskSummary, TaskUpdateParams, TaskUpdateResult,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use serde_json::Value;
@@ -25,7 +25,7 @@ const BRIEF_SPEC_CHARS: usize = 160;
 
 /// Columns of one task row, read by name in `read_task_row`. It is spliced into
 const TASK_COLUMNS: &str = "task_id, run_id, status, created_at_ms, instructions, title, \
-     display_name, parent_task_id, metadata_json, depends_on_json";
+     display_name, parent_task_id, metadata_json, depends_on_json, result";
 
 /// First task page. The status filter is a bindable NULL-able predicate, so one
 const TASK_PAGE_FIRST: &str = "SELECT %COLUMNS% FROM orchestration_tasks \
@@ -144,6 +144,7 @@ struct TaskRow {
     metadata: Option<Value>,
     depends_on: Vec<String>,
     parent: Option<String>,
+    result: Option<String>,
 }
 
 impl TaskRow {
@@ -153,6 +154,7 @@ impl TaskRow {
             run_id: self.run_id.clone(),
             status: self.status,
             depends_on: self.depends_on.clone(),
+            result: self.result.clone(),
         }
     }
 
@@ -225,6 +227,7 @@ fn read_task_row(row: &Row<'_>) -> rusqlite::Result<TaskRow> {
         depends_on: decode_string_list(&row.get::<_, String>("depends_on_json")?)
             .map_err(domain_error)?,
         parent: row.get("parent_task_id")?,
+        result: row.get("result")?,
     })
 }
 
@@ -236,7 +239,7 @@ fn load_task_in_run(
 ) -> Result<TaskRow, RpcError> {
     tx.query_row(
         "SELECT task_id, run_id, status, created_at_ms, instructions, title, display_name, \
-         parent_task_id, metadata_json, depends_on_json \
+         parent_task_id, metadata_json, depends_on_json, result \
          FROM orchestration_tasks WHERE task_id = ?1 AND run_id = ?2",
         params![task_id, run_id],
         read_task_row,
@@ -342,7 +345,39 @@ pub fn create(
             run_id: params.scope.run_id.clone(),
             status,
             depends_on,
+            result: None,
         },
+    })
+}
+
+/// The engine must authorize the transition against active attempts in this
+/// same transaction before calling this storage operation.
+pub fn update(
+    tx: &Transaction<'_>,
+    params: &TaskUpdateParams,
+) -> Result<TaskUpdateResult, RpcError> {
+    params.validate_shape(&params.scope.host.host_id)?;
+    crate::runs::require_coordinator(tx, &params.scope)?;
+    set_status_in_tx(
+        tx,
+        &params.scope.host.host_id,
+        &params.scope.run_id,
+        &params.task_id,
+        params.status,
+    )?;
+    if let Some(result) = &params.result {
+        let changed = tx
+            .execute(
+                "UPDATE orchestration_tasks SET result=?3 WHERE task_id=?1 AND run_id=?2",
+                params![params.task_id, params.scope.run_id, result],
+            )
+            .map_err(store_error)?;
+        if changed != 1 {
+            return Err(store_error("Task result was not persisted."));
+        }
+    }
+    Ok(TaskUpdateResult {
+        task: load_task_in_run(tx, &params.task_id, &params.scope.run_id)?.record(),
     })
 }
 

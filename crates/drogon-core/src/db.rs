@@ -198,6 +198,10 @@ const VERSIONED_COMPONENTS: &[(&str, i64)] = &[
     ("coordination_access", 1),
     ("orchestration_mail", 1),
     ("orchestration_attempts", 1),
+    (
+        crate::coordination_worker_retain::SCHEMA_COMPONENT,
+        crate::coordination_worker_retain::SCHEMA_VERSION,
+    ),
 ];
 
 /// One recorded component version a forward migration would advance.
@@ -240,6 +244,23 @@ fn pending_forward_migrations(conn: &Connection) -> rusqlite::Result<Vec<Pending
                     target: *current,
                 });
             }
+        }
+    }
+    if table_columns(conn, "orchestration_domain_meta")?.is_some() {
+        let recorded: Option<i64> = conn.query_row(
+            "SELECT MAX(version) FROM orchestration_domain_meta",
+            [],
+            |row| row.get(0),
+        )?;
+        let target = drogon_orchestration::schema::SCHEMA_VERSION;
+        if let Some(recorded) = recorded
+            && recorded < target
+        {
+            pending.push(PendingMigration {
+                component: "orchestration_domain".to_string(),
+                recorded,
+                target,
+            });
         }
     }
     // Main-schema additive columns: an older data dir's `sessions` table
@@ -420,6 +441,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     mentu_storage::apply_pending_steps_in_tx(&tx)?;
     crate::project::apply_pending_steps_in_tx(&tx)?;
     coordination_access::apply_pending_steps_in_tx(&tx)?;
+    crate::coordination_worker_retain::apply_pending_steps_in_tx(&tx)?;
     drogon_orchestration::schema::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;
     crate::coordination_attempts::migrate(&tx).map_err(StartupError::Orchestration)?;
     crate::coordination_mail::migrate_in_tx(&tx).map_err(StartupError::Orchestration)?;

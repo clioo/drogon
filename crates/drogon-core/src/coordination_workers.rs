@@ -106,6 +106,11 @@ impl Engine {
                 params.validate_shape(&self.host_id)?;
                 self.release_coordination_worker(request, &params)
             }
+            "orchestration.workerRetain" => {
+                let params: WorkerRetainParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.retain_coordination_worker(request, &params)
+            }
             other => Err(error::method_not_found(other)),
         }
     }

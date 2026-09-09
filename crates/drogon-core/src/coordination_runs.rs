@@ -1,6 +1,8 @@
 //! Engine-owned admission and receipts around transaction-only run/task operations.
 
-use drogon_orchestration::{runs, tasks};
+use drogon_orchestration::{gates, runs, tasks};
+use drogon_protocol::orchestration_common::SessionIdentity;
+use drogon_protocol::orchestration_gate::*;
 use drogon_protocol::orchestration_run::*;
 use drogon_protocol::orchestration_scope::CoordinatorScope;
 use drogon_protocol::orchestration_task::*;
@@ -8,6 +10,7 @@ use drogon_protocol::{Request, RpcError};
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::sync::atomic::Ordering;
 
 use crate::coordination_attempts;
@@ -27,7 +30,12 @@ impl Engine {
                 self.coordination_mutation(
                     request,
                     actor,
-                    |_| Ok(()),
+                    |_| {
+                        self.require_coordinator_caller(
+                            params.caller.as_ref(),
+                            &params.coordinator_id,
+                        )
+                    },
                     |tx| encode(runs::create(tx, &params, &new_id("run"), now_ms())?),
                 )
             }
@@ -44,9 +52,58 @@ impl Engine {
                 self.coordination_mutation(
                     request,
                     actor,
-                    |tx| authorize_run_use(tx, &params, request, &key),
+                    |tx| {
+                        self.require_coordinator_caller(
+                            params.caller.as_ref(),
+                            &params.coordinator_id,
+                        )?;
+                        authorize_run_use(tx, &params, request, &key)
+                    },
                     |tx| encode(runs::use_run(tx, &params)?),
                 )
+            }
+            "orchestration.runBind" => {
+                let params: RunBindParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                let actor = Actor::AdminBootstrap {
+                    host_id: params.host.host_id.clone(),
+                    coordinator_id: params.coordinator_id.clone(),
+                };
+                let key = actor.receipt_key(&request.request_id)?;
+                self.coordination_mutation(request, actor, |tx| {
+                    self.require_coordinator_caller(Some(&params.caller), &params.coordinator_id)?;
+                    let prior: Option<String> = tx.query_row(
+                        "SELECT result_json FROM requests WHERE request_id=?1 AND status='done' AND error_json IS NULL AND result_json IS NOT NULL",
+                        [&key], |row| row.get(0)).optional().map_err(error::from_sqlite)?;
+                    if let Some(prior) = prior {
+                        let receipt: RunUseResult = serde_json::from_str(&prior).map_err(|_| error::internal_error("Invalid binding receipt."))?;
+                        let current = runs::show(tx, &RunShowParams { host: params.host.clone(), run_id: params.run_id.clone() })?.run;
+                        if receipt.run != current {
+                            return Err(RpcError::new("consumer_fenced", "Coordinator binding has changed."));
+                        }
+                    }
+                    Ok(())
+                }, |tx| {
+                    let current = runs::show(tx, &RunShowParams { host: params.host.clone(), run_id: params.run_id.clone() })?.run;
+                    encode(runs::use_run(tx, &RunUseParams {
+                        host: params.host.clone(), run_id: params.run_id.clone(),
+                        coordinator_id: params.coordinator_id.clone(),
+                        consumer_generation: current.consumer_generation,
+                        takeover: params.takeover || current.coordinator_id != params.coordinator_id,
+                        caller: Some(params.caller.clone()),
+                    })?)
+                })
+            }
+            "orchestration.runCurrent" => {
+                let params: RunCurrentParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.coordination_read(|tx| {
+                    self.require_coordinator_caller(
+                        params.caller.as_ref(),
+                        &params.coordinator_id,
+                    )?;
+                    encode(runs::current(tx, &params)?)
+                })
             }
             "orchestration.runList" => {
                 let params: RunListParams = decode(&request.params)?;
@@ -67,6 +124,61 @@ impl Engine {
                     |tx| runs::require_coordinator(tx, &params.scope),
                     |tx| encode(tasks::create(tx, &params, &new_id("task"), now_ms())?),
                 )
+            }
+            "orchestration.taskUpdate" => {
+                let params: TaskUpdateParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.coordination_mutation(
+                    request,
+                    coordinator_actor(&params.scope),
+                    |tx| runs::require_coordinator(tx, &params.scope),
+                    |tx| {
+                        require_task_transition(tx, &params.scope, &params.task_id, params.status)?;
+                        encode(tasks::update(tx, &params)?)
+                    },
+                )
+            }
+            "orchestration.gateCreate" => {
+                let params: GateCreateParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.coordination_mutation(
+                    request,
+                    coordinator_actor(&params.scope),
+                    |tx| runs::require_coordinator(tx, &params.scope),
+                    |tx| {
+                        require_task_transition(
+                            tx,
+                            &params.scope,
+                            &params.task_id,
+                            TaskStatus::Blocked,
+                        )?;
+                        encode(gates::create(tx, &params, &new_id("gate"))?)
+                    },
+                )
+            }
+            "orchestration.gateResolve" => {
+                let params: GateResolveParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.coordination_mutation(
+                    request,
+                    coordinator_actor(&params.scope),
+                    |tx| runs::require_coordinator(tx, &params.scope),
+                    |tx| {
+                        let gate = gates::get(tx, &params.scope, &params.gate_id)?;
+                        require_task_transition(
+                            tx,
+                            &params.scope,
+                            &gate.task_id,
+                            TaskStatus::Ready,
+                        )?;
+                        encode(gates::resolve(tx, &params)?)
+                    },
+                )
+            }
+            "orchestration.gateList" => {
+                let params: GateListParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.coordination_read(|tx| encode(gates::list(tx, &params)?))
             }
             "orchestration.taskList" => {
                 let params: TaskListParams = decode(&request.params)?;
@@ -108,6 +220,49 @@ impl Engine {
         }
     }
 
+    fn require_coordinator_caller(
+        &self,
+        caller: Option<&SessionIdentity>,
+        coordinator_id: &str,
+    ) -> Result<(), RpcError> {
+        let Some(caller) = caller else {
+            return Ok(());
+        };
+        let identity = serde_json::json!([
+            "drogon.coordinator-session.v1",
+            caller.session_id,
+            caller.incarnation
+        ]);
+        let expected = format!(
+            "terminal-{:x}",
+            Sha256::digest(identity.to_string().as_bytes())
+        );
+        if expected != coordinator_id {
+            return Err(error::invalid_argument(
+                "Coordinator identity does not match the caller session.",
+            ));
+        }
+        let handle = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&caller.session_id)
+            .cloned()
+            .ok_or_else(|| {
+                error::unverifiable(
+                    "Coordinator session has no live handle in this service instance.",
+                )
+            })?;
+        crate::session::check_incarnation(&handle, &caller.incarnation)?;
+        let observed = crate::session::snapshot(&handle);
+        if observed["hostId"] != self.host_id || observed["verdict"] != "live" {
+            return Err(error::unverifiable(
+                "Coordinator session is not observed live on this host.",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn coordination_mutation(
         &self,
         request: &Request,
@@ -146,6 +301,35 @@ impl Engine {
         // Fence and payload share one snapshot; reads never allocate request receipts.
         read(&tx)
     }
+}
+
+fn require_task_transition(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    task_id: &str,
+    status: TaskStatus,
+) -> Result<(), RpcError> {
+    tasks::show(
+        tx,
+        &TaskShowParams {
+            scope: scope.clone(),
+            task_id: task_id.to_string(),
+        },
+    )?;
+    let active = coordination_attempts::history(tx, scope, task_id)?
+        .iter()
+        .any(|entry| entry.active);
+    if active != (status == TaskStatus::Dispatched) {
+        return Err(RpcError::new(
+            "task_not_startable",
+            if active {
+                "Stop or settle the active worker before changing task status."
+            } else {
+                "A task cannot be dispatched without an active Dispatch."
+            },
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn coordinator_actor(scope: &CoordinatorScope) -> Actor {

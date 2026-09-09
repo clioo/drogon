@@ -22,6 +22,7 @@ mod coordination_question_rpc;
 mod coordination_receipts;
 mod coordination_runs;
 mod coordination_worker_control;
+mod coordination_worker_retain;
 mod coordination_workers;
 mod desktop_relay_rpc;
 pub mod jira;
@@ -89,6 +90,7 @@ use session::SessionHandle;
 const CAPABILITIES: &[&str] = &[
     "automation.v1",
     "orchestration.native.v1",
+    "orchestration.terminal-bindings.v1",
     "workspace.v1",
     "files.v1",
     "session.pty.v1",
@@ -530,9 +532,15 @@ impl Engine {
             "mentu.cancel" => self.mentu_cancel(request),
             "orchestration.runCreate"
             | "orchestration.runUse"
+            | "orchestration.runBind"
+            | "orchestration.runCurrent"
             | "orchestration.runList"
             | "orchestration.runShow"
             | "orchestration.taskCreate"
+            | "orchestration.taskUpdate"
+            | "orchestration.gateCreate"
+            | "orchestration.gateResolve"
+            | "orchestration.gateList"
             | "orchestration.taskList"
             | "orchestration.taskShow" => self.dispatch_run_task(request),
             "orchestration.workerStart"
@@ -540,7 +548,8 @@ impl Engine {
             | "orchestration.workerRead"
             | "orchestration.workerStop"
             | "orchestration.workerAbandon"
-            | "orchestration.workerRelease" => self.dispatch_coordination_worker(request),
+            | "orchestration.workerRelease"
+            | "orchestration.workerRetain" => self.dispatch_coordination_worker(request),
             "orchestration.requestShow" => self.show_coordination_receipt(request, None),
             "orchestration.send" | "orchestration.check" => self.dispatch_admin_mail(request),
             "orchestration.ask" | "orchestration.reply" => {

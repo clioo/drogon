@@ -4,6 +4,15 @@ use drogon_cli::cli::Cli;
 use drogon_cli::error::CliError;
 
 fn main() -> ExitCode {
+    // Windows gives the process entry thread only 1 MiB; clap command-tree
+    // construction of this grammar overflows that (see
+    // `CLI_WORK_STACK_SIZE`). All real work runs on the provisioned thread.
+    drogon_cli::run_on_cli_stack(real_main)
+        .join()
+        .unwrap_or(ExitCode::FAILURE)
+}
+
+fn real_main() -> ExitCode {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(err) => {
