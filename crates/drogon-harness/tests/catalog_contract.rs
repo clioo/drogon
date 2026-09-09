@@ -62,6 +62,18 @@ const REAP_RESERVE: Duration = Duration::from_millis(100);
 /// missing ACK stall the child's absolute timeline.
 #[cfg(unix)]
 const ACK_WAIT: Duration = Duration::from_secs(5);
+/// One absolute envelope per registrar operation (spawn, birth capture,
+/// ledger append, ACK wait, unwind), decided BEFORE spawning.
+/// Sub-budgets min() into it; the unwind window is reserved up front so
+/// a failed ACK wait never hands unwind an already-exhausted deadline.
+/// Worst case per operation fits the child's absolute timeline several
+/// times over.
+#[cfg(unix)]
+const OP_ENVELOPE: Duration = Duration::from_secs(8);
+/// Unwind window reserved inside every operation envelope: TERM grace,
+/// force escalation and reap always have at least this much timeline.
+#[cfg(unix)]
+const UNWIND_RESERVE: Duration = Duration::from_secs(1);
 #[cfg(unix)]
 const TICK: Duration = Duration::from_millis(25);
 /// Combined bytes one bounded helper may retain across both streams.
@@ -478,8 +490,10 @@ fn parse_ps_record(output: &std::process::Output) -> Option<(String, String)> {
 /// preserved as a `BoundedError` (including unreaped helper ownership);
 /// the caller decides how to retain that evidence.
 #[cfg(unix)]
-fn birth_of(pid: u32) -> Result<String, BoundedError> {
-    let op_deadline = Instant::now() + PS_TIMEOUT;
+fn birth_of(pid: u32, cap: Instant) -> Result<String, BoundedError> {
+    // Sub-budget of the caller's pre-spawn absolute cap, never a fresh
+    // budget of its own.
+    let op_deadline = std::cmp::min(cap, Instant::now() + PS_TIMEOUT);
     if Instant::now() >= op_deadline {
         return Err(BoundedError {
             message: "operation deadline already expired".to_string(),
@@ -570,14 +584,14 @@ fn read_report(dir: &Path) -> (Option<serde_json::Value>, Option<String>) {
 /// reason it cannot serve as closure evidence (missing, unreadable,
 /// malformed).
 #[cfg(unix)]
-fn read_seal(dir: &Path) -> (Option<SealCounts>, Option<String>) {
+fn read_seal(dir: &Path) -> (Option<Seal>, Option<String>) {
     let path = dir.join(SEALED_FILE);
     if !path.exists() {
         return (None, None);
     }
     match std::fs::read_to_string(&path) {
         Err(err) => (None, Some(format!("unreadable ({err})"))),
-        Ok(text) => match parse_seal_counts(&text) {
+        Ok(text) => match parse_seal(&text) {
             Err(reason) => (None, Some(format!("malformed ({reason})"))),
             Ok(seal) => (Some(seal), None),
         },
@@ -769,23 +783,59 @@ fn check_ack_content(expected_birth: &str, content: Option<&str>) -> Result<(), 
     }
 }
 
-/// Registrar-declared final counts for one registration source, parsed
-/// strictly from the seal file (`declared=N registered=M`).
+/// Registrar-declared completion for one registration source: WHO
+/// closed it plus its final counts. The source identity binds the seal
+/// to an actual attempt — a registrar names its own pid (which the
+/// parent spawned and therefore knows), a shell fixture names the pid
+/// it declared.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SealCounts {
+enum SealSource {
+    Registrar,
+    Fixture,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Seal {
+    source: SealSource,
+    source_pid: u32,
     declared: usize,
     registered: usize,
 }
 
-/// Strict parse of the seal file. Any shape deviation is a seal failure,
+/// Strict parse of the seal file (`source registrar|fixture <pid>` plus
+/// `declared=N registered=M`). Any shape deviation — including a
+/// duplicated key, a bad pid, or an unknown source — is a seal failure,
 /// never a default.
-fn parse_seal_counts(text: &str) -> Result<SealCounts, String> {
+fn parse_seal(text: &str) -> Result<Seal, String> {
+    let mut source = None;
+    let mut source_pid = None;
     let mut declared = None;
     let mut registered = None;
     for field in text.split_whitespace() {
         let (key, value) = field
             .split_once('=')
             .ok_or_else(|| format!("seal field without '=': {field:?}"))?;
+        if key == "source" {
+            if source.is_some() {
+                return Err("duplicate seal field: \"source\"".to_string());
+            }
+            let (kind, pid) = value
+                .split_once(':')
+                .ok_or_else(|| format!("seal source without 'kind:pid': {value:?}"))?;
+            let pid: u32 = pid
+                .parse()
+                .map_err(|_| format!("seal pid is not a number: {pid:?}"))?;
+            if pid == 0 || pid > i32::MAX as u32 {
+                return Err(format!("seal pid outside positive pid_t range: {pid}"));
+            }
+            source = Some(match kind {
+                "registrar" => SealSource::Registrar,
+                "fixture" => SealSource::Fixture,
+                _ => return Err(format!("unknown seal source: {kind:?}")),
+            });
+            source_pid = Some(pid);
+            continue;
+        }
         let number: usize = value
             .parse()
             .map_err(|_| format!("seal field is not a number: {field:?}"))?;
@@ -805,8 +855,14 @@ fn parse_seal_counts(text: &str) -> Result<SealCounts, String> {
             _ => return Err(format!("unknown seal field: {key:?}")),
         }
     }
+    let (source, source_pid) = match (source, source_pid) {
+        (Some(source), Some(pid)) => (source, pid),
+        _ => return Err("seal missing source=<kind:pid>".to_string()),
+    };
     match (declared, registered) {
-        (Some(declared), Some(registered)) => Ok(SealCounts {
+        (Some(declared), Some(registered)) => Ok(Seal {
+            source,
+            source_pid,
             declared,
             registered,
         }),
@@ -839,12 +895,14 @@ struct RegistrationSnapshot {
     report: Option<ReportSummary>,
     report_problem: Option<String>,
     runner_exited: bool,
-    /// Explicit source closure: the registrar's sealed final counts, and
+    /// Explicit source closure: the registrar's sealed statement, and
     /// the reason when the seal is missing, unreadable or malformed.
     /// Completion rests on this statement plus no outstanding
     /// registration — never on matching consecutive reads.
-    seal: Option<SealCounts>,
+    seal: Option<Seal>,
     seal_problem: Option<String>,
+    /// The runner pid the parent spawned: registrar seals must name it.
+    runner_pid: u32,
     /// Identities the parent explicitly acknowledged.
     acked: Vec<LedgerEntry>,
 }
@@ -945,6 +1003,31 @@ fn check_registration(snapshot: &RegistrationSnapshot) -> RegistrationVerdict {
             }
         }
     };
+    // Source identity: a registrar seal must name the exact runner the
+    // parent spawned; a fixture seal must name a declared pid. Either
+    // mismatch fails closed.
+    if let Some(seal) = seal {
+        match seal.source {
+            SealSource::Registrar if seal.source_pid != snapshot.runner_pid => {
+                return fail(format!(
+                    "seal from foreign registrar: pid={} (runner is {})",
+                    seal.source_pid, snapshot.runner_pid
+                ));
+            }
+            SealSource::Fixture
+                if !snapshot
+                    .declarations
+                    .iter()
+                    .any(|declared| declared.pid == seal.source_pid) =>
+            {
+                return fail(format!(
+                    "seal from unknown source: fixture pid={} never declared",
+                    seal.source_pid
+                ));
+            }
+            _ => {}
+        }
+    }
     // The attempt's final statement, kept distinct from source closure:
     // a sealed source still needs its report. A missing report is only
     // clean with no seal, a zero plan and zero observed — while any
@@ -1043,15 +1126,20 @@ fn check_registration(snapshot: &RegistrationSnapshot) -> RegistrationVerdict {
 /// What a bounded identity check could prove. Only a clean, non-signaled
 /// exit-1 with empty stdout AND empty stderr proves "no such process".
 /// A live or replaced identity is decided ONLY by the strict single-record
-/// parser. Everything else — signal termination, silent failure,
-/// diagnostics, partial or unparseable output — is unverifiable, never
-/// absence (amendment C).
+/// parser. A zombie (stat Z) with a matching birth is dead but present:
+/// it is neither Alive (never signal a zombie — meaningless) nor Gone
+/// (the pid still exists, awaiting its owner's reap). Everything else —
+/// signal termination, silent failure, diagnostics, partial or
+/// unparseable output — is unverifiable, never absence (amendment C).
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Identity {
     Alive,
     Gone,
     Replaced,
+    /// Dead with a matching birth, still present as a zombie. Resolved
+    /// without any signal; the owner must reap.
+    Zombie,
     Unverifiable,
 }
 
@@ -1069,7 +1157,15 @@ fn classify_ps(entry: &LedgerEntry, output: &std::process::Output) -> Identity {
         return Identity::Unverifiable;
     }
     match parse_ps_record(output) {
-        Some((birth, _stat)) if birth == entry.birth => Identity::Alive,
+        Some((birth, stat)) if birth == entry.birth => {
+            // A zombie is our dead process awaiting its owner's reap:
+            // proven dead, never signaled, never confused with live.
+            if stat.starts_with('Z') {
+                Identity::Zombie
+            } else {
+                Identity::Alive
+            }
+        }
         Some(_) => Identity::Replaced,
         None => Identity::Unverifiable,
     }
@@ -1097,11 +1193,41 @@ fn identity_probe(entry: &LedgerEntry, op_deadline: Instant) -> (Identity, Optio
 }
 
 #[cfg(unix)]
+/// Signal a whole supervised process group. Only for groups this parent
+/// created (the runner's own group); never the harness's own group.
+#[cfg(unix)]
+fn signal_group(pgid: u32, signal: libc::c_int) -> Result<(), String> {
+    // SAFETY: killpg on a group created via process_group(0) for the
+    // runner this parent spawned.
+    let rc = unsafe { libc::killpg(pgid as libc::pid_t, signal) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "killpg({pgid}, {signal}): {}",
+            std::io::Error::last_os_error()
+        ))
+    }
+}
+
+/// Whether killpg(pgid, 0) proves the group empty (ESRCH) or leaves
+/// membership unverifiable (delivery success, EPERM, or any other
+/// outcome — all mean "cannot prove empty").
+#[cfg(unix)]
+fn group_empty(pgid: u32) -> bool {
+    // SAFETY: signal 0 performs no action beyond error checking.
+    let rc = unsafe { libc::killpg(pgid as libc::pid_t, 0) };
+    if rc == 0 {
+        return false;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
 fn signal_pid(pid: u32, signal: libc::c_int) -> Result<(), String> {
     // SAFETY: `pid` was positively rechecked as an owned live identity
     // immediately before this call, or is our own unreaped direct child
-    // (registrar unwind, runner escalation) whose pid cannot be recycled
-    // under us while we hold the handle; signals are TERM-then-KILL only.
+    // (registrar unwind) whose pid cannot be recycled under us while we
+    // hold the handle; signals are TERM-then-KILL only.
     let rc = unsafe { libc::kill(pid as libc::pid_t, signal) };
     if rc == 0 {
         Ok(())
@@ -1225,12 +1351,21 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
     // registration can never be written before the parent is reading.
     std::fs::write(fixture_path.join("parent.ready"), b"ready\n").expect("parent ready file");
 
-    let mut child = std::process::Command::new(std::env::current_exe().expect("current_exe"))
+    let mut runner_command =
+        std::process::Command::new(std::env::current_exe().expect("current_exe"));
+    runner_command
         .args(["--exact", test_name, "--nocapture"])
         .env(CHILD_MODE_ENV, "1")
-        .env(FIXTURE_DIR_ENV, &fixture_path)
-        .spawn()
-        .expect("spawn supervised child");
+        .env(FIXTURE_DIR_ENV, &fixture_path);
+    {
+        use std::os::unix::process::CommandExt;
+        runner_command.process_group(0);
+    }
+    let mut child = runner_command.spawn().expect("spawn supervised child");
+    // Own process group: deadline escalation can signal the whole group
+    // (runner plus every descendant it started), and the group id equals
+    // the runner pid while the runner leads it. The group is never the
+    // harness's own: only this freshly spawned group is signaled below.
     // The directly spawned runner is seeded from the Child handle itself:
     // the strongest identity binding available (amendment B).
     let runner_pid = child.id();
@@ -1287,19 +1422,20 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
                 None
             }
         };
-        // Runner escalation is TERM-first with full grace measured from
-        // the successful send, then KILL. The runner is our direct
-        // unreaped child, so its pid cannot be recycled under us while
-        // runner_done is none — signaling it is safe without a probe.
+        // Runner escalation is TERM-first to the whole supervised group
+        // with full grace measured from the successful send, then KILL:
+        // never repeated kills, never discarded signal errors. The
+        // runner leads its own group, so this contains the runner plus
+        // every descendant it started.
         if runner_done.is_none() && Instant::now() >= overall_deadline && !runner_escalated {
             runner_escalated = true;
             killed_by_parent = true;
-            match signal_pid(runner_pid, libc::SIGTERM) {
+            match signal_group(runner_pid, libc::SIGTERM) {
                 Ok(()) => {
-                    actions.push(format!("runner pid={runner_pid} SIGTERM"));
+                    actions.push(format!("runner pid={runner_pid} group SIGTERM"));
                     runner_term_at = Some(Instant::now());
                 }
-                Err(err) => unverifiable.push(format!("runner SIGTERM failed: {err}")),
+                Err(err) => unverifiable.push(format!("runner group SIGTERM failed: {err}")),
             }
         }
         if runner_escalated
@@ -1308,9 +1444,9 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
             && !runner_forced
         {
             runner_forced = true;
-            match signal_pid(runner_pid, libc::SIGKILL) {
-                Ok(()) => actions.push(format!("runner pid={runner_pid} SIGKILL")),
-                Err(err) => unverifiable.push(format!("runner SIGKILL failed: {err}")),
+            match signal_group(runner_pid, libc::SIGKILL) {
+                Ok(()) => actions.push(format!("runner pid={runner_pid} group SIGKILL")),
+                Err(err) => unverifiable.push(format!("runner group SIGKILL failed: {err}")),
             }
         }
         // Ledger AND declaration reads every tick: late registrations
@@ -1322,7 +1458,7 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
                 unverifiable.push(note);
             }
         }
-        let (decl_entries, decl_malformed, _) = read_declarations(&fixture_path);
+        let (decl_entries, decl_malformed, decls_lost_tick) = read_declarations(&fixture_path);
         for bad in &decl_malformed {
             let note = format!("malformed declaration record: {bad}");
             if !unverifiable.iter().any(|u| u == &note) {
@@ -1365,6 +1501,15 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
             let outcome = match identity {
                 Identity::Alive => Some(true),
                 Identity::Gone => Some(false),
+                // A zombie is proven dead: unblock the registrar like
+                // Gone (its owner reaps), but record the state.
+                Identity::Zombie => {
+                    actions.push(format!(
+                        "pid={} zombie at verification (dead, owner must reap)",
+                        entry.pid
+                    ));
+                    Some(false)
+                }
                 Identity::Replaced => {
                     actions.push(format!(
                         "pid={} recycled before verification; no ack, contained without signaling",
@@ -1539,6 +1684,23 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
                         });
                         resolved.push(index);
                     }
+                    // A zombie is dead with a matching birth: never
+                    // signaled (meaningless on a zombie), resolved as a
+                    // natural exit with the state on record. Reaping is
+                    // the owner's job — the registrar reaps natural
+                    // exits before reporting, so this arm is the backstop
+                    // for a reap the registrar missed.
+                    Identity::Zombie => {
+                        actions.push(format!(
+                            "pid={} resolved-zombie (dead, owner must reap; never signaled)",
+                            item.entry.pid
+                        ));
+                        resolutions.push(Resolution {
+                            pid: item.entry.pid,
+                            outcome: ResolutionOutcome::NaturalExit,
+                        });
+                        resolved.push(index);
+                    }
                 }
             }
             for index in resolved.into_iter().rev() {
@@ -1554,18 +1716,17 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
         // still keeps resolving: newly observed registrations keep
         // their cleanup even on failure.
         if runner_done.is_some() {
-            let (verdict_entries, verdict_malformed) = read_ledger(&fixture_path);
+            // The SAME tick-top reads the admission loop already owned:
+            // evaluating termination on a second read could observe an
+            // entry that never entered safety ownership. One read per
+            // tick keeps observation and ownership identical.
             if !duplicate_noted {
-                let unique: std::collections::HashSet<&LedgerEntry> =
-                    verdict_entries.iter().collect();
-                duplicate_noted = unique.len() != verdict_entries.len();
+                let unique: std::collections::HashSet<&LedgerEntry> = entries.iter().collect();
+                duplicate_noted = unique.len() != entries.len();
             }
-            let (verdict_declarations, verdict_malformed_decls, verdict_decls_lost) =
-                read_declarations(&fixture_path);
             let decl_duplicate_noted = {
-                let unique: std::collections::HashSet<&LedgerEntry> =
-                    verdict_declarations.iter().collect();
-                unique.len() != verdict_declarations.len()
+                let unique: std::collections::HashSet<&LedgerEntry> = decl_entries.iter().collect();
+                unique.len() != decl_entries.len()
             };
             let (verdict_report, verdict_problem) = read_report(&fixture_path);
             let (verdict_seal, verdict_seal_problem) = read_seal(&fixture_path);
@@ -1578,18 +1739,19 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
             };
             let snapshot = RegistrationSnapshot {
                 plan,
-                ledger: verdict_entries,
-                malformed_lines: verdict_malformed.len(),
+                ledger: entries,
+                malformed_lines: malformed.len(),
                 duplicate_lines: duplicate_noted,
-                declarations: verdict_declarations,
-                declarations_unreadable: verdict_decls_lost,
-                malformed_declarations: verdict_malformed_decls.len(),
+                declarations: decl_entries,
+                declarations_unreadable: decls_lost_tick,
+                malformed_declarations: decl_malformed.len(),
                 duplicate_declarations: decl_duplicate_noted,
                 report: verdict_summary,
                 report_problem: verdict_report_problem,
                 runner_exited: true,
                 seal: verdict_seal,
                 seal_problem: verdict_seal_problem,
+                runner_pid,
                 // Coverage re-reads the registrar-visible ACK files from
                 // disk: independent of the in-memory write record.
                 acked: read_acks(&fixture_path),
@@ -1629,19 +1791,43 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
         sleep_capped(cleanup_deadline, TICK);
     }
     // Bounded reap of the runner through the Child handle (real reaping;
-    // still min()ed into the absolute cleanup timeline).
+    // still min()ed into the absolute cleanup timeline). A wait failure
+    // records evidence instead of panicking past cleanup and dropping a
+    // possibly live handle.
     let runner_reap_deadline = std::cmp::min(
         Instant::now() + Duration::from_millis(500),
         cleanup_deadline,
     );
-    let mut status = child.try_wait().expect("wait child");
+    let mut status = match child.try_wait() {
+        Ok(status) => status,
+        Err(err) => {
+            unverifiable.push(format!("runner wait failed during reap: {err}"));
+            None
+        }
+    };
     while status.is_none() && Instant::now() < runner_reap_deadline {
         sleep_capped(runner_reap_deadline, TICK);
-        status = child.try_wait().expect("wait child");
+        match child.try_wait() {
+            Ok(found) => status = found,
+            Err(err) => {
+                unverifiable.push(format!("runner wait failed during reap: {err}"));
+                break;
+            }
+        }
     }
     actions.push(format!("runner pid={runner_pid} status={status:?}"));
     if status.is_none() {
         unverifiable.push(format!("runner pid={runner_pid} could not be reaped"));
+        // Group state after the bounded reap: provably empty is
+        // verified containment of every descendant; anything else is
+        // recorded against the retained directory below.
+        if group_empty(runner_pid) {
+            actions.push(format!("runner pid={runner_pid} unreaped but group-empty"));
+        } else {
+            unverifiable.push(format!(
+                "runner pid={runner_pid} unreaped with surviving group members"
+            ));
+        }
     }
 
     // Final registration record: the loop breaks on a passing verdict
@@ -1699,6 +1885,7 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
             runner_exited,
             seal,
             seal_problem,
+            runner_pid,
             acked: read_acks(&fixture_path),
         };
         match check_registration(&final_snapshot) {
@@ -1711,13 +1898,59 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
     }
 
     // A bounded helper whose own reap could not be confirmed is recorded
-    // as unverifiable evidence: dropping a Child is not a reap, so the
-    // run fails and the directory is retained.
+    // as unverifiable evidence — and gets one final bounded settle pass
+    // here, because these helpers are OUR direct children: a final
+    // kill-and-reap within a small total bound is handle hygiene this
+    // run owes itself, not a fresh budget for the test. Dropping a
+    // Child is not a reap, so survivors keep the failure and the
+    // retained directory.
     if !unreaped_helpers.is_empty() {
         unverifiable.push(format!(
             "{} bounded helper(s) could not confirm their own reap",
             unreaped_helpers.len()
         ));
+        let settle_deadline = Instant::now() + Duration::from_millis(500);
+        let mut settle_notes = Vec::new();
+        for helper in &mut unreaped_helpers {
+            let pid = helper.id();
+            match helper.try_wait() {
+                Ok(Some(_)) => continue,
+                Ok(None) => {
+                    if let Err(err) = helper.kill() {
+                        settle_notes.push(format!("helper pid={pid} final kill failed: {err}"));
+                    }
+                    while matches!(helper.try_wait(), Ok(None)) && Instant::now() < settle_deadline
+                    {
+                        sleep_capped(settle_deadline, Duration::from_millis(5));
+                    }
+                    match helper.try_wait() {
+                        Ok(Some(_)) => {}
+                        Ok(None) => settle_notes.push(format!(
+                            "helper pid={pid} still unreaped after final settle"
+                        )),
+                        Err(err) => {
+                            settle_notes.push(format!("helper pid={pid} final wait failed: {err}"))
+                        }
+                    }
+                }
+                Err(err) => settle_notes.push(format!("helper pid={pid} final wait failed: {err}")),
+            }
+        }
+        unverifiable.extend(settle_notes);
+    }
+    // Persist owned-identity evidence with the retained directory — pid,
+    // exit/group state and the full unverifiable record — so a failure
+    // never rests on memory alone. Written only when the directory is
+    // retained (unverifiable non-empty), which is exactly when the
+    // evidence matters.
+    if !unverifiable.is_empty() {
+        let evidence = format!(
+            "runner pid={runner_pid} status={status:?} killed_by_parent={killed_by_parent}\n\
+             resolutions={resolutions:?}\nunverifiable={unverifiable:?}\n"
+        );
+        if let Err(err) = std::fs::write(fixture_path.join("SUPERVISION_EVIDENCE"), evidence) {
+            unverifiable.push(format!("evidence write failed: {err}"));
+        }
     }
     // Keep the parent-owned directory until the runner and every known
     // identity are verified exited; retain on uncertainty. A passing
@@ -1999,7 +2232,7 @@ fn fixture_handshake_sh(pid: &str) -> String {
          _END=$(($(date +%s) + 5)); _I=0\n\
          while [ ! -f \"$_FD/ack.{pid}\" ] && [ \"$(date +%s)\" -lt \"$_END\" ] && [ \"$_I\" -lt 500 ]; do sleep 0.1; _I=$((_I+1)); done\n\
          grep -qFx -e \"$_BIRTH alive\" -e \"$_BIRTH gone\" \"$_FD/ack.{pid}\" 2>/dev/null || exit 3\n\
-         echo \"declared=1 registered=1\" > \"$_FD/sealed.registrations\"\n"
+         echo \"source=fixture:{pid} declared=1 registered=1\" > \"$_FD/sealed.registrations\"\n"
     )
 }
 
@@ -2072,7 +2305,7 @@ fn timed_out_probe_is_killed_within_its_budget() {
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
                  {}\n\
-                 sleep 60\n",
+                 exec sleep 60\n",
                 fixture_handshake_sh("$$")
             ),
             Duration::from_millis(300),
@@ -2455,7 +2688,7 @@ fn isolation_setup_failure_fails_closed_without_probing() {
 /// report the failure - nothing is silently dropped on any registration
 /// path.
 #[cfg(unix)]
-fn append_ledger(dir: &Path, pid: u32) -> Result<String, BoundedError> {
+fn append_ledger(dir: &Path, pid: u32, cap: Instant) -> Result<String, BoundedError> {
     // No registration precedes proof the parent is reading: the
     // handshake file the parent wrote before spawn is READ on every
     // registration, and a missing or mismatched handshake fails the
@@ -2470,7 +2703,7 @@ fn append_ledger(dir: &Path, pid: u32) -> Result<String, BoundedError> {
             unreaped: None,
         });
     }
-    let birth = birth_of(pid)?;
+    let birth = birth_of(pid, cap)?;
     // File failures here return instead of panicking: a panic between
     // spawn and the ledger append would orphan a live fixture nobody
     // recorded. The caller unwinds the owned handle on any error.
@@ -2664,11 +2897,20 @@ struct RegistrationLedger {
     registered: usize,
     failures: Vec<String>,
     owned: Vec<std::process::Child>,
+    /// Set by seal(): the source is closed and no further spawn is
+    /// accepted.
+    closed: bool,
 }
 
 #[cfg(unix)]
 impl RegistrationLedger {
-    fn spawn_owned(&mut self, dir: &Path, script: &str) -> Option<u32> {
+    fn spawn_owned(&mut self, dir: &Path, script: &str, cap: Instant) -> Option<u32> {
+        // A sealed source accepts no further spawns: anything spawned
+        // past the seal would contradict it, so refuse with evidence.
+        if self.closed {
+            self.failures.push("spawn after seal refused".to_string());
+            return None;
+        }
         self.declared += 1;
         let child = match std::process::Command::new("/bin/sh")
             .arg("-c")
@@ -2690,8 +2932,8 @@ impl RegistrationLedger {
         // Birth capture and declaration are part of the SAME owned spawn:
         // a fixture that cannot be declared never runs undeclared. Any
         // failure unwinds the owned handle instead of orphaning it.
-        let op_deadline = Instant::now() + PS_TIMEOUT;
-        let birth = match birth_of(pid) {
+        let op_deadline = std::cmp::min(cap, Instant::now() + PS_TIMEOUT);
+        let birth = match birth_of(pid, op_deadline) {
             Ok(birth) => birth,
             Err(err) => {
                 self.owned.push(child);
@@ -2727,27 +2969,37 @@ impl RegistrationLedger {
     /// missing-registration self-test): the declared count rises but the
     /// ledger stays empty, and accounting must expose the gap. The
     /// caller remains responsible for the child it owns.
-    fn declare_only(&mut self, dir: &Path, script: &str) -> Option<u32> {
-        self.spawn_owned(dir, script)
+    fn declare_only(&mut self, dir: &Path, script: &str, cap: Instant) -> Option<u32> {
+        self.spawn_owned(dir, script, cap)
     }
 
     /// Register one fixture child: spawn (ownership retained) + ledger
     /// append + bounded wait for the parent's verification ACK. The
     /// registrar keeps its handle until the ACK arrives; a missing ACK,
     /// like any other registration failure, unwinds the owned fixture
-    /// instead of transferring unobserved ownership.
+    /// instead of transferring unobserved ownership. One absolute cap,
+    /// decided before spawning, bounds birth capture, append, ACK wait
+    /// and the reserved unwind window. Returns None on any failure so
+    /// callers cannot mistake a failed registration for an owned pid.
     fn register(&mut self, dir: &Path, script: &str) -> Option<u32> {
-        let pid = self.spawn_owned(dir, script)?;
-        let op_deadline = Instant::now() + PS_TIMEOUT;
-        match append_ledger(dir, pid) {
+        let cap = Instant::now() + OP_ENVELOPE;
+        // A refused post-seal spawn records its evidence and ends the
+        // registration without touching the channels.
+        let pid = self.spawn_owned(dir, script, cap)?;
+        let op_deadline = std::cmp::min(cap, Instant::now() + PS_TIMEOUT);
+        let mut failed = false;
+        match append_ledger(dir, pid, cap) {
             Ok(birth) => {
                 self.registered += 1;
-                let ack_deadline = Instant::now() + ACK_WAIT;
+                // The unwind window stays reserved: the ACK wait never
+                // consumes the whole cap.
+                let ack_deadline = std::cmp::min(cap - UNWIND_RESERVE, Instant::now() + ACK_WAIT);
                 if let Err(reason) = await_ack(dir, pid, &birth, ack_deadline) {
                     let mut note = format!("pid={pid} {reason}");
                     note.push_str("; ");
-                    note.push_str(&unwind_owned(self, pid, ack_deadline));
+                    note.push_str(&unwind_owned(self, pid, cap));
                     self.failures.push(note);
+                    failed = true;
                 }
             }
             Err(err) => {
@@ -2764,9 +3016,10 @@ impl RegistrationLedger {
                 note.push_str("; ");
                 note.push_str(&unwind_owned(self, pid, op_deadline));
                 self.failures.push(note);
+                failed = true;
             }
         }
-        Some(pid)
+        if failed { None } else { Some(pid) }
     }
 
     /// Explicit source closure: write the final declared/registered
@@ -2774,12 +3027,31 @@ impl RegistrationLedger {
     /// both observed channels; a failed seal write is failure evidence
     /// that fails the run closed downstream (missing seal).
     fn seal(&mut self, dir: &Path) {
+        // Closing the source: no further spawn/register/retain is
+        // accepted after this point (spawn_owned refuses), so anything
+        // observed beyond the sealed counts is a contradiction, not a
+        // late arrival.
+        self.closed = true;
         let content = format!(
-            "declared={} registered={}\n",
-            self.declared, self.registered
+            "source=registrar:{} declared={} registered={}\n",
+            std::process::id(),
+            self.declared,
+            self.registered
         );
-        if let Err(err) = std::fs::write(dir.join(SEALED_FILE), content) {
-            self.failures.push(format!("seal write failed: {err}"));
+        // create_new: sealing twice (or over another source's seal) is
+        // failure evidence, never a silent overwrite.
+        let sealed = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(dir.join(SEALED_FILE));
+        match sealed {
+            Ok(mut file) => {
+                use std::io::Write;
+                if let Err(err) = file.write_all(content.as_bytes()) {
+                    self.failures.push(format!("seal write failed: {err}"));
+                }
+            }
+            Err(err) => self.failures.push(format!("seal write failed: {err}")),
         }
     }
 
@@ -2823,21 +3095,23 @@ impl RegistrationLedger {
 /// the owned fixture.
 #[cfg(unix)]
 fn retain_late_registration(ledger: &mut RegistrationLedger, dir: &Path, pid: u32) {
-    match append_ledger(dir, pid) {
+    // Same single-cap discipline as register: no fresh cleanup budgets.
+    let cap = Instant::now() + OP_ENVELOPE;
+    match append_ledger(dir, pid, cap) {
         Ok(birth) => {
             ledger.registered += 1;
-            let ack_deadline = Instant::now() + ACK_WAIT;
+            let ack_deadline = std::cmp::min(cap - UNWIND_RESERVE, Instant::now() + ACK_WAIT);
             if let Err(reason) = await_ack(dir, pid, &birth, ack_deadline) {
                 let mut note = format!("pid={pid} {reason}");
                 note.push_str("; ");
-                note.push_str(&unwind_owned(ledger, pid, ack_deadline));
+                note.push_str(&unwind_owned(ledger, pid, cap));
                 ledger.failures.push(note);
             }
         }
         Err(err) => {
             let mut note = format!("pid={pid} late registration failed: {}", err.message);
             if let Some(helper) = err.unreaped {
-                let op_deadline = Instant::now() + PS_TIMEOUT;
+                let op_deadline = std::cmp::min(cap, Instant::now() + PS_TIMEOUT);
                 match settle_helper(helper, op_deadline) {
                     None => note.push_str("; unreaped ps helper reaped by registrant"),
                     Some(still) => {
@@ -2846,9 +3120,8 @@ fn retain_late_registration(ledger: &mut RegistrationLedger, dir: &Path, pid: u3
                     }
                 }
             }
-            let op_deadline = Instant::now() + PS_TIMEOUT;
             note.push_str("; ");
-            note.push_str(&unwind_owned(ledger, pid, op_deadline));
+            note.push_str(&unwind_owned(ledger, pid, cap));
             ledger.failures.push(note);
         }
     }
@@ -2923,9 +3196,15 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
         // append-only ledger while tearing down (amendment B). A late
         // registration failure is retained as evidence, never dropped.
         let mut ledger = RegistrationLedger::default();
-        let pid = ledger.declare_only(&dir, "sleep 5").expect("fixture spawn");
+        let declare_cap = Instant::now() + OP_ENVELOPE;
+        let pid = ledger
+            .declare_only(&dir, "sleep 5", declare_cap)
+            .expect("fixture spawn");
         std::thread::sleep(Duration::from_millis(300));
         retain_late_registration(&mut ledger, &dir, pid);
+        // Harvest pass for uniformity; the late fixture is a deliberate
+        // survivor at this point (parent-owned from here).
+        ledger.reap_owned_bounded(Instant::now());
         ledger.seal(&dir);
         ledger.release_transferred();
         write_child_report(
@@ -2977,6 +3256,9 @@ fn supervisor_term_resistant_child_is_forced_after_recheck() {
         let dir = fixture_dir_from_env();
         let mut ledger = RegistrationLedger::default();
         ledger.register(&dir, "trap '' TERM; sleep 30");
+        // Harvest pass: nothing exited is expected (deliberate survivor
+        // stays parent-owned); stuck handles transfer, never block here.
+        ledger.reap_owned_bounded(Instant::now());
         ledger.seal(&dir);
         ledger.release_transferred();
         write_child_report(
@@ -3034,7 +3316,8 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
         // untracked orphan), while still reporting declared=1,
         // registered=0.
         let mut ledger = RegistrationLedger::default();
-        ledger.declare_only(&dir, "sleep 2");
+        let declare_cap = Instant::now() + OP_ENVELOPE;
+        ledger.declare_only(&dir, "sleep 2", declare_cap);
         let stuck = ledger.reap_owned_bounded(Instant::now() + Duration::from_secs(5));
         if !stuck.is_empty() {
             ledger.failures.push(format!(
@@ -3106,6 +3389,10 @@ fn supervisor_distinguishes_product_cleanup_from_rescue() {
         ledger.register(&dir, "sleep 0.2");
         std::thread::sleep(Duration::from_millis(500));
         ledger.register(&dir, "sleep 30");
+        // Harvest reaps the exited prompt fixture; the deliberate
+        // survivor stays parent-owned (stuck handles transfer, never
+        // block here).
+        ledger.reap_owned_bounded(Instant::now());
         ledger.seal(&dir);
         ledger.release_transferred();
         write_child_report(
@@ -3178,6 +3465,15 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
         let mut ledger = RegistrationLedger::default();
         ledger.register(&dir, "sleep 0.2");
         std::thread::sleep(Duration::from_millis(500));
+        // Reap natural exits through our own handles BEFORE reporting:
+        // an unreaped exited child stays a zombie, and a zombie must
+        // never reach the parent as a live identity.
+        let stuck = ledger.reap_owned_bounded(Instant::now());
+        if !stuck.is_empty() {
+            ledger.failures.push(format!(
+                "natural-exit fixture(s) still owned at report time: {stuck:?}"
+            ));
+        }
         ledger.seal(&dir);
         ledger.release_transferred();
         write_child_report(
@@ -3292,6 +3588,17 @@ mod registration_accounting {
         }
     }
 
+    /// The common case: a seal from the test runner itself. Tests that
+    /// pin source mismatches construct `Seal` literals directly.
+    fn sealed(declared: usize, registered: usize) -> Seal {
+        Seal {
+            source: SealSource::Registrar,
+            source_pid: 4242,
+            declared,
+            registered,
+        }
+    }
+
     fn snapshot(plan: ExpectedPlan) -> RegistrationSnapshot {
         RegistrationSnapshot {
             plan,
@@ -3307,6 +3614,8 @@ mod registration_accounting {
             runner_exited: false,
             seal: None,
             seal_problem: None,
+            // Matches the `sealed()` helper's source pid.
+            runner_pid: 4242,
             acked: Vec::new(),
         }
     }
@@ -3333,10 +3642,7 @@ mod registration_accounting {
         state.declarations = vec![observed.clone()];
         state.report = Some(summary(1, 1));
         state.runner_exited = true;
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 1,
-        });
+        state.seal = Some(sealed(1, 1));
         state.acked = vec![observed];
         assert_eq!(check_registration(&state), RegistrationVerdict::Complete);
     }
@@ -3350,10 +3656,7 @@ mod registration_accounting {
         state.ledger = vec![observed.clone()];
         state.declarations = vec![observed.clone()];
         state.report = Some(summary(1, 1));
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 1,
-        });
+        state.seal = Some(sealed(1, 1));
         state.acked = vec![observed];
         let reason = not_quiescent(&check_registration(&state));
         assert!(reason.contains("runner still running"), "{reason}");
@@ -3370,10 +3673,7 @@ mod registration_accounting {
         state.declarations = vec![entry(4242, "Mon Sep  9 08:00:00 2026")];
         state.report = Some(summary(1, 1));
         state.runner_exited = true;
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 1,
-        });
+        state.seal = Some(sealed(1, 1));
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("never acknowledged"), "{reason}");
     }
@@ -3389,10 +3689,7 @@ mod registration_accounting {
         state.declarations = vec![observed.clone()];
         state.report = Some(summary(1, 1));
         state.runner_exited = true;
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 1,
-        });
+        state.seal = Some(sealed(1, 1));
         assert!(failed_closed(&check_registration(&state)).contains("never acknowledged"));
         validate_identity(&observed, &state.acked).expect("ack the observed identity");
         state.acked = vec![observed];
@@ -3419,10 +3716,7 @@ mod registration_accounting {
         state.declarations = vec![observed.clone()];
         state.report = Some(summary(1, 1));
         state.runner_exited = true;
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 1,
-        });
+        state.seal = Some(sealed(1, 1));
         state.acked = vec![observed.clone()];
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("duplicate"), "{reason}");
@@ -3451,10 +3745,7 @@ mod registration_accounting {
         let reason = not_quiescent(&check_registration(&state));
         assert!(reason.contains("runner still running"), "{reason}");
         state.runner_exited = true;
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 0,
-        });
+        state.seal = Some(sealed(1, 0));
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("incomplete registration"), "{reason}");
         assert!(reason.contains("plan expects 1"), "{reason}");
@@ -3466,10 +3757,7 @@ mod registration_accounting {
         state.ledger = vec![entry(4242, "Mon Sep  9 08:00:00 2026")];
         state.declarations = vec![entry(4242, "Mon Sep  9 08:00:00 2026")];
         state.runner_exited = true;
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 1,
-        });
+        state.seal = Some(sealed(1, 1));
         state.acked = state.ledger.clone();
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("missing final report"), "{reason}");
@@ -3488,10 +3776,7 @@ mod registration_accounting {
         state.ledger = vec![observed.clone()];
         state.declarations = vec![observed.clone()];
         state.runner_exited = true;
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 1,
-        });
+        state.seal = Some(sealed(1, 1));
         state.acked = vec![observed];
         // The report suppresses a declaration...
         state.report = Some(summary(0, 1));
@@ -3516,10 +3801,7 @@ mod registration_accounting {
         state.ledger = vec![observed.clone()];
         state.declarations = vec![observed.clone()];
         state.runner_exited = true;
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 1,
-        });
+        state.seal = Some(sealed(1, 1));
         state.acked = vec![observed];
         let mut failing = summary(1, 1);
         failing.failures = vec!["pid=4243 late registration failed: ps error".to_string()];
@@ -3601,19 +3883,13 @@ mod registration_accounting {
         state.declarations = Vec::new();
         state.report = Some(summary(0, 1));
         state.runner_exited = true;
-        state.seal = Some(SealCounts {
-            declared: 0,
-            registered: 1,
-        });
+        state.seal = Some(sealed(0, 1));
         state.acked = vec![observed];
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("incomplete declaration"), "{reason}");
         // Same counts, but the ledger identity was never declared.
         state.declarations = vec![entry(4243, "Mon Sep  9 08:00:00 2026")];
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 1,
-        });
+        state.seal = Some(sealed(1, 1));
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("undeclared registration"), "{reason}");
         assert!(reason.contains("4242"), "{reason}");
@@ -3632,10 +3908,7 @@ mod registration_accounting {
         let mut state = snapshot(plan(2, 1));
         state.ledger = vec![observed.clone()];
         state.declarations = vec![observed.clone(), entry(4243, "Mon Sep  9 08:00:00 2026")];
-        state.seal = Some(SealCounts {
-            declared: 2,
-            registered: 1,
-        });
+        state.seal = Some(sealed(2, 1));
         state.report = Some(summary(2, 1));
         state.runner_exited = true;
         state.acked = vec![observed];
@@ -3656,10 +3929,7 @@ mod registration_accounting {
         state.duplicate_declarations = true;
         state.report = Some(summary(1, 1));
         state.runner_exited = true;
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 1,
-        });
+        state.seal = Some(sealed(1, 1));
         state.acked = vec![observed];
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("duplicate declaration"), "{reason}");
@@ -3673,31 +3943,41 @@ mod registration_accounting {
     #[test]
     fn seal_counts_parse_strictly() {
         assert_eq!(
-            parse_seal_counts("declared=1 registered=1"),
-            Ok(SealCounts {
+            parse_seal("source=registrar:4242 declared=1 registered=1"),
+            Ok(Seal {
+                source: SealSource::Registrar,
+                source_pid: 4242,
                 declared: 1,
                 registered: 1,
             })
         );
         assert_eq!(
-            parse_seal_counts("  declared=0   registered=0\n"),
-            Ok(SealCounts {
+            parse_seal("  source=fixture:7   declared=0   registered=0\n"),
+            Ok(Seal {
+                source: SealSource::Fixture,
+                source_pid: 7,
                 declared: 0,
                 registered: 0,
             })
         );
         for bad in [
             "",
-            "declared=1",
-            "registered=1",
-            "declared=one registered=1",
-            "declared=1 registered=1 extra=2",
+            "declared=1 registered=1",
+            "source=registrar:4242 declared=1",
+            "source=registrar:4242 registered=1",
+            "source=registrar:4242 declared=one registered=1",
+            "source=registrar:4242 declared=1 registered=1 extra=2",
+            "source=registrar:4242 declared=1 declared=2 registered=1",
+            "source=registrar:4242 declared=1 registered=1 registered=1",
+            "source=registrar:4242 source=fixture:7 declared=1 registered=1",
+            "source=cron:4242 declared=1 registered=1",
+            "source=registrar declared=1 registered=1",
+            "source=registrar:abc declared=1 registered=1",
+            "source=registrar:0 declared=1 registered=1",
             "1 1",
             "declared = 1",
-            "declared=1 declared=2 registered=1",
-            "declared=1 registered=1 registered=1",
         ] {
-            assert!(parse_seal_counts(bad).is_err(), "{bad:?}");
+            assert!(parse_seal(bad).is_err(), "{bad:?}");
         }
     }
 
@@ -3729,12 +4009,29 @@ mod registration_accounting {
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("registration source malformed"), "{reason}");
         state.seal_problem = None;
-        state.seal = Some(SealCounts {
-            declared: 1,
-            registered: 0,
-        });
+        state.seal = Some(sealed(1, 0));
         let reason = failed_closed(&check_registration(&state));
         assert!(reason.contains("contradicts"), "{reason}");
+        // A registrar seal naming another pid is foreign, even with
+        // matching counts.
+        state.seal = Some(Seal {
+            source: SealSource::Registrar,
+            source_pid: 9999,
+            declared: 1,
+            registered: 1,
+        });
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("foreign registrar"), "{reason}");
+        // A fixture seal for a pid nobody declared is unknown, even
+        // with matching counts.
+        state.seal = Some(Seal {
+            source: SealSource::Fixture,
+            source_pid: 9999,
+            declared: 1,
+            registered: 1,
+        });
+        let reason = failed_closed(&check_registration(&state));
+        assert!(reason.contains("unknown source"), "{reason}");
     }
 
     #[test]
@@ -3931,6 +4228,37 @@ mod ps_classification {
         let out = output(libc::SIGTERM, b"", b"");
         assert_eq!(
             classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &out),
+            Identity::Unverifiable
+        );
+    }
+
+    #[test]
+    fn zombie_with_matching_birth_is_dead_not_alive() {
+        // Stat Z with our birth: the process died but awaits its
+        // owner's reap. Proven dead — never signaled, never confused
+        // with live — and distinct from gone (the pid still exists).
+        let zombie = output(0, b"Mon Sep  9 08:00:00 2026 Z\n", b"");
+        assert_eq!(
+            classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &zombie),
+            Identity::Zombie
+        );
+        // A recycled pid that is now someone else's zombie: replaced,
+        // not ours, never signaled either.
+        assert_eq!(
+            classify_ps(&entry("Mon Jan  1 00:00:00 2001"), &zombie),
+            Identity::Replaced
+        );
+        // Z with modifiers is still a zombie when the birth matches.
+        let zplus = output(0, b"Mon Sep  9 08:00:00 2026 Z+\n", b"");
+        assert_eq!(
+            classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &zplus),
+            Identity::Zombie
+        );
+        // A zombie with diagnostics or a signaled ps is unverifiable,
+        // like any other identity.
+        let noisy = output(0, b"Mon Sep  9 08:00:00 2026 Z\n", b"diag\n");
+        assert_eq!(
+            classify_ps(&entry("Mon Sep  9 08:00:00 2026"), &noisy),
             Identity::Unverifiable
         );
     }
