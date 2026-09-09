@@ -126,6 +126,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             create_v1_tables(tx)?;
             apply_v2_title_column(tx)?;
             apply_v3_composer_columns(tx)?;
+            backfill_projects_from_pre_existing_folder_workspaces(tx)?;
             tx.execute(
                 "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -159,6 +160,43 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             )?;
         }
         _ => {}
+    }
+    Ok(())
+}
+
+/// Upgrade safety (user-feature-closure item 5): a data dir written by a
+/// daemon from before Projects existed (dc12c7a and earlier -- this module
+/// was added in c2deb28) registered folder workspaces directly via
+/// `workspace::register`, with no owning `projects` row at all --
+/// `project::list` only ever reads `projects`, so those workspaces silently
+/// disappeared from the sidebar after an upgrade even though the row (and
+/// the user's registration) was never lost. Runs once, only on the fresh
+/// "no recorded projects schema version" branch (a true fresh install has
+/// no `workspaces` rows either, so this is a no-op there): every `folder`
+/// `workspaces` row without a `projects` row at the same path gets one,
+/// mirroring `project::add`'s own folder-project shape exactly (new uuid,
+/// same path/name/host/created_at, no default_base_ref). `git` workspace
+/// rows are deliberately left alone -- only a folder project registers its
+/// own root as a Workspace (see `add`'s doc comment); a bare pre-Projects
+/// git workspace has no Worktree row to pair it with, so backfilling it as
+/// a Project would show zero attachable worktrees, a materially different
+/// (and confusing) shape from every other git Project in this schema.
+fn backfill_projects_from_pre_existing_folder_workspaces(
+    tx: &Transaction,
+) -> rusqlite::Result<()> {
+    let orphaned: Vec<(String, String, String, String)> = tx
+        .prepare(
+            "SELECT path, name, host_id, created_at FROM workspaces
+             WHERE kind = 'folder' AND path NOT IN (SELECT path FROM projects)",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (path, name, host_id, created_at) in orphaned {
+        tx.execute(
+            "INSERT INTO projects (id, host_id, path, name, kind, default_base_ref, created_at)
+             VALUES (?1, ?2, ?3, ?4, 'folder', NULL, ?5)",
+            params![uuid::Uuid::new_v4().to_string(), host_id, path, name, created_at],
+        )?;
     }
     Ok(())
 }

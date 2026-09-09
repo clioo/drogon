@@ -9,7 +9,9 @@
 use std::path::PathBuf;
 
 use drogon_core::Engine;
+use drogon_protocol::{PROTOCOL_VERSION, Request};
 use rusqlite::Connection;
+use serde_json::{Value, json};
 
 /// One component's recorded past-version fixtures: (fixture name, recorded
 /// version). Empty for components released only at v1.
@@ -46,6 +48,9 @@ fn fixture_sql(fixture: &str) -> &'static str {
         "automations-v1" => include_str!("fixtures/upgrades/automations-v1.sql"),
         "projects-v1" => include_str!("fixtures/upgrades/projects-v1.sql"),
         "main-schema-v1" => include_str!("fixtures/upgrades/main-schema-v1.sql"),
+        "workspaces-only-pre-projects" => {
+            include_str!("fixtures/upgrades/workspaces-only-pre-projects.sql")
+        }
         other => panic!("unknown fixture {other}"),
     }
 }
@@ -352,4 +357,99 @@ fn refusal_leaves_the_data_dir_untouched() {
         !backups.exists(),
         "a refused (downgrade) open must not create a backup: the dir is not ours to touch"
     );
+}
+
+// User-feature-closure item 5: an old (pre-Projects, dc12c7a-era) daemon's
+// directly-registered folder workspaces must survive an upgrade to this
+// build automatically -- no re-add required. `project::list` reads only
+// `projects`, so the fix is a one-time backfill from `workspaces` into
+// `projects` on the "no recorded projects schema version" migration branch
+// (see `backfill_projects_from_pre_existing_folder_workspaces` in
+// `project.rs`).
+
+#[test]
+fn old_folder_workspace_reappears_as_a_project_without_re_adding() {
+    let (dir, engine) = open_seeded("pre-projects-folder", "workspaces-only-pre-projects");
+    let response = engine.dispatch(Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: "list-1".into(),
+        auth: None,
+        method: "project.list".into(),
+        params: json!({}),
+    });
+    assert!(response.ok, "{response:?}");
+    let result = response.result.unwrap();
+    let projects = result["projects"].as_array().unwrap();
+    let backfilled = projects
+        .iter()
+        .find(|p| p["path"] == "/tmp/seed-old-folder")
+        .unwrap_or_else(|| panic!("old folder workspace missing from project.list: {projects:?}"));
+    assert_eq!(backfilled["name"], "old-folder");
+    assert_eq!(backfilled["kind"], "folder");
+    assert_eq!(backfilled["hostId"], "host-old");
+    // Never a re-registration under a fresh id every reopen: the second
+    // open must be the `Some(3)` no-op branch, not another backfill pass.
+    let id_first_open = backfilled["id"].as_str().unwrap().to_string();
+    drop(engine);
+    let engine_again = Engine::open(dir.path()).unwrap();
+    let response_again = engine_again.dispatch(Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: "list-2".into(),
+        auth: None,
+        method: "project.list".into(),
+        params: json!({}),
+    });
+    let projects_again = response_again.result.unwrap();
+    let projects_again = projects_again["projects"].as_array().unwrap();
+    assert_eq!(
+        projects_again.len(),
+        1,
+        "reopening must never duplicate the backfilled project: {projects_again:?}"
+    );
+    assert_eq!(projects_again[0]["id"], Value::String(id_first_open));
+}
+
+#[test]
+fn old_git_kind_workspace_is_not_backfilled_into_projects() {
+    let (_dir, engine) = open_seeded("pre-projects-git", "workspaces-only-pre-projects");
+    let response = engine.dispatch(Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: "list-1".into(),
+        auth: None,
+        method: "project.list".into(),
+        params: json!({}),
+    });
+    let projects = response.result.unwrap();
+    let projects = projects["projects"].as_array().unwrap();
+    assert!(
+        !projects
+            .iter()
+            .any(|p| p["path"] == "/tmp/seed-old-git-worktree"),
+        "a bare pre-Projects git workspace (no Worktree row) must not become an invented Project: {projects:?}"
+    );
+    // The row itself is untouched, not silently dropped.
+    let conn = read_db(&_dir);
+    let still_there: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM workspaces WHERE path = '/tmp/seed-old-git-worktree'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(still_there, 1);
+}
+
+#[test]
+fn fresh_install_backfill_is_a_no_op_with_no_pre_existing_workspaces() {
+    let dir = temp_dir("fresh-backfill");
+    let engine = Engine::open(dir.path()).unwrap();
+    let response = engine.dispatch(Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: "list-1".into(),
+        auth: None,
+        method: "project.list".into(),
+        params: json!({}),
+    });
+    let projects = response.result.unwrap();
+    assert_eq!(projects["projects"].as_array().unwrap().len(), 0);
 }
