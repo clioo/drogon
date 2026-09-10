@@ -226,6 +226,62 @@ describe("relay dispatch", () => {
     expect(outcome).toEqual({ ok: true, result: { tabs: [tab("browser-tab-1", "w1")] } });
   });
 
+  test("mentu.open asks the renderer and reports its verdict verbatim", async () => {
+    const host = stubHost();
+    const opener = vi.fn(async (workspaceId: string, recipeId?: string) => ({
+      ok: true as const,
+      result: { workspaceId, recipeId, opened: true },
+    }));
+    const outcome = await dispatchRelayCommand(
+      host,
+      {
+        commandId: "relay-mentu-1",
+        kind: "mentu.open",
+        params: { workspaceId: "w1", recipeId: "hello" },
+      },
+      opener,
+    );
+    expect(opener).toHaveBeenCalledWith("w1", "hello");
+    expect(outcome).toEqual({
+      ok: true,
+      result: { workspaceId: "w1", recipeId: "hello", opened: true },
+    });
+    // The browser host is untouched: the Mentu tab is renderer state.
+    expect(host.createTab).not.toHaveBeenCalled();
+  });
+
+  test("mentu.open rejects bad params without asking the renderer", async () => {
+    const host = stubHost();
+    const opener = vi.fn();
+    const outcome = await dispatchRelayCommand(
+      host,
+      { commandId: "relay-mentu-2", kind: "mentu.open", params: { workspaceId: "" } },
+      opener as never,
+    );
+    expect(outcome).toEqual({
+      ok: false,
+      error: { code: "invalid_argument", message: "Invalid mentu.open params." },
+    });
+    expect(opener).not.toHaveBeenCalled();
+  });
+
+  test("a renderer refusal is a failure, never a silent open", async () => {
+    const host = stubHost();
+    const opener = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: "mentu_unavailable", message: "mentu.v1 withheld" },
+    }));
+    const outcome = await dispatchRelayCommand(
+      host,
+      { commandId: "relay-mentu-3", kind: "mentu.open", params: { workspaceId: "w1" } },
+      opener,
+    );
+    expect(outcome).toEqual({
+      ok: false,
+      error: { code: "mentu_unavailable", message: "mentu.v1 withheld" },
+    });
+  });
+
   test("unknown kinds never throw; they complete invalid_argument", async () => {
     const host = stubHost();
     const outcome = await dispatchRelayCommand(host, {

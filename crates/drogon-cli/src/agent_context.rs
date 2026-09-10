@@ -675,7 +675,9 @@ pub fn all_commands() -> Vec<AgentCommand> {
             "drogon-cli secrets set --kind <KIND> --name <NAME> < value-on-stdin",
             &["kind", "name"],
             &[],
-            &["printf '%s' \"$GITHUB_TOKEN\" | drogon-cli secrets set --kind github --name GITHUB_TOKEN_REF --json"],
+            &[
+                "printf '%s' \"$GITHUB_TOKEN\" | drogon-cli secrets set --kind github --name GITHUB_TOKEN_REF --json",
+            ],
             &["Requires the service capability bot.secrets.v1."],
         ),
         entry(
@@ -1233,6 +1235,40 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[],
             &["drogon-cli skills list --json"],
             &["Pure local read of bundled guide metadata — works without a running daemon."],
+        ),
+        entry(
+            "mentu open",
+            &["mentu", "open"],
+            "Open (or focus) the workspace's Mentu tab in the connected Drogon desktop",
+            "drogon-cli mentu open --workspace <ID> [--recipe <ID>] [--timeout-ms <MS>]",
+            &["recipe", "timeout-ms", "workspace"],
+            &[],
+            &[
+                "drogon-cli mentu open --workspace ws-1 --recipe hello",
+                "drogon-cli mentu open --workspace ws-1",
+            ],
+            &[
+                "Requires mentu.v1 for the tab and browser.relay.v1 plus a connected Drogon desktop for the transport; without a desktop the call fails desktop_not_connected inside its timeout.",
+                "Success means the desktop's own renderer confirmed the tab — a refusal (desktop_unavailable, mentu_unavailable, mentu_workspace_unknown, mentu_open_timeout) is an RPC error, never a silent success.",
+                "Use this to hand a human the recipe you just wrote; it never runs the recipe.",
+            ],
+        ),
+        entry(
+            "mentu status",
+            &["mentu", "status"],
+            "Report honestly whether the optional Mentu environment is installed on this host",
+            "drogon-cli mentu status [--workspace <ID>]",
+            &["workspace"],
+            &[],
+            &[
+                "drogon-cli mentu status --workspace ws-1 --json",
+                "drogon-cli mentu status",
+            ],
+            &[
+                "Requires the service capability mentu.v1; without it the daemon has no Mentu surface to report on.",
+                "verdict is installed, not_installed or partially_available — check it BEFORE promising a recipe, because the Mentu runtime is optional.",
+                "With --workspace the result also counts that workspace's .mentu/recipes entries and lists each invalid one's issue.",
+            ],
         ),
         entry(
             "skills get",

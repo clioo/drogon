@@ -4,9 +4,10 @@ description: >-
   Drive Drogon through the public `drogon-cli`: resolve the executable, check
   status and capabilities, manage workspaces, projects and worktrees, and
   operate terminals (create, list, send, read, wait, close), the embedded
-  browser pane (open, navigate, snapshot, click, fill, tabs) plus harness
-  launch. Use for terminal control, lightweight prompts and shell commands.
-  Use the orchestration guide for supervised multi-agent coordination.
+  browser pane (open, navigate, snapshot, click, fill, tabs), harness
+  launch, and the optional Mentu recipe environment (status, open). Use for
+  terminal control, lightweight prompts and shell commands. Use the
+  orchestration guide for supervised multi-agent coordination.
 ---
 
 # Drogon CLI

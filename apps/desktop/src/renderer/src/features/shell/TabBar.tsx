@@ -38,8 +38,10 @@ import {
 import { TabCreateMenu } from "./TabCreateMenu";
 import { SortableBrowserTab } from "./tab-strip/SortableBrowserTab";
 import { SortableEditorTab } from "./tab-strip/SortableEditorTab";
+import { SortableMentuTab } from "./tab-strip/SortableMentuTab";
 import type { DropIndicator } from "./tab-chrome";
 import {
+  MENTU_TAB_ID,
   moveTabOrder,
   partitionPinnedOrder,
   reconcileTabOrder,
@@ -57,14 +59,16 @@ import {
 type StripEntry =
   | { kind: "session"; id: string }
   | { kind: "browser"; id: string }
-  | { kind: "editor"; id: string };
+  | { kind: "editor"; id: string }
+  | { kind: "mentu"; id: string };
 
 /**
- * Unified tab strip: one tab per terminal session, one per browser page
- * and one per open file, then the "+" static create menu. Selecting a
- * browser tab shows the browser pane for that page, and selecting an
- * editor tab shows the full-width Monaco editor for that file, in the tab
- * area below the strip.
+ * Unified tab strip: one tab per terminal session, one per browser page,
+ * one per open file and the workspace's single Mentu tab, then the "+"
+ * static create menu. Selecting a browser tab shows the browser pane for
+ * that page, selecting an editor tab shows the full-width Monaco editor
+ * for that file and selecting the Mentu tab shows the wide Mentu recipe
+ * surface — all in the tab area below the strip.
  */
 export function TabBar({
   sessions,
@@ -100,6 +104,10 @@ export function TabBar({
   onSelectSession,
   onSelectBrowserTab,
   onSelectEditorTab,
+  mentuOpen,
+  mentuActive,
+  onSelectMentu,
+  onCloseMentu,
   onCloseSession,
   onCloseBrowserTab,
   onCloseEditorTab,
@@ -150,6 +158,14 @@ export function TabBar({
   onSelectSession: (id: string) => void;
   onSelectBrowserTab: (tabId: string) => void;
   onSelectEditorTab: (tabId: string) => void;
+  /** True while this workspace's Mentu tab is open in the strip. It stands
+   *  in the strip like any other tab; App owns the membership. */
+  mentuOpen: boolean;
+  /** True while the Mentu tab is the selected strip tab (its surface is
+   *  the one rendered in the tab area). */
+  mentuActive: boolean;
+  onSelectMentu: () => void;
+  onCloseMentu: () => void;
   onCloseSession: (session: Session) => void;
   onCloseBrowserTab: (tabId: string) => void;
   onCloseEditorTab: (tabId: string) => void;
@@ -158,8 +174,8 @@ export function TabBar({
   onCreateTerminal: () => void;
   onLaunchHarness: (input: HarnessLaunchInput) => Promise<boolean>;
   onNewBrowserTab: () => void;
-  /** Mentu (J9) entry in the create menu; optional until the right-sidebar
-   *  Mentu activity item lands. */
+  // Mentu (J9) entry in the create menu: opens the workspace's Mentu TAB
+  // (not a full-page route — that is what used to hide the strip).
   onOpenMentu?: () => void;
   mentuAvailable?: boolean;
   /** Create-menu Agent settings row (Settings → Agents); hidden without it. */
@@ -177,6 +193,7 @@ export function TabBar({
       sessions.map((item) => item.id),
       browserTabs.map((tab) => tab.tabId),
       editorTabs.map((tab) => tab.tabId),
+      mentuOpen,
     ),
     pinnedIds,
   );
@@ -184,6 +201,7 @@ export function TabBar({
     if (sessionById.has(id)) return [{ kind: "session", id }];
     if (browserById.has(id)) return [{ kind: "browser", id }];
     if (editorById.has(id)) return [{ kind: "editor", id }];
+    if (mentuOpen && id === MENTU_TAB_ID) return [{ kind: "mentu", id }];
     return [];
   });
   const pinned = new Set(pinnedIds);
@@ -282,12 +300,15 @@ export function TabBar({
     const selector =
       entry.kind === "session"
         ? `#session-tab-${CSS.escape(entry.id)}`
-        : `[data-tab-id="${CSS.escape(entry.id)}"]`;
+        : entry.kind === "mentu"
+          ? `#${MENTU_TAB_ID}`
+          : `[data-tab-id="${CSS.escape(entry.id)}"]`;
     document.querySelector<HTMLElement>(selector)?.focus();
   };
   const selectEntry = (entry: StripEntry) => {
     if (entry.kind === "session") onSelectSession(entry.id);
     else if (entry.kind === "browser") onSelectBrowserTab(entry.id);
+    else if (entry.kind === "mentu") onSelectMentu();
     else onSelectEditorTab(entry.id);
   };
   const stepEntry = (currentId: string, delta: number) => {
@@ -398,6 +419,28 @@ export function TabBar({
               {entries.map((entry, index) => {
                 const hasTabsToRight = index < entries.length - 1;
                 const hasTabsToLeft = index > 0;
+                if (entry.kind === "mentu") {
+                  return (
+                    <SortableMentuTab
+                      key={MENTU_TAB_ID}
+                      isActive={mentuActive}
+                      isPinned={pinned.has(MENTU_TAB_ID)}
+                      hasTabsToRight={hasTabsToRight}
+                      hasTabsToLeft={hasTabsToLeft}
+                      tabCount={entries.length}
+                      dropIndicator={dropIndicatorById.get(MENTU_TAB_ID)}
+                      onActivate={onSelectMentu}
+                      onClose={onCloseMentu}
+                      onCloseOthers={() => onCloseOthers(MENTU_TAB_ID)}
+                      onCloseToRight={() => onCloseToRight(MENTU_TAB_ID)}
+                      onCloseToLeft={() => onCloseToLeft(MENTU_TAB_ID)}
+                      onTogglePin={() => onTogglePin(MENTU_TAB_ID)}
+                      onStripKeyDown={(event) =>
+                        stripKeyDown(event, MENTU_TAB_ID)
+                      }
+                    />
+                  );
+                }
                 if (entry.kind === "browser") {
                   const tab = browserById.get(entry.id);
                   if (!tab) return null;
@@ -469,7 +512,8 @@ export function TabBar({
                 const isActive =
                   item.id === activeSessionId &&
                   activeBrowserTabId === null &&
-                  activeEditorTabId === null;
+                  activeEditorTabId === null &&
+                  !mentuActive;
                 // Accessible name keeps the legacy "<label> <verdict>" shape
                 // (the verdict text moved off the visible row into the name
                 // so the strip matches the source chrome without losing the

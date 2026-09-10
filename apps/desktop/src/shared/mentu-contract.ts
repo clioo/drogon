@@ -198,7 +198,65 @@ export interface MentuBridge {
   }) => Promise<Result<MentuRunEvidenceResult>>;
   mentuRetry(input: { runId: string }): Promise<Result<MentuRunResult>>;
   mentuCancel(input: { runId: string }): Promise<Result<MentuRunResult>>;
+  /**
+   * Additive (Mentu-as-tab): `drogon-cli mentu open` arrives in the
+   * renderer as one main -> renderer request; the shell opens (or focuses)
+   * the workspace's Mentu tab and answers through
+   * {@link MentuBridge.reportOpenTab}. Optional so older preload builds
+   * still satisfy the interface — the CLI then gets an honest
+   * `mentu_open_unsupported` refusal instead of silence.
+   */
+  onOpenTab?: (listener: (request: MentuOpenTabRequest) => void) => () => void;
+  reportOpenTab?: (result: MentuOpenTabResult) => Promise<boolean>;
 }
+
+/** One `mentu.open` request forwarded from the daemon relay. */
+export type MentuOpenTabRequest = {
+  requestId: string;
+  workspaceId: string;
+  recipeId?: string;
+};
+
+/** The renderer's own verdict for one `mentu.open` request. `ok: false`
+ *  always carries a stable `code` so the CLI can report a refusal rather
+ *  than pretend the tab opened. */
+export type MentuOpenTabResult = {
+  requestId: string;
+  ok: boolean;
+  /** Present when the workspace did not exist, Mentu was withheld, or the
+   *  named recipe is not in the workspace's recipe list. */
+  code?: string;
+  message?: string;
+};
+
+/** Main -> renderer channel carrying one {@link MentuOpenTabRequest}. */
+export const MENTU_OPEN_TAB_CHANNEL = "drogon:mentuOpenTab";
+/** Renderer -> main channel carrying the {@link MentuOpenTabResult}. */
+export const MENTU_OPEN_TAB_RESULT_CHANNEL = "drogon:mentuOpenTabResult";
+
+export const mentuOpenTabRequestSchema = z.object({
+  requestId: z.string().min(1).max(128),
+  workspaceId: z.string().min(1).max(200),
+  recipeId: z.string().min(1).max(200).optional(),
+});
+
+export const mentuOpenTabResultSchema = z.object({
+  requestId: z.string().min(1).max(128),
+  ok: z.boolean(),
+  code: z.string().min(1).max(128).optional(),
+  message: z.string().min(1).max(2_048).optional(),
+});
+
+/**
+ * Params of one `mentu.open` relay command (the wire shape
+ * `crates/drogon-core/src/desktop_relay_rpc.rs` emits). `recipeId` is
+ * optional. Additive: nothing above changes.
+ */
+export const mentuRelayOpenParamsSchema = z.object({
+  workspaceId: z.string().min(1).max(200),
+  recipeId: z.string().min(1).max(200).optional(),
+});
+export type MentuRelayOpenParams = z.infer<typeof mentuRelayOpenParamsSchema>;
 
 const id = z
   .string()

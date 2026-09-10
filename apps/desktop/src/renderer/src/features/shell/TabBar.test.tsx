@@ -44,6 +44,10 @@ function renderStrip(overrides: {
   onCloseEditorTab?: (id: string) => void;
   onCopyText?: (text: string) => void;
   onRetrySession?: (session: Session) => void;
+  mentuOpen?: boolean;
+  mentuActive?: boolean;
+  onSelectMentu?: () => void;
+  onCloseMentu?: () => void;
 }) {
   const onOrderChange = overrides.onOrderChange ?? (() => {});
   const onCommitTitle = overrides.onCommitTitle ?? (() => {});
@@ -57,6 +61,10 @@ function renderStrip(overrides: {
       activeBrowserTabId={null}
       editorTabs={overrides.editorTabs ?? []}
       activeEditorTabId={overrides.activeEditorTabId ?? null}
+      mentuOpen={overrides.mentuOpen ?? false}
+      mentuActive={overrides.mentuActive ?? false}
+      onSelectMentu={overrides.onSelectMentu ?? (() => {})}
+      onCloseMentu={overrides.onCloseMentu ?? (() => {})}
       harnesses={[]}
       workspaceId="ws"
       hostId="host"
@@ -199,6 +207,10 @@ describe("TabBar strip order", () => {
         activeBrowserTabId={null}
         editorTabs={[]}
         activeEditorTabId={null}
+        mentuOpen={false}
+        mentuActive={false}
+        onSelectMentu={() => {}}
+        onCloseMentu={() => {}}
         harnesses={[]}
         workspaceId="ws"
         hostId="host"
@@ -421,5 +433,65 @@ describe("TabBar no per-workspace session cap (#272)", () => {
     const ids = tabIds();
     expect(ids).toHaveLength(20);
     expect(ids.slice(-2)).toEqual(["late-1", "late-2"]);
+  });
+});
+
+// Regression for the reported bug: the "+" menu's Mentu entry used to open a
+// full-page ROUTE, which hid the terminal column — the column that owns the
+// tab strip — so the whole tab system disappeared. Mentu is now a real tab:
+// it stands beside the session tabs, is selectable and closeable, and the
+// strip keeps rendering every other tab.
+describe("Mentu as a strip tab (reported bug)", () => {
+  it("renders the Mentu tab beside the sessions and keeps the strip intact", () => {
+    renderStrip({
+      sessions: [session("a"), session("b")],
+      mentuOpen: true,
+      mentuActive: true,
+    });
+    expect(tabIds()).toEqual(["a", "b", "mentu-tab"]);
+    const mentu = screen.getByRole("tab", { name: "Mentu" });
+    expect(mentu.getAttribute("aria-selected")).toBe("true");
+    expect(mentu.getAttribute("aria-controls")).toBe("mentu-tab-panel");
+    expect(mentu.getAttribute("data-testid")).toBe("recipe-tab");
+    // Every session tab is still there — the strip never blanks out.
+    expect(screen.getByRole("tab", { name: /^Terminal 1/ })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /^Terminal 2/ })).toBeTruthy();
+    // And the strip's own roving tabindex / tablist never goes away.
+    expect(screen.getByRole("tablist", { name: "Sessions" })).toBeTruthy();
+  });
+
+  it("is absent from the strip while closed", () => {
+    renderStrip({ sessions: [session("a")], mentuOpen: false });
+    expect(tabIds()).toEqual(["a"]);
+    expect(screen.queryByRole("tab", { name: "Mentu" })).toBeNull();
+  });
+
+  it("selects on click and closes through its own affordance", () => {
+    const onSelectMentu = vi.fn();
+    const onCloseMentu = vi.fn();
+    renderStrip({
+      sessions: [session("a")],
+      mentuOpen: true,
+      onSelectMentu,
+      onCloseMentu,
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "Mentu" }));
+    expect(onSelectMentu).toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close tab Mentu" }),
+    );
+    expect(onCloseMentu).toHaveBeenCalled();
+    // A session tab stays selected-looking while Mentu is not active.
+    const terminal = screen.getByRole("tab", { name: /^Terminal 1/ });
+    expect(terminal.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("keeps session tabs selectable while the Mentu tab is open but not active", () => {
+    renderStrip({ sessions: [session("a")], mentuOpen: true });
+    const terminal = screen.getByRole("tab", { name: /^Terminal 1/ });
+    expect(terminal.getAttribute("aria-selected")).toBe("true");
+    expect(
+      screen.getByRole("tab", { name: "Mentu" }).getAttribute("aria-selected"),
+    ).toBe("false");
   });
 });

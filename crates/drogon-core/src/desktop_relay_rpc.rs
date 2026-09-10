@@ -81,6 +81,24 @@ impl RelayState {
     }
 }
 
+/// Relay command kind for `mentu.open` (Mentu-as-tab, additive alongside
+/// the `browser.*` kinds). Defined here rather than in
+/// `drogon-protocol`'s browser module because the Mentu tab is a renderer
+/// surface: the desktop's main process forwards the command to the
+/// renderer window and completes it with the renderer's own verdict.
+pub const MENTU_OPEN_KIND: &str = "mentu.open";
+
+/// `mentu.open` wire params. `recipeId` is optional: without it the
+/// desktop opens (or focuses) the workspace's Mentu tab with whatever
+/// recipe the surface already has selected.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuOpenParams {
+    pub workspace_id: String,
+    pub recipe_id: Option<String>,
+    pub timeout_ms: Option<u64>,
+}
+
 fn decode<T: DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
     serde_json::from_value(value.clone())
         .map_err(|_| error::invalid_argument("Invalid browser relay parameters."))
@@ -317,6 +335,23 @@ impl Engine {
             json!({ "tabId": params.tab_id, "selector": params.selector, "text": params.text }),
             timeout_ms,
         )
+    }
+
+    pub(super) fn do_mentu_open(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: MentuOpenParams = decode(value)?;
+        browser::validate_id(&params.workspace_id, "workspace id")?;
+        if let Some(recipe_id) = &params.recipe_id {
+            browser::validate_id(recipe_id, "recipe id")?;
+        }
+        let timeout_ms = browser::validate_timeout_ms(params.timeout_ms)?;
+        let mut wire = json!({ "workspaceId": params.workspace_id });
+        if let Some(recipe_id) = params.recipe_id {
+            wire["recipeId"] = json!(recipe_id);
+        }
+        // The completion is the renderer's own answer (it reports back once
+        // the tab is open), so a healthy call proves the tab exists — not
+        // merely that a command was queued.
+        self.relay_roundtrip(MENTU_OPEN_KIND, wire, timeout_ms)
     }
 
     pub(super) fn do_browser_tabs(&self, value: &Value) -> Result<Value, RpcError> {

@@ -474,6 +474,10 @@ impl Engine {
             "browser.click" => self.do_browser_click(&request.params),
             "browser.fill" => self.do_browser_fill(&request.params),
             "browser.tabs" => self.do_browser_tabs(&request.params),
+            // Mentu-as-tab: the desktop relay carries the request into the
+            // running app's renderer, which opens the workspace's Mentu tab
+            // and answers with its own verdict.
+            "mentu.open" => self.do_mentu_open(&request.params),
             "git.status" => self.do_git_status(&request.params),
             "git.diff" => self.do_git_diff(&request.params),
             "git.stage" => self.mutating(request, Self::do_git_stage),

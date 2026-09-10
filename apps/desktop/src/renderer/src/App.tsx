@@ -47,6 +47,7 @@ import {
 import { Sidebar } from "./features/shell/Sidebar";
 import { DaemonConnectionBanner } from "./features/shell/DaemonConnectionBanner";
 import {
+  MENTU_TAB_ID,
   bulkCloseTargets,
   loadTabStripState,
   partitionPinnedOrder,
@@ -271,6 +272,7 @@ import {
   windowMentuBridge,
 } from "./mentu-mount";
 import { MENTU_OPEN_TAB_EVENT, MentuPanel } from "./features/mentu/MentuPanel";
+import { mentuStore } from "./features/mentu/mentu-store";
 import { refreshWorktreeIssueLinks } from "./features/tasks/issue-links";
 import { TasksPage } from "./features/tasks/TasksPage";
 import { loadBotSnapshot, resolveBotsScope } from "./bots-loader";
@@ -744,6 +746,18 @@ export function App() {
   // Render-time mirror for the async tab rehydrate below (sessionsRef pattern).
   const editorTabsRef = useRef(editorTabs);
   editorTabsRef.current = editorTabs;
+  // Mentu as a fourth strip kind (fixes the reported bug: the "+" menu's
+  // Mentu entry used to set a full-page ROUTE, and a full-page route hides
+  // the terminal column — which is where the tab strip lives, so the whole
+  // tab system vanished). Membership is per workspace and rides the
+  // tab-strip envelope (`tabStrip.mentu`, tab-order.ts); the selection is
+  // local like the browser/editor selections. Mentu is a singleton per
+  // workspace (the fork's RecipeTab has one tab per worktree), so a
+  // boolean plus the shared MENTU_TAB_ID is the whole record.
+  const [activeMentuTab, setActiveMentuTab] = useState(false);
+  // Set while a relayed `mentu.open` for a NOT-currently-selected workspace
+  // is switching to it; cleared once that workspace's strip load lands.
+  const pendingMentuOpenRef = useRef<string | null>(null);
   // R12-D tab strip: order, pins and renames persist per workspace in the
   // shell's own localStorage envelope (tab-order.ts), like the sidebar keys.
   const [tabStrip, setTabStrip] = useState<TabStripState>(() =>
@@ -752,6 +766,8 @@ export function App() {
   useEffect(() => {
     setTabStrip(loadTabStripState(window.localStorage, selected));
   }, [selected]);
+  /** This workspace's Mentu tab membership (the envelope is the owner). */
+  const mentuTabOpen = tabStrip.mentu;
   const updateTabStrip = (next: TabStripState) => {
     setTabStrip(next);
     saveTabStripState(window.localStorage, selected, next);
@@ -1317,7 +1333,6 @@ export function App() {
   const portsSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
   const automationsSectionRef = useRef<HTMLElement>(null);
-  const mentuSectionRef = useRef<HTMLElement>(null);
   const tasksSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1328,11 +1343,9 @@ export function App() {
         ? botsSectionRef.current
         : route === AUTOMATIONS_ROUTE_ID
           ? automationsSectionRef.current
-          : route === MENTU_ROUTE_ID
-            ? mentuSectionRef.current
-            : route === TASKS_ROUTE_ID
-              ? tasksSectionRef.current
-              : null;
+          : route === TASKS_ROUTE_ID
+            ? tasksSectionRef.current
+            : null;
     if (route !== null && target && prevRouteRef.current !== route) {
       applyPanelFocus(
         resolveRoute(
@@ -1409,6 +1422,10 @@ export function App() {
     // Workspace switches drop the strip selection (pages are
     // workspace-scoped); the subscription above repopulates the list.
     setActiveBrowserTabId(null);
+    // The Mentu tab is workspace-scoped too: membership comes from the
+    // incoming workspace's envelope, so the previous workspace's selection
+    // must not leak.
+    setActiveMentuTab(false);
     knownBrowserIds.current = new Set();
     // Editor tabs (R16-A) are NOT cleared here: they are scope-stamped
     // (EditorTabState.workspaceId) and filtered to the current workspace at
@@ -1496,13 +1513,15 @@ export function App() {
   )
     automationsAliveRef.current = false;
   const automationsAlive = automationsAliveRef.current;
-  // Mentu keep-alive mirrors Automations: survives switches and
-  // transients, unmounts on explicit withhold or settled workspace loss.
+  // Mentu keep-alive mirrors the browser/editor panes: the tab-area surface
+  // mounts once the workspace's Mentu tab is open (or selected), survives
+  // strip switches and transients, and unmounts on explicit capability
+  // withhold or settled workspace loss — never on a mere route change.
   const mentuAvailable = isMentuAvailable(liveCapabilities);
   const mentuExplicitWithhold =
     status !== null && !isMentuAvailable(liveCapabilities);
   const mentuAliveRef = useRef(false);
-  if (route === MENTU_ROUTE_ID && mentuAvailable && current)
+  if (current && mentuAvailable && (activeMentuTab || mentuTabOpen))
     mentuAliveRef.current = true;
   else if (
     mentuExplicitWithhold ||
@@ -1510,6 +1529,9 @@ export function App() {
   )
     mentuAliveRef.current = false;
   const mentuAlive = mentuAliveRef.current;
+  // The Mentu surface owns the tab area only while its tab is the selected
+  // strip tab AND the tab is still a member of the strip.
+  const mentuTabActive = activeMentuTab && mentuTabOpen && mentuAlive;
   // Tasks keep-alive: unlike the session-bound panels, Tasks is
   // project-scoped and mounts with no workspace selected, so the first
   // task can create the first worktree. It unmounts only on settled
@@ -2743,11 +2765,13 @@ export function App() {
     setActive(id);
     setActiveBrowserTabId(null);
     setActiveEditorTabId(null);
+    setActiveMentuTab(false);
   };
   const selectBrowserTab = (tabId: string) => {
     setRoute(null);
     setActiveBrowserTabId(tabId);
     setActiveEditorTabId(null);
+    setActiveMentuTab(false);
   };
   // Editor tabs (R16-A, fixes #133): opening a path reuses its tab if
   // already open in that workspace (tabId is workspace+path, so a
@@ -2793,6 +2817,7 @@ export function App() {
     });
     setActiveEditorTabId(tabId);
     setActiveBrowserTabId(null);
+    setActiveMentuTab(false);
   };
   // R16-BJ (#294, fork openDiff): the Source Control row's diff opens as
   // its own editor tab, keyed by path AND diff area — the staged and
@@ -2813,6 +2838,7 @@ export function App() {
     );
     setActiveEditorTabId(tabId);
     setActiveBrowserTabId(null);
+    setActiveMentuTab(false);
   };
   // #197 New Markdown (fork `onNewFileTab`): the first free
   // untitled[-N].md at the workspace root via files.create, then the
@@ -2846,6 +2872,40 @@ export function App() {
     setRoute(null);
     setActiveEditorTabId(tabId);
     setActiveBrowserTabId(null);
+    setActiveMentuTab(false);
+  };
+  // Mentu tab (fixes the reported bug): the "+" menu's Mentu entry, the
+  // panel's "Open full tab" button and `drogon-cli mentu open` all land
+  // here. Opening is idempotent — it focuses the existing tab instead of
+  // minting a second one — and it never touches `route`, which is exactly
+  // what used to blank the strip.
+  const openMentuTab = () => {
+    if (!selectedRef.current) return;
+    setRoute(null);
+    if (!tabStripRef.current.mentu) {
+      const next = { ...tabStripRef.current, mentu: true };
+      tabStripRef.current = next;
+      setTabStrip(next);
+      saveTabStripState(window.localStorage, selectedRef.current, next);
+    }
+    setActiveBrowserTabId(null);
+    setActiveEditorTabId(null);
+    setActiveMentuTab(true);
+  };
+  // Closing the selected Mentu tab falls back to the strip neighbor, or the
+  // terminal pane when it was the only tab — never to a foreign kind's
+  // state.
+  const closeMentuTab = () => {
+    if (!tabStripRef.current.mentu) return;
+    updateTabStrip({ ...tabStripRef.current, mentu: false });
+    if (!activeMentuTab) return;
+    setActiveMentuTab(false);
+    const neighbor = liveStripOrder().find((id) => id !== MENTU_TAB_ID);
+    if (!neighbor) return;
+    if (visibleEditorTabs.some((tab) => tab.tabId === neighbor))
+      setActiveEditorTabId(neighbor);
+    else if (browserTabs.some((tab) => tab.tabId === neighbor))
+      setActiveBrowserTabId(neighbor);
   };
   // EditorHost only ever reports a dirty change for the path it is
   // CURRENTLY rendering, which by construction is activeEditorTab's path
@@ -2974,6 +3034,7 @@ export function App() {
         stripSessions.map((item) => item.id),
         browserTabs.map((tab) => tab.tabId),
         visibleEditorTabs.map((tab) => tab.tabId),
+        tabStrip.mentu,
       ),
       tabStrip.pinned,
     );
@@ -3253,7 +3314,10 @@ export function App() {
     if (targets.length === 0) return;
     const doomed = new Set(targets);
     // Move selection off a doomed tab first so each close keeps a survivor.
-    const currentId = activeEditorTabId ?? activeBrowserTabId ?? active;
+    const currentId =
+      activeMentuTab
+        ? MENTU_TAB_ID
+        : (activeEditorTabId ?? activeBrowserTabId ?? active);
     if (doomed.has(currentId)) {
       const at = order.indexOf(anchorId);
       const neighbor = [
@@ -3261,7 +3325,8 @@ export function App() {
         ...order.slice(0, at).reverse(),
       ].find((id) => !doomed.has(id));
       if (neighbor) {
-        if (visibleEditorTabs.some((tab) => tab.tabId === neighbor))
+        if (neighbor === MENTU_TAB_ID) openMentuTab();
+        else if (visibleEditorTabs.some((tab) => tab.tabId === neighbor))
           selectEditorTab(neighbor);
         else if (browserTabs.some((tab) => tab.tabId === neighbor))
           selectBrowserTab(neighbor);
@@ -3272,6 +3337,7 @@ export function App() {
       const session = sessions.find((item) => item.id === target);
       // Split-aware: closing a split tab stops both panes, never orphans.
       if (session) void closeTabSession(session);
+      else if (target === MENTU_TAB_ID) closeMentuTab();
       else if (visibleEditorTabs.some((tab) => tab.tabId === target))
         closeEditorTab(target);
       else void closeBrowserTab(target);
@@ -3824,13 +3890,91 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    // Mentu panel "Open full tab" (R11-D): the panel dispatches a window
-    // event because App owns routing; setRoute is a stable state setter.
-    const onOpenMentuTab = () => setRoute(MENTU_ROUTE_ID);
+    // Mentu panel "Open full tab" (R11-D) and `drogon-cli mentu open`: both
+    // dispatch this window event because App owns the strip. It opens the
+    // workspace's Mentu TAB — never a route, because a full-page route
+    // hides the tab strip (the reported bug). The handler is a
+    // first-render closure, so it reads `selectedRef`/`tabStripRef`
+    // instead of render-scoped state; every setter it touches is stable.
+    const onOpenMentuTab = () => openMentuTab();
     window.addEventListener(MENTU_OPEN_TAB_EVENT, onOpenMentuTab);
     return () =>
       window.removeEventListener(MENTU_OPEN_TAB_EVENT, onOpenMentuTab);
   }, []);
+  useEffect(() => {
+    // `drogon-cli mentu open` (main process -> renderer): the relay command
+    // is answered by this shell, because the Mentu tab is renderer state.
+    // A registered-once closure over refs only, with one explicit verdict
+    // per request — a workspace that does not exist, a withheld mentu.v1
+    // capability and a successful open are three different answers, so the
+    // CLI can never report an open that did not happen.
+    const bridge = windowMentuBridge();
+    if (!bridge?.onOpenTab || !bridge.reportOpenTab) return;
+    const report = bridge.reportOpenTab.bind(bridge);
+    const off = bridge.onOpenTab((request) => {
+      const workspaceId = request.workspaceId;
+      const refuse = (code: string, message: string) => {
+        void report({ requestId: request.requestId, ok: false, code, message });
+      };
+      if (!workspacesRef.current.some((item) => item.id === workspaceId)) {
+        refuse(
+          "mentu_workspace_unknown",
+          `No workspace '${workspaceId}' is registered in this Drogon window.`,
+        );
+        return;
+      }
+      if (!mentuGateRef.current) {
+        refuse(
+          "mentu_unavailable",
+          "The running service does not advertise mentu.v1, so the Mentu tab cannot open.",
+        );
+        return;
+      }
+      // Membership is written to the REQUESTED workspace's envelope, not
+      // the selected one: a relayed open must never open the tab in the
+      // wrong workspace just because the user is looking elsewhere.
+      const stored = loadTabStripState(window.localStorage, workspaceId);
+      if (!stored.mentu)
+        saveTabStripState(window.localStorage, workspaceId, {
+          ...stored,
+          mentu: true,
+        });
+      if (request.recipeId)
+        mentuStore.set(workspaceId, { selectedRecipeId: request.recipeId });
+      if (selectedRef.current !== workspaceId) {
+        // Switching workspaces reloads the strip from the envelope written
+        // above, and the workspace-switch effect clears the selection; the
+        // pending marker re-applies it after the load lands.
+        pendingMentuOpenRef.current = workspaceId;
+        setRoute(null);
+        setSelected(workspaceId);
+      } else {
+        const current = tabStripRef.current;
+        if (!current.mentu) {
+          const next = { ...current, mentu: true };
+          tabStripRef.current = next;
+          setTabStrip(next);
+        }
+        setRoute(null);
+        setActiveBrowserTabId(null);
+        setActiveEditorTabId(null);
+        setActiveMentuTab(true);
+      }
+      void report({ requestId: request.requestId, ok: true });
+    });
+    return off;
+  }, []);
+  // Completes a relayed `mentu.open` for another workspace: the strip load
+  // for that workspace has landed and the membership is there, so the
+  // selection can be applied without racing the workspace-switch reset.
+  useEffect(() => {
+    if (pendingMentuOpenRef.current !== selected) return;
+    if (!tabStrip.mentu) return;
+    pendingMentuOpenRef.current = null;
+    setActiveBrowserTabId(null);
+    setActiveEditorTabId(null);
+    setActiveMentuTab(true);
+  }, [selected, tabStrip.mentu]);
   useEffect(() => {
     // Source Control row open (#294): the panel dispatches a window event
     // because App owns the main tab strip — the exact shape of the
@@ -4368,9 +4512,6 @@ export function App() {
                   (route === AUTOMATIONS_ROUTE_ID &&
                     automationsAlive &&
                     filesProps !== null) ||
-                  (route === MENTU_ROUTE_ID &&
-                    mentuAlive &&
-                    filesProps !== null) ||
                   (route === TASKS_ROUTE_ID && tasksAlive)
                     ? "none"
                     : undefined,
@@ -4422,6 +4563,10 @@ export function App() {
                 onSelectSession={selectSessionTab}
                 onSelectBrowserTab={selectBrowserTab}
                 onSelectEditorTab={selectEditorTab}
+                mentuOpen={mentuTabOpen}
+                mentuActive={mentuTabActive}
+                onSelectMentu={openMentuTab}
+                onCloseMentu={closeMentuTab}
                 onCloseSession={(item) => void closeTabSession(item)}
                 onCloseBrowserTab={(tabId) => void closeBrowserTab(tabId)}
                 onCloseEditorTab={closeEditorTab}
@@ -4429,12 +4574,16 @@ export function App() {
                 onCreateTerminal={() => void create()}
                 onLaunchHarness={launchHarness}
                 onNewBrowserTab={() => void newBrowserTab()}
-                onOpenMentu={() => setRoute(MENTU_ROUTE_ID)}
+                onOpenMentu={openMentuTab}
                 mentuAvailable={mentuAvailable}
                 onOpenAgentSettings={() => openSettings("agents")}
                 onNewMarkdown={() => void createNewMarkdownTab()}
               />
-              {activeBotMeta && terminal && !activeBrowserTab && !activeEditorTab ? (
+              {activeBotMeta &&
+              terminal &&
+              !activeBrowserTab &&
+              !activeEditorTab &&
+              !mentuTabActive ? (
                 <BotSessionHeader
                   meta={activeBotMeta}
                   session={terminal}
@@ -4457,7 +4606,9 @@ export function App() {
                 aria-busy={loadingSessions}
                 style={{
                   display:
-                    activeBrowserTab || activeEditorTab ? "none" : undefined,
+                    activeBrowserTab || activeEditorTab || mentuTabActive
+                      ? "none"
+                      : undefined,
                 }}
               >
                 {terminal && status ? (
@@ -4622,6 +4773,31 @@ export function App() {
                   )
                 ) : null}
               </div>
+              {/* Mentu as a tab (fixes the reported bug): the wide recipe
+                  surface renders in the tab area, exactly like the browser
+                  and editor panes above, so the tab strip stays mounted and
+                  keeps its membership. The panel is the `variant="tab"`
+                  MentuPanel the full-page route used to render, unchanged. */}
+              <div
+                id="mentu-tab-panel"
+                role="tabpanel"
+                aria-labelledby={mentuTabActive ? "mentu-tab" : undefined}
+                className="active-session-panel"
+                data-testid="mentu-tab-panel"
+                style={{
+                  display: mentuTabActive ? undefined : "none",
+                }}
+              >
+                {mentuAlive && current ? (
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <MentuPanel
+                      bridge={mentuGatedBridge}
+                      workspaceId={current.id}
+                      variant="tab"
+                    />
+                  </div>
+                ) : null}
+              </div>
             </section>
             {tasksAlive && status ? (
               // No aria-label: an unnamed section is generic (invisible to
@@ -4756,23 +4932,6 @@ export function App() {
                     filesBaseRegistry,
                     AUTOMATIONS_ROUTE_ID,
                   )}
-                  workspace={filesProps.workspace}
-                  status={filesProps.status}
-                />
-              </section>
-            ) : null}
-            {mentuAlive && filesProps ? (
-              <section
-                ref={mentuSectionRef}
-                tabIndex={-1}
-                className="terminal-column"
-                aria-label="Mentu"
-                style={{
-                  display: route === MENTU_ROUTE_ID ? undefined : "none",
-                }}
-              >
-                <MountedPanel
-                  descriptor={resolveRoute(filesBaseRegistry, MENTU_ROUTE_ID)}
                   workspace={filesProps.workspace}
                   status={filesProps.status}
                 />

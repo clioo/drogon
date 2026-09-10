@@ -45,7 +45,7 @@ import {
   resolveMenuShortcutPlatform,
 } from "./tab-menu-shortcuts";
 
-export type TabMenuKind = "session" | "browser" | "editor";
+export type TabMenuKind = "session" | "browser" | "editor" | "mentu";
 
 /** Window event that closes every other open tab menu before one opens. */
 export const TAB_STRIP_CLOSE_MENUS_EVENT = "drogon-close-tab-menus";

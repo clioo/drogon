@@ -32,6 +32,7 @@ import { probeRenderedExitedStubs } from "./probe-rendered-exited-stubs.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
+import { probeRenderedMentuTab } from "./probe-rendered-mentu-tab.mjs";
 import { probeRenderedDaemonRestart } from "./probe-rendered-daemon-restart.mjs";
 import {
   probeRenderedBrowserTabsAcrossDaemonRestart,
@@ -865,6 +866,18 @@ try {
     // tabs persist per workspace and come back in order after a reload.
     report.checks.push(
       ...(await probeRenderedTabs({ page, workspace, output })),
+    );
+    // Mentu-as-tab: the reported bug (the "+" menu's Mentu entry used to
+    // hide the whole tab strip) plus the Bot-facing `drogon-cli mentu open`
+    // and the honest `mentu status` environment check.
+    report.checks.push(
+      ...(await probeRenderedMentuTab({
+        page,
+        workspace,
+        output,
+        cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
+        dataDir,
+      })),
     );
   }
   if (withAgents) {

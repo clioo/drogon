@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MENTU_TAB_ID,
   bulkCloseTargets,
   loadTabStripState,
   moveTabOrder,
@@ -147,6 +148,7 @@ describe("tab-strip persistence", () => {
       splits: {},
       editors: [],
       browsers: [],
+      mentu: false,
     });
     expect(loadTabStripState(storage, "ws-1")).toEqual({
       order: ["a", "b"],
@@ -155,6 +157,7 @@ describe("tab-strip persistence", () => {
       splits: {},
       editors: [],
       browsers: [],
+      mentu: false,
     });
     expect(loadTabStripState(storage, "ws-2")).toEqual({
       order: [],
@@ -163,6 +166,7 @@ describe("tab-strip persistence", () => {
       splits: {},
       editors: [],
       browsers: [],
+      mentu: false,
     });
   });
 
@@ -178,6 +182,7 @@ describe("tab-strip persistence", () => {
       splits: {},
       editors: [],
       browsers: [],
+      mentu: false,
     });
     expect(
       parseTabStripState(
@@ -190,6 +195,7 @@ describe("tab-strip persistence", () => {
       splits: {},
       editors: [],
       browsers: [],
+      mentu: false,
     });
   });
 
@@ -204,6 +210,7 @@ describe("tab-strip persistence", () => {
       },
       editors: [],
       browsers: [],
+      mentu: false,
     });
     expect(loadTabStripState(storage, "ws-1").splits).toEqual({
       a: { panes: ["a", "b"], active: "b", sizes: [0.6, 0.4] },
@@ -235,6 +242,7 @@ describe("tab-strip membership (R16-AJ, fixes #215)", () => {
       splits: {},
       editors: ["notes.txt", "src/a.ts"],
       browsers: [{ tabId: "browser-tab-1", url: "https://example.com/" }],
+      mentu: false,
     });
     expect(loadTabStripState(storage, "ws-1")).toEqual({
       order: ["ws-1::notes.txt", "browser-tab-1"],
@@ -243,6 +251,7 @@ describe("tab-strip membership (R16-AJ, fixes #215)", () => {
       splits: {},
       editors: ["notes.txt", "src/a.ts"],
       browsers: [{ tabId: "browser-tab-1", url: "https://example.com/" }],
+      mentu: false,
     });
   });
 
@@ -258,6 +267,7 @@ describe("tab-strip membership (R16-AJ, fixes #215)", () => {
       splits: {},
       editors: [],
       browsers: [],
+      mentu: false,
     });
   });
 
@@ -326,5 +336,79 @@ describe("resolveTabTitle", () => {
   it("prefers the custom rename", () => {
     expect(resolveTabTitle("a", "Terminal 1", { a: "db" })).toBe("db");
     expect(resolveTabTitle("b", "Terminal 2", { a: "db" })).toBe("Terminal 2");
+  });
+});
+
+// The Mentu tab's strip membership: one stable id in `order`, one boolean in
+// the envelope. Reconciling must never invent the tab while it is closed and
+// must keep its stored position while it is open.
+describe("Mentu tab membership", () => {
+  it("only admits the Mentu id while the tab is open", () => {
+    expect(reconcileTabOrder(["a"], ["a"], [], [], false)).toEqual(["a"]);
+    expect(reconcileTabOrder(["a"], ["a"], [], [], true)).toEqual([
+      "a",
+      MENTU_TAB_ID,
+    ]);
+    // Its stored position survives a restart, like any other tab.
+    expect(
+      reconcileTabOrder(
+        ["a", MENTU_TAB_ID, "b"],
+        ["a", "b"],
+        [],
+        [],
+        true,
+      ),
+    ).toEqual(["a", MENTU_TAB_ID, "b"]);
+    // A closed Mentu tab is dropped even if the stored order still has it.
+    expect(
+      reconcileTabOrder(["a", MENTU_TAB_ID, "b"], ["a", "b"], [], [], false),
+    ).toEqual(["a", "b"]);
+  });
+
+  it("round-trips the membership flag and defaults to closed", () => {
+    const storage = memStorage();
+    const open = {
+      order: ["a", MENTU_TAB_ID],
+      pinned: [],
+      titles: {},
+      splits: {},
+      editors: [],
+      browsers: [],
+      mentu: true,
+    };
+    saveTabStripState(storage, "ws-1", open);
+    expect(loadTabStripState(storage, "ws-1").mentu).toBe(true);
+
+    const closed = { ...open, order: ["a"], mentu: false };
+    saveTabStripState(storage, "ws-2", closed);
+    expect(loadTabStripState(storage, "ws-2").mentu).toBe(false);
+
+    // Pre-Mentu envelopes and junk both hydrate to closed — never to a tab
+    // the user never opened.
+    expect(
+      parseTabStripState(
+        JSON.stringify({ state: { order: ["a"], pinned: [], titles: {} } }),
+      ).mentu,
+    ).toBe(false);
+    expect(
+      parseTabStripState(
+        JSON.stringify({ state: { order: ["a"], mentu: "yes" } }),
+      ).mentu,
+    ).toBe(false);
+    expect(
+      parseTabStripState(
+        JSON.stringify({ state: { order: ["a"], mentu: 1 } }),
+      ).mentu,
+    ).toBe(false);
+  });
+
+  it("the Mentu tab can be pinned and bulk-closed like any other tab", () => {
+    const order = ["a", MENTU_TAB_ID, "b"];
+    expect(
+      togglePinnedOrder(order, [], MENTU_TAB_ID).pinned,
+    ).toEqual([MENTU_TAB_ID]);
+    expect(
+      bulkCloseTargets(order, [MENTU_TAB_ID], "a", "others"),
+    ).toEqual(["b"]);
   });
 });

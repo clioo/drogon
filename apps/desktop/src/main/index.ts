@@ -67,6 +67,7 @@ import { startSessionStatePush } from "./session-state-bridge";
 import { startBrowserRelay } from "./browser/relay-poller";
 import { dispatchBotSnapshot, registerBotBridge } from "./bot-bridge";
 import { autoInstallBundledMentuRuntime, registerMentuBridge } from "./mentu-bridge";
+import { openMentuTabInBoundWindow } from "./mentu-open-relay";
 import {
   readCursorMismatches,
   writeByteCountMismatches,
@@ -811,7 +812,11 @@ if (!holdsSingleInstanceLock) {
         getUsageStore().setAgentWorking(working);
       },
     });
-    startBrowserRelay(registerBrowserIpc(() => window));
+    // `mentu.open` rides the same relay queue but is answered by the
+    // renderer (the Mentu tab is renderer state); see main/mentu-open-relay.ts.
+    startBrowserRelay(registerBrowserIpc(() => window), (workspaceId, recipeId) =>
+      openMentuTabInBoundWindow(workspaceId, recipeId),
+    );
     registerNotificationsIpc(() => window);
     // R16-BF2 push: daemon `session.events.poll` → `ui:session-state-changed`
     // for the card/tab badge (the 2 s `session.list` poll stays as fallback).
