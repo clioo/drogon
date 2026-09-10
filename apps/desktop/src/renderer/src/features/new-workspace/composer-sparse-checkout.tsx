@@ -126,6 +126,11 @@ export function ComposerSparseCheckout({
                 onChange={(event) =>
                   setDraft({ ...draft, name: event.target.value })
                 }
+                // Why (source SparseCheckoutPresetDraftForm): preset names
+                // and directory lists are identifiers/paths, not prose.
+                maxLength={80}
+                autoComplete="off"
+                spellCheck={false}
                 className="w-full rounded-md border border-input bg-transparent px-3 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               />
             </div>
@@ -140,6 +145,8 @@ export function ComposerSparseCheckout({
                   setDraft({ ...draft, directoriesText: event.target.value })
                 }
                 placeholder="apps/desktop\ncrates"
+                // Why (source SparseCheckoutPresetDraftForm): paths, not prose.
+                spellCheck={false}
                 className="w-full resize-y rounded-md border border-input bg-transparent px-3 py-1.5 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               />
             </div>
