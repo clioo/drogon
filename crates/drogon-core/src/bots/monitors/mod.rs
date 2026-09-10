@@ -40,13 +40,12 @@
 //!    cursor write; on any failure persist neither.
 //!
 //! Scheduling/firing reuses the existing automation scheduler and runner
-//! (C08 owns admission and renewal); the durable driver is [`tick`], and
-//! committed change events land in the delegation outbox
-//! (`bots::delegation`) in the same transaction as the cursor write.
-//! This module defines no timer, launcher, or model caller. The
-//! same-transaction cursor-CAS + outbox-enqueue shape is
-//! [`storage::commit_advance_in_tx`], whose caller-supplied `enqueue`
-//! closure is the delegation outbox write.
+//! (C08 owns admission and renewal); the durable producer tick lives in
+//! `bot_self_mgmt`, and committed change events land in its outbox, which
+//! the delegation drain (`bots::delegation`) consumes. This module defines
+//! no timer, launcher, or model caller. The same-transaction cursor-CAS +
+//! outbox-enqueue shape is [`storage::commit_advance_in_tx`], whose
+//! caller-supplied `enqueue` closure is the outbox write.
 //!
 //! ## Approval, secrets, and policy
 //!
@@ -76,7 +75,6 @@ pub mod record;
 pub mod result;
 pub mod rule;
 pub mod storage;
-pub mod tick;
 
 pub use commit::{
     BASE_BACKOFF_MS, CommitDecision, CommitInput, MAX_BACKOFF_MS, MonitorEventIntent, RetainReason,

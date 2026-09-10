@@ -321,11 +321,15 @@ fn scheduler_tick_delegates_file_changes_to_bot_runs() {
 
     // First tick: the initial read is a change → one event, one dispatch.
     // Wall-clock times (not fixed): the cap row and the list view must
-    // agree on *today*.
+    // agree on *today*. The producer tick only fires cron-scheduled
+    // monitors, so the follow-up change below is timed past the next
+    // minute boundary (deterministic regardless of where in the minute
+    // this test starts).
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as f64;
+    let next_minute = (now / 60_000.0).floor() * 60_000.0 + 60_000.0;
     let summary = drogon_core::automations::scheduler::tick_once(&fixture.engine, now);
     assert_eq!(summary.monitor_events, 1, "one change committed");
     assert_eq!(summary.delegations, 1, "one delegation dispatched");
@@ -337,19 +341,64 @@ fn scheduler_tick_delegates_file_changes_to_bot_runs() {
     assert_eq!(summary.delegations, 0);
     assert_eq!(history_len(&fixture), 1);
 
-    // A genuinely new change delegates exactly once more.
+    // A genuinely new change delegates exactly once more — timed past
+    // the next minute boundary so the cron-scheduled producer is due.
     std::fs::write(
         fixture._dir.path().join("folder/notes/status.md"),
         b"v2 bytes",
     )
     .unwrap();
-    let summary = drogon_core::automations::scheduler::tick_once(&fixture.engine, now + 30_000.0);
+    let summary =
+        drogon_core::automations::scheduler::tick_once(&fixture.engine, next_minute + 61_000.0);
     assert_eq!(summary.monitor_events, 1);
     assert_eq!(summary.delegations, 1);
     assert_eq!(history_len(&fixture), 2);
 
-    // The list view reports the honest budget: 2 of 10 consumed.
+    // The list view reports the honest budget: 2 consumed (or 1, when
+    // the minute-boundary wait crossed a UTC midnight — the cap day
+    // rolled over, which is itself correct behavior).
     let listed = fixture.list();
-    assert_eq!(listed["monitors"][0]["delegationsToday"]["used"], 2);
+    let used = listed["monitors"][0]["delegationsToday"]["used"]
+        .as_i64()
+        .unwrap();
+    assert!(used == 1 || used == 2, "used today: {used}");
     assert!(listed["monitors"][0]["lastEventId"].as_str().is_some());
+}
+
+#[test]
+fn create_honors_cron_manual_and_rejects_bad_cron() {
+    let fixture = Fixture::new();
+    // Default: scheduled every minute (the cadence the P2 tick fires).
+    let created = fixture.create(
+        "m-cron-default",
+        json!({"monitorId": "mon-cron", "resource": "notes/status.md"}),
+    );
+    assert_eq!(
+        created["trigger"],
+        json!({"kind": "scheduled", "cron": "* * * * *"})
+    );
+    // Explicit cron.
+    let created = fixture.create(
+        "m-cron-explicit",
+        json!({"monitorId": "mon-cron2", "resource": "notes/status.md", "cron": "*/5 * * * *"}),
+    );
+    assert_eq!(
+        created["trigger"],
+        json!({"kind": "scheduled", "cron": "*/5 * * * *"})
+    );
+    // Nonsense cron is refused at admission, not discovered at tick time.
+    let error = fixture.create_err(
+        "m-cron-bad",
+        json!({"monitorId": "mon-bad", "resource": "notes/status.md", "cron": "FREQ=DAILY"}),
+    );
+    assert_eq!(error.code, "invalid_argument", "{error:?}");
+    // Manual opt-out: staged, valid, but the producer tick always skips it.
+    let created = fixture.create(
+        "m-manual",
+        json!({"monitorId": "mon-man", "resource": "notes/status.md", "manual": true}),
+    );
+    assert_eq!(created["trigger"], json!({"kind": "manual"}));
+    let listed = fixture.list();
+    let monitors = listed["monitors"].as_array().unwrap();
+    assert_eq!(monitors.len(), 3);
 }

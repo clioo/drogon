@@ -2,11 +2,11 @@
 //! a Bot responsibility run that creates a worktree, opens a session, and
 //! sends a prompt.
 //!
-//! A monitor tick ([`crate::bots::monitors::tick`]) that commits a change
-//! writes one [`DelegationEvent`] row into the `bot_monitor_events` outbox
-//! in the same transaction as the cursor advance — never one without the
-//! other. This module drains that outbox, oldest first, in the scheduler
-//! tick tail:
+//! The producer is the P2 monitor tick
+//! ([`crate::bot_self_mgmt::tick_bot_monitors`]), which writes one row per
+//! change into the `bot_monitor_events` outbox in the same transaction as
+//! the cursor advance — never one without the other. This module drains
+//! that outbox, oldest first, in the scheduler tick tail:
 //!
 //! ```text
 //! outbox row → stale-grace check → monitor policy (`ExplicitResponsibility`)
@@ -37,9 +37,11 @@
 //!   from the Bot's own folder row; the harness resolves from the Bot's
 //!   stored policy via [`harness_overrides`](crate::bots::policy::harness_overrides).
 //!   Either absent → honest refusal, event deleted, no fabricated dispatch.
-//! - Never dispatches `NotificationOnly` monitors. Those events drain
-//!   without a run (counted as `drained_notification`); inference runs only
-//!   for an explicitly bound responsibility.
+//! - Never dispatches `NotificationOnly` monitors. Their outbox rows are
+//!   another lane's retained evidence: the peek join admits only bound
+//!   monitors, so unbound rows are never claimed, never dispatched, and
+//!   never deleted here. Inference runs only for an explicitly bound
+//!   responsibility.
 //! - Never floods: [`MAX_DELEGATIONS_PER_BOT_PER_DAY`] bounds one bot, and
 //!   [`MAX_DRAIN_PER_TICK`] bounds one tick. A tripped cap deletes the
 //!   excess event and counts it (`cap_exceeded`); the durable daily-count
@@ -150,16 +152,12 @@ pub struct DelegationEvent {
 }
 
 fn create_tables(tx: &Transaction) -> Result<()> {
+    // The outbox itself (`bot_monitor_events`) belongs to the BotSelf
+    // component (`bot_self_mgmt::record_monitor_event_in_tx` writes it);
+    // this component owns only the delegation budget rows. Forward, never
+    // duplicated here.
     tx.execute_batch(
-        "CREATE TABLE IF NOT EXISTS bot_monitor_events (
-            event_id TEXT PRIMARY KEY,
-            monitor_id TEXT NOT NULL,
-            observed_at REAL NOT NULL,
-            payload_json TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS bot_monitor_events_observed
-            ON bot_monitor_events(observed_at);
-        CREATE TABLE IF NOT EXISTS bot_delegation_daily (
+        "CREATE TABLE IF NOT EXISTS bot_delegation_daily (
             bot_id TEXT NOT NULL,
             day_utc INTEGER NOT NULL,
             count INTEGER NOT NULL,
@@ -241,40 +239,44 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Enqueue one event inside the caller's transaction (the monitor tick
-/// calls this from its cursor-advance transaction, so cursor and outbox
-/// commit atomically). `INSERT OR IGNORE` on the content-bound event id:
-/// a duplicate tick for the same change collapses here, never enqueues
-/// twice. Returns true when the row was newly inserted.
-pub fn enqueue_event_in_tx(tx: &Transaction, event: &DelegationEvent) -> Result<bool> {
-    let payload = serde_json::to_string(event)?;
-    let inserted = tx.execute(
-        "INSERT OR IGNORE INTO bot_monitor_events
-            (event_id, monitor_id, observed_at, payload_json)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![
-            event.event_id,
-            event.monitor_id,
-            event.observed_at_ms,
-            payload
-        ],
-    )?;
-    Ok(inserted > 0)
-}
-
-/// Oldest-first peek (read-only, no claim — the claim is the delete in the
-/// record transaction). Bounded so one crowded outbox cannot stall a tick.
-fn peek_oldest(conn: &Connection, limit: usize) -> Result<Vec<DelegationEvent>> {
+/// Oldest-first peek at the P2 outbox (read-only, no claim — the claim is
+/// the delete in the record transaction), restricted to monitors that
+/// opted into the chain (`inferencePolicy.kind = explicit_responsibility`).
+/// Unbound monitors' rows are another component's retained evidence
+/// (their tests assert those rows persist) — this drain never touches
+/// them, and the join means an unbound backlog can never starve a bound
+/// event behind the per-tick bound. Rows whose payload no longer parses
+/// (or whose id disagrees with its own payload) come back as poison the
+/// caller orphans instead of retrying forever.
+fn peek_oldest(conn: &Connection, limit: usize) -> Result<Vec<PeekedEvent>> {
     let mut stmt = conn.prepare(
-        "SELECT payload_json FROM bot_monitor_events
-         ORDER BY observed_at, rowid LIMIT ?1",
+        "SELECT e.event_id, e.payload_json FROM bot_monitor_events e
+         JOIN bot_monitors m ON m.id = e.monitor_id
+         WHERE json_extract(m.payload_json, '$.inferencePolicy.kind')
+               = 'explicit_responsibility'
+         ORDER BY e.at, e.rowid LIMIT ?1",
     )?;
     let rows = stmt
-        .query_map(params![limit as i64], |r| r.get::<_, String>(0))?
+        .query_map(params![limit as i64], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    rows.into_iter()
-        .map(|json| Ok(serde_json::from_str(&json)?))
-        .collect()
+    Ok(rows
+        .into_iter()
+        .map(|(event_id, payload_json)| {
+            match serde_json::from_str::<DelegationEvent>(&payload_json) {
+                Ok(event) if event.event_id == event_id => PeekedEvent::Event(event),
+                _ => PeekedEvent::Poison(event_id),
+            }
+        })
+        .collect())
+}
+
+/// One peeked outbox row: a well-formed delegation event, or a poison row
+/// the drain orphans instead of spinning on.
+enum PeekedEvent {
+    Event(DelegationEvent),
+    Poison(String),
 }
 
 fn delete_event(conn: &Connection, event_id: &str) -> Result<()> {
@@ -285,12 +287,24 @@ fn delete_event(conn: &Connection, event_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Whether both P2 tables this drain reads exist yet. Databases that
+/// predate the BotSelf/BotMonitors components' adoption (or unit-test
+/// databases that never migrated them) drain to an empty summary, never
+/// an error.
+fn outbox_table_exists(conn: &Connection) -> bool {
+    let has = |name: &str| {
+        conn.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1")
+            .and_then(|mut stmt| stmt.exists(params![name]))
+            .unwrap_or(false)
+    };
+    has("bot_monitor_events") && has("bot_monitors")
+}
+
 /// Terminal-verdict buckets for [`delete_counted`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeleteBucket {
     Orphaned,
     Refused,
-    DrainedNotification,
     JoinedExisting,
     CapExceeded,
 }
@@ -308,7 +322,6 @@ fn delete_counted(
         Ok(()) => match bucket {
             DeleteBucket::Orphaned => summary.orphaned += 1,
             DeleteBucket::Refused => summary.refused += 1,
-            DeleteBucket::DrainedNotification => summary.drained_notification += 1,
             DeleteBucket::JoinedExisting => summary.joined_existing += 1,
             DeleteBucket::CapExceeded => summary.cap_exceeded += 1,
         },
@@ -479,8 +492,10 @@ pub struct DelegationSummary {
     pub skipped_stale: usize,
     /// Excess events dropped by the per-day cap.
     pub cap_exceeded: usize,
-    /// `NotificationOnly` events drained without a run.
-    pub drained_notification: usize,
+    /// Bound at peek time but unbound when re-read (a concurrent edit
+    /// won the race): left queued for the next drain, never dispatched
+    /// and never deleted on this pass.
+    pub deferred: usize,
     /// Events whose bot/responsibility/policy gate refused them.
     pub refused: usize,
     /// Events whose monitor or bot row is gone.
@@ -577,6 +592,12 @@ pub fn drain_delegation_events<S: DispatchSeam>(
     let events = match peek_oldest(&db.lock().unwrap(), MAX_DRAIN_PER_TICK) {
         Ok(events) => events,
         Err(e) => {
+            // The outbox belongs to the BotSelf component: a database that
+            // predates its adoption has no table, which means no events —
+            // never an error (mirrors their tick's own table check).
+            if !outbox_table_exists(&db.lock().unwrap()) {
+                return summary;
+            }
             eprintln!("[delegation] outbox peek failed: {e}");
             return summary;
         }
@@ -584,8 +605,15 @@ pub fn drain_delegation_events<S: DispatchSeam>(
     // Bots that already tripped the cap this drain: their remaining events
     // stay queued (another bot's events still drain normally).
     let mut capped: HashSet<String> = HashSet::new();
-    for event in &events {
+    for peeked in &events {
         summary.claimed += 1;
+        let event = match peeked {
+            PeekedEvent::Event(event) => event,
+            PeekedEvent::Poison(event_id) => {
+                delete_counted(db, event_id, &mut summary, DeleteBucket::Orphaned);
+                continue;
+            }
+        };
         if now_ms - event.observed_at_ms > DELEGATION_GRACE_MS {
             if delete_event(&db.lock().unwrap(), &event.event_id).is_ok() {
                 summary.skipped_stale += 1;
@@ -639,15 +667,13 @@ fn drain_single_event<S: DispatchSeam>(
             return;
         }
     };
-    // Default policy stops at the drained row: no model calls.
+    // The peek only admits bound monitors, but a concurrent edit can
+    // unbind between peek and now: leave the event queued (it rejoins
+    // the unbound backlog, which this drain never consumes) rather than
+    // dispatching on a stale binding or deleting another lane's row.
     let responsibility_id = match &monitor.inference_policy {
         MonitorInferencePolicy::NotificationOnly => {
-            delete_counted(
-                db,
-                &event.event_id,
-                summary,
-                DeleteBucket::DrainedNotification,
-            );
+            summary.deferred += 1;
             return;
         }
         MonitorInferencePolicy::ExplicitResponsibility { responsibility_id } => {

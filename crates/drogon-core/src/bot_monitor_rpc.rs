@@ -13,7 +13,7 @@
 //! `bot.monitor_create`, `bot.monitor_approve`, `bot.monitor_list`.
 //! Wired into `Engine::dispatch_inner` next to the other `bot.*` arms.
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, Transaction};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -63,6 +63,11 @@ fn parse_scope(params: &Value, method: &str) -> Result<MonitorScope, RpcError> {
             // responsibility and the parked monitor in one call.
             "responsibilityName",
             "instructions",
+            // Producer cadence: a cron string builds a Scheduled trigger
+            // (the P2 tick only fires those); `manual: true` stages a
+            // Manual monitor the tick skips.
+            "cron",
+            "manual",
         ];
         if !admitted.contains(&key.as_str()) {
             return Err(invalid_argument(format!("{method}: unknown field {key}")));
@@ -106,27 +111,6 @@ fn resolve_bot_scope(
     )
 }
 
-/// The watched tree: the registered project whose path is the Bot's folder.
-/// A monitor watches a project tree, never an arbitrary host path.
-fn project_for_folder(
-    conn: &Connection,
-    derived_host_id: &str,
-    folder: &str,
-) -> Result<String, RpcError> {
-    conn.query_row(
-        "SELECT id FROM projects WHERE path = ?1 AND host_id = ?2",
-        params![folder, derived_host_id],
-        |r| r.get::<_, String>(0),
-    )
-    .optional()
-    .map_err(|e| storage_error(format!("project lookup failed: {e}")))?
-    .ok_or_else(|| {
-        invalid_argument(
-            "this bot's folder is not a registered project yet: run `project add` first",
-        )
-    })
-}
-
 fn monitor_error(e: mstorage::StorageError) -> RpcError {
     match e {
         mstorage::StorageError::IdCollision => {
@@ -165,7 +149,7 @@ pub(crate) fn create_monitor_in_tx(
     now_ms: f64,
 ) -> Result<Value, RpcError> {
     let scope = parse_scope(params, "bot.monitor_create")?;
-    let (folder, _) = resolve_bot_scope(tx, derived_host_id, &scope)?;
+    let (folder, workspace_id) = resolve_bot_scope(tx, derived_host_id, &scope)?;
     let object = params.as_object().expect("parse_scope checked object");
     let resource = object
         .get("resource")
@@ -288,19 +272,43 @@ pub(crate) fn create_monitor_in_tx(
     } else {
         None
     };
-    let project_id = project_for_folder(tx, derived_host_id, &folder)?;
+    // The watched tree is the Bot's owning workspace: the P2 producer
+    // tick resolves a monitor's `project_id` through the `workspaces`
+    // table, so the rule names the workspace id, never an arbitrary path.
     let rule = MonitorRule::LocalFileDigest(LocalFileRule {
         host_id: derived_host_id.to_string(),
-        project_id,
+        project_id: workspace_id.clone(),
         resource,
         max_bytes,
     });
     validate_rule(&rule).map_err(invalid_argument)?;
+    // Scheduled by default (the P2 producer tick only fires
+    // cron-scheduled monitors); explicit `cron` sets the cadence, and
+    // `manual: true` stages a Manual monitor the tick always skips.
+    let trigger = match object.get("cron") {
+        None | Some(Value::Null) => match object.get("manual") {
+            Some(Value::Bool(true)) => MonitorTrigger::Manual,
+            _ => MonitorTrigger::Scheduled {
+                cron: "* * * * *".to_string(),
+            },
+        },
+        Some(Value::String(cron)) => {
+            let admitted = crate::automations::scheduler::validate_cron(cron)
+                .map_err(|e| invalid_argument(format!("bot.monitor_create: invalid cron: {e}")))?;
+            MonitorTrigger::Scheduled { cron: admitted }
+        }
+        Some(_) => {
+            return Err(invalid_argument(
+                "bot.monitor_create: cron must be a cron expression string",
+            ));
+        }
+    };
+    trigger.validate().map_err(invalid_argument)?;
     let mut record = new_unapproved_monitor(
         monitor_id.clone(),
         Some(scope.bot_id.clone()),
         rule,
-        MonitorTrigger::Manual,
+        trigger,
         now_ms,
     )
     .map_err(invalid_argument)?;
@@ -312,12 +320,21 @@ pub(crate) fn create_monitor_in_tx(
         "monitorId": record.id,
         "botId": scope.bot_id,
         "approved": false,
+        "trigger": trigger_view(&record.trigger),
         "responsibilityId": match &record.inference_policy {
             crate::bots::monitors::policy::MonitorInferencePolicy::ExplicitResponsibility { responsibility_id } =>
                 Value::String(responsibility_id.clone()),
             _ => Value::Null,
         },
     }))
+}
+
+/// Wire view of a monitor trigger for create/list responses.
+fn trigger_view(trigger: &MonitorTrigger) -> Value {
+    match trigger {
+        MonitorTrigger::Manual => json!({"kind": "manual"}),
+        MonitorTrigger::Scheduled { cron } => json!({"kind": "scheduled", "cron": cron}),
+    }
 }
 
 /// `bot.monitor_approve` work phase: arm the monitor's CURRENT rule text.
@@ -330,7 +347,7 @@ pub(crate) fn approve_monitor_in_tx(
     now_ms: f64,
 ) -> Result<Value, RpcError> {
     let scope = parse_scope(params, "bot.monitor_approve")?;
-    let (folder, _) = resolve_bot_scope(tx, derived_host_id, &scope)?;
+    let (_folder, workspace_id) = resolve_bot_scope(tx, derived_host_id, &scope)?;
     let monitor_id = params
         .as_object()
         .and_then(|o| o.get("monitorId"))
@@ -346,7 +363,7 @@ pub(crate) fn approve_monitor_in_tx(
     }
     // The approval pins this rule text: refuse to arm a monitor whose rule
     // no longer watches this bot's own tree.
-    let project_id = project_for_folder(tx, derived_host_id, &folder)?;
+    let project_id = workspace_id.clone();
     let rule = record.rule.local_file();
     if rule.host_id != derived_host_id || rule.project_id != project_id {
         return Err(invalid_argument(
@@ -393,6 +410,8 @@ fn monitor_list_in_conn(
                 },
                 "cursor": record.cursor,
                 "lastEventId": record.last_event_id,
+                "health": crate::bot_self_mgmt::monitor_health(record).as_str(),
+                "trigger": trigger_view(&record.trigger),
                 "consecutiveErrors": record.consecutive_errors,
                 "lastError": record.last_error,
                 "delegationsToday": {
