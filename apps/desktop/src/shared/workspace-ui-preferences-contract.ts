@@ -23,6 +23,8 @@ export type WorkspaceUIPreferences = Pick<
   | "hideAutomationGeneratedWorkspaces"
   | "hideCliCreatedWorkspaces"
   | "worktreeCardProperties"
+  | "agentActivityDisplayMode"
+  | "_expandedWorktreeCardPropertiesDefaulted"
   | "workspaceStatuses"
   | "workspaceBoardOpacity"
   | "workspaceBoardColumnWidth"

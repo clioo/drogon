@@ -83,6 +83,10 @@ import {
 } from "./workspace-options-state";
 import type { WorkspaceUIPreferences } from "../../../../shared/workspace-ui-preferences-contract";
 import { WorkspaceOptionsMenuSections } from "./WorkspaceOptionsMenuSections";
+import { resolveCardPullRequest } from "./worktree-card-pr-display";
+import { useWorkspaceCardPorts } from "./use-workspace-card-ports";
+import { useWorktreeIssueLinks } from "./use-worktree-issue-links";
+import type { WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
 import { useProjectHeaderDrag } from "./project-header-drag";
 import { useWorktreeCardDrag } from "./worktree-card-drag";
 import { WorktreeCard } from "./WorktreeCard";
@@ -459,6 +463,8 @@ export function ProjectList({
     () => fromSharedUIPreferences(sharedPrefs),
     [sharedPrefs],
   );
+  const portsByWorkspaceId = useWorkspaceCardPorts(workspaces, workspaceOptions.showProperties.ports === true);
+  const issueLinksByWorktree = useWorktreeIssueLinks(groups, workspaceOptions.showProperties["linear-issue"] === true || workspaceOptions.showProperties["jira-issue"] === true);
   useEffect(() => {
     const ui = windowUiBridge(window.drogon);
     if (!ui) return;
@@ -745,7 +751,7 @@ export function ProjectList({
   // fetched git project is left OUT of the map on purpose: `derivePrStatusBucket`
   // treats absence as `unavailable`, distinct from a real empty `none`.
   useEffect(() => {
-    if (workspaceOptions.groupBy !== "pr-status") return;
+    if (workspaceOptions.groupBy !== "pr-status" && !workspaceOptions.showProperties.pr) return;
     const bridge = windowTasksBridge(window.drogon);
     if (!bridge.tasksList) return;
     const gitProjectIds = [
@@ -792,7 +798,7 @@ export function ProjectList({
     return () => {
       cancelled = true;
     };
-  }, [hideFiltered, workspaceOptions.groupBy, pullsByProjectId]);
+  }, [hideFiltered, workspaceOptions.groupBy, workspaceOptions.showProperties.pr, pullsByProjectId]);
   const prGroups = useMemo(
     () =>
       groupWorktreesByPrStatus(hideFiltered, pullsByProjectId).map((group) => ({
@@ -997,6 +1003,10 @@ export function ProjectList({
             <EntryGroupRow
               key={group.key}
               group={group}
+              portsByWorkspaceId={portsByWorkspaceId}
+              issueLinksByWorktree={issueLinksByWorktree}
+              pullsByProjectId={pullsByProjectId}
+              cardOptions={workspaceOptions}
               showBranch={workspaceOptions.showProperties.branch}
               showPr={workspaceOptions.showProperties.pr}
               cardLayout={workspaceOptions.cardLayout}
@@ -1021,6 +1031,10 @@ export function ProjectList({
             key={group.project.id}
             group={group}
             hideHeader={workspaceOptions.groupBy === "none"}
+            portsByWorkspaceId={portsByWorkspaceId}
+            issueLinksByWorktree={issueLinksByWorktree}
+            pullsByProjectId={pullsByProjectId}
+            cardOptions={workspaceOptions}
             showBranch={workspaceOptions.showProperties.branch}
             showPr={workspaceOptions.showProperties.pr}
             cardLayout={workspaceOptions.cardLayout}
@@ -1131,6 +1145,7 @@ function findProject(
  */
 function EntryGroupRow({
   group,
+  issueLinksByWorktree,
   workspaces,
   sessions,
   selectedWorkspaceId,
@@ -1143,11 +1158,15 @@ function EntryGroupRow({
   onRemoveWorktree,
   onRenameWorktree,
   onRemoveProject,
+  portsByWorkspaceId,
+  pullsByProjectId,
+  cardOptions,
   showBranch = true,
   showPr = true,
   cardLayout = "comfortable",
 }: {
   group: WorkspaceEntryGroup;
+  issueLinksByWorktree?: ReadonlyMap<string, readonly WorktreeIssueLink[]>;
   workspaces: Workspace[];
   sessions: Session[];
   selectedWorkspaceId: string;
@@ -1163,6 +1182,9 @@ function EntryGroupRow({
     name: string,
   ) => Promise<string | null>;
   onRemoveProject: (project: Project) => void;
+  portsByWorkspaceId?: ReadonlyMap<string, readonly number[]>;
+  pullsByProjectId?: ReadonlyMap<string, readonly TaskPullRequest[] | null>;
+  cardOptions?: Pick<WorkspaceOptionsState, "showProperties" | "agentActivityDisplayMode">;
   showBranch?: boolean;
   showPr?: boolean;
   cardLayout?: "comfortable" | "compact";
@@ -1205,6 +1227,10 @@ function EntryGroupRow({
                 tabStrip={tabStrip}
                 showBranch={showBranch}
                 showPr={showPr}
+                ports={portsByWorkspaceId?.get(worktree.workspaceId)}
+                issueLinks={issueLinksByWorktree?.get(worktree.id)}
+                pr={resolveCardPullRequest(worktree, pullsByProjectId?.get(project.id) ?? [])}
+                {...cardOptions}
                 onRemove={
                   !worktreesAvailable
                     ? null
@@ -1228,6 +1254,7 @@ function EntryGroupRow({
 
 function ProjectRow({
   group,
+  issueLinksByWorktree,
   headerIndex,
   workspaces,
   sessions,
@@ -1247,11 +1274,15 @@ function ProjectRow({
   onOpenProjectSettings,
   onRemoveProject,
   hideHeader = false,
+  portsByWorkspaceId,
+  pullsByProjectId,
+  cardOptions,
   showBranch = true,
   showPr = true,
   cardLayout = "comfortable",
 }: {
   group: ProjectGroup;
+  issueLinksByWorktree?: ReadonlyMap<string, readonly WorktreeIssueLink[]>;
   /** Index among the rendered project headers (drag geometry). */
   headerIndex: number;
   workspaces: Workspace[];
@@ -1292,6 +1323,9 @@ function ProjectRow({
    *  each card (WorktreeCard's own doc comment). */
   showBranch?: boolean;
   showPr?: boolean;
+  portsByWorkspaceId?: ReadonlyMap<string, readonly number[]>;
+  pullsByProjectId?: ReadonlyMap<string, readonly TaskPullRequest[] | null>;
+  cardOptions?: Pick<WorkspaceOptionsState, "showProperties" | "agentActivityDisplayMode">;
   /** Workspace options "Card layout": toggles a density class on each
    *  card's wrapper only -- WorktreeCard's own markup is untouched. */
   cardLayout?: "comfortable" | "compact";
@@ -1385,6 +1419,10 @@ function ProjectRow({
                   tabStrip={tabStrip}
                   showBranch={showBranch}
                   showPr={showPr}
+                  ports={portsByWorkspaceId?.get(worktree.workspaceId)}
+                  issueLinks={issueLinksByWorktree?.get(worktree.id)}
+                  pr={resolveCardPullRequest(worktree, pullsByProjectId?.get(project.id) ?? [])}
+                  {...cardOptions}
                   onRemove={
                     !worktreesAvailable
                       ? null

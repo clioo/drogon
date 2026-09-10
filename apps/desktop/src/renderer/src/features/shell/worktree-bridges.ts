@@ -1,12 +1,13 @@
 import type { GitBridge } from "../../../../shared/git-contract";
 import type { ProjectBridge } from "../../../../shared/project-contract";
+import type { ShellBridge as NativeShellBridge } from "../../../../shared/shell-contract";
 
 /**
  * Renderer-side shape of the granted `window.drogon.shell.*` namespace
  * (main/shell-bridge.ts). Declared here instead of imported from
  * preload/shell.ts: the renderer bundle must not import Electron code.
  */
-export type ShellBridge = {
+export type ShellBridge = Partial<Pick<NativeShellBridge, "openExternal">> & {
   showItemInFolder(input: { path: string }): Promise<
     | { ok: true; result: { shown: boolean } }
     | { ok: false; error: { code: string; message: string; retryable: boolean } }
@@ -26,7 +27,8 @@ export type ShellBridge = {
  * delete these helpers (same note as changes-mount.ts `windowGitBridge`).
  */
 export function windowShellBridge(): ShellBridge | null {
-  const bridge = (window.drogon as unknown as { shell?: ShellBridge }).shell;
+  if (typeof window === "undefined") return null;
+  const bridge = (window.drogon as unknown as { shell?: ShellBridge } | undefined)?.shell;
   return bridge ?? null;
 }
 

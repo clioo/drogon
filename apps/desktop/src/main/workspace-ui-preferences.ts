@@ -17,6 +17,7 @@ import {
   WORKSPACE_BOARD_COLUMN_WIDTH_DEFAULT,
 } from "../shared/workspace-statuses";
 import type { WorktreeCardProperty } from "../shared/persistence-contracts/ui-chrome-types";
+import { DEFAULT_WORKTREE_CARD_PROPERTIES, normalizeWorktreeCardProperties as normalizeSourceCardProperties } from "../shared/worktree/card-properties";
 
 export const WORKSPACE_UI_PREFERENCES_FILE_NAME = "workspace-ui-preferences.json";
 
@@ -24,14 +25,6 @@ const GROUP_BY_VALUES = ["none", "workspace-status", "repo", "pr-status"] as con
 const SORT_BY_VALUES = ["name", "smart", "recent", "repo", "manual"] as const;
 const PROJECT_ORDER_BY_VALUES = ["manual", "recent"] as const;
 const CARD_LAYOUT_VALUES = ["comfortable", "compact"] as const;
-// Real badges WorktreeCardMetaBadges.tsx actually renders today; toggling
-// any other WorktreeCardProperty value would be exactly the inert-control
-// mock UI the task forbids, so only these are admitted.
-const KNOWN_WORKTREE_CARD_PROPERTIES: readonly WorktreeCardProperty[] = [
-  "branch",
-  "pr",
-  "issue",
-];
 
 export const DEFAULT_WORKSPACE_UI_PREFERENCES: WorkspaceUIPreferences = {
   groupBy: "repo",
@@ -43,7 +36,9 @@ export const DEFAULT_WORKSPACE_UI_PREFERENCES: WorkspaceUIPreferences = {
   hideDetachedHeadWorkspaces: false,
   hideAutomationGeneratedWorkspaces: false,
   hideCliCreatedWorkspaces: false,
-  worktreeCardProperties: ["branch", "pr"],
+  worktreeCardProperties: [...DEFAULT_WORKTREE_CARD_PROPERTIES],
+  agentActivityDisplayMode: "compact",
+  _expandedWorktreeCardPropertiesDefaulted: true,
   workspaceStatuses: cloneDefaultWorkspaceStatuses(),
   workspaceBoardOpacity: 1,
   workspaceBoardColumnWidth: WORKSPACE_BOARD_COLUMN_WIDTH_DEFAULT,
@@ -88,19 +83,7 @@ function normalizeCardLayout(value: unknown): WorkspaceUIPreferences["cardLayout
 }
 
 function normalizeWorktreeCardProperties(value: unknown): WorktreeCardProperty[] {
-  if (!Array.isArray(value)) {
-    return [...DEFAULT_WORKSPACE_UI_PREFERENCES.worktreeCardProperties];
-  }
-  const seen = new Set<WorktreeCardProperty>();
-  for (const entry of value) {
-    if (
-      typeof entry === "string" &&
-      (KNOWN_WORKTREE_CARD_PROPERTIES as readonly string[]).includes(entry)
-    ) {
-      seen.add(entry as WorktreeCardProperty);
-    }
-  }
-  return KNOWN_WORKTREE_CARD_PROPERTIES.filter((property) => seen.has(property));
+  return normalizeSourceCardProperties(Array.isArray(value) ? value : undefined);
 }
 
 /**
@@ -113,6 +96,16 @@ function normalizeWorktreeCardProperties(value: unknown): WorktreeCardProperty[]
  */
 export function normalizeWorkspaceUIPreferences(raw: unknown): WorkspaceUIPreferences {
   const state = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const limitedMenuProfile = state._expandedWorktreeCardPropertiesDefaulted !== true
+    && Array.isArray(state.worktreeCardProperties)
+    && state.worktreeCardProperties.every((id) => id === "branch" || id === "pr" || id === "issue");
+  let properties = normalizeWorktreeCardProperties(state.worktreeCardProperties);
+  if (limitedMenuProfile) {
+    // The old menu never controlled these properties; preserve the Notes and
+    // agent rows it always rendered without restoring a user's unchecked PR/Branch.
+    properties = state.cardLayout === "compact" ? normalizeSourceCardProperties(["status"])
+      : normalizeSourceCardProperties([...properties, ...DEFAULT_WORKTREE_CARD_PROPERTIES.filter((id) => id !== "pr")]);
+  }
   const reorderedRepaired = isBoolean(state._workspaceStatusesReorderedDefaultRepaired)
     ? state._workspaceStatusesReorderedDefaultRepaired
     : false;
@@ -128,6 +121,9 @@ export function normalizeWorkspaceUIPreferences(raw: unknown): WorkspaceUIPrefer
     sortBy: normalizeSortBy(state.sortBy),
     projectOrderBy: normalizeProjectOrderBy(state.projectOrderBy),
     cardLayout: normalizeCardLayout(state.cardLayout),
+    agentActivityDisplayMode: state.agentActivityDisplayMode === "full" || state.agentActivityDisplayMode === "compact"
+      ? state.agentActivityDisplayMode : limitedMenuProfile ? "full" : "compact",
+    _expandedWorktreeCardPropertiesDefaulted: true,
     hideSleepingWorkspaces: isBoolean(state.hideSleepingWorkspaces)
       ? state.hideSleepingWorkspaces
       : DEFAULT_WORKSPACE_UI_PREFERENCES.hideSleepingWorkspaces,
@@ -143,7 +139,7 @@ export function normalizeWorkspaceUIPreferences(raw: unknown): WorkspaceUIPrefer
     hideCliCreatedWorkspaces: isBoolean(state.hideCliCreatedWorkspaces)
       ? state.hideCliCreatedWorkspaces
       : DEFAULT_WORKSPACE_UI_PREFERENCES.hideCliCreatedWorkspaces,
-    worktreeCardProperties: normalizeWorktreeCardProperties(state.worktreeCardProperties),
+    worktreeCardProperties: properties,
     workspaceStatuses: normalizePersistedWorkspaceStatuses(state.workspaceStatuses, {
       migrateDefaultWorkflowStatuses: !workflowMigrated,
       repairReorderedDefaultStatuses: !reorderedRepaired,

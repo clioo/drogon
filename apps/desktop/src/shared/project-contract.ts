@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Result } from "./session-contract";
+import { issueDetailsSchema, issueProviderSchema, worktreeIssueLinkSchema, type IssueDetails, type WorktreeIssueLink } from "./worktree-issue-contract";
 
 export const PROJECT_CAPABILITY = "project.v1";
 export const WORKTREE_CAPABILITY = "worktree.v1";
@@ -78,6 +79,9 @@ export type ProjectBridge = {
     manualOrder?: number | null;
     linkedPr?: number | null;
   }): Promise<Result<WorktreeResult>>;
+  worktreeIssueLinks(input: { projectId: string }): Promise<Result<{ links: WorktreeIssueLink[] }>>;
+  worktreeLinkIssue(input: { worktreeId: string; issue: IssueDetails }): Promise<Result<WorktreeIssueLink>>;
+  worktreeUnlinkIssue(input: { worktreeId: string; provider: "linear" | "jira" }): Promise<Result<{ worktreeId: string; provider: "linear" | "jira"; removed: boolean }>>;
   /**
    * Subscribes to registry pushes from main (issue #146). Every method
    * above stays optional; this one is too, so older preloads simply never
@@ -227,6 +231,9 @@ export const projectBridgeSchemas = {
       .max(256)
       .refine((value) => !value.includes("\0")),
   }),
+  worktreeIssueLinks: z.object({ projectId: id }).strict(),
+  worktreeLinkIssue: z.object({ worktreeId: id, issue: issueDetailsSchema }).strict(),
+  worktreeUnlinkIssue: z.object({ worktreeId: id, provider: issueProviderSchema }).strict(),
   worktreeUpdate: z.object({
     worktreeId: id,
     note: z
@@ -318,4 +325,7 @@ export const projectResultSchemas = {
   "worktree.remove": z.object({ id: z.string(), removed: z.boolean() }),
   "worktree.rename": worktreeResult,
   "worktree.update": worktreeResult,
+  "worktree.issueLinks": z.object({ links: z.array(worktreeIssueLinkSchema).max(10000) }),
+  "worktree.linkIssue": worktreeIssueLinkSchema,
+  "worktree.unlinkIssue": z.object({ worktreeId: id, provider: issueProviderSchema, removed: z.boolean() }),
 };

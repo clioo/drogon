@@ -92,7 +92,7 @@ describe("normalizeWorkspaceUIPreferences", () => {
     const state = normalizeWorkspaceUIPreferences({
       worktreeCardProperties: ["branch", "not-a-real-property", "issue"],
     });
-    expect(state.worktreeCardProperties).toEqual(["branch", "issue"]);
+    expect(state.worktreeCardProperties).toEqual(["status", "unread", "branch", "issue"]);
   });
 
   it("clamps board opacity and column width to their real bounds", () => {

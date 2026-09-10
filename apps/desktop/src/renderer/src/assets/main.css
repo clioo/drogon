@@ -1988,6 +1988,33 @@ footer[data-testid="status-bar"] {
   font-size: 11px;
   color: var(--foreground);
 }
+.shell-worktree-card-linked-meta {
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.shell-worktree-card-linked-meta .shell-worktree-card-issue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.shell-worktree-card-issue-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-worktree-card-linked-meta button {
+  cursor: pointer;
+  border-radius: 3px;
+}
+.shell-worktree-card-linked-meta button:hover {
+  background: var(--muted);
+}
+.shell-worktree-card-linked-meta button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
 /* R4-C shell dialogs and card menu (append-only): project add, inline new
    worktree, remove confirm, kebab menu, and the inner select surface of the
    restructured worktree card (outer keeps .shell-worktree-card). */

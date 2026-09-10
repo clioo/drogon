@@ -20,8 +20,9 @@
      where entries can carry different real projects).
    - Project order: Manual (the existing project-header drag order) or
      Recent (by each project's own most-recent real worktree activity).
-   - Card layout: Comfortable/Compact.
-   - Show properties: Branch (name + ahead/behind) and Pull request chip.
+   - Card layout: source Default/Compact property presets.
+   - Show properties: branch, linked issues/PR, provenance, notes, attributed
+     ports and inline agents; activity supports compact/full lineage.
    - Hide: Sleeping / Default branch / Detached HEAD / Automation-created /
      CLI-created are all real, computed filters (schema v5's
      `Worktree.creator`, set by every `drogon-cli worktree create` call;
@@ -35,6 +36,8 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
 } from "../../components/ui/dropdown-menu";
+import { CARD_PROPERTY_OPTIONS, cardPropertiesToFlags } from "./workspace-options-state";
+import { getWorktreeCardModeProperties } from "../../../../shared/worktree/card-properties";
 import type {
   WorkspaceCardLayout,
   WorkspaceGroupBy,
@@ -76,6 +79,7 @@ export function WorkspaceOptionsMenuSections({
     <>
       <DropdownMenuLabel>Group by</DropdownMenuLabel>
       <DropdownMenuRadioGroup
+        aria-label="Group by"
         value={state.groupBy}
         onValueChange={(value) =>
           onChange({ ...state, groupBy: value as WorkspaceGroupBy })
@@ -91,6 +95,7 @@ export function WorkspaceOptionsMenuSections({
 
       <DropdownMenuLabel>Sort by</DropdownMenuLabel>
       <DropdownMenuRadioGroup
+        aria-label="Sort by"
         value={state.sortBy}
         onValueChange={(value) =>
           onChange({ ...state, sortBy: value as WorkspaceSortBy })
@@ -106,6 +111,7 @@ export function WorkspaceOptionsMenuSections({
 
       <DropdownMenuLabel>Project order</DropdownMenuLabel>
       <DropdownMenuRadioGroup
+        aria-label="Project order"
         value={state.projectOrderBy}
         onValueChange={(value) =>
           onChange({ ...state, projectOrderBy: value as WorkspaceProjectOrderBy })
@@ -125,7 +131,9 @@ export function WorkspaceOptionsMenuSections({
       <DropdownMenuRadioGroup
         value={state.cardLayout}
         onValueChange={(value) =>
-          onChange({ ...state, cardLayout: value as WorkspaceCardLayout })
+          onChange({ ...state, cardLayout: value as WorkspaceCardLayout,
+            showProperties: cardPropertiesToFlags(getWorktreeCardModeProperties(value === "compact" ? "Compact" : "Default")),
+          })
         }
       >
         {(Object.keys(CARD_LAYOUT_LABEL) as WorkspaceCardLayout[]).map(
@@ -139,30 +147,21 @@ export function WorkspaceOptionsMenuSections({
       <DropdownMenuSeparator />
 
       <DropdownMenuLabel>Show properties</DropdownMenuLabel>
-      <DropdownMenuCheckboxItem
-        checked={state.showProperties.branch}
-        onSelect={(event) => event.preventDefault()}
-        onCheckedChange={(checked) =>
-          onChange({
-            ...state,
-            showProperties: { ...state.showProperties, branch: checked },
-          })
-        }
-      >
-        Branch
-      </DropdownMenuCheckboxItem>
-      <DropdownMenuCheckboxItem
-        checked={state.showProperties.pr}
-        onSelect={(event) => event.preventDefault()}
-        onCheckedChange={(checked) =>
-          onChange({
-            ...state,
-            showProperties: { ...state.showProperties, pr: checked },
-          })
-        }
-      >
-        Pull request
-      </DropdownMenuCheckboxItem>
+      {CARD_PROPERTY_OPTIONS.map(({ id, label }) => (
+        <DropdownMenuCheckboxItem key={id}
+          checked={state.showProperties[id] === true}
+          onSelect={(event) => event.preventDefault()}
+          onCheckedChange={(checked) => onChange({ ...state,
+            showProperties: { ...state.showProperties, [id]: checked },
+          })}
+        >{label}</DropdownMenuCheckboxItem>
+      ))}
+      <DropdownMenuLabel>Agent activity display</DropdownMenuLabel>
+      <DropdownMenuRadioGroup value={state.agentActivityDisplayMode ?? "full"}
+        onValueChange={(value) => onChange({ ...state, agentActivityDisplayMode: value as "compact" | "full" })}>
+        <DropdownMenuRadioItem value="compact">Compact activity</DropdownMenuRadioItem>
+        <DropdownMenuRadioItem value="full">Full list</DropdownMenuRadioItem>
+      </DropdownMenuRadioGroup>
       <DropdownMenuSeparator />
 
       <DropdownMenuLabel>Hide</DropdownMenuLabel>

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { probeWorkspaceProperties } from "./probe-workspace-properties.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
@@ -776,6 +777,7 @@ try {
   assert.equal(advancedWorktree?.note, "BM2 child");
   assert.equal(advancedWorktree?.parentWorktreeId, parentWorktreeId);
   report.checks.push("composer-advanced-branch-parent-note-setup-sparse");
+  report.checks.push(...await probeWorkspaceProperties({ page, worktree: advancedWorktree, output }));
 
   if (withHarness) {
     // Quick Session is intentionally gated to the harness acceptance: it

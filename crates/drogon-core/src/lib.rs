@@ -43,6 +43,7 @@ pub mod git_worktree;
 mod harness;
 mod hooks;
 mod project;
+mod project_card_revision;
 // R16-BC (additive): `ports.kill` — workspace-owned process stop.
 mod ports;
 mod ring;
@@ -51,6 +52,7 @@ mod session_env;
 mod workspace;
 mod workspace_file_rpc;
 mod workspace_files;
+mod worktree_issues;
 mod worktree_rpc;
 
 mod service_quiescence;
@@ -105,6 +107,7 @@ const CAPABILITIES: &[&str] = &[
     "runtime.quiescent-shutdown.v1",
     drogon_protocol::project::PROJECT_CAPABILITY,
     drogon_protocol::worktree::WORKTREE_CAPABILITY,
+    drogon_protocol::worktree_issues::CAPABILITY,
     drogon_protocol::tasks::TASKS_CAPABILITY,
     "session.agent-state.v1",
     // R2-S: the Bots page (list/create/chat/history) is real end-to-end as
@@ -486,6 +489,9 @@ impl Engine {
             }
             "worktree.create" => self.mutating(request, Self::do_worktree_create),
             "worktree.list" => self.do_worktree_list(&request.params),
+            "worktree.issueLinks" => self.do_worktree_issue_links(&request.params),
+            "worktree.linkIssue" => self.mutating(request, Self::do_worktree_link_issue),
+            "worktree.unlinkIssue" => self.mutating(request, Self::do_worktree_unlink_issue),
             "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
             "worktree.rename" => self.mutating(request, Self::do_worktree_rename),
             "worktree.update" => self.mutating(request, Self::do_worktree_update),

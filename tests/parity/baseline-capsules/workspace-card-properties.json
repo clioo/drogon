@@ -1,0 +1,41 @@
+{
+  "capsuleId": "workspace-card-properties",
+  "description": "Pure source card preset/normalization contract; approved by root after reading the complete two-file runtime closure.",
+  "sourceRevision": "34ae1a1c926fd1ce1f174f7c6ef2f65e0a0c4168",
+  "sourceRevisionNote": "Verified via `git -C <source-root> rev-parse HEAD` at manifest authoring time; the runner re-verifies this on every invocation and refuses to stage on any mismatch.",
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "entryTestFile": "src/shared/worktree/card-properties.test.ts",
+  "files": [
+    {
+      "path": "src/shared/worktree/card-properties.test.ts",
+      "role": "test",
+      "sha256": "cc75eec05798b56397bad5c0fc5fae9582b285cd694f4f032f926bd5097d14cf"
+    },
+    {
+      "path": "src/shared/worktree/card-properties.ts",
+      "role": "module",
+      "sha256": "4b56b8021e16dfce9897c805486cf965ceddd95a1b764c55271d6c0b94ff279b"
+    }
+  ],
+  "dependencyClosureNote": "The test imports only the sibling pure card-properties module. Its three imports are type-only and erased; no runtime module, filesystem, network, process or DOM dependency.",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 7
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "source test.environment is 'node' (matches capsule; no difference here)",
+    "source defines a global constant ORCA_FEATURE_WALL_ENABLED='true' at build time; the capsule's generated config defines nothing, since the pinned files never reference it",
+    "source registers three setupFiles (config/scripts/happy-dom-offscreen-canvas.ts, config/scripts/happy-dom-mutation-observer-retention.ts, config/scripts/vitest-host-ports-setup.ts); the capsule registers none, since the pinned files touch no DOM/canvas/host-port surface",
+    "source sets hookTimeout=60000ms and testTimeout=30000ms for its full, heavier suite; the capsule uses Vitest's built-in defaults",
+    "source passes execArgv ['--no-experimental-webstorage','--expose-gc'] to the worker process for retention tests elsewhere in the suite; the capsule passes none, since the pinned files allocate nothing that a GC-timing test would observe",
+    "installed capsule runner uses vitest 5.0.0 (apps/desktop/node_modules/.bin/vitest); the source project pins vitest ^4.1.11 in its own package.json. This is a real, unverified compatibility gap for anything beyond these two plain arithmetic/clamping assertions -- do not treat a pass under 5.0.0 as proof the source suite passes under its own pinned 4.1.11."
+  ],
+  "isolationRationale": "Seven unchanged pure array/shape assertions; all production functions are deterministic arrays/objects. No timers or effects. The installed Vitest version difference is disclosed and this baseline only admits these assertions, not other source suites."
+}

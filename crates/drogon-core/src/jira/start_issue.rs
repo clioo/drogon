@@ -298,11 +298,38 @@ impl Engine {
         // The issue's live title and url drive the fork's seed naming; the
         // renderer-passed title is the fallback when the read fails
         // (offline site), never a silent generic name.
-        let (title, issue_url) =
-            match super::issues::get_issue(&self.jira, &key, typed.site_id.as_deref()) {
-                Ok(Some(issue)) => (issue.title, Some(issue.url)),
-                _ => (typed.title.clone().unwrap_or_else(|| key.clone()), None),
-            };
+        let selected_site_id = super::ops::first_client(&self.jira, typed.site_id.as_deref())?
+            .map(|client| client.site.id);
+        let (title, issue_url, state_name, labels, site_id) = match super::issues::get_issue(
+            &self.jira,
+            &key,
+            selected_site_id.as_deref().or(typed.site_id.as_deref()),
+        ) {
+            Ok(Some(issue)) => (
+                issue.title,
+                Some(issue.url),
+                Some(issue.status.name),
+                issue.labels,
+                issue.site_id.or(selected_site_id),
+            ),
+            _ => (
+                typed.title.clone().unwrap_or_else(|| key.clone()),
+                None,
+                None,
+                Vec::new(),
+                selected_site_id.or_else(|| typed.site_id.clone().filter(|id| id != "all")),
+            ),
+        };
+        let linked_issue = drogon_protocol::worktree_issues::IssueDetails {
+            provider: drogon_protocol::worktree_issues::IssueProvider::Jira,
+            identifier: key.clone(),
+            title: title.clone(),
+            url: issue_url.clone(),
+            state_name,
+            labels,
+            site_id,
+        };
+        crate::worktree_issues::validate_issue(&linked_issue)?;
         let (display_name, seed_name) =
             jira_issue_workspace_seed(&key, &title).unwrap_or_else(|| {
                 let fallback_seed = jira_issue_suggested_name(&title);
@@ -316,16 +343,26 @@ impl Engine {
                 )
             });
 
-        // Idempotency, the tasks.start way: a worktree whose display title
-        // already carries this issue key is the previous start's result.
-        let existing: Option<String> = {
+        // Association identity survives a user's display-title change.
+        // The old title lookup only adopts workspaces created before links existed.
+        let (existing, was_linked) = {
             let conn = self.db.lock().unwrap();
-            conn.query_row(
-                "SELECT id FROM worktrees WHERE project_id = ?1 AND title = ?2",
+            let linked = crate::worktree_issues::find_git_worktree_for_issue(
+                &conn,
+                &typed.project_id,
+                drogon_protocol::worktree_issues::IssueProvider::Jira,
+                &key,
+                linked_issue.site_id.as_deref(),
+            )?;
+            let was_linked = linked.is_some();
+            let existing = linked.or_else(|| conn.query_row(
+                "SELECT w.id FROM worktrees w WHERE w.project_id = ?1 AND w.title = ?2
+                 AND NOT EXISTS(SELECT 1 FROM worktree_issue_links l WHERE l.worktree_id = w.id AND l.provider = 'jira')
+                 ORDER BY w.created_at, w.id LIMIT 1",
                 rusqlite::params![typed.project_id, display_name],
                 |row| row.get::<_, String>(0),
-            )
-            .ok()
+            ).ok());
+            (existing, was_linked)
         };
         let worktree_id: String = if let Some(id) = existing {
             id
@@ -374,6 +411,9 @@ impl Engine {
         };
 
         let conn = self.db.lock().unwrap();
+        if issue_url.is_some() || !was_linked {
+            crate::worktree_issues::save_issue_link(&conn, &worktree_id, &linked_issue)?;
+        }
         let worktree_row = conn
             .query_row(
                 "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at FROM worktrees WHERE id = ?1",

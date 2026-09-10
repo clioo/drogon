@@ -667,6 +667,7 @@ pub(crate) fn changes(conn: &Connection) -> Result<Value, drogon_protocol::RpcEr
     for row in preset_rows {
         digest.update(row.map_err(error::from_sqlite)?.as_bytes());
     }
+    crate::project_card_revision::update(conn, &mut digest)?;
     Ok(json!({ "revision": format!("{:x}", digest.finalize()) }))
 }
 

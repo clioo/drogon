@@ -93,6 +93,8 @@ function pull(overrides: Partial<TaskPullRequest> = {}): TaskPullRequest {
   };
 }
 
+const PR_ONLY_PROPERTIES = { branch: false, pr: true, issue: false, "linear-issue": false, "jira-issue": false, automation: false, cli: false, comment: false, ports: false, "inline-agents": false };
+
 class FakeStorage implements Pick<Storage, "getItem" | "setItem"> {
   private store = new Map<string, string>();
   getItem(key: string): string | null {
@@ -119,7 +121,8 @@ describe("workspace options persistence", () => {
       sortBy: "smart",
       projectOrderBy: "recent",
       cardLayout: "compact",
-      showProperties: { branch: false, pr: true },
+      showProperties: PR_ONLY_PROPERTIES,
+      agentActivityDisplayMode: "full",
       hide: {
         sleeping: true,
         defaultBranch: true,
@@ -630,7 +633,8 @@ function sharedPrefs(overrides: Partial<WorkspaceUIPreferences> = {}): Workspace
     hideDetachedHeadWorkspaces: false,
     hideAutomationGeneratedWorkspaces: false,
     hideCliCreatedWorkspaces: false,
-    worktreeCardProperties: ["branch", "pr"],
+    worktreeCardProperties: ["status", "unread", "issue", "linear-issue", "jira-issue", "pr", "automation", "cli", "comment", "ports", "inline-agents"],
+    agentActivityDisplayMode: "compact",
     workspaceStatuses: [],
     workspaceBoardOpacity: 1,
     workspaceBoardColumnWidth: 308,
@@ -650,7 +654,8 @@ describe("toSharedUIPreferences / fromSharedUIPreferences", () => {
       sortBy: "smart",
       projectOrderBy: "recent",
       cardLayout: "compact",
-      showProperties: { branch: false, pr: true },
+      showProperties: PR_ONLY_PROPERTIES,
+      agentActivityDisplayMode: "compact",
       hide: {
         sleeping: true,
         defaultBranch: false,
@@ -664,7 +669,7 @@ describe("toSharedUIPreferences / fromSharedUIPreferences", () => {
     expect(shared.sortBy).toBe("smart");
     expect(shared.projectOrderBy).toBe("recent");
     expect(shared.cardLayout).toBe("compact");
-    expect(shared.worktreeCardProperties).toEqual(["pr"]);
+    expect(shared.worktreeCardProperties).toEqual(["status", "unread", "pr"]);
     expect(shared.hideSleepingWorkspaces).toBe(true);
     expect(shared.hideDetachedHeadWorkspaces).toBe(true);
     expect(shared.hideCliCreatedWorkspaces).toBe(true);
@@ -681,7 +686,7 @@ describe("toSharedUIPreferences / fromSharedUIPreferences", () => {
       showProperties: { branch: true, pr: false },
     };
     const shared = toSharedUIPreferences(state, ["branch", "pr", "issue"]);
-    expect(shared.worktreeCardProperties).toEqual(["issue", "branch"]);
+    expect(shared.worktreeCardProperties).toEqual(["status", "unread", "branch", "issue"]);
   });
 
   it("sharedUIPreferencesAreUntouched is true only for the exact defaults", () => {

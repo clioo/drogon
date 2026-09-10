@@ -51,18 +51,30 @@ import {
 } from "../../../../shared/workspace-pr-status";
 import type { TaskPullRequest } from "../../../../shared/tasks-contract";
 import type { WorkspaceUIPreferences } from "../../../../shared/workspace-ui-preferences-contract";
+import { DEFAULT_WORKTREE_CARD_PROPERTIES, normalizeWorktreeCardProperties } from "../../../../shared/worktree/card-properties";
 
 export type WorkspaceGroupBy = "none" | "workspace-status" | "repo" | "pr-status";
 export type WorkspaceSortBy = "manual" | "name" | "recent" | "smart" | "repo";
 export type WorkspaceProjectOrderBy = "manual" | "recent";
 export type WorkspaceCardLayout = "comfortable" | "compact";
 
-export type WorkspaceShowProperties = {
-  /** Branch name + ahead/behind badges. */
-  branch: boolean;
-  /** PR chip. */
-  pr: boolean;
-};
+export const CARD_PROPERTY_OPTIONS = [
+  { id: "branch", label: "Branch" },
+  { id: "issue", label: "GitHub ticket" },
+  { id: "linear-issue", label: "Linear issue" },
+  { id: "jira-issue", label: "Jira issue" },
+  { id: "pr", label: "Pull request" },
+  { id: "automation", label: "Automation" },
+  { id: "cli", label: "Drogon CLI" },
+  { id: "comment", label: "Notes" },
+  { id: "ports", label: "Ports" },
+  { id: "inline-agents", label: "Agent activity" },
+] as const;
+export type CardProperty = (typeof CARD_PROPERTY_OPTIONS)[number]["id"];
+export type WorkspaceShowProperties = { branch: boolean; pr: boolean } & Partial<Record<CardProperty, boolean>>;
+export function cardPropertiesToFlags(properties: readonly string[]): WorkspaceShowProperties {
+  return Object.fromEntries(CARD_PROPERTY_OPTIONS.map(({ id }) => [id, properties.includes(id)])) as WorkspaceShowProperties;
+}
 
 export type WorkspaceHideFilters = {
   sleeping: boolean;
@@ -87,6 +99,7 @@ export type WorkspaceOptionsState = {
   projectOrderBy: WorkspaceProjectOrderBy;
   cardLayout: WorkspaceCardLayout;
   showProperties: WorkspaceShowProperties;
+  agentActivityDisplayMode?: "compact" | "full";
   hide: WorkspaceHideFilters;
 };
 
@@ -95,7 +108,8 @@ export const DEFAULT_WORKSPACE_OPTIONS_STATE: WorkspaceOptionsState = {
   sortBy: "recent",
   projectOrderBy: "manual",
   cardLayout: "comfortable",
-  showProperties: { branch: true, pr: true },
+  showProperties: cardPropertiesToFlags(DEFAULT_WORKTREE_CARD_PROPERTIES),
+  agentActivityDisplayMode: "compact",
   hide: {
     sleeping: false,
     defaultBranch: false,
@@ -157,16 +171,11 @@ export function loadWorkspaceOptionsState(
       cardLayout: isWorkspaceCardLayout(state.cardLayout)
         ? state.cardLayout
         : DEFAULT_WORKSPACE_OPTIONS_STATE.cardLayout,
-      showProperties: {
-        branch:
-          typeof state.showProperties?.branch === "boolean"
-            ? state.showProperties.branch
-            : DEFAULT_WORKSPACE_OPTIONS_STATE.showProperties.branch,
-        pr:
-          typeof state.showProperties?.pr === "boolean"
-            ? state.showProperties.pr
-            : DEFAULT_WORKSPACE_OPTIONS_STATE.showProperties.pr,
-      },
+      showProperties: Object.fromEntries(CARD_PROPERTY_OPTIONS.map(({ id }) => [id,
+        typeof state.showProperties?.[id] === "boolean" ? state.showProperties[id]
+          : DEFAULT_WORKSPACE_OPTIONS_STATE.showProperties[id],
+      ])) as WorkspaceShowProperties,
+      agentActivityDisplayMode: state.agentActivityDisplayMode === "compact" ? "compact" : "full",
       hide: {
         sleeping:
           typeof state.hide?.sleeping === "boolean"
@@ -215,25 +224,27 @@ export function saveWorkspaceOptionsState(
  *  wholesale. */
 export function toSharedUIPreferences(
   state: WorkspaceOptionsState,
-  currentCardProperties: readonly WorkspaceUIPreferences["worktreeCardProperties"][number][] = [],
+  currentCardProperties: readonly WorkspaceUIPreferences["worktreeCardProperties"][number][] = ["status", "unread"],
 ): Partial<WorkspaceUIPreferences> {
   const properties = new Set(currentCardProperties);
-  for (const property of ["branch", "pr"] as const) {
-    properties.delete(property);
+  for (const { id } of CARD_PROPERTY_OPTIONS) {
+    // Old callers omit newer fields; preserve them rather than treating absence as unchecked.
+    if (state.showProperties[id] === true) properties.add(id);
+    if (state.showProperties[id] === false) properties.delete(id);
   }
-  if (state.showProperties.branch) properties.add("branch");
-  if (state.showProperties.pr) properties.add("pr");
   return {
     groupBy: state.groupBy,
     sortBy: state.sortBy,
     projectOrderBy: state.projectOrderBy,
     cardLayout: state.cardLayout,
+    agentActivityDisplayMode: state.agentActivityDisplayMode ?? "compact",
+    _expandedWorktreeCardPropertiesDefaulted: true,
     hideSleepingWorkspaces: state.hide.sleeping,
     hideDefaultBranchWorkspace: state.hide.defaultBranch,
     hideDetachedHeadWorkspaces: state.hide.detachedHead,
     hideAutomationGeneratedWorkspaces: state.hide.automationCreated,
     hideCliCreatedWorkspaces: state.hide.cliCreated,
-    worktreeCardProperties: [...properties],
+    worktreeCardProperties: normalizeWorktreeCardProperties([...properties]),
   };
 }
 
@@ -248,10 +259,8 @@ export function fromSharedUIPreferences(
     sortBy: prefs.sortBy,
     projectOrderBy: prefs.projectOrderBy ?? DEFAULT_WORKSPACE_OPTIONS_STATE.projectOrderBy,
     cardLayout: prefs.cardLayout ?? DEFAULT_WORKSPACE_OPTIONS_STATE.cardLayout,
-    showProperties: {
-      branch: (prefs.worktreeCardProperties ?? []).includes("branch"),
-      pr: (prefs.worktreeCardProperties ?? []).includes("pr"),
-    },
+    showProperties: cardPropertiesToFlags(prefs.worktreeCardProperties ?? []),
+    agentActivityDisplayMode: prefs.agentActivityDisplayMode ?? "compact",
     hide: {
       sleeping: prefs.hideSleepingWorkspaces ?? false,
       defaultBranch: prefs.hideDefaultBranchWorkspace ?? false,

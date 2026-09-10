@@ -47,7 +47,9 @@ afterEach(() => {
  * logic -- the store applies the update exactly as given, same as the
  * main process would.
  */
-function makeUiStore(seed: WorkspaceUIPreferences = INITIAL_SHARED_UI_PREFERENCES): {
+function makeUiStore(
+  seed: WorkspaceUIPreferences = INITIAL_SHARED_UI_PREFERENCES,
+): {
   ui: WorkspaceUIPreferencesBridge;
   current: () => WorkspaceUIPreferences;
 } {
@@ -111,8 +113,15 @@ function baseProps(overrides: {
   groups?: ProjectGroup[];
   sessions?: Session[];
   workspaces?: Workspace[];
-  onOpenAction?: (action: { kind: string; worktreeId?: string; projectId?: string }) => void;
-  onSubmitRemove?: (worktree: Worktree, force: boolean) => Promise<string | null>;
+  onOpenAction?: (action: {
+    kind: string;
+    worktreeId?: string;
+    projectId?: string;
+  }) => void;
+  onSubmitRemove?: (
+    worktree: Worktree,
+    force: boolean,
+  ) => Promise<string | null>;
 }) {
   return {
     groups: overrides.groups ?? [],
@@ -147,8 +156,15 @@ function mount(overrides: {
   groups?: ProjectGroup[];
   sessions?: Session[];
   workspaces?: Workspace[];
-  onOpenAction?: (action: { kind: string; worktreeId?: string; projectId?: string }) => void;
-  onSubmitRemove?: (worktree: Worktree, force: boolean) => Promise<string | null>;
+  onOpenAction?: (action: {
+    kind: string;
+    worktreeId?: string;
+    projectId?: string;
+  }) => void;
+  onSubmitRemove?: (
+    worktree: Worktree,
+    force: boolean,
+  ) => Promise<string | null>;
 }) {
   (window as unknown as { drogon?: unknown }).drogon ??= {};
   return render(
@@ -176,7 +192,7 @@ function projectHeaders(): string[] {
  *  branch name), so tests key off this accessible name instead of text. */
 function cardTitlesInOrder(): string[] {
   return screen
-    .getAllByRole("button", { name: /^Select /})
+    .getAllByRole("button", { name: /^Select / })
     .map((el) => (el.getAttribute("aria-label") ?? "").replace(/^Select /, ""));
 }
 
@@ -215,19 +231,35 @@ describe("Workspace options: viewport/keyboard reachability (packaged acceptance
     // unambiguous label picked per section -- several labels repeat
     // verbatim across sections, e.g. "Repo"/"Recent activity"/"Manual
     // (drag order)", so those are covered via the count below instead).
-    expect(within(menu).getByRole("menuitemradio", { name: "Workspace status" })).toBeTruthy();
-    expect(within(menu).getByRole("menuitemradio", { name: "Smart" })).toBeTruthy();
-    expect(within(menu).getByRole("menuitemradio", { name: "Compact" })).toBeTruthy();
     expect(
-      within(menu).getAllByRole("menuitemradio", { name: "Manual (drag order)" }),
+      within(menu).getByRole("menuitemradio", { name: "Workspace status" }),
+    ).toBeTruthy();
+    expect(
+      within(menu).getByRole("menuitemradio", { name: "Smart" }),
+    ).toBeTruthy();
+    expect(
+      within(menu).getByRole("menuitemradio", { name: "Compact" }),
+    ).toBeTruthy();
+    expect(
+      within(menu).getAllByRole("menuitemradio", {
+        name: "Manual (drag order)",
+      }),
     ).toHaveLength(2); // Sort by + Project order
     // Show properties / Hide checkboxes.
-    expect(within(menu).getByRole("menuitemcheckbox", { name: "Pull request" })).toBeTruthy();
-    expect(within(menu).getByRole("menuitemcheckbox", { name: "CLI-created" })).toBeTruthy();
-    // The two controls the real acceptance run could not reach.
-    expect(within(menu).getByRole("menuitem", { name: "Add Project" })).toBeTruthy();
     expect(
-      within(menu).getByRole("textbox", { name: "Filter projects and worktrees" }),
+      within(menu).getByRole("menuitemcheckbox", { name: "Pull request" }),
+    ).toBeTruthy();
+    expect(
+      within(menu).getByRole("menuitemcheckbox", { name: "CLI-created" }),
+    ).toBeTruthy();
+    // The two controls the real acceptance run could not reach.
+    expect(
+      within(menu).getByRole("menuitem", { name: "Add Project" }),
+    ).toBeTruthy();
+    expect(
+      within(menu).getByRole("textbox", {
+        name: "Filter projects and worktrees",
+      }),
     ).toBeTruthy();
   });
 
@@ -238,7 +270,9 @@ describe("Workspace options: viewport/keyboard reachability (packaged acceptance
     mount({ groups });
     openWorkspaceOptionsMenu();
     const menu = screen.getByRole("menu");
-    const addProject = within(menu).getByRole("menuitem", { name: "Add Project" });
+    const addProject = within(menu).getByRole("menuitem", {
+      name: "Add Project",
+    });
 
     // Radix's roving-focus group auto-focuses the first real item on
     // open; jump to the end of that same real keyboard order.
@@ -256,7 +290,11 @@ describe("Workspace options: Hide", () => {
         project: project(),
         worktrees: [
           worktree({ id: "wt-awake", workspaceId: "ws-awake", title: "Awake" }),
-          worktree({ id: "wt-asleep", workspaceId: "ws-asleep", title: "Asleep" }),
+          worktree({
+            id: "wt-asleep",
+            workspaceId: "ws-asleep",
+            title: "Asleep",
+          }),
         ],
       },
     ];
@@ -377,8 +415,14 @@ describe("Workspace options: Sort by", () => {
 describe("Workspace options: Group by", () => {
   test("Group by None hides every project header while keeping the cards", () => {
     const groups: ProjectGroup[] = [
-      { project: project({ id: "a", name: "Alpha Repo" }), worktrees: [worktree({ id: "wt-a", projectId: "a", title: "Card A" })] },
-      { project: project({ id: "b", name: "Bravo Repo" }), worktrees: [worktree({ id: "wt-b", projectId: "b", title: "Card B" })] },
+      {
+        project: project({ id: "a", name: "Alpha Repo" }),
+        worktrees: [worktree({ id: "wt-a", projectId: "a", title: "Card A" })],
+      },
+      {
+        project: project({ id: "b", name: "Bravo Repo" }),
+        worktrees: [worktree({ id: "wt-b", projectId: "b", title: "Card B" })],
+      },
     ];
     mount({ groups });
     expect(projectHeaders()).toEqual(["Alpha Repo", "Bravo Repo"]);
@@ -403,9 +447,11 @@ describe("Workspace options: Show properties", () => {
       },
     ];
     const { container } = mount({ groups });
-    expect(container.querySelector(".shell-worktree-card-branch")).toBeTruthy();
-
+    // Source Default omits Branch; explicitly opt in before testing uncheck.
+    expect(container.querySelector(".shell-worktree-card-branch")).toBeNull();
     openWorkspaceOptionsMenu();
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Branch" }));
+    expect(container.querySelector(".shell-worktree-card-branch")).toBeTruthy();
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Branch" }));
 
     expect(container.querySelector(".shell-worktree-card-branch")).toBeNull();
@@ -485,7 +531,9 @@ describe("Workspace options: persistence", () => {
  *  per card, not one for the whole list), and clicks "Delete". Mirrors
  *  worktree-delete-menu.test.tsx's own gesture. */
 function clickDeleteForWorktree(worktreeId: string): void {
-  const cardRoot = document.querySelector(`[data-worktree-card-id="${worktreeId}"]`);
+  const cardRoot = document.querySelector(
+    `[data-worktree-card-id="${worktreeId}"]`,
+  );
   expect(cardRoot).toBeTruthy();
   const scope = (cardRoot as HTMLElement).closest(
     '[data-worktree-context-menu-scope="worktree"]',
@@ -493,7 +541,9 @@ function clickDeleteForWorktree(worktreeId: string): void {
   expect(scope).toBeTruthy();
   fireEvent.contextMenu(scope, { clientX: 50, clientY: 50 });
   const item = Array.from(
-    document.querySelectorAll<HTMLElement>(".shell-worktree-context-menu-item-destructive"),
+    document.querySelectorAll<HTMLElement>(
+      ".shell-worktree-context-menu-item-destructive",
+    ),
   ).find((el) => el.textContent?.includes("Delete"));
   expect(item).toBeTruthy();
   fireEvent.pointerDown(item!, { pointerType: "mouse", button: 0 });
@@ -536,7 +586,9 @@ describe("Workspace options: Group by (cross-project)", () => {
     expect(projectHeaders()).toEqual(["Alpha Repo", "Bravo Repo"]);
 
     openWorkspaceOptionsMenu();
-    fireEvent.click(within(screen.getByRole("menu")).getByText("Workspace status"));
+    fireEvent.click(
+      within(screen.getByRole("menu")).getByText("Workspace status"),
+    );
 
     // One real status label header; both projects' cards render under it.
     expect(projectHeaders()).toEqual(["In review"]);
@@ -546,8 +598,14 @@ describe("Workspace options: Group by (cross-project)", () => {
     // worktree, never project A's or a synthetic bucket id, even though
     // both now render under the same "In review" header.
     clickDeleteForWorktree("wb");
-    expect(onOpenAction).toHaveBeenCalledWith({ kind: "remove", worktreeId: "wb" });
-    expect(onOpenAction).not.toHaveBeenCalledWith({ kind: "remove", worktreeId: "wa" });
+    expect(onOpenAction).toHaveBeenCalledWith({
+      kind: "remove",
+      worktreeId: "wb",
+    });
+    expect(onOpenAction).not.toHaveBeenCalledWith({
+      kind: "remove",
+      worktreeId: "wa",
+    });
   });
 
   test("Group by PR status buckets by real fetched pull-request state per project; an unfetched/failed project's cards land under 'PR status unavailable', never a false 'no pull request'", async () => {
@@ -555,13 +613,23 @@ describe("Workspace options: Group by (cross-project)", () => {
       {
         project: project({ id: "a", name: "Alpha Repo" }),
         worktrees: [
-          worktree({ id: "wa", projectId: "a", branch: "feature-a", title: "Card A" }),
+          worktree({
+            id: "wa",
+            projectId: "a",
+            branch: "feature-a",
+            title: "Card A",
+          }),
         ],
       },
       {
         project: project({ id: "b", name: "Bravo Repo" }),
         worktrees: [
-          worktree({ id: "wb", projectId: "b", branch: "feature-b", title: "Card B" }),
+          worktree({
+            id: "wb",
+            projectId: "b",
+            branch: "feature-b",
+            title: "Card B",
+          }),
         ],
       },
     ];
@@ -594,7 +662,11 @@ describe("Workspace options: Group by (cross-project)", () => {
       // Project B's own fetch genuinely fails (gh missing/unauthenticated).
       return {
         ok: false,
-        error: { code: "gh_unavailable", message: "gh is not installed", retryable: false },
+        error: {
+          code: "gh_unavailable",
+          message: "gh is not installed",
+          retryable: false,
+        },
       };
     });
     (window as unknown as { drogon: Record<string, unknown> }).drogon = {
@@ -607,9 +679,13 @@ describe("Workspace options: Group by (cross-project)", () => {
 
     await waitFor(() => expect(tasksList).toHaveBeenCalled());
     await waitFor(() =>
-      expect([...projectHeaders()].sort()).toEqual(["Open", "PR status unavailable"].sort()),
+      expect([...projectHeaders()].sort()).toEqual(
+        ["Open", "PR status unavailable"].sort(),
+      ),
     );
-    const openHeader = screen.getByText("Open").closest(".shell-project") as HTMLElement;
+    const openHeader = screen
+      .getByText("Open")
+      .closest(".shell-project") as HTMLElement;
     expect(within(openHeader).getByText("Card A")).toBeTruthy();
     const unavailableHeader = screen
       .getByText("PR status unavailable")
@@ -651,7 +727,13 @@ describe("Workspace options: manual reorder persists canonical ranks", () => {
       },
     ];
     const worktreeUpdate = vi.fn(
-      async ({ worktreeId, manualOrder }: { worktreeId: string; manualOrder: number }) => ({
+      async ({
+        worktreeId,
+        manualOrder,
+      }: {
+        worktreeId: string;
+        manualOrder: number;
+      }) => ({
         ok: true,
         result: { id: worktreeId, manualOrder },
       }),
@@ -667,11 +749,22 @@ describe("Workspace options: manual reorder persists canonical ranks", () => {
         </div>
       </TooltipProvider>,
     );
-    const scrollContainer = container.querySelector(".shell-sidebar-scroll") as HTMLElement;
+    const scrollContainer = container.querySelector(
+      ".shell-sidebar-scroll",
+    ) as HTMLElement;
     stubRect(scrollContainer, { top: 0, bottom: 400 });
-    Object.defineProperty(scrollContainer, "scrollTop", { value: 0, configurable: true });
-    Object.defineProperty(scrollContainer, "scrollHeight", { value: 400, configurable: true });
-    Object.defineProperty(scrollContainer, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(scrollContainer, "scrollTop", {
+      value: 0,
+      configurable: true,
+    });
+    Object.defineProperty(scrollContainer, "scrollHeight", {
+      value: 400,
+      configurable: true,
+    });
+    Object.defineProperty(scrollContainer, "clientHeight", {
+      value: 400,
+      configurable: true,
+    });
 
     // Three 40px-tall bands, top to bottom, in their initial render order.
     const cardBands: Record<string, { top: number; bottom: number }> = {
@@ -680,7 +773,9 @@ describe("Workspace options: manual reorder persists canonical ranks", () => {
       w3: { top: 80, bottom: 120 },
     };
     for (const [id, band] of Object.entries(cardBands)) {
-      const cardEl = container.querySelector(`[data-worktree-card-id="${id}"]`) as HTMLElement;
+      const cardEl = container.querySelector(
+        `[data-worktree-card-id="${id}"]`,
+      ) as HTMLElement;
       stubRect(cardEl, band);
     }
     const sourceRow = container.querySelector(
@@ -702,13 +797,24 @@ describe("Workspace options: manual reorder persists canonical ranks", () => {
     await waitFor(() => expect(worktreeUpdate).toHaveBeenCalled());
     // The canonical stride-1000 ranks for the new order [w2, w3, w1]
     // (higher renders first): w2=3000, w3=2000, w1=1000.
-    expect(worktreeUpdate).toHaveBeenCalledWith({ worktreeId: "w2", manualOrder: 3000 });
-    expect(worktreeUpdate).toHaveBeenCalledWith({ worktreeId: "w3", manualOrder: 2000 });
-    expect(worktreeUpdate).toHaveBeenCalledWith({ worktreeId: "w1", manualOrder: 1000 });
+    expect(worktreeUpdate).toHaveBeenCalledWith({
+      worktreeId: "w2",
+      manualOrder: 3000,
+    });
+    expect(worktreeUpdate).toHaveBeenCalledWith({
+      worktreeId: "w3",
+      manualOrder: 2000,
+    });
+    expect(worktreeUpdate).toHaveBeenCalledWith({
+      worktreeId: "w1",
+      manualOrder: 1000,
+    });
 
     // The rendered order reflects the new arrangement immediately (the
     // optimistic overlay), before any reload.
-    await waitFor(() => expect(cardTitlesInOrder()).toEqual(["Two", "Three", "One"]));
+    await waitFor(() =>
+      expect(cardTitlesInOrder()).toEqual(["Two", "Three", "One"]),
+    );
 
     cleanup();
 
@@ -720,13 +826,179 @@ describe("Workspace options: manual reorder persists canonical ranks", () => {
       {
         project: project({ id: "a", name: "Alpha Repo" }),
         worktrees: [
-          worktree({ id: "w1", projectId: "a", title: "One", manualOrder: 1000 }),
-          worktree({ id: "w2", projectId: "a", title: "Two", manualOrder: 3000 }),
-          worktree({ id: "w3", projectId: "a", title: "Three", manualOrder: 2000 }),
+          worktree({
+            id: "w1",
+            projectId: "a",
+            title: "One",
+            manualOrder: 1000,
+          }),
+          worktree({
+            id: "w2",
+            projectId: "a",
+            title: "Two",
+            manualOrder: 3000,
+          }),
+          worktree({
+            id: "w3",
+            projectId: "a",
+            title: "Three",
+            manualOrder: 2000,
+          }),
         ],
       },
     ];
     mount({ groups: reloaded });
     expect(cardTitlesInOrder()).toEqual(["Two", "Three", "One"]);
   });
+});
+
+test.each(["none", "repo", "workspace-status", "pr-status"] as const)(
+  "known PR property reaches the real card in %s grouping and can be hidden",
+  async (groupBy) => {
+    const store = makeUiStore({ ...INITIAL_SHARED_UI_PREFERENCES, groupBy });
+    (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+      ui: store.ui,
+      tasks: {
+        tasksList: async () => ({
+          ok: true,
+          result: {
+            pulls: [
+              {
+                number: 7,
+                title: "Review feature",
+                state: "open",
+                url: "https://github.com/example/repo/pull/7",
+                headRefName: "feature",
+              },
+            ],
+          },
+        }),
+      },
+    };
+    mount({ groups: [{ project: project(), worktrees: [worktree()] }] });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Linked PR #7: Open")).toBeTruthy(),
+    );
+    openWorkspaceOptionsMenu();
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: "Pull request" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Linked PR #7: Open")).toBeNull(),
+    );
+    expect(store.current().worktreeCardProperties).not.toContain("pr");
+  },
+);
+
+for (const provider of ["linear", "jira"] as const)
+  test.each(["none", "repo", "workspace-status", "pr-status"] as const)(
+    `${provider} associations reach the real card in %s grouping and retain independent visibility`,
+    async (groupBy) => {
+      const store = makeUiStore({ ...INITIAL_SHARED_UI_PREFERENCES, groupBy });
+      const issueLinks = vi.fn(async () => ({
+        ok: true,
+        result: {
+          links: [
+            {
+              worktreeId: "wt-1",
+              provider: "linear",
+              identifier: "ENG-123",
+              title: "Linked Linear work",
+              url: "https://linear.app/team/issue/ENG-123",
+            },
+            {
+              worktreeId: "wt-1",
+              provider: "jira",
+              identifier: "KAN-1",
+              title: "Linked Jira work",
+              url: "https://example.atlassian.net/browse/KAN-1",
+            },
+          ],
+        },
+      }));
+      (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+        ui: store.ui,
+        project: { worktreeIssueLinks: issueLinks },
+        status: async () => ({
+          ok: true,
+          result: {
+            hostId: "host-1",
+            capabilities: ["worktree.issue-links.v1"],
+          },
+        }),
+      };
+      mount({ groups: [{ project: project(), worktrees: [worktree()] }] });
+      await waitFor(() => expect(screen.getByText("ENG-123")).toBeTruthy());
+      expect(screen.getByText("KAN-1")).toBeTruthy();
+      expect(issueLinks.mock.calls).toEqual([[{ projectId: "proj-1" }]]);
+      openWorkspaceOptionsMenu();
+      fireEvent.click(
+        screen.getByRole("menuitemcheckbox", {
+          name: provider === "linear" ? "Linear issue" : "Jira issue",
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.queryByText(provider === "linear" ? "ENG-123" : "KAN-1"),
+        ).toBeNull(),
+      );
+      expect(
+        screen.getByText(provider === "linear" ? "KAN-1" : "ENG-123"),
+      ).toBeTruthy();
+      expect(store.current().worktreeCardProperties).not.toContain(
+        `${provider}-issue`,
+      );
+    },
+  );
+
+test("Ports property displays only this workspace's attributed listener and hides it", async () => {
+  const store = makeUiStore();
+  const list = vi.fn(async () => ({
+    ok: true,
+    result: {
+      platform: "darwin",
+      scannedAt: 1,
+      unavailableReason: null,
+      ports: [
+        {
+          id: "port",
+          bindHost: "127.0.0.1",
+          connectHost: "127.0.0.1",
+          port: 4317,
+          pid: 123,
+          processName: "node",
+          protocol: "http",
+          kind: "workspace",
+          owner: {
+            workspaceId: "ws-1",
+            displayName: "Workspace",
+            confidence: "cwd",
+          },
+        },
+      ],
+    },
+  }));
+  (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+    ui: store.ui,
+    status: async () => ({ ok: true, result: { hostId: "host-1" } }),
+    workspacePorts: { list },
+  };
+  mount({
+    groups: [{ project: project(), worktrees: [worktree()] }],
+    workspaces: [
+      {
+        id: "ws-1",
+        path: "/repo/wt-1",
+        name: "Workspace",
+        kind: "git",
+        hostId: "host-1",
+      },
+    ],
+  });
+  await waitFor(() => expect(screen.getByText(":4317")).toBeTruthy());
+  expect(list).toHaveBeenCalledTimes(1);
+  openWorkspaceOptionsMenu();
+  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Ports" }));
+  await waitFor(() => expect(screen.queryByText(":4317")).toBeNull());
+  expect(store.current().worktreeCardProperties).not.toContain("ports");
 });

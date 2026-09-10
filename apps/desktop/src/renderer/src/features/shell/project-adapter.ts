@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import type { ProjectBridge } from "../../../../shared/project-contract";
 import type {
   AgentState,
   Project,
@@ -41,7 +42,7 @@ export function isWorktreesAvailable(capabilities: readonly string[]): boolean {
  * (crates/drogon-protocol `WorktreeListParams`), so the loader fans out
  * one call per project.
  */
-export interface ProjectRpcBridge {
+export interface ProjectRpcBridge extends Partial<Pick<ProjectBridge, "worktreeIssueLinks" | "worktreeLinkIssue" | "worktreeUnlinkIssue">> {
   projectList?: () => Promise<Result<{ projects: Project[] }>>;
   worktreeList?: (input: {
     projectId: string;

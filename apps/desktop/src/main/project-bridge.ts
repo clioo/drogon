@@ -7,6 +7,7 @@ import {
 } from "../shared/project-contract";
 import { resultSchemas } from "../shared/result-validation";
 import type { Result } from "../shared/session-contract";
+import type { IssueDetails, WorktreeIssueLink } from "../shared/worktree-issue-contract";
 import { callNative } from "./native-client";
 
 // Same registration trick as main/git-bridge.ts: the project/worktree
@@ -37,6 +38,9 @@ const nativeMethodFor: Record<ProjectMethod, string> = {
   worktreeRemove: "worktree.remove",
   worktreeRename: "worktree.rename",
   worktreeUpdate: "worktree.update",
+  worktreeIssueLinks: "worktree.issueLinks",
+  worktreeLinkIssue: "worktree.linkIssue",
+  worktreeUnlinkIssue: "worktree.unlinkIssue",
 };
 
 const invalid = {
@@ -72,6 +76,20 @@ export async function dispatchProjectRequest(
         retryable: false,
       },
     };
+  if (method === "worktreeLinkIssue" || method === "worktreeUnlinkIssue") {
+    const actual = checked.data as Pick<WorktreeIssueLink, "worktreeId" | "provider">;
+    let ownsRequest = actual.worktreeId === params.worktreeId;
+    if (method === "worktreeLinkIssue") {
+      const expected = params.issue as IssueDetails;
+      const linked = checked.data as WorktreeIssueLink;
+      ownsRequest &&= linked.provider === expected.provider
+        && linked.identifier.toUpperCase() === expected.identifier.toUpperCase()
+        && linked.siteId === expected.siteId;
+    } else ownsRequest &&= actual.provider === params.provider;
+    if (!ownsRequest) return { ok: false, error: {
+      code: "internal_error", message: "The issue response belongs to another worktree or issue.", retryable: false,
+    } };
+  }
   return { ok: true, result: checked.data };
 }
 
@@ -88,6 +106,9 @@ const channelFor: Record<ProjectMethod, string> = {
   worktreeRemove: "drogon:worktreeRemove",
   worktreeRename: "drogon:worktreeRename",
   worktreeUpdate: "drogon:worktreeUpdate",
+  worktreeIssueLinks: "drogon:worktreeIssueLinks",
+  worktreeLinkIssue: "drogon:worktreeLinkIssue",
+  worktreeUnlinkIssue: "drogon:worktreeUnlinkIssue",
 };
 
 /**
