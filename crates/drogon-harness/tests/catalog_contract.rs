@@ -2326,7 +2326,13 @@ fn pi_probe_malformed_output_is_parse_failed_with_a_bounded_sample() {
 }
 
 #[test]
-fn missing_executable_is_not_installed() {
+fn bad_path_spawn_failure_is_unknown_cause_not_not_installed() {
+    // A caller-supplied bad path is NOT outer-discovery absence: the
+    // version spawn fails, the gate refuses, and the status carries
+    // unknown cause — never a missing claim without evidence.
+    // (executable=None, the outer-discovery positively-absent case,
+    // stays NotInstalled — covered by the Antigravity arm of
+    // codex_and_antigravity_report_unsupported_surface.)
     let probe = probe_host_catalog(HarnessId::Pi, Some(Path::new("/no/such/pi-here")));
     assert!(
         probe.pending.is_empty(),
@@ -2339,7 +2345,9 @@ fn missing_executable_is_not_installed() {
         probe.unverifiable
     );
     let catalog = &probe.catalog;
-    assert_eq!(catalog.status, EnumerationStatus::NotInstalled);
+    assert_eq!(catalog.status, EnumerationStatus::ProbeFailed);
+    let note = catalog.note.clone().expect("failure note");
+    assert!(note.contains("cause unknown"), "{note}");
 }
 
 /// Refusal bodies (COMPILE-ONLY until reviewed: never executed here).

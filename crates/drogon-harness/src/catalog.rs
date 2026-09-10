@@ -732,17 +732,13 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
                      root: {stderr_tail}"
                 ),
             ),
-            ProbeRun::SpawnFailed(message) => {
-                let (status, note) = classify_spawn_failure(
-                    "version probe",
-                    executable_presence(executable),
-                    &message,
-                );
-                (
-                    status,
-                    format!("{note}; enumeration not started in this root"),
-                )
-            }
+            ProbeRun::SpawnFailed(message) => (
+                EnumerationStatus::ProbeFailed,
+                format!(
+                    "version probe spawn failed ({message}); cause unknown; \
+                     enumeration not started in this root"
+                ),
+            ),
             ProbeRun::HelperFailed { stream, error } => (
                 EnumerationStatus::ProbeFailed,
                 format!(
@@ -879,19 +875,14 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
             Vec::new(),
             Some(format!("probe exceeded its wall-clock budget; {evidence}")),
         ),
-        ProbeRun::SpawnFailed(message) => {
-            let (status, note) = classify_spawn_failure(
-                "enumeration probe",
-                executable_presence(executable),
-                &message,
-            );
-            (
-                probe_provenance(executable, argv.clone(), version),
-                status,
-                Vec::new(),
-                Some(note),
-            )
-        }
+        ProbeRun::SpawnFailed(message) => (
+            probe_provenance(executable, argv.clone(), version),
+            EnumerationStatus::ProbeFailed,
+            Vec::new(),
+            Some(format!(
+                "enumeration probe spawn failed ({message}); cause unknown"
+            )),
+        ),
         ProbeRun::HelperFailed { stream, error } => (
             probe_provenance(executable, argv.clone(), version),
             EnumerationStatus::ProbeFailed,
@@ -1012,17 +1003,13 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
                      root: {stderr_tail}"
                 ),
             ),
-            ProbeRun::SpawnFailed(message) => {
-                let (status, note) = classify_spawn_failure(
-                    "version probe",
-                    executable_presence(executable),
-                    &message,
-                );
-                (
-                    status,
-                    format!("{note}; enumeration not started in this root"),
-                )
-            }
+            ProbeRun::SpawnFailed(message) => (
+                EnumerationStatus::ProbeFailed,
+                format!(
+                    "version probe spawn failed ({message}); cause unknown; \
+                     enumeration not started in this root"
+                ),
+            ),
             ProbeRun::HelperFailed { stream, error } => (
                 EnumerationStatus::ProbeFailed,
                 format!(
@@ -1151,19 +1138,14 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
             Vec::new(),
             Some(format!("probe exceeded its wall-clock budget; {evidence}")),
         ),
-        ProbeRun::SpawnFailed(message) => {
-            let (status, note) = classify_spawn_failure(
-                "enumeration probe",
-                executable_presence(executable),
-                &message,
-            );
-            (
-                probe_provenance(executable, argv.clone(), version),
-                status,
-                Vec::new(),
-                Some(note),
-            )
-        }
+        ProbeRun::SpawnFailed(message) => (
+            probe_provenance(executable, argv.clone(), version),
+            EnumerationStatus::ProbeFailed,
+            Vec::new(),
+            Some(format!(
+                "enumeration probe spawn failed ({message}); cause unknown"
+            )),
+        ),
         ProbeRun::HelperFailed { stream, error } => (
             probe_provenance(executable, argv.clone(), version),
             EnumerationStatus::ProbeFailed,
@@ -1266,14 +1248,12 @@ fn probe_version_only(harness: HarnessId, executable: &Path, budget: Duration) -
             EnumerationStatus::ProbeFailed,
             Some(format!("version probe exited {exit_code}: {stderr_tail}")),
         ),
-        ProbeRun::SpawnFailed(message) => {
-            let (status, note) = classify_spawn_failure(
-                "version probe",
-                executable_presence(executable),
-                &message,
-            );
-            (status, Some(note))
-        }
+        ProbeRun::SpawnFailed(message) => (
+            EnumerationStatus::ProbeFailed,
+            Some(format!(
+                "version probe spawn failed ({message}); cause unknown"
+            )),
+        )
         ProbeRun::HelperFailed { stream, error } => (
             EnumerationStatus::ProbeFailed,
             Some(format!(
@@ -2076,64 +2056,6 @@ fn version_gate_open(run: &ProbeRun, verified: bool, unreaped: bool) -> bool {
     matches!(run, ProbeRun::Completed { .. }) && verified && !unreaped
 }
 
-/// Filesystem evidence observed at a spawn failure instant: only a
-/// typed absence proves a missing executable.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg(unix)]
-enum SpawnEvidence {
-    /// Path positively absent (typed NotFound).
-    Absent,
-    /// Path present (executable or not): the failure cause is unknown.
-    Present,
-    /// The stat itself failed otherwise: unknown, never absence.
-    Unknown,
-}
-
-/// Observe executable presence at a spawn failure instant. Uses
-/// symlink_metadata (no follow, no exec) so the check itself spawns
-/// nothing.
-#[cfg(unix)]
-fn executable_presence(executable: &Path) -> SpawnEvidence {
-    match std::fs::symlink_metadata(executable) {
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => SpawnEvidence::Absent,
-        Err(_) => SpawnEvidence::Unknown,
-        Ok(_) => SpawnEvidence::Present,
-    }
-}
-
-/// Honest spawn-failure status for one probe phase: only positively
-/// absent paths stay NotInstalled (outer discovery already handles the
-/// absent-executable case); anything else is an explicit unknown-cause
-/// ProbeFailed carrying phase plus error. Never a transient claim,
-/// never a missing claim without evidence.
-#[cfg(unix)]
-fn classify_spawn_failure(
-    phase: &'static str,
-    evidence: SpawnEvidence,
-    error: &str,
-) -> (EnumerationStatus, String) {
-    match evidence {
-        SpawnEvidence::Absent => (
-            EnumerationStatus::NotInstalled,
-            format!("{phase} spawn failed ({error}); executable absent at probe time"),
-        ),
-        SpawnEvidence::Present => (
-            EnumerationStatus::ProbeFailed,
-            format!(
-                "{phase} spawn failed ({error}); executable present at probe time, \
-                 cause unknown — not a missing install"
-            ),
-        ),
-        SpawnEvidence::Unknown => (
-            EnumerationStatus::ProbeFailed,
-            format!(
-                "{phase} spawn failed ({error}); executable state inconclusive, \
-                 cause unknown"
-            ),
-        ),
-    }
-}
-
 #[cfg(unix)]
 enum ParseOutcome {
     Entries(Vec<CatalogEntry>),
@@ -2291,30 +2213,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn spawn_failure_status_needs_absent_path_for_not_installed() {
-        // Literally in-memory: pre-observed evidence enum plus error
-        // strings in, status plus note out. No filesystem reads here;
-        // executable_presence (the single stat call) stays untested by
-        // unit by design.
-        let (status, note) = super::classify_spawn_failure(
-            "enumeration probe",
-            super::SpawnEvidence::Absent,
-            "No such file or directory",
-        );
-        assert_eq!(status, EnumerationStatus::NotInstalled);
-        assert!(note.contains("absent"), "{note}");
-        for evidence in [super::SpawnEvidence::Present, super::SpawnEvidence::Unknown] {
-            let (status, note) =
-                super::classify_spawn_failure("enumeration probe", evidence, "e");
-            assert_eq!(status, EnumerationStatus::ProbeFailed);
-            assert!(note.contains("unknown"), "{note}");
-        }
-        let (_, note) =
-            super::classify_spawn_failure("version probe", super::SpawnEvidence::Present, "e");
-        assert!(note.contains("version probe"), "{note}");
     }
 
     #[test]
