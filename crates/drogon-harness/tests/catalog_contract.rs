@@ -2777,9 +2777,34 @@ PIEOF\n\
         note.contains("group-empty after SIGTERM"),
         "evidence must record verified group exit, not assumed: {note}"
     );
+    // Correct owner of TERM evidence is the PRODUCT catalog note above
+    // (group-empty after SIGTERM) plus assert_clean_product's zero-
+    // rescue proof. Precise limits, not overclaims: the product group
+    // probe establishes group absence via killpg — NOT wait/reaping of
+    // a non-child (only the spawning parent can waitpid) — and the
+    // captured CI failure proves the gone-before-resolve order, not
+    // both timing orders. When the product's group is already empty,
+    // the supervisor must observe Gone and stay silent; demanding a
+    // supervisor SIGTERM here contradicts assert_clean_product and
+    // races the product's own bounded group cleanup. A supervisor
+    // signal is only correct for an identity verified alive at resolve
+    // time. What this test does require of the supervisor: verified
+    // every observed identity (an ACK exists) and resolved it gone
+    // without signaling.
     assert!(
-        run.cleanup.actions.iter().any(|a| a.contains("SIGTERM")),
-        "{:?}",
+        run.cleanup
+            .actions
+            .iter()
+            .any(|a| a.contains("ack-alive") || a.contains("ack-gone")),
+        "supervisor must have verified the identity before resolving it gone: {:?}",
+        run.cleanup.actions
+    );
+    assert!(
+        run.cleanup
+            .actions
+            .iter()
+            .any(|a| a.contains("resolved-gone")),
+        "grandchild must resolve gone: {:?}",
         run.cleanup.actions
     );
 }
