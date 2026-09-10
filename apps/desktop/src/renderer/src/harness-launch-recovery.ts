@@ -1,5 +1,9 @@
 import { bridgeSchemas } from "../../shared/bridge-validation";
-import type { HarnessLaunchInput } from "../../shared/session-contract";
+import type {
+  Harness,
+  HarnessLaunchInput,
+} from "../../shared/session-contract";
+import { ALLOWED_EFFORT_LEVELS } from "./harness-launch-form";
 
 const STORAGE_KEY = "drogon:pending-harness-launch";
 // Bounds unbounded growth across many workspaces/hosts; oldest entries drop first.
@@ -143,4 +147,31 @@ export function loadPendingHarnessLaunch(
       return entry.input;
   }
   return null;
+}
+
+/**
+ * Whether a stored pending intent is still honestly recoverable against
+ * the CURRENT harness list: the harness must still be listed as
+ * `available` (host fencing — a binary removed or disabled since the
+ * save must not be re-offered), the provider must still be Pi-only, and
+ * the effort must still be advertised for the harness. Unknown ids stay
+ * recoverable (manual-unverified, never refuted without a real host
+ * catalog). Pure data adapter for the held menu handover; `load*`
+ * behavior above is unchanged.
+ */
+export function isPendingLaunchRecoverable(
+  input: HarnessLaunchInput,
+  harnesses: Pick<Harness, "harnessId" | "availability">[],
+): boolean {
+  const listed = harnesses.find(
+    (harness) => harness.harnessId === input.harnessId,
+  );
+  if (!listed || listed.availability !== "available") return false;
+  if (input.provider !== undefined && input.harnessId !== "pi") return false;
+  if (
+    input.effort !== undefined &&
+    !ALLOWED_EFFORT_LEVELS[input.harnessId].includes(input.effort)
+  )
+    return false;
+  return true;
 }

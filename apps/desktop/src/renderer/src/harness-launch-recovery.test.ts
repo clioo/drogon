@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   clearPendingHarnessLaunch,
+  isPendingLaunchRecoverable,
   loadPendingHarnessLaunch,
   savePendingHarnessLaunch,
 } from "./harness-launch-recovery";
@@ -154,5 +155,73 @@ describe("harness launch recovery", () => {
     expect(loadPendingHarnessLaunch("h1", "w24", storage)).not.toBeNull();
     // The earliest ones are evicted.
     expect(loadPendingHarnessLaunch("h1", "w0", storage)).toBeNull();
+  });
+});
+
+describe("pending launch recoverability (C01 fencing adapter)", () => {
+  const harnesses = [
+    { harnessId: "claude", availability: "available" },
+    { harnessId: "pi", availability: "available" },
+    { harnessId: "opencode", availability: "missing" },
+  ] as const;
+  const list = harnesses.map((h) => ({ ...h })) as unknown as Parameters<
+    typeof isPendingLaunchRecoverable
+  >[1];
+
+  test("a pending intent for a still-available harness stays recoverable", () => {
+    expect(isPendingLaunchRecoverable(input, list)).toBe(true);
+  });
+  test("unknown ids stay recoverable: manual-unverified is never refuted here", () => {
+    expect(
+      isPendingLaunchRecoverable(
+        {
+          ...input,
+          harnessId: "pi",
+          model: "no-such-model",
+          provider: "no-such-provider",
+          effort: "high",
+          requestId: "22222222-2222-2222-2222-222222222222",
+        },
+        list,
+      ),
+    ).toBe(true);
+  });
+  test("a harness that went missing since the save is no longer recoverable", () => {
+    expect(
+      isPendingLaunchRecoverable(
+        {
+          ...input,
+          harnessId: "opencode",
+          requestId: "33333333-3333-3333-3333-333333333333",
+        },
+        list,
+      ),
+    ).toBe(false);
+    expect(
+      isPendingLaunchRecoverable(
+        {
+          ...input,
+          harnessId: "codex",
+          requestId: "44444444-4444-4444-4444-444444444444",
+        },
+        list,
+      ),
+    ).toBe(false);
+  });
+  test("stale provider/effort combinations are no longer recoverable", () => {
+    expect(
+      isPendingLaunchRecoverable({ ...input, provider: "anthropic" }, list),
+    ).toBe(false);
+    expect(
+      isPendingLaunchRecoverable(
+        {
+          ...input,
+          harnessId: "pi",
+          effort: "ultra",
+          requestId: "55555555-5555-5555-5555-555555555555",
+        },
+        list,
+      ),
+    ).toBe(false);
   });
 });
