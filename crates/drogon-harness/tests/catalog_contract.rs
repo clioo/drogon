@@ -2777,9 +2777,30 @@ PIEOF\n\
         note.contains("group-empty after SIGTERM"),
         "evidence must record verified group exit, not assumed: {note}"
     );
+    // Correct owner of TERM evidence is the PRODUCT catalog note above
+    // (group-empty after SIGTERM) plus assert_clean_product's zero-
+    // rescue proof: when the product reaps the grandchild first, the
+    // supervisor must observe Gone and stay silent. Demanding a
+    // supervisor SIGTERM here contradicts assert_clean_product and races
+    // the product's own bounded group cleanup (CI proved both orders
+    // occur). A supervisor signal is only correct for an identity
+    // verified alive at resolve time. What this test does require of
+    // the supervisor: verified every observed identity (an ACK exists)
+    // and resolved it gone without signaling.
     assert!(
-        run.cleanup.actions.iter().any(|a| a.contains("SIGTERM")),
-        "{:?}",
+        run.cleanup
+            .actions
+            .iter()
+            .any(|a| a.contains("ack-alive") || a.contains("ack-gone")),
+        "supervisor must have verified the identity before resolving it gone: {:?}",
+        run.cleanup.actions
+    );
+    assert!(
+        run.cleanup
+            .actions
+            .iter()
+            .any(|a| a.contains("resolved-gone")),
+        "grandchild must resolve gone: {:?}",
         run.cleanup.actions
     );
 }
