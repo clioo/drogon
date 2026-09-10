@@ -3040,6 +3040,7 @@ fn nonzero_exit_is_probe_failed_never_model_rows() {
 /// survive in the note rather than being erased by a later success.
 /// Finite fixture (both branches exit immediately, no sleeps or
 /// descendants), so a future run is bounded by construction.
+#[cfg(unix)]
 #[test]
 fn failed_version_refuses_enumeration_despite_valid_models() {
     let bin = FixtureBin::new();

@@ -1253,7 +1253,7 @@ fn probe_version_only(harness: HarnessId, executable: &Path, budget: Duration) -
             Some(format!(
                 "version probe spawn failed ({message}); cause unknown"
             )),
-        )
+        ),
         ProbeRun::HelperFailed { stream, error } => (
             EnumerationStatus::ProbeFailed,
             Some(format!(
