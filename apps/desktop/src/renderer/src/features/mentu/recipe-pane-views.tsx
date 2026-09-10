@@ -16,8 +16,33 @@
 // counts) render the reference's honest "unavailable" states; observed
 // token usage and models render through the dedicated MentuUsageMetrics
 // component when the record carries them. Drogon estimates nothing.
+//
+// Target-design additions (owner-supplied mockup): a dotted-grid canvas
+// with real zoom controls (CSS transform scale, clamped 50%-200%, plus a
+// fit-to-view reset — local to this component, no fake "connected" state),
+// a check-circle-family status glyph reflecting the node's ACTUAL run
+// record (never a decorative always-green icon), and a SELECTED badge with
+// a destructive-accent border plus the named single dependency for the
+// selected node. The dependency-COUNT phrase (`Depends on N node(s)`)
+// keeps its exact existing text when nothing is selected — the name
+// suffix only appends for the selected node, so this stays an additive
+// change.
 
-import { Activity, ArrowRight, Clock3, FileJson, Gauge } from "lucide-react";
+import { useState } from "react";
+import {
+  Activity,
+  AlertCircle,
+  ArrowRight,
+  CheckCircle2,
+  Circle,
+  Clock3,
+  FileJson,
+  Gauge,
+  Loader2,
+  Maximize,
+  Minus,
+  Plus,
+} from "lucide-react";
 import type {
   MentuRecipeDetail,
   MentuReferencedOutput,
@@ -25,14 +50,37 @@ import type {
   MentuStepEvidence,
 } from "../../../../shared/mentu-contract";
 import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import {
   groupStepAttempts,
   nodeRunRecord,
   type RecipeGraph,
 } from "./recipe-graph";
 import { RecipeVerification } from "./RecipeVerification";
-import { statusLabel } from "./run-status";
+import { statusLabel, statusToneClass } from "./run-status";
 import { UsageStepMetrics, UsageTokenCards } from "./MentuUsageMetrics";
+
+const ZOOM_MIN = 50;
+const ZOOM_MAX = 200;
+const ZOOM_STEP = 10;
+const ZOOM_DEFAULT = 100;
+
+/** The node's own run-record status as a glyph, never a bare decorative
+ *  checkmark: no record renders a neutral outline circle, a run in
+ *  progress spins, and success/failure use the same tone convention as
+ *  the rest of the panel (`statusToneClass`). */
+function NodeStatusIcon({
+  status,
+}: {
+  status: MentuRun["steps"][number]["status"] | undefined;
+}): React.JSX.Element {
+  const className = `size-4 shrink-0 ${statusToneClass(status)}`;
+  if (status === "running") return <Loader2 className={`${className} animate-spin`} aria-hidden />;
+  if (status === "succeeded") return <CheckCircle2 className={className} aria-hidden />;
+  if (status === "failed" || status === "unavailable")
+    return <AlertCircle className={className} aria-hidden />;
+  return <Circle className={className} aria-hidden />;
+}
 
 function MetricValue({ value, exact }: { value: string; exact: boolean }): React.JSX.Element {
   return (
@@ -104,6 +152,24 @@ function EvidenceStream({
   return null;
 }
 
+/** Real, functional zoom over the graph canvas: a CSS transform scale the
+ *  buttons actually change (clamped, keyboard-operable via the Select-free
+ *  plain buttons below), never a decorative control that does nothing. */
+function useGraphZoom(): {
+  zoom: number;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  fitToView: () => void;
+} {
+  const [zoom, setZoom] = useState(ZOOM_DEFAULT);
+  return {
+    zoom,
+    zoomIn: () => setZoom((current) => Math.min(ZOOM_MAX, current + ZOOM_STEP)),
+    zoomOut: () => setZoom((current) => Math.max(ZOOM_MIN, current - ZOOM_STEP)),
+    fitToView: () => setZoom(ZOOM_DEFAULT),
+  };
+}
+
 export function GraphView({
   graph,
   run,
@@ -115,59 +181,122 @@ export function GraphView({
   selectedNodeId: string | null;
   onSelectNode: (nodeId: string) => void;
 }): React.JSX.Element {
+  const { zoom, zoomIn, zoomOut, fitToView } = useGraphZoom();
   const levels = new Map<number, (typeof graph.nodes)[number][]>();
   for (const node of graph.nodes) {
     const nodesAtLevel = levels.get(node.depth) ?? [];
     nodesAtLevel.push(node);
     levels.set(node.depth, nodesAtLevel);
   }
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   return (
-    <div
-      className="@container/mentu-graph min-w-0 space-y-3"
-      data-testid="recipe-graph"
-      role="tree"
-      aria-label="Recipe dependency graph"
-    >
-      {[...levels.entries()]
-        .sort(([left], [right]) => left - right)
-        .map(([level, nodes]) => (
-          <div key={level} className="flex items-stretch gap-2" data-recipe-graph-level={level}>
-            {level > 0 ? (
-              <ArrowRight className="mt-3 size-4 shrink-0 text-muted-foreground" aria-hidden />
-            ) : null}
-            <div className="grid min-w-0 flex-1 gap-2 @md/mentu-graph:grid-cols-2 @2xl/mentu-graph:grid-cols-3">
-              {nodes.map((node) => {
-                const record = nodeRunRecord(run?.steps, node.label);
-                return (
-                  <button
-                    key={node.id}
-                    type="button"
-                    role="treeitem"
-                    aria-selected={selectedNodeId === node.id}
-                    data-recipe-node={node.label}
-                    onClick={() => onSelectNode(node.id)}
-                    className={`min-w-0 rounded-lg border p-3 text-left transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 ${selectedNodeId === node.id ? "border-ring bg-accent text-accent-foreground" : "border-border bg-card hover:bg-accent/50"}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Activity className="size-4 shrink-0" />
-                      <span className="min-w-0 truncate text-sm font-medium">{node.label}</span>
-                      {record ? (
-                        <Badge variant="outline" className="ml-auto text-[10px]">
-                          {statusLabel(record.status)}
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {node.dependencies.length > 0
-                        ? `Depends on ${node.dependencies.length} node${node.dependencies.length === 1 ? "" : "s"}`
-                        : "No dependencies"}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+    <div className="relative min-w-0" data-testid="recipe-graph-canvas">
+      <div
+        className="pointer-events-none absolute inset-0 -m-3 rounded-lg opacity-60 [background-image:radial-gradient(var(--border)_1px,transparent_1px)] [background-size:16px_16px] dark:opacity-30"
+        aria-hidden
+      />
+      <div className="relative mb-3 flex items-center gap-1" data-testid="recipe-graph-zoom">
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="outline"
+          onClick={zoomIn}
+          disabled={zoom >= ZOOM_MAX}
+          aria-label="Zoom in"
+        >
+          <Plus />
+        </Button>
+        <span className="min-w-10 text-center text-[11px] tabular-nums text-muted-foreground">
+          {zoom}%
+        </span>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="outline"
+          onClick={zoomOut}
+          disabled={zoom <= ZOOM_MIN}
+          aria-label="Zoom out"
+        >
+          <Minus />
+        </Button>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="outline"
+          onClick={fitToView}
+          aria-label="Fit to view"
+        >
+          <Maximize />
+        </Button>
+      </div>
+      <div
+        className="@container/mentu-graph relative min-w-0 origin-top-left space-y-3 transition-transform"
+        style={{ transform: `scale(${zoom / 100})` }}
+        data-testid="recipe-graph"
+        role="tree"
+        aria-label="Recipe dependency graph"
+      >
+        {[...levels.entries()]
+            .sort(([left], [right]) => left - right)
+            .map(([level, nodes]) => (
+              <div key={level} className="flex items-stretch gap-2" data-recipe-graph-level={level}>
+                {level > 0 ? (
+                  <ArrowRight className="mt-3 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                ) : null}
+                <div className="grid min-w-0 flex-1 gap-2 @md/mentu-graph:grid-cols-2 @2xl/mentu-graph:grid-cols-3">
+                  {nodes.map((node) => {
+                    const record = nodeRunRecord(run?.steps, node.label);
+                    const selected = selectedNodeId === node.id;
+                    const onlyDependency =
+                      node.dependencies.length === 1
+                        ? nodeById.get(node.dependencies[0])?.label
+                        : undefined;
+                    return (
+                      <button
+                        key={node.id}
+                        type="button"
+                        role="treeitem"
+                        aria-selected={selected}
+                        data-recipe-node={node.label}
+                        onClick={() => onSelectNode(node.id)}
+                        className={`min-w-0 rounded-lg border-2 p-3 text-left transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 ${selected ? "border-destructive bg-accent text-accent-foreground" : "border-border bg-card hover:bg-accent/50"}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <NodeStatusIcon status={record?.status} />
+                          <span className="min-w-0 truncate text-sm font-medium">
+                            {node.label}
+                          </span>
+                          {selected ? (
+                            <Badge
+                              variant="destructive"
+                              className="ml-auto text-[9px] tracking-wide"
+                              data-testid="mentu-node-selected-badge"
+                            >
+                              SELECTED
+                            </Badge>
+                          ) : record ? (
+                            <Badge variant="outline" className="ml-auto text-[10px]">
+                              {statusLabel(record.status)}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {node.dependencies.length > 0
+                            ? `Depends on ${node.dependencies.length} node${node.dependencies.length === 1 ? "" : "s"}`
+                            : "No dependencies"}
+                          {selected && onlyDependency ? (
+                            <span className="ml-1 font-mono text-muted-foreground/80">
+                              · ({onlyDependency})
+                            </span>
+                          ) : null}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+      </div>
     </div>
   );
 }

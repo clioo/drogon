@@ -104,6 +104,44 @@ describe("GraphView", () => {
     expect(screen.getByText("Succeeded")).toBeTruthy();
     expect(screen.getByText("Failed")).toBeTruthy();
   });
+
+  it("marks the selected node with a SELECTED badge, a destructive border and its named single dependency", () => {
+    const graph = buildRecipeGraph(recipe().steps);
+    const testNodeId = graph.nodes.find((node) => node.label === "test")!.id;
+    render(
+      <GraphView graph={graph} run={run()} selectedNodeId={testNodeId} onSelectNode={() => {}} />,
+    );
+    expect(screen.getByTestId("mentu-node-selected-badge").textContent).toBe("SELECTED");
+    const selectedButton = screen.getByRole("treeitem", { selected: true });
+    expect(selectedButton.className).toContain("border-destructive");
+    expect(selectedButton.textContent).toContain("· (build)");
+    // The unselected node keeps the exact pre-existing status badge text,
+    // never a SELECTED badge.
+    const buildButton = screen.getByText("build").closest("button")!;
+    expect(buildButton.querySelector('[data-testid="mentu-node-selected-badge"]')).toBeNull();
+  });
+
+  it("keeps the exact dependency-count phrase when nothing is selected (no name suffix)", () => {
+    const graph = buildRecipeGraph(recipe().steps);
+    render(<GraphView graph={graph} run={run()} selectedNodeId={null} onSelectNode={() => {}} />);
+    expect(screen.getByText("Depends on 1 node").textContent).toBe("Depends on 1 node");
+  });
+
+  it("offers real, functional zoom controls that change the rendered scale", () => {
+    const graph = buildRecipeGraph(recipe().steps);
+    render(<GraphView graph={graph} run={run()} selectedNodeId={null} onSelectNode={() => {}} />);
+    const canvas = screen.getByTestId("recipe-graph");
+    expect(canvas.style.transform).toBe("scale(1)");
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(canvas.style.transform).toBe("scale(1.1)");
+    expect(screen.getByText("110%")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+    expect(canvas.style.transform).toBe("scale(0.9)");
+    fireEvent.click(screen.getByRole("button", { name: "Fit to view" }));
+    expect(canvas.style.transform).toBe("scale(1)");
+    expect(screen.getByText("100%")).toBeTruthy();
+  });
 });
 
 describe("EvidenceView", () => {

@@ -5,11 +5,22 @@
 // draft step, and Save forwards the edited draft to the controller.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
-import type { MentuRecipeStep } from "./recipe-validation/mentu-recipe-document";
+import type { Harness } from "../../../../shared/session-contract";
+import type {
+  MentuRecipeDefinition,
+  MentuRecipeStep,
+} from "./recipe-validation/mentu-recipe-document";
 import type { RecipeGraphNode } from "./recipe-graph";
 import { SelectedNodeInspector } from "./recipe-pane-inspector";
+
+// Radix Select/Popover defer open/highlight focus work to a setTimeout
+// (same helper `select.test.tsx` uses for the source-ported Select).
+const flushDeferredFocus = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 
 beforeEach(installRadixJsdomStubs);
 afterEach(cleanup);
@@ -217,5 +228,204 @@ describe("SelectedNodeInspector edit mode", () => {
     );
     expect(screen.queryByRole("button", { name: /Save to Mentu JSON/ })).toBeNull();
     expect(screen.getByText(/draft source has errors/)).toBeTruthy();
+  });
+});
+
+const CLAUDE_HARNESS: Harness = {
+  harnessId: "claude",
+  displayName: "Claude Code",
+  availability: "available",
+  executable: "/usr/local/bin/claude",
+};
+
+describe("SelectedNodeInspector real harness catalog", () => {
+  it("renders the registered harness with a CLI chip and its real availability, without breaking the plain backend list", async () => {
+    render(
+      <SelectedNodeInspector
+        node={node}
+        editStep={step}
+        backends={["shell"]}
+        inheritBackendLabel="shell"
+        editable
+        disabled={false}
+        saving={false}
+        onSave={vi.fn()}
+        harnessCatalog={[CLAUDE_HARNESS]}
+      />,
+    );
+    fireEvent.keyDown(screen.getByLabelText("Harness / backend"), { key: "Enter" });
+    await flushDeferredFocus();
+    expect(screen.getByText("Claude Code")).toBeTruthy();
+    expect(screen.getByText("CLI")).toBeTruthy();
+    // The pre-existing "backends in use" entries (here just shell) still
+    // render plainly alongside the registered catalog.
+    expect(screen.getAllByText("shell").length).toBeGreaterThan(0);
+  });
+
+  it("honestly reflects a missing harness instead of hiding or inventing availability", () => {
+    render(
+      <SelectedNodeInspector
+        node={node}
+        editStep={{ ...step, backend: "claude" }}
+        backends={["shell", "claude"]}
+        inheritBackendLabel="shell"
+        editable
+        disabled={false}
+        saving={false}
+        onSave={vi.fn()}
+        harnessCatalog={[{ ...CLAUDE_HARNESS, availability: "missing", executable: null }]}
+      />,
+    );
+    expect(screen.getByText("Not installed on this host")).toBeTruthy();
+  });
+
+  it("surfaces a failed catalog load as an explicit status, never a silent empty list", () => {
+    render(
+      <SelectedNodeInspector
+        node={node}
+        editStep={step}
+        backends={["shell"]}
+        inheritBackendLabel="shell"
+        editable
+        disabled={false}
+        saving={false}
+        onSave={vi.fn()}
+        harnessCatalog={[]}
+        harnessCatalogError="daemon unreachable"
+      />,
+    );
+    expect(screen.getByText(/Harness catalog unavailable: daemon unreachable/)).toBeTruthy();
+  });
+
+  it("wires the refresh affordance to the caller's real refresh call", () => {
+    const onRefresh = vi.fn();
+    render(
+      <SelectedNodeInspector
+        node={node}
+        editStep={step}
+        backends={["shell"]}
+        inheritBackendLabel="shell"
+        editable
+        disabled={false}
+        saving={false}
+        onSave={vi.fn()}
+        harnessCatalog={[CLAUDE_HARNESS]}
+        onRefreshHarnessCatalog={onRefresh}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Refresh harness catalog" }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SelectedNodeInspector honest model quick-pick", () => {
+  const agentStep: MentuRecipeStep = {
+    label: "build-and-test",
+    backend: "claude",
+    prompt: "build",
+  };
+  const agentNode: RecipeGraphNode = {
+    id: "step:build-and-test",
+    label: "build-and-test",
+    kind: "step",
+    dependencies: [],
+    depth: 0,
+  };
+
+  it("offers the recipe-observed model from a sibling step, not a fabricated live count", async () => {
+    const recipe: MentuRecipeDefinition = {
+      name: "demo",
+      steps: [
+        { label: "other", backend: "claude", model: "claude-opus-5" },
+        agentStep,
+      ],
+    };
+    render(
+      <SelectedNodeInspector
+        node={agentNode}
+        editStep={agentStep}
+        backends={["shell", "claude"]}
+        inheritBackendLabel="shell"
+        editable
+        disabled={false}
+        saving={false}
+        onSave={vi.fn()}
+        recipeDefinition={recipe}
+      />,
+    );
+    expect(
+      screen.getByText(/model ids available/).textContent,
+    ).toContain("from this recipe");
+    fireEvent.keyDown(screen.getByLabelText("Model quick pick"), { key: "Enter" });
+    await flushDeferredFocus();
+    expect(screen.getByText("claude-opus-5")).toBeTruthy();
+  });
+
+  it("says plainly when nothing is known or observed for the backend", () => {
+    render(
+      <SelectedNodeInspector
+        node={agentNode}
+        editStep={{ ...agentStep, backend: "opencode" }}
+        backends={["shell", "opencode"]}
+        inheritBackendLabel="shell"
+        editable
+        disabled={false}
+        saving={false}
+        onSave={vi.fn()}
+        recipeDefinition={{ name: "demo", steps: [] }}
+      />,
+    );
+    expect(screen.getByText(/enter an exact id manually/)).toBeTruthy();
+  });
+});
+
+describe("SelectedNodeInspector JSON-synced chip", () => {
+  it("reads JSON synced when the draft matches the saved step", () => {
+    render(
+      <SelectedNodeInspector
+        node={node}
+        editStep={step}
+        backends={["shell"]}
+        inheritBackendLabel="shell"
+        editable
+        disabled={false}
+        saving={false}
+        onSave={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("mentu-json-sync-chip").textContent).toContain("JSON synced");
+  });
+
+  it("reads Unsaved edits the moment the in-progress draft diverges", () => {
+    render(
+      <SelectedNodeInspector
+        node={node}
+        editStep={step}
+        backends={["shell"]}
+        inheritBackendLabel="shell"
+        editable
+        disabled={false}
+        saving={false}
+        onSave={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Timeout (seconds)"), { target: { value: "90" } });
+    expect(screen.getByTestId("mentu-json-sync-chip").textContent).toContain("Unsaved edits");
+  });
+
+  it("reads Saving… while a save is in flight", () => {
+    render(
+      <SelectedNodeInspector
+        node={node}
+        editStep={step}
+        backends={["shell"]}
+        inheritBackendLabel="shell"
+        editable
+        disabled={false}
+        saving
+        onSave={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("mentu-json-sync-chip").textContent).toContain("Saving…");
   });
 });

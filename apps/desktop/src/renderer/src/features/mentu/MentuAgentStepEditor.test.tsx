@@ -3,11 +3,13 @@
 // Agent-step editor tests: the editable Model field, the Pi-only provider
 // binding, the four distinct verdict tones, and keyboard-operable inputs.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import { MentuAgentStepEditor } from "./MentuAgentStepEditor";
 import type { ApprovedSelectionVerdict } from "./mentu-approved-selection";
 
+beforeEach(installRadixJsdomStubs);
 afterEach(cleanup);
 
 const unverified: ApprovedSelectionVerdict = {
@@ -83,5 +85,48 @@ describe("MentuAgentStepEditor", () => {
     renderEditor({ disabled: true, showProvider: true });
     expect((screen.getByLabelText("Model") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText("Provider binding") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("renders no quick-pick affordance when the caller has nothing honestly known or observed", () => {
+    renderEditor({ knownModels: [], observedModels: [] });
+    expect(screen.queryByLabelText("Model quick pick")).toBeNull();
+  });
+
+  it("picking a known model writes the exact id through onChangeModel, never a substitution", async () => {
+    const { onChangeModel } = renderEditor({
+      knownModels: [{ id: "claude-sonnet-5", note: "recommended" }],
+    });
+    fireEvent.keyDown(screen.getByLabelText("Model quick pick"), { key: "Enter" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    fireEvent.click(screen.getByText("claude-sonnet-5"));
+    expect(onChangeModel).toHaveBeenCalledWith("claude-sonnet-5");
+  });
+
+  it("picking the default entry clears the model instead of writing a sentinel", async () => {
+    const { onChangeModel } = renderEditor({
+      knownModels: [{ id: "claude-sonnet-5", note: "recommended" }],
+    });
+    fireEvent.keyDown(screen.getByLabelText("Model quick pick"), { key: "Enter" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    fireEvent.click(screen.getByText("harness default"));
+    expect(onChangeModel).toHaveBeenCalledWith("");
+  });
+
+  it("renders the caller's honest catalog status line, verbatim", () => {
+    renderEditor({ catalogStatusLine: "No known or recipe-observed model ids for codex yet." });
+    expect(screen.getByTestId("model-catalog-status").textContent).toBe(
+      "No known or recipe-observed model ids for codex yet.",
+    );
+  });
+
+  it("wires the refresh affordance to the caller's real refresh call", () => {
+    const onRefreshCatalog = vi.fn();
+    renderEditor({ onRefreshCatalog });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh model catalog" }));
+    expect(onRefreshCatalog).toHaveBeenCalledTimes(1);
   });
 });

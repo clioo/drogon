@@ -89,6 +89,11 @@ export function RecipePaneContent({
                 disabled={controller.busy || controller.saving}
                 saving={controller.saving}
                 onSave={(draft) => controller.saveSelectedStep(draft)}
+                harnessCatalog={controller.harnessCatalog}
+                harnessCatalogLoading={controller.harnessCatalogLoading}
+                harnessCatalogError={controller.harnessCatalogError}
+                onRefreshHarnessCatalog={controller.refreshHarnessCatalog}
+                recipeDefinition={controller.recipeDefinition}
               />
             </div>
           ) : graph ? (

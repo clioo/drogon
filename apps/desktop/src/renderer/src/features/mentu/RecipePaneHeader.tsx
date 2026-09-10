@@ -4,8 +4,18 @@
 // header with the reference's DOM, Tailwind classes, copy, icons, keyboard
 // and ARIA. Only the controller type is adapted (this repo's
 // `MentuPaneController` over the mentu.* daemon RPCs).
+//
+// Target-design additions (owner-supplied mockup): an "Active Workspace"
+// chip beside the title (true for every render — this panel only ever
+// shows the workspace the shell handed it), a refresh icon button that
+// re-loads the recipe list and the current recipe (real network calls,
+// not decorative), and a prominent "Run Recipe" primary button in the
+// app's destructive/red accent. The button reuses the EXACT same
+// review -> approve & run state machine `RunControls` already drives
+// (`controller.review`/`stageReview`/`approveAndRun`) so it is a second
+// entry point into real, already-gated behavior, never a parallel path.
 
-import { AlertCircle, Network } from "lucide-react";
+import { AlertCircle, Network, Play, RefreshCw } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Label } from "../../components/ui/label";
@@ -24,19 +34,34 @@ export function RecipePaneHeader({
 }: {
   controller: MentuPaneController;
 }): React.JSX.Element {
+  const runtimeAvailable =
+    controller.runtime?.available === true && controller.runtime?.lockMatches === true;
+  const runDisabled =
+    controller.busy ||
+    controller.saving ||
+    controller.operationRunning ||
+    !controller.recipe ||
+    controller.graph?.valid !== true ||
+    !runtimeAvailable;
+  const runLabel = controller.review ? "Approve & run recipe" : "Run Recipe";
   return (
     <>
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <Network className="size-4 text-muted-foreground" aria-hidden />
           <div className="min-w-0">
-            <h1 className="truncate text-sm font-medium">Mentu</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-sm font-medium">Mentu</h1>
+              <Badge variant="outline" className="shrink-0 text-[10px]">
+                Active Workspace
+              </Badge>
+            </div>
             <p className="truncate text-xs text-muted-foreground">
               Workspace source: .mentu/recipes
             </p>
           </div>
         </div>
-        <div className="ml-auto flex min-w-[220px] items-center gap-2">
+        <div className="ml-auto flex min-w-[220px] flex-wrap items-center gap-2">
           <Label htmlFor="recipe-selector" className="sr-only">
             Recipe
           </Label>
@@ -60,6 +85,29 @@ export function RecipePaneHeader({
               ))}
             </SelectContent>
           </Select>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            disabled={controller.loading || controller.busy}
+            onClick={() => controller.refreshRecipes()}
+            aria-label="Refresh recipes"
+          >
+            <RefreshCw className={`size-3.5 ${controller.loading ? "animate-spin" : ""}`} />
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            disabled={runDisabled}
+            data-testid="mentu-run-recipe"
+            onClick={() =>
+              controller.review ? void controller.approveAndRun() : controller.stageReview()
+            }
+          >
+            <Play />
+            {runLabel}
+          </Button>
         </div>
       </div>
       {controller.dirty ? (

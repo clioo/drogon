@@ -20,11 +20,14 @@ import type {
   MentuRuntimeInfo,
   MentuStepEvidence,
 } from "../../../../shared/mentu-contract";
+import type { Harness } from "../../../../shared/session-contract";
 import type { MentuPaneMode } from "../../../../shared/persistence-contracts/mentu-pane-types";
 import { buildRecipeGraph, type RecipeGraph } from "./recipe-graph";
 import { useMentuState } from "./mentu-store";
+import { useHarnessCatalog } from "./mentu-harness-catalog";
 import type { MentuRuntimeMessageKind } from "./MentuRuntimeMessage";
 import type {
+  MentuRecipeDefinition,
   MentuRecipeDocument,
   MentuRecipeStep,
   MentuRecipeValidationIssue,
@@ -61,6 +64,9 @@ export type MentuPaneController = {
   recipes: MentuRecipeSummary[];
   validEntries: MentuRecipeSummary[];
   invalidCount: number;
+  /** Re-runs the real recipe-list and runtime-info loads (the header's
+   *  refresh affordance). */
+  refreshRecipes: () => void;
   selectedRecipeId: string | null;
   setSelectedRecipeId: (recipeId: string | null) => void;
   recipe: MentuRecipeDetail | null;
@@ -93,6 +99,16 @@ export type MentuPaneController = {
   availableBackends: string[];
   /** The draft's root backend, shown as the inspector's inherit option. */
   inheritBackendLabel: string | null;
+  /** The draft (or saved) recipe definition, for the inspector's honest
+   *  "observed in this recipe" model quick-pick. Null before a recipe
+   *  parses. */
+  recipeDefinition: MentuRecipeDefinition | null;
+  /** Real registered-harness catalog (`harness.list`) for the inspector's
+   *  Harness / backend select — never a Mentu-local guess. */
+  harnessCatalog: Harness[];
+  harnessCatalogLoading: boolean;
+  harnessCatalogError: string | null;
+  refreshHarnessCatalog: () => void;
   /** Whether the draft text parses into an editable document at all. */
   editable: boolean;
   saveNotice: string | null;
@@ -117,6 +133,7 @@ export function useMentuPaneController(
   workspaceId: string,
 ): MentuPaneController {
   const [state, setState] = useMentuState(workspaceId);
+  const harnessCatalog = useHarnessCatalog();
   const [recipes, setRecipes] = useState<MentuRecipeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [recipe, setRecipe] = useState<MentuRecipeDetail | null>(null);
@@ -155,6 +172,11 @@ export function useMentuPaneController(
   const [drafts, setDrafts] = useState<MentuDraftState>({ draftSourceByPath: {} });
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
+  // Bumped by the header's refresh affordance to re-run the load effect
+  // below with the exact same real calls the initial mount makes — never
+  // a decorative spinner with nothing behind it.
+  const [recipesGeneration, setRecipesGeneration] = useState(0);
+  const refreshRecipes = useCallback(() => setRecipesGeneration((value) => value + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,7 +194,7 @@ export function useMentuPaneController(
     return () => {
       cancelled = true;
     };
-  }, [bridge, workspaceId]);
+  }, [bridge, workspaceId, recipesGeneration]);
 
   useEffect(() => {
     let cancelled = false;
@@ -630,6 +652,7 @@ export function useMentuPaneController(
     recipes,
     validEntries,
     invalidCount,
+    refreshRecipes,
     selectedRecipeId: state.selectedRecipeId,
     setSelectedRecipeId,
     recipe,
@@ -655,6 +678,11 @@ export function useMentuPaneController(
     editStep,
     availableBackends,
     inheritBackendLabel,
+    recipeDefinition: (editDocument ?? savedDocument)?.recipe ?? null,
+    harnessCatalog: harnessCatalog.harnesses,
+    harnessCatalogLoading: harnessCatalog.loading,
+    harnessCatalogError: harnessCatalog.error,
+    refreshHarnessCatalog: harnessCatalog.refresh,
     editable: savedDocument !== null,
     saveNotice,
     saving,
