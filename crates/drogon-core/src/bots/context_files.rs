@@ -125,7 +125,7 @@ what it actually does instead of guessing a command:
   ship inside this binary.
 - `drogon-cli skills get --topic drogon-cli` — print the full Drogon CLI guide
   (workspaces, projects, worktrees, terminals, the embedded browser, harness
-  launch).
+  launch, and the optional Mentu recipe environment).
 - `drogon-cli skills get --topic orchestration` — print the multi-agent
   orchestration guide (run, task, dispatch, ask, check, reply).
 
@@ -133,6 +133,14 @@ Read the matching guide (or `agent-context`) before using a command whose flags
 you are not certain of. Do not guess flags, and do not assume a command exists
 because it sounds plausible: if the guide and the schema do not list it, it is
 not there.
+
+Mentu recipes are OPTIONAL work. Before you tell anyone you made one or can run
+one, ask this host whether it really has the Mentu environment —
+`drogon-cli mentu status --workspace <ID> --json` answers installed,
+not_installed or partially_available from the daemon's own probe — and if you do
+write a recipe, `drogon-cli mentu open --workspace <ID> --recipe <ID>` shows it
+to the person you are working for. The CLI guide says when a recipe is worth
+writing and when a plain answer is the right output.
 ";
 
 /// Writes both context files into `home`, returning whether either file
@@ -228,6 +236,25 @@ mod tests {
             assert!(
                 rendered.contains(command),
                 "expected the honest discovery command {command:?} in:\n{rendered}"
+            );
+        }
+    }
+
+    /// The Mentu capability is optional, so the Bot's identity file must say
+    /// how to CHECK before promising a recipe, and name the two verbs that
+    /// exist (`mentu status`, `mentu open`) — never an invented one.
+    #[test]
+    fn agents_md_gates_mentu_on_a_real_environment_check() {
+        let rendered = render_agents_md(&bot("Arya Stark", None, None));
+        for fragment in [
+            "drogon-cli mentu status --workspace <ID> --json",
+            "drogon-cli mentu open --workspace <ID> --recipe <ID>",
+            "not_installed",
+            "OPTIONAL",
+        ] {
+            assert!(
+                rendered.contains(fragment),
+                "expected {fragment:?} in:\n{rendered}"
             );
         }
     }
