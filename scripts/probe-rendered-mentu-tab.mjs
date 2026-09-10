@@ -176,6 +176,52 @@ export async function probeRenderedMentuTab({
   await panel.getByText("tab-step-two", { exact: true }).waitFor();
   checks.push("a-recipe-is-visible-in-the-mentu-tab");
 
+  // 4b. The recipe RUNS from this tab against the pinned runtime and its
+  //     evidence shows real per-step status and output. Deterministic shell
+  //     steps, so this is the same proof the sealed J9 journey makes — now
+  //     on the tab surface.
+  const runButton = panel.locator('[data-testid="mentu-run-recipe"]');
+  await runButton.click();
+  await panel
+    .getByRole("button", { name: "Approve & run recipe", exact: true })
+    .waitFor({ timeout: 15000 });
+  await panel
+    .getByRole("button", { name: "Approve & run recipe", exact: true })
+    .click();
+  const runStatus = panel.locator('[data-testid="mentu-run-status"]');
+  // The wide tab keeps RunControls on its Run view (the Graph view renders
+  // the per-node statuses instead), so the run verdict is read there.
+  await panel.getByRole("tab", { name: "Run", exact: true }).click();
+  await runStatus.waitFor({ timeout: 180000 });
+  // Any terminal verdict renders here; the probe asserts WHICH one, so a
+  // failed run is reported as a failed run instead of a timeout.
+  await runStatus
+    .getByText(/Succeeded|Failed|Cancelled|Unavailable/i)
+    .waitFor({ timeout: 180000 });
+  const statusText = (await runStatus.innerText()) ?? "";
+  assert.match(
+    statusText,
+    /Succeeded/i,
+    `the recipe run must succeed, saw ${JSON.stringify(statusText)}; panel text: ${JSON.stringify((await panel.innerText())?.slice(0, 2000))}`,
+  );
+  await panel.getByRole("tab", { name: "Evidence", exact: true }).click();
+  const evidence = panel.locator('[data-testid="recipe-evidence"]');
+  await evidence.waitFor();
+  await evidence.getByText("tab-step-one", { exact: true }).waitFor();
+  await evidence.getByText("tab-step-two", { exact: true }).waitFor();
+  const stdoutBlocks = await evidence
+    .locator('pre[aria-label="stdout output"]')
+    .allTextContents();
+  assert.ok(
+    stdoutBlocks.some((text) => text.includes("MENTU-TAB-STEP-ONE")),
+    `the first step's stdout evidence must carry its marker, saw ${JSON.stringify(stdoutBlocks)}`,
+  );
+  assert.ok(
+    stdoutBlocks.some((text) => text.includes("MENTU-TAB-STEP-TWO")),
+    `the second step's stdout evidence must carry its marker, saw ${JSON.stringify(stdoutBlocks)}`,
+  );
+  checks.push("mentu-tab-runs-a-recipe-and-shows-per-step-evidence");
+
   // 5. A real theme switch (the Settings radio, persisted) with captures
   //    whose computed background/foreground are verified, then the
   //    horizontal-overflow budget on this surface.

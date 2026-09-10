@@ -90,6 +90,16 @@ fn collect_recipe_files(
     names.sort_by_key(|entry| entry.file_name());
     for entry in names {
         let path = entry.path();
+        // Drogon's own approved-snapshot store lives INSIDE the recipes
+        // root (`.mentu/recipes/.snapshots/<run id>/`, written by
+        // `execution::stage_approved_snapshot`). It holds the bound recipe
+        // copy plus a `manifest.json` that is deliberately NOT a recipe, so
+        // counting it here would report the tool's own artifact as an
+        // invalid user recipe — a lie in `mentu status` and in the Mentu
+        // recipe list. Skip exactly that directory at the recipes root.
+        if dir == root_real && entry.file_name() == ".snapshots" {
+            continue;
+        }
         let Ok(real) = fs::canonicalize(&path) else {
             continue;
         };
@@ -770,6 +780,39 @@ mod tests {
     fn missing_recipes_directory_is_an_empty_catalog() {
         let dir = workspace();
         assert_eq!(discover_recipes(dir.path()).unwrap(), Vec::new());
+    }
+
+    /// Drogon writes its approved snapshot store INSIDE `.mentu/recipes`
+    /// (`.snapshots/<run id>/`), and that store holds a `manifest.json`
+    /// that is not a recipe. Listing it would report the tool's own
+    /// artifact as an invalid user recipe — the exact lie `mentu status`
+    /// must never tell — so the discovery walk skips that directory at the
+    /// recipes root while still walking user sub-directories.
+    #[test]
+    fn the_daemons_own_snapshot_store_is_not_reported_as_a_recipe() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        let snapshots = dir
+            .path()
+            .join(".mentu/recipes/.snapshots/run-1");
+        fs::create_dir_all(&snapshots).unwrap();
+        fs::write(
+            snapshots.join("manifest.json"),
+            "{\"recipe\":\"hello\"}",
+        )
+        .unwrap();
+        fs::write(snapshots.join("hello.json"), VALID).unwrap();
+        // A user's own nested recipe directory is still discovered.
+        let nested = dir.path().join(".mentu/recipes/team");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("nested.json"), VALID).unwrap();
+
+        let ids: Vec<String> = discover_recipes(dir.path())
+            .unwrap()
+            .into_iter()
+            .map(|recipe| recipe.id)
+            .collect();
+        assert_eq!(ids, vec!["hello".to_string(), "team/nested".to_string()]);
     }
 
     #[test]
