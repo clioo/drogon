@@ -13,6 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::policy::MonitorInferencePolicy;
 use super::rule::{MonitorRule, validate_rule};
 
 /// Longest admitted monitor/bot identifier in bytes.
@@ -70,6 +71,15 @@ pub struct MonitorRecord {
     /// Secret **names** only (e.g. `GITHUB_TOKEN_REF`). Values are never
     /// stored or logged. v1 file digests carry none.
     pub secret_refs: Vec<String>,
+    /// What a committed change event may trigger. `NotificationOnly` (the
+    /// default) stops at the drained outbox row; `ExplicitResponsibility`
+    /// lets the delegation drain dispatch that responsibility through the
+    /// existing runner seam. Binding is grant-like metadata, not rule
+    /// bytes: it never enters `approval_hash`, so (re)binding never
+    /// parks or unparks approval — exactly like a secret grant living
+    /// outside the hashed rule.
+    #[serde(default)]
+    pub inference_policy: MonitorInferencePolicy,
     pub trigger: MonitorTrigger,
     /// Last accepted cursor (`v1:<hex>`), or `None` before the first
     /// successful check.
@@ -155,6 +165,7 @@ impl MonitorRecord {
         if !self.secret_refs.is_empty() {
             return Err("secret references are not admitted for local_file_digest.v1".to_string());
         }
+        self.inference_policy.validate()?;
         self.trigger.validate()?;
         if let Some(cursor) = &self.cursor
             && !super::result::is_valid_cursor(cursor)
@@ -206,6 +217,7 @@ pub fn new_monitor(
         trigger,
         cursor: None,
         enabled: true,
+        inference_policy: MonitorInferencePolicy::default(),
         approved_rule_hash,
         created_at_ms,
         updated_at_ms: created_at_ms,
@@ -239,11 +251,77 @@ pub fn staged_rule_edit(
     Ok(record)
 }
 
+/// Sentinel approval hash for a parked monitor. It is not hex and can
+/// never equal a real [`MonitorRule::approval_hash`], so a parked record
+/// fails [`MonitorRecord::is_approved`] until [`approve_rule`] runs.
+/// Stored durably (so `needs-approval` survives restarts), never logged
+/// as anything but a state label.
+pub const UNAPPROVED_SENTINEL: &str = "pending-user-approval";
+
+/// Build a parked (needs-approval) v1 monitor: the Bot stages the watch,
+/// the user arms it with an explicit approve call. The record validates
+/// but never reports approved — it cannot be constructed approved by
+/// accident.
+pub fn new_unapproved_monitor(
+    id: String,
+    bot_id: Option<String>,
+    rule: MonitorRule,
+    trigger: MonitorTrigger,
+    created_at_ms: f64,
+) -> Result<MonitorRecord, String> {
+    let record = MonitorRecord {
+        id,
+        bot_id,
+        version: 1,
+        rule,
+        interpreter: None,
+        argv: Vec::new(),
+        secret_refs: Vec::new(),
+        trigger,
+        cursor: None,
+        enabled: true,
+        inference_policy: super::policy::MonitorInferencePolicy::default(),
+        approved_rule_hash: UNAPPROVED_SENTINEL.to_string(),
+        created_at_ms,
+        updated_at_ms: created_at_ms,
+        consecutive_errors: 0,
+        next_eligible_at_ms: None,
+        last_event_id: None,
+        last_success_at_ms: None,
+        last_error: None,
+    };
+    record.validate()?;
+    debug_assert!(!record.is_approved());
+    Ok(record)
+}
+
 /// Explicitly approve the record's current rule text.
 pub fn approve_rule(mut record: MonitorRecord, updated_at_ms: f64) -> MonitorRecord {
     record.approved_rule_hash = record.rule.approval_hash();
     record.updated_at_ms = updated_at_ms;
     record
+}
+
+/// Bind (or re-bind) a committed change event to an enabled reactive
+/// responsibility. Binding is outside the approval hash by construction:
+/// it changes neither `version` nor `approved_rule_hash`, so binding
+/// never parks a running monitor and never unparks a parked one — the
+/// user approves *what is watched*, then separately chooses *what runs*.
+/// The delegation drain still applies the runner's own enabled/ownership
+/// gates afterward; binding alone authorizes nothing.
+pub fn bind_responsibility(
+    mut record: MonitorRecord,
+    responsibility_id: String,
+    updated_at_ms: f64,
+) -> Result<MonitorRecord, String> {
+    let policy = MonitorInferencePolicy::ExplicitResponsibility { responsibility_id };
+    policy.validate()?;
+    record.inference_policy = policy;
+    record.updated_at_ms = updated_at_ms;
+    record
+        .validate()
+        .map_err(|e| format!("binding refused: {e}"))?;
+    Ok(record)
 }
 
 trait EditShape {
@@ -347,6 +425,7 @@ mod tests {
                     trigger: MonitorTrigger::Manual,
                     cursor: None,
                     enabled: true,
+                    inference_policy: super::super::policy::MonitorInferencePolicy::default(),
                     approved_rule_hash: approved(&r),
                     created_at_ms: 1.0,
                     updated_at_ms: 1.0,

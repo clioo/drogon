@@ -153,6 +153,9 @@ pub enum StartupError {
     Bots(bots_storage::StorageError),
     BotSelf(bot_self_storage::SelfStorageError),
     BotMonitors(bot_monitors_storage::StorageError),
+    /// P3 delegation drain: the per-day delegation budget rows. Own error
+    /// type, same aggregate rollback as every other component.
+    Delegation(crate::bots::delegation::DelegationError),
     Orchestration(drogon_protocol::RpcError),
     /// Main-schema, recovery, or host-identity failure.
     Sqlite(rusqlite::Error),
@@ -165,6 +168,7 @@ impl std::fmt::Display for StartupError {
             Self::Bots(e) => write!(f, "bots: {e}"),
             Self::BotSelf(e) => write!(f, "bot_self: {e}"),
             Self::BotMonitors(e) => write!(f, "bot_monitors: {e}"),
+            Self::Delegation(e) => write!(f, "delegation: {e}"),
             Self::Orchestration(e) => write!(f, "orchestration: {}", e.message),
             Self::Sqlite(e) => write!(f, "sqlite error: {e}"),
         }
@@ -205,6 +209,10 @@ const VERSIONED_COMPONENTS: &[(&str, i64)] = &[
     (
         bot_self_storage::SELF_SCHEMA_COMPONENT,
         bot_self_storage::SELF_SCHEMA_VERSION,
+    ),
+    (
+        crate::bots::delegation::DELEGATION_SCHEMA_COMPONENT,
+        crate::bots::delegation::DELEGATION_SCHEMA_VERSION,
     ),
     (
         mentu_storage::MENTU_SCHEMA_COMPONENT,
@@ -464,6 +472,10 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     bots_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Bots)?;
     bot_monitors_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::BotMonitors)?;
     bot_self_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::BotSelf)?;
+    // P3 delegation drain: only the per-day budget table — the monitor
+    // rows and the event outbox belong to the BotMonitors/BotSelf
+    // components above (forward, never duplicated here).
+    crate::bots::delegation::apply_pending_steps_in_tx(&tx).map_err(StartupError::Delegation)?;
     mentu_storage::apply_pending_steps_in_tx(&tx)?;
     crate::project::apply_pending_steps_in_tx(&tx)?;
     coordination_access::apply_pending_steps_in_tx(&tx)?;

@@ -23,6 +23,8 @@ type ComponentFixtures = &'static [(&'static str, i64)];
 /// version fails `every_component_fixture_migrates_to_current`.
 const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("bots", 3, &[("bots-v1", 1), ("bots-v2", 2)]),
+    ("bot_monitors", 1, &[]),
+    ("bot_delegation", 1, &[]),
     ("automations", 2, &[("automations-v1", 1)]),
     ("projects", 5, &[("projects-v1", 1)]),
     ("mentu", 1, &[]),

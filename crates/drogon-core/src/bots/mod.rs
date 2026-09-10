@@ -1,6 +1,7 @@
 //! Native Bot contracts; execution and persistence are separate integration gates.
 
 pub mod conversation;
+pub mod delegation;
 pub mod delivery;
 pub mod identity;
 pub mod input;

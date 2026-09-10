@@ -113,21 +113,24 @@ pub enum ResponsibilityRefusal {
     UnownedAutomation(String),
 }
 
-/// Outcome of the (not-yet-wired) job dispatch step for a responsibility
-/// found eligible. Kept separate from [`ResponsibilityDispatchAttempt`] so
-/// "was this allowed to run" and "did dispatch itself succeed" can never be
-/// conflated, mirroring `automations::execution::JobOutcome`.
+/// Outcome of the reactive job-dispatch gate for a responsibility that
+/// passed every check (enabled, and invoked with a real supplied event).
+/// The gate is wired: the caller that carries event context — the
+/// delegation drain (`bots::delegation`), which resolves the workspace
+/// and the template-built prompt from the claimed outbox event —
+/// proceeds to the existing runner seam. A caller with no event context
+/// (notably `bot.run`'s responsibility turn, which arrives with a bare
+/// reason and no workspace/prompt source) still refuses downstream as
+/// `RunUnsupported::ReactiveDispatchParamsNotWired` rather than
+/// fabricating either — see `automations::runner::prepare_run_plan_in_tx`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponsibilityJobOutcome {
     /// Delegated to `automations::execution::spawn_v1_session` for a
     /// scheduled responsibility's owned automation.
     Automation(execution::JobOutcome),
-    /// A reactive responsibility passed every gate (enabled, and invoked
-    /// with a real supplied event), but no deterministic reactive adapter
-    /// is wired into this crate yet -- see the contract's "the future
-    /// adapter reserves durable receipts before opening a harness
-    /// session". Always returned in this case; never a fabricated success.
-    UnsupportedReactiveDispatch,
+    /// A reactive responsibility passed every gate. Event-context
+    /// dispatch (workspace + prompt) is the delegation drain's job.
+    ReactiveReady,
 }
 
 /// The composed outcome: refused at the responsibility gate, refused by
@@ -206,9 +209,7 @@ pub fn evaluate_and_attempt_responsibility_dispatch(
                     );
                 }
             }
-            ResponsibilityDispatchAttempt::Dispatched(
-                ResponsibilityJobOutcome::UnsupportedReactiveDispatch,
-            )
+            ResponsibilityDispatchAttempt::Dispatched(ResponsibilityJobOutcome::ReactiveReady)
         }
         ResponsibilityTrigger::Scheduled { automation_id } => {
             let Some(automation) = owned_automation else {

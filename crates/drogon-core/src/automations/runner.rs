@@ -471,9 +471,11 @@ pub fn prepare_run_plan_in_tx(
         ResponsibilityDispatchAttempt::RefusedByAutomation(refusal) => {
             return Ok(PrepareOutcome::Refused(RunRefusal::Automation(refusal)));
         }
-        ResponsibilityDispatchAttempt::Dispatched(
-            ResponsibilityJobOutcome::UnsupportedReactiveDispatch,
-        ) => {
+        ResponsibilityDispatchAttempt::Dispatched(ResponsibilityJobOutcome::ReactiveReady) => {
+            // The responsibility gate passed, but this context-free path
+            // carries no outbox event to resolve a workspace and prompt
+            // from — only the delegation drain (`bots::delegation`) does.
+            // Refuse honestly rather than fabricating either.
             return Ok(PrepareOutcome::Unsupported(
                 RunUnsupported::ReactiveDispatchParamsNotWired,
             ));
