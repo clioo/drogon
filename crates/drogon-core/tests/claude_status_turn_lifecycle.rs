@@ -384,12 +384,15 @@ fn disabling_status_hooks_mid_turn_drops_the_hook_lifecycle() {
     );
 }
 
-/// Adversarial F2: a Stop that arrives while status hooks are globally
-/// disabled still concludes honestly to `idle` (the reference maps every
-/// Stop to done) — it must not be misread as a turn start, and the
-/// activity-fallback state must not survive it as `working`.
+/// Round-2 RACE-1/RACE-2: a Stop that arrives while status hooks are
+/// globally disabled must be SPENT, never concluded — concluding it
+/// durably parked ENDED hook authority over the live session, which hid
+/// later typing as `idle` and survived re-enable against the
+/// re-observation promise. The disabled row is pure activity clock; the
+/// re-enable resets unconditionally, so typing reads `working` again
+/// until the next real hook event re-establishes authority.
 #[test]
-fn stop_while_disabled_reads_idle() {
+fn stop_while_disabled_is_spent_and_reenable_reobserves() {
     let dir = tempfile::tempdir().unwrap();
     install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
@@ -402,9 +405,28 @@ fn stop_while_disabled_reads_idle() {
     hook_event(&engine, &session_id, &incarnation, "Stop");
     assert_eq!(
         listed_state(&engine, &session_id),
-        "idle",
-        "Stop while disabled must read idle, never working"
+        "unknown",
+        "a spent Stop must deposit no authority: the activity clock owns the row"
     );
+
+    // RACE-1's exact repro: typing while still disabled follows the
+    // activity clock — the spent Stop must not hide it as idle.
+    write_and_wait_for_echo(&engine, &session, "typed while disabled\n");
+    assert_eq!(listed_state(&engine, &session_id), "working");
+
+    set_status_hooks(&engine, true);
+    write_and_wait_for_echo(&engine, &session, "typed after re-enable\n");
+    assert_eq!(
+        listed_state(&engine, &session_id),
+        "working",
+        "typing after the disabled window must not be hidden as idle"
+    );
+
+    // The next real hook event re-establishes full authority.
+    hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
+    assert_eq!(listed_state(&engine, &session_id), "working");
+    hook_event(&engine, &session_id, &incarnation, "Stop");
+    assert_eq!(listed_state(&engine, &session_id), "idle");
 }
 
 /// Adversarial F3: re-enabling status hooks after a mid-turn disable

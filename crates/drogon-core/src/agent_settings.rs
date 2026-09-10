@@ -211,6 +211,9 @@ impl Engine {
         if params["onlyIfUninitialized"] == true && current.is_some() {
             return self.agent_settings();
         }
+        let status_hooks_were_enabled = current
+            .as_ref()
+            .is_none_or(|current| current.agent_status_hooks_enabled);
         let mut value = serde_json::to_value(current.unwrap_or_default()).unwrap();
         let patch = params["updates"]
             .as_object()
@@ -277,10 +280,19 @@ impl Engine {
             return Err(error::io_error("Cannot save agent settings"));
         }
         if patch.contains_key("agentStatusHooksEnabled") {
-            let handles: Vec<_> = self.sessions.lock().unwrap().values().cloned().collect();
-            for handle in handles {
-                handle.set_status_hooks_enabled(settings.agent_status_hooks_enabled)?;
-                crate::session_events::record_snapshot(&crate::session::snapshot(&handle));
+            // Only a real transition touches live sessions: the reset in
+            // `set_status_hooks_enabled` drops every lifecycle fact, and a
+            // no-op re-save of the same value must not blip a running
+            // claude turn back to `unknown` (the hooks re-report on their
+            // own cadence). An actual flip — either direction — resets so
+            // no fact can outlive the authority that produced it.
+            let changed = status_hooks_were_enabled != settings.agent_status_hooks_enabled;
+            if changed {
+                let handles: Vec<_> = self.sessions.lock().unwrap().values().cloned().collect();
+                for handle in handles {
+                    handle.set_status_hooks_enabled(settings.agent_status_hooks_enabled)?;
+                    crate::session_events::record_snapshot(&crate::session::snapshot(&handle));
+                }
             }
         }
         Ok(json!({ "initialized": true, "settings": settings }))

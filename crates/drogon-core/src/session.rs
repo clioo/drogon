@@ -194,6 +194,14 @@ impl SessionHandle {
         if self.is_exited() {
             return Ok(());
         }
+        // Whatever the direction, hook authority is re-established only by
+        // the next real hook event: drop any lifecycle fact observed under
+        // the previous policy UNCONDITIONALLY, so nothing deposited in a
+        // disabled window (a Stop that raced the files' neutered state,
+        // for one) can outlive it and hide later activity (round-2
+        // RACE-1/RACE-2). The dropped fact is durable too — see
+        // [`Self::reset_hook_lifecycle`].
+        self.reset_hook_lifecycle();
         let mut saved = self.suspended_hook_files.lock().unwrap();
         if enabled {
             for (path, bytes) in saved.iter() {
@@ -204,13 +212,11 @@ impl SessionHandle {
             }
             saved.clear();
         } else if saved.is_empty() {
-            // The hook lifecycle loses its authority with the files: drop
-            // it wholesale so the session falls back to the activity clock
-            // (the documented `HookTurn::Inactive` policy) instead of
-            // stranding its last hook-reported state forever — a turn
-            // disabled mid-run must never keep reading `working` with no
-            // hook ever able to conclude it.
-            self.reset_hook_lifecycle();
+            // The hook lifecycle loses its authority with the files: the
+            // session falls back to the activity clock (the documented
+            // `HookTurn::Inactive` policy) — a turn disabled mid-run must
+            // never keep reading `working` with no hook ever able to
+            // conclude it.
             let paths = self.hook_cleanup_paths.lock().unwrap().clone();
             for root in paths {
                 let path = match self.harness_id.as_deref() {
@@ -262,14 +268,6 @@ impl SessionHandle {
                 saved.push((path, bytes));
             }
             self.cache_idle_at.lock().unwrap().take();
-        } else {
-            // The files regain their authority, but no fact was observed
-            // under it while they were out: force re-observation from the
-            // activity clock until the next real hook event (the disable
-            // already reset the lifecycle; this covers a disable racing in
-            // from another window between this enable and its file
-            // restore).
-            self.reset_hook_lifecycle();
         }
         Ok(())
     }

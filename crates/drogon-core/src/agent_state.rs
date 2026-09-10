@@ -215,10 +215,12 @@ pub(crate) fn event_belongs_to_harness(event: &str, harness_id: Option<&str>) ->
                 | codex_events::STOP
         ),
         // Harness-less sessions (plain `session.start`) have no managed
-        // install; they keep the historical open namespace. Their
-        // hook-driven states are activity-derived, so no event name can
-        // manufacture `working` there.
-        None => true,
+        // install, so nothing legitimately reports hooks for them: every
+        // name is a forgery. The historical open namespace let forged
+        // Stop/Wait events manufacture phantom `idle`/`needs_input` over
+        // live activity (round-2 PLAIN) — only forged turn starts were
+        // inert there. Their rows stay purely activity-derived.
+        None => false,
         // Any other harness (antigravity) has no hook plumbing at all.
         Some(_) => false,
     }

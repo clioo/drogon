@@ -189,15 +189,14 @@ impl Engine {
             .is_some_and(|settings| !settings.agent_status_hooks_enabled)
         {
             // Status hooks are disabled: the hook files are neutered, so
-            // the activity clock owns the row. An in-flight event must
-            // never OPEN a turn (nobody's hooks can conclude it — that
-            // strands `working`); a turn-end signal still concludes
-            // honestly (the reference maps every Stop to done), and every
-            // other signal is spent without touching the turn fact.
-            match signal {
-                HookSignal::TurnEnd => handle.end_hook_event(),
-                HookSignal::TurnStart | HookSignal::Wait => handle.discard_hook_signal(),
-            }
+            // the activity clock owns the row and NO in-flight event may
+            // deposit hook authority — not even a turn end. Concluding a
+            // Stop here durably parked ENDED over a live explicit session
+            // and hid later typing as `idle`, surviving re-enable (the
+            // re-observation promise); every signal is spent instead, and
+            // `set_status_hooks_enabled` resets the lifecycle on the next
+            // enable so the row re-observes from scratch.
+            handle.discard_hook_signal();
             return Ok(session::snapshot(&handle));
         }
         if let Some(prompt) = params.get("promptPreview").and_then(Value::as_str) {

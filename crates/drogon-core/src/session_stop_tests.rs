@@ -61,32 +61,67 @@ fn exact_stop_distinguishes_signal_from_already_observed_exit() {
     assert_eq!(repeated.session.unwrap()["verdict"], "exited");
 }
 
-fn start_sleep_session(engine: &Engine, dir: &tempfile::TempDir, secs: &str) -> Value {
-    let invoke = |id: &str, method: &str, params: Value| {
-        let response = engine.dispatch(Request {
-            protocol: PROTOCOL_VERSION,
-            request_id: id.into(),
-            auth: None,
-            method: method.into(),
-            params,
-        });
-        assert!(response.ok, "{:?}", response.error);
-        response.result.unwrap()
-    };
-    let workspace = invoke(
-        "workspace",
-        "workspace.register",
-        json!({"path":dir.path()}),
-    );
-    invoke(
-        "start",
-        "session.start",
-        json!({
-            "workspaceId": workspace["id"],
-            "command": "/bin/sh",
-            "args": ["-c", format!("exec sleep {secs}")],
-        }),
+/// Points `agentCmdOverrides` at a fixture `pi` that sleeps for `secs`
+/// seconds, so the hook-event tests below drive a session that legitimately
+/// carries the pi hook namespace (hook events on harness-less sessions are
+/// refused as forgeries). Must run before `Engine::open`.
+fn write_pi_fixture_settings(dir: &tempfile::TempDir, secs: &str) {
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let pi = bin.join("pi");
+    std::fs::write(&pi, format!("#!/bin/sh\nexec sleep {secs}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&pi, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::write(
+        dir.path().join("agent-settings.json"),
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "settings": {
+                "defaultTuiAgent": null,
+                "disabledTuiAgents": [],
+                "agentCmdOverrides": { "pi": pi.to_string_lossy() },
+                "agentDefaultArgs": {},
+                "agentDefaultEnv": {},
+                "agentStatusHooksEnabled": true,
+                "tabAutoGenerateTitle": false,
+                "promptCacheTimerEnabled": false,
+                "promptCacheTtlMs": 300000,
+                "codexSessionSourceHome": ""
+            }
+        }))
+        .unwrap(),
     )
+    .unwrap();
+}
+
+fn start_sleep_session(engine: &Engine, dir: &tempfile::TempDir) -> Value {
+    let workspace_dir = dir.path().join("work");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    let response = engine.dispatch(Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: "ws-sleep".into(),
+        auth: None,
+        method: "workspace.register".into(),
+        params: json!({"path": workspace_dir.to_string_lossy()}),
+    });
+    assert!(response.ok, "{:?}", response.error);
+    let workspace = response.result.unwrap();
+    let response = engine.dispatch(Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: "start-sleep".into(),
+        auth: None,
+        method: "harness.start".into(),
+        params: json!({
+            "workspaceId": workspace["id"],
+            "harnessId": "pi",
+            "permissionMode": "inherit",
+        }),
+    });
+    assert!(response.ok, "{:?}", response.error);
+    response.result.unwrap()
 }
 
 fn hook_event(engine: &Engine, session: &Value, event: &str) -> Value {
@@ -118,8 +153,9 @@ fn session_row(dir: &tempfile::TempDir, id: &str) -> (String, Option<String>) {
 #[test]
 fn hook_wait_stamp_is_durable_and_clear_removes_it() {
     let dir = tempfile::tempdir().unwrap();
+    write_pi_fixture_settings(&dir, "30");
     let engine = Engine::open(dir.path()).unwrap();
-    let session = start_sleep_session(&engine, &dir, "30");
+    let session = start_sleep_session(&engine, &dir);
     let id = session["id"].as_str().unwrap();
 
     let waited = hook_event(&engine, &session, "ToolApprovalRequested");
@@ -139,8 +175,9 @@ fn hook_wait_stamp_is_durable_and_clear_removes_it() {
 fn restart_keeps_reporting_an_uncleared_wait_with_its_stamp() {
     let dir = tempfile::tempdir().unwrap();
     let (id, stamp) = {
+        write_pi_fixture_settings(&dir, "30");
         let engine = Engine::open(dir.path()).unwrap();
-        let session = start_sleep_session(&engine, &dir, "30");
+        let session = start_sleep_session(&engine, &dir);
         let waited = hook_event(&engine, &session, "ToolApprovalRequested");
         assert_eq!(waited["agentState"], "needs_input");
         // The engine drops without `stop`: the orphaned `sleep` keeps the
@@ -182,8 +219,9 @@ fn exit_clears_a_stale_wait_so_restart_lists_the_exited_session() {
     // `session.list` consumer enforcing the session invariants.
     let dir = tempfile::tempdir().unwrap();
     let id = {
+        write_pi_fixture_settings(&dir, "30");
         let engine = Engine::open(dir.path()).unwrap();
-        let session = start_sleep_session(&engine, &dir, "30");
+        let session = start_sleep_session(&engine, &dir);
         let waited = hook_event(&engine, &session, "ToolApprovalRequested");
         assert_eq!(waited["agentState"], "needs_input");
         let id = waited["id"].as_str().unwrap().to_string();

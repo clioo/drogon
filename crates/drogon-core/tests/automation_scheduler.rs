@@ -1529,8 +1529,44 @@ fn tick_finalizes_an_exited_fixture_run_as_completed() {
 
 #[test]
 fn tick_finalizes_a_turn_ended_live_session_as_completed() {
-    ensure_fixture_harness_on_path();
     let dir = tempfile::tempdir().unwrap();
+    // The turn-end report comes from the pi extension, so the stand-in
+    // session must be a pi harness session: hook events on harness-less
+    // sessions are refused as forgeries. The fixture pi echoes the marker
+    // and stays live; the overrides resolution keeps the test off PATH.
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let pi_fixture = bin.join("pi");
+    std::fs::write(
+        &pi_fixture,
+        "#!/bin/sh\necho turn-ended-marker\nexec sleep 120\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&pi_fixture, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::write(
+        dir.path().join("agent-settings.json"),
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "settings": {
+                "defaultTuiAgent": null,
+                "disabledTuiAgents": [],
+                "agentCmdOverrides": { "pi": pi_fixture.to_string_lossy() },
+                "agentDefaultArgs": {},
+                "agentDefaultEnv": {},
+                "agentStatusHooksEnabled": true,
+                "tabAutoGenerateTitle": false,
+                "promptCacheTimerEnabled": false,
+                "promptCacheTtlMs": 300000,
+                "codexSessionSourceHome": ""
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let (engine, workspace_id) = engine_with_workspace(&dir);
     let created = create_automation(&engine, "fin-2", &workspace_id, "0 0 1 1 *");
     let automation_id = created["id"].as_str().unwrap().to_string();
@@ -1541,7 +1577,7 @@ fn tick_finalizes_a_turn_ended_live_session_as_completed() {
     )));
     let run_id = result["runId"].as_str().unwrap().to_string();
 
-    // A live session stands in for the agent's session: it emits output
+    // A live pi session stands in for the agent's session: it emits output
     // (its activity stamp) and then idles. Re-link the run row to it (no
     // public RPC re-links runs), then report the turn-end hook the pi
     // extension sends on AgentEnd — a clear (#360), so the session
@@ -1549,9 +1585,8 @@ fn tick_finalizes_a_turn_ended_live_session_as_completed() {
     // silence window passes; that idle edge is what the tick finalizes.
     let sleeper = ok(engine.dispatch(request(
         "fin2-sleep",
-        "session.start",
-        json!({"workspaceId": workspace_id, "command": "/bin/sh",
-               "args": ["-c", "echo turn-ended-marker; exec sleep 120"], "cols": 80, "rows": 24}),
+        "harness.start",
+        json!({"workspaceId": workspace_id, "harnessId": "pi", "permissionMode": "inherit"}),
     )));
     let sleeper_id = sleeper["id"].as_str().unwrap().to_string();
     let sleeper_inc = sleeper["incarnation"].as_str().unwrap().to_string();
