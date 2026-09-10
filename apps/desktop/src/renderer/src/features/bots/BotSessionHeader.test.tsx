@@ -109,4 +109,46 @@ describe("BotSessionHeader", () => {
     fireEvent.click(screen.getByText("Bots"));
     expect(onOpenBots).toHaveBeenCalledTimes(1);
   });
+
+  it("renders the workspace chip and title from the REAL bot facts -- they change when those change", () => {
+    // task_e7c183ebc637: every app-rendered line above the terminal must be
+    // derived from values the app actually knows (the bot's real home path,
+    // real harness), never hardcoded and never model prose. Rerendering
+    // with different inputs must move every one of them.
+    const { rerender } = render(
+      <BotSessionHeader
+        meta={meta()}
+        session={session()}
+        workspacePath="/Users/carlos/Drogon/bots/arya-stark"
+        onStop={() => {}}
+        stopping={false}
+        onOpenBots={() => {}}
+      />,
+    );
+    expect(screen.getByText("/Users/carlos/Drogon/bots/arya-stark")).toBeTruthy();
+    expect(screen.getByTestId("bot-session-title").textContent).toBe(
+      "Arya Stark · Claude",
+    );
+    rerender(
+      <BotSessionHeader
+        meta={meta({
+          displayName: "Watcher on the Wall",
+          handle: null,
+          harnessId: "pi",
+        })}
+        session={session()}
+        workspacePath="/Users/carlos/Drogon/bots/watcher"
+        onStop={() => {}}
+        stopping={false}
+        onOpenBots={() => {}}
+      />,
+    );
+    expect(screen.getByText("/Users/carlos/Drogon/bots/watcher")).toBeTruthy();
+    expect(
+      screen.queryByText("/Users/carlos/Drogon/bots/arya-stark"),
+    ).toBeNull();
+    expect(screen.getByTestId("bot-session-title").textContent).toBe(
+      "Watcher on the Wall · Pi",
+    );
+  });
 });

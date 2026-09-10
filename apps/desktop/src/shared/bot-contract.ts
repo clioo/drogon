@@ -51,11 +51,12 @@ export type BotRunHarnessSource = {
   explicitModel: string | null;
 };
 
-/** A `bot.run` call is either a responsibility invocation, or a chat turn
- *  carrying its own `prompt` -- mutually exclusive on the wire (native
- *  rejects supplying both). `requestId` is caller-chosen so a genuine
- *  same-params retry after an ambiguous transport failure reuses the same
- *  ledger key, same as `startHarness`. */
+/** A `bot.run` call is one of a responsibility invocation, a chat turn
+ *  carrying its own `prompt` (headless one-shot daemon run), or an
+ *  open-session dispatch (`interactive: true`, NO `prompt`) -- mutually
+ *  exclusive on the wire (native rejects supplying both). `requestId` is
+ *  caller-chosen so a genuine same-params retry after an ambiguous
+ *  transport failure reuses the same ledger key, same as `startHarness`. */
 export type BotRunTurnInput = BotScope & {
   requestId: string;
   botId: string;
@@ -74,13 +75,23 @@ export type BotRunTurnInput = BotScope & {
         responsibilityId?: never;
         reason?: never;
         eventIdentity?: never;
-        /** Open-session request (bug-bot-a836b4ebf8be65505): native runs the
-         *  harness's own interactive entrypoint (no `-p`/`--print`) instead
-         *  of the headless one-shot daemon-run seam automations use, and
-         *  retargets the session at the Bot's own provisioned home
-         *  workspace instead of wherever its record happens to be stored.
-         *  Absent/false keeps the original one-shot chat-turn contract. */
-        interactive?: boolean;
+        interactive?: never;
+      }
+    | {
+        /** Open-session request (bug-bot-a836b4ebf8be65505, refined by the
+         *  Carlos directive on task_e7c183ebc637): native runs the harness's
+         *  own interactive entrypoint (no `-p`/`--print`) with NO prompt at
+         *  all -- no model turn is dispatched, so the session opens live and
+         *  IDLE, ready for the user's first real message. The model is never
+         *  asked to confirm liveness or narrate the environment: those are
+         *  daemon facts surfaced by the status pill and the Bot session
+         *  inspector. A prompt alongside interactive is a native parse
+         *  error. */
+        interactive: true;
+        prompt?: never;
+        responsibilityId?: never;
+        reason?: never;
+        eventIdentity?: never;
       }
   );
 

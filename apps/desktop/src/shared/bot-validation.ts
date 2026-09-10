@@ -176,13 +176,29 @@ const chatTurn = globalScope
     prompt: z.string().min(1).max(20_000),
     harness: harnessOverrides.nullable().optional(),
     locale: z.string().nullable().optional(),
-    // Open-session request (bug-bot-a836b4ebf8be65505): see
-    // BotRunTurnInput's doc in bot-contract.ts.
-    interactive: z.boolean().optional(),
   })
   .strict();
 
-export const botRunInputSchema = z.union([chatTurn, responsibilityTurn]);
+// Open-session request (bug-bot-a836b4ebf8be65505, refined by the Carlos
+// directive on task_e7c183ebc637): `interactive: true` with NO prompt --
+// native starts the harness's interactive entrypoint with nothing to
+// consume, so no model turn is ever burned on opening a session. See
+// BotRunTurnInput's doc in bot-contract.ts.
+const openSessionTurn = globalScope
+  .extend({
+    requestId: id,
+    botId: id,
+    interactive: z.literal(true),
+    harness: harnessOverrides.nullable().optional(),
+    locale: z.string().nullable().optional(),
+  })
+  .strict();
+
+export const botRunInputSchema = z.union([
+  chatTurn,
+  openSessionTurn,
+  responsibilityTurn,
+]);
 
 export const botRunResultSchema = z.object({
   requestId: z.string(),

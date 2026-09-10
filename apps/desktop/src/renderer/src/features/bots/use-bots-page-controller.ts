@@ -83,13 +83,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** The chat-turn text Open session dispatches: native wraps it in the bot's
- *  operating prompt (identity, working style, standing instructions), so a
- *  short opener is enough — the turn exists to open the session, and its
- *  wording is what the history/message row carries. */
-export const BOT_OPEN_SESSION_PROMPT =
-  "Hi! Reply briefly to confirm this session is live.";
-
 export function useBotsPageController(deps: BotsPageControllerDeps) {
   const {
     snapshot,
@@ -351,20 +344,26 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     [busy, onRunResponsibility, localSnapshot, snapshot, load],
   );
 
-  // Open session (bug-bot-open-session, #348/R17-E follow-up, Carlos
-  // directive on task_0436fdf3aa91): the click dispatches a `bot.run` chat
-  // turn with the bot's STORED harness overrides (buildBotRunHarness — the
-  // same resolution the mount uses for manual runs) — a REAL daemon
-  // session, not a greeting stub — selects the bot, hands the returned
-  // session to the host's `onOpenSession` (when supplied) so the app can
-  // open/focus the canonical Bot-linked tab in-app, then reloads so the
-  // new message/session state lands. Reads are app-global and native
-  // resolves the '' scope to the bot's owning workspace, so no
-  // workspace-selection refusal remains: only a missing scope (unknown
-  // host) refuses. Every other failure — a bridge without botRun
-  // (capability withheld), a daemon-unreachable transport throw, a
-  // refused/unsupported outcome — lands in the shared action-error alert,
-  // never a silent no-op.
+  // Open session (bug-bot-a836b4ebf8be65505; Carlos directive on
+  // task_e7c183ebc637): the click dispatches a `bot.run` OPEN-SESSION
+  // turn (`interactive: true`, NO prompt — the wire contract rejects a
+  // prompt outright) with the bot's STORED harness overrides
+  // (buildBotRunHarness — the same resolution the mount uses for manual
+  // runs). Native starts the harness's own interactive entrypoint in the
+  // Bot's provisioned home and delivers NOTHING to it: no model turn is
+  // burned, the session opens live and IDLE, and the owner's first real
+  // message is the first thing the harness ever sees. Liveness and
+  // environment are daemon facts (the header's status pill and the
+  // session inspector) — never a recital the model is asked to invent.
+  // The dispatch still selects the bot and hands the returned session to
+  // the host's `onOpenSession` (when supplied) so the app can open/focus
+  // the canonical Bot-linked tab in-app, then reloads so the new session
+  // state lands. Reads are app-global and native resolves the '' scope to
+  // the bot's owning workspace, so no workspace-selection refusal
+  // remains: only a missing scope (unknown host) refuses. Every other
+  // failure — a bridge without botRun (capability withheld), a
+  // daemon-unreachable transport throw, a refused/unsupported outcome —
+  // lands in the shared action-error alert, never a silent no-op.
   const launchBot = useCallback(
     async (bot: { id: string }): Promise<void> => {
       if (busy) {
@@ -399,12 +398,13 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
           ...scope,
           requestId: mintRequestId("bot-open-session"),
           botId: bot.id,
-          prompt: BOT_OPEN_SESSION_PROMPT,
-          // bug-bot-a836b4ebf8be65505: a live, user-facing tab (native's own
-          // interactive TUI entrypoint, run against the Bot's own
-          // provisioned home) instead of the headless one-shot daemon run
-          // this dispatch used before — which is what made a Bot "session"
-          // print one reply and exit immediately.
+          // bug-bot-a836b4ebf8be65505 + task_e7c183ebc637: a live, IDLE,
+          // user-facing tab (native's own interactive TUI entrypoint, run
+          // against the Bot's own provisioned home) that dispatches NO
+          // model turn — there is no `prompt` on this call, by contract.
+          // The old dispatch asked the model to "confirm this session is
+          // live", and the model answered with fabricated working
+          // directories and model names the owner read as product output.
           interactive: true,
           harness: buildBotRunHarness(
             live.harnessPolicy.defaultHarness,
