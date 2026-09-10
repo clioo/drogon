@@ -872,7 +872,9 @@ export function TerminalPane({
     );
     const kittyModes = new TerminalKittyKeyboardModeTracker();
     kittyModes.resetForSnapshot();
-    const claimShiftEnter = createTerminalShiftEnterHandler(() => kittyModes.flags, (data) => terminal.input(data, true));
+    // Pi always needs CSI-u (its native Shift+Enter, valid with or without
+    // kitty negotiation); shells keep negotiated encoding (source parity).
+    const claimShiftEnter = createTerminalShiftEnterHandler(() => kittyModes.flags, (data) => terminal.input(data, true), { forceCsiU: session.harnessId === "pi" });
     let optionKeyLocations: TerminalOptionKeyLocation = 0;
     terminal.attachCustomKeyEventHandler((event) => {
       if (canWrite && claimShiftEnter(event)) return false;
