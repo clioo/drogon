@@ -3025,6 +3025,41 @@ fn nonzero_exit_is_probe_failed_never_model_rows() {
     assert!(note.contains("token refresh failed"), "{note}");
 }
 
+/// Regression body for the restored version-refusal policy
+/// (COMPILE-ONLY until reviewed: never executed here). A failed version
+/// check never yields a version-qualified Enumerated, even when the
+/// enumeration surface would answer: the version failure evidence must
+/// survive in the note rather than being erased by a later success.
+/// Finite fixture (both branches exit immediately, no sleeps or
+/// descendants), so a future run is bounded by construction.
+#[test]
+fn failed_version_refuses_enumeration_despite_valid_models() {
+    let bin = FixtureBin::new();
+    let pi = bin.add(
+        "pi",
+        "#!/bin/sh\n\
+         if [ \"$1\" = \"--version\" ]; then echo 'version check failed' >&2; exit 1; fi\n\
+         echo 'provider      model'\n\
+         echo 'kimi-coding   kimi-for-coding'\n\
+         exit 0\n",
+    );
+    let probe = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    assert!(probe.pending.is_empty(), "pending custody: {:?}", probe.pending);
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
+    assert_eq!(catalog.status, EnumerationStatus::ProbeFailed);
+    assert!(catalog.entries.is_empty(), "no rows without a version");
+    let note = catalog.note.clone().expect("failure note");
+    assert!(
+        note.contains("version probe exited 1"),
+        "version failure evidence must survive: {note}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn isolation_setup_failure_fails_closed_without_probing() {

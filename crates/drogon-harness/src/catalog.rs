@@ -697,28 +697,14 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
         unverifiable.push(format!("version probe cleanup: {note}"));
     }
     cleanup_verified &= v_verified;
-    // Version gate is custody-only: unresolved cleanup (an unreaped
-    // leader or unverified group) blocks enumeration, but a resolved
-    // version failure does not — nothing was left behind, and the
-    // enumeration spawn is the real availability test. (Blocking every
-    // version failure turned transient fork pressure into NotInstalled:
-    // a version spawn failure with a working enumeration surface used
-    // to pass.)
-    let version_blocked = v_unreaped.is_some() || !v_verified;
-    let version_failed_note: Option<String> = match &v_run {
-        ProbeRun::Completed { .. } => None,
-        ProbeRun::TimedOut { evidence } => {
-            Some(format!("version probe exceeded its window: {evidence}"))
-        }
-        ProbeRun::FailedExit {
-            exit_code,
-            stderr_tail,
-        } => Some(format!("version probe exited {exit_code}: {stderr_tail}")),
-        ProbeRun::SpawnFailed(message) => Some(format!("version probe spawn failed ({message})")),
-        ProbeRun::HelperFailed { stream, error } => {
-            Some(format!("version probe {stream} read failed ({error})"))
-        }
-    };
+    // Version gate is refusal-backed: enumeration starts ONLY on a
+    // completed version probe with resolved custody. A failed or
+    // unverified version never yields a version-qualified Enumerated:
+    // version-pinned adapters cannot be declared supported from an
+    // ignored failed version check. (The root cause of the a3656b7
+    // output-cap failure stays honestly unknown; this restores the
+    // evidence-backed policy without claiming a cure.)
+    let version_refused = !(matches!(v_run, ProbeRun::Completed { .. }) && cleanup_verified);
     if let Some(child) = v_unreaped {
         unverifiable.push(format!(
             "version probe leader pid={} unreaped; enumeration not started",
@@ -731,7 +717,7 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
         });
         cleanup_verified = false;
     }
-    if version_blocked {
+    if version_refused {
         let (status, note) = match v_run {
             ProbeRun::TimedOut { evidence } => (
                 EnumerationStatus::TimedOut,
@@ -795,11 +781,6 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
             cleanup_verified,
             unverifiable,
         };
-    }
-    // A resolved version failure rides along as honesty evidence (the
-    // blocked path above already returned with its own note).
-    if let Some(vnote) = version_failed_note {
-        unverifiable.push(vnote);
     }
     let argv = vec!["--list-models".to_string()];
     let attempt = ProbeAttempt {
@@ -898,30 +879,12 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
             Vec::new(),
             Some(format!("probe exceeded its wall-clock budget; {evidence}")),
         ),
-        ProbeRun::SpawnFailed(message) => {
-            // The version probe already proved this executable runs: a
-            // spawn failure now is transient (fork pressure), not a
-            // missing install. Without a completed version,
-            // NotInstalled stands.
-            if matches!(v_run, ProbeRun::Completed { .. }) {
-                (
-                    probe_provenance(executable, argv.clone(), version),
-                    EnumerationStatus::ProbeFailed,
-                    Vec::new(),
-                    Some(format!(
-                        "enumeration spawn failed after a completed version probe \
-                         ({message}); transient, not a missing install"
-                    )),
-                )
-            } else {
-                (
-                    probe_provenance(executable, argv.clone(), version),
-                    EnumerationStatus::NotInstalled,
-                    Vec::new(),
-                    Some(message),
-                )
-            }
-        }
+        ProbeRun::SpawnFailed(message) => (
+            probe_provenance(executable, argv.clone(), version),
+            EnumerationStatus::NotInstalled,
+            Vec::new(),
+            Some(message),
+        ),
         ProbeRun::HelperFailed { stream, error } => (
             probe_provenance(executable, argv.clone(), version),
             EnumerationStatus::ProbeFailed,
@@ -1007,28 +970,14 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
         unverifiable.push(format!("version probe cleanup: {note}"));
     }
     cleanup_verified &= v_verified;
-    // Version gate is custody-only: unresolved cleanup (an unreaped
-    // leader or unverified group) blocks enumeration, but a resolved
-    // version failure does not — nothing was left behind, and the
-    // enumeration spawn is the real availability test. (Blocking every
-    // version failure turned transient fork pressure into NotInstalled:
-    // a version spawn failure with a working enumeration surface used
-    // to pass.)
-    let version_blocked = v_unreaped.is_some() || !v_verified;
-    let version_failed_note: Option<String> = match &v_run {
-        ProbeRun::Completed { .. } => None,
-        ProbeRun::TimedOut { evidence } => {
-            Some(format!("version probe exceeded its window: {evidence}"))
-        }
-        ProbeRun::FailedExit {
-            exit_code,
-            stderr_tail,
-        } => Some(format!("version probe exited {exit_code}: {stderr_tail}")),
-        ProbeRun::SpawnFailed(message) => Some(format!("version probe spawn failed ({message})")),
-        ProbeRun::HelperFailed { stream, error } => {
-            Some(format!("version probe {stream} read failed ({error})"))
-        }
-    };
+    // Version gate is refusal-backed: enumeration starts ONLY on a
+    // completed version probe with resolved custody. A failed or
+    // unverified version never yields a version-qualified Enumerated:
+    // version-pinned adapters cannot be declared supported from an
+    // ignored failed version check. (The root cause of the a3656b7
+    // output-cap failure stays honestly unknown; this restores the
+    // evidence-backed policy without claiming a cure.)
+    let version_refused = !(matches!(v_run, ProbeRun::Completed { .. }) && cleanup_verified);
     if let Some(child) = v_unreaped {
         unverifiable.push(format!(
             "version probe leader pid={} unreaped; enumeration not started",
@@ -1041,7 +990,7 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
         });
         cleanup_verified = false;
     }
-    if version_blocked {
+    if version_refused {
         let (status, note) = match v_run {
             ProbeRun::TimedOut { evidence } => (
                 EnumerationStatus::TimedOut,
@@ -1105,11 +1054,6 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
             cleanup_verified,
             unverifiable,
         };
-    }
-    // A resolved version failure rides along as honesty evidence (the
-    // blocked path above already returned with its own note).
-    if let Some(vnote) = version_failed_note {
-        unverifiable.push(vnote);
     }
     let argv = vec!["models".to_string()];
     let attempt = ProbeAttempt {
@@ -1200,30 +1144,12 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
             Vec::new(),
             Some(format!("probe exceeded its wall-clock budget; {evidence}")),
         ),
-        ProbeRun::SpawnFailed(message) => {
-            // The version probe already proved this executable runs: a
-            // spawn failure now is transient (fork pressure), not a
-            // missing install. Without a completed version,
-            // NotInstalled stands.
-            if matches!(v_run, ProbeRun::Completed { .. }) {
-                (
-                    probe_provenance(executable, argv.clone(), version),
-                    EnumerationStatus::ProbeFailed,
-                    Vec::new(),
-                    Some(format!(
-                        "enumeration spawn failed after a completed version probe \
-                         ({message}); transient, not a missing install"
-                    )),
-                )
-            } else {
-                (
-                    probe_provenance(executable, argv.clone(), version),
-                    EnumerationStatus::NotInstalled,
-                    Vec::new(),
-                    Some(message),
-                )
-            }
-        }
+        ProbeRun::SpawnFailed(message) => (
+            probe_provenance(executable, argv.clone(), version),
+            EnumerationStatus::NotInstalled,
+            Vec::new(),
+            Some(message),
+        ),
         ProbeRun::HelperFailed { stream, error } => (
             probe_provenance(executable, argv.clone(), version),
             EnumerationStatus::ProbeFailed,
