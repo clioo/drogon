@@ -1,0 +1,63 @@
+{
+  "run_id": "run_20260907E_malform01",
+  "recipe_name": "usage-malformed",
+  "started_at": "2026-09-07T23:00:00Z",
+  "ended_at": "2026-09-07T23:00:09Z",
+  "outcome": "ok",
+  "cloud_mode": "local-only",
+  "recipe_ref": ".mentu/recipes/usage-malformed.json",
+  "events_file": "events.jsonl",
+  "state_file": "state.json",
+  "baseline_file": "baseline.json",
+  "steps": [
+    {
+      "label": "wrong-types",
+      "backend": "pi",
+      "model": "glm-5.3-flash",
+      "outcome": "ok",
+      "local_complete": true,
+      "exit_code": 0,
+      "duration_seconds": 4,
+      "attempts": 1,
+      "input_tokens": "50",
+      "output_tokens": 40.5,
+      "usage_known": "yes",
+      "output_file": "wrong-types.stdout",
+      "error_file": "wrong-types.stderr",
+      "warnings": [],
+      "hooks": []
+    },
+    {
+      "label": "negative",
+      "backend": "pi",
+      "model": "glm-5.3-flash",
+      "outcome": "ok",
+      "local_complete": true,
+      "exit_code": 0,
+      "duration_seconds": 2,
+      "attempts": 1,
+      "input_tokens": -5,
+      "output_tokens": 0,
+      "output_file": "negative.stdout",
+      "error_file": "negative.stderr",
+      "warnings": [],
+      "hooks": []
+    },
+    {
+      "label": "huge",
+      "backend": "pi",
+      "model": "glm-5.3-flash",
+      "outcome": "ok",
+      "local_complete": true,
+      "exit_code": 0,
+      "duration_seconds": 3,
+      "attempts": 1,
+      "output_tokens": 10000000000000000000000000000000,
+      "output_file": "huge.stdout",
+      "error_file": "huge.stderr",
+      "warnings": [],
+      "hooks": []
+    }
+  ],
+  "hooks": []
+}

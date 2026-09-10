@@ -3,7 +3,8 @@
 // Projection tests for the ported recipe-pane views: the evidence view
 // spells per-step status, exit codes, evidence paths and error text from
 // the daemon run record; the metrics view aggregates reported durations
-// and stays honestly unavailable for everything the record does not carry.
+// and observed token usage, staying honestly unavailable for everything
+// the record does not carry.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -157,6 +158,123 @@ describe("MetricsView", () => {
     expect(
       screen.getByText("No measurements are available until a run record is loaded."),
     ).toBeTruthy();
+  });
+
+  it("aggregates retry token totals once per recorded attempt", () => {
+    // Ported from the reference's "aggregates duration/tokens once per
+    // recorded attempt without deduplicating by label": each entry is one
+    // attempt's own counts; the lifetime `attempts` counter never sums.
+    const retried = run();
+    retried.steps = [
+      {
+        label: "recover",
+        backend: "pi",
+        status: "failed",
+        exitCode: 1,
+        durationSeconds: 3,
+        attempts: 1,
+        outputPath: null,
+        errorPath: null,
+        error: null,
+        verification: null,
+        model: "model-a",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          usageKnown: true,
+          invalid: [],
+        },
+      },
+      {
+        label: "recover",
+        backend: "pi",
+        status: "succeeded",
+        exitCode: 0,
+        durationSeconds: 2,
+        attempts: 2,
+        outputPath: null,
+        errorPath: null,
+        error: null,
+        verification: null,
+        model: "model-b",
+        usage: {
+          inputTokens: 40,
+          outputTokens: null,
+          usageKnown: true,
+          invalid: [],
+        },
+      },
+    ];
+    render(<MetricsView run={retried} />);
+    expect(screen.getByText("Duration: 5s")).toBeTruthy();
+    expect(screen.getByText("Input tokens: 140")).toBeTruthy();
+    expect(screen.getByText("Output tokens: 50 + 1 unknown")).toBeTruthy();
+    expect(screen.getByText("Attempt 1 of 2")).toBeTruthy();
+    expect(screen.getByText("Attempt 2 of 2")).toBeTruthy();
+    expect(screen.getByText("Model: model-a")).toBeTruthy();
+    expect(screen.getByText("Model: model-b")).toBeTruthy();
+    expect(screen.getByText("Input tokens: 100 (exact)")).toBeTruthy();
+    expect(screen.getByText("Input tokens: 40 (exact)")).toBeTruthy();
+    expect(screen.getByText("Output tokens: 50 (exact)")).toBeTruthy();
+    expect(screen.getByText("Output tokens: unavailable")).toBeTruthy();
+  });
+
+  it("distinguishes a measured zero from unreported and rejected values", () => {
+    const mixed = run();
+    mixed.steps = [
+      {
+        label: "measured",
+        backend: "pi",
+        status: "succeeded",
+        exitCode: 0,
+        durationSeconds: 1,
+        attempts: 1,
+        outputPath: null,
+        errorPath: null,
+        error: null,
+        verification: null,
+        usage: {
+          inputTokens: 0,
+          outputTokens: 5,
+          usageKnown: true,
+          invalid: [],
+        },
+      },
+      {
+        label: "rejected",
+        backend: "pi",
+        status: "succeeded",
+        exitCode: 0,
+        durationSeconds: 1,
+        attempts: 1,
+        outputPath: null,
+        errorPath: null,
+        error: null,
+        verification: null,
+        usage: {
+          inputTokens: null,
+          outputTokens: null,
+          usageKnown: null,
+          invalid: [{ field: "input_tokens", reason: "negative" }],
+        },
+      },
+    ];
+    render(<MetricsView run={mixed} />);
+    expect(screen.getByText("Input tokens: 0 + 1 unknown + 1 invalid")).toBeTruthy();
+    expect(screen.getByText("Output tokens: 5 + 1 unknown")).toBeTruthy();
+    expect(screen.getByText("Input tokens: 0 (exact)")).toBeTruthy();
+    expect(screen.getByText("Input tokens: unavailable (negative)")).toBeTruthy();
+  });
+
+  it("keeps cost unavailable even when the record reports tokens", () => {
+    const billed = run();
+    billed.steps = billed.steps.map((step) => ({
+      ...step,
+      usage: { inputTokens: 10, outputTokens: 10, usageKnown: true, invalid: [] },
+    }));
+    render(<MetricsView run={billed} />);
+    expect(screen.getByText("Cost: unavailable")).toBeTruthy();
+    expect(screen.getByText("Scope: recipe · session aggregate: unavailable")).toBeTruthy();
   });
 });
 

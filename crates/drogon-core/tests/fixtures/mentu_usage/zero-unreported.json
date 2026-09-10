@@ -1,0 +1,31 @@
+{
+  "run_id": "run_20260907C_zero_un00",
+  "recipe_name": "usage-zero-unreported",
+  "started_at": "2026-09-07T21:10:00Z",
+  "ended_at": "2026-09-07T21:10:03Z",
+  "outcome": "ok",
+  "cloud_mode": "local-only",
+  "recipe_ref": ".mentu/recipes/usage-zero-unreported.json",
+  "events_file": "events.jsonl",
+  "state_file": "state.json",
+  "baseline_file": "baseline.json",
+  "steps": [
+    {
+      "label": "probe",
+      "backend": "pi",
+      "model": "glm-5.3-flash",
+      "outcome": "ok",
+      "local_complete": true,
+      "exit_code": 0,
+      "duration_seconds": 1,
+      "attempts": 1,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "output_file": "probe.stdout",
+      "error_file": "probe.stderr",
+      "warnings": [],
+      "hooks": []
+    }
+  ],
+  "hooks": []
+}

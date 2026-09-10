@@ -1,0 +1,39 @@
+{
+  "baseline_file": "baseline.json",
+  "cloud_mode": "local-only",
+  "ended_at": "2026-09-05T09:28:44Z",
+  "events_file": "events.jsonl",
+  "hooks": [],
+  "outcome": "failed",
+  "recipe_name": "isolation",
+  "recipe_ref": "/var/folders/tmp/.mentu/recipes/isolation.json",
+  "run_id": "run_081D22885C1A4042BCDFFDEC9A088F5B",
+  "started_at": "2026-09-05T09:28:43Z",
+  "state_file": "state.json",
+  "steps": [
+    {
+      "attempts": 1,
+      "backend": "spark",
+      "completion_method": "provider_complete",
+      "drift": {
+        "created_paths": [],
+        "expected_paths": [],
+        "ignored_run_state_paths": [],
+        "preexisting_paths": [],
+        "unexpected_paths": []
+      },
+      "duration_seconds": 0,
+      "error_file": "exercise.stderr",
+      "exit_code": 1,
+      "hooks": [],
+      "label": "exercise",
+      "local_complete": false,
+      "model": "fixture-isolation",
+      "outcome": "failed",
+      "output_file": "exercise.stdout",
+      "warnings": [
+        "Completion policy was not satisfied"
+      ]
+    }
+  ]
+}
