@@ -12,6 +12,9 @@ use crate::{Engine, error, require_dimension, require_str};
 #[path = "harness_hooks/mod.rs"]
 mod harness_hooks;
 
+#[path = "harness/selection_gate.rs"]
+mod selection_gate;
+
 /// What's fixed *before* admission (the launch argv and, for Pi, the
 /// `--extension` path) versus resolved *after* it (the incarnation the hook
 /// commands embed) — the same two-phase shape `write_settings_file` already
@@ -76,6 +79,13 @@ impl Engine {
         let workspace_id = require_str(params, "workspaceId")?;
         let request: HarnessLaunchRequest = serde_json::from_value(params.clone())
             .map_err(|_| error::invalid_argument("Invalid harness launch preferences"))?;
+        // C01 consumer (C01-QA-1): the explicit selection is validated
+        // with the real selection vocabulary before any planning. No
+        // Engine-owned catalog exists yet (held lib.rs seam), so this
+        // admits shape/capability-valid ids as manual-unverified and
+        // refuses unsupported combinations without substitution; the
+        // existing plan below stays the argv and fencing authority.
+        let _admission = selection_gate::check_launch_selection(&request, None)?;
         let settings = self.read_agent_settings()?;
         let plan = match settings.as_ref() {
             Some(settings) => crate::agent_settings::plan_with_settings(&request, settings)?,
