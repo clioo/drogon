@@ -66,6 +66,7 @@ import { startSessionStatePush } from "./session-state-bridge";
 import { startBrowserRelay } from "./browser/relay-poller";
 import { dispatchBotSnapshot, registerBotBridge } from "./bot-bridge";
 import { autoInstallBundledMentuRuntime, registerMentuBridge } from "./mentu-bridge";
+import { seedPiQueueFollowUpKeybindings } from "./pi-keybindings-seed";
 import {
   readCursorMismatches,
   writeByteCountMismatches,
@@ -799,6 +800,9 @@ if (!holdsSingleInstanceLock) {
     });
     await bootstrapDaemon();
     void autoInstallBundledMentuRuntime();
+    // Product default, best effort: Enter queues a Pi follow-up and
+    // Opt+Enter steers (absent keys only; never rewrites user values).
+    void seedPiQueueFollowUpKeybindings();
     if (backgroundWindow && process.platform === "darwin")
       app.setActivationPolicy("prohibited");
     createWindow();
