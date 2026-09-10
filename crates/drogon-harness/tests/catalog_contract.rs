@@ -1264,8 +1264,37 @@ struct ChildReport {
     /// Isolation roots the probe retained (paths under the parent-owned
     /// fixture dir); the parent preserves them with the directory.
     probe_retained_roots: Vec<String>,
+    /// Branch-entry markers observed by the child before reporting: the
+    /// version marker proves the fixture ran; the enumeration marker
+    /// must stay absent whenever enumeration never runs.
+    version_entered: bool,
+    enumeration_entered: bool,
     /// Whether the probe verified all descendant cleanup.
     probe_cleanup_verified: bool,
+}
+
+/// Branch-entry marker files a fixture writes when it takes a CLI
+/// branch: the version marker proves the fixture ran; the enumeration
+/// marker must stay absent whenever enumeration never runs. Writers
+/// (fixture scripts), readers (child report) and assertions share these
+/// single-segment relative names so neither side can drift silently.
+#[cfg(unix)]
+const VERSION_MARKER_FILE: &str = "version.entered";
+#[cfg(unix)]
+const ENUMERATION_MARKER_FILE: &str = "enumeration.entered";
+
+/// Pure control on marker placement: distinct, non-empty, single-segment
+/// relative names. Literally in-memory (no processes, no filesystem) —
+/// the native bodies assert the actual files.
+#[cfg(unix)]
+#[test]
+fn branch_marker_filenames_are_distinct_relative_paths() {
+    for name in [VERSION_MARKER_FILE, ENUMERATION_MARKER_FILE] {
+        assert!(!name.is_empty());
+        assert!(!name.contains('/'));
+        assert!(!name.contains('\\'));
+    }
+    assert_ne!(VERSION_MARKER_FILE, ENUMERATION_MARKER_FILE);
 }
 
 fn write_child_report(dir: &Path, report: &ChildReport) {
@@ -2144,6 +2173,26 @@ fn add_fixture(dir: &Path, name: &str, script: &str) -> PathBuf {
     }
 }
 
+/// Write an executable fixture WITHOUT the warm-up spawn: for refusal
+/// fixtures whose registering runs must be exactly countable (a warm-up
+/// handshake would create a second identity breaking the single seal).
+/// Same permissions as [`add_fixture`]; the caller owns all process
+/// custody through the normal probe/registrar paths. Refusal measures
+/// gate logic, not timing, so first-exec latency needs no warming.
+fn add_cold_fixture(dir: &Path, name: &str, script: &str) -> PathBuf {
+    {
+        let path = dir.join(name);
+        std::fs::write(&path, script).expect("write fixture script");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod fixture");
+        }
+        path
+    }
+}
+
 /// One best-effort `--version` spawn of a freshly-written fixture so the
 /// timed probe that follows measures the product, not the platform's
 /// first-execution scan: on macOS a brand-new script inode costs ~250ms
@@ -2507,7 +2556,19 @@ fn settle_probe(
     (catalog, pending_pids, retained, cleanup_verified, notes)
 }
 
-fn child_probe_and_report(pi_script: &str, budget: Duration) {
+/// Child-mode body shared by the adversarial catalog probes: run the
+/// fixture probe for one harness, count the ledger the fixture scripts
+/// appended, observe branch-entry markers, and write the report the
+/// parent will assert on. `warm` selects warmed fixture preparation
+/// (default path, absorbs first-exec latency) versus cold preparation
+/// (every registering run countable — required when the plan counts
+/// exact identities and a warm-up handshake would add a second one).
+fn child_probe_and_report(
+    harness: HarnessId,
+    pi_script: &str,
+    budget: Duration,
+    warm: bool,
+) {
     // Settle probe custody through reporting: the wrapper is retained
     // (never `.catalog`-and-discard) and pending handles are reaped
     // boundedly before the report is written.
@@ -2541,13 +2602,19 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
                 // Refused before probing: no probe custody exists.
                 probe_pending_pids: Vec::new(),
                 probe_retained_roots: Vec::new(),
+                version_entered: false,
+                enumeration_entered: false,
                 probe_cleanup_verified: true,
             },
         );
         return;
     }
-    let pi = add_fixture(&dir, "pi", pi_script);
-    let probe = probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), budget);
+    let probe_exe = if warm {
+        add_fixture(&dir, harness.executable(), pi_script)
+    } else {
+        add_cold_fixture(&dir, harness.executable(), pi_script)
+    };
+    let probe = probe_host_catalog_with_budget(harness, Some(&probe_exe), budget);
     // Settle bound derives from the same supervise envelope the parent
     // enforces (child start approximates parent launch): the report and
     // child exit keep a margin before the parent's kill deadline — never
@@ -2578,6 +2645,8 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
             registration_failures,
             probe_pending_pids,
             probe_retained_roots,
+            version_entered: dir.join(VERSION_MARKER_FILE).exists(),
+            enumeration_entered: dir.join(ENUMERATION_MARKER_FILE).exists(),
             probe_cleanup_verified,
         },
     );
@@ -2588,6 +2657,7 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
 fn timed_out_probe_is_killed_within_its_budget() {
     if in_child_mode() {
         child_probe_and_report(
+            HarnessId::Pi,
             &format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
@@ -2604,6 +2674,7 @@ fn timed_out_probe_is_killed_within_its_budget() {
             // 300ms proved too tight once macOS first-exec scan and
             // scheduling latency stack up.
             Duration::from_secs(1) + PROBE_RESERVED_CLEANUP,
+            true,
         );
         return;
     }
@@ -2809,6 +2880,7 @@ fn probe_output_beyond_the_cap_is_drained_not_kept() {
 fn leader_exits_but_grandchild_holds_pipes_is_bounded_and_reported() {
     if in_child_mode() {
         child_probe_and_report(
+            HarnessId::Pi,
             &format!(
                 "#!/bin/sh\n\
              if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
@@ -2822,6 +2894,7 @@ PIEOF\n\
                 fixture_handshake_sh("$!")
             ),
             Duration::from_secs(10),
+            true,
         );
         return;
     }
@@ -2884,6 +2957,7 @@ PIEOF\n\
 fn term_resistant_descendant_is_sigkilled_and_evidence_recorded() {
     if in_child_mode() {
         child_probe_and_report(
+            HarnessId::Pi,
             &format!(
                 "#!/bin/sh\n\
              if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
@@ -2897,6 +2971,7 @@ PIEOF\n\
                 fixture_handshake_sh("$!")
             ),
             Duration::from_secs(10),
+            true,
         );
         return;
     }
@@ -2925,6 +3000,7 @@ PIEOF\n\
 fn redirected_stdio_survivor_is_caught_after_eof_and_leader_exit() {
     if in_child_mode() {
         child_probe_and_report(
+            HarnessId::Pi,
             &format!(
                 "#!/bin/sh\n\
              if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
@@ -2938,6 +3014,7 @@ PIEOF\n\
                 fixture_handshake_sh("$!")
             ),
             Duration::from_secs(10),
+            true,
         );
         return;
     }
@@ -2965,6 +3042,7 @@ PIEOF\n\
 fn continuous_producer_respects_the_deadline_and_is_fully_reaped() {
     if in_child_mode() {
         child_probe_and_report(
+            HarnessId::Pi,
             &format!(
                 "#!/bin/sh\n\
                  if [ \"$1\" = \"--version\" ]; then echo 0.85.1; exit 0; fi\n\
@@ -2981,6 +3059,7 @@ fn continuous_producer_respects_the_deadline_and_is_fully_reaped() {
             // 300ms proved too tight once macOS first-exec scan and
             // scheduling latency stack up.
             Duration::from_secs(1) + PROBE_RESERVED_CLEANUP,
+            true,
         );
         return;
     }
@@ -3033,39 +3112,134 @@ fn nonzero_exit_is_probe_failed_never_model_rows() {
     assert!(note.contains("token refresh failed"), "{note}");
 }
 
-/// Regression body for the restored version-refusal policy
-/// (COMPILE-ONLY until reviewed: never executed here). A failed version
-/// check never yields a version-qualified Enumerated, even when the
-/// enumeration surface would answer: the version failure evidence must
-/// survive in the note rather than being erased by a later success.
-/// Finite fixture (both branches exit immediately, no sleeps or
-/// descendants), so a future run is bounded by construction.
+/// Supervised refusal, Pi: the version run registers exactly once (cold
+/// preparation — no warm-up identity), fails, and enumeration never
+/// runs. The version marker proves the fixture ran; the enumeration
+/// marker stays absent; the catalog refuses with version evidence while
+/// the supervisor needs zero rescue. COMPILE-ONLY until reviewed with a
+/// launcher grant: never executed here.
 #[cfg(unix)]
 #[test]
-fn failed_version_refuses_enumeration_despite_valid_models() {
-    let bin = FixtureBin::new();
-    let pi = bin.add(
-        "pi",
-        "#!/bin/sh\n\
-         if [ \"$1\" = \"--version\" ]; then echo 'version check failed' >&2; exit 1; fi\n\
-         echo 'provider      model'\n\
-         echo 'kimi-coding   kimi-for-coding'\n\
-         exit 0\n",
+fn pi_failed_version_refuses_enumeration_under_supervision() {
+    if in_child_mode() {
+        child_probe_and_report(
+            HarnessId::Pi,
+            &format!(
+                "#!/bin/sh\n\
+                 _FD=\"$(dirname \"$0\")\"\n\
+                 if [ \"$1\" = \"--version\" ]; then echo entered > \"$_FD/{}\"; {} echo 'version probe refused' >&2; exit 1; fi\n\
+                 echo entered > \"$_FD/{}\"\n\
+                 {}\n\
+                 cat <<'PIEOF'\n\
+provider      model\n\
+kimi-coding   kimi-for-coding\n\
+MARKER        should-never-appear\n\
+PIEOF\n\
+                 exit 0\n",
+                VERSION_MARKER_FILE,
+                fixture_handshake_sh("$$"),
+                ENUMERATION_MARKER_FILE,
+                fixture_handshake_sh("$$")
+            ),
+            Duration::from_secs(10),
+            false,
+        );
+        return;
+    }
+    let run = supervise(
+        "pi_failed_version_refuses_enumeration_under_supervision",
+        SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
     );
-    let probe = probe_host_catalog(HarnessId::Pi, Some(&pi));
-    assert!(probe.pending.is_empty(), "pending custody: {:?}", probe.pending);
+    run.assert_clean_product();
+    let catalog = run.catalog();
+    assert_eq!(catalog["status"], "probe_failed");
     assert!(
-        probe.cleanup_verified,
-        "unverifiable: {:?}",
-        probe.unverifiable
+        catalog["entries"].as_array().expect("entries").is_empty(),
+        "no rows without a version, marked or otherwise"
     );
-    let catalog = &probe.catalog;
-    assert_eq!(catalog.status, EnumerationStatus::ProbeFailed);
-    assert!(catalog.entries.is_empty(), "no rows without a version");
-    let note = catalog.note.clone().expect("failure note");
+    let note = catalog["note"].as_str().expect("note");
     assert!(
         note.contains("version probe exited 1"),
         "version failure evidence must survive: {note}"
+    );
+    let report = run.report.as_ref().expect("child report");
+    assert_eq!(
+        report["version_entered"].as_bool(),
+        Some(true),
+        "version branch provably ran"
+    );
+    assert_eq!(
+        report["enumeration_entered"].as_bool(),
+        Some(false),
+        "enumeration branch never entered"
+    );
+}
+
+/// Supervised refusal, OpenCode: same shape through the shared gate —
+/// one cold registering version run, failed version, absent enumeration
+/// marker, ProbeFailed catalog, zero supervisor rescue. COMPILE-ONLY
+/// until reviewed with a launcher grant: never executed here.
+#[cfg(unix)]
+#[test]
+fn opencode_failed_version_refuses_enumeration_under_supervision() {
+    if in_child_mode() {
+        child_probe_and_report(
+            HarnessId::Opencode,
+            &format!(
+                "#!/bin/sh\n\
+                 _FD=\"$(dirname \"$0\")\"\n\
+                 if [ \"$1\" = \"--version\" ]; then echo entered > \"$_FD/{}\"; {} echo 'version probe refused' >&2; exit 1; fi\n\
+                 echo entered > \"$_FD/{}\"\n\
+                 {}\n\
+                 cat <<'OCEOF'\n\
+MARKER/should-never-appear\n\
+opencode/claude-sonnet-5\n\
+OCEOF\n\
+                 exit 0\n",
+                VERSION_MARKER_FILE,
+                fixture_handshake_sh("$$"),
+                ENUMERATION_MARKER_FILE,
+                fixture_handshake_sh("$$")
+            ),
+            Duration::from_secs(10),
+            false,
+        );
+        return;
+    }
+    let run = supervise(
+        "opencode_failed_version_refuses_enumeration_under_supervision",
+        SUPERVISE_OVERALL,
+        ExpectedPlan {
+            declared: 1,
+            registered: 1,
+        },
+    );
+    run.assert_clean_product();
+    let catalog = run.catalog();
+    assert_eq!(catalog["status"], "probe_failed");
+    assert!(
+        catalog["entries"].as_array().expect("entries").is_empty(),
+        "no rows without a version, marked or otherwise"
+    );
+    let note = catalog["note"].as_str().expect("note");
+    assert!(
+        note.contains("version probe exited 1"),
+        "version failure evidence must survive: {note}"
+    );
+    let report = run.report.as_ref().expect("child report");
+    assert_eq!(
+        report["version_entered"].as_bool(),
+        Some(true),
+        "version branch provably ran"
+    );
+    assert_eq!(
+        report["enumeration_entered"].as_bool(),
+        Some(false),
+        "enumeration branch never entered"
     );
 }
 
@@ -3727,6 +3901,9 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
                 // No probe runs here: custody evidence is trivially clean.
                 probe_pending_pids: Vec::new(),
                 probe_retained_roots: Vec::new(),
+                // Rust-spawned sleeps write no branch markers.
+                version_entered: false,
+                enumeration_entered: false,
                 probe_cleanup_verified: true,
             },
         );
@@ -3782,6 +3959,9 @@ fn supervisor_term_resistant_child_is_forced_after_recheck() {
                 // No probe runs here: custody evidence is trivially clean.
                 probe_pending_pids: Vec::new(),
                 probe_retained_roots: Vec::new(),
+                // Rust-spawned sleeps write no branch markers.
+                version_entered: false,
+                enumeration_entered: false,
                 probe_cleanup_verified: true,
             },
         );
@@ -3855,6 +4035,9 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
                 // No probe runs here: custody evidence is trivially clean.
                 probe_pending_pids: Vec::new(),
                 probe_retained_roots: Vec::new(),
+                // Rust-spawned sleeps write no branch markers.
+                version_entered: false,
+                enumeration_entered: false,
                 probe_cleanup_verified: true,
             },
         );
@@ -3928,6 +4111,9 @@ fn supervisor_distinguishes_product_cleanup_from_rescue() {
                 // No probe runs here: custody evidence is trivially clean.
                 probe_pending_pids: Vec::new(),
                 probe_retained_roots: Vec::new(),
+                // Rust-spawned sleeps write no branch markers.
+                version_entered: false,
+                enumeration_entered: false,
                 probe_cleanup_verified: true,
             },
         );
@@ -4012,6 +4198,9 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
                 // No probe runs here: custody evidence is trivially clean.
                 probe_pending_pids: Vec::new(),
                 probe_retained_roots: Vec::new(),
+                // Rust-spawned sleeps write no branch markers.
+                version_entered: false,
+                enumeration_entered: false,
                 probe_cleanup_verified: true,
             },
         );
