@@ -2,7 +2,7 @@
 //! ROOT-approved contract, composed on top of `bots::policy` +
 //! `automations::runner`'s 3-phase flow (never duplicating either).
 //!
-//! ## Chat turns (`prompt`, R2-S)
+//! ## Chat turns (`prompt`, R2-S) and the open-session dispatch
 //!
 //! `bot.run` also accepts a `prompt` in place of `responsibilityId`/
 //! `reason`/`eventIdentity` -- a raw chat turn with no `Responsibility`/
@@ -16,6 +16,18 @@
 //! table, `bots::storage::record_bot_message_in_tx`) instead of a
 //! `ResponsibilityRun` -- a distinct effect, not a parallel copy of the
 //! existing one. `bot.history` (below) reads these rows back.
+//!
+//! [`RunTurn::OpenSession`] (Carlos directive, task_e7c183ebc637) is the
+//! Open Session button's dispatch and deliberately dispatches NO model
+//! turn: a session must open LIVE and IDLE, ready for the user's first
+//! real message. The session's liveness and environment are daemon facts
+//! surfaced by the status pill and the Bot session inspector -- never a
+//! recital the model is asked to invent (the old "confirm this session is
+//! live" greeting made the model fabricate working directories and model
+//! names that the owner then read as product output). An open-session
+//! dispatch therefore starts the harness's interactive entrypoint with NO
+//! prompt parameter at all, records no [`BotMessage`] row (no turn
+//! happened), and only rotates the Bot's `current_session`.
 //!
 //! ## Request contract (strict; unknown fields denied)
 //!
@@ -219,8 +231,10 @@ pub struct HarnessOverrides {
     permission_mode: Option<String>,
 }
 
-/// A `bot.run` call is either a scheduled/reactive/manual responsibility
-/// invocation, or a raw chat turn carrying its own `prompt`. Mutually
+/// A `bot.run` call is one of a scheduled/reactive/manual responsibility
+/// invocation, a raw chat turn carrying its own `prompt` (headless one-shot
+/// daemon run), or an open-session dispatch (`interactive: true`, no
+/// `prompt`): a live, IDLE session with no model turn behind it. Mutually
 /// exclusive on the wire (see [`parse_bot_run_request`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum RunTurn {
@@ -231,20 +245,18 @@ pub enum RunTurn {
     },
     Chat {
         prompt: String,
-        /// Open-session request (bug-bot-a836b4ebf8be65505): a live,
-        /// user-facing tab instead of a headless one-shot daemon run --
-        /// `claude`/`pi`/etc.'s own interactive TUI entrypoint stays
-        /// running so the caller can converse with it, matching the
-        /// primitive `startHarness` already uses for every other
-        /// user-facing tab. Absent/false keeps the original one-shot
-        /// `bot.run` chat-turn contract byte-for-byte (every existing
-        /// caller and test). [`Engine::bot_run`]'s ROOT adapter -- never
-        /// [`authorized_prepare`] itself -- is what actually strips
-        /// `headless` and retargets the session at the Bot's own sandbox
-        /// workspace; this field only carries the caller's intent through
-        /// to [`ChatPlan::interactive`].
-        interactive: bool,
     },
+    /// Open-session request (bug-bot-a836b4ebf8be65505, refined by the
+    /// Carlos directive on task_e7c183ebc637): a live, user-facing tab
+    /// with NO model turn -- `claude`/`pi`/etc.'s own interactive TUI
+    /// entrypoint starts and waits for the user's first real message,
+    /// matching the primitive `startHarness` already uses for every other
+    /// user-facing tab. A `prompt` alongside `interactive` is a parse
+    /// ERROR, so the wire contract itself makes "ask the model to confirm
+    /// the session is live" impossible. [`Engine::bot_run`]'s ROOT adapter
+    /// -- never [`authorized_prepare`] alone -- is what strips `headless`
+    /// and retargets the session at the Bot's own sandbox workspace.
+    OpenSession,
 }
 
 /// The strict, normalized request. The envelope `request_id` is deliberately
@@ -273,11 +285,18 @@ pub struct ChatPlan {
     pub bot_id: String,
     pub request_id: String,
     pub params: Value,
+    /// The dispatched turn's raw text. Always empty for an open-session
+    /// plan: it dispatches no turn, records no [`BotMessage`] row, and
+    /// this field exists only so the one [`ChatPlan`] type can carry both
+    /// dispatch kinds' shared plumbing.
     pub prompt: String,
     pub attempt_at: f64,
-    /// Carried verbatim from [`RunTurn::Chat::interactive`]; see that
-    /// field's doc. `false` for every pre-existing caller/test.
-    pub interactive: bool,
+    /// True for an [`RunTurn::OpenSession`] dispatch: the ROOT adapter
+    /// strips `headless` and retargets the Bot's own home workspace, and
+    /// `finalize` rotates `current_session` WITHOUT recording a chat-turn
+    /// message row (no turn was dispatched). `false` for a plain chat
+    /// turn, which keeps the original one-shot headless contract.
+    pub open_session: bool,
 }
 
 /// Bound on the raw chat message: generous enough for a real conversational
@@ -410,8 +429,33 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         None | Some(Value::Null) => None,
         Some(value) => Some(parse_harness(value)?),
     };
+    let interactive = match object.get("interactive") {
+        None | Some(Value::Null) => None,
+        Some(Value::Bool(value)) => Some(*value),
+        Some(_) => return Err(invalid_argument("field interactive must be a boolean")),
+    };
     let has_prompt = matches!(object.get("prompt"), Some(value) if !value.is_null());
+    if interactive.is_some()
+        && ["responsibilityId", "reason", "eventIdentity"]
+            .iter()
+            .any(|key| object.contains_key(*key))
+    {
+        return Err(invalid_argument(
+            "field interactive must not be set alongside a responsibility invocation (only a chat \
+             turn or an open-session dispatch can use it)",
+        ));
+    }
     let turn = if has_prompt {
+        if interactive == Some(true) {
+            // The Carlos directive (task_e7c183ebc637): opening a session
+            // must never dispatch a model turn -- the model is never the
+            // source of truth about the session. Reject the combination so
+            // the wire contract itself enforces it.
+            return Err(invalid_argument(
+                "field prompt must not be set alongside interactive: opening a session never \
+                 dispatches a model turn",
+            ));
+        }
         for key in ["responsibilityId", "reason", "eventIdentity"] {
             if object.contains_key(key) {
                 return Err(invalid_argument(format!(
@@ -424,17 +468,14 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         if prompt.chars().count() > MAX_CHAT_PROMPT_CHARS {
             return Err(invalid_argument("field prompt exceeds the maximum length"));
         }
-        let interactive = match object.get("interactive") {
-            None | Some(Value::Null) => false,
-            Some(Value::Bool(value)) => *value,
-            Some(_) => return Err(invalid_argument("field interactive must be a boolean")),
-        };
-        RunTurn::Chat { prompt, interactive }
+        RunTurn::Chat { prompt }
+    } else if interactive == Some(true) {
+        RunTurn::OpenSession
     } else {
-        if object.contains_key("interactive") {
+        if let Some(false) = interactive {
             return Err(invalid_argument(
-                "field interactive must not be set alongside a responsibility invocation (only \
-                 a chat turn can open a live session)",
+                "field interactive must be true without a prompt: an open-session dispatch is \
+                 the only promptless turn",
             ));
         }
         RunTurn::Responsibility {
@@ -884,7 +925,7 @@ pub fn authorized_prepare(
                 Err(e) => Err(internal_error(format!("failed to load bot run state: {e}"))),
             }
         }
-        RunTurn::Chat { prompt, interactive } => {
+        RunTurn::Chat { prompt } => {
             let Some(bot) = bots_storage::get_bot(conn, derived_host_id, &folder, &request.bot_id)
                 .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
             else {
@@ -896,8 +937,11 @@ pub fn authorized_prepare(
             };
             let operating_prompt = crate::bots::prompt::build_operating_prompt(&bot, prompt);
             let chat_request_id = format!("bot-chat:{envelope_request_id}");
-            let params =
-                build_chat_harness_start_params(&workspace_id, &operating_prompt, &harness_params);
+            let params = build_chat_harness_start_params(
+                &workspace_id,
+                Some(&operating_prompt),
+                &harness_params,
+            );
             Ok(BotRunPrepare::ReadyChat {
                 plan: ChatPlan {
                     bot_id: request.bot_id.clone(),
@@ -905,7 +949,39 @@ pub fn authorized_prepare(
                     params,
                     prompt: prompt.clone(),
                     attempt_at,
-                    interactive: *interactive,
+                    open_session: false,
+                },
+                workspace_id,
+            })
+        }
+        RunTurn::OpenSession => {
+            // Same bot-existence gate as a chat turn, but NO prompt is
+            // built or dispatched: the session opens live and IDLE, and
+            // the harness's own interactive entrypoint waits for the
+            // user's first real message (Carlos directive,
+            // task_e7c183ebc637). Liveness/environment facts belong to
+            // the daemon's status pill and inspector, never to a model
+            // recital.
+            let bot_exists = bots_storage::get_bot(conn, derived_host_id, &folder, &request.bot_id)
+                .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
+                .is_some();
+            if !bot_exists {
+                return Ok(BotRunPrepare::Refused {
+                    workspace_id,
+                    refusal: json!({"type": "bot", "kind": "unknownBot", "botId": request.bot_id}),
+                    error: format!("bot {} not found", request.bot_id),
+                });
+            }
+            let chat_request_id = format!("bot-open:{envelope_request_id}");
+            let params = build_chat_harness_start_params(&workspace_id, None, &harness_params);
+            Ok(BotRunPrepare::ReadyChat {
+                plan: ChatPlan {
+                    bot_id: request.bot_id.clone(),
+                    request_id: chat_request_id,
+                    params,
+                    prompt: String::new(),
+                    attempt_at,
+                    open_session: true,
                 },
                 workspace_id,
             })
@@ -915,17 +991,21 @@ pub fn authorized_prepare(
 
 /// Chat-turn equivalent of `automations::runner`'s private
 /// `build_harness_start_params`: same shape, since `harness.start` itself
-/// has no concept of responsibilities/automations.
+/// has no concept of responsibilities/automations. `prompt: None` (the
+/// open-session dispatch) omits the key entirely, so the harness starts
+/// with nothing to consume -- no model turn exists to burn.
 fn build_chat_harness_start_params(
     workspace_id: &str,
-    prompt: &str,
+    prompt: Option<&str>,
     harness_params: &HarnessLaunchParams,
 ) -> Value {
     let mut params = json!({
         "workspaceId": workspace_id,
         "harnessId": harness_params.harness_id,
-        "prompt": prompt,
     });
+    if let Some(prompt) = prompt {
+        params["prompt"] = json!(prompt);
+    }
     if let Some(model) = &harness_params.model {
         params["model"] = json!(model);
     }
@@ -1054,8 +1134,13 @@ fn ensure_bot_home_workspace(
     let bot = bots_storage::get_bot(tx, host_id, &folder, bot_id)
         .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
         .ok_or_else(|| not_found_bot(bot_id))?;
-    let home =
-        crate::bot_self_mgmt::ensure_home_for_bot(tx, data_dir, host_id, &bot, origin_workspace_id)?;
+    let home = crate::bot_self_mgmt::ensure_home_for_bot(
+        tx,
+        data_dir,
+        host_id,
+        &bot,
+        origin_workspace_id,
+    )?;
     Ok((home.home_workspace_id, home.path))
 }
 
@@ -1147,7 +1232,7 @@ pub fn record(
 /// (a single call is always exactly one of the two).
 enum PreparedOutcome {
     Responsibility(RunPlan, RunnerOutcome, f64),
-    Chat(ChatPlan, RunnerOutcome, f64, String),
+    Chat(ChatPlan, RunnerOutcome, f64, Option<String>),
 }
 
 /// The applied ROOT adapter: composes the staged primitives above onto
@@ -1189,7 +1274,7 @@ impl crate::Engine {
                 let mut prepared =
                     authorized_prepare(tx, &derived_host_id, &request_id, &parsed, attempt_at)?;
                 // Open-session retarget (bug-bot-a836b4ebf8be65505): an
-                // interactive chat turn is a live user-facing tab, not a
+                // open-session dispatch is a live user-facing tab, not a
                 // headless daemon run, so it must (a) drop `headless` from
                 // the built `harness.start` params -- the interactive TUI
                 // entrypoint stays running instead of exiting on completion
@@ -1197,12 +1282,14 @@ impl crate::Engine {
                 // workspace instead of the folder its record happens to be
                 // stored under (which is whatever project workspace was
                 // selected at `bot.create` time, never the caller's to
-                // isolate from). `authorized_prepare` stays unaware of any
-                // of this -- it is applied here, in the ROOT adapter, so the
+                // isolate from). Its params carry NO `prompt` key already
+                // (authorized_prepare built it that way): no model turn is
+                // dispatched. `authorized_prepare` stays unaware of any of
+                // this -- it is applied here, in the ROOT adapter, so the
                 // staged primitive keeps its original one-shot contract
                 // (and every existing direct-call test) untouched.
                 if let BotRunPrepare::ReadyChat { plan, workspace_id } = &mut prepared
-                    && plan.interactive
+                    && plan.open_session
                 {
                     plan.params
                         .as_object_mut()
@@ -1331,7 +1418,9 @@ impl crate::Engine {
                     // Strictly after `execute_chat` returns, same rule as
                     // the responsibility path.
                     let observed_at = crate::now_unix_ms() as f64;
-                    let message_id = uuid::Uuid::new_v4().to_string();
+                    // An open-session dispatch has no message row, so its
+                    // receipt carries a null messageId honestly.
+                    let message_id = (!plan.open_session).then(|| uuid::Uuid::new_v4().to_string());
                     let receipt = match &outcome {
                         RunnerOutcome::Observed {
                             session_id,
@@ -1347,7 +1436,7 @@ impl crate::Engine {
                             Some(json!({"sessionId": session_id, "incarnation": incarnation})),
                             None,
                             None,
-                            Some(message_id.clone()),
+                            message_id.clone(),
                             Value::Null,
                             Some(observed_at),
                             attempt_at,
@@ -1366,7 +1455,7 @@ impl crate::Engine {
                             Some(json!({"sessionId": session_id, "incarnation": incarnation})),
                             None,
                             None,
-                            Some(message_id.clone()),
+                            message_id.clone(),
                             Value::String(error.to_string()),
                             Some(observed_at),
                             attempt_at,
@@ -1381,7 +1470,7 @@ impl crate::Engine {
                             None,
                             None,
                             None,
-                            Some(message_id.clone()),
+                            message_id.clone(),
                             Value::String(error.to_string()),
                             None,
                             attempt_at,
@@ -1402,9 +1491,30 @@ impl crate::Engine {
                         record(tx, &plan, &outcome, observed_at)?;
                     }
                     Some(PreparedOutcome::Chat(plan, outcome, observed_at, message_id)) => {
-                        record_chat(tx, &plan, &outcome, observed_at, message_id)?;
-                        if plan.interactive {
-                            record_opened_session(tx, &derived_host_id, &plan, &outcome, observed_at)?;
+                        // An open-session dispatch records NO chat-turn
+                        // message row (no turn was dispatched -- the
+                        // receipt's messageId stays null and bot.history
+                        // stays honest); it only rotates the Bot's
+                        // current_session so the snapshot/inspector reflect
+                        // the live session.
+                        if plan.open_session {
+                            record_opened_session(
+                                tx,
+                                &derived_host_id,
+                                &plan,
+                                &outcome,
+                                observed_at,
+                            )?;
+                        } else {
+                            record_chat(
+                                tx,
+                                &plan,
+                                &outcome,
+                                observed_at,
+                                // Only an open-session plan arrives without one,
+                                // and the branch above already handled it.
+                                message_id.expect("a plain chat turn mints a message id"),
+                            )?;
                         }
                     }
                     None => {}

@@ -114,4 +114,52 @@ describe("BotSessionInspector", () => {
     );
     expect(screen.queryByText("@arya-stark")).toBeNull();
   });
+
+  it("follows the REAL bot's harness, model and workspace -- nothing is hardcoded", () => {
+    // task_e7c183ebc637: the inspector is the trustworthy surface for
+    // session facts, so its rows must track the bot's actual identity and
+    // home, changing when they change (a fixture bot with a different
+    // harness/model/workspace renders different facts, never a canned
+    // string and never model-invented ones).
+    const { rerender } = render(
+      <BotSessionInspector
+        meta={meta({ harnessId: "pi", model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4" })}
+        session={session()}
+        workspacePath="/Users/carlos/Drogon/bots/arya-stark"
+        processId={48921}
+        nowMs={STARTED_AT}
+      />,
+    );
+    expect(screen.getByTestId("bot-session-row-harness").textContent).toContain(
+      "Pi (Pi Labs)",
+    );
+    expect(screen.getByTestId("bot-session-row-model").textContent).toContain(
+      "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+    );
+    expect(
+      screen.getByTestId("bot-session-row-workspace").textContent,
+    ).toContain("/Users/carlos/Drogon/bots/arya-stark");
+
+    rerender(
+      <BotSessionInspector
+        meta={meta({ harnessId: "codex", model: null })}
+        session={session()}
+        workspacePath="/tmp/other-bot-home"
+        processId={null}
+        nowMs={STARTED_AT}
+      />,
+    );
+    expect(screen.getByTestId("bot-session-row-harness").textContent).toContain(
+      "Codex (OpenAI)",
+    );
+    expect(screen.getByTestId("bot-session-row-model").textContent).toContain(
+      "Harness default",
+    );
+    expect(
+      screen.queryByText("/Users/carlos/Drogon/bots/arya-stark"),
+    ).toBeNull();
+    expect(screen.getByTestId("bot-session-row-workspace").textContent).toContain(
+      "/tmp/other-bot-home",
+    );
+  });
 });

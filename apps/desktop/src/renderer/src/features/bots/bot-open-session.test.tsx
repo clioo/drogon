@@ -90,7 +90,7 @@ function fakeBridge(
 }
 
 describe("bot open session", () => {
-  it("dispatches a bot.run chat turn with the bot's stored harness and reloads", async () => {
+  it("dispatches an open-session turn with NO model prompt, the bot's stored harness, and a reload", async () => {
     const seeded = bot({
       harnessPolicy: {
         defaultHarness: "pi",
@@ -109,19 +109,22 @@ describe("bot open session", () => {
     await waitFor(() => expect(fake.botRun).toHaveBeenCalledTimes(1));
     const input = fake.botRun.mock.calls[0]![0] as Record<string, unknown>;
     expect(input.botId).toBe("bot-1");
-    expect(typeof input.prompt).toBe("string");
-    expect((input.prompt as string).trim().length).toBeGreaterThan(0);
+    // task_e7c183ebc637: opening a session dispatches NO model turn. The
+    // seam assertion is on the wire shape itself -- no `prompt` field
+    // exists on the dispatch at all, so there is nothing for a model to
+    // narrate a status report from.
+    expect("prompt" in input && input.prompt !== undefined).toBe(false);
+    // bug-bot-a836b4ebf8be65505: Open Session must request a live,
+    // interactive session (native's own TUI entrypoint), never the headless
+    // one-shot daemon run that made a Bot "session" print one reply and
+    // exit immediately.
+    expect(input.interactive).toBe(true);
     expect(input.harness).toMatchObject({
       harnessId: "pi",
       provider: "dgx-spark",
       model: "qwen3.8-flash-next-nvidia-nvfp4",
       permissionMode: "unattended",
     });
-    // bug-bot-a836b4ebf8be65505: Open Session must request a live,
-    // interactive session (native's own TUI entrypoint), never the headless
-    // one-shot daemon run that made a Bot "session" print one reply and
-    // exit immediately.
-    expect(input.interactive).toBe(true);
     // The post-dispatch reload is what lands the new session state.
     await waitFor(() => expect(fake.snapshots()).toBeGreaterThanOrEqual(2));
     expect(screen.queryByRole("alert")).toBeNull();
