@@ -2327,3 +2327,67 @@ async fn automation_show_fetches_one_record() {
     assert_eq!(request["params"]["id"], "auto-1");
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_list_worktree_resolves_the_workspace_first() {
+    let dir = temp_data_dir("tlistwt");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("worktree.get") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "worktree": {
+                        "id": "wt-1",
+                        "projectId": "proj-1",
+                        "workspaceId": "ws-of-wt",
+                        "path": "/repo/wt-1",
+                        "branch": "wt-1",
+                        "head": "abc123",
+                        "baseRef": null,
+                        "createdAt": "2026-09-05T12:00:00Z"
+                    }
+                }),
+            )),
+            Some("session.list") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"sessions": [session_result("sess-1")]}),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let output = run_cli(dir.path(), &["terminal", "list", "--worktree", "wt-1"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    // The session.list call is scoped to the worktree's workspace.
+    let request = service.last_captured();
+    assert_eq!(request["method"], "session.list");
+    assert_eq!(request["params"]["workspaceId"], "ws-of-wt");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_list_rejects_workspace_and_worktree_together() {
+    let dir = temp_data_dir("tlistcf");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|_request| panic!("the daemon must not be called")),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "list",
+            "--workspace",
+            "ws-1",
+            "--worktree",
+            "wt-1",
+        ],
+    );
+    // clap's conflicts_with already rejects the combination; here we only
+    // need to prove the daemon is never called.
+    assert_eq!(output.status.code(), Some(2));
+    drop(service);
+}

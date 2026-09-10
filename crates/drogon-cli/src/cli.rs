@@ -545,11 +545,15 @@ pub enum TerminalAction {
     /// List sessions, optionally scoped to one workspace
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli terminal list [--workspace <ID>] [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --request-id, --retry-request, --workspace"
+        override_usage = "drogon-cli terminal list [--workspace <ID>|--worktree <ID>] [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --request-id, --retry-request, --worktree, --workspace"
     )]
     List {
         #[arg(long, value_name = "ID")]
         workspace: Option<String>,
+        /// Scope to a worktree (resolved to its workspace; source
+        /// `--worktree <selector>`)
+        #[arg(long, value_name = "ID", conflicts_with = "workspace")]
+        worktree: Option<String>,
         /// Cap the number of sessions returned (newest last, source order)
         #[arg(long, value_name = "N")]
         limit: Option<u64>,
@@ -1028,9 +1032,16 @@ impl Cli {
                         }
                     }
                 }
-                TerminalAction::List { workspace, limit } => {
+                TerminalAction::List {
+                    workspace,
+                    worktree,
+                    limit,
+                } => {
                     if let Some(workspace) = workspace {
                         require_nonempty("workspace", workspace)?;
+                    }
+                    if let Some(worktree) = worktree {
+                        require_nonempty("worktree", worktree)?;
                     }
                     if let Some(limit) = limit
                         && *limit == 0

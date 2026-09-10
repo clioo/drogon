@@ -202,7 +202,35 @@ async fn terminal(
             let session: Session = Client::decode_checked(&call, "session.start", check_session)?;
             emit(call, json, || output::session_started(&session), 0, None)
         }
-        TerminalAction::List { workspace, limit } => {
+        TerminalAction::List {
+            workspace,
+            worktree,
+            limit,
+        } => {
+            // `--worktree` resolves to the worktree's workspace first; a
+            // folder Project's implicit worktree is addressable too.
+            let workspace = match workspace {
+                Some(id) => Some(id.clone()),
+                None => match worktree {
+                    Some(wt) => {
+                        let call = client
+                            .call(
+                                "worktree.get",
+                                json!({ "id": wt }),
+                                request_id,
+                                DEFAULT_TIMEOUT,
+                            )
+                            .await?;
+                        let found: WorktreeEnvelope = Client::decode_checked(
+                            &call,
+                            "worktree.get",
+                            |env: &WorktreeEnvelope| check_worktree(&env.worktree),
+                        )?;
+                        Some(found.worktree.workspace_id)
+                    }
+                    None => None,
+                },
+            };
             let params = match workspace {
                 Some(id) => json!({ "workspaceId": id }),
                 None => json!({}),

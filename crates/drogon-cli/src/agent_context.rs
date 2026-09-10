@@ -345,12 +345,17 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "terminal list",
             &["terminal", "list"],
-            "List sessions, optionally scoped to one workspace",
-            "drogon-cli terminal list [--workspace <ID>] [--limit <N>]",
-            &["limit", "workspace"],
+            "List sessions, optionally scoped to one workspace or worktree",
+            "drogon-cli terminal list [--workspace <ID>|--worktree <ID>] [--limit <N>]",
+            &["limit", "worktree", "workspace"],
             &[],
-            &["drogon-cli terminal list --json"],
-            &[],
+            &[
+                "drogon-cli terminal list --json",
+                "drogon-cli terminal list --worktree wt-1 --limit 10",
+            ],
+            &[
+                "--worktree resolves the worktree to its workspace first (a folder Project's id addresses its implicit worktree).",
+            ],
         ),
         entry(
             "terminal read",
