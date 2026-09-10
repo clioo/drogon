@@ -1,11 +1,20 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/renderer/src/components/sidebar/worktree-card-surface.tsx and
-   worktree-card-header.tsx (adapter: Orca's store-driven card becomes a
-   pure props card over this repo's Worktree/Session contract; the title
-   is the inline-rename editor, the meta row is the badges projection,
-   and right-click / Menu-key / kebab open the worktree context menu.) */
+   src/renderer/src/components/sidebar/worktree-card-surface.tsx,
+   worktree-card-header.tsx, worktree-card-parent-content.tsx and
+   worktree-card-secondary-rows.tsx (adapter: Orca's store-driven card
+   becomes a pure props card over this repo's Worktree/Session contract;
+   the title is the inline-rename editor, the meta row is the badges
+   projection, and right-click / Menu-key / kebab open the worktree
+   context menu). The card body follows the source's classic layout: a
+   left status lane (WorktreeCardStatusSlot's StatusIndicator column),
+   the identity column (title row + meta row at gap-1.5) and the inline
+   agent rows (WorktreeCardAgents), with the compact "N agents" summary
+   pill from worktree-card-compact-agents.tsx. The card's own extras the
+   source does not render (base-ref line, note line, "No sessions yet")
+   are folded into the accessible label instead of drawn. */
 import { Fragment, useState, useSyncExternalStore } from "react";
 import { MoreHorizontal, StickyNote } from "lucide-react";
+import { cn } from "../../lib/utils";
 import type { Session, Worktree } from "../../../../shared/session-contract";
 import { AgentStateIcon } from "./AgentStateIcon";
 import {
@@ -23,9 +32,17 @@ import {
   formatWorktreeCardSummaryLine,
   summarizeCardAgentStates,
 } from "./worktree-card-agent-summary";
+import { useWorktreeAgentExpansionState } from "./worktree-card-agents-expansion-state";
+import {
+  CompactAgentExpansion,
+  CompactAgentSummaryButton,
+} from "./worktree-card-compact-agents";
 import type { WorktreeCardPrDisplay } from "./worktree-card-pr-display";
 import { useWorktreeGitStatus } from "./use-worktree-git-status";
-import { buildWorktreeAgentRows } from "./worktree-agent-rows";
+import {
+  buildWorktreeAgentRows,
+  formatRowHarnessLabel,
+} from "./worktree-agent-rows";
 import type { WorktreeAgentRow as WorktreeAgentRowData } from "./worktree-agent-rows";
 import { WorktreeAgentRow } from "./WorktreeAgentRow";
 import { useGeneratedAgentTitles } from "../settings/agent-generated-titles";
@@ -33,21 +50,6 @@ import { buildWorktreeAgentRowTree } from "./worktree-agent-lineage";
 import type { TabStripState } from "./tab-order";
 import type { CardProperty } from "./workspace-options-state";
 import type { WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
-
-// Fork worktree-card-agents-expansion-state.ts adaptation (issue #359):
-// disclosure state keyed by worktree id in a module map so a card remount
-// (project collapse, sidebar rebuild) does not reset the user's collapsed
-// parents — the source keeps it out of component state for the same reason.
-const collapsedLineageParentsByWorktree = new Map<string, Set<string>>();
-
-function readCollapsedParents(worktreeId: string): Set<string> {
-  let collapsed = collapsedLineageParentsByWorktree.get(worktreeId);
-  if (!collapsed) {
-    collapsed = new Set();
-    collapsedLineageParentsByWorktree.set(worktreeId, collapsed);
-  }
-  return collapsed;
-}
 
 type AgentBranchContext = {
   row: WorktreeAgentRowData;
@@ -199,8 +201,6 @@ export function WorktreeCard({
   issueLinks?: readonly WorktreeIssueLink[];
 }) {
   const [beginEditing, setBeginEditing] = useState(false);
-  const [, forceCollapsedParentsBump] = useState(0);
-  const [compactExpanded, setCompactExpanded] = useState(false);
   const attached = sessions.filter(
     (session) => session.workspaceId === worktree.workspaceId,
   );
@@ -218,18 +218,17 @@ export function WorktreeCard({
   // like the fork's buildAgentRowLineageTree — children render inside a
   // boxed group under the parent row, with the fork's disclosure chrome.
   // The summary below still derives from every row, so counts can never
-  // disagree with the tree (same source the fork summarizes).
+  // disagree with the tree (same source the fork summarizes). Disclosure
+  // state (collapsed lineage parents + the compact summary panel) lives in
+  // the source's remount-durable expansion-state hook.
   const { rootRows, childrenByParentSessionId } =
     buildWorktreeAgentRowTree(rows);
-  const collapsedLineageParents = readCollapsedParents(worktree.id);
-  const toggleLineageParent = (sessionId: string) => {
-    if (collapsedLineageParents.has(sessionId)) {
-      collapsedLineageParents.delete(sessionId);
-    } else {
-      collapsedLineageParents.add(sessionId);
-    }
-    forceCollapsedParentsBump((n) => n + 1);
-  };
+  const {
+    collapsedLineageParents,
+    compactRootListExpanded,
+    toggleLineageParent,
+    toggleCompactRootList,
+  } = useWorktreeAgentExpansionState(worktree.id);
   // Why: root leaf siblings reserve a leading spacer when any root has a
   // chevron, keeping the state-dot column aligned (fork's
   // anyRootHasChildren rule).
@@ -254,6 +253,13 @@ export function WorktreeCard({
   );
   const name = worktreeDisplayName(worktree, workspaces);
   const note = showProperties.comment === false ? "" : worktree.note?.trim() ?? "";
+  // The card's one-line state sentence, folded into the accessible label
+  // like the source's sr-only status announcement (the source draws no
+  // summary text on the card; the lane dot + tooltip carry the state).
+  const summaryLine = formatWorktreeCardSummaryLine(
+    agentSummary,
+    summary.activeRelative,
+  );
   const hostId =
     workspaces.find((item) => item.id === worktree.workspaceId)?.hostId ?? null;
   const gitStatus = useWorktreeGitStatus({
@@ -261,6 +267,14 @@ export function WorktreeCard({
     workspaceId: worktree.workspaceId,
     enabled: projectKind === "git" && !implicitFolderWorktree,
   });
+  // The source's meta-row presence test (hasMetaRow): the branch identity
+  // or any badge — the agent rows tighten up under the title when absent.
+  const hasMetaRow = Boolean(
+    (showBranch && worktree.branch) ||
+      (showBranch && (gitStatus?.branch.ahead ?? 0) + (gitStatus?.branch.behind ?? 0) > 0) ||
+      (showPr && pr) ||
+      (showProperties.issue !== false && issueNumber !== null),
+  );
   return (
     <WorktreeContextMenu
       worktree={worktree}
@@ -284,8 +298,18 @@ export function WorktreeCard({
             : undefined
         }
         onClickCapture={onCardClickCapture}
-        aria-label={`${name}${summary.unread ? ", needs input" : ""}${note ? `, Note: ${note}` : ""}`}
+        aria-label={`${name}${summary.unread ? ", needs input" : ""}${summaryLine ? `, ${summaryLine}` : ""}${note ? `, Note: ${note}` : ""}`}
       >
+        {/* Status lane (the source's WorktreeCardStatusSlot column): the
+            activity glyph lives left of the content, its tooltip names the
+            state; unread (needs_input) shows the amber bell glyph like the
+            source's filled bell. */}
+        <div
+          className="shell-worktree-card-status-lane"
+          data-worktree-card-status-slot=""
+        >
+          <AgentStateIcon state={summary.state} size={12} />
+        </div>
         {/* Main column: the card is a flex row (select content beside the
             kebab), so the select button and the nested rows share one
             column wrapper instead of squeezing each other to zero width. */}
@@ -299,21 +323,15 @@ export function WorktreeCard({
             onClick={() => onSelect(worktree.workspaceId)}
           >
             <span className="shell-worktree-card-top">
-              <AgentStateIcon state={summary.state} size={14} />
               <WorktreeTitleInlineRename
                 displayName={name}
                 disabled={disabled || onRename === null}
                 beginEditing={beginEditing}
                 onBeginEditingConsumed={() => setBeginEditing(false)}
                 onRename={(next) => onRename?.(next) ?? Promise.resolve(null)}
+                showUnreadEmphasis={summary.unread}
+                className="text-[13px] leading-5"
               />
-              {summary.unread && (
-                <span
-                  className="shell-unread-dot"
-                  aria-label="Unread agent request"
-                  title="An agent in this worktree is waiting for input"
-                />
-              )}
             </span>
             <WorktreeCardMetaBadges
               branch={showBranch ? worktree.branch : ""}
@@ -323,35 +341,9 @@ export function WorktreeCard({
               issueNumber={showProperties.issue === false ? null : issueNumber}
               pr={showPr ? pr : null}
             />
-            {showBranch && worktree.baseRef ? (
-              <span
-                className="shell-worktree-card-base"
-                title={`Based on ${worktree.baseRef}`}
-              >
-                base {worktree.baseRef}
-              </span>
-            ) : null}
-            {/* Why: the fork's card keeps the agent summary and the relative
-              time on one compact line (no duplicated session count); the
-              line truncates instead of wrapping the timestamp alone. */}
-            {attached.length === 0 ? (
-              <span className="shell-worktree-card-summary">
-                No sessions yet
-              </span>
-            ) : (
-              <span
-                className="shell-worktree-card-summary"
-                title={formatWorktreeCardSummaryLine(
-                  agentSummary,
-                  summary.activeRelative,
-                )}
-              >
-                {formatWorktreeCardSummaryLine(
-                  agentSummary,
-                  summary.activeRelative,
-                )}
-              </span>
-            )}
+            {/* The comment property's visible note line: this repo's own
+                pinned property surface (probe-workspace-properties.mjs
+                asserts the exact text on the card), kept as its own row. */}
             {note ? (
               <span className="shell-worktree-card-note" title={note}>
                 <StickyNote size={12} aria-hidden="true" />
@@ -360,37 +352,73 @@ export function WorktreeCard({
             ) : null}
           </button>
           <WorktreeCardLinkedMetadata worktree={worktree} properties={showProperties} ports={ports} issueLinks={issueLinks} />
-          {/* Nested session rows (the fork's inline agent list): one row per
-            session underneath the summary line, outside the select button
-            so rows stay real buttons. Issue #359: rows with a recorded
-            parent session render as a fork lineage branch — a disclosure
-            chevron on the parent row and a boxed, indented children group
-            beneath it (worktree-card-compact-agent-row.tsx /
-            WorktreeCardAgents.renderCompactAgentBranch). */}
+          {/* Nested session rows (the fork's WorktreeCardAgents inline list):
+            one row per session, outside the select button so rows stay real
+            buttons. Issue #359: rows with a recorded parent session render
+            as a fork lineage branch — a disclosure chevron on the parent
+            row and a boxed, indented children group beneath it. Compact
+            mode (the default) folds multiple root rows into the source's
+            "N agents" summary pill (CompactAgentSummaryButton). */}
           {showProperties["inline-agents"] !== false && rows.length > 0 ? (
             <div
-              className="shell-worktree-card-rows"
-              role="group"
+              className={cn(
+                "shell-worktree-card-rows flex flex-col gap-0.5",
+                // The fork's WorktreeCardAgents mt: the rows tighten up
+                // under the title when the card has no meta row.
+                !hasMetaRow && "-mt-1",
+              )}
+              data-compact-agent-list="true"
+              role={childrenByParentSessionId.size > 0 ? "tree" : "group"}
+              // The fork labels this group "Agents"; this repo's acceptance
+              // oracle pins "<card> sessions", so the oracle-facing label
+              // stays.
               aria-label={`${name} sessions`}
             >
-              {agentActivityDisplayMode === "compact" && rootRows.length > 1 ? (
-                <button type="button" className="shell-worktree-card-summary"
-                  aria-expanded={compactExpanded} disabled={disabled}
-                  onClick={() => setCompactExpanded((expanded) => !expanded)}>
-                  {rootRows.length} agents
-                </button>
-              ) : null}
-              {(agentActivityDisplayMode === "full" || rootRows.length <= 1 || compactExpanded) && rootRows.map((row) =>
-                renderAgentBranch({
-                  row,
-                  ancestorSessionIds: new Set(),
-                  childrenByParentSessionId,
-                  collapsedLineageParents,
-                  onToggleParent: toggleLineageParent,
-                  anyRootHasChildren,
-                  disabled,
-                  onSelect: handleSelectSession,
-                }),
+              {agentActivityDisplayMode === "compact" &&
+              (childrenByParentSessionId.size > 0
+                ? rootRows.length
+                : rows.length) > 1 ? (
+                <div
+                  className={cn(
+                    "compact-agent-summary-panel",
+                    compactRootListExpanded && "compact-agent-summary-panel-expanded",
+                  )}
+                >
+                  <CompactAgentSummaryButton
+                    sessions={rowSessions}
+                    labelFor={(session) => formatRowHarnessLabel(session.harnessId ?? null)}
+                    subjectLabel={`${childrenByParentSessionId.size > 0 ? rootRows.length : rows.length} agents`}
+                    expanded={compactRootListExpanded}
+                    onToggle={toggleCompactRootList}
+                  />
+                  <CompactAgentExpansion expanded={compactRootListExpanded}>
+                    {rootRows.map((row) =>
+                      renderAgentBranch({
+                        row,
+                        ancestorSessionIds: new Set(),
+                        childrenByParentSessionId,
+                        collapsedLineageParents,
+                        onToggleParent: toggleLineageParent,
+                        anyRootHasChildren,
+                        disabled,
+                        onSelect: handleSelectSession,
+                      }),
+                    )}
+                  </CompactAgentExpansion>
+                </div>
+              ) : (
+                rootRows.map((row) =>
+                  renderAgentBranch({
+                    row,
+                    ancestorSessionIds: new Set(),
+                    childrenByParentSessionId,
+                    collapsedLineageParents,
+                    onToggleParent: toggleLineageParent,
+                    anyRootHasChildren,
+                    disabled,
+                    onSelect: handleSelectSession,
+                  }),
+                )
               )}
             </div>
           ) : null}

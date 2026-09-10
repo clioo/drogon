@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
+  ChevronDown,
   CircleX,
   Ellipsis,
   FolderGit2,
@@ -22,6 +23,7 @@ import {
   Plus,
   SlidersHorizontal,
 } from "lucide-react";
+import { cn } from "../../lib/utils";
 import { DropdownMenu, Tooltip } from "radix-ui";
 import type {
   Project,
@@ -53,8 +55,10 @@ import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
 import { readSkipDeleteWorktreeConfirm } from "./DeleteWorktreeSkipConfirmOption";
 import {
   PROJECT_HEADER_ACTIONS_CLASS_NAME,
+  PROJECT_HEADER_ACTION_BUTTON_CLASS_NAME,
   ProjectActionsMenu,
 } from "./project-actions-menu";
+import { isProjectHeaderActionTarget } from "./project-header-drag-contract";
 import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import {
   filterGroupsBySelectedProjects,
@@ -66,6 +70,10 @@ import {
   orderProjectGroups,
   saveSidebarProjectOrder,
 } from "./sidebar-order";
+import {
+  loadCollapsedProjectIds,
+  saveCollapsedProjectIds,
+} from "./sidebar-collapsed-projects";
 import {
   applyWorkspaceHideFilters,
   DEFAULT_WORKSPACE_OPTIONS_STATE,
@@ -574,6 +582,29 @@ export function ProjectList({
     if (typeof localStorage !== "undefined")
       saveSidebarProjectOrder(localStorage, next);
   }, []);
+  // Persisted collapsed PROJECT sections (the fork's collapsedWorktreeGroups
+  // store slice, adapted to localStorage like sidebar-order.ts): a header
+  // click / Enter / Space folds its worktree cards; the chevron rotates.
+  const [collapsedProjectIds, setCollapsedProjectIds] = useState<string[]>(
+    () =>
+      typeof localStorage === "undefined"
+        ? []
+        : loadCollapsedProjectIds(localStorage),
+  );
+  const collapsedProjectIdSet = useMemo(
+    () => new Set(collapsedProjectIds),
+    [collapsedProjectIds],
+  );
+  const toggleProjectCollapsed = useCallback((projectId: string) => {
+    setCollapsedProjectIds((current) => {
+      const next = current.includes(projectId)
+        ? current.filter((id) => id !== projectId)
+        : [...current, projectId];
+      if (typeof localStorage !== "undefined")
+        saveCollapsedProjectIds(localStorage, next);
+      return next;
+    });
+  }, []);
   const worktreesById = useMemo(() => {
     const map = new Map<string, Worktree>();
     for (const group of groups) {
@@ -1031,6 +1062,8 @@ export function ProjectList({
             key={group.project.id}
             group={group}
             hideHeader={workspaceOptions.groupBy === "none"}
+            collapsed={collapsedProjectIdSet.has(group.project.id)}
+            onToggleCollapsed={() => toggleProjectCollapsed(group.project.id)}
             portsByWorkspaceId={portsByWorkspaceId}
             issueLinksByWorktree={issueLinksByWorktree}
             pullsByProjectId={pullsByProjectId}
@@ -1274,6 +1307,8 @@ function ProjectRow({
   onOpenProjectSettings,
   onRemoveProject,
   hideHeader = false,
+  collapsed = false,
+  onToggleCollapsed,
   portsByWorkspaceId,
   pullsByProjectId,
   cardOptions,
@@ -1318,7 +1353,11 @@ function ProjectRow({
    *  to the *real* project (unlike a synthetic merged group), so per-card
    *  remove/rename/settings keep acting on the correct project even
    *  though its name and kebab menu are not shown here. */
+  /** Project header collapsed (the fork's folded group section). */
   hideHeader?: boolean;
+  collapsed?: boolean;
+  /** Toggles the section's collapsed state (header click / Enter / Space). */
+  onToggleCollapsed?: () => void;
   /** Workspace options "Show properties" -- passed straight through to
    *  each card (WorktreeCard's own doc comment). */
   showBranch?: boolean;
@@ -1335,37 +1374,89 @@ function ProjectRow({
     worktreesAvailable &&
     project.kind === "git" &&
     !project.id.startsWith("folder:");
+  // The fork's repo-header collapse affordance is hidden while the section
+  // is empty (showHeaderCollapseAffordance: row.count > 0).
+  const showCollapseAffordance = group.worktrees.length > 0;
+  const handleHeaderToggle = (event: React.SyntheticEvent<HTMLElement>) => {
+    if (
+      isProjectHeaderActionTarget(event.target, event.currentTarget) ||
+      event.defaultPrevented
+    ) {
+      return;
+    }
+    onToggleCollapsed?.();
+  };
   return (
     <div className="shell-project">
       {hideHeader ? null : (
       <div
         className="shell-project-row group relative"
         title={project.path}
+        role="button"
+        tabIndex={0}
+        aria-expanded={showCollapseAffordance ? !collapsed : undefined}
         data-project-header-id={project.id}
         data-project-header-index={headerIndex}
+        data-project-header-collapsed={collapsed ? "true" : undefined}
         data-project-header-drag-handle=""
         onPointerDown={(event) => onProjectHandlePointerDown(event, project.id)}
+        onClick={handleHeaderToggle}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          if (isProjectHeaderActionTarget(event.target, event.currentTarget))
+            return;
+          event.preventDefault();
+          onToggleCollapsed?.();
+        }}
       >
         {project.kind === "git" ? (
-          <FolderGit2 size={15} aria-hidden="true" />
+          <span
+            className="flex size-4 shrink-0 items-center justify-center rounded-[4px] text-muted-foreground"
+            aria-hidden="true"
+          >
+            <FolderGit2 className="size-3.5" />
+          </span>
         ) : null}
         <span className="shell-project-name">{project.name}</span>
         <div
           className={PROJECT_HEADER_ACTIONS_CLASS_NAME}
           data-project-header-actions=""
         >
+          {showCollapseAffordance ? (
+            <div
+              className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+              data-project-header-collapse-affordance=""
+              aria-hidden
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onToggleCollapsed?.();
+              }}
+            >
+              <ChevronDown
+                className={cn(
+                  "size-3.5 transition-transform",
+                  collapsed && "-rotate-90",
+                )}
+              />
+            </div>
+          ) : null}
           {canCreate && (
             <button
               type="button"
-              className="shell-icon-button"
+              className={PROJECT_HEADER_ACTION_BUTTON_CLASS_NAME}
               data-project-header-action=""
               aria-label={`Create new worktree for ${project.name}`}
               title={`Create new worktree for ${project.name}`}
               disabled={disabled}
-              onClick={onNewWorktree}
+              onClick={(event) => {
+                event.stopPropagation();
+                onNewWorktree();
+              }}
               onPointerDown={(event) => event.stopPropagation()}
             >
-              <Plus size={15} />
+              <Plus className="size-3.5" />
             </button>
           )}
           <ProjectActionsMenu
@@ -1377,6 +1468,7 @@ function ProjectRow({
         </div>
       </div>
       )}
+      {collapsed ? null : (
       <div className="shell-project-cards">
         {(() => {
           let cardIndex = 0;
@@ -1444,6 +1536,7 @@ function ProjectRow({
           );
         })()}
       </div>
+      )}
     </div>
   );
 }

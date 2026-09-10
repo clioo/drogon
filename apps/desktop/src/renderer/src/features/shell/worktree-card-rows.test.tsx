@@ -4,11 +4,12 @@
    summary line, the focused row follows the active tab, and the summary
    counts come from the same rows. */
 import React from "react";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { Session, Workspace, Worktree } from "../../../../shared/session-contract";
 import { WorktreeCard } from "./WorktreeCard";
 import { EMPTY_TAB_STRIP_STATE } from "./tab-order";
+import { clearWorktreeAgentExpansionStateForTests } from "./worktree-card-agents-expansion-state";
 import { TooltipProvider } from "../../components/ui/tooltip";
 
 // No vi.mock here: with CI worker reuse (test.isolate false, see
@@ -77,6 +78,8 @@ function renderCard(sessions: Session[], activeSessionId: string) {
   );
 }
 
+afterEach(clearWorktreeAgentExpansionStateForTests);
+
 describe("WorktreeCard nested session rows", () => {
   test("nests one row per session with harness icon, title and time", () => {
     const { container, unmount } = renderCard(
@@ -112,6 +115,7 @@ describe("WorktreeCard nested session rows", () => {
       expect(
         container.querySelector('[data-worktree-agent-row="s-2"]'),
       ).toBeTruthy();
+      // The inline list keeps the oracle-pinned "<card> sessions" label.
       expect(
         container.querySelector('[aria-label="demo sessions"]'),
       ).toBeTruthy();
@@ -132,17 +136,26 @@ describe("WorktreeCard nested session rows", () => {
       expect(
         container.querySelector('[data-focused-agent-pane="true"]'),
       ).toBeTruthy();
-      // Collapsed counts derived from the same rows the card nests.
-      screen.getByText(/1 working, 1 idle/);
+      // The source's card draws no summary text line; the same counts ride
+      // the card's accessible label (the lane dot + tooltip carry the
+      // visual state).
+      const surface = container.querySelector<HTMLElement>(
+        ".shell-worktree-card",
+      );
+      expect(surface?.getAttribute("aria-label") ?? "").toContain(
+        "1 working, 1 idle",
+      );
     } finally {
       unmount();
     }
   });
 
-  test("shows the empty state with no rows when there are no sessions", () => {
+  test("renders no empty-state text when there are no sessions", () => {
     const { container, unmount } = renderCard([], "");
     try {
-      screen.getByText("No sessions yet");
+      // The source's card renders nothing when a worktree has no agents:
+      // no placeholder line, no rows.
+      expect(screen.queryByText("No sessions yet")).toBeNull();
       expect(
         container.querySelector("[data-worktree-agent-row]"),
       ).toBeNull();

@@ -9,6 +9,7 @@ import { describe, expect, test, afterEach } from "vitest";
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import type { Session, Workspace, Worktree } from "../../../../shared/session-contract";
 import { WorktreeCard } from "./WorktreeCard";
+import { clearWorktreeAgentExpansionStateForTests } from "./worktree-card-agents-expansion-state";
 import { EMPTY_TAB_STRIP_STATE } from "./tab-order";
 import { TooltipProvider } from "../../components/ui/tooltip";
 
@@ -88,7 +89,10 @@ function orchestrationSet(): Session[] {
 // Why: the suite runs with test isolation off (see vitest.config.ts),
 // and without globals testing-library does not auto-register cleanup —
 // leaked trees would make role queries match earlier cards.
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  clearWorktreeAgentExpansionStateForTests();
+});
 
 describe("WorktreeCard subagent nesting box (issue #359)", () => {
   test("children render inside a boxed group under the parent row", () => {
@@ -140,11 +144,17 @@ describe("WorktreeCard subagent nesting box (issue #359)", () => {
     expect(within(parentRow as HTMLElement).getByText("+3")).not.toBeNull();
   });
 
-  test("the summary line counts children even while collapsed", () => {
+  test("the accessible summary counts children even while collapsed", () => {
     const { view } = renderCard("wt-nest-4", orchestrationSet());
     fireEvent.click(view.getByRole("button", { name: "Hide 3 child agents" }));
-    const summary = view.container.querySelector(".shell-worktree-card-summary");
-    expect(summary!.textContent).toContain("All sessions idle");
+    // The source draws no summary text line; the same counts ride the
+    // card's accessible label and still cover every session.
+    const surface = view.container.querySelector<HTMLElement>(
+      ".shell-worktree-card",
+    );
+    expect(surface?.getAttribute("aria-label") ?? "").toContain(
+      "All sessions idle",
+    );
   });
 
   test("a session whose parent is not in the card renders flat", () => {
