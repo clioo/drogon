@@ -822,6 +822,7 @@ fn worktree_struct(conn: &rusqlite::Connection, worktree_id: &str) -> Result<Wor
                 manual_order: None,
                 last_activity_at: None,
                 linked_pr: None,
+                linked_issue: None,
                 creator: None,
             })
         },

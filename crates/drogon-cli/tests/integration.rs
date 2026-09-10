@@ -2230,3 +2230,58 @@ async fn worktree_rm_delete_branch_flag_maps_and_prints() {
     assert_eq!(request["params"]["deleteBranch"], true);
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_set_display_name_and_comment_alias_map_to_update() {
+    let dir = temp_data_dir("wtsdn");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "w1",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-1",
+                    "path": "/repo/w1",
+                    "branch": "w1",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            ))
+        }),
+    );
+    // --display-name maps to the title wire field.
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "set",
+            "--id",
+            "w1",
+            "--display-name",
+            "Deploy worker",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["title"], "Deploy worker");
+    // --comment is the source name for --note.
+    let output = run_cli(
+        dir.path(),
+        &["worktree", "set", "--id", "w1", "--comment", "from the CLI"],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["note"], "from the CLI");
+    // --no-display-name clears the title explicitly.
+    let output = run_cli(
+        dir.path(),
+        &["worktree", "set", "--id", "w1", "--no-display-name"],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["title"], Value::Null);
+    drop(service);
+}

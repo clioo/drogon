@@ -475,17 +475,29 @@ pub enum WorktreeAction {
     /// Update Orca metadata for a worktree (note, parent)
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree set --id <ID> [--note <TEXT>|--no-note] [--parent <ID>|--no-parent]\nValid flags: --data-dir, --help, --id, --json, --no-note, --no-parent, --note, --parent, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree set --id <ID> [--note <TEXT>|--no-note] [--parent <ID>|--no-parent] [--display-name <NAME>|--no-display-name]\nValid flags: --comment, --data-dir, --display-name, --help, --id, --json, --no-display-name, --no-note, --no-parent, --note, --parent, --request-id, --retry-request"
     )]
     Set {
         #[arg(long, value_name = "ID")]
         id: String,
-        /// Note text; empty after trimming clears the note
-        #[arg(long, value_name = "TEXT", conflicts_with = "no_note")]
+        /// Note text; empty after trimming clears the note. `--comment` is
+        /// the source CLI's name for the same field.
+        #[arg(
+            long,
+            visible_alias = "comment",
+            value_name = "TEXT",
+            conflicts_with = "no_note"
+        )]
         note: Option<String>,
         /// Clear the note explicitly
         #[arg(long)]
         no_note: bool,
+        /// Display title (source `--display-name`)
+        #[arg(long, value_name = "NAME", conflicts_with = "no_display_name")]
+        display_name: Option<String>,
+        /// Clear the display title explicitly
+        #[arg(long)]
+        no_display_name: bool,
         /// Parent worktree id (same project only)
         #[arg(long, value_name = "ID", conflicts_with = "no_parent")]
         parent: Option<String>,
@@ -960,6 +972,8 @@ impl Cli {
                     id,
                     note,
                     no_note,
+                    display_name,
+                    no_display_name,
                     parent,
                     no_parent,
                 } => {
@@ -967,12 +981,22 @@ impl Cli {
                     if let Some(note) = note {
                         require_nonempty("note", note)?;
                     }
+                    if let Some(display_name) = display_name {
+                        require_nonempty("display-name", display_name)?;
+                    }
                     if let Some(parent) = parent {
                         require_nonempty("parent", parent)?;
                     }
-                    if note.is_none() && !no_note && parent.is_none() && !no_parent {
+                    if note.is_none()
+                        && !no_note
+                        && display_name.is_none()
+                        && !no_display_name
+                        && parent.is_none()
+                        && !no_parent
+                    {
                         return Err(CliError::Usage(
-                            "worktree set requires --note/--no-note or --parent/--no-parent".into(),
+                            "worktree set requires --note/--no-note, --display-name/--no-display-name, or --parent/--no-parent"
+                                .into(),
                         ));
                     }
                 }

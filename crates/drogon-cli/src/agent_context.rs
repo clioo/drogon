@@ -253,13 +253,26 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "worktree set",
             &["worktree", "set"],
-            "Update Orca metadata for a worktree (note, parent)",
-            "drogon-cli worktree set --id <ID> [--note <TEXT>|--no-note] [--parent <ID>|--no-parent]",
-            &["id", "no-note", "no-parent", "note", "parent"],
-            &[],
-            &["drogon-cli worktree set --id wt-1 --note investigating --json"],
+            "Update Orca metadata for a worktree (note, title, parent)",
+            "drogon-cli worktree set --id <ID> [--note <TEXT>|--no-note] [--display-name <NAME>|--no-display-name] [--parent <ID>|--no-parent]",
             &[
-                "Absent flags leave the stored value; --no-note/--no-parent clear explicitly. Parents must belong to the same project.",
+                "comment",
+                "display-name",
+                "id",
+                "no-display-name",
+                "no-note",
+                "no-parent",
+                "note",
+                "parent",
+            ],
+            &[],
+            &[
+                "drogon-cli worktree set --id wt-1 --note investigating --json",
+                "drogon-cli worktree set --id wt-1 --display-name 'Deploy worker'",
+            ],
+            &[
+                "Absent flags leave the stored value; --no-note/--no-parent/--no-display-name clear explicitly. Parents must belong to the same project.",
+                "--comment is the source CLI's name for --note; --display-name edits the card title.",
             ],
         ),
         entry(

@@ -814,6 +814,8 @@ async fn worktree(
             id,
             note,
             no_note,
+            display_name,
+            no_display_name,
             parent,
             no_parent,
         } => {
@@ -824,6 +826,11 @@ async fn worktree(
                 params["note"] = Value::Null;
             } else if let Some(note) = note {
                 params["note"] = json!(note);
+            }
+            if *no_display_name {
+                params["title"] = Value::Null;
+            } else if let Some(display_name) = display_name {
+                params["title"] = json!(display_name);
             }
             if *no_parent {
                 params["parentWorktreeId"] = Value::Null;

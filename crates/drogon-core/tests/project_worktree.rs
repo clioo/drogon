@@ -1323,3 +1323,45 @@ fn worktree_remove_without_delete_branch_keeps_the_branch() {
         "the branch stays without deleteBranch"
     );
 }
+
+#[test]
+fn worktree_update_title_roundtrip() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let project = ok(
+        &engine,
+        "project.add",
+        "ut1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let created = ok(
+        &engine,
+        "worktree.create",
+        "ut2",
+        json!({"projectId": project["id"], "name": "named"}),
+    );
+    let updated = ok(
+        &engine,
+        "worktree.update",
+        "ut3",
+        json!({"worktreeId": created["id"], "title": "display title"}),
+    );
+    assert_eq!(updated["title"], json!("display title"));
+    // Tri-state: absent preserves, explicit null clears.
+    let kept = ok(
+        &engine,
+        "worktree.update",
+        "ut4",
+        json!({"worktreeId": created["id"], "note": "keep the title"}),
+    );
+    assert_eq!(kept["title"], json!("display title"));
+    let cleared = ok(
+        &engine,
+        "worktree.update",
+        "ut5",
+        json!({"worktreeId": created["id"], "title": null}),
+    );
+    assert_eq!(cleared["title"], Value::Null);
+}
