@@ -1029,9 +1029,10 @@ mod tests {
     fn zone_edit_scenario_is_deterministic_at_fixed_clocks() {
         use crate::automations::timezone::preview_fires_in_zone;
         // Fixed admission clock: yearly walls, future-ness and
-        // first-occurrence hold with zero flake, whatever the run date
-        // (including the Jan-1 00:00-05:00Z window, where the two zones'
-        // next fires fall in different years).
+        // first-occurrence hold with zero flake. This vector pins May;
+        // the January-window relationship (zones' next fires falling in
+        // different years) is covered by the integration wall assertions,
+        // which hold for any run date.
         let t0 = utc_ms(2026, 4, 17, 12, 0);
         let utc_next = admit_next_run_at("0 0 1 1 *", "UTC", t0).unwrap();
         let ny_next = admit_next_run_at("0 0 1 1 *", NY, t0).unwrap();

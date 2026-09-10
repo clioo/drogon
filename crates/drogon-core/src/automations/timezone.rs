@@ -225,9 +225,9 @@ fn is_fold_second_half(tz: &Tz, fire: &DateTime<Tz>) -> bool {
 /// First fireable instant after the fold overlap containing a later half:
 /// the wall clock stepped forward minute by minute until it resolves to
 /// a single instant, then refined backward to the first valid second.
-/// Folds never touch gaps, so a `Gap` arm only steps over it.
-/// Bundle-backed (`chrono-tz`) resolution at both granularities, so
-/// seconds-grained crons are covered with one walk plus one scan.
+/// A `Gap` arm only steps over it. Bundle-backed (`chrono-tz`)
+/// resolution at both granularities, so seconds-grained crons are
+/// covered with one walk plus one scan.
 fn overlap_end_after(tz: &Tz, later_half: &DateTime<Tz>) -> Option<DateTime<Tz>> {
     // Truncate to the minute first: stepping whole minutes from a wall
     // with seconds would overshoot the first single wall (e.g. from
@@ -250,8 +250,9 @@ fn overlap_end_after(tz: &Tz, later_half: &DateTime<Tz>) -> Option<DateTime<Tz>>
 /// Pins the overlap end to the first valid second: the minute walk only
 /// brackets it inside one minute wall, and transitions carry second
 /// precision. Scans backward from the minute wall; the first non-single
-/// second met means the boundary is the second right after it. Falls
-/// back to the minute wall when the whole scan stays single.
+/// second met means the boundary is the second right after it. An
+/// exhausted scan fails closed with no fire rather than rounding to an
+/// unverified wall.
 fn refine_overlap_end(tz: &Tz, minute_wall: DateTime<Tz>) -> Option<DateTime<Tz>> {
     let end_secs = minute_wall.timestamp();
     for back in 1..=OVERLAP_REWIND_SECONDS {
@@ -265,7 +266,7 @@ fn refine_overlap_end(tz: &Tz, minute_wall: DateTime<Tz>) -> Option<DateTime<Tz>
             }
         }
     }
-    Some(minute_wall)
+    None
 }
 
 /// Next fire plus the gap skips advanced past to reach it. Preview-only:
