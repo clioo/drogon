@@ -104,7 +104,7 @@ describe("installTerminalLinkifierClickPriming", () => {
     expect(order).toEqual(["prime", "snapshot-link"]);
   });
 
-  it("uses Ctrl on non-Mac platforms and preserves Shift for routing", () => {
+  it("primes every left click and preserves Shift for routing", () => {
     vi.stubGlobal("navigator", {
       userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
     });
@@ -115,10 +115,12 @@ describe("installTerminalLinkifierClickPriming", () => {
     installTerminalLinkifierClickPriming(terminal);
     const mouseDown = getMouseDownHandler(registrations);
 
+    // Every left click now opens a link, so every one must prime the
+    // linkifier — the platform modifier no longer gates the gesture.
     mouseDown(modifierMouseDown({ ctrlKey: true, shiftKey: true }));
     mouseDown(modifierMouseDown({ metaKey: true }));
 
-    expect(handleMouseMove).toHaveBeenCalledOnce();
+    expect(handleMouseMove).toHaveBeenCalledTimes(2);
     expect(handleMouseMove.mock.calls[0][0].shiftKey).toBe(true);
   });
 

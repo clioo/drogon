@@ -30,17 +30,15 @@ export function terminalHttpLinkActionDestinationsFor(
 }
 
 /**
- * Where a direct activation (⌘/Ctrl+click) opens: the Shift escape hatch
- * always states the system browser outright (the fork's
- * `resolveModifierRouting` without its not-ported invert branch); without
- * Shift the click follows the Link Routing preference.
+ * Owner-specified routing (2026-09-10), a deliberate divergence from the
+ * fork: Shift+click opens inside Drogon's own browser, a plain click hands
+ * the URL to the user's default browser. The gesture decides outright, so
+ * the Link Routing preference no longer steers a terminal click.
  */
 export function terminalHttpLinkClickDestination(
   shiftKey: boolean | undefined,
-  openLinksInApp: boolean,
 ): TerminalHttpLinkDestination {
-  if (shiftKey) return "system";
-  return openLinksInApp ? "drogon" : "system";
+  return shiftKey ? "drogon" : "system";
 }
 
 /** Popover action labels, from the fork's TerminalLinkActionPopover copy. */
@@ -50,9 +48,9 @@ export function terminalHttpLinkDestinationLabel(
   return destination === "drogon" ? "Drogon Browser" : "System Browser";
 }
 
-/** Hover hint, matching the source's non-inverting copy exactly. */
+/** Hover hint stating the owner's gesture rule outright. */
 export function getTerminalUrlOpenHint(platform: { isMac: boolean }): string {
   return platform.isMac
-    ? "Click for actions, ⌘+click to open, or ⇧⌘+click for system browser"
-    : "Click for actions, Ctrl+click to open, or Shift+Ctrl+click for system browser";
+    ? "Click to open in your browser, or ⇧+click for Drogon Browser"
+    : "Click to open in your browser, or Shift+click for Drogon Browser";
 }

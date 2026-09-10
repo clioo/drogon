@@ -729,10 +729,7 @@ export function TerminalPane({
       url: string,
       event?: Pick<MouseEvent, "shiftKey">,
     ): Promise<{ ok: true } | { ok: false; message: string }> =>
-      openHttpUrlTo(
-        terminalHttpLinkClickDestination(event?.shiftKey, readOpenLinksInApp()),
-        url,
-      );
+      openHttpUrlTo(terminalHttpLinkClickDestination(event?.shiftKey), url);
     terminal.loadAddon(
       new WebLinksAddon((event, url) =>
         handleTerminalWebLinkClick(url, event, {

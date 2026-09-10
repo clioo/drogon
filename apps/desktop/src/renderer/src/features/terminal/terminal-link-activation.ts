@@ -18,14 +18,15 @@ export function isTerminalLinkActivation(
 type TerminalLinkMouseEvent = Pick<MouseEvent, "ctrlKey" | "metaKey"> &
   Partial<Pick<MouseEvent, "altKey" | "button" | "shiftKey">>;
 
+// Owner-specified (2026-09-10): a plain left click opens the link outright
+// (default browser) and Shift+click opens it in Drogon's browser, so every
+// unmodified left click activates instead of raising the action popover.
+// ⌘/Ctrl+click keeps working as an activation for existing muscle memory.
 export function isTerminalLinkDirectActivation(
   event: TerminalLinkMouseEvent | undefined,
 ): boolean {
   return Boolean(
-    event &&
-      (event.button === undefined || event.button === 0) &&
-      !event.altKey &&
-      isTerminalLinkActivation(event),
+    event && (event.button === undefined || event.button === 0) && !event.altKey,
   );
 }
 

@@ -26,14 +26,12 @@ describe("terminalHttpLinkActionDestinationsFor", () => {
 });
 
 describe("terminalHttpLinkClickDestination", () => {
-  test("Shift states the system browser outright", () => {
-    expect(terminalHttpLinkClickDestination(true, true)).toBe("system");
-    expect(terminalHttpLinkClickDestination(true, false)).toBe("system");
+  test("Shift opens inside Drogon's own browser", () => {
+    expect(terminalHttpLinkClickDestination(true)).toBe("drogon");
   });
-  test("a plain modifier click follows the preference", () => {
-    expect(terminalHttpLinkClickDestination(false, true)).toBe("drogon");
-    expect(terminalHttpLinkClickDestination(false, false)).toBe("system");
-    expect(terminalHttpLinkClickDestination(undefined, false)).toBe("system");
+  test("a plain click hands the URL to the default browser", () => {
+    expect(terminalHttpLinkClickDestination(false)).toBe("system");
+    expect(terminalHttpLinkClickDestination(undefined)).toBe("system");
   });
 });
 
@@ -47,10 +45,10 @@ describe("terminalHttpLinkDestinationLabel", () => {
 describe("getTerminalUrlOpenHint", () => {
   test("matches the source copy", () => {
     expect(getTerminalUrlOpenHint({ isMac: true })).toBe(
-      "Click for actions, ⌘+click to open, or ⇧⌘+click for system browser",
+      "Click to open in your browser, or ⇧+click for Drogon Browser",
     );
     expect(getTerminalUrlOpenHint({ isMac: false })).toBe(
-      "Click for actions, Ctrl+click to open, or Shift+Ctrl+click for system browser",
+      "Click to open in your browser, or Shift+click for Drogon Browser",
     );
   });
 });

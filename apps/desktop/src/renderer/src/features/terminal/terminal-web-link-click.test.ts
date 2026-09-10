@@ -19,7 +19,7 @@ describe("handleTerminalWebLinkClick", () => {
     expect(requestAction).not.toHaveBeenCalled();
   });
 
-  it("raises the popover on a plain click instead of navigating", () => {
+  it("opens on a plain click rather than raising the popover", () => {
     const openUrl = vi.fn(async () => ({ ok: true as const }));
     const requestAction = vi.fn(() => true);
     const event = {
@@ -33,11 +33,11 @@ describe("handleTerminalWebLinkClick", () => {
       requestAction,
     });
     expect(handled).toBe(true);
-    expect(openUrl).not.toHaveBeenCalled();
-    expect(requestAction).toHaveBeenCalledWith(event);
+    expect(openUrl).toHaveBeenCalledWith("https://example.com");
+    expect(requestAction).not.toHaveBeenCalled();
   });
 
-  it("leaves a plain click unhandled without a popover requester", () => {
+  it("opens a plain click even with no popover requester wired", () => {
     const openUrl = vi.fn(async () => ({ ok: true as const }));
     const handled = handleTerminalWebLinkClick(
       "https://example.com",
@@ -49,8 +49,8 @@ describe("handleTerminalWebLinkClick", () => {
       } as unknown as MouseEvent,
       { openUrl },
     );
-    expect(handled).toBe(false);
-    expect(openUrl).not.toHaveBeenCalled();
+    expect(handled).toBe(true);
+    expect(openUrl).toHaveBeenCalledWith("https://example.com");
   });
 
   it("routes direct gestures to the opener and clears selection", async () => {
