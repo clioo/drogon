@@ -725,6 +725,94 @@ pub fn check_browser_tabs(list: &BrowserTabsList) -> Result<(), String> {
     Ok(())
 }
 
+/// The pinned Mentu runtime's identity, as `mentu.runtime` reports it.
+/// Field names mirror `crates/drogon-protocol/src/mentu.rs` exactly.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRuntimeInfo {
+    pub available: bool,
+    pub path: Option<String>,
+    pub version: Option<String>,
+    pub expected_revision: String,
+    pub expected_sha256: String,
+    pub actual_sha256: Option<String>,
+    pub lock_matches: bool,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRuntimeResult {
+    pub runtime: MentuRuntimeInfo,
+}
+
+/// One recipe discovered under a workspace's `.mentu/recipes`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRecipeSummary {
+    pub id: String,
+    pub path: String,
+    pub name: Option<String>,
+    pub valid: bool,
+    pub issue: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRecipesResult {
+    pub recipes: Vec<MentuRecipeSummary>,
+}
+
+/// What `mentu open` reports: the desktop's own verdict, relayed back.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuOpenResult {
+    pub workspace_id: String,
+    pub recipe_id: Option<String>,
+    /// Always true on a successful RPC: a refusal is an RPC-level error, so
+    /// this field can never claim an open that the desktop rejected.
+    pub opened: bool,
+}
+
+pub fn check_mentu_runtime(result: &MentuRuntimeResult) -> Result<(), String> {
+    // Same host-independent invariants the desktop's zod contract enforces:
+    // the lock identity is always present, and a claimed availability must
+    // be backed by an actual digest.
+    require_nonempty("expectedRevision", &result.runtime.expected_revision)?;
+    require_nonempty("expectedSha256", &result.runtime.expected_sha256)?;
+    if result.runtime.available && result.runtime.actual_sha256.is_none() {
+        return Err("runtime claims availability without an actual sha256".into());
+    }
+    if result.runtime.available != result.runtime.lock_matches {
+        return Err("runtime availability and lock verdict disagree".into());
+    }
+    if result.runtime.available && result.runtime.message.is_some() {
+        return Err("an available runtime must not carry an unavailable message".into());
+    }
+    Ok(())
+}
+
+pub fn check_mentu_recipes(result: &MentuRecipesResult) -> Result<(), String> {
+    for recipe in &result.recipes {
+        require_nonempty("id", &recipe.id)?;
+        require_nonempty("path", &recipe.path)?;
+        // An invalid recipe must say why; a bare `valid: false` would be an
+        // unusable answer for an agent deciding what to do next.
+        if !recipe.valid && recipe.issue.as_deref().unwrap_or("").is_empty() {
+            return Err(format!("recipe {}: invalid without an issue", recipe.id));
+        }
+    }
+    Ok(())
+}
+
+pub fn check_mentu_open(result: &MentuOpenResult) -> Result<(), String> {
+    require_nonempty("workspaceId", &result.workspace_id)?;
+    if !result.opened {
+        return Err("the desktop reported the Mentu tab as not opened".into());
+    }
+    Ok(())
+}
+
 /// The service must accept exactly the bytes the CLI sent, no more, no less.
 pub fn check_write(result: &WriteResult, expected_bytes: u64) -> Result<(), String> {
     if result.accepted_bytes != expected_bytes {

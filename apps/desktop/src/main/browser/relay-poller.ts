@@ -25,6 +25,7 @@ import {
   type BrowserTabState,
   type RelayCommand,
 } from "../../shared/browser-contract";
+import { mentuRelayOpenParamsSchema } from "../../shared/mentu-contract";
 import type { Result } from "../../shared/session-contract";
 import { dataDirectory, resolveEndpointPath } from "../native-client";
 
@@ -195,15 +196,29 @@ function blockedCode(blocked: { blocked: string; code?: string }): {
   return { code: "browser_blocked", message: blocked.blocked };
 }
 
+/** One Mentu open request handler; injectable so the poller dispatch is
+ *  unit-testable without Electron, and so the electron-free browser relay
+ *  module never has to import the main-process Mentu relay. `index.ts`
+ *  wires the real one.
+ */
+export type MentuRelayOpener = (
+  workspaceId: string,
+  recipeId?: string,
+) => Promise<RelayOutcome>;
+
 /**
  * Executes one relay command against the browser host. Never throws: every
  * failure (bad params, missing tab, blocked navigation, refused script)
  * becomes an `ok:false` outcome the poller reports back, so the CLI always
- * gets an answer inside its own timeout.
+ * gets an answer inside its own timeout. `mentu.open` is answered by the
+ * renderer (see `main/mentu-open-relay.ts`) instead of the browser host —
+ * same back-pressure, different owner; with no opener wired the command
+ * completes as a typed refusal rather than pretending the tab opened.
  */
 export async function dispatchRelayCommand(
   host: RelayBrowserHost,
   command: RelayCommand,
+  mentuOpener?: MentuRelayOpener,
 ): Promise<RelayOutcome> {
   const invalid = (message: string): RelayOutcome => ({
     ok: false,
@@ -254,6 +269,20 @@ export async function dispatchRelayCommand(
       if (!parsed.success) return invalid("Invalid browser.tabs params.");
       return { ok: true, result: { tabs: host.tabsForWorkspace(parsed.data.workspaceId) } };
     }
+    case "mentu.open": {
+      const parsed = mentuRelayOpenParamsSchema.safeParse(command.params);
+      if (!parsed.success) return invalid("Invalid mentu.open params.");
+      if (!mentuOpener) {
+        return {
+          ok: false,
+          error: {
+            code: "mentu_open_unsupported",
+            message: "This Drogon build has no Mentu tab relay wired.",
+          },
+        };
+      }
+      return mentuOpener(parsed.data.workspaceId, parsed.data.recipeId);
+    }
     default:
       return invalid("Unknown relay command kind.");
   }
@@ -264,6 +293,7 @@ export async function runRelayCycle(
   host: RelayBrowserHost,
   call: RelayDaemonCall,
   clientId: string,
+  mentuOpener?: MentuRelayOpener,
 ): Promise<void> {
   const polled = await call(
     "desktop.commands.poll",
@@ -282,7 +312,7 @@ export async function runRelayCycle(
   }
   for (const raw of parsed.data.commands) {
     const command = relayCommandSchema.parse(raw);
-    const outcome = await dispatchRelayCommand(host, command);
+    const outcome = await dispatchRelayCommand(host, command, mentuOpener);
     const completed = outcome.ok
       ? { commandId: command.commandId, ok: true, result: outcome.result }
       : {
@@ -316,7 +346,10 @@ let active = false;
  * tests; the app itself never stops it. A second call while one poller runs
  * is a no-op returning a no-op stop.
  */
-export function startBrowserRelay(host: RelayBrowserHost): () => void {
+export function startBrowserRelay(
+  host: RelayBrowserHost,
+  mentuOpener?: MentuRelayOpener,
+): () => void {
   if (active) return () => {};
   active = true;
   let stopped = false;
@@ -327,7 +360,7 @@ export function startBrowserRelay(host: RelayBrowserHost): () => void {
     let backoff = BASE_BACKOFF_MS;
     while (!stopped) {
       try {
-        await runRelayCycle(host, call, clientId);
+        await runRelayCycle(host, call, clientId, mentuOpener);
         backoff = BASE_BACKOFF_MS;
       } catch {
         await new Promise((resolve) => setTimeout(resolve, backoff));

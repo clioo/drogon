@@ -11,17 +11,20 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::{
     AutomationAction, BotAction, BrowserAction, Cli, Command, HarnessAction, InternalAction,
-    ProjectAction, SecretsAction, TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
+    MentuAction, ProjectAction, SecretsAction, TerminalAction, WaitFor, WorkspaceAction,
+    WorktreeAction,
 };
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
-    BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, Project,
-    ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Verdict, Workspace,
-    WorkspaceList, Worktree, WorktreeList, WriteResult, check_automation, check_automation_history,
-    check_automation_list, check_automation_run_now, check_browser_snapshot, check_browser_tab,
-    check_browser_tabs, check_harness_catalog, check_project, check_project_list, check_read,
-    check_removed, check_session, check_status, check_workspace, check_workspace_list,
-    check_worktree, check_worktree_list, check_write, partition_session_list,
+    BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, MentuOpenResult,
+    MentuRecipesResult, MentuRuntimeInfo, MentuRuntimeResult, Project, ProjectList, ReadResult,
+    Removed, Session, SessionList, StatusResult, Verdict, Workspace, WorkspaceList, Worktree,
+    WorktreeList, WriteResult, check_automation, check_automation_history, check_automation_list,
+    check_automation_run_now, check_browser_snapshot, check_browser_tab, check_browser_tabs,
+    check_harness_catalog, check_mentu_open, check_mentu_recipes, check_mentu_runtime,
+    check_project, check_project_list, check_read, check_removed, check_session, check_status,
+    check_workspace, check_workspace_list, check_worktree, check_worktree_list, check_write,
+    partition_session_list,
 };
 use crate::error::{CliError, method_not_found, timeout};
 use crate::output;
@@ -97,6 +100,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Worktree { action } => worktree(&client, &request_id, json, action).await,
         Command::Terminal { action } => terminal(&client, &request_id, json, action).await,
         Command::Browser { action } => browser(&client, &request_id, json, action).await,
+        Command::Mentu { action } => mentu(&client, &request_id, json, action).await,
         Command::Harness { action } => harness(&client, &request_id, json, action).await,
         Command::Automation { action } => automation(&client, &request_id, json, action).await,
         Command::Bot { action } => match action {
@@ -904,6 +908,187 @@ async fn browser(
     }
 }
 
+/// Mentu (journey J9). `status` answers, honestly, whether the OPTIONAL
+/// Mentu environment is really installed on this host — the pinned runtime's
+/// presence and lock verdict plus (with `--workspace`) the workspace's own
+/// recipe inventory — so an agent never promises a recipe on a host that
+/// cannot run or even show one. `open` drives the desktop relay so a Bot can
+/// hand the human the Mentu tab it just wrote a recipe into.
+async fn mentu(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &MentuAction,
+) -> Result<RunOutcome, CliError> {
+    match action {
+        MentuAction::Status { workspace } => {
+            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            let runtime_call = client
+                .call("mentu.runtime", json!({}), request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let runtime: MentuRuntimeResult =
+                Client::decode_checked(&runtime_call, "mentu.runtime", check_mentu_runtime)?;
+            // Only a workspace-scoped run can say anything about recipes; no
+            // workspace means the recipe half is reported as unknown, never
+            // as zero recipes.
+            let (last_call, recipes) = match workspace {
+                Some(workspace_id) => {
+                    let call = client
+                        .call(
+                            "mentu.recipes",
+                            json!({ "workspaceId": workspace_id }),
+                            request_id,
+                            DEFAULT_TIMEOUT,
+                        )
+                        .await?;
+                    let decoded: MentuRecipesResult =
+                        Client::decode_checked(&call, "mentu.recipes", check_mentu_recipes)?;
+                    (call, Some(decoded))
+                }
+                None => (runtime_call, None),
+            };
+            let report =
+                mentu_environment(&runtime.runtime, workspace.as_deref(), recipes.as_ref());
+            if json {
+                // One envelope either way: the last call's own header
+                // (protocol/requestId) with the combined verdict as its
+                // result, so an agent parses the same shape as every other
+                // verb instead of a bespoke document.
+                let mut raw = last_call.raw.clone();
+                if let Some(map) = raw.as_object_mut() {
+                    map.insert("result".into(), report.clone());
+                }
+                let stdout = serde_json::to_string_pretty(&raw).map_err(|err| {
+                    CliError::local(
+                        crate::error::internal_error(format!("cannot encode response: {err}")),
+                        request_id.to_string(),
+                    )
+                })?;
+                Ok(RunOutcome {
+                    stdout,
+                    exit_code: 0,
+                    stderr_note: None,
+                })
+            } else {
+                Ok(RunOutcome {
+                    stdout: output::mentu_environment(&report),
+                    exit_code: 0,
+                    stderr_note: None,
+                })
+            }
+        }
+        MentuAction::Open {
+            workspace,
+            recipe,
+            timeout_ms,
+        } => {
+            // Both halves are required: mentu.v1 for a tab that can show
+            // anything, browser.relay.v1 for the transport that reaches the
+            // desktop. Without the desktop the call fails
+            // `desktop_not_connected` inside its own timeout.
+            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            capability_preflight(client, request_id, "browser.relay.v1", "the desktop relay")
+                .await?;
+            let mut params = json!({ "workspaceId": workspace, "timeoutMs": timeout_ms });
+            if let Some(recipe) = recipe {
+                params["recipeId"] = json!(recipe);
+            }
+            let call = client
+                .call("mentu.open", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let opened: MentuOpenResult =
+                Client::decode_checked(&call, "mentu.open", check_mentu_open)?;
+            emit(call, json, || output::mentu_opened(&opened), 0, None)
+        }
+    }
+}
+
+/// The honest verdict vocabulary for `mentu status`. `installed` requires
+/// the bytes AND the lock verdict AND a real `--version` answer;
+/// `not_installed` is the absence of any runtime at the resolved path;
+/// `partially_available` is a runtime that exists but is not the approved
+/// one (wrong bytes, or a binary that will not answer `--version`).
+fn mentu_runtime_verdict(runtime: &MentuRuntimeInfo) -> (&'static str, String) {
+    if runtime.actual_sha256.is_none() {
+        return (
+            "not_installed",
+            runtime
+                .message
+                .clone()
+                .unwrap_or_else(|| "No Mentu runtime is installed for this data directory.".into()),
+        );
+    }
+    if !runtime.available || !runtime.lock_matches {
+        return (
+            "partially_available",
+            runtime.message.clone().unwrap_or_else(|| {
+                "A Mentu runtime exists but does not match the approved runtime lock.".into()
+            }),
+        );
+    }
+    match runtime.version.as_deref() {
+        Some(version) if !version.trim().is_empty() => (
+            "installed",
+            format!(
+                "Mentu runtime {version} is installed and matches the approved lock (revision {}).",
+                runtime.expected_revision
+            ),
+        ),
+        // Bytes match but the binary would not report a version: do not
+        // claim a full install on evidence this host never produced.
+        _ => (
+            "partially_available",
+            "The Mentu runtime matches the approved lock but did not answer --version.".into(),
+        ),
+    }
+}
+
+/// Combined `mentu status` result: the runtime verdict, plus the workspace's
+/// recipe inventory when one was asked for.
+fn mentu_environment(
+    runtime: &MentuRuntimeInfo,
+    workspace: Option<&str>,
+    recipes: Option<&MentuRecipesResult>,
+) -> serde_json::Value {
+    let (verdict, summary) = mentu_runtime_verdict(runtime);
+    let inventory = recipes.map(|result| {
+        let valid = result.recipes.iter().filter(|recipe| recipe.valid).count();
+        let invalid: Vec<serde_json::Value> = result
+            .recipes
+            .iter()
+            .filter(|recipe| !recipe.valid)
+            .map(|recipe| {
+                json!({
+                    "id": recipe.id,
+                    "issue": recipe.issue,
+                })
+            })
+            .collect();
+        json!({
+            "total": result.recipes.len(),
+            "valid": valid,
+            "invalid": invalid,
+        })
+    });
+    let summary = match (&inventory, workspace) {
+        (Some(inventory), Some(workspace)) => format!(
+            "{summary} Workspace {workspace} exposes {} recipe(s), {} valid.",
+            inventory["total"].as_u64().unwrap_or(0),
+            inventory["valid"].as_u64().unwrap_or(0),
+        ),
+        _ => summary,
+    };
+    json!({
+        "verdict": verdict,
+        "summary": summary,
+        "runtime": serde_json::to_value(runtime).unwrap_or(serde_json::Value::Null),
+        "workspace": workspace.map(|id| json!({
+            "id": id,
+            "recipes": inventory,
+        })),
+    })
+}
+
 /// Success: human text or the raw validated envelope, exactly one stdout
 /// payload either way, plus an optional exit-code override for semantics the
 /// RPC layer cannot express (close verdicts).
@@ -1438,7 +1623,12 @@ async fn bot_secret_grants(
         }
         BotAction::ListGrants { bot, workspace } => {
             let call = client
-                .call("bot.list_secret_grants", scope(bot, workspace), request_id, DEFAULT_TIMEOUT)
+                .call(
+                    "bot.list_secret_grants",
+                    scope(bot, workspace),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
                 .await?;
             let result = call.result.clone();
             emit(
@@ -1515,7 +1705,12 @@ async fn secrets(
         }
         SecretsAction::List { kind } => {
             let call = client
-                .call("secrets.list", json!({"kind": kind}), request_id, DEFAULT_TIMEOUT)
+                .call(
+                    "secrets.list",
+                    json!({"kind": kind}),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
                 .await?;
             let result = call.result.clone();
             emit(

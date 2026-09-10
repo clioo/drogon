@@ -214,6 +214,11 @@ export const relayCommandKinds = [
   "browser.click",
   "browser.fill",
   "browser.tabs",
+  // Additive: `drogon-cli mentu open` rides the same relay queue, but the
+  // command is executed by the renderer (the Mentu tab is renderer state),
+  // which reports its own verdict back through the main process. See
+  // shared/mentu-contract.ts for the params/result shapes.
+  "mentu.open",
 ] as const;
 export type RelayCommandKind = (typeof relayCommandKinds)[number];
 

@@ -166,6 +166,99 @@ fn unanswered_command_times_out_to_desktop_not_connected() {
 }
 
 #[test]
+fn mentu_open_rides_the_same_relay_and_carries_its_recipe() {
+    let (_root, engine) = fixture();
+    let waiter = Arc::clone(&engine);
+    let handle = std::thread::spawn(move || {
+        call(
+            &waiter,
+            "mentu-open",
+            "mentu.open",
+            json!({"workspaceId": "w1", "recipeId": "hello", "timeoutMs": 5000}),
+        )
+    });
+    let polled = call(
+        &engine,
+        "poll",
+        "desktop.commands.poll",
+        json!({"clientId": "desktop-1", "waitMs": 5000}),
+    );
+    assert!(polled.ok, "{polled:?}");
+    let commands = polled.result.unwrap()["commands"].clone();
+    assert_eq!(commands.as_array().unwrap().len(), 1);
+    assert_eq!(commands[0]["kind"], "mentu.open");
+    assert_eq!(commands[0]["params"]["workspaceId"], "w1");
+    assert_eq!(commands[0]["params"]["recipeId"], "hello");
+    let command_id = commands[0]["commandId"].as_str().unwrap().to_string();
+
+    // The completion is the RENDERER's verdict (the Mentu tab is renderer
+    // state), relayed verbatim back to the CLI waiter.
+    let completed = call(
+        &engine,
+        "complete",
+        "desktop.commands.complete",
+        json!({
+            "commandId": command_id,
+            "ok": true,
+            "result": {"workspaceId": "w1", "recipeId": "hello", "opened": true}
+        }),
+    );
+    assert!(completed.ok, "{completed:?}");
+    let answered = handle.join().expect("waiter thread");
+    assert!(answered.ok, "{answered:?}");
+    assert_eq!(answered.result.unwrap()["opened"], true);
+}
+
+#[test]
+fn mentu_open_without_recipe_omits_the_field_and_rejects_an_empty_id() {
+    let (_root, engine) = fixture();
+    let waiter = Arc::clone(&engine);
+    let handle = std::thread::spawn(move || {
+        call(
+            &waiter,
+            "mentu-open",
+            "mentu.open",
+            json!({"workspaceId": "w1", "timeoutMs": 5000}),
+        )
+    });
+    let polled = call(
+        &engine,
+        "poll",
+        "desktop.commands.poll",
+        json!({"clientId": "desktop-1", "waitMs": 5000}),
+    );
+    assert!(polled.ok, "{polled:?}");
+    let commands = polled.result.unwrap()["commands"].clone();
+    let params = commands[0]["params"].clone();
+    assert_eq!(params["workspaceId"], "w1");
+    assert!(params.get("recipeId").is_none(), "{params:?}");
+    let command_id = commands[0]["commandId"].as_str().unwrap().to_string();
+    call(
+        &engine,
+        "complete",
+        "desktop.commands.complete",
+        json!({"commandId": command_id, "ok": true, "result": {"opened": true}}),
+    );
+    let _ = handle.join().expect("waiter thread");
+
+    // An empty recipe id is refused before anything is enqueued.
+    let refused = call(
+        &engine,
+        "mentu-empty",
+        "mentu.open",
+        json!({"workspaceId": "w1", "recipeId": ""}),
+    );
+    assert_eq!(error_code(&refused), "invalid_argument");
+    let empty_workspace = call(
+        &engine,
+        "mentu-no-workspace",
+        "mentu.open",
+        json!({"timeoutMs": 1000}),
+    );
+    assert_eq!(error_code(&empty_workspace), "invalid_argument");
+}
+
+#[test]
 fn long_poll_waits_for_a_late_command() {
     let (_root, engine) = fixture();
     let poller = Arc::clone(&engine);

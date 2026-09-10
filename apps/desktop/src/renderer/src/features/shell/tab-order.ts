@@ -33,6 +33,15 @@ export type PersistedBrowserTab = {
  * localStorage envelope, and the path cap rejects garbage without judging
  * legal path characters (any non-empty string the files bridge accepted).
  */
+/**
+ * The Mentu tab's strip id (issue: Mentu must open as a real tab). Mentu
+ * is a singleton per workspace and the strip envelope is already keyed by
+ * workspace, so one stable id — never a host-minted one — is the whole
+ * membership record. Namespaced so it can never collide with a daemon
+ * session id or a host-minted browser tab id.
+ */
+export const MENTU_TAB_ID = "mentu-tab";
+
 export const MAX_PERSISTED_EDITOR_TABS = 128;
 export const MAX_PERSISTED_BROWSER_TABS = 16;
 export const MAX_PERSISTED_PATH_CHARS = 1024;
@@ -63,6 +72,12 @@ export type TabStripState = {
    * membership). Absent/empty on pre-membership envelopes.
    */
   browsers: PersistedBrowserTab[];
+  /**
+   * Whether the workspace's Mentu tab is open (Mentu-as-tab membership,
+   * additive). `false`/absent on older envelopes. The tab's strip position
+   * still rides `order` under [`MENTU_TAB_ID`].
+   */
+  mentu: boolean;
 };
 
 export const EMPTY_TAB_STRIP_STATE: TabStripState = {
@@ -72,6 +87,7 @@ export const EMPTY_TAB_STRIP_STATE: TabStripState = {
   splits: {},
   editors: [],
   browsers: [],
+  mentu: false,
 };
 
 /** Storage key pattern mirrors the right-sidebar keys (`drogon:<area>:<name>`); one envelope per workspace. */
@@ -90,8 +106,10 @@ export function reconcileTabOrder(
   sessionIds: readonly string[],
   browserIds: readonly string[] = [],
   editorIds: readonly string[] = [],
+  mentuOpen = false,
 ): string[] {
-  const valid = new Set([...sessionIds, ...browserIds, ...editorIds]);
+  const mentuIds = mentuOpen ? [MENTU_TAB_ID] : [];
+  const valid = new Set([...sessionIds, ...browserIds, ...editorIds, ...mentuIds]);
   const result: string[] = [];
   const seen = new Set<string>();
   for (const id of storedOrder ?? []) {
@@ -100,7 +118,7 @@ export function reconcileTabOrder(
       seen.add(id);
     }
   }
-  for (const id of [...sessionIds, ...browserIds, ...editorIds]) {
+  for (const id of [...sessionIds, ...browserIds, ...editorIds, ...mentuIds]) {
     if (!seen.has(id)) {
       result.push(id);
       seen.add(id);
@@ -281,20 +299,30 @@ function sanitizeBrowserTabs(value: unknown): PersistedBrowserTab[] {
   return out.slice(0, MAX_PERSISTED_BROWSER_TABS);
 }
 
+function emptyTabStripState(): TabStripState {
+  return {
+    ...EMPTY_TAB_STRIP_STATE,
+    titles: {},
+    splits: {},
+    editors: [],
+    browsers: [],
+    mentu: false,
+  };
+}
+
 export function parseTabStripState(raw: string | null | undefined): TabStripState {
-  if (!raw)
-    return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {}, editors: [], browsers: [] };
+  if (!raw) return emptyTabStripState();
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
-      return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {}, editors: [], browsers: [] };
+      return emptyTabStripState();
     const candidate = parsed as { state?: unknown };
     if (
       typeof candidate.state !== "object" ||
       candidate.state === null ||
       Array.isArray(candidate.state)
     )
-      return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {}, editors: [], browsers: [] };
+      return emptyTabStripState();
     const state = candidate.state as Record<string, unknown>;
     const order = sanitizeIdList(state.order);
     const pinned = sanitizeIdList(state.pinned).filter((id) =>
@@ -305,6 +333,9 @@ export function parseTabStripState(raw: string | null | undefined): TabStripStat
     // Additive R16-AJ keys: older envelopes hydrate to no restored tabs.
     const editors = sanitizePathList(state.editors);
     const browsers = sanitizeBrowserTabs(state.browsers);
+    // Additive Mentu-as-tab key: only a literal `true` counts, so a
+    // corrupt or partial envelope can never fabricate a tab.
+    const mentu = state.mentu === true;
     return {
       order,
       pinned,
@@ -312,9 +343,10 @@ export function parseTabStripState(raw: string | null | undefined): TabStripStat
       splits,
       editors,
       browsers,
+      mentu,
     };
   } catch {
-    return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {}, editors: [], browsers: [] };
+    return emptyTabStripState();
   }
 }
 
@@ -325,7 +357,7 @@ export function loadTabStripState(
   try {
     return parseTabStripState(storage.getItem(tabStripStorageKey(workspaceId)));
   } catch {
-    return { ...EMPTY_TAB_STRIP_STATE, titles: {}, splits: {}, editors: [], browsers: [] };
+    return emptyTabStripState();
   }
 }
 

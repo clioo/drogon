@@ -129,6 +129,15 @@ pub enum Command {
         #[command(subcommand)]
         action: BotAction,
     },
+    /// Mentu recipes (requires the service capability mentu.v1): inspect
+    /// whether the optional Mentu environment (pinned runtime + workspace
+    /// recipes) is really present on this host, and open the workspace's
+    /// Mentu tab in the running Drogon desktop so a human can see the
+    /// recipe.
+    Mentu {
+        #[command(subcommand)]
+        action: MentuAction,
+    },
     /// Integration secrets: seal a value into the daemon's 0600 store or
     /// list configured names (user-only; values are read from stdin for
     /// `set`, never echoed, and never appear in argv; requires the service
@@ -167,6 +176,43 @@ pub enum Command {
     Skills {
         #[command(subcommand)]
         action: SkillsAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MentuAction {
+    /// Report honestly whether the optional Mentu environment is installed
+    /// on this host: the pinned runtime's presence and lock state, and —
+    /// with `--workspace` — how many recipes that workspace's `.mentu/recipes`
+    /// actually holds. Never an optimistic guess.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli mentu status [--workspace <ID>]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+    )]
+    Status {
+        /// Also report this workspace's recipe inventory
+        #[arg(long, value_name = "ID")]
+        workspace: Option<String>,
+    },
+    /// Open (or focus) the workspace's Mentu tab in the connected Drogon
+    /// desktop, optionally focused on one recipe. Requires the service
+    /// capability browser.relay.v1 plus a connected Drogon desktop; the
+    /// desktop's own verdict is the result, so an open that did not happen
+    /// is reported as a failure.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli mentu open --workspace <ID> [--recipe <ID>] [--timeout-ms <MS>]\nValid flags: --data-dir, --help, --json, --recipe, --request-id, --retry-request, --timeout-ms, --workspace"
+    )]
+    Open {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        /// Recipe id to select in the Mentu tab (`mentu status --workspace`
+        /// lists the ids this workspace exposes)
+        #[arg(long, value_name = "ID")]
+        recipe: Option<String>,
+        /// Bounded wait for the desktop to confirm the tab, in ms (1..=25000)
+        #[arg(long, value_name = "MS", default_value_t = 15_000)]
+        timeout_ms: u64,
     },
 }
 
@@ -900,6 +946,24 @@ impl Cli {
                     timeout_ms,
                 } => {
                     require_nonempty("workspace", workspace)?;
+                    validate_relay_timeout(*timeout_ms)?;
+                }
+            },
+            Command::Mentu { action } => match action {
+                MentuAction::Status { workspace } => {
+                    if let Some(workspace) = workspace {
+                        require_nonempty("workspace", workspace)?;
+                    }
+                }
+                MentuAction::Open {
+                    workspace,
+                    recipe,
+                    timeout_ms,
+                } => {
+                    require_nonempty("workspace", workspace)?;
+                    if let Some(recipe) = recipe {
+                        require_nonempty("recipe", recipe)?;
+                    }
                     validate_relay_timeout(*timeout_ms)?;
                 }
             },
@@ -2653,8 +2717,15 @@ mod bot_self_tests {
 
     #[test]
     fn secrets_verbs_parse_and_validate() {
-        let cli = parse(&["secrets", "set", "--kind", "github", "--name", "GITHUB_TOKEN_REF"])
-            .unwrap();
+        let cli = parse(&[
+            "secrets",
+            "set",
+            "--kind",
+            "github",
+            "--name",
+            "GITHUB_TOKEN_REF",
+        ])
+        .unwrap();
         assert!(matches!(
             cli.command,
             Command::Secrets {
@@ -2715,5 +2786,108 @@ mod bot_self_tests {
         ])
         .unwrap();
         assert!(cli.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod mentu_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("drogon-cli").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn mentu_status_parses_with_and_without_a_workspace() {
+        let cli = parse(&["mentu", "status"]).unwrap();
+        let Command::Mentu {
+            action: MentuAction::Status { workspace },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert!(workspace.is_none());
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["mentu", "status", "--workspace", "ws-1"]).unwrap();
+        let Command::Mentu {
+            action: MentuAction::Status { workspace },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(workspace.as_deref(), Some("ws-1"));
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn mentu_open_parses_recipe_and_defaults_the_timeout() {
+        let cli = parse(&["mentu", "open", "--workspace", "ws-1"]).unwrap();
+        let Command::Mentu {
+            action:
+                MentuAction::Open {
+                    workspace,
+                    recipe,
+                    timeout_ms,
+                },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(workspace, "ws-1");
+        assert!(recipe.is_none());
+        assert_eq!(*timeout_ms, 15_000);
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&[
+            "mentu",
+            "open",
+            "--workspace",
+            "ws-1",
+            "--recipe",
+            "hello",
+            "--timeout-ms",
+            "5000",
+        ])
+        .unwrap();
+        let Command::Mentu {
+            action: MentuAction::Open {
+                recipe, timeout_ms, ..
+            },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(recipe.as_deref(), Some("hello"));
+        assert_eq!(*timeout_ms, 5000);
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn mentu_open_requires_a_workspace_and_rejects_empty_ids() {
+        assert!(parse(&["mentu", "open", "--recipe", "hello"]).is_err());
+        let empty_workspace = parse(&["mentu", "open", "--workspace", ""]).unwrap();
+        assert!(empty_workspace.validate().is_err());
+        let empty_recipe =
+            parse(&["mentu", "open", "--workspace", "ws-1", "--recipe", ""]).unwrap();
+        assert!(empty_recipe.validate().is_err());
+        let empty_status = parse(&["mentu", "status", "--workspace", ""]).unwrap();
+        assert!(empty_status.validate().is_err());
+    }
+
+    #[test]
+    fn mentu_timeouts_are_bounded_client_side() {
+        for value in ["0", "25001"] {
+            let cli = parse(&[
+                "mentu",
+                "open",
+                "--workspace",
+                "ws-1",
+                "--timeout-ms",
+                value,
+            ])
+            .unwrap();
+            assert!(cli.validate().is_err(), "timeout {value} must be refused");
+        }
     }
 }

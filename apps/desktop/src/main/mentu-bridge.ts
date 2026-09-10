@@ -9,6 +9,7 @@ import {
 import { resultSchemas } from "../shared/result-validation";
 import type { Result } from "../shared/session-contract";
 import { callNative } from "./native-client";
+import { registerMentuOpenTabResult } from "./mentu-open-relay";
 
 // Registered here rather than editing shared/result-validation.ts directly:
 // identical precedent to main/tasks-bridge.ts's registration of
@@ -97,6 +98,10 @@ const channelFor: Record<MentuMethod, string> = {
 export function registerMentuBridge(
   getWindow: () => BrowserWindow | null,
 ): void {
+  // Additive (Mentu-as-tab): the renderer's own verdict for a `mentu.open`
+  // relay command arrives on this channel, and the same window getter is
+  // what the relay poller delivers requests to.
+  registerMentuOpenTabResult(getWindow);
   for (const method of Object.keys(mentuBridgeSchemas) as MentuMethod[]) {
     ipcMain.handle(channelFor[method], async (event, input: unknown) => {
       const window = getWindow();

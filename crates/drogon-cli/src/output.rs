@@ -6,9 +6,9 @@ use base64::engine::general_purpose::STANDARD;
 
 use crate::client::{
     AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, BrowserSnapshot,
-    BrowserTab, BrowserTabsList, HarnessCatalog, MethodResult, Project, ProjectList, ReadResult,
-    Removed, Session, SessionList, StatusResult, Workspace, WorkspaceList, Worktree, WorktreeList,
-    WriteResult,
+    BrowserTab, BrowserTabsList, HarnessCatalog, MentuOpenResult, MethodResult, Project,
+    ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Workspace, WorkspaceList,
+    Worktree, WorktreeList, WriteResult,
 };
 
 pub fn status_line(result: &StatusResult) -> String {
@@ -421,6 +421,68 @@ pub fn browser_tabs(list: &BrowserTabsList) -> String {
         .map(browser_tab_line)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// `mentu status` in human form. The verdict is the first word on purpose:
+/// an agent (or a human skimming) must not have to infer "is Mentu really
+/// installed here" from the rest of the report.
+pub fn mentu_environment(report: &serde_json::Value) -> String {
+    let verdict = report["verdict"].as_str().unwrap_or("unknown");
+    let mut lines = vec![format!("Mentu environment: {verdict}",)];
+    if let Some(summary) = report["summary"].as_str() {
+        lines.push(summary.to_string());
+    }
+    if let Some(runtime) = report["runtime"].as_object() {
+        let path = runtime["path"].as_str().unwrap_or("-");
+        let version = runtime["version"].as_str().unwrap_or("-");
+        let actual = runtime["actualSha256"].as_str().unwrap_or("-");
+        lines.push(format!("runtime: {path}"));
+        lines.push(format!("version: {version}"));
+        lines.push(format!(
+            "lock: expected {} got {}",
+            runtime["expectedSha256"].as_str().unwrap_or("-"),
+            actual
+        ));
+    }
+    if let Some(workspace) = report["workspace"].as_object() {
+        lines.push(format!(
+            "workspace: {}",
+            workspace["id"].as_str().unwrap_or("-")
+        ));
+        let recipes = workspace["recipes"].as_object();
+        lines.push(match recipes {
+            Some(recipes) => format!(
+                "recipes: {} total, {} valid",
+                recipes["total"].as_u64().unwrap_or(0),
+                recipes["valid"].as_u64().unwrap_or(0)
+            ),
+            None => "recipes: unknown".into(),
+        });
+        if let Some(invalid) = recipes.and_then(|recipes| recipes["invalid"].as_array()) {
+            for entry in invalid {
+                lines.push(format!(
+                    "  invalid {}: {}",
+                    entry["id"].as_str().unwrap_or("-"),
+                    entry["issue"].as_str().unwrap_or("no issue reported")
+                ));
+            }
+        }
+    }
+    lines.join("\n")
+}
+
+/// `mentu open`: the desktop confirmed the tab, so say exactly that much.
+pub fn mentu_opened(result: &MentuOpenResult) -> String {
+    match &result.recipe_id {
+        Some(recipe) => format!(
+            "Opened the Mentu tab for workspace {} focused on recipe {recipe}.",
+            result.workspace_id
+        ),
+        None => format!(
+            "Opened the Mentu tab for workspace {}.",
+            result.workspace_id
+        ),
+    }
 }
 
 /// One line per discovered harness; unknown future harness ids render

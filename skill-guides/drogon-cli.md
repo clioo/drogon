@@ -4,9 +4,10 @@ description: >-
   Drive Drogon through the public `drogon-cli`: resolve the executable, check
   status and capabilities, manage workspaces, projects and worktrees, and
   operate terminals (create, list, send, read, wait, close), the embedded
-  browser pane (open, navigate, snapshot, click, fill, tabs) plus harness
-  launch. Use for terminal control, lightweight prompts and shell commands.
-  Use the orchestration guide for supervised multi-agent coordination.
+  browser pane (open, navigate, snapshot, click, fill, tabs), harness
+  launch, and the optional Mentu recipe environment (status, open). Use for
+  terminal control, lightweight prompts and shell commands. Use the
+  orchestration guide for supervised multi-agent coordination.
 ---
 
 # Drogon CLI
@@ -29,6 +30,9 @@ drogon-cli status --json
 If the CLI is missing, say so explicitly instead of inspecting source files.
 For the full machine-readable surface, run
 `drogon-cli agent-context --json` (local, no daemon needed).
+
+Recipes are optional work; the Mentu section below says how to find out
+whether this host can run one before you say you made one.
 
 ## Inside A Drogon Terminal
 
@@ -55,11 +59,14 @@ capability list. Gate optional work on capabilities: `harness.catalog.v1`
 and `harness.launch.v1` for harness commands, `orchestration.native.v1`
 for the orchestration verbs, `project.v1` and `worktree.v1` for projects
 and worktrees, `git.v1` for Git operations, `session.agent-state.v1`
-for agent-state fields on sessions, and `browser.relay.v1` for the browser
-commands below (which additionally need a connected Drogon desktop).
+for agent-state fields on sessions, `browser.relay.v1` for the browser
+commands below (which additionally need a connected Drogon desktop), and
+`mentu.v1` for the Mentu recipe verbs below.
 
 Run `drogon-cli status --json` first, then the narrowest command for the
-job. The full guide for supervised coordination is one guide away:
+job. Before promising a Mentu recipe, run
+`drogon-cli mentu status --workspace <ID> --json` — the runtime is
+optional. The full guide for supervised coordination is one guide away:
 `drogon-cli skills get --topic orchestration`.
 
 ## Workspaces
@@ -129,6 +136,38 @@ Inside a Drogon terminal both spellings work with no `--data-dir` flag:
 `drogon-cli browser open --workspace <ID> <URL>` or the shorter `drogon`
 alias — the shim is already on `PATH`.
 
+## Mentu Recipes
+
+Mentu is Drogon's recipe runner: a recipe is a JSON file under the
+workspace's `.mentu/recipes` directory describing steps in a dependency
+graph. Its runtime is OPTIONAL, so check before you promise anything:
+`drogon-cli mentu status --workspace <ID> --json` reports a `verdict` of
+`installed`, `not_installed` or `partially_available` plus the workspace's
+recipe inventory (total, valid, and each invalid entry's issue). The
+verdict comes from the daemon's own probe of the pinned runtime's bytes and
+lock hash — never from an assumption about the host — and requires the
+service capability `mentu.v1`.
+
+Write a recipe when the work is repeatable, has more than one ordered
+step, and per-step evidence is worth keeping (a build-and-verify chain, a
+release check, a migration you will re-run). Write a plain answer, not a
+recipe, when the request is a question, a single command, or exploratory
+work whose steps you cannot state yet. `drogon-cli mentu status --workspace <ID>`
+afterwards proves the file you wrote is actually discovered and valid — an
+invalid recipe is listed with its issue instead of being hidden.
+
+Hand the human the recipe with
+`drogon-cli mentu open --workspace <ID> --recipe <ID>` (or without
+`--recipe` to reopen the tab on whatever was selected). It enqueues one
+relay request and waits (bounded, `--timeout-ms 5000` overrides the 15000
+default, range 1 to 25000) for the connected Drogon desktop, which opens or
+focuses the workspace's Mentu tab and answers with its own verdict: a
+refusal is an error (`desktop_unavailable`, `mentu_unavailable`,
+`mentu_workspace_unknown`, `mentu_open_timeout`), never a silent success.
+With no desktop connected the call fails with `desktop_not_connected`
+inside the timeout, like the browser commands above. This verb shows a
+recipe; it never runs one.
+
 ## Harness Launch
 
 `drogon-cli harness list --json` shows the harnesses the service host can
@@ -161,6 +200,10 @@ never established). Only an observed exit is an exit.
 - `terminal wait` exits 1 with code `timeout` when the budget expires.
 - `browser` commands exit 1 with code `desktop_not_connected` when no
   Drogon desktop is connected to execute them.
+- `mentu open` refuses with `method_not_found` when the service does not
+  advertise `mentu.v1` or `browser.relay.v1`, with `desktop_not_connected`
+  when no desktop is connected, and with the desktop's own refusal code
+  when the window would not open the tab.
 - The diagnostic passthrough `drogon-cli rpc status` sends one raw
   protocol method and prints the validated envelope.
 
