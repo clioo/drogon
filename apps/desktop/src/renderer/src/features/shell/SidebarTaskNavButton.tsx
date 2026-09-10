@@ -1,13 +1,14 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/sidebar/SidebarTaskNavButton.tsx (adapter:
-   props instead of the zustand store; availability probes instead of
-   preflight/Linear status; chip clicks park the source on the Tasks
+   props instead of the zustand store; availability probes instead of the
+   fork's preflight/remote status; chip clicks park the source on the Tasks
    navigation seam and route, replacing openTaskPage({ taskSource }).
    Omissions vs the source, per #346: the hide-tasks ContextMenu wrapper
    (Drogon's tasksButtonVisible flag is written from the View > Appearance
    menu; no renderer write path exists outside coordinator-owned App) and
    the GitHub list prefetch (Drogon's page revalidates its own mount
-   cache). */
+   cache). Linear availability is the renderer-local fixture connection —
+   the daemon has no Linear RPC, so the probe reads localStorage. */
 import { useEffect, useState } from "react";
 import { List } from "lucide-react";
 import {
@@ -37,6 +38,18 @@ const defaultGitHubTasksProbe: TaskAvailabilityProbe = async () => {
     return (
       result?.ok === true && result.result.available && result.result.loggedIn
     );
+  } catch {
+    return false;
+  }
+};
+
+/** Linear tasks need the local fixture connection (no daemon RPC). */
+const defaultLinearTasksProbe: TaskAvailabilityProbe = async () => {
+  try {
+    const { isLinearConnected } = await import(
+      "../tasks/linear/linear-connection"
+    );
+    return isLinearConnected();
   } catch {
     return false;
   }
@@ -86,12 +99,14 @@ export function SidebarTaskNavButton({
   active,
   onOpenTasks,
   probeGitHubTasksAvailable = defaultGitHubTasksProbe,
+  probeLinearTasksAvailable = defaultLinearTasksProbe,
   probeJiraTasksAvailable = defaultJiraTasksProbe,
 }: {
   active: boolean;
   onOpenTasks: () => void;
   /** Availability seams; tests stub these instead of the window bridges. */
   probeGitHubTasksAvailable?: TaskAvailabilityProbe;
+  probeLinearTasksAvailable?: TaskAvailabilityProbe;
   probeJiraTasksAvailable?: TaskAvailabilityProbe;
 }): React.JSX.Element {
   const [availability, setAvailability] = useState<TaskProviderAvailability>({
@@ -113,11 +128,12 @@ export function SidebarTaskNavButton({
         }
       };
     void probeGitHubTasksAvailable().then(mark({ githubConnected: true }));
+    void probeLinearTasksAvailable().then(mark({ linearConnected: true }));
     void probeJiraTasksAvailable().then(mark({ jiraConnected: true }));
     return () => {
       cancelled = true;
     };
-  }, [probeGitHubTasksAvailable, probeJiraTasksAvailable]);
+  }, [probeGitHubTasksAvailable, probeLinearTasksAvailable, probeJiraTasksAvailable]);
 
   const visibleTaskProviders = filterAvailableTaskProviders(
     TASK_PROVIDERS,

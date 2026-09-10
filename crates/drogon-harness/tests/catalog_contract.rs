@@ -2125,6 +2125,9 @@ impl FixtureBin {
 
 /// Writes an executable fixture script into `dir` (shared by FixtureBin
 /// and by supervised child modes, whose fixture dir is parent-owned).
+/// Warms the OS exec cache for the fresh inode first (see
+/// [`warm_fixture_exec`]): without it every timed probe pays macOS
+/// first-execution scan latency instead of measuring product behavior.
 fn add_fixture(dir: &Path, name: &str, script: &str) -> PathBuf {
     {
         let path = dir.join(name);
@@ -2135,7 +2138,50 @@ fn add_fixture(dir: &Path, name: &str, script: &str) -> PathBuf {
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
                 .expect("chmod fixture");
         }
+        #[cfg(unix)]
+        warm_fixture_exec(&path);
         path
+    }
+}
+
+/// One best-effort `--version` spawn of a freshly-written fixture so the
+/// timed probe that follows measures the product, not the platform's
+/// first-execution scan: on macOS a brand-new script inode costs ~250ms
+/// on first exec (observed: fresh scripts 210-300ms, repeat runs ~0ms,
+/// freshly-copied signed binaries unaffected) while sub-second probe work
+/// windows cannot absorb it. Production harness CLIs are long-installed
+/// and warm, so warming replicates production conditions instead of
+/// weakening any timing assertion.
+///
+/// Side-effect free by fixture contract: every fixture script in this
+/// file answers `--version` (or ignores argv) and exits before any
+/// handshake/ledger write. The bounded kill below is a backstop only —
+/// the handle is always reaped, never dropped, so supervision accounting
+/// never observes the warm-up (no ledger entry exists for it).
+#[cfg(unix)]
+fn warm_fixture_exec(path: &Path) {
+    let mut child = match std::process::Command::new(path)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return,
+    };
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+            _ => break,
+        }
+    }
+    let _ = child.kill();
+    let reap_end = Instant::now() + Duration::from_secs(2);
+    while matches!(child.try_wait(), Ok(None)) && Instant::now() < reap_end {
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -2543,8 +2589,13 @@ fn timed_out_probe_is_killed_within_its_budget() {
             ),
             // Total budget as work PLUS the reserved cleanup: a short
             // work window that still starts the fixture (kill-path
-            // coverage), never a pre-spawn refusal.
-            Duration::from_millis(300) + PROBE_RESERVED_CLEANUP,
+            // coverage), never a pre-spawn refusal. One second comfortably
+            // covers a warmed version probe plus the fixture handshake
+            // round-trip (parent tick, identity check, ACK poll) while
+            // the infinite/sleeping producer still always exceeds it;
+            // 300ms proved too tight once macOS first-exec scan and
+            // scheduling latency stack up.
+            Duration::from_secs(1) + PROBE_RESERVED_CLEANUP,
         );
         return;
     }
@@ -2910,8 +2961,13 @@ fn continuous_producer_respects_the_deadline_and_is_fully_reaped() {
             ),
             // Total budget as work PLUS the reserved cleanup: a short
             // work window that still starts the fixture (kill-path
-            // coverage), never a pre-spawn refusal.
-            Duration::from_millis(300) + PROBE_RESERVED_CLEANUP,
+            // coverage), never a pre-spawn refusal. One second comfortably
+            // covers a warmed version probe plus the fixture handshake
+            // round-trip (parent tick, identity check, ACK poll) while
+            // the infinite/sleeping producer still always exceeds it;
+            // 300ms proved too tight once macOS first-exec scan and
+            // scheduling latency stack up.
+            Duration::from_secs(1) + PROBE_RESERVED_CLEANUP,
         );
         return;
     }

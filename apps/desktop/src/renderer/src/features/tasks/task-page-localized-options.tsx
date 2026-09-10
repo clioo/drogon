@@ -1,20 +1,22 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/task-page-localized-options.tsx — GitHub +
-// Jira adaptation. The source icon set shrinks to GitHub and Jira (no
-// Linear/GitLab in this repo); the source's qualifier defaults
+// Jira + Linear adaptation. The source icon set is GitHub, Jira and Linear
+// (no GitLab in this repo); the source's qualifier defaults
 // (presetToQuery) prefill the search box while projectTasksDaemonQuery
 // strips the qualifiers the daemon already encodes via kind + `state`
 // (open|closed|all). The Jira preset pills and the Jira source option are
-// the fork's (R17-B).
+// the fork's (R17-B); the Linear option fronts the renderer-local fixture
+// provider (no daemon RPC).
 
 import { GithubIcon } from "./github-icon";
 import { JiraIcon } from "./jira/jira-issue-workspace-content";
+import { LinearIcon } from "../../components/icons/LinearIcon";
 import type { TaskIssueState } from "../../../../shared/tasks-contract";
 
 export type GitHubTaskKind = "issues" | "pulls";
 
 export type SourceOption = {
-  id: "github" | "jira";
+  id: "github" | "jira" | "linear";
   label: string;
   Icon: (props: { className?: string }) => React.JSX.Element;
   disabled?: boolean;
@@ -31,6 +33,11 @@ export function getSourceOptions(): SourceOption[] {
       id: "jira",
       label: "Jira",
       Icon: ({ className }) => <JiraIcon className={className} />,
+    },
+    {
+      id: "linear",
+      label: "Linear",
+      Icon: ({ className }) => <LinearIcon className={className} />,
     },
   ];
 }

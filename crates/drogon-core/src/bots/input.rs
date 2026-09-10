@@ -804,3 +804,138 @@ pub fn parse_responsibility_create(value: &Value) -> PResult<Value> {
 pub fn parse_bot_id(value: &Value) -> PResult<Value> {
     Ok(Value::String(parse_id_like(value, "", 1, 16_384)?))
 }
+
+// ---------------------------------------------------------------------------
+// C05 queue/steer input semantics (additive, compatible-only).
+//
+// A queued input waits behind the conversation's active turn; a steer
+// injects into the active turn itself. Both carry the full
+// Bot/project/host target triple so the conversation owner can reject
+// wrong-scope targets before ordering anything. Ordering rule (enforced by
+// `bots::conversation::Conversation`, documented here so producers agree):
+// queue appends FIFO and never disturbs the active turn; steer requires an
+// active turn and never reorders the queue.
+// ---------------------------------------------------------------------------
+
+/// A validated queue request: one prompt waiting for its turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueInput {
+    pub bot_id: String,
+    pub project_id: String,
+    pub host_id: String,
+    pub prompt: String,
+}
+
+/// A validated steer request: one prompt for the currently-active turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SteerInput {
+    pub bot_id: String,
+    pub project_id: String,
+    pub host_id: String,
+    pub active_request_id: String,
+    pub prompt: String,
+}
+
+const QUEUE_FIELDS: &[&str] = &["botId", "projectId", "hostId", "prompt"];
+const STEER_FIELDS: &[&str] = &["botId", "projectId", "hostId", "activeRequestId", "prompt"];
+
+fn parse_scope_id(value: &Value, path: &str) -> PResult<String> {
+    parse_id_like(value, path, 1, 16_384)
+}
+
+fn parse_prompt_text(value: &Value, path: &str) -> PResult<String> {
+    let raw = as_string(value, path)?;
+    if js_trim(raw).is_empty() {
+        return Err(BotInputError::new(
+            InvalidInputCategory::OutOfRange,
+            path.to_string(),
+        ));
+    }
+    if codepoint_len(raw) > 262_144 {
+        return Err(BotInputError::new(
+            InvalidInputCategory::OutOfRange,
+            path.to_string(),
+        ));
+    }
+    Ok(raw.to_string())
+}
+
+/// Strict `{botId, projectId, hostId, prompt}` parser. Unknown fields are
+/// denied; ids trim to non-empty `1..=16_384` code points; prompt keeps its
+/// verbatim text but must be non-blank and `<= 262_144` code points.
+pub fn parse_queue_input(value: &Value) -> PResult<QueueInput> {
+    let obj = as_object(value, "")?;
+    reject_unknown_fields(obj, QUEUE_FIELDS, "")?;
+    let bot_id = obj
+        .get("botId")
+        .ok_or_else(|| missing("botId"))
+        .and_then(|v| parse_scope_id(v, "botId"))?;
+    let project_id = obj
+        .get("projectId")
+        .ok_or_else(|| missing("projectId"))
+        .and_then(|v| parse_scope_id(v, "projectId"))?;
+    let host_id = obj
+        .get("hostId")
+        .ok_or_else(|| missing("hostId"))
+        .and_then(|v| parse_scope_id(v, "hostId"))?;
+    let prompt = obj
+        .get("prompt")
+        .ok_or_else(|| missing("prompt"))
+        .and_then(|v| parse_prompt_text(v, "prompt"))?;
+    Ok(QueueInput {
+        bot_id,
+        project_id,
+        host_id,
+        prompt,
+    })
+}
+
+/// Strict `{botId, projectId, hostId, activeRequestId, prompt}` parser.
+/// Same bounds as [`parse_queue_input`]; `activeRequestId` trims to
+/// non-empty `1..=16_384` code points and names the turn being steered.
+pub fn parse_steer_input(value: &Value) -> PResult<SteerInput> {
+    let obj = as_object(value, "")?;
+    reject_unknown_fields(obj, STEER_FIELDS, "")?;
+    let bot_id = obj
+        .get("botId")
+        .ok_or_else(|| missing("botId"))
+        .and_then(|v| parse_scope_id(v, "botId"))?;
+    let project_id = obj
+        .get("projectId")
+        .ok_or_else(|| missing("projectId"))
+        .and_then(|v| parse_scope_id(v, "projectId"))?;
+    let host_id = obj
+        .get("hostId")
+        .ok_or_else(|| missing("hostId"))
+        .and_then(|v| parse_scope_id(v, "hostId"))?;
+    let active_request_id = obj
+        .get("activeRequestId")
+        .ok_or_else(|| missing("activeRequestId"))
+        .and_then(|v| parse_scope_id(v, "activeRequestId"))?;
+    let prompt = obj
+        .get("prompt")
+        .ok_or_else(|| missing("prompt"))
+        .and_then(|v| parse_prompt_text(v, "prompt"))?;
+    Ok(SteerInput {
+        bot_id,
+        project_id,
+        host_id,
+        active_request_id,
+        prompt,
+    })
+}
+
+/// FIFO-append check for queue producers/consumers: `after` must be exactly
+/// `before` followed by `appended` in order, with the active turn untouched
+/// (the caller compares that separately). Pure predicate for tests and for
+/// documenting that queue/steer never reorder — not a second ordering
+/// authority.
+pub fn is_fifo_append(before: &[String], after: &[String], appended: &[String]) -> bool {
+    if after.len() != before.len() + appended.len() {
+        return false;
+    }
+    if &after[..before.len()] != before {
+        return false;
+    }
+    &after[before.len()..] == appended
+}
