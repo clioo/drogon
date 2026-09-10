@@ -86,6 +86,27 @@ stages needing foreign cwd (S7/S8/S9) or bundle argv (S11) are specified as
 owner extensions E1/E2 with review/tests — never a competing supervisor.
 Prep docs stay on `codex/sealed-build-prep` and never merge as-is.
 
+## Rev-3 rework record (E1 hydration + hash corrigenda; machine-verified)
+
+E1 shipped under the same ownership (`.preflight/gui-qa-build/`: bootstrap
+`e3bf6861…`, outer `6e029fd9…` 557 lines, `build-manifest.mjs` `71e62a0e…`
+424 lines/MANIFEST_VERSION=1, control tests `00a16d4b…` 512 lines — all read
+in full, hashed by direct read). `10-WRAPPED-STAGES.md` S7/S8/S9 now invoke
+the E1 outer via a per-run source manifest authored post-S6 (budgets
+1200/1200/1800 s, exact argv table, byte-attested tools, complete-log and
+owned-pid focus gates); S10 parses the E1 complete `stdout.log`. E2
+(--bundle/--files) remains refused and owner-pending.
+Independent-audit hash fixes (all regenerated, none transcribed):
+`scripts/desktop-artifacts.mjs` was 57 chars → full 64-hex;
+`scripts/acceptance-process.mjs` was 55 chars → full 64-hex; PR399
+entrypoint `1ebb84a0…` (stale snapshot line) → actual helper bytes
+`c6bd3a28…`. Generation: `git show $SEALED:<path> | sha256sum` for sealed
+blobs ($SEALED=59ed97…, origin/main verified equal), `sha256sum` direct
+reads for helper/E1 bytes; every embedded hash re-verified by extraction
+against fresh computation before commit (27/27 valid, all 64-hex). The
+prepared-runtime binary hash stays record-transcribed by rule (contact
+forbidden; provenance-only, never stage input).
+
 ## Left for the gated execution lane
 
 1. Coordinator gates: G1 (approve S0–S8 execution), G2 (ack S9 PACKAGED

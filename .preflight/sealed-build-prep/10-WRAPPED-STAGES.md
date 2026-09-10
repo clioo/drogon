@@ -15,7 +15,11 @@ review/tests — this lane specifies the request, never the implementation.
 | D3 | Observer optional, attached only to S9/S11 | Outer observes THROUGHOUT every stage: OS observer started BEFORE spawn (`gui-qa-outer.mjs:151-152`), 75 ms identity journal during work (`:177-179`), final sweep, observer stopped AFTER sweep under its own 5 s lifecycle (`:242-256`). |
 | D4 | Post-deadline grace (timer fires, then grace begins) | Monotonic `performance.now()` budget/reserve split (`gui-qa-launch.mjs:51-64`): work loop stops at `workEnd`, teardown spends only the 30 s reserve; `shouldSignal` withholds EVERY signal past `hardEnd`, `capToReserve` bounds each wait; KILL withheld past hardEnd stays `unverifiable` (`gui-qa-launch.mjs:181-184`). |
 | D5 | Direct-child-only evidence for descendants (group-kill, no identities) | Retained-runner exit checked independently (nonzero/null exit throws, `:177-190`); descendants tracked in a ppid-chained identity journal (`:100-130`), sweep verdict scoped to the owned journal (`:237`); EVERY successful external signal marks rescue and forces FAIL (`:138-148`, `:265-266`). |
-| D6 | Called "audited" without review | No new supervisor; every stage cites frozen source lines + verified hashes (§1). Any custody change is owner extension E1/E2 with review/tests. |
+| D6 | Called "audited" without review | No new supervisor; every stage cites frozen source lines + verified hashes (§1). Custody changes ship only as owner E1 (landed; §S7/S8/S9); E2 stays an owner extension with review/tests. |
+
+Rev-3: E1 SHIPPED — S7/S8/S9 run under `gui-qa-build-outer.mjs` via a
+per-run source manifest (authored post-S6, shape `build-manifest.mjs` v1);
+S10 parses the E1 complete `stdout.log`; E2 (--bundle/--files) still refused.
 | D7 | Moving-main clone (`--branch main`, HEAD trusted) | Clone, then `checkout --detach $SEALED_SHA` + `rev-parse` assert (S4b/S4c). Mismatch aborts: main moved → re-prep required, never a silent moving target. |
 | D8 | S0 `rev-parse HEAD == 59ed…` vs prep HEAD 8964… skew | S0 asserts sealed CONTENT, not branch HEAD: `origin/main == $SEALED`, non-prep tree diff-empty vs `$SEALED`, status clean outside prep docs. Prep HEAD is accepted only with its delta confined to `.preflight/sealed-build-prep/`. |
 
@@ -84,7 +88,8 @@ Resolves D8: branch HEAD (prep commit) is irrelevant; only sealed content matter
 
 Payload asserts Node 24 + git/node/npm on the outer's FIXED PATH (D2: the PATH
 under test is the frozen allowlist, `gui-qa-outer.mjs:67`, never ambient).
-Cargo is asserted at the S8 gate (E1 blesses its absolute path).
+Cargo/rustc paths are lane-supplied in the per-run E1 source manifest and
+byte-attested by the E1 outer (coordinator-blessed toolchain).
 
 ## S2 — remote resolution, read-only (outer as-is; `git -C`, cwd-independent)
 
@@ -143,41 +148,74 @@ NPM_ABS="$(dirname "$NODE_BIN")/npm"
 ```
 
 `--prefix` is absolute → cwd-independent under the `:47` guard. npm
-cache/config land in the outer's private HOME (`:68-73`, D2). Record
-`TOOLBIN="$RUN/toolchain/node_modules/.bin"` for E1 stages.
+cache/config land in the outer's private HOME (`:68-73`, D2). The E1
+build outer resolves this same path itself post-S6 (`resolvePinnedPnpm`:
+`$RUN/toolchain/node_modules/.bin/pnpm`, realpath-bound, X_OK-checked).
 
-## S7/S8/S9 — OWNER EXTENSION E1 REQUIRED (blocked; specified, not implemented)
+## S7/S8/S9 — E1 SHIPPED (rev-3; manifest authority, no owner block remains)
 
-Requested of the helper owner (separate review/tests, per lane rule 5): extend
-the `:47` cwd guard with an allowlisted run-dir scope (exact `$RUN`, recorded
-per-invocation in `launch.json`, `:168-176`) and bless a known-absolute cargo
-path (none exists in evidence; S1 does not assert cargo). Everything else —
-env -i envelope, monotonic budget+reserve, identity-verified sweep, observer
-throughout, rescue accounting — stays frozen. Owner adds a `gui-qa-control`
-test pinning the new guard exactly as `:47` is pinned today. Intended
-post-grant invocations (argv byte-identical to `scripts/build-main.sh`):
+Rev-2 requested E1; the owner has since shipped the E1 sealed-BUILD runner
+under the same ownership (interface refs: `20-MANIFEST-DRAFT.md` → `e1`).
+This section replaces the rev-2 extension request. E2 stays pending (§S11).
+
+E1 interface (current, read in full): bootstrap
+`…/.preflight/gui-qa-build/bootstrap-build-outer.sh` (`e3bf6861…06567`)
++ outer `gui-qa-build-outer.mjs` (`6e029fd9…f993437`, 557 lines) + manifest
+module `build-manifest.mjs` (`71e62a0e…06721`, 424 lines) + control tests
+`gui-qa-build-control.test.mjs` (`00a16d4b…bf40c6`, 512 lines). CLI takes
+NO cwd/argv: `--output-root <dir> --source-manifest <abs.json> --stage
+<s7-install|s8-fetch|s9-package> --budget-sec <N seconds,1..3600, must equal
+the manifest stage budget>`. cwd is derived from the manifest sourceRoot;
+argv is constructed from the finite table (s7 `[NODE24, pnpmJs, install,
+--frozen-lockfile]` — pnpm JS directly under pinned Node, same script
+file+args as `build-main.sh`'s bare `pnpm`; s8 `[cargo, fetch, --locked]`;
+s9 `[NODE24, scripts/package-desktop.mjs]`), each cwd `<runDir>/source`.
+Env is the frozen allowlist verbatim plus PATH prepend
+(nodeDir:toolchainBin:cargoDir), run-dir CARGO_HOME/RUSTUP_HOME (S8 cache
+survives for S9), exact RUSTC; the manifest carries NO env keys (banned:
+env/command/argv/cwd/shell). Gate: realpath identity + HEAD==manifest sha
+(40-hex) + clean tree + asset hashes + tool BYTES (attested, rechecked
+pre-spawn); post-run tooling/source/asset re-attestation, complete-log
+(stdout.log/stderr.log sealed+drained, stdio eof) else FAIL, observer
+checks EVERY journaled owned pid for focus/windows.
+
+Per-run source-manifest authorship (post-S6, pre-S7; exec-shell + local
+validation only). The exec lane writes `$RUN/source-manifest.json`:
+`{version:1, sourceRoot:"$RUN/source", runDir:"$RUN", sha:"<S4-pinned HEAD,
+40-hex>", assets:{package.json,pnpm-lock.yaml,Cargo.toml,Cargo.lock:
+64-hex of the $RUN/source bytes}, tools:{node:{sha256 of NODE_BIN bytes},
+pnpm:{sha256 of the S6-resolved pnpm bytes}, cargo:{path,sha256},
+rustc:{path,sha256}}, stages:{"s7-install":{budgetSec:1200},
+"s8-fetch":{budgetSec:1200},"s9-package":{budgetSec:1800}}}`.
+cargo/rustc paths are lane-supplied (absolute, executable, outside $RUN,
+byte-attested) and require coordinator blessing of the toolchain; the owner
+test-fixture paths (`/opt/homebrew/bin/cargo`) are convention examples,
+never pins. Validate locally before spending a stage:
+`node --input-type=module -e "import{m from '<owner>/gui-qa-build/build-manifest.mjs'"` — i.e. import `validateBuildManifestShape` +
+`checkManifestPaths` (pure shape + realpath, no spawn) and reject on throw.
 
 ```sh
-# S7 --cwd "$RUN/source" --command "$TOOLBIN/pnpm" install --frozen-lockfile   (budget 1200000)
-# S8 --cwd "$RUN/source" --command <blessed-cargo> fetch --locked              (budget 1200000)
-# S9 --cwd "$RUN/source" --command "$NODE_BIN" scripts/package-desktop.mjs     (budget 1800000)
+BOOT=/Users/carlos/orca/workspaces/Drogon/gui-qa-owner-muse/.preflight/gui-qa-build/bootstrap-build-outer.sh
+"$BOOT" --output-root "$RUN" --source-manifest "$RUN/source-manifest.json" --stage s7-install --budget-sec 1200
+"$BOOT" --output-root "$RUN" --source-manifest "$RUN/source-manifest.json" --stage s8-fetch --budget-sec 1200
+"$BOOT" --output-root "$RUN" --source-manifest "$RUN/source-manifest.json" --stage s9-package --budget-sec 1800
 ```
 
-S9 success: exit 0 AND a `{"status":"PACKAGED",…}` terminal record in
-`runner.log` (copied verbatim to `$RUN/package.log` via an as-is
-`/bin/cp <output>/runner.log "$RUN/package.log"` stage for the S10 contract).
-Cwd workarounds (`--dir`, absolute script paths) were rejected: they change
-argv or the packager's git-cwd assumptions versus the reviewed script, and
-only the owner can bless such a delta.
+S9 success: exit 0 AND `<output>/outer-report.json` PASSED AND the COMPLETE
+`stdout.log` ends with a `{"status":"PACKAGED",…}` record (never the 2MiB
+`runner.log` tail). Record the s9 output dir as `$S9OUT` for S10.
 
 ## S10 — extract + identify the bundle (outer as-is; GATE G2 after)
 
 ```sh
 "$OUTER" --output-root "$RUN" --budget-ms 60000 \
-  --command "$NODE_BIN" "$PREP/s10-extract-bundle.mjs" "$RUN/package.log"
+  --command "$NODE_BIN" "$PREP/s10-extract-bundle.mjs" "$S9OUT/stdout.log"
 ```
 
-Argv elements contain no `--bundle`/`--files` (`:48` safe by construction).
+`$S9OUT` is the single `$RUN/build-s9-package-*` dir from the E1 S9 stage;
+`stdout.log` is the E1 complete-log sink output (sealed+drained, stdio eof
+required for PASS), which the S10 payload parses exactly as `build-main.sh`
+does (`findLast` PACKAGED, require `.bundle`). Argv elements contain no `--bundle`/`--files` (`:48` safe by construction).
 Record `runner.log` as `$BUNDLE`. STOP: report `$BUNDLE` + PACKAGED
 `revision`/`artifactDigest` (+ `sealedDigest` via the S9 tree) for coordinator
 ack (G2). S11 needs explicit approval (G3) AND owner grant E2.

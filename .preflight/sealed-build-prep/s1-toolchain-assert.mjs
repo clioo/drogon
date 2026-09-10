@@ -7,8 +7,9 @@ import path from "node:path";
 // custody, deadlines, env, observation, and cleanup. Asserts the frozen
 // private env the outer guarantees (outer lines 66-78): Node 24 first on a
 // fixed PATH, no ambient inheritance (bootstrap-outer.sh env -i).
-// Cargo is intentionally NOT asserted here: no known-absolute cargo exists in
-// evidence, so S8 stays behind owner extension E1 (owner blesses the path).
+// Cargo is intentionally NOT asserted here: its path is lane-supplied in the
+// per-run E1 source manifest and byte-attested by the E1 outer itself
+// (coordinator-blessed toolchain; owner test paths are convention only).
 assert.equal(
   Number(process.versions.node.split(".")[0]),
   24,
