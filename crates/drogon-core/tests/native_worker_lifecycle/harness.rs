@@ -255,7 +255,8 @@ printf 'capability_is_bogus=yes\n'
 else printf 'capability_is_bogus=no\n'; fi
 printf 'capability_len=%s\n' "${#DROGON_DISPATCH_CAPABILITY}"
 if [ -n "${DROGON_DISPATCH_CAPABILITY:-}" ]; then
-printf '%s' "$DROGON_DISPATCH_CAPABILITY" > "${NATIVE_ENV_DUMP}.cap"
+cap_tmp="${NATIVE_ENV_DUMP}.cap.tmp.$$"
+printf '%s' "$DROGON_DISPATCH_CAPABILITY" > "$cap_tmp" && mv "$cap_tmp" "${NATIVE_ENV_DUMP}.cap"
 fi
 printf 'dump_complete\n'
 } > "$out"
@@ -610,14 +611,28 @@ pub fn capability_file(env: &ProbeEnv) -> PathBuf {
 
 /// The worker capability, read from the fixture's temp-side file. Never
 /// printed; used only to prove hash/presence facts and to present stale
-/// credentials for refusal probes.
+/// credentials for refusal probes. Reads completed (non-empty) content,
+/// not mere existence: the writer publishes atomically, but a truncated
+/// prefix must never be mistaken for the credential (an empty capability
+/// matches the empty service credential and enters the admin dispatcher).
 pub fn capability_value(env: &ProbeEnv) -> String {
     let path = capability_file(env);
     wait_for_file(&path);
-    std::fs::read_to_string(&path)
-        .expect("capability file")
-        .trim()
-        .to_string()
+    let deadline = Instant::now() + WAIT_BUDGET;
+    loop {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let trimmed = content.trim().to_string();
+            if !trimmed.is_empty() {
+                return trimmed;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "fixture capability never completed: {}",
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[derive(Clone)]

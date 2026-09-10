@@ -26,9 +26,9 @@ use drogon_protocol::Response;
 use serde_json::json;
 
 use harness::{
-    Fixture, Liveness, ProbeEnv, Started, StopMarkerGuard, capability_value, classify_kill_output,
-    err_code, fresh_worker, liveness_probe, observe_liveness, ok, pid_dir, recorded_pids, request,
-    started, wait_for_pid_count,
+    Fixture, Liveness, ProbeEnv, Started, StopMarkerGuard, capability_file, capability_value,
+    classify_kill_output, err_code, fresh_worker, liveness_probe, observe_liveness, ok, pid_dir,
+    recorded_pids, request, started, wait_for_pid_count,
 };
 
 /// Admits the first worker, stops it (settled stop: attempt `stopped`, task
@@ -163,6 +163,30 @@ fn liveness_observer_counts_only_proven_esrch_as_exit() {
     let self_pid = std::process::id() as i32;
     assert!(self_pid > 1);
     assert_eq!(observe_liveness(self_pid), Liveness::Live);
+}
+
+/// The capability file must never be observed mid-write: the fixture used
+/// to expose the shell redirect's truncate->write window, so a reader in
+/// that window got an empty capability that matched the empty service
+/// credential and entered the admin dispatcher (`invalid_argument: The
+/// admin credential sends only as the coordinator`). The reader waits for
+/// completed (non-empty) content, not mere existence.
+#[test]
+fn capability_read_skips_a_truncated_prefix_and_returns_the_completed_value() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let env = ProbeEnv {
+        workspace: dir.path().join("workspace"),
+        data_dir: dir.path().join("data"),
+        cli: dir.path().join("cli"),
+    };
+    let path = capability_file(&env);
+    let writer = std::thread::spawn(move || {
+        std::fs::write(&path, b"").expect("truncate prefix");
+        std::thread::sleep(Duration::from_millis(500));
+        std::fs::write(&path, "ab12").expect("completed value");
+    });
+    assert_eq!(capability_value(&env), "ab12");
+    writer.join().expect("writer");
 }
 
 /// Cleanup is honest about outcomes: while an owned child is provably live
