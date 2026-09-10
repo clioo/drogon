@@ -53,9 +53,11 @@ describe("agent.settings.v1 mixed-version guard", () => {
     await screen.findByText("2 detected");
     expect(screen.getByRole("status")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toMatch(/restart/i);
+    expect(screen.getByRole("status").textContent).not.toMatch(/restart the app/i);
+    expect(screen.getByRole("status").textContent).toContain("stops every session");
     // The fieldset (and its controls) still render -- a capability gap is
     // surfaced, not a reason to hide the panel.
-    expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Auto" }).closest("fieldset")?.disabled).toBe(true);
   });
 });
 describe("source Agents pane", () => {

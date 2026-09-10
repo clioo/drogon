@@ -13,6 +13,7 @@ import {
 } from "../../components/ui/tooltip";
 import { Button } from "../../components/ui/button";
 import { SettingsSection } from "./SettingsSection";
+import { ServiceCapabilityNotice } from "../shell/ServiceCapabilityNotice";
 import {
   SettingsSegmentedControl,
   SettingsSubsectionHeader,
@@ -98,8 +99,8 @@ export function AgentsSection(props: {
     };
   }, [refreshKey, settings.agentCmdOverrides]);
   useEffect(() => {
-    if (!ready) void agentSettingsState.load();
-  }, [ready]);
+    if (!ready && props.capabilityAvailable !== false) void agentSettingsState.load();
+  }, [ready, props.capabilityAvailable]);
   const detectedIds =
     detected === null
       ? null
@@ -122,16 +123,11 @@ export function AgentsSection(props: {
       description="Manage AI agents, set a default, and customize commands."
     >
       {props.capabilityAvailable === false && (
-        <div
-          role="status"
-          className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground"
-        >
-          This Drogon service is running an older version that does not
-          support Agent settings yet. Restart the app to pick up the update
-          — your current sessions stay untouched until you do.
+        <div className="mb-4 rounded-md border border-border bg-muted px-3 py-2">
+          <ServiceCapabilityNotice feature="Agent settings" />
         </div>
       )}
-      {error && (
+      {error && props.capabilityAvailable !== false && (
         <div
           role="alert"
           className="mb-4 flex items-center justify-between gap-3 text-xs text-destructive"
@@ -147,7 +143,7 @@ export function AgentsSection(props: {
         </div>
       )}
       <fieldset
-        disabled={!ready}
+        disabled={!ready || props.capabilityAvailable === false}
         className="min-w-0 space-y-8"
         aria-busy={saving || !ready}
       >

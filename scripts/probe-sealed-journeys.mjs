@@ -146,6 +146,9 @@ export function mentuStepsAll(steps, expected) {
 // only the default plumbing for the real acceptance harness.
 import { selectSettingsTheme, captureThemeSurface } from "./acceptance-theme.mjs";
 
+// An owned deterministic fixture gets one run; failures must not be hidden by retries.
+const RUN_ATTEMPTS = 1;
+
 export const SEALED_MODEL_FIXTURE_BASE_URL_ENV =
   "DROGON_SEALED_MODEL_FIXTURE_BASE_URL";
 
@@ -196,6 +199,11 @@ export async function seedLocalPiProvider(
   if (instanceId) process.env.DROGON_SEALED_MODEL_FIXTURE_INSTANCE_ID = instanceId;
   else delete process.env.DROGON_SEALED_MODEL_FIXTURE_INSTANCE_ID;
   await mkdir(piDir, { recursive: true });
+  const settingsPath = path.join(piDir, "settings.json");
+  let settings = {};
+  try { settings = JSON.parse(await readFile(settingsPath, "utf8")); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+  await writeFile(settingsPath, JSON.stringify({ ...settings, defaultProvider: PI_PROVIDER, defaultModel: PI_MODEL_ID }) + "\n");
   await writeFile(
     path.join(piDir, "models.json"),
     JSON.stringify({
@@ -1001,10 +1009,8 @@ export async function probeAutomationRunNowDetail({
       .locator(`[data-testid="automation-row-${id}"]`)
       .waitFor({ timeout: 30000 });
     await page.locator(`[data-testid="automation-row-${id}"]`).click();
-    // The detail pane's Run Now button triggers a real headless Pi run on
-    // the free local model; the Runs tab records it. The shared model
-    // server can answer 429 under load, so a failed run is retried
-    // boundedly — never silently, each attempt stays in the history.
+    // The real headless Pi run uses the owned deterministic fixture.
+    // A failed run fails acceptance rather than spending another Run click.
     await page
       .getByRole("button", { name: "Run Now", exact: true })
       .waitFor({ timeout: 15000 });
@@ -1013,7 +1019,7 @@ export async function probeAutomationRunNowDetail({
     const history = page.locator('[data-testid="automation-history"]');
     let succeededRow = null;
     let markerVisible = false;
-    for (let attempt = 1; attempt <= 3 && !markerVisible; attempt += 1) {
+    for (let attempt = 1; attempt <= RUN_ATTEMPTS && !markerVisible; attempt += 1) {
       succeededRow = null;
       // Spend a Run Now click only once the sealed model fixture answers
       // as itself (bounded), so an attempt is never wasted on a fixture
@@ -1052,7 +1058,7 @@ export async function probeAutomationRunNowDetail({
           break;
         }
         assert.ok(
-          !/failed|error/i.test(text) || attempt < 3,
+          !/failed|error/i.test(text) || attempt < RUN_ATTEMPTS,
           `automation run failed on every attempt: ${text}`,
         );
         if (/failed|error/i.test(text)) break; // retry the run
@@ -1090,7 +1096,7 @@ export async function probeAutomationRunNowDetail({
         )
         .then(() => true)
         .catch(() => false);
-      if (!markerVisible && attempt < 3) {
+      if (!markerVisible && attempt < RUN_ATTEMPTS) {
         const automationsBreadcrumb = page
           .getByRole("navigation", { name: "Automations breadcrumb" })
           .getByRole("button", { name: "Automations", exact: true });
@@ -1142,6 +1148,9 @@ export async function probeBotPresetManualRun({
   output,
 }) {
   const marker = `BOT_${Date.now()}`;
+  const beforeAutomations = await runCliJson(cli, ["--data-dir", dataDir, "--json", "automation", "list"]);
+  assert.equal(beforeAutomations.ok, true, JSON.stringify(beforeAutomations));
+  const preservedAutomationIds = beforeAutomations.result.automations.map((automation) => automation.id);
   const botName = "Acceptance Bot R16BB";
   const dutyName = "Acceptance duty R16BB";
   await page.getByRole("button", { name: "Bots", exact: true }).click();
@@ -1183,6 +1192,19 @@ export async function probeBotPresetManualRun({
   const botId = botTestId?.startsWith("bot-") ? botTestId.slice(4) : null;
   assert.ok(botId, `bot card must carry bot-<id>, got ${botTestId}`);
   await shot(page, output, "bots-preset-created.png");
+  // Mutate from another real workspace: the bot, responsibility, run and
+  // deletion must retain their canonical owner, not follow this selection.
+  await page.getByRole("button", { name: "Select demo-b", exact: true }).click();
+  const foreignCard = page.locator('.shell-worktree-card[data-active="true"]').filter({ has: page.getByRole("button", { name: "Select demo-b", exact: true }) });
+  await foreignCard.waitFor();
+  const foreign = await page.evaluate(async ({ projectId, worktreeId }) => {
+    const result = await window.drogon.project.worktreeList({ projectId });
+    if (!result.ok) throw new Error(result.error.message);
+    return result.result.worktrees.find((worktree) => worktree.id === worktreeId);
+  }, { projectId: await foreignCard.getAttribute("data-worktree-card-project"), worktreeId: await foreignCard.getAttribute("data-worktree-card-id") });
+  assert(foreign && foreign.workspaceId !== workspaceId);
+  await page.getByRole("button", { name: "Bots", exact: true }).click();
+  await card.waitFor();
   // A responsibility whose cron never fires: the manual Run control is the
   // only way it executes during the run.
   await card
@@ -1209,11 +1231,7 @@ export async function probeBotPresetManualRun({
   await shot(page, output, "bots-responsibility-manual.png");
   let ownedAutomationId = null;
   try {
-    // The shared model server can answer 429 under load; each Run click
-    // records a real history row (a failed turn still terminates the run
-    // row at a terminal status verdict), so retry boundedly until a run's
-    // output carries the marker — never silently, every attempt stays
-    // visible in history.
+    // Exactly one run through the owned fixture; failures remain failures.
     // automation.list intentionally omits Bot ownership from its public
     // summary. Re-read the exact scope through the real Bot snapshot bridge;
     // the scheduled responsibility trigger carries the owned automation id.
@@ -1247,7 +1265,10 @@ export async function probeBotPresetManualRun({
     );
     let markerVisible = false;
     ownedAutomationId = owned.id;
-    for (let attempt = 1; attempt <= 3 && !markerVisible; attempt += 1) {
+    const scheduled = await runCliJson(cli, ["--data-dir", dataDir, "--json", "automation", "list"]);
+    assert.equal(scheduled.ok, true, JSON.stringify(scheduled));
+    assert.equal(scheduled.result.automations.find((item) => item.id === ownedAutomationId)?.workspaceId, workspaceId);
+    for (let attempt = 1; attempt <= RUN_ATTEMPTS && !markerVisible; attempt += 1) {
       // Same bounded fixture-readiness check as J7.
       assert.ok(
         await waitForFixtureReady(60000),
@@ -1362,7 +1383,7 @@ export async function probeBotPresetManualRun({
         .then(() => true)
         .catch(() => false);
       if (!markerVisible) {
-        assert.ok(attempt < 3, "bot run output never carried the marker");
+        assert.ok(attempt < RUN_ATTEMPTS, "bot run output never carried the marker");
         await page.getByRole("button", { name: "Bots", exact: true }).click();
         await panel.waitFor();
       }
@@ -1382,7 +1403,15 @@ export async function probeBotPresetManualRun({
       await captureThemeSurface(page, path.join(output, `bots-run-detail-${colorScheme}.png`), selection);
     }
     await selectSettingsTheme(page, "light");
+    const nativeSessions = await runCliJson(cli, ["--data-dir", dataDir, "--json", "rpc", "session.list"]);
+    assert.equal(nativeSessions.ok, true, JSON.stringify(nativeSessions));
+    const ownedRuns = nativeSessions.result.sessions.filter((session) => session.args.some((arg) => arg.includes(marker)));
+    assert.equal(ownedRuns.length, 1, "exactly one real bot process must carry this request marker");
+    assert.equal(ownedRuns[0].workspaceId, workspaceId);
+    assert.equal(ownedRuns[0].verdict, "exited");
     return [
+      "bots-cross-workspace-responsibility-and-run-retain-canonical-owner",
+      "bots-delete-from-foreign-workspace-removes-owned-automation-and-preserves-unrelated",
       "bots-preset-create-with-local-pi-model",
       "bots-manual-responsibility-run-history-row-exited",
       "bots-run-output-visible-in-automation-detail",
@@ -1395,6 +1424,8 @@ export async function probeBotPresetManualRun({
     // action closed the renderer, preserve that original failure and let
     // the outer acceptance cleanup own the daemon/session teardown.
     if (!page.isClosed()) {
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Select demo-b", exact: true }).click();
       await page
         .getByRole("button", { name: "Bots", exact: true })
         .first()
@@ -1434,13 +1465,13 @@ export async function probeBotPresetManualRun({
       ["--data-dir", dataDir, "--json", "automation", "list"],
       { timeout: 30000 },
     ).catch(() => null);
+    assert.equal(listed?.ok, true, "automation deletion must be verified, never inferred from a failed read");
     assert.ok(
-      ownedAutomationId === null ||
-        !listed?.result?.automations?.some(
-          (entry) => entry.id === ownedAutomationId,
-        ),
+      !listed.result.automations.some((entry) => entry.id === ownedAutomationId || entry.name === dutyName),
       "bot delete must remove its owned automations",
     );
+    for (const id of preservedAutomationIds)
+      assert(listed.result.automations.some((entry) => entry.id === id), "bot delete must preserve unrelated automations");
     if (!page.isClosed()) {
       const remainingBot = await page
         .evaluate(async ({ id, botId }) => {
@@ -1459,11 +1490,12 @@ export async function probeBotPresetManualRun({
           return snapshot.result.bots.some((entry) => entry.id === botId);
         }, { id: workspaceId, botId })
         .catch(() => null);
-      assert.notEqual(
+      assert.equal(
         remainingBot,
-        true,
-        "bot delete must remove the bot from the scoped snapshot",
+        false,
+        "bot delete must remove the bot from a successfully read scoped snapshot",
       );
+      await page.getByRole("button", { name: "Select folder", exact: true }).click();
     }
   }
 }

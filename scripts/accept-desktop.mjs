@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { markAcceptanceFailed, markAcceptancePassed } from "./acceptance-report-state.mjs";
 import { probeWorkspaceProperties } from "./probe-workspace-properties.mjs";
 import { probeChatLifecycle } from "./probe-chat-lifecycle.mjs";
+import { probeMixedVersionRecovery } from "./probe-mixed-version-recovery.mjs";
 import { seedPrivateClaudeKeyboard, probeClaudeTerminalInput } from "./probe-claude-terminal-input.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -172,7 +174,7 @@ let ranUpgradeCheck = false; // guards the explicit exit in the upgrade path
 async function stopOwned(child, label) {
   if (!child) return;
   const result = await stopAcceptanceProcess(child);
-  if (result.forced || result.verdict !== "exited") report.status = "FAILED";
+  if (result.forced || result.verdict !== "exited") markAcceptanceFailed(report);
   if (result.forced)
     report.cleanup.push(`${label}: required force after timeout`);
   report.cleanup.push(`${label}: ${result.verdict}`);
@@ -461,7 +463,30 @@ try {
     return response.result.workspaces[0];
   });
   report.checks.push("isolated-renderer-and-real-folder-registration");
-  report.checks.push(...await probeClaudeTerminalInput({ page, workspaceId: registered.id, output }));
+  if (packaged && process.env.DROGON_MIXED_FROM_BUNDLE) {
+    await fixtureDaemon.stop();
+    fixtureDaemon = null;
+    const closeMixedDesktop = async () => {
+      if (browser) await browser.close();
+      browser = null;
+      await stopOwned(desktop, "mixed-version probe desktop");
+      desktop = null;
+      page = null;
+    };
+    report.checks.push(...await probeMixedVersionRecovery({
+      oldBundle: path.resolve(process.env.DROGON_MIXED_FROM_BUNDLE), packaged, fixture, fixtureBin, output,
+      close: closeMixedDesktop,
+      launch: async (data) => { await launchDesktop(data); return page; },
+    }));
+    await launchDesktop();
+    fixtureDaemon = packagedFixtureDaemon(packaged.daemon, packaged.cli, dataDir);
+    await fixtureDaemon.capture();
+    await page.getByRole("button", { name: "Sessions", exact: true }).click();
+  }
+  if (packaged && modelFixture)
+    report.checks.push(...await probeChatLifecycle({ page, cli: packaged.cli, dataDir, output }));
+  if (report.claudeKeyboardIsolation)
+    report.checks.push(...await probeClaudeTerminalInput({ page, workspaceId: registered.id, output }));
   await page
     .getByRole("button", { name: "New tab", exact: true })
     .last()
@@ -809,7 +834,6 @@ try {
   }
   // Later probes address the folder workspace, so select its card again.
   await page.getByRole("button", { name: "Select folder" }).click();
-  report.checks.push(...await probeChatLifecycle({ page, dataDir, output }));
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
   if (withFiles) {
     report.checks.push(
@@ -946,15 +970,6 @@ try {
         daemon: packaged.daemon,
         cli: packaged.cli,
       })),
-    );
-  }
-  if (bundle) {
-    // Re-verify the exact sealed identity after acceptance: a candidate that
-    // changed mid-run fails closed instead of producing a mismatched report.
-    const closing = await verifySealedBundle(bundle, candidateSealed);
-    assert.equal(closing.sealedDigest, report.sealedDigest);
-    report.checks.push(
-      "sealed-final-artifact-identity-unchanged-after-acceptance",
     );
   }
   if (!packaged) {
@@ -1258,7 +1273,7 @@ try {
       await stopOwned(desktop, "upgrade desktop");
       await stopUpgradePhaseDaemons().catch((error) => {
         report.cleanup.push(`upgrade-phase daemon cleanup: ${error.message}`);
-        report.status = "FAILED";
+        markAcceptanceFailed(report);
       });
       desktop = null;
       browser = null;
@@ -1295,7 +1310,7 @@ try {
       await stopOwned(desktop, "refusal desktop");
       await stopUpgradePhaseDaemons().catch((error) => {
         report.cleanup.push(`refusal-phase daemon cleanup: ${error.message}`);
-        report.status = "FAILED";
+        markAcceptanceFailed(report);
       });
       desktop = null;
       browser = null;
@@ -1303,7 +1318,13 @@ try {
     }
     ranUpgradeCheck = true;
   }
-  report.status = "PASSED";
+  if (bundle) {
+    // Includes every relaunch, mixed-version and migration phase.
+    const closing = await verifySealedBundle(bundle, candidateSealed);
+    assert.equal(closing.sealedDigest, report.sealedDigest);
+    report.checks.push("sealed-final-artifact-identity-unchanged-after-acceptance");
+  }
+  markAcceptancePassed(report);
 } catch (error) {
   report.error = error.message;
   report.errorStack = error.stack;
@@ -1340,7 +1361,7 @@ try {
       );
       report.cleanup.push("owned workspace sessions: exited");
     } catch {
-      report.status = "FAILED";
+      markAcceptanceFailed(report);
       report.cleanup.push("owned workspace sessions: unverifiable");
     }
   }
@@ -1352,7 +1373,7 @@ try {
       await fixtureDaemon.stop();
       report.cleanup.push("exact packaged fixture daemon and sessions: exited");
     } catch (error) {
-      report.status = "FAILED";
+      markAcceptanceFailed(report);
       report.cleanup.push(`packaged fixture cleanup: ${error.message}`);
     }
   }
@@ -1368,7 +1389,7 @@ try {
     const fixtureResult = await closeModelFixtureForReport(modelFixture);
     report.cleanup.push(fixtureResult.cleanupLine);
     if (fixtureResult.failed) {
-      report.status = "FAILED";
+      markAcceptanceFailed(report);
       report.error = [report.error, fixtureResult.errorDetail]
         .filter(Boolean)
         .join("; ");
@@ -1381,7 +1402,7 @@ try {
       report.checks.push("macos-no-desktop-activation-or-visible-windows");
       report.cleanup.push("OS foreground observer: exited");
     } catch (error) {
-      report.status = "FAILED";
+      markAcceptanceFailed(report);
       report.error = [report.error, error.message].filter(Boolean).join("; ");
     }
   }

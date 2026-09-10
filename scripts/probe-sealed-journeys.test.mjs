@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -166,7 +166,12 @@ describe("seedLocalPiProvider (no real network endpoint, ever)", () => {
     withCleanFixtureEnv(async () => {
       const dir = await mkdtemp(path.join(tmpdir(), "sealed-fixture-seed-"));
       try {
+        await writeFile(path.join(dir, "settings.json"), JSON.stringify({ theme: "light", defaultProvider: "previous-provider" }));
         await seedLocalPiProvider(dir, "http://127.0.0.1:54329/v1");
+        const settings = JSON.parse(await readFile(path.join(dir, "settings.json"), "utf8"));
+        assert.equal(settings.defaultProvider, PI_PROVIDER);
+        assert.equal(settings.defaultModel, PI_MODEL_ID);
+        assert.equal(settings.theme, "light");
         const written = JSON.parse(
           await readFile(path.join(dir, "models.json"), "utf8"),
         );
