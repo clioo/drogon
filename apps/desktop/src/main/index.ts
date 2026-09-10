@@ -323,9 +323,13 @@ function registerBridge() {
           // whole-list parse arrive here as an error and pass through
           // unchanged; records inside an accepted envelope are re-checked
           // one by one so a single bad one is dropped with a warning.
-          const response = await callNative("session.list", {
-            workspaceId: value,
-          });
+          // `value` is optional (Bot-session persistence fix): omitting
+          // `workspaceId` from the native call returns every session on
+          // this host instead of one workspace's.
+          const response = await callNative(
+            "session.list",
+            value ? { workspaceId: value } : {},
+          );
           if (!response.ok) return response;
           const { sessions, warnings } = isolateSessionList(response.result);
           for (const warning of warnings)

@@ -208,7 +208,10 @@ export interface DesktopBridge extends FileBridge, BotBridge {
   workspaces(): Promise<Result<{ workspaces: Workspace[] }>>;
   addWorkspace(path: string): Promise<Result<Workspace>>;
   chooseFolder(): Promise<string | null>;
-  sessions(workspaceId: string): Promise<Result<{ sessions: Session[] }>>;
+  /** Omitting `workspaceId` returns every session on this host (Bot-session
+   *  persistence: the sidebar's Chats section and the resume check need to
+   *  see a Bot's session regardless of the currently selected workspace). */
+  sessions(workspaceId?: string): Promise<Result<{ sessions: Session[] }>>;
   /**
    * `launch` is additive (R12-E restart reuse): pass the prior session's
    * recorded argv to re-launch it, or omit for the default shell.
