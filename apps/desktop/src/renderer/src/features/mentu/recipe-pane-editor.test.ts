@@ -115,6 +115,39 @@ describe("recipe pane editor", () => {
     ]);
   });
 
+  it("persists the exact model id on an agent step", () => {
+    const updated = updateRecipeStepDocument(baseDocument(), "test", {
+      backend: "codex",
+      model: "gpt-5.6-luna",
+      dependencies: "build",
+      timeout: "",
+      retries: "",
+      verifyCommands: "",
+    });
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    const steps = serializeMentuRecipeDocument(updated.document).steps as Record<
+      string,
+      unknown
+    >[];
+    expect(steps[1].backend).toBe("codex");
+    expect(steps[1].model).toBe("gpt-5.6-luna");
+    // The sibling shell step gains no model field.
+    expect(steps[0]).not.toHaveProperty("model");
+  });
+
+  it("refuses a model on a shell-effective step instead of storing it", () => {
+    const document = baseDocument();
+    const draft = draftForRecipeStep(document.recipe.steps![0]);
+    const refused = updateRecipeStepDocument(document, "build", {
+      ...draft,
+      model: "gpt-5.6-luna",
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.message).toContain("shell backend");
+  });
+
   it("refuses non-integer timeouts and retries with field messages", () => {
     const document = baseDocument();
     const draft = draftForRecipeStep(document.recipe.steps![0]);
