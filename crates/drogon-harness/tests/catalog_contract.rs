@@ -2442,16 +2442,20 @@ fn refused_budget_fails_closed_before_spawning() {
 /// or an ACK for another birth or outcome — fails visibly with exit 3
 /// instead of running unowned. Exact helper inventory per handshake
 /// run (all transient, all group-contained, none registered): one
-/// `dirname`, one `ps`, word-splitting canonicalization with zero forks
-/// (function scope; the script's own `$1` untouched), one `date`-bounded
-/// ACK wait (wall-clock deadline immune to fork-latency stretch, plus
-/// an iteration backstop), short poll `sleep`s (one per iteration, each
-/// exiting on its own well before the wait ends), and one exact
-/// whole-line `grep -F -e "<birth> alive" -e "<birth> gone"` — the
-/// shell twin of `check_ack_content`, binding attempt and outcome, not
-/// a substring. Marker writes outside this snippet fail their fixture
-/// visibly (`|| exit 3`). Residual, stated not solved: a transient alive
-/// at the instant of a group kill is reaped by exit, not tracked.
+/// `dirname` here plus one script-level `dirname` where the script
+/// needs its dir before invoking this snippet, one `ps`, one subshell
+/// fork for the `$(...)` canonicalization call itself (word-splitting
+/// inside avoids extra tr/sed child processes; function scope keeps the
+/// script's own `$1` untouched), one `date`-bounded ACK wait
+/// (wall-clock deadline immune to fork-latency stretch, plus an
+/// iteration backstop), short poll `sleep`s (one per iteration), and
+/// one exact whole-line `grep -F -e "<birth> alive" -e "<birth> gone"`
+/// — the shell twin of `check_ack_content`, binding attempt and
+/// outcome, not a substring. Marker writes outside this snippet fail
+/// their fixture visibly (`|| exit 3`). Residual, stated not solved:
+/// a transient alive at the instant of a group kill is unobserved
+/// afterwards (never claimed reaped) — exit status there is
+/// unverifiable, not evidence.
 #[cfg(unix)]
 fn fixture_handshake_sh(pid: &str) -> String {
     format!(
@@ -2632,6 +2636,29 @@ fn child_probe_and_report(harness: HarnessId, pi_script: &str, budget: Duration,
             0
         }
     };
+    // Branch markers are observed BEFORE constructing the report: the
+    // struct moves registration_failures, so every failure push must
+    // happen up front. Uses try_exists (not exists) so read errors stay
+    // errors instead of melting into false.
+    let version_entered = match std::fs::try_exists(dir.join(VERSION_MARKER_FILE)) {
+        // A version marker that cannot be read fails closed as
+        // not-observed (the test requires it present).
+        Ok(present) => present,
+        Err(err) => {
+            registration_failures.push(format!("version marker unreadable: {err}"));
+            false
+        }
+    };
+    let enumeration_entered = match std::fs::try_exists(dir.join(ENUMERATION_MARKER_FILE)) {
+        // An unreadable enumeration marker must NEVER read as absence:
+        // fail it as present so the run fails closed instead of passing
+        // on a lie.
+        Ok(present) => present,
+        Err(err) => {
+            registration_failures.push(format!("enumeration marker unreadable: {err}"));
+            true
+        }
+    };
     write_child_report(
         &dir,
         &ChildReport {
@@ -2641,26 +2668,8 @@ fn child_probe_and_report(harness: HarnessId, pi_script: &str, budget: Duration,
             registration_failures,
             probe_pending_pids,
             probe_retained_roots,
-            version_entered: match std::fs::try_exists(dir.join(VERSION_MARKER_FILE)) {
-                // A version marker that cannot be read fails closed as
-                // not-observed (the test requires it present).
-                Ok(present) => present,
-                Err(err) => {
-                    registration_failures.push(format!("version marker unreadable: {err}"));
-                    false
-                }
-            },
-            enumeration_entered: match std::fs::try_exists(dir.join(ENUMERATION_MARKER_FILE)) {
-                // An unreadable enumeration marker must NEVER read as
-                // absence: fail it as present so the run fails closed
-                // instead of passing on a lie.
-                Ok(present) => present,
-                Err(err) => {
-                    registration_failures
-                        .push(format!("enumeration marker unreadable: {err}"));
-                    true
-                }
-            },
+            version_entered,
+            enumeration_entered,
             probe_cleanup_verified,
         },
     );
