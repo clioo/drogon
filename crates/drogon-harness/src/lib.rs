@@ -18,7 +18,8 @@ mod mentu_contract;
 mod selection;
 
 pub use catalog::{
-    CatalogEntry, EnumerationStatus, HostCatalog, PROBE_OUTPUT_CAP, PROBE_TIMEOUT_DEFAULT,
+    CatalogEntry, CatalogProbe, EnumerationStatus, HostCatalog, PROBE_OUTPUT_CAP,
+    PROBE_RESERVED_CLEANUP, PROBE_TIMEOUT_DEFAULT, PendingProbeChild, ProbeChildRole,
     ProbeProvenance, freshness_token, probe_host_catalog, probe_host_catalog_with_budget,
 };
 pub use discovery::{HarnessAvailability, HarnessInstallation, discover, resolve_executable};

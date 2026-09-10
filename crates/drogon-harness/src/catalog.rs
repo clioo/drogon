@@ -67,7 +67,7 @@
 //!   rows.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
 
@@ -84,6 +84,19 @@ pub const PROBE_OUTPUT_CAP: usize = 1 << 20;
 /// waited on forever.
 pub const PROBE_TIMEOUT_DEFAULT: Duration = Duration::from_secs(10);
 
+/// Cleanup reserved BEFORE any probe work, inside one total pre-spawn
+/// deadline: group TERM grace + group KILL grace + leader reap + margin.
+/// Work (setup, version probe, enumeration probe, post-exit drain) shares
+/// whatever the total leaves above this reserve; a total at or below the
+/// reserve refuses before spawning. The patient phase graces below are
+/// deliberately NOT shortened: enumeration probes finish in milliseconds,
+/// and hurrying escalation would trade containment for speed.
+pub const PROBE_RESERVED_CLEANUP: Duration = Duration::from_secs(6);
+
+/// Sub-cap for the `--version` probe inside the shared work window.
+#[cfg(unix)]
+const VERSION_PROBE_CAP: Duration = Duration::from_secs(5);
+
 /// How long pipe drain continues after the leader exited before the group
 /// is TERM-escalated (a grandchild may hold the inherited pipes).
 const POST_EXIT_GRACE: Duration = Duration::from_secs(3);
@@ -96,10 +109,6 @@ const SIGNAL_GRACE: Duration = Duration::from_secs(2);
 /// EOF (observed on macOS: a window where the writer is gone but
 /// waitpid(WNOHANG) still reports the process running).
 const REAP_GRACE: Duration = Duration::from_secs(1);
-
-/// Margin over the worst-case escalation chain after which the drain loop
-/// stops unconditionally, so no child behavior can hang a probe.
-const HARD_STOP_MARGIN: Duration = Duration::from_secs(1);
 
 /// How long the post-leader group check rides out transient teardown
 /// statuses (Present/EPERM) before declaring survivors or unverifiable.
@@ -270,6 +279,54 @@ impl HostCatalog {
 /// This is explicitly NOT a cryptographic integrity digest — the
 /// authoritative runtime integrity lock lives in `drogon-core` — and must
 /// not be presented as one.
+#[derive(Debug)]
+#[must_use = "a probe result owns live descendants and retained roots until reaped or transferred; discarding it leaks custody"]
+/// The complete result of one host-catalog probe: the catalog metadata
+/// PLUS genuine custody of everything the probe still owns. A downstream
+/// caller receives the actual [`std::process::Child`] handles — never
+/// bare pids — and either reaps them boundedly or explicitly transfers
+/// them; `pending` being empty never proves descendants exited, and only
+/// `cleanup_verified` (with an empty `retained_roots` decision owned by
+/// the caller) says a root may be deleted. There is no `Drop`
+/// implementation that waits: cleanup is always explicit and bounded.
+pub struct CatalogProbe {
+    /// The enumerated catalog (or the fail-closed record).
+    pub catalog: HostCatalog,
+    /// Live probe descendants this result still owns: an unreaped leader
+    /// or bounded helper. Empty on the common clean path.
+    pub pending: Vec<PendingProbeChild>,
+    /// Isolation roots retained because cleanup was unverifiable (paths
+    /// this probe created). The caller deletes them explicitly once it
+    /// has verified containment itself — never a broad delete.
+    pub retained_roots: Vec<PathBuf>,
+    /// Whether every descendant's exit was proven (group-empty via
+    /// ESRCH) at every step. False retains the roots above.
+    pub cleanup_verified: bool,
+    /// Wastebasket-free evidence of what could not be proven (EPERM /
+    /// killpg errors, hard stops, surviving members). Empty on a clean
+    /// probe; callers surface it, never drop it.
+    pub unverifiable: Vec<String>,
+}
+
+/// One live probe descendant crossing the return boundary with its role.
+#[derive(Debug)]
+pub struct PendingProbeChild {
+    /// Actual OS custody: only the holder can wait/reap this child.
+    pub child: std::process::Child,
+    /// Which probe step owns it.
+    pub role: ProbeChildRole,
+    /// Process id at capture time, for evidence records.
+    pub pid: u32,
+}
+
+/// Which probe step a pending child belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbeChildRole {
+    /// The `--version` probe child.
+    VersionProbe,
+    /// The enumeration (`--list-models`/`models`) probe child.
+    EnumerationProbe,
+}
 pub fn freshness_token(catalog: &HostCatalog) -> String {
     let mut keys: Vec<String> = catalog
         .entries
@@ -307,45 +364,85 @@ pub fn freshness_token(catalog: &HostCatalog) -> String {
 ///
 /// On non-unix platforms this fails closed with
 /// [`EnumerationStatus::UnsupportedPlatform`] before spawning anything.
-pub fn probe_host_catalog(harness: HarnessId, executable: Option<&Path>) -> HostCatalog {
+pub fn probe_host_catalog(harness: HarnessId, executable: Option<&Path>) -> CatalogProbe {
     probe_host_catalog_with_budget(harness, executable, PROBE_TIMEOUT_DEFAULT)
 }
 
 /// [`probe_host_catalog`] with an explicit wall-clock budget (tests use a
 /// short budget so the timeout kill path is exercised in milliseconds).
+///
+/// The budget is ONE total pre-spawn deadline across setup, the version
+/// probe, the enumeration probe and cleanup: [`PROBE_RESERVED_CLEANUP`]
+/// is reserved up front, and a budget at or below the reserve refuses
+/// before spawning anything.
 pub fn probe_host_catalog_with_budget(
     harness: HarnessId,
     executable: Option<&Path>,
     budget: Duration,
-) -> HostCatalog {
+) -> CatalogProbe {
     let Some(executable) = executable else {
-        return HostCatalog::unavailable(harness, HarnessAvailability::Missing);
+        return CatalogProbe {
+            catalog: HostCatalog::unavailable(harness, HarnessAvailability::Missing),
+            pending: Vec::new(),
+            retained_roots: Vec::new(),
+            cleanup_verified: true,
+            unverifiable: Vec::new(),
+        };
     };
+    if budget <= PROBE_RESERVED_CLEANUP {
+        // No-positive-work budgets refuse before spawning (or isolating):
+        // starting work that cannot pay for its own cleanup is dishonest.
+        return CatalogProbe {
+            catalog: HostCatalog {
+                harness,
+                availability: HarnessAvailability::Available,
+                executable: Some(executable.to_path_buf()),
+                provenance: None,
+                entries: Vec::new(),
+                status: EnumerationStatus::TimedOut,
+                note: Some(format!(
+                    "budget {budget:?} leaves no positive work after the {:?} reserved \
+                     cleanup; refused before spawning",
+                    PROBE_RESERVED_CLEANUP
+                )),
+            },
+            pending: Vec::new(),
+            retained_roots: Vec::new(),
+            cleanup_verified: true,
+            unverifiable: Vec::new(),
+        };
+    }
     #[cfg(unix)]
     {
         match harness {
             HarnessId::Pi => probe_pi(executable, budget),
             HarnessId::Opencode => probe_opencode(executable, budget),
             HarnessId::Claude | HarnessId::Codex | HarnessId::Antigravity => {
-                probe_version_only(harness, executable)
+                probe_version_only(harness, executable, budget)
             }
         }
     }
     #[cfg(not(unix))]
     {
-        HostCatalog {
-            harness,
-            availability: HarnessAvailability::Available,
-            executable: Some(executable.to_path_buf()),
-            provenance: None,
-            entries: Vec::new(),
-            status: EnumerationStatus::UnsupportedPlatform,
-            note: Some(
-                "host enumeration requires unix process-group primitives; \
-                 failed closed without spawning the executable. Generic \
-                 harness launch is unaffected."
-                    .to_string(),
-            ),
+        CatalogProbe {
+            catalog: HostCatalog {
+                harness,
+                availability: HarnessAvailability::Available,
+                executable: Some(executable.to_path_buf()),
+                provenance: None,
+                entries: Vec::new(),
+                status: EnumerationStatus::UnsupportedPlatform,
+                note: Some(
+                    "host enumeration requires unix process-group primitives; \
+                     failed closed without spawning the executable. Generic \
+                     harness launch is unaffected."
+                        .to_string(),
+                ),
+            },
+            pending: Vec::new(),
+            retained_roots: Vec::new(),
+            cleanup_verified: true,
+            unverifiable: Vec::new(),
         }
     }
 }
@@ -520,21 +617,28 @@ fn create_private_dir(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn isolation_failed_catalog(harness: HarnessId, executable: &Path, reason: String) -> HostCatalog {
-    HostCatalog {
-        harness,
-        availability: HarnessAvailability::Available,
-        executable: Some(executable.to_path_buf()),
-        provenance: Some(ProbeProvenance {
-            executable: executable.to_path_buf(),
-            argv: Vec::new(),
-            version: None,
-            probed_at: SystemTime::now(),
-            config_scope: "private-isolated-root (credential-free)".to_string(),
-        }),
-        entries: Vec::new(),
-        status: EnumerationStatus::IsolationFailed,
-        note: Some(reason),
+fn isolation_failed_catalog(harness: HarnessId, executable: &Path, reason: String) -> CatalogProbe {
+    CatalogProbe {
+        catalog: HostCatalog {
+            harness,
+            availability: HarnessAvailability::Available,
+            executable: Some(executable.to_path_buf()),
+            provenance: Some(ProbeProvenance {
+                executable: executable.to_path_buf(),
+                argv: Vec::new(),
+                version: None,
+                probed_at: SystemTime::now(),
+                config_scope: "private-isolated-root (credential-free)".to_string(),
+            }),
+            entries: Vec::new(),
+            status: EnumerationStatus::IsolationFailed,
+            note: Some(reason),
+        },
+        // Nothing spawned, so there is nothing to own or retain.
+        pending: Vec::new(),
+        retained_roots: Vec::new(),
+        cleanup_verified: true,
+        unverifiable: Vec::new(),
     }
 }
 
@@ -548,7 +652,12 @@ fn isolation_failed_catalog(harness: HarnessId, executable: &Path, reason: Strin
 /// `auth.json`/`models-store.json` or any credential material to make more
 /// models visible.
 #[cfg(unix)]
-fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
+fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
+    // ONE total pre-spawn deadline across setup, both probes and
+    // cleanup; the reserve stays untouched by work.
+    let start = Instant::now();
+    let total = start + budget;
+    let work_end = total - PROBE_RESERVED_CLEANUP;
     let isolation = match ProbeIsolation::create() {
         Ok(isolation) => isolation,
         Err(reason) => return isolation_failed_catalog(HarnessId::Pi, executable, reason),
@@ -566,7 +675,105 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
     env.push(("PI_TELEMETRY".to_string(), "0".to_string()));
     env.push(("PI_SKIP_VERSION_CHECK".to_string(), "1".to_string()));
 
-    let version = probe_version(executable, &env, isolation.root());
+    let mut pending: Vec<PendingProbeChild> = Vec::new();
+    let mut unverifiable: Vec<String> = Vec::new();
+    let mut cleanup_verified = true;
+
+    // The version probe consumes from the SAME total (additionally
+    // capped): a hung --version cannot eat the enumeration window or
+    // the reserve.
+    let version_end = std::cmp::min(start + VERSION_PROBE_CAP, work_end);
+    let (version, v_outcome) =
+        probe_version(executable, &env, isolation.root(), version_end, total);
+    let ProbeOutcome {
+        run: v_run,
+        cleanup_verified: v_verified,
+        post_exit_cleanup: v_cleanup,
+        unreaped: v_unreaped,
+    } = v_outcome;
+    if let Some(note) = v_cleanup {
+        unverifiable.push(format!("version probe cleanup: {note}"));
+    }
+    cleanup_verified &= v_verified;
+    if let Some(child) = v_unreaped {
+        unverifiable.push(format!(
+            "version probe leader pid={} unreaped; enumeration not started",
+            child.id()
+        ));
+        pending.push(PendingProbeChild {
+            pid: child.id(),
+            child,
+            role: ProbeChildRole::VersionProbe,
+        });
+        cleanup_verified = false;
+    }
+    // Version custody unresolved (or the version run failed): do NOT
+    // start enumeration in — or remove — this root.
+    if !(matches!(v_run, ProbeRun::Completed { .. }) && cleanup_verified) {
+        let (status, note) = match v_run {
+            ProbeRun::TimedOut { evidence } => (
+                EnumerationStatus::TimedOut,
+                format!(
+                    "version probe exceeded its window; enumeration not started in this \
+                     root: {evidence}"
+                ),
+            ),
+            ProbeRun::FailedExit {
+                exit_code,
+                stderr_tail,
+            } => (
+                EnumerationStatus::ProbeFailed,
+                format!(
+                    "version probe exited {exit_code}; enumeration not started in this \
+                     root: {stderr_tail}"
+                ),
+            ),
+            ProbeRun::SpawnFailed(message) => (
+                EnumerationStatus::NotInstalled,
+                format!(
+                    "version probe spawn failed ({message}); enumeration not started; \
+                     executable treated as not installed"
+                ),
+            ),
+            ProbeRun::HelperFailed { stream, error } => (
+                EnumerationStatus::ProbeFailed,
+                format!(
+                    "version probe {stream} read failed ({error}); enumeration not started \
+                     in this root"
+                ),
+            ),
+            ProbeRun::Completed { .. } => (
+                EnumerationStatus::ProbeFailed,
+                "version probe cleanup unverifiable; enumeration not started in this root"
+                    .to_string(),
+            ),
+        };
+        return CatalogProbe {
+            catalog: HostCatalog {
+                harness: HarnessId::Pi,
+                availability: HarnessAvailability::Available,
+                executable: Some(executable.to_path_buf()),
+                provenance: Some(ProbeProvenance {
+                    executable: executable.to_path_buf(),
+                    argv: Vec::new(),
+                    version,
+                    probed_at: SystemTime::now(),
+                    config_scope: "private-isolated-root (credential-free)".to_string(),
+                }),
+                entries: Vec::new(),
+                status,
+                note: Some(note),
+            },
+            pending,
+            retained_roots: if cleanup_verified {
+                Vec::new()
+            } else {
+                isolation.disarm().into_iter().collect()
+            },
+            cleanup_verified,
+            unverifiable,
+        };
+    }
     let argv = vec!["--list-models".to_string()];
     let attempt = ProbeAttempt {
         executable,
@@ -574,19 +781,35 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
         env: &env,
         cwd: &isolation.cwd,
     };
-    let outcome = run_probe(&attempt, budget);
+    // Remaining-time check before the second spawn lives inside
+    // run_probe (refuses without spawning when the work window is gone).
+    let outcome = run_probe(&attempt, work_end, total);
     let cleanup_note = outcome.cleanup_note();
-    let retained = if outcome.cleanup_verified {
+    let ProbeOutcome {
+        run,
+        cleanup_verified: e_verified,
+        post_exit_cleanup: _,
+        unreaped,
+    } = outcome;
+    cleanup_verified &= e_verified;
+    if let Some(child) = unreaped {
+        pending.push(PendingProbeChild {
+            pid: child.id(),
+            child,
+            role: ProbeChildRole::EnumerationProbe,
+        });
+        cleanup_verified = false;
+    }
+    let retained = if cleanup_verified {
         None
     } else {
         isolation.disarm()
     };
-    let (provenance, status, entries, mut note) = match outcome.run {
-        ProbeRun::Completed { output, .. } => {
+    let (provenance, status, entries, mut note) = match run {
+        ProbeRun::Completed { stdout, stderr } => {
             let provenance = probe_provenance(executable, argv.clone(), version);
-            match parse_pi_list_models(&output) {
+            let (status, entries, mut note) = match parse_pi_list_models(&stdout) {
                 ParseOutcome::Entries(entries) => (
-                    provenance,
                     EnumerationStatus::Enumerated,
                     entries,
                     Some(
@@ -598,7 +821,6 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
                     ),
                 ),
                 ParseOutcome::Empty => (
-                    provenance,
                     EnumerationStatus::Enumerated,
                     Vec::new(),
                     Some(
@@ -609,12 +831,27 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
                     ),
                 ),
                 ParseOutcome::Malformed(sample) => (
-                    provenance,
                     EnumerationStatus::ParseFailed,
                     Vec::new(),
                     Some(format!("unrecognized --list-models shape: {sample:?}")),
                 ),
+            };
+            if !stderr.is_empty() {
+                // Diagnostics are honesty evidence, never rows and never
+                // a failure by themselves: stdout alone was parsed.
+                let tail: String = String::from_utf8_lossy(&stderr)
+                    .chars()
+                    .rev()
+                    .take(200)
+                    .collect();
+                let tail: String = tail.chars().rev().collect();
+                note = Some(format!(
+                    "{}; probe stderr diagnostics ({} bytes, not parsed): {tail}",
+                    note.unwrap_or_default(),
+                    stderr.len()
+                ));
             }
+            (provenance, status, entries, note)
         }
         ProbeRun::FailedExit {
             stderr_tail,
@@ -640,25 +877,42 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
             Vec::new(),
             Some(message),
         ),
+        ProbeRun::HelperFailed { stream, error } => (
+            probe_provenance(executable, argv.clone(), version),
+            EnumerationStatus::ProbeFailed,
+            Vec::new(),
+            Some(format!(
+                "pi --list-models {stream} read failed ({error}); output around it is not evidence"
+            )),
+        ),
     };
     if let Some(cleanup) = cleanup_note {
         note = Some(format!("{}; {cleanup}", note.unwrap_or_default()));
     }
-    if let Some(path) = retained {
+    for item in &unverifiable {
+        note = Some(format!("{}; {item}", note.unwrap_or_default()));
+    }
+    if let Some(path) = &retained {
         note = Some(format!(
             "{}; probe root retained for inspection: {} (descendant cleanup unverifiable)",
             note.unwrap_or_default(),
             path.display()
         ));
     }
-    HostCatalog {
-        harness: HarnessId::Pi,
-        availability: HarnessAvailability::Available,
-        executable: Some(executable.to_path_buf()),
-        provenance: Some(provenance),
-        entries,
-        status,
-        note,
+    CatalogProbe {
+        catalog: HostCatalog {
+            harness: HarnessId::Pi,
+            availability: HarnessAvailability::Available,
+            executable: Some(executable.to_path_buf()),
+            provenance: Some(provenance),
+            entries,
+            status,
+            note,
+        },
+        pending,
+        retained_roots: retained.into_iter().collect(),
+        cleanup_verified,
+        unverifiable,
     }
 }
 
@@ -669,7 +923,12 @@ fn probe_pi(executable: &Path, budget: Duration) -> HostCatalog {
 /// explicit: the built-in catalog only; user-defined providers are not
 /// enumerated.
 #[cfg(unix)]
-fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
+fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
+    // ONE total pre-spawn deadline across setup, both probes and
+    // cleanup; the reserve stays untouched by work.
+    let start = Instant::now();
+    let total = start + budget;
+    let work_end = total - PROBE_RESERVED_CLEANUP;
     let isolation = match ProbeIsolation::create() {
         Ok(isolation) => isolation,
         Err(reason) => return isolation_failed_catalog(HarnessId::Opencode, executable, reason),
@@ -683,7 +942,105 @@ fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
         "OPENCODE_CONFIG_DIR".to_string(),
         opencode_dir.to_string_lossy().into_owned(),
     ));
-    let version = probe_version(executable, &env, isolation.root());
+    let mut pending: Vec<PendingProbeChild> = Vec::new();
+    let mut unverifiable: Vec<String> = Vec::new();
+    let mut cleanup_verified = true;
+
+    // The version probe consumes from the SAME total (additionally
+    // capped): a hung --version cannot eat the enumeration window or
+    // the reserve.
+    let version_end = std::cmp::min(start + VERSION_PROBE_CAP, work_end);
+    let (version, v_outcome) =
+        probe_version(executable, &env, isolation.root(), version_end, total);
+    let ProbeOutcome {
+        run: v_run,
+        cleanup_verified: v_verified,
+        post_exit_cleanup: v_cleanup,
+        unreaped: v_unreaped,
+    } = v_outcome;
+    if let Some(note) = v_cleanup {
+        unverifiable.push(format!("version probe cleanup: {note}"));
+    }
+    cleanup_verified &= v_verified;
+    if let Some(child) = v_unreaped {
+        unverifiable.push(format!(
+            "version probe leader pid={} unreaped; enumeration not started",
+            child.id()
+        ));
+        pending.push(PendingProbeChild {
+            pid: child.id(),
+            child,
+            role: ProbeChildRole::VersionProbe,
+        });
+        cleanup_verified = false;
+    }
+    // Version custody unresolved (or the version run failed): do NOT
+    // start enumeration in — or remove — this root.
+    if !(matches!(v_run, ProbeRun::Completed { .. }) && cleanup_verified) {
+        let (status, note) = match v_run {
+            ProbeRun::TimedOut { evidence } => (
+                EnumerationStatus::TimedOut,
+                format!(
+                    "version probe exceeded its window; enumeration not started in this \
+                     root: {evidence}"
+                ),
+            ),
+            ProbeRun::FailedExit {
+                exit_code,
+                stderr_tail,
+            } => (
+                EnumerationStatus::ProbeFailed,
+                format!(
+                    "version probe exited {exit_code}; enumeration not started in this \
+                     root: {stderr_tail}"
+                ),
+            ),
+            ProbeRun::SpawnFailed(message) => (
+                EnumerationStatus::NotInstalled,
+                format!(
+                    "version probe spawn failed ({message}); enumeration not started; \
+                     executable treated as not installed"
+                ),
+            ),
+            ProbeRun::HelperFailed { stream, error } => (
+                EnumerationStatus::ProbeFailed,
+                format!(
+                    "version probe {stream} read failed ({error}); enumeration not started \
+                     in this root"
+                ),
+            ),
+            ProbeRun::Completed { .. } => (
+                EnumerationStatus::ProbeFailed,
+                "version probe cleanup unverifiable; enumeration not started in this root"
+                    .to_string(),
+            ),
+        };
+        return CatalogProbe {
+            catalog: HostCatalog {
+                harness: HarnessId::Opencode,
+                availability: HarnessAvailability::Available,
+                executable: Some(executable.to_path_buf()),
+                provenance: Some(ProbeProvenance {
+                    executable: executable.to_path_buf(),
+                    argv: Vec::new(),
+                    version,
+                    probed_at: SystemTime::now(),
+                    config_scope: "private-isolated-root (credential-free)".to_string(),
+                }),
+                entries: Vec::new(),
+                status,
+                note: Some(note),
+            },
+            pending,
+            retained_roots: if cleanup_verified {
+                Vec::new()
+            } else {
+                isolation.disarm().into_iter().collect()
+            },
+            cleanup_verified,
+            unverifiable,
+        };
+    }
     let argv = vec!["models".to_string()];
     let attempt = ProbeAttempt {
         executable,
@@ -691,19 +1048,35 @@ fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
         env: &env,
         cwd: &isolation.cwd,
     };
-    let outcome = run_probe(&attempt, budget);
+    // Remaining-time check before the second spawn lives inside
+    // run_probe (refuses without spawning when the work window is gone).
+    let outcome = run_probe(&attempt, work_end, total);
     let cleanup_note = outcome.cleanup_note();
-    let retained = if outcome.cleanup_verified {
+    let ProbeOutcome {
+        run,
+        cleanup_verified: e_verified,
+        post_exit_cleanup: _,
+        unreaped,
+    } = outcome;
+    cleanup_verified &= e_verified;
+    if let Some(child) = unreaped {
+        pending.push(PendingProbeChild {
+            pid: child.id(),
+            child,
+            role: ProbeChildRole::EnumerationProbe,
+        });
+        cleanup_verified = false;
+    }
+    let retained = if cleanup_verified {
         None
     } else {
         isolation.disarm()
     };
-    let (provenance, status, entries, mut note) = match outcome.run {
-        ProbeRun::Completed { output, .. } => {
+    let (provenance, status, entries, mut note) = match run {
+        ProbeRun::Completed { stdout, stderr } => {
             let provenance = probe_provenance(executable, argv.clone(), version);
-            match parse_opencode_models(&output) {
+            let (status, entries, mut note) = match parse_opencode_models(&stdout) {
                 ParseOutcome::Entries(entries) => (
-                    provenance,
                     EnumerationStatus::Enumerated,
                     entries,
                     Some(
@@ -714,18 +1087,32 @@ fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
                     ),
                 ),
                 ParseOutcome::Empty => (
-                    provenance,
                     EnumerationStatus::Enumerated,
                     Vec::new(),
                     Some("opencode reported no models".to_string()),
                 ),
                 ParseOutcome::Malformed(sample) => (
-                    provenance,
                     EnumerationStatus::ParseFailed,
                     Vec::new(),
                     Some(format!("unrecognized `models` shape: {sample:?}")),
                 ),
+            };
+            if !stderr.is_empty() {
+                // Diagnostics are honesty evidence, never rows and never
+                // a failure by themselves: stdout alone was parsed.
+                let tail: String = String::from_utf8_lossy(&stderr)
+                    .chars()
+                    .rev()
+                    .take(200)
+                    .collect();
+                let tail: String = tail.chars().rev().collect();
+                note = Some(format!(
+                    "{}; probe stderr diagnostics ({} bytes, not parsed): {tail}",
+                    note.unwrap_or_default(),
+                    stderr.len()
+                ));
             }
+            (provenance, status, entries, note)
         }
         ProbeRun::FailedExit {
             stderr_tail,
@@ -749,25 +1136,42 @@ fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
             Vec::new(),
             Some(message),
         ),
+        ProbeRun::HelperFailed { stream, error } => (
+            probe_provenance(executable, argv.clone(), version),
+            EnumerationStatus::ProbeFailed,
+            Vec::new(),
+            Some(format!(
+                "opencode models {stream} read failed ({error}); output around it is not evidence"
+            )),
+        ),
     };
     if let Some(cleanup) = cleanup_note {
         note = Some(format!("{}; {cleanup}", note.unwrap_or_default()));
     }
-    if let Some(path) = retained {
+    for item in &unverifiable {
+        note = Some(format!("{}; {item}", note.unwrap_or_default()));
+    }
+    if let Some(path) = &retained {
         note = Some(format!(
             "{}; probe root retained for inspection: {} (descendant cleanup unverifiable)",
             note.unwrap_or_default(),
             path.display()
         ));
     }
-    HostCatalog {
-        harness: HarnessId::Opencode,
-        availability: HarnessAvailability::Available,
-        executable: Some(executable.to_path_buf()),
-        provenance: Some(provenance),
-        entries,
-        status,
-        note,
+    CatalogProbe {
+        catalog: HostCatalog {
+            harness: HarnessId::Opencode,
+            availability: HarnessAvailability::Available,
+            executable: Some(executable.to_path_buf()),
+            provenance: Some(provenance),
+            entries,
+            status,
+            note,
+        },
+        pending,
+        retained_roots: retained.into_iter().collect(),
+        cleanup_verified,
+        unverifiable,
     }
 }
 
@@ -776,13 +1180,86 @@ fn probe_opencode(executable: &Path, budget: Duration) -> HostCatalog {
 /// [`crate::selection::SelectionVerdict::NotValidatable`] — shape-checked
 /// but never host-confirmed, per the no-fictitious-confirmation rule.
 #[cfg(unix)]
-fn probe_version_only(harness: HarnessId, executable: &Path) -> HostCatalog {
+fn probe_version_only(harness: HarnessId, executable: &Path, budget: Duration) -> CatalogProbe {
+    // ONE total pre-spawn deadline; the reserve stays untouched by work.
+    let start = Instant::now();
+    let total = start + budget;
+    let work_end = total - PROBE_RESERVED_CLEANUP;
     let isolation = match ProbeIsolation::create() {
         Ok(isolation) => isolation,
         Err(reason) => return isolation_failed_catalog(harness, executable, reason),
     };
     let env = isolation.env();
-    let version = probe_version(executable, &env, isolation.root());
+    let version_end = std::cmp::min(start + VERSION_PROBE_CAP, work_end);
+    let (version, outcome) = probe_version(executable, &env, isolation.root(), version_end, total);
+    let cleanup_note = outcome.cleanup_note();
+    let ProbeOutcome {
+        run,
+        cleanup_verified,
+        post_exit_cleanup: _,
+        unreaped,
+    } = outcome;
+    let mut pending: Vec<PendingProbeChild> = Vec::new();
+    let mut verified = cleanup_verified;
+    let mut unverifiable: Vec<String> = Vec::new();
+    if let Some(child) = unreaped {
+        unverifiable.push(format!("version probe leader pid={} unreaped", child.id()));
+        pending.push(PendingProbeChild {
+            pid: child.id(),
+            child,
+            role: ProbeChildRole::VersionProbe,
+        });
+        verified = false;
+    }
+    let (status, mut note) = match run {
+        ProbeRun::Completed { .. } if verified => (
+            EnumerationStatus::UnsupportedSurface,
+            Some(
+                "this harness exposes no model enumeration surface; only the \
+                 version probe was captured"
+                    .to_string(),
+            ),
+        ),
+        // Every version-probe outcome propagates its custody and
+        // cleanup errors: a failed version probe is a failed probe,
+        // never a silent version-less record.
+        ProbeRun::Completed { .. } => (
+            EnumerationStatus::ProbeFailed,
+            Some("version probe cleanup unverifiable".to_string()),
+        ),
+        ProbeRun::TimedOut { evidence } => (
+            EnumerationStatus::TimedOut,
+            Some(format!("version probe exceeded its window: {evidence}")),
+        ),
+        ProbeRun::FailedExit {
+            exit_code,
+            stderr_tail,
+        } => (
+            EnumerationStatus::ProbeFailed,
+            Some(format!("version probe exited {exit_code}: {stderr_tail}")),
+        ),
+        ProbeRun::SpawnFailed(message) => (EnumerationStatus::NotInstalled, Some(message)),
+        ProbeRun::HelperFailed { stream, error } => (
+            EnumerationStatus::ProbeFailed,
+            Some(format!(
+                "version probe {stream} read failed ({error}); output around it is not evidence"
+            )),
+        ),
+    };
+    if let Some(cleanup) = cleanup_note {
+        note = Some(format!("{}; {cleanup}", note.unwrap_or_default()));
+    }
+    for item in &unverifiable {
+        note = Some(format!("{}; {item}", note.unwrap_or_default()));
+    }
+    let retained = if verified { None } else { isolation.disarm() };
+    if let Some(path) = &retained {
+        note = Some(format!(
+            "{}; probe root retained for inspection: {} (descendant cleanup unverifiable)",
+            note.unwrap_or_default(),
+            path.display()
+        ));
+    }
     let provenance = ProbeProvenance {
         executable: executable.to_path_buf(),
         argv: Vec::new(),
@@ -790,18 +1267,20 @@ fn probe_version_only(harness: HarnessId, executable: &Path) -> HostCatalog {
         probed_at: SystemTime::now(),
         config_scope: "private-isolated-root (read-only; no enumeration command)".to_string(),
     };
-    HostCatalog {
-        harness,
-        availability: HarnessAvailability::Available,
-        executable: Some(executable.to_path_buf()),
-        provenance: Some(provenance),
-        entries: Vec::new(),
-        status: EnumerationStatus::UnsupportedSurface,
-        note: Some(
-            "this harness exposes no model enumeration surface; only the \
-             version probe was captured"
-                .to_string(),
-        ),
+    CatalogProbe {
+        catalog: HostCatalog {
+            harness,
+            availability: HarnessAvailability::Available,
+            executable: Some(executable.to_path_buf()),
+            provenance: Some(provenance),
+            entries: Vec::new(),
+            status,
+            note,
+        },
+        pending,
+        retained_roots: retained.into_iter().collect(),
+        cleanup_verified: verified,
+        unverifiable,
     }
 }
 
@@ -821,22 +1300,35 @@ fn probe_provenance(
 }
 
 #[cfg(unix)]
-fn probe_version(executable: &Path, env: &[(String, String)], cwd: &Path) -> Option<String> {
+fn probe_version(
+    executable: &Path,
+    env: &[(String, String)],
+    cwd: &Path,
+    work_end: Instant,
+    total: Instant,
+) -> (Option<String>, ProbeOutcome) {
     let attempt = ProbeAttempt {
         executable,
         argv: &["--version".to_string()],
         env,
         cwd,
     };
-    match run_probe(&attempt, Duration::from_secs(5)).run {
-        ProbeRun::Completed { output, .. } => String::from_utf8_lossy(&output)
+    let outcome = run_probe(&attempt, work_end, total);
+    // Version is stdout's first line only: stderr diagnostics never
+    // pollute it.
+    let version = match &outcome.run {
+        ProbeRun::Completed { stdout, .. } => String::from_utf8_lossy(stdout)
             .lines()
             .next()
             .map(str::trim)
             .filter(|line| !line.is_empty())
             .map(str::to_string),
-        ProbeRun::FailedExit { .. } | ProbeRun::TimedOut { .. } | ProbeRun::SpawnFailed(_) => None,
-    }
+        ProbeRun::FailedExit { .. }
+        | ProbeRun::TimedOut { .. }
+        | ProbeRun::SpawnFailed(_)
+        | ProbeRun::HelperFailed { .. } => None,
+    };
+    (version, outcome)
 }
 
 #[cfg(unix)]
@@ -849,10 +1341,12 @@ struct ProbeAttempt<'a> {
 
 #[cfg(unix)]
 enum ProbeRun {
-    /// The leader exited zero. `output` is the combined, cap-bounded
-    /// stdout+stderr.
+    /// The leader exited zero. Stdout and stderr are retained
+    /// SEPARATELY under the combined cap: model parsers read stdout
+    /// only, stderr feeds failure tails and honesty notes but never rows.
     Completed {
-        output: Vec<u8>,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
     },
     /// The leader exited non-zero. Never parsed into catalog rows.
     FailedExit {
@@ -864,6 +1358,13 @@ enum ProbeRun {
     /// prove about descendant exit.
     TimedOut {
         evidence: String,
+    },
+    /// A bounded helper stream failed mid-drain (EIO/EBADF and friends).
+    /// Fail-closed with the captured errno: a read error is never pipe
+    /// closure, and output assembled around it is not evidence.
+    HelperFailed {
+        stream: &'static str,
+        error: String,
     },
     SpawnFailed(String),
 }
@@ -878,6 +1379,10 @@ struct ProbeOutcome {
     /// Evidence of descendant cleanup needed after leader exit; `None` on
     /// an ordinary clean exit.
     post_exit_cleanup: Option<String>,
+    /// The leader handle when its reap could not be confirmed. The
+    /// caller owns bounded reaping or explicit transfer from here —
+    /// dropping it without either leaks custody.
+    unreaped: Option<std::process::Child>,
 }
 
 #[cfg(unix)]
@@ -907,8 +1412,8 @@ const FAILURE_TAIL_LIMIT: usize = 400;
 #[cfg(unix)]
 mod run {
     use super::{
-        DRAIN_PER_EVENT_CAP, FAILURE_TAIL_LIMIT, HARD_STOP_MARGIN, POST_EOF_GROUP_GRACE,
-        POST_EXIT_GRACE, ProbeAttempt, ProbeOutcome, ProbeRun, REAP_GRACE, SIGNAL_GRACE,
+        DRAIN_PER_EVENT_CAP, FAILURE_TAIL_LIMIT, POST_EOF_GROUP_GRACE, POST_EXIT_GRACE,
+        ProbeAttempt, ProbeOutcome, ProbeRun, REAP_GRACE, SIGNAL_GRACE,
     };
     use std::os::unix::io::AsRawFd;
     use std::process::{Child, Command, ExitStatus, Stdio};
@@ -986,9 +1491,20 @@ mod run {
     /// Escalate the whole process group and collect checked evidence about
     /// descendant exit. Returns whether the group was provably empty at
     /// the end; mere signal delivery is never reported as verified exit.
-    fn escalate_group(pgid: u32, child: &mut Child, evidence: &mut Vec<String>) -> bool {
+    /// Escalate the whole process group and collect checked evidence about
+    /// descendant exit. Every grace is capped by the absolute `total`
+    /// deadline — never a fresh allowance: when the total expires
+    /// mid-escalation that cut is recorded instead of overrunning it.
+    /// Returns whether the group was provably empty at the end; mere
+    /// signal delivery is never reported as verified exit.
+    fn escalate_group(
+        pgid: u32,
+        child: &mut Child,
+        evidence: &mut Vec<String>,
+        total: Instant,
+    ) -> bool {
         signal_group(pgid, libc::SIGTERM, evidence);
-        let term_deadline = Instant::now() + SIGNAL_GRACE;
+        let term_deadline = std::cmp::min(Instant::now() + SIGNAL_GRACE, total);
         match wait_group_empty(pgid, child, term_deadline) {
             GroupStatus::Empty => {
                 evidence.push("group-empty after SIGTERM".to_string());
@@ -1003,9 +1519,16 @@ mod run {
                 false
             }
             GroupStatus::Present => {
-                evidence.push("group survived SIGTERM; escalating to SIGKILL".to_string());
+                if Instant::now() >= total {
+                    evidence.push(
+                        "total deadline expired during SIGTERM grace; escalating without grace"
+                            .to_string(),
+                    );
+                } else {
+                    evidence.push("group survived SIGTERM; escalating to SIGKILL".to_string());
+                }
                 signal_group(pgid, libc::SIGKILL, evidence);
-                let kill_deadline = Instant::now() + SIGNAL_GRACE;
+                let kill_deadline = std::cmp::min(Instant::now() + SIGNAL_GRACE, total);
                 let final_status = wait_group_empty(pgid, child, kill_deadline);
                 evidence.push(format!(
                     "group after SIGKILL: {}",
@@ -1032,7 +1555,19 @@ mod run {
     /// Read available data on a nonblocking pipe fd, bounded per event so
     /// one chatty stream cannot starve the deadline, escalation checks or
     /// the sibling stream. Returns false once EOF is reached.
-    fn drain(pipe: &mut PipeState, combined: &mut usize, cap: usize) -> bool {
+    /// What one drain slice proved about its fd. Errors are explicit
+    /// evidence, never EOF: only a 0-byte read proves every writer
+    /// closed the pipe.
+    enum Drain {
+        /// Drained for this event (more may arrive).
+        Progress,
+        /// EOF: every writer (incl. descendants) closed it.
+        Eof,
+        /// The fd failed with errno captured at the instant.
+        Failed(std::io::Error),
+    }
+
+    fn drain(pipe: &mut PipeState, combined: &mut usize, cap: usize) -> Drain {
         let mut chunk = [0u8; 8192];
         let mut served = 0usize;
         while served < DRAIN_PER_EVENT_CAP {
@@ -1047,18 +1582,18 @@ mod run {
                 continue;
             }
             if n == 0 {
-                return false; // EOF: every writer (incl. descendants) closed it.
+                return Drain::Eof;
             }
             let err = std::io::Error::last_os_error();
             if err.kind() == std::io::ErrorKind::WouldBlock {
-                return true; // EAGAIN: drained for this event.
+                return Drain::Progress; // EAGAIN: drained for this event.
             }
             if err.kind() == std::io::ErrorKind::Interrupted {
                 continue;
             }
-            return false; // EIO and friends: treat as closed-with-error.
+            return Drain::Failed(err); // EIO and friends: explicit error.
         }
-        true
+        Drain::Progress
     }
 
     fn failure_tail(bytes: &[u8]) -> String {
@@ -1081,7 +1616,25 @@ mod run {
         Ok(())
     }
 
-    pub fn run_probe(attempt: &ProbeAttempt, budget: Duration) -> ProbeOutcome {
+    /// Run `cmd` bounded by ONE absolute work deadline inside ONE
+    /// absolute total deadline. `work_end` bounds the leader's own work
+    /// (drain, post-exit grace); `total` bounds everything including
+    /// escalation, reap and the unconditional stop — no phase mints a
+    /// fresh allowance, and cuts against `total` are recorded instead of
+    /// overrun. Refuses before spawning when no work remains.
+    pub fn run_probe(attempt: &ProbeAttempt, work_end: Instant, total: Instant) -> ProbeOutcome {
+        // No-positive-work budgets refuse before spawning (isolation and
+        // a previous probe may have consumed the window already).
+        if Instant::now() >= work_end {
+            return ProbeOutcome {
+                run: ProbeRun::TimedOut {
+                    evidence: "no remaining work budget; not spawning".to_string(),
+                },
+                cleanup_verified: true,
+                post_exit_cleanup: None,
+                unreaped: None,
+            };
+        }
         let mut command = Command::new(attempt.executable);
         command
             .args(attempt.argv)
@@ -1102,6 +1655,7 @@ mod run {
                     run: ProbeRun::SpawnFailed(format!("spawn failed: {err}")),
                     cleanup_verified: true,
                     post_exit_cleanup: None,
+                    unreaped: None,
                 };
             }
         };
@@ -1120,16 +1674,27 @@ mod run {
         }
         if !cleanup_verified {
             // Nonblocking setup failed: draining could block, so fail
-            // closed instead of probing further.
-            escalate_group(pgid, &mut child, &mut evidence);
+            // closed instead of probing further. The reap is bounded by
+            // the total — never an unbounded wait — and an unconfirmed
+            // reap crosses in `unreaped` instead of dropping.
+            escalate_group(pgid, &mut child, &mut evidence, total);
             let _ = child.kill();
-            let _ = child.wait();
+            let reap_end = std::cmp::min(Instant::now() + REAP_GRACE, total);
+            while child.try_wait().ok().flatten().is_none() && Instant::now() < reap_end {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let unreaped = if child.try_wait().ok().flatten().is_some() {
+                None
+            } else {
+                Some(child)
+            };
             return ProbeOutcome {
                 run: ProbeRun::TimedOut {
                     evidence: evidence.join("; "),
                 },
                 cleanup_verified,
                 post_exit_cleanup: None,
+                unreaped,
             };
         }
         let mut pipes = [
@@ -1147,17 +1712,15 @@ mod run {
             },
         ];
         let mut combined = 0usize;
+        // Stream errors fail the probe (never EOF): the first one stops
+        // the drain with its errno preserved.
+        let mut helper_error: Option<(&'static str, String)> = None;
 
-        let deadline = Instant::now() + budget;
-        // Unconditional final bound: budget, plus the worst-case escalation
-        // chain (post-exit grace, TERM wait, KILL wait), reap, and margin.
-        // No child behavior can keep the probe alive past this.
-        let hard_stop = deadline
-            + POST_EXIT_GRACE
-            + SIGNAL_GRACE
-            + SIGNAL_GRACE
-            + REAP_GRACE
-            + HARD_STOP_MARGIN;
+        let deadline = work_end;
+        // Unconditional final bound IS the caller's total deadline, not a
+        // second allowance: no child behavior and no escalation step may
+        // outlive it; cuts are recorded instead.
+        let hard_stop = total;
         let mut leader_exited: Option<ExitStatus> = None;
         let mut exit_deadline: Option<Instant> = None;
         let mut escalated = false;
@@ -1170,7 +1733,7 @@ mod run {
                 && let Ok(Some(status)) = child.try_wait()
             {
                 leader_exited = Some(status);
-                exit_deadline = Some(Instant::now() + POST_EXIT_GRACE);
+                exit_deadline = Some(std::cmp::min(Instant::now() + POST_EXIT_GRACE, total));
             }
 
             if pipes.iter().all(|pipe| !pipe.open) {
@@ -1182,14 +1745,14 @@ mod run {
                 escalated = true;
                 evidence.push("unconditional hard stop reached".to_string());
                 cleanup_verified = false;
-                escalate_group(pgid, &mut child, &mut evidence);
+                escalate_group(pgid, &mut child, &mut evidence, total);
                 break;
             }
             if !escalated && (now >= deadline || exit_deadline.is_some_and(|d| now >= d)) {
                 escalated = true;
                 if now >= deadline && leader_exited.is_none() {
                     budget_expired = true;
-                    evidence.push(format!("leader still running after {budget:?} budget"));
+                    evidence.push("leader still running after its work window".to_string());
                 } else {
                     evidence.push(
                         "leader exited but pipes stayed open past the post-exit grace \
@@ -1197,7 +1760,7 @@ mod run {
                             .to_string(),
                     );
                 }
-                if !escalate_group(pgid, &mut child, &mut evidence) {
+                if !escalate_group(pgid, &mut child, &mut evidence, total) {
                     cleanup_verified = false;
                 }
             }
@@ -1253,16 +1816,33 @@ mod run {
                 continue;
             }
             if ready > 0 {
+                let mut stop = false;
                 for poll_fd in &poll_fds {
                     let Some(pipe) = pipes.iter_mut().find(|p| p.raw == poll_fd.fd) else {
                         continue;
                     };
                     let hangup = poll_fd.revents & (libc::POLLHUP | libc::POLLERR) != 0;
                     let readable = poll_fd.revents & libc::POLLIN != 0;
-                    if (readable || hangup) && !drain(pipe, &mut combined, super::PROBE_OUTPUT_CAP)
-                    {
-                        pipe.open = false;
+                    if !(readable || hangup) {
+                        continue;
                     }
+                    let stream = match pipe.stream {
+                        Stream::Stdout => "stdout",
+                        Stream::Stderr => "stderr",
+                    };
+                    match drain(pipe, &mut combined, super::PROBE_OUTPUT_CAP) {
+                        Drain::Eof => pipe.open = false,
+                        Drain::Progress => {}
+                        Drain::Failed(err) => {
+                            helper_error = Some((stream, format!("{err}")));
+                            let _ = child.kill();
+                            stop = true;
+                            break;
+                        }
+                    }
+                }
+                if stop {
+                    break;
                 }
             }
         }
@@ -1273,7 +1853,7 @@ mod run {
         // timeout. Reap it with a bounded wait; a leader that closed its
         // fds but keeps running is pathological and gets escalated.
         if leader_exited.is_none() {
-            let reap_deadline = Instant::now() + REAP_GRACE;
+            let reap_deadline = std::cmp::min(Instant::now() + REAP_GRACE, total);
             while leader_exited.is_none() && Instant::now() < reap_deadline {
                 if let Ok(Some(status)) = child.try_wait() {
                     leader_exited = Some(status);
@@ -1284,10 +1864,10 @@ mod run {
         }
         if leader_exited.is_none() {
             evidence.push("leader closed its pipes but did not exit; escalating".to_string());
-            if !escalate_group(pgid, &mut child, &mut evidence) {
+            if !escalate_group(pgid, &mut child, &mut evidence, total) {
                 cleanup_verified = false;
             }
-            let kill_deadline = Instant::now() + SIGNAL_GRACE;
+            let kill_deadline = std::cmp::min(Instant::now() + SIGNAL_GRACE, total);
             while leader_exited.is_none() && Instant::now() < kill_deadline {
                 if let Ok(Some(status)) = child.try_wait() {
                     leader_exited = Some(status);
@@ -1305,7 +1885,11 @@ mod run {
         // drain. Check the group after reaping the leader, riding out the
         // transient teardown statuses before deciding.
         if leader_exited.is_some() {
-            match wait_group_empty(pgid, &mut child, Instant::now() + POST_EOF_GROUP_GRACE) {
+            match wait_group_empty(
+                pgid,
+                &mut child,
+                std::cmp::min(Instant::now() + POST_EOF_GROUP_GRACE, total),
+            ) {
                 GroupStatus::Empty => {}
                 GroupStatus::Present => {
                     escalated = true;
@@ -1314,7 +1898,7 @@ mod run {
                          (stdio may be redirected); escalating"
                             .to_string(),
                     );
-                    if !escalate_group(pgid, &mut child, &mut evidence) {
+                    if !escalate_group(pgid, &mut child, &mut evidence, total) {
                         cleanup_verified = false;
                     }
                 }
@@ -1329,39 +1913,61 @@ mod run {
             }
         }
 
-        let mut output = Vec::new();
+        let mut stdout_bytes = Vec::new();
         let mut stderr_bytes = Vec::new();
         for pipe in pipes {
             match pipe.stream {
-                Stream::Stdout => output.extend_from_slice(&pipe.bytes),
-                Stream::Stderr => stderr_bytes.extend_from_slice(&pipe.bytes),
+                Stream::Stdout => stdout_bytes = pipe.bytes,
+                Stream::Stderr => stderr_bytes = pipe.bytes,
             }
         }
-        output.extend_from_slice(&stderr_bytes);
         let post_exit_cleanup = escalated.then(|| evidence.join("; "));
-        let run = match leader_exited {
-            Some(status) if status.success() && !budget_expired => ProbeRun::Completed { output },
-            Some(status) if budget_expired => {
-                evidence.push(format!(
-                    "leader was still running at the deadline; leader status after \
-                     cleanup: {status}"
-                ));
-                ProbeRun::TimedOut {
-                    evidence: evidence.join("; "),
-                }
+        // Custody on return: a leader that never became reapable crosses
+        // the boundary in `unreaped` instead of being dropped — even
+        // after every bounded escalation and reap attempt above.
+        let unreaped = match child.try_wait() {
+            Ok(Some(_)) => None,
+            Ok(None) => Some(child),
+            Err(err) => {
+                evidence.push(format!("final leader wait failed: {err}"));
+                cleanup_verified = false;
+                Some(child)
             }
-            Some(status) => ProbeRun::FailedExit {
-                stderr_tail: failure_tail(&stderr_bytes),
-                exit_code: status.to_string(),
-            },
-            None => ProbeRun::TimedOut {
-                evidence: evidence.join("; "),
+        };
+        let run = match helper_error {
+            // A stream read error fails the probe outright: output
+            // assembled around it is not evidence.
+            Some((stream, error)) => ProbeRun::HelperFailed { stream, error },
+            None => match leader_exited {
+                // Model parsers read stdout only; stderr feeds failure tails
+                // and honesty notes but never rows.
+                Some(status) if status.success() && !budget_expired => ProbeRun::Completed {
+                    stdout: stdout_bytes,
+                    stderr: stderr_bytes,
+                },
+                Some(status) if budget_expired => {
+                    evidence.push(format!(
+                        "leader was still running at the deadline; leader status after \
+                     cleanup: {status}"
+                    ));
+                    ProbeRun::TimedOut {
+                        evidence: evidence.join("; "),
+                    }
+                }
+                Some(status) => ProbeRun::FailedExit {
+                    stderr_tail: failure_tail(&stderr_bytes),
+                    exit_code: status.to_string(),
+                },
+                None => ProbeRun::TimedOut {
+                    evidence: evidence.join("; "),
+                },
             },
         };
         ProbeOutcome {
             run,
             cleanup_verified,
             post_exit_cleanup,
+            unreaped,
         }
     }
 }
@@ -1480,9 +2086,13 @@ mod tests {
             std::path::Path::new("/fixture/pi"),
             "cannot create private dir /tmp/x: denied".to_string(),
         );
-        assert_eq!(catalog.status, EnumerationStatus::IsolationFailed);
-        assert!(catalog.entries.is_empty());
-        assert!(catalog.note.as_deref().unwrap().contains("denied"));
+        assert_eq!(catalog.catalog.status, EnumerationStatus::IsolationFailed);
+        assert!(catalog.catalog.entries.is_empty());
+        assert!(catalog.catalog.note.as_deref().unwrap().contains("denied"));
+        // Wrapper custody: nothing spawned, nothing retained.
+        assert!(catalog.pending.is_empty());
+        assert!(catalog.retained_roots.is_empty());
+        assert!(catalog.cleanup_verified);
     }
 
     #[test]

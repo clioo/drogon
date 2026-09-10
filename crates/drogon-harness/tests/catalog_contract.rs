@@ -10,8 +10,9 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use drogon_harness::{
-    CatalogEntry, EnumerationStatus, HarnessId, HostCatalog, PROBE_OUTPUT_CAP, ProbeProvenance,
-    freshness_token, probe_host_catalog, probe_host_catalog_with_budget,
+    CatalogEntry, EnumerationStatus, HarnessId, HostCatalog, PROBE_OUTPUT_CAP,
+    PROBE_RESERVED_CLEANUP, ProbeProvenance, freshness_token, probe_host_catalog,
+    probe_host_catalog_with_budget,
 };
 
 // ---------------------------------------------------------------------
@@ -1256,6 +1257,12 @@ struct ChildReport {
     /// Retained registration failure evidence from the child (empty on a
     /// healthy run); any entry makes the run unverifiable.
     registration_failures: Vec<String>,
+    /// Probe custody evidence, settled by the child before reporting:
+    /// pids the probe still owned after its bounded settle (empty on a
+    /// healthy run; any entry makes the run unverifiable).
+    probe_pending_pids: Vec<u32>,
+    /// Whether the probe verified all descendant cleanup.
+    probe_cleanup_verified: bool,
 }
 
 fn write_child_report(dir: &Path, report: &ChildReport) {
@@ -1904,6 +1911,32 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
         }
     }
 
+    // Probe custody evidence from the child's settled wrapper: unreaped
+    // probe descendants or unverified probe cleanup fail the run closed,
+    // exactly like registration failures. Missing custody fields mean
+    // the child discarded the wrapper instead of settling it.
+    if let Some(value) = &report {
+        let pending = value
+            .get("probe_pending_pids")
+            .and_then(serde_json::Value::as_array);
+        let verified = value
+            .get("probe_cleanup_verified")
+            .and_then(serde_json::Value::as_bool);
+        match (pending, verified) {
+            (Some(pids), Some(true)) if pids.is_empty() => {}
+            (Some(pids), verified) => unverifiable.push(format!(
+                "probe left {} unreaped descendant(s): {:?} (cleanup verified={verified:?})",
+                pids.len(),
+                pids.iter().map(|pid| pid.to_string()).collect::<Vec<_>>()
+            )),
+            _ => unverifiable.push(
+                "result report missing probe custody evidence (probe_pending_pids / \
+                 probe_cleanup_verified)"
+                    .to_string(),
+            ),
+        }
+    }
+
     // A bounded helper whose own reap could not be confirmed is recorded
     // as unverifiable evidence — and gets one final bounded settle pass
     // here, because these helpers are OUR direct children: a final
@@ -2136,7 +2169,20 @@ fn pi_probe_enumerates_entries_with_provenance() {
     let bin = FixtureBin::new();
     let pi = bin.add("pi", &fake_pi(FAKE_PI_TABLE));
 
-    let catalog = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    // The wrapper is retained through reporting: custody and cleanup
+    // evidence are asserted, never silently discarded with `.catalog`.
+    let probe = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
     assert_eq!(catalog.harness, HarnessId::Pi);
     assert_eq!(catalog.status, EnumerationStatus::Enumerated);
     assert_eq!(catalog.entries.len(), 3);
@@ -2181,7 +2227,18 @@ fn pi_probe_auth_empty_answer_is_an_honest_empty_enumeration() {
         "pi",
         &fake_pi("No models available. Use /login to log into a provider via OAuth or API key.\n"),
     );
-    let catalog = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    let probe = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
     assert_eq!(catalog.status, EnumerationStatus::Enumerated);
     assert!(catalog.entries.is_empty());
     assert!(
@@ -2197,16 +2254,67 @@ fn pi_probe_malformed_output_is_parse_failed_with_a_bounded_sample() {
     let bin = FixtureBin::new();
     let body = "<!DOCTYPE html><html><body>oauth redirect</body></html>\n";
     let pi = bin.add("pi", &fake_pi(body));
-    let catalog = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    let probe = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
     assert_eq!(catalog.status, EnumerationStatus::ParseFailed);
-    let sample = catalog.note.expect("parse sample note");
+    let sample = catalog.note.clone().expect("parse sample note");
     assert!(sample.len() <= 240, "sample stays bounded: {sample}");
 }
 
 #[test]
 fn missing_executable_is_not_installed() {
-    let catalog = probe_host_catalog(HarnessId::Pi, Some(Path::new("/no/such/pi-here")));
+    let probe = probe_host_catalog(HarnessId::Pi, Some(Path::new("/no/such/pi-here")));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
     assert_eq!(catalog.status, EnumerationStatus::NotInstalled);
+}
+
+/// Refusal bodies (COMPILE-ONLY until reviewed: never executed here).
+/// A total at or below the reserved cleanup refuses BEFORE spawning:
+/// same TimedOut family as an exhausted probe, but the note proves
+/// refusal (no leader, no group, nothing to clean) instead of kill-path
+/// coverage. Short budgets that must exercise the kill path express
+/// their total as work PLUS the reserve (see the timed_out /
+/// continuous_producer fixtures) and are a different case.
+#[cfg(unix)]
+#[test]
+fn refused_budget_fails_closed_before_spawning() {
+    let bin = FixtureBin::new();
+    // A fixture that WOULD enumerate if spawned: refusal must not run it.
+    let pi = bin.add("pi", &fake_pi(FAKE_PI_TABLE));
+    for budget in [
+        Duration::ZERO,
+        Duration::from_millis(100),
+        PROBE_RESERVED_CLEANUP,
+    ] {
+        let probe = probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), budget);
+        assert_eq!(probe.catalog.status, EnumerationStatus::TimedOut);
+        assert!(probe.catalog.entries.is_empty());
+        let note = probe.catalog.note.as_ref().expect("refusal note");
+        assert!(note.contains("refused before spawning"), "{note}");
+        assert!(probe.pending.is_empty());
+        assert!(probe.retained_roots.is_empty());
+        assert!(probe.cleanup_verified);
+    }
 }
 
 #[cfg(unix)]
@@ -2246,7 +2354,51 @@ fn fixture_handshake_sh(pid: &str) -> String {
 /// Child-mode body shared by the adversarial catalog probes: run the
 /// fixture probe, count the ledger the fixture scripts appended, and
 /// write the report the parent will assert on.
+/// Settle a probe result the child owns: bounded reap of pending
+/// handles (the child's own children) within an absolute deadline, then
+/// hand over the catalog plus custody evidence for the report. Surviving
+/// pids cross as evidence — the parent fails closed on them — instead
+/// of dropped handles.
+#[cfg(unix)]
+fn settle_probe(
+    probe: drogon_harness::CatalogProbe,
+    deadline: Instant,
+) -> (drogon_harness::HostCatalog, Vec<u32>, bool, Vec<String>) {
+    let drogon_harness::CatalogProbe {
+        catalog,
+        pending,
+        retained_roots: _,
+        cleanup_verified,
+        unverifiable,
+    } = probe;
+    // Retained roots live under the parent-owned fixture dir; the parent
+    // sees them itself, so only pids and flags cross in the report.
+    let mut pending_pids = Vec::new();
+    for mut held in pending {
+        let pid = held.child.id();
+        // Our own child: reap if exited, else TERM/KILL boundedly.
+        let reaped = match held.child.try_wait() {
+            Ok(Some(_)) => true,
+            Ok(None) => {
+                let _ = held.child.kill();
+                while held.child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
+                    sleep_capped(deadline, Duration::from_millis(2));
+                }
+                held.child.try_wait().ok().flatten().is_some()
+            }
+            Err(_) => false,
+        };
+        if !reaped {
+            pending_pids.push(pid);
+        }
+    }
+    (catalog, pending_pids, cleanup_verified, unverifiable)
+}
+
 fn child_probe_and_report(pi_script: &str, budget: Duration) {
+    // Settle probe custody through reporting: the wrapper is retained
+    // (never `.catalog`-and-discard) and pending handles are reaped
+    // boundedly before the report is written.
     let dir = fixture_dir_from_env();
     let mut registration_failures: Vec<String> = Vec::new();
     // The handshake is READ here, not assumed: when the parent is not
@@ -2273,12 +2425,22 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
                 declared_children: 0,
                 registered_children: 0,
                 registration_failures: vec![reason],
+                // Refused before probing: no probe custody exists.
+                probe_pending_pids: Vec::new(),
+                probe_cleanup_verified: true,
             },
         );
         return;
     }
     let pi = add_fixture(&dir, "pi", pi_script);
-    let catalog = probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), budget);
+    let probe = probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), budget);
+    // Settle within a small absolute bound: the probe normally owns
+    // nothing by now (its leader reaped itself); anything left is
+    // failure evidence for the report, never a dropped handle.
+    let settle_deadline = Instant::now() + Duration::from_secs(2);
+    let (catalog, probe_pending_pids, probe_cleanup_verified, probe_unverifiable) =
+        settle_probe(probe, settle_deadline);
+    registration_failures.extend(probe_unverifiable);
     let (entries, _) = read_ledger(&dir);
     // Independent evidence: declared comes from the fixtures' OWN
     // declaration channel (one pid per spawned fixture), registered
@@ -2299,6 +2461,8 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
             declared_children: declared,
             registered_children: entries.len(),
             registration_failures,
+            probe_pending_pids,
+            probe_cleanup_verified,
         },
     );
 }
@@ -2315,7 +2479,10 @@ fn timed_out_probe_is_killed_within_its_budget() {
                  exec sleep 60\n",
                 fixture_handshake_sh("$$")
             ),
-            Duration::from_millis(300),
+            // Total budget as work PLUS the reserved cleanup: a short
+            // work window that still starts the fixture (kill-path
+            // coverage), never a pre-spawn refusal.
+            Duration::from_millis(300) + PROBE_RESERVED_CLEANUP,
         );
         return;
     }
@@ -2348,7 +2515,18 @@ fn opencode_probe_parses_provider_id_lines() {
         "opencode",
         &fake_opencode("opencode/claude-sonnet-5\nopencode/glm-5\nbare-id\n"),
     );
-    let catalog = probe_host_catalog(HarnessId::Opencode, Some(&opencode));
+    let probe = probe_host_catalog(HarnessId::Opencode, Some(&opencode));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
     assert_eq!(catalog.status, EnumerationStatus::Enumerated);
     assert_eq!(catalog.entries.len(), 3);
     assert_eq!(catalog.entries[0].provider.as_deref(), Some("opencode"));
@@ -2364,7 +2542,18 @@ fn opencode_probe_parses_provider_id_lines() {
 fn claude_has_no_enumeration_surface_and_reports_version_only() {
     let bin = FixtureBin::new();
     let claude = bin.add("claude", "#!/bin/sh\necho '2.1.266 (Claude Code)'\n");
-    let catalog = probe_host_catalog(HarnessId::Claude, Some(&claude));
+    let probe = probe_host_catalog(HarnessId::Claude, Some(&claude));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
     assert_eq!(catalog.status, EnumerationStatus::UnsupportedSurface);
     assert!(catalog.entries.is_empty());
     assert_eq!(
@@ -2380,19 +2569,43 @@ fn claude_has_no_enumeration_surface_and_reports_version_only() {
 fn codex_and_antigravity_report_unsupported_surface() {
     let bin = FixtureBin::new();
     let codex = bin.add("codex", "#!/bin/sh\necho 'codex-cli 1.2.3'\n");
-    let catalog = probe_host_catalog(HarnessId::Codex, Some(&codex));
+    let probe = probe_host_catalog(HarnessId::Codex, Some(&codex));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
     assert_eq!(catalog.status, EnumerationStatus::UnsupportedSurface);
 
     let absent = probe_host_catalog(HarnessId::Antigravity, None);
-    assert_eq!(absent.status, EnumerationStatus::NotInstalled);
+    assert!(absent.pending.is_empty());
+    assert!(absent.cleanup_verified);
+    assert_eq!(absent.catalog.status, EnumerationStatus::NotInstalled);
 }
 
 #[test]
 fn freshness_token_changes_when_the_model_set_or_version_changes() {
     let bin = FixtureBin::new();
     let pi = bin.add("pi", &fake_pi(FAKE_PI_TABLE));
-    let catalog = probe_host_catalog(HarnessId::Pi, Some(&pi));
-    let token = freshness_token(&catalog);
+    let probe = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
+    let token = freshness_token(catalog);
     assert!(
         token.starts_with("pi|0.85.1|"),
         "token carries executable and version: {token}"
@@ -2414,7 +2627,7 @@ fn freshness_token_changes_when_the_model_set_or_version_changes() {
             });
             entries
         },
-        ..catalog.clone()
+        ..probe.catalog.clone()
     };
     assert_ne!(token, freshness_token(&changed));
 
@@ -2422,9 +2635,9 @@ fn freshness_token_changes_when_the_model_set_or_version_changes() {
     let upgraded = HostCatalog {
         provenance: Some(ProbeProvenance {
             version: Some("0.86.0".to_string()),
-            ..catalog.provenance.clone().expect("provenance")
+            ..probe.catalog.provenance.clone().expect("provenance")
         }),
-        ..catalog.clone()
+        ..probe.catalog.clone()
     };
     assert_ne!(token, freshness_token(&upgraded));
 }
@@ -2444,7 +2657,18 @@ fn probe_output_beyond_the_cap_is_drained_not_kept() {
     let bin = FixtureBin::new();
     let pi = bin.add("pi", &fake_pi(&body));
     let start = Instant::now();
-    let catalog = probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), Duration::from_secs(20));
+    let probe = probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), Duration::from_secs(20));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
     assert_eq!(catalog.status, EnumerationStatus::Enumerated);
     assert!(!catalog.entries.is_empty());
     assert!(
@@ -2597,7 +2821,10 @@ fn continuous_producer_respects_the_deadline_and_is_fully_reaped() {
                  while :; do echo 'provider      model                            context  max-out  thinking  images'; done\n",
                 fixture_handshake_sh("$$")
             ),
-            Duration::from_millis(300),
+            // Total budget as work PLUS the reserved cleanup: a short
+            // work window that still starts the fixture (kill-path
+            // coverage), never a pre-spawn refusal.
+            Duration::from_millis(300) + PROBE_RESERVED_CLEANUP,
         );
         return;
     }
@@ -2631,10 +2858,21 @@ fn nonzero_exit_is_probe_failed_never_model_rows() {
          echo 'token refresh failed' >&2\n\
          exit 1\n",
     );
-    let catalog = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    let probe = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
     assert_eq!(catalog.status, EnumerationStatus::ProbeFailed);
     assert!(catalog.entries.is_empty(), "no rows from a failed probe");
-    let note = catalog.note.expect("failure note");
+    let note = catalog.note.clone().expect("failure note");
     assert!(note.contains("exited"), "{note}");
     assert!(note.contains("token refresh failed"), "{note}");
 }
@@ -2674,7 +2912,18 @@ fn isolation_setup_failure_fails_closed_without_probing() {
         return;
     }
     let fixture = PathBuf::from(std::env::var("DROGON_CATALOG_TEST_FIXTURE").unwrap());
-    let catalog = probe_host_catalog(HarnessId::Pi, Some(&fixture));
+    let probe = probe_host_catalog(HarnessId::Pi, Some(&fixture));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
     assert_eq!(
         catalog.status,
         EnumerationStatus::IsolationFailed,
@@ -3283,6 +3532,9 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
                 declared_children: ledger.declared,
                 registered_children: ledger.registered,
                 registration_failures: ledger.failures,
+                // No probe runs here: custody evidence is trivially clean.
+                probe_pending_pids: Vec::new(),
+                probe_cleanup_verified: true,
             },
         );
         return;
@@ -3334,6 +3586,9 @@ fn supervisor_term_resistant_child_is_forced_after_recheck() {
                 declared_children: ledger.declared,
                 registered_children: ledger.registered,
                 registration_failures: ledger.failures,
+                // No probe runs here: custody evidence is trivially clean.
+                probe_pending_pids: Vec::new(),
+                probe_cleanup_verified: true,
             },
         );
         return;
@@ -3403,6 +3658,9 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
                 declared_children: ledger.declared,
                 registered_children: ledger.registered,
                 registration_failures: ledger.failures,
+                // No probe runs here: custody evidence is trivially clean.
+                probe_pending_pids: Vec::new(),
+                probe_cleanup_verified: true,
             },
         );
         return;
@@ -3472,6 +3730,9 @@ fn supervisor_distinguishes_product_cleanup_from_rescue() {
                 declared_children: ledger.declared,
                 registered_children: ledger.registered,
                 registration_failures: ledger.failures,
+                // No probe runs here: custody evidence is trivially clean.
+                probe_pending_pids: Vec::new(),
+                probe_cleanup_verified: true,
             },
         );
         return;
@@ -3552,6 +3813,9 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
                 declared_children: ledger.declared,
                 registered_children: ledger.registered,
                 registration_failures: ledger.failures,
+                // No probe runs here: custody evidence is trivially clean.
+                probe_pending_pids: Vec::new(),
+                probe_cleanup_verified: true,
             },
         );
         return;
