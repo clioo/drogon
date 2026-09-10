@@ -1,7 +1,7 @@
 // MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 // src/renderer/src/components/task-page/ProviderFilters.tsx (R17-B: the
 // Jira arm joins the GitHub filters — the fork switches the filter row per
-// source; Linear/GitLab stay unported).
+// source; the Linear source carries its own filter row inside its content).
 import { TaskPageGitHubFilters } from "./github/Filters";
 import { TaskPageJiraFilters } from "../jira/jira-filters";
 import type { TaskPageModelProps } from "../task-page-model";

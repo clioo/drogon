@@ -19,7 +19,7 @@ function open(state = DEFAULT_WORKSPACE_OPTIONS_STATE) {
   return change;
 }
 
-test.each(["GitHub ticket", "Linear issue", "Jira issue", "Pull request", "Automation", "Notes", "Ports", "Agent activity"])("exposes the source %s property as a real checkbox", (name) => {
+test.each(["GitHub ticket", "Linear issue", "Jira issue", "PR/MR link", "Automation", "Notes", "Ports", "Agent activity"])("exposes the source %s property as a real checkbox", (name) => {
   const change = open();
   fireEvent.click(screen.getByRole("menuitemcheckbox", { name }));
   expect(change).toHaveBeenCalledTimes(1);

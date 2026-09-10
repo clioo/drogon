@@ -1,10 +1,11 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/task-page/TaskPage.tsx and its stage hooks
    (use-task-page-*), adapted to this repo's contracts: Orca's zustand
-   multi-provider page becomes a props-driven GitHub-only page over the
-   tasks.* RPCs. The ported task-page/ components render the model this
-   file assembles; row selection keeps the journey-J6 behavior (start a
-   worktree for the issue, then open its terminal). */
+   multi-provider page becomes a props-driven page over the tasks.* RPCs
+   (GitHub), the jira.v1 bridge (Jira) and the renderer-local fixture
+   provider (Linear). The ported task-page/ components render the model
+   this file assembles; row selection keeps the journey-J6 behavior (start
+   a worktree for the issue, then open its terminal). */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -15,6 +16,17 @@ import {
 } from "../../../../shared/tasks-contract";
 import type { Session } from "../../../../shared/session-contract";
 import type { ProjectGroup } from "../shell/project-adapter";
+import { windowProjectBridge } from "../shell/project-adapter";
+import type { IssueDetails, WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
+import {
+  isLinearConnected,
+  readLinearIssues,
+} from "./linear/linear-connection";
+import {
+  linkLinearIssueToWorktree,
+  startWorkspaceFromLinearIssue,
+  unlinkLinearIssueFromWorktree,
+} from "./linear/linear-start";
 import type {
   JiraBridge,
   JiraConnectionStatus,
@@ -228,9 +240,9 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose, jiraBri
   );
   const [githubTaskKind, setGithubTaskKind] = useState<GitHubTaskKind>("issues");
   // #346: source deep-linked from the sidebar provider chips. The raw
-  // request survives even when the source is not renderable yet (Jira
-  // arrives with R17-B), so it selects as soon as the option exists;
-  // until then the resolution falls back to the default source.
+  // request survives even when the source is not renderable yet, so it
+  // selects as soon as the option exists; until then the resolution falls
+  // back to the default source.
   const [requestedTaskSource, setRequestedTaskSource] =
     useState<TaskSource | null>(null);
   useEffect(() => {
@@ -478,6 +490,172 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose, jiraBri
   }, [jiraList]);
   // handleUseJiraItem lives below next to refreshLinks (it opens the
   // started worktree's terminal and refreshes the issue badges).
+
+  // --- Linear source state (renderer-local fixture provider: no daemon
+  // RPC, so connection + issues come from localStorage and start/link/
+  // unlink go through the durable project bridge like every surface). ---
+  const [linearConnectedState, setLinearConnectedState] = useState(() =>
+    isLinearConnected(),
+  );
+  const [linearConnectOpen, setLinearConnectOpen] = useState(false);
+  const [linearRefreshNonce, setLinearRefreshNonce] = useState(0);
+  const [linearSearchInput, setLinearSearchInput] = useState("");
+  const [linearLinksState, setLinearLinksState] = useState<WorktreeIssueLink[]>([]);
+  const [linearBusyKey, setLinearBusyKey] = useState<string | null>(null);
+  const refreshLinearStatus = useCallback(() => {
+    setLinearConnectedState(isLinearConnected());
+    setLinearRefreshNonce((nonce) => nonce + 1);
+  }, []);
+  const linearIssues = useMemo(
+    () =>
+      taskSource === "linear" && linearConnectedState
+        ? readLinearIssues()
+        : [],
+    // readLinearIssues re-reads the local collection per nonce bump.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [taskSource, linearConnectedState, linearRefreshNonce],
+  );
+  const refreshLinearLinks = useCallback(() => {
+    if (projectId === null || typeof window === "undefined") {
+      setLinearLinksState([]);
+      return;
+    }
+    const projectBridge = windowProjectBridge(window.drogon);
+    if (typeof projectBridge.worktreeIssueLinks !== "function") {
+      setLinearLinksState([]);
+      return;
+    }
+    void projectBridge
+      .worktreeIssueLinks({ projectId })
+      .then((result) => {
+        if (result.ok) {
+          setLinearLinksState(
+            result.result.links.filter((link) => link.provider === "linear"),
+          );
+        }
+      })
+      .catch(() => {});
+  }, [projectId]);
+  useEffect(() => {
+    if (taskSource === "linear") refreshLinearLinks();
+  }, [taskSource, refreshLinearLinks, linearRefreshNonce]);
+  const linearWorktrees = useMemo(
+    () =>
+      (groups.find((group) => group.project.id === projectId)?.worktrees ?? []).map(
+        (worktree) => ({
+          id: worktree.id,
+          label:
+            worktree.title?.trim() || worktree.branch || worktree.id.slice(0, 8),
+        }),
+      ),
+    [groups, projectId],
+  );
+  const handleRefreshLinearIssues = useCallback(() => {
+    setLinearRefreshNonce((nonce) => nonce + 1);
+    refreshLinearLinks();
+  }, [refreshLinearLinks]);
+  const handleStartLinearItem = useCallback(
+    (issue: IssueDetails) => {
+      if (projectId === null) {
+        toast.error("Select a project in the Tasks page before starting a Linear issue.");
+        return;
+      }
+      if (typeof window === "undefined") return;
+      const key = `start:${issue.identifier.toUpperCase()}`;
+      setLinearBusyKey(key);
+      void startWorkspaceFromLinearIssue(windowProjectBridge(window.drogon), {
+        projectId,
+        issue,
+      })
+        .then((outcome) => {
+          if (!outcome.ok) {
+            toast.error(outcome.error);
+            return;
+          }
+          if (!outcome.linked) {
+            toast.error("Worktree created, but the Linear link is unavailable.");
+          }
+          refreshLinearLinks();
+          onOpenTerminal(outcome.workspaceId);
+        })
+        .catch(() => {
+          toast.error("Could not start the Linear issue.");
+        })
+        .finally(() => {
+          setLinearBusyKey((current) => (current === key ? null : current));
+        });
+    },
+    [projectId, refreshLinearLinks, onOpenTerminal],
+  );
+  const handleLinkLinearItem = useCallback(
+    (issue: IssueDetails, worktreeId: string) => {
+      if (typeof window === "undefined") return;
+      const key = `link:${issue.identifier.toUpperCase()}`;
+      setLinearBusyKey(key);
+      void linkLinearIssueToWorktree(windowProjectBridge(window.drogon), {
+        worktreeId,
+        issue,
+      })
+        .then((outcome) => {
+          if (!outcome.ok) {
+            toast.error(outcome.error);
+            return;
+          }
+          toast.success(`Linked ${issue.identifier}.`);
+          refreshLinearLinks();
+        })
+        .catch(() => {
+          toast.error("Could not link the Linear issue.");
+        })
+        .finally(() => {
+          setLinearBusyKey((current) => (current === key ? null : current));
+        });
+    },
+    [refreshLinearLinks],
+  );
+  const handleUnlinkLinearItem = useCallback(
+    (issue: IssueDetails) => {
+      if (typeof window === "undefined") return;
+      const link = linearLinksState.find(
+        (entry) =>
+          entry.identifier.toUpperCase() === issue.identifier.toUpperCase(),
+      );
+      if (!link) return;
+      const key = `unlink:${issue.identifier.toUpperCase()}`;
+      setLinearBusyKey(key);
+      void unlinkLinearIssueFromWorktree(windowProjectBridge(window.drogon), {
+        worktreeId: link.worktreeId,
+      })
+        .then((outcome) => {
+          if (!outcome.ok) {
+            toast.error(outcome.error);
+            return;
+          }
+          toast.success(`Unlinked ${issue.identifier}.`);
+          refreshLinearLinks();
+        })
+        .catch(() => {
+          toast.error("Could not unlink the Linear issue.");
+        })
+        .finally(() => {
+          setLinearBusyKey((current) => (current === key ? null : current));
+        });
+    },
+    [linearLinksState, refreshLinearLinks],
+  );
+  const onOpenLinearWorktree = useCallback(
+    (worktreeId: string) => {
+      for (const group of groups) {
+        const worktree = group.worktrees.find((entry) => entry.id === worktreeId);
+        if (worktree) {
+          onOpenTerminal(worktree.workspaceId);
+          return;
+        }
+      }
+      toast.error("That worktree is no longer in this project.");
+    },
+    [groups, onOpenTerminal],
+  );
 
   const refreshGroups = useCallback(() => {
     const next = loadGroups();
@@ -825,9 +1003,15 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose, jiraBri
     // project display name is only the pre-resolve fallback. The Jira
     // branch is the fork's account-backed summary
     // (task-source-context-summary.ts getAccountBackedTaskSourceSummary):
-    // Jira · Local · <site displayName|siteUrl|Current account>.
+    // Jira · Local · <site displayName|siteUrl|Current account>. The
+    // Linear branch is the same shape over the local fixture collection.
     taskSourceContextSummary:
-      taskSource === "jira"
+      taskSource === "linear"
+        ? {
+            label: ["Linear", "Local", `${linearIssues.length} issues`].join(" · "),
+            title: ["Linear source", "Host: Local"].join(" · "),
+          }
+        : taskSource === "jira"
         ? {
             label: [
               "Jira",
@@ -960,6 +1144,27 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose, jiraBri
     writeJiraClipboardText: writeJiraClipboardTextOpener,
     onJiraIssuePatched,
     jiraCreationDialog,
+
+    // The Linear source surface (renderer-local fixture provider).
+    linearConnected: linearConnectedState,
+    linearConnectOpen,
+    setLinearConnectOpen,
+    refreshLinearStatus,
+    linearIssues,
+    linearLoading: false,
+    linearError: null,
+    linearSearchInput,
+    setLinearSearchInput,
+    handleRefreshLinearIssues,
+    linearLinks: linearLinksState,
+    linearWorktrees,
+    linearBusyKey,
+    handleStartLinearItem,
+    handleLinkLinearItem,
+    handleUnlinkLinearItem,
+    onOpenLinearWorktree,
+    openLinearIssueUrl: openJiraIssueUrlOpener,
+    writeLinearClipboardText: writeJiraClipboardTextOpener,
   };
 
   return <TaskPageSurface model={model} />;

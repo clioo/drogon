@@ -13,6 +13,7 @@ import { getRepoBackedTaskEmptyState } from "./task-page-empty-state";
 import { GITHUB_TASK_GRID_CLASS } from "./task-page-source-context";
 import { TooltipProvider } from "./ui/tooltip";
 import { jiraSurfaceModelDefaults } from "./jira/jira-surface-defaults";
+import { linearSurfaceModelDefaults } from "./linear/linear-surface-defaults";
 import type { TaskPageModel } from "./task-page-model";
 
 afterEach(cleanup);
@@ -71,6 +72,7 @@ function baseModel(overrides: Partial<TaskPageModel> = {}): TaskPageModel {
     startBusyNumber: null,
     githubListScrollRef: { current: null },
     ...jiraSurfaceModelDefaults(),
+    ...linearSurfaceModelDefaults(),
     ...overrides,
   };
 }

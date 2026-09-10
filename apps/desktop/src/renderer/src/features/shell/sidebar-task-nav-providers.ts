@@ -4,8 +4,9 @@
 // settings plus preflight/Linear status, and keeps GitHub and Jira
 // unconditionally visible; Drogon has no visibleTaskProviders setting yet,
 // so the full provider list is the baseline, GitHub is gated on the gh auth
-// probe, Jira on a connected site (jira.status), and GitLab/Linear stay
-// dark until an integration exists to gate them.
+// probe, Jira on a connected site (jira.status), Linear on the local
+// fixture connection, and GitLab stays dark until an integration exists
+// to gate it.
 import type { TaskSource } from "../tasks/task-source-navigation";
 
 export type TaskProvider = TaskSource;
