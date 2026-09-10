@@ -197,7 +197,8 @@ fn approved_snapshot_survives_a_later_edit_and_refuses_it() {
     let approved = recipe::load_recipe(dir.path(), "pair").unwrap();
 
     let staged =
-        execution::stage_approved_snapshot(dir.path(), "pair", &approved.content_hash).unwrap();
+        execution::stage_approved_snapshot(dir.path(), None, "pair", &approved.content_hash)
+            .unwrap();
     assert_eq!(staged.recipe_bytes, approved.source.as_bytes());
 
     // Another editor lands B. The staged bytes still equal A …
@@ -206,17 +207,18 @@ fn approved_snapshot_survives_a_later_edit_and_refuses_it() {
     assert_eq!(staged.recipe_bytes, approved.source.as_bytes());
 
     // … and pre-spawn verification refuses to launch B under A's approval.
-    let err = execution::verify_staged_fresh(dir.path(), &staged).unwrap_err();
+    let err = execution::verify_staged_fresh(dir.path(), None, &staged).unwrap_err();
     assert_eq!(err.code, "invalid_argument");
     assert!(err.message.contains("re-approve"));
 
     // Materializing before the edit pins A's bytes to the run dir.
     write_recipe(dir.path(), "pair", &two_step());
     let staged =
-        execution::stage_approved_snapshot(dir.path(), "pair", &approved.content_hash).unwrap();
+        execution::stage_approved_snapshot(dir.path(), None, "pair", &approved.content_hash)
+            .unwrap();
     let snapshot_arg = dir
         .path()
-        .join(".mentu/snapshots/run-aaa/pair.json")
+        .join(".mentu/recipes/.snapshots/run-aaa/pair.json")
         .to_string_lossy()
         .into_owned();
     let materialized = execution::materialize_snapshot(
@@ -233,7 +235,7 @@ fn approved_snapshot_survives_a_later_edit_and_refuses_it() {
         "execution content remains A after the file moved to B"
     );
     assert!(
-        execution::verify_staged_fresh(dir.path(), &staged).is_err(),
+        execution::verify_staged_fresh(dir.path(), None, &staged).is_err(),
         "launch under B must refuse, never silently execute it"
     );
 }
@@ -245,8 +247,15 @@ fn snapshot_keeps_unicode_paths_and_relative_resources() {
     let (_serial, _path_dir, _path) = isolate_path_with_executables(&["codex"]);
     let dir = workspace();
     let id = "equipo compuesto";
-    fs::create_dir_all(dir.path().join("recursos")).unwrap();
-    fs::write(dir.path().join("recursos/guía.md"), "contenido\n").unwrap();
+    // prompt_file resources are rooted at the workspace's .mentu/prompts
+    // (the only location the pinned runtime reads); Unicode paths flow
+    // through the prompts-relative layout unchanged.
+    fs::create_dir_all(dir.path().join(".mentu/prompts/recursos")).unwrap();
+    fs::write(
+        dir.path().join(".mentu/prompts/recursos/guía.md"),
+        "contenido\n",
+    )
+    .unwrap();
     let source = two_step().replace(
         r#""prompt_file":"docs/build.md""#,
         r#""prompt_file":"recursos/guía.md""#,
@@ -254,11 +263,12 @@ fn snapshot_keeps_unicode_paths_and_relative_resources() {
     write_recipe(dir.path(), id, &source);
     let loaded = recipe::load_recipe(dir.path(), id).unwrap();
 
-    let staged = execution::stage_approved_snapshot(dir.path(), id, &loaded.content_hash).unwrap();
+    let staged =
+        execution::stage_approved_snapshot(dir.path(), None, id, &loaded.content_hash).unwrap();
     assert_eq!(staged.resources.len(), 1);
     let snapshot_arg = dir
         .path()
-        .join(".mentu/snapshots/run-uni/pair.json")
+        .join(".mentu/recipes/.snapshots/run-uni/pair.json")
         .to_string_lossy()
         .into_owned();
     let materialized = execution::materialize_snapshot(
@@ -286,7 +296,7 @@ fn snapshot_keeps_unicode_paths_and_relative_resources() {
     // at the workspace-relative layout.
     let mirrored = materialized.dir.join("recursos/guía.md");
     assert_eq!(fs::read(&mirrored).unwrap(), b"contenido\n");
-    execution::verify_staged_fresh(dir.path(), &staged).unwrap();
+    execution::verify_staged_fresh(dir.path(), None, &staged).unwrap();
 }
 
 /// Acceptance 5: a supported selection stages with its exact backend/model;
@@ -298,7 +308,7 @@ fn supported_selection_stages_exactly_unsupported_refuses_cleanly() {
     write_recipe(dir.path(), "pair", &two_step());
     let loaded = recipe::load_recipe(dir.path(), "pair").unwrap();
     let staged =
-        execution::stage_approved_snapshot(dir.path(), "pair", &loaded.content_hash).unwrap();
+        execution::stage_approved_snapshot(dir.path(), None, "pair", &loaded.content_hash).unwrap();
     // Shell-only agent list here is the codex review step with no model:
     // carried exactly, never substituted.
     assert_eq!(staged.steps.len(), 1);
@@ -312,11 +322,11 @@ fn supported_selection_stages_exactly_unsupported_refuses_cleanly() {
     .to_string();
     write_recipe(dir.path(), "bad", &bad);
     let hash = recipe::current_content_hash(dir.path(), "bad").unwrap();
-    let err = execution::stage_approved_snapshot(dir.path(), "bad", &hash).unwrap_err();
+    let err = execution::stage_approved_snapshot(dir.path(), None, "bad", &hash).unwrap_err();
     assert_eq!(err.code, execution::BACKEND_UNSUPPORTED_CODE);
     assert!(err.message.contains("opencode"), "{}", err.message);
     assert!(
-        !dir.path().join(".mentu/snapshots").exists(),
+        !dir.path().join(".mentu/recipes/.snapshots").exists(),
         "a refused selection stages no snapshot bytes"
     );
 }

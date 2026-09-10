@@ -28,9 +28,12 @@ export async function probeWorkspaceProperties({ page, worktree, output }) {
       assert.equal(reply.result.worktreeId, worktree.id);
     }
     await menu();
-    await page.getByRole("menuitemradio", { name: "Default", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: "Detailed", exact: true }).click();
     await page.keyboard.press("Escape");
-    for (const [groupBy, label] of [["none", "None"], ["repo", "Repo"], ["workspace-status", "Workspace status"], ["pr-status", "PR status"]]) {
+    // Labels follow main's reference-faithful WorkspaceOptionsMenuSections
+    // tables (workspace-options-state.ts): card-layout preset Detailed/Compact,
+    // group-by None/Project/Status/PR. Persisted ids are unchanged.
+    for (const [groupBy, label] of [["none", "None"], ["repo", "Project"], ["workspace-status", "Status"], ["pr-status", "PR"]]) {
       await menu();
       await page.getByRole("group", { name: "Group by", exact: true }).getByRole("menuitemradio", { name: label, exact: true }).click();
       await page.keyboard.press("Escape");
@@ -62,7 +65,7 @@ export async function probeWorkspaceProperties({ page, worktree, output }) {
     assert.deepEqual([...compact.worktreeCardProperties].sort(), ["status", "unread"]);
     checks.push("workspace-compact-applies-source-metadata-preset-not-only-density");
     await menu();
-    await page.getByRole("menuitemradio", { name: "Default", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: "Detailed", exact: true }).click();
     await page.keyboard.press("Escape");
     await card().getByText("ENG-123", { exact: true }).waitFor();
     await page.screenshot({ path: path.join(output, "workspace-properties-linked-issues.png"), animations: "disabled" });

@@ -263,7 +263,7 @@ pub enum Invocation<'a> {
 /// C03: `snapshot` carries the staged approved bytes for a fresh `Run`.
 /// When present the staged content is re-verified against the live
 /// workspace (refusing drift), materialized write-once under
-/// `.mentu/snapshots/<run id>/`, and the snapshot recipe path — never
+/// `.mentu/recipes/.snapshots/<run id>/`, and the snapshot recipe path — never
 /// the mutable recipe path — is passed to the runtime. `Resume` with a
 /// snapshot is refused: a resume re-enters runtime-side state, it does
 /// not start approved bytes.
@@ -301,7 +301,7 @@ pub fn launch_run(
                 "Staged snapshot names a different recipe.",
             ));
         }
-        verify_staged_fresh(&workspace_root, staged)?;
+        verify_staged_fresh(&workspace_root, daemon_home_prompts().as_deref(), staged)?;
         let snapshot_recipe_path = snapshot_root(&workspace_root)
             .join(&internal_id)
             .join(&staged.recipe_file_name);
@@ -350,12 +350,12 @@ pub fn launch_run(
         .stderr(Stdio::piped());
 
     let mut child = command.spawn().map_err(|e| {
-        // A materialized snapshot with no run behind it is litter, not
-        // evidence: drop it so failed spawns cannot accumulate snapshot
-        // dirs. (Refusals happen before materialization and leave nothing.)
-        if let Some(dir) = &snapshot_dir {
-            let _ = std::fs::remove_dir_all(dir);
-        }
+        // A materialized snapshot for a failed spawn is historical
+        // evidence of an attempted operation, never litter: the exact
+        // approved bytes, manifest and argv are retained for audit and
+        // ownership. Fresh run ids keep retries write-once, so a
+        // retained snapshot can never collide with a later one.
+        let _ = &snapshot_dir;
         error::io_error(format!("failed to start mentu-recipes: {e}"))
     })?;
     let stdout = child.stdout.take().expect("piped stdout");
@@ -491,7 +491,11 @@ fn finish(
             // have read unapproved bytes mid-flight — disclosed on the
             // record, never silent. (A pre-spawn refusal already covers
             // drift before launch; this covers drift during the run.)
-            let drift = attested_drift(workspace_root, &attest_resources);
+            let drift = attested_drift(
+                workspace_root,
+                daemon_home_prompts().as_deref(),
+                &attest_resources,
+            );
             let error_message = match (first_step_error(&steps, status), drift.is_empty()) {
                 (message, true) => message,
                 (message, false) => {
@@ -1070,8 +1074,20 @@ pub struct SnapshotRuntime {
     pub revision: String,
 }
 
+/// The snapshot root INSIDE the workspace's admitted recipes tree:
+/// `<workspace>/.mentu/recipes/.snapshots`. The pinned `mentu-recipes`
+/// 0.5.0 runtime resolves a recipe path only against an admitted recipes
+/// root — the workspace's `.mentu/recipes` or the home's — and answers
+/// "Recipe not found" for anything else (verified against the pinned
+/// binary: `.mentu/snapshots/...` is refused, `.mentu/recipes/.snapshots/...`
+/// is admitted, and the hidden directory stays out of `mentu-recipes list`).
+/// Materializing inside the recipes tree is what makes the approved
+/// immutable bytes loadable without weakening the runner's own admission.
 fn snapshot_root(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(".mentu").join("snapshots")
+    workspace_root
+        .join(".mentu")
+        .join("recipes")
+        .join(".snapshots")
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -1087,16 +1103,30 @@ fn valid_run_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// Collects the workspace-relative `prompt_file` references in `steps`:
-/// absolute paths and `..` escapes are skipped with a note (never
-/// followed); surviving entries resolve containment-checked against the
-/// workspace root. `Path` joins only — spaces/Unicode flow through
-/// untouched, no shell involved.
+/// Collects the `prompt_file` references in `steps`, rooted at the
+/// workspace's `.mentu/prompts/` — the ONLY location the pinned
+/// `mentu-recipes` 0.5.0 runtime resolves `prompt_file` from (verified
+/// against the pinned binary: a file beside the recipe, in the workspace
+/// cwd, or at any other workspace-relative path is never read; the step
+/// fails "has no prompt or prompt_file"). Lookup is two-tier, in runner
+/// order: `<workspace>/.mentu/prompts/<rel>` first, then
+/// `<home>/.mentu/prompts/<rel>` — the reference itself is the bare
+/// name, never a `.mentu/prompts`-prefixed path (that would
+/// double-prefix). Absolute paths and `..` escapes are skipped with a
+/// note (never followed); surviving entries resolve containment-checked
+/// against the tier that admitted them. `Path` joins only —
+/// spaces/Unicode flow through untouched, no shell involved. The staged
+/// bytes are the approval-bound mirror; the runner reads the live file
+/// from the admitting tier, and spawn-time plus post-run drift
+/// attestation (`attested_drift`) discloses any divergence from these
+/// pinned digests.
 fn collect_snapshot_resources(
     workspace_root: &Path,
     workspace_real: &Path,
+    home_prompts: Option<&Path>,
     steps: &[serde_json::Value],
 ) -> (Vec<(SnapshotResource, Vec<u8>)>, Vec<String>) {
+    let workspace_prompts = workspace_root.join(".mentu").join("prompts");
     let mut resources = Vec::new();
     let mut skipped = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -1120,15 +1150,34 @@ fn collect_snapshot_resources(
         if !seen.insert(rel.to_string()) {
             continue;
         }
-        let candidate = workspace_root.join(rel_path);
-        let Ok(real) = fs::canonicalize(&candidate) else {
+        // Two-tier lookup in runner order: the workspace's prompts root
+        // first, then the home's (the caller passes it pre-canonicalized;
+        // `None` when there is no home). The admitting tier's canonical
+        // root is the containment boundary for that resource.
+        let mut tiers: Vec<(PathBuf, PathBuf)> =
+            vec![(workspace_prompts.clone(), workspace_real.to_path_buf())];
+        if let Some((root, home_real)) =
+            home_prompts.and_then(|home| fs::canonicalize(home).ok().map(|real| (home, real)))
+        {
+            // The boundary is canonicalized so symlinked homes (macOS
+            // temp dirs, /home -> /usr/home) cannot quietly reject an
+            // admitted resource.
+            tiers.push((root.to_path_buf(), home_real));
+        }
+        let mut found: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
+        for (root, boundary) in &tiers {
+            if let Some(real) = fs::canonicalize(root.join(rel_path))
+                .ok()
+                .filter(|real| real.is_file() && real.starts_with(boundary))
+            {
+                found = Some((real, boundary.clone()));
+                break;
+            }
+        }
+        let Some((real, _boundary)) = found else {
             skipped.push(format!("{rel}: unreadable at approval time"));
             continue;
         };
-        if !real.starts_with(workspace_real) || !real.is_file() {
-            skipped.push(format!("{rel}: outside the workspace, not mirrored"));
-            continue;
-        }
         let Ok(meta) = fs::metadata(&real) else {
             skipped.push(format!("{rel}: unreadable at approval time"));
             continue;
@@ -1165,6 +1214,7 @@ fn collect_snapshot_resources(
 /// run and re-verifies immediately before spawn.
 pub fn stage_approved_snapshot(
     workspace_root: &Path,
+    home_prompts: Option<&Path>,
     recipe_id: &str,
     content_hash: &str,
 ) -> Result<StagedSnapshot, RpcError> {
@@ -1197,7 +1247,7 @@ pub fn stage_approved_snapshot(
         .cloned()
         .unwrap_or_default();
     let (resources, skipped_resources) =
-        collect_snapshot_resources(workspace_root, &workspace_real, &full_steps);
+        collect_snapshot_resources(workspace_root, &workspace_real, home_prompts, &full_steps);
     let recipe_file_name = recipe_path
         .file_name()
         .and_then(|name| name.to_str())
@@ -1230,29 +1280,40 @@ pub fn stage_approved_snapshot(
 /// Re-verifies staged bytes against the live workspace immediately before
 /// spawn: the recipe hash plus every mirrored resource. Any drift refuses
 /// the launch — it must never silently execute B after approving A.
-pub fn verify_staged_fresh(workspace_root: &Path, staged: &StagedSnapshot) -> Result<(), RpcError> {
+pub fn verify_staged_fresh(
+    workspace_root: &Path,
+    home_prompts: Option<&Path>,
+    staged: &StagedSnapshot,
+) -> Result<(), RpcError> {
     let current = recipe::current_content_hash(workspace_root, &staged.recipe_id)?;
     if current != staged.content_hash {
         return Err(error::invalid_argument(
             "Recipe content changed since approval; re-approve before running.",
         ));
     }
+    // The same two lookup roots the pinned runner resolves prompt_file
+    // from, in the same order. Each admitted resource must still exist,
+    // stay inside its admitting tier, and hash to the approved digest.
+    let workspace_prompts = workspace_root.join(".mentu").join("prompts");
     let workspace_real = fs::canonicalize(workspace_root)
         .map_err(|_| error::not_found("Workspace is unavailable."))?;
+    let mut roots = vec![(workspace_prompts, workspace_real)];
+    if let Some((root, home_real)) =
+        home_prompts.and_then(|home| fs::canonicalize(home).ok().map(|real| (home, real)))
+    {
+        roots.push((root.to_path_buf(), home_real));
+    }
     for (resource, _) in &staged.resources {
-        let candidate = workspace_root.join(&resource.path);
-        let real = fs::canonicalize(&candidate).map_err(|_| {
+        let found = roots.iter().find_map(|(root, boundary)| {
+            let real = fs::canonicalize(root.join(&resource.path)).ok()?;
+            (real.is_file() && real.starts_with(boundary)).then_some(real)
+        });
+        let real = found.ok_or_else(|| {
             error::invalid_argument(format!(
                 "Relative resource '{}' changed since approval; re-approve before running.",
                 resource.path
             ))
         })?;
-        if !real.starts_with(&workspace_real) {
-            return Err(error::invalid_argument(format!(
-                "Relative resource '{}' changed since approval; re-approve before running.",
-                resource.path
-            )));
-        }
         let bytes = fs::read(&real).map_err(|_| {
             error::invalid_argument(format!(
                 "Relative resource '{}' changed since approval; re-approve before running.",
@@ -1289,21 +1350,50 @@ fn read_live_resource_capped(path: &Path) -> Option<Vec<u8>> {
 /// workspace-relative paths whose live bytes no longer match the
 /// approval-pinned hash (missing, escaped-containment, or
 /// content-drifted). Pure reads — the caller discloses, never rewrites.
-fn attested_drift(workspace_root: &Path, staged: &[(String, String)]) -> Vec<String> {
+/// The daemon's home prompts root (`$HOME/.mentu/prompts`) — the
+/// runner's second lookup tier — canonicalized best-effort. `None` when
+/// HOME is unset or the path is unavailable; the runner itself would
+/// also fail to read from a missing root, so `None` is honest.
+pub fn daemon_home_prompts() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let root = std::path::PathBuf::from(home)
+        .join(".mentu")
+        .join("prompts");
+    fs::canonicalize(&root).ok()
+}
+
+fn attested_drift(
+    workspace_root: &Path,
+    home_prompts: Option<&Path>,
+    staged: &[(String, String)],
+) -> Vec<String> {
     if staged.is_empty() {
         return Vec::new();
     }
-    let Ok(workspace_real) = fs::canonicalize(workspace_root) else {
-        return staged.iter().map(|(path, _)| path.clone()).collect();
-    };
+    // The same two lookup roots the pinned runner reads prompt_file
+    // from, in the same order: the workspace's prompts root first, then
+    // the home's. A resource absent from BOTH tiers is drifted.
+    let workspace_prompts = workspace_root.join(".mentu").join("prompts");
+    let mut roots = vec![workspace_prompts];
+    roots.extend(home_prompts.map(Path::to_path_buf));
     let mut drifted = Vec::new();
     for (rel, pinned) in staged {
-        let candidate = workspace_root.join(rel);
-        let matches = fs::canonicalize(&candidate)
-            .ok()
-            .filter(|real| real.starts_with(&workspace_real) && real.is_file())
-            .and_then(|real| read_live_resource_capped(&real))
-            .is_some_and(|bytes| sha256_hex(&bytes) == *pinned);
+        let matches = roots
+            .iter()
+            .find_map(|root| {
+                // The first tier that HAS the file decides: a drifted
+                // workspace copy must not fall through to a matching
+                // home copy, because the runner reads the workspace one.
+                let real = fs::canonicalize(root.join(rel)).ok()?;
+                if !real.is_file() {
+                    return None;
+                }
+                Some(
+                    read_live_resource_capped(&real)
+                        .is_some_and(|bytes| sha256_hex(&bytes) == *pinned),
+                )
+            })
+            .unwrap_or(false);
         if !matches {
             drifted.push(rel.clone());
         }
@@ -1320,14 +1410,14 @@ pub struct MaterializedSnapshot {
     pub recipe_path: PathBuf,
 }
 
-/// Materializes `staged` under `.mentu/snapshots/<run_id>/`: the exact
-/// approved recipe bytes, the mirrored relative resources laid out at
-/// their workspace-relative paths (so a runtime resolving references
-/// against the recipe directory reads the pinned bytes, while
-/// workspace-relative resolution keeps working against bytes verified
-/// equal at spawn), and `manifest.json` recording the effective
-/// selection, the exact argv, and the pinned adapter/runtime version with
-/// the run. Write-once: an existing dir is never overwritten.
+/// Materializes `staged` under `.mentu/recipes/.snapshots/<run_id>/`: the
+/// exact approved recipe bytes, the mirrored pinned resource bytes laid
+/// out at their prompts-relative paths (the runner reads the LIVE
+/// `.mentu/prompts/<rel>` file — see `collect_snapshot_resources` — so
+/// this mirror is the run-bound audit copy of what approval pinned), and
+/// `manifest.json` recording the effective selection, the exact argv, and
+/// the pinned adapter/runtime version with the run. Write-once: an
+/// existing dir is never overwritten.
 /// `--workspace` and the child cwd intentionally stay the workspace root
 /// (run records and evidence keep their established locations, and step
 /// `dir`/shell relatives resolve exactly as approved); the manifest pins
@@ -1553,10 +1643,12 @@ mod selection_snapshot_tests {
     #[test]
     fn stage_materialize_verify_round_trip_with_unicode_and_spaces() {
         let dir = workspace();
-        // Spaces + Unicode in both the recipe id path and the relative resource.
+        // Spaces + Unicode in both the recipe id path and the relative
+        // resource, rooted at the workspace's .mentu/prompts — the only
+        // location the pinned runtime resolves prompt_file from.
         write_workspace_recipe(dir.path(), "team redo.json", SHELL_ONLY);
         let resource_rel = "docs/plan de acción.md";
-        let resource_path = dir.path().join(resource_rel);
+        let resource_path = dir.path().join(".mentu/prompts").join(resource_rel);
         std::fs::create_dir_all(resource_path.parent().unwrap()).unwrap();
         std::fs::write(&resource_path, "paso uno\n").unwrap();
         let with_resource = SHELL_ONLY.replace(
@@ -1565,14 +1657,14 @@ mod selection_snapshot_tests {
         );
         write_workspace_recipe(dir.path(), "team redo.json", &with_resource);
         let hash = content_hash(dir.path(), "team redo");
-        let staged = stage_approved_snapshot(dir.path(), "team redo", &hash).unwrap();
+        let staged = stage_approved_snapshot(dir.path(), None, "team redo", &hash).unwrap();
         assert_eq!(staged.resources.len(), 1);
         assert_eq!(staged.resources[0].0.path, resource_rel);
         assert!(staged.skipped_resources.is_empty());
-        verify_staged_fresh(dir.path(), &staged).unwrap();
+        verify_staged_fresh(dir.path(), None, &staged).unwrap();
         let snapshot_recipe_arg = dir
             .path()
-            .join(".mentu/snapshots/run-1")
+            .join(".mentu/recipes/.snapshots/run-1")
             .join("team redo.json")
             .to_string_lossy()
             .into_owned();
@@ -1622,8 +1714,8 @@ mod selection_snapshot_tests {
         assert!(
             manifest["argv"][2]
                 .as_str()
-                .is_some_and(|p| p.contains(".mentu/snapshots/run-1/")),
-            "argv names the snapshot recipe: {}",
+                .is_some_and(|p| p.contains(".mentu/recipes/.snapshots/run-1/")),
+            "argv names the snapshot recipe inside the admitted recipes tree: {}",
             manifest["argv"]
         );
         // Write-once: the same run id never overwrites.
@@ -1639,58 +1731,59 @@ mod selection_snapshot_tests {
         let dir = workspace();
         write_workspace_recipe(dir.path(), "hello.json", SHELL_ONLY);
         std::fs::create_dir_all(dir.path().join("docs")).unwrap();
-        std::fs::write(dir.path().join("docs/note.md"), "v1").unwrap();
+        std::fs::create_dir_all(dir.path().join(".mentu/prompts/docs")).unwrap();
+        std::fs::write(dir.path().join(".mentu/prompts/docs/note.md"), "v1").unwrap();
         let with_resource = SHELL_ONLY.replace(
             r#""prompt": "make""#,
             r#""prompt": "make", "prompt_file": "docs/note.md""#,
         );
         write_workspace_recipe(dir.path(), "hello.json", &with_resource);
         let hash = content_hash(dir.path(), "hello");
-        let staged = stage_approved_snapshot(dir.path(), "hello", &hash).unwrap();
+        let staged = stage_approved_snapshot(dir.path(), None, "hello", &hash).unwrap();
         // Edit the recipe to B before launch: staging and verification refuse.
         let edited = with_resource.replace("shell-only", "changed");
         write_workspace_recipe(dir.path(), "hello.json", &edited);
         assert!(
-            stage_approved_snapshot(dir.path(), "hello", &hash).is_err(),
+            stage_approved_snapshot(dir.path(), None, "hello", &hash).is_err(),
             "stale hash must not stage"
         );
         assert!(
-            verify_staged_fresh(dir.path(), &staged).is_err(),
+            verify_staged_fresh(dir.path(), None, &staged).is_err(),
             "edited bytes must not verify"
         );
         // Restore A, then drift the relative resource instead.
         write_workspace_recipe(dir.path(), "hello.json", &with_resource);
-        verify_staged_fresh(dir.path(), &staged).unwrap();
-        std::fs::write(dir.path().join("docs/note.md"), "v2").unwrap();
-        let err = verify_staged_fresh(dir.path(), &staged).unwrap_err();
+        verify_staged_fresh(dir.path(), None, &staged).unwrap();
+        std::fs::write(dir.path().join(".mentu/prompts/docs/note.md"), "v2").unwrap();
+        let err = verify_staged_fresh(dir.path(), None, &staged).unwrap_err();
         assert!(err.message.contains("docs/note.md"), "{}", err.message);
     }
 
     #[test]
     fn attestation_reports_drift_missing_and_growth() {
         let dir = workspace();
-        std::fs::create_dir_all(dir.path().join("docs")).unwrap();
-        std::fs::write(dir.path().join("docs/a.md"), "v1").unwrap();
+        std::fs::create_dir_all(dir.path().join(".mentu/prompts/docs")).unwrap();
+        std::fs::write(dir.path().join(".mentu/prompts/docs/a.md"), "v1").unwrap();
         let pinned_a = ("docs/a.md".to_string(), sha256_hex(b"v1"));
         let pinned_b = ("docs/b.md".to_string(), sha256_hex(b"v1"));
         // Unchanged bytes attest clean.
-        assert!(attested_drift(dir.path(), std::slice::from_ref(&pinned_a)).is_empty());
+        assert!(attested_drift(dir.path(), None, std::slice::from_ref(&pinned_a)).is_empty());
         // Content drift flags the file.
-        std::fs::write(dir.path().join("docs/a.md"), "v2").unwrap();
+        std::fs::write(dir.path().join(".mentu/prompts/docs/a.md"), "v2").unwrap();
         assert_eq!(
-            attested_drift(dir.path(), std::slice::from_ref(&pinned_a)),
+            attested_drift(dir.path(), None, std::slice::from_ref(&pinned_a)),
             vec!["docs/a.md".to_string()]
         );
         // A missing file flags it too.
         assert_eq!(
-            attested_drift(dir.path(), &[pinned_b]),
+            attested_drift(dir.path(), None, &[pinned_b]),
             vec!["docs/b.md".to_string()]
         );
         // Growth past the mirror cap reads as drifted without loading it all.
         let big = vec![b'x'; (SNAPSHOT_MAX_RESOURCE_BYTES + 16) as usize];
-        std::fs::write(dir.path().join("docs/a.md"), &big).unwrap();
+        std::fs::write(dir.path().join(".mentu/prompts/docs/a.md"), &big).unwrap();
         assert_eq!(
-            attested_drift(dir.path(), &[pinned_a]),
+            attested_drift(dir.path(), None, &[pinned_a]),
             vec!["docs/a.md".to_string()]
         );
     }
@@ -1705,11 +1798,95 @@ mod selection_snapshot_tests {
             r#""prompt": "make""#,
             r#""prompt": "make", "prompt_file": "manifest.json""#,
         );
-        std::fs::write(dir.path().join("manifest.json"), "live\n").unwrap();
+        std::fs::create_dir_all(dir.path().join(".mentu/prompts")).unwrap();
+        std::fs::write(dir.path().join(".mentu/prompts/manifest.json"), "live\n").unwrap();
         write_workspace_recipe(dir.path(), "collide.json", &colliding);
         let hash = content_hash(dir.path(), "collide");
-        let err = stage_approved_snapshot(dir.path(), "collide", &hash).unwrap_err();
+        let err = stage_approved_snapshot(dir.path(), None, "collide", &hash).unwrap_err();
         assert!(err.message.contains("collides"), "{}", err.message);
+    }
+
+    #[test]
+    fn prompt_file_resolves_home_tier_when_workspace_lacks_it() {
+        let dir = workspace();
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".mentu/prompts")).unwrap();
+        std::fs::write(
+            home.path().join(".mentu/prompts/home-only.md"),
+            "home bytes\n",
+        )
+        .unwrap();
+        let with_home = SHELL_ONLY.replace(
+            r#""prompt": "make""#,
+            r#""prompt": "make", "prompt_file": "home-only.md""#,
+        );
+        write_workspace_recipe(dir.path(), "home-tier.json", &with_home);
+        let hash = content_hash(dir.path(), "home-tier");
+        let staged = stage_approved_snapshot(
+            dir.path(),
+            Some(&home.path().join(".mentu/prompts")),
+            "home-tier",
+            &hash,
+        )
+        .unwrap();
+        assert_eq!(staged.resources.len(), 1);
+        assert_eq!(staged.resources[0].0.path, "home-only.md");
+        // The home-tier bytes are the pinned ones, and freshness verifies
+        // against the same tier (workspace first, home second).
+        assert_eq!(staged.resources[0].1, b"home bytes\n");
+        verify_staged_fresh(
+            dir.path(),
+            Some(&home.path().join(".mentu/prompts")),
+            &staged,
+        )
+        .unwrap();
+        // Without the home tier in play the same reference is honestly
+        // unresolvable: a skip note, never a fabricated pin.
+        let without_home = stage_approved_snapshot(dir.path(), None, "home-tier", &hash).unwrap();
+        assert!(without_home.resources.is_empty());
+        assert_eq!(without_home.skipped_resources.len(), 1);
+    }
+
+    #[test]
+    fn prompt_file_workspace_tier_wins_over_home() {
+        let dir = workspace();
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".mentu/prompts")).unwrap();
+        std::fs::create_dir_all(home.path().join(".mentu/prompts")).unwrap();
+        std::fs::write(
+            dir.path().join(".mentu/prompts/both.md"),
+            "workspace bytes\n",
+        )
+        .unwrap();
+        std::fs::write(home.path().join(".mentu/prompts/both.md"), "home bytes\n").unwrap();
+        let with_both = SHELL_ONLY.replace(
+            r#""prompt": "make""#,
+            r#""prompt": "make", "prompt_file": "both.md""#,
+        );
+        write_workspace_recipe(dir.path(), "two-tier.json", &with_both);
+        let hash = content_hash(dir.path(), "two-tier");
+        let staged = stage_approved_snapshot(
+            dir.path(),
+            Some(&home.path().join(".mentu/prompts")),
+            "two-tier",
+            &hash,
+        )
+        .unwrap();
+        // Runner order is workspace-first: the pinned bytes are the
+        // workspace tier's, never the home copy.
+        assert_eq!(staged.resources[0].1, b"workspace bytes\n");
+        // A workspace-tier drift is flagged even though the home tier
+        // still holds the approved bytes (the runner reads workspace
+        // first, so the drifted copy is what would execute).
+        std::fs::write(dir.path().join(".mentu/prompts/both.md"), "drifted\n").unwrap();
+        assert!(
+            !verify_staged_fresh(
+                dir.path(),
+                Some(&home.path().join(".mentu/prompts")),
+                &staged
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -1721,7 +1898,7 @@ mod selection_snapshot_tests {
         );
         write_workspace_recipe(dir.path(), "evil.json", &evil);
         let hash = content_hash(dir.path(), "evil");
-        let staged = stage_approved_snapshot(dir.path(), "evil", &hash).unwrap();
+        let staged = stage_approved_snapshot(dir.path(), None, "evil", &hash).unwrap();
         assert!(staged.resources.is_empty());
         assert_eq!(staged.skipped_resources.len(), 1);
         assert!(staged.skipped_resources[0].contains("outside the workspace"));

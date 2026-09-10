@@ -169,8 +169,12 @@ impl Engine {
         // `launch_run` re-verifies freshness immediately before spawn and
         // materializes per run (selection + pinned runtime recorded in
         // the snapshot manifest with the run id).
-        let staged =
-            execution::stage_approved_snapshot(&workspace_root, &parsed.recipe_id, &stored_hash)?;
+        let staged = execution::stage_approved_snapshot(
+            &workspace_root,
+            execution::daemon_home_prompts().as_deref(),
+            &parsed.recipe_id,
+            &stored_hash,
+        )?;
         // The invocation path is superseded by the snapshot path inside
         // `launch_run`; it still resolves through the containment checks
         // so a recipe that vanished between staging and spawn refuses

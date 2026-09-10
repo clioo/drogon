@@ -262,7 +262,8 @@ fn run_invokes_the_pinned_runtime_with_the_approved_snapshot() {
     let expected_dir = fx
         .workspace_path
         .join(".mentu")
-        .join("snapshots")
+        .join("recipes")
+        .join(".snapshots")
         .join(&run_id);
     assert_eq!(snapshot_path.parent().unwrap(), expected_dir);
     assert_eq!(
@@ -324,7 +325,11 @@ fn edited_recipe_after_approval_refuses_without_spawning() {
     );
     assert_eq!(code, "invalid_argument");
     assert!(
-        !fx.workspace_path.join(".mentu").join("snapshots").exists(),
+        !fx.workspace_path
+            .join(".mentu")
+            .join("recipes")
+            .join(".snapshots")
+            .exists(),
         "a refused launch stages no snapshot bytes"
     );
     assert!(
@@ -360,7 +365,11 @@ fn unsupported_agent_backend_refuses_without_inference() {
     assert_eq!(error.code, "mentu_backend_unsupported");
     assert!(error.message.contains("opencode"), "{}", error.message);
     assert!(
-        !fx.workspace_path.join(".mentu").join("snapshots").exists(),
+        !fx.workspace_path
+            .join(".mentu")
+            .join("recipes")
+            .join(".snapshots")
+            .exists(),
         "a refused selection stages no snapshot bytes"
     );
     assert!(
