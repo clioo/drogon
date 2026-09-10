@@ -106,6 +106,13 @@ export function createGatedBotBridge(
       isAllowed()
         ? (source.botDelete?.(input) ?? notImplemented())
         : refused(),
+    // Redesigned page's monitor read — same fail-closed gate: a withheld
+    // capability refuses locally, a source without the method reports
+    // unsupported.
+    botMonitorList: (input) =>
+      isAllowed()
+        ? (source.botMonitorList?.(input) ?? notImplemented())
+        : refused(),
   };
   if (source.read) gated.read = source.read;
   return gated;

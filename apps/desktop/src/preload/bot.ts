@@ -3,6 +3,7 @@ import type {
   BotCreateInput,
   BotDeleteInput,
   BotHistoryInput,
+  BotMonitorListInput,
   BotResponsibilityCreateInput,
   BotResponsibilityDeleteInput,
   BotRunTurnInput,
@@ -25,4 +26,8 @@ export const botBridgeExtras = {
     ipcRenderer.invoke("drogon:botResponsibilityDelete", value),
   botDelete: (value: BotDeleteInput) =>
     ipcRenderer.invoke("drogon:botDelete", value),
+  /** Bots-page monitor read (`bot.monitor_list`): the REAL durable
+   *  monitor state behind the redesigned page's MONITORS column. */
+  botMonitorList: (value: BotMonitorListInput) =>
+    ipcRenderer.invoke("drogon:botMonitorList", value),
 };

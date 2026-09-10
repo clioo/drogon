@@ -52,7 +52,21 @@ function bot(overrides: Partial<BotsPanelBot> = {}): BotsPanelBot {
     harnessPolicy: { defaultHarness: "codex", explicitModel: null },
     instructions: "",
     memories: [],
-    responsibilities: [],
+    // Default-configured: the design collapses bots with nothing
+    // configured, and these tests exercise the expanded card's controls.
+    responsibilities: [
+      {
+        id: "resp-seed",
+        name: "Seeded duty",
+        instructions: "",
+        kind: "scheduled",
+        trigger: { kind: "scheduled", automationId: "auto-seed" },
+        enabled: true,
+        recipe: null,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
     currentSession: null,
     createdAt: 1,
     updatedAt: 1,
@@ -529,5 +543,105 @@ describe("use-bots-page-controller", () => {
     const deleteButton = await screen.findByTestId("delete-bot-bot-1");
     fireEvent.click(deleteButton);
     await waitFor(() => expect(screen.getByTestId("bots-empty")).toBeTruthy());
+  });
+});
+
+describe("use-bots-page-controller: design column side reads", () => {
+  const automationSummary = {
+    id: "auto-1",
+    name: "Review duty",
+    cron: "0 2 * * *",
+    timezone: "UTC",
+    workspaceId: null,
+    harness: "pi",
+    model: undefined,
+    prompt: "Inspect the workspace.",
+    enabled: true,
+    nextRunAt: 4_000_000_000_000,
+    lastRunAt: null,
+    lastRun: null,
+  };
+
+  function monitorView() {
+    return {
+      monitorId: "mon-1",
+      version: 1,
+      ruleKind: "local_file_digest.v1",
+      projectId: "proj-1",
+      enabled: true,
+      approved: true,
+      responsibilityId: null,
+      cursor: "crc-1",
+      lastEventId: null,
+      health: "healthy",
+      trigger: { kind: "scheduled", cron: "*/5 * * * *" },
+      consecutiveErrors: 0,
+      lastError: null,
+      failureThreshold: 3,
+      lastCheckAtMs: null,
+      lastCheckOutcome: null,
+      incidentCount: 0,
+      delegationsToday: { used: 0, max: 10 },
+      resource: "notes/status.md",
+    } as const;
+  }
+
+  it("joins the real scheduler records and durable monitors into the columns", async () => {
+    const automationList = vi.fn(async () => ({
+      ok: true as const,
+      result: { automations: [automationSummary] },
+    }));
+    const monitorList = vi.fn(async () => ({
+      ok: true as const,
+      result: { monitors: [monitorView()], workspaceId: scope.workspaceId },
+    }));
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [bot({ responsibilities: [responsibility()] })],
+          history: [],
+        }}
+        scope={scope}
+        automationList={automationList}
+        monitorList={monitorList}
+      />,
+    );
+    await waitFor(() => expect(monitorList).toHaveBeenCalledTimes(1));
+    // The monitor read rides the app-global scope; native resolves the
+    // owning workspace daemon-side.
+    expect(monitorList).toHaveBeenCalledWith({
+      hostId: scope.hostId,
+      workspaceId: scope.workspaceId,
+      botId: "bot-1",
+    });
+    // The automation card renders the REAL joined schedule.
+    await screen.findByText("0 2 * * *");
+    // And the monitor card renders the durable health chip and source.
+    expect(await screen.findByText("Watching")).toBeTruthy();
+    // The resource renders twice (card title + SOURCE cell); both real.
+    expect(screen.getAllByText("notes/status.md").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("3 consecutive errors")).toBeTruthy();
+  });
+
+  it("keeps the columns honest when a side read fails or is absent", async () => {
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [bot({ responsibilities: [responsibility()] })],
+          history: [],
+        }}
+        scope={scope}
+        automationList={async () => ({ ok: false as const })}
+        monitorList={async () => ({ ok: false as const })}
+      />,
+    );
+    // Failed monitor read: the unavailable note, never an empty claim.
+    expect(
+      await screen.findByText(/Monitor details are unavailable/),
+    ).toBeTruthy();
+    // Failed automation join: the card stays, the schedule reads as a dash.
+    expect(screen.getAllByText("Review duty").length).toBeGreaterThanOrEqual(1);
+    // No automation summary → no "Active" chip of invented state.
+    expect(screen.getByText("No runs yet")).toBeTruthy();
   });
 });

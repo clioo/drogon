@@ -14,6 +14,8 @@ import {
   botResponsibilityDeleteResultSchema,
   botDeleteInputSchema,
   botDeleteResultSchema,
+  botMonitorListInputSchema,
+  botMonitorListResultSchema,
 } from "../shared/bot-validation";
 import type { Result } from "../shared/session-contract";
 import type {
@@ -21,6 +23,7 @@ import type {
   BotsPanelSnapshot,
   BotRunReceipt,
   BotHistoryResult,
+  BotMonitorListResult,
   BotResponsibilityCreateInput,
   BotResponsibilityCreateResult,
   BotResponsibilityDeleteInput,
@@ -48,6 +51,7 @@ resultSchemas["bot.history"] = botHistoryResultSchema;
 resultSchemas["bot.responsibility_create"] = botResponsibilityCreateResultSchema;
 resultSchemas["bot.responsibility_delete"] = botResponsibilityDeleteResultSchema;
 resultSchemas["bot.delete"] = botDeleteResultSchema;
+resultSchemas["bot.monitor_list"] = botMonitorListResultSchema;
 
 type NativeCall = (
   method: string,
@@ -255,6 +259,46 @@ export async function dispatchBotResponsibilityDelete(
   return { ok: true, result: checked.data };
 }
 
+/** Bots-page monitor read (`bot.monitor_list`): the durable state behind
+ *  the redesigned MONITORS column. Native resolves the bot's owning
+ *  workspace when the request rides the app-global "" sentinel and echoes
+ *  the RESOLVED scope, so this gate demands a real workspace id back —
+ *  plus the exact botId — before the renderer may trust the rows. */
+export async function dispatchBotMonitorList(
+  input: unknown,
+  call: NativeCall = callNative,
+): Promise<Result<BotMonitorListResult>> {
+  const parsed = botMonitorListInputSchema.safeParse(input);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: {
+        code: "invalid_argument",
+        message: "Invalid Bot monitor request.",
+        retryable: false,
+      },
+    };
+  const result = await call("bot.monitor_list", parsed.data);
+  if (!result.ok) return result;
+  const checked = botMonitorListResultSchema.safeParse(result.result);
+  if (
+    !checked.success ||
+    checked.data.hostId !== parsed.data.hostId ||
+    checked.data.botId !== parsed.data.botId ||
+    checked.data.workspaceId === ""
+  )
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message:
+          "The Bot monitor list does not match its requested scope or contract.",
+        retryable: false,
+      },
+    };
+  return { ok: true, result: checked.data };
+}
+
 const invalid = {
   ok: false,
   error: {
@@ -339,4 +383,5 @@ export function registerBotBridge(getWindow: () => BrowserWindow | null): void {
     guarded(dispatchBotResponsibilityDelete),
   );
   ipcMain.handle("drogon:botDelete", guarded(dispatchBotDelete));
+  ipcMain.handle("drogon:botMonitorList", guarded(dispatchBotMonitorList));
 }

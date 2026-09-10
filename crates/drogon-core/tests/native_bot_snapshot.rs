@@ -421,3 +421,53 @@ fn snapshot_budget_counts_linked_automation_run_payload_for_each_referencing_row
         "Budget each reference before loading malformed linked records: {result:?}",
     );
 }
+
+#[test]
+fn snapshot_projects_home_when_provisioned_and_null_when_not() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    let created = call(
+        &fx.engine,
+        "bot.create",
+        json!({
+            "workspaceId": fx.workspace["id"],
+            "hostId": host,
+            "body": {
+                "characterPreset": "none",
+                "displayIdentity": {"displayName": "Arya", "handle": "arya", "title": null},
+                "harnessPolicy": {"defaultHarness": "codex", "explicitModel": null},
+                "instructions": "Guard the realm.",
+                "memories": [],
+            },
+        }),
+    );
+    assert!(created.ok, "{created:?}");
+    let bot_id = created.result.unwrap()["id"].as_str().unwrap().to_string();
+
+    // Never provisioned: home is an explicit null, never invented.
+    let data = call(&fx.engine, "bot.snapshot", fx.scope()).result.unwrap();
+    assert!(data["bots"][0]["home"].is_null());
+
+    // Provision (as the bot itself — the self API's actor fence).
+    let provisioned = call(
+        &fx.engine,
+        "bot.self_provision",
+        json!({
+            "workspaceId": fx.workspace["id"],
+            "hostId": host,
+            "botId": bot_id,
+            "actorBotId": bot_id,
+        }),
+    );
+    assert!(provisioned.ok, "{provisioned:?}");
+    let home_path = provisioned.result.unwrap()["path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let data = call(&fx.engine, "bot.snapshot", fx.scope()).result.unwrap();
+    let home = &data["bots"][0]["home"];
+    assert_eq!(home["handle"], "arya");
+    assert_eq!(home["path"], home_path);
+    assert!(home["homeWorkspaceId"].as_str().is_some());
+}

@@ -19,6 +19,7 @@ import {
   projectSessionLiveness,
   triggerLabel,
 } from "./bots-panel-projection";
+import { filterBots } from "./bots-page-model";
 
 // Contract test for the exported-but-unmounted Bots panel (V4-B).
 // Shapes mirror the admitted native Bot storage contracts
@@ -270,6 +271,25 @@ describe("BotsPanel projection", () => {
 });
 
 describe("BotsPanel render", () => {
+  it("renders the design header: back arrow, count chip, filter input and the red New Bot", () => {
+    const markup = render(emptySnapshot);
+    expect(markup).toContain('aria-label="Back"');
+    expect(markup).toContain('data-testid="bots-active-count"');
+    // React splits the interpolated count from the label in static markup.
+    expect(markup).toMatch(/0(<!-- -->)? active/);
+    expect(markup).toContain('data-testid="bots-filter-input"');
+    expect(markup).toContain('aria-label="Filter bots"');
+    expect(markup).toContain("Filter bots");
+    expect(markup).toContain("New Bot");
+    // The design's red accent rides the destructive token.
+    expect(markup).toContain('data-variant="destructive"');
+    expect(markup).toContain("bg-destructive");
+    // The subtitle line sits under the header.
+    expect(markup).toContain(
+      "Your team of agents, with memory and a purpose. Configured with",
+    );
+  });
+
   it("renders the fork's empty state with its Create Bot control unconditionally (#348)", () => {
     // Fork parity: the empty state always offers the Create Bot action —
     // the fork gates nothing on bridge/scope presence.
@@ -329,6 +349,7 @@ describe("BotsPanel render", () => {
       bots: [
         bot({
           instructions: "Guard the realm.",
+          responsibilities: [responsibility()],
           displayIdentity: {
             displayName: "Watcher",
             handle: "watcher",
@@ -342,6 +363,38 @@ describe("BotsPanel render", () => {
     expect(markup).toContain("Guard the realm.");
     expect(markup).toContain("Harness default");
     expect(markup).toContain("@watcher");
+  });
+
+  it("collapses a bot with nothing configured and claims standby only with a provisioned home", () => {
+    const markup = render({ bots: [bot()], history: [] });
+    expect(markup).toContain("No automations or monitors yet");
+    expect(markup).not.toContain("Standby workspace initialized");
+    const provisioned = render({
+      bots: [
+        bot({
+          home: {
+            handle: "watcher",
+            path: "/data/bots/watcher",
+            homeWorkspaceId: "ws-home",
+          },
+        }),
+      ],
+      history: [],
+    });
+    expect(provisioned).toContain("Standby workspace initialized");
+  });
+
+  it("filters the list through the model over real fields only", () => {
+    // The header input drives filterBots (pinned in bots-page-model.test);
+    // static markup cannot type, so the join is pinned at the model seam.
+    const bots = [
+      bot({ id: "bot-1", displayIdentity: { displayName: "Watcher", handle: null, title: null } }),
+      bot({ id: "bot-2", displayIdentity: { displayName: "Arya", handle: "arya", title: null } }),
+    ];
+    expect(filterBots(bots, "arya").map((entry) => entry.id)).toEqual([
+      "bot-2",
+    ]);
+    expect(filterBots(bots, "  ")).toHaveLength(2);
   });
 
   it("exposes the exact dispatch payload on scheduled run buttons and never on reactive ones", () => {
@@ -382,16 +435,20 @@ describe("BotsPanel render", () => {
     expect(markup).toContain('aria-label="Run Review duty"');
   });
 
-  it("keeps orphaned history evidence visible with explicit null-join markers", () => {
+  it("keeps linked run evidence visible inside the owning automation card", () => {
+    // The redesigned card folds history into each automation card (joined
+    // by automationId). Orphaned rows (no automation join) are not claimed
+    // by any bot card; they remain visible on the Automations runs
+    // dashboard — never re-homed under an unrelated card.
     const markup = render({
-      bots: [bot()],
+      bots: [bot({ responsibilities: [responsibility()] })],
       history: [
         historyEntry({
           run: {
             id: "run-2",
             botId: "bot-1",
             responsibilityId: "resp-gone",
-            automationId: null,
+            automationId: "auto-1",
             automationRunId: null,
             startedAt: 900,
             endedAt: null,
@@ -407,16 +464,16 @@ describe("BotsPanel render", () => {
         historyEntry(),
       ],
     });
-    expect(markup).toContain("Responsibility history");
+    expect(markup).toContain('data-testid="history-run-2"');
+    expect(markup).toContain('data-testid="history-run-1"');
     expect(markup).toContain("Removed responsibility");
     expect(markup).toContain("Recorded");
-    expect(markup).toContain("Review duty");
     expect(markup).toContain("completed · run 3");
   });
 
-  it("renders per-bot history rows with the linked run's raw verdict, never a synthesized success badge", () => {
+  it("renders per-automation history rows with the linked run's raw verdict, never a synthesized success badge", () => {
     const markup = render({
-      bots: [bot()],
+      bots: [bot({ responsibilities: [responsibility()] })],
       history: [
         historyEntry({
           run: { ...historyEntry().run, id: "r-live", hostObservation: "live" },
@@ -433,7 +490,7 @@ describe("BotsPanel render", () => {
         }),
       ],
     });
-    expect(markup).toContain("Responsibility history");
+    expect(markup).toContain('data-testid="history-r-live"');
     expect(markup).toContain("Review duty");
     // The fork's `status · id` evidence line, with the run ordinal standing
     // in for the id: raw snake_case verdicts, not label-cased badges.
@@ -476,7 +533,11 @@ describe("BotsPanel R2-S: create/chat gate on bridge+scope, same rule as the run
   };
 
   it("renders Create Bot / Open session controls unconditionally (#348 fork parity)", () => {
-    const markup = render({ bots: [bot()], history: [] });
+    // A configured bot renders the expanded card; an unconfigured one
+    // renders the design's collapsed row (pinned above).
+    const markup = render(
+      { bots: [bot({ responsibilities: [responsibility()] })], history: [] },
+    );
     expect(markup).toContain("New Bot");
     expect(markup).toContain('data-testid="open-session-bot-1"');
     expect(markup).toContain("Open session");
@@ -489,7 +550,10 @@ describe("BotsPanel R2-S: create/chat gate on bridge+scope, same rule as the run
   });
 
   it("renders a per-bot Open session control once bridge+scope are supplied", () => {
-    const markup = render({ bots: [bot()], history: [] }, { bridge, scope });
+    const markup = render(
+      { bots: [bot({ responsibilities: [responsibility()] })], history: [] },
+      { bridge, scope },
+    );
     expect(markup).toContain('data-testid="open-session-bot-1"');
     expect(markup).toContain("Open session");
   });
@@ -550,9 +614,8 @@ describe("BotsPanel styling contract (admitted tokens/primitives only)", () => {
     );
     const runButtonMarkup = markup.slice(runButtonStart, runButtonEnd + 1);
     expect(runButtonMarkup).toContain('data-slot="button"');
-    // The fork's BotResponsibilityCard runs scheduled duties through an
-    // icon-xs ghost button (size-6), not the default icon size.
-    expect(runButtonMarkup).toContain("size-6");
+    // The automation card's Run now is a compact outline button (h-6).
+    expect(runButtonMarkup).toContain("h-6");
     expect(runButtonMarkup).toContain('data-bot-id="bot-1"');
     expect(runButtonMarkup).toContain('data-responsibility-id="resp-1"');
   });
@@ -605,14 +668,16 @@ describe("BotsPanel R7-E: header Back, add/delete responsibility controls", () =
     }),
   };
 
-  it("renders the header Back button unconditionally, like the source (#348)", () => {
+  it("renders the header Back control unconditionally, like the source (#348)", () => {
+    // The design renders it as an arrow icon button; the accessible name
+    // stays "Back" and it renders with or without a close handler.
     const without = render({ bots: [bot()], history: [] });
-    expect(without).toContain(">Back<");
+    expect(without).toContain('aria-label="Back"');
     const withClose = render(
       { bots: [bot()], history: [] },
       { onClose: () => {} },
     );
-    expect(withClose).toContain(">Back<");
+    expect(withClose).toContain('aria-label="Back"');
   });
 
   it("renders Add responsibility unconditionally and no per-row Delete, like the source (#348)", () => {

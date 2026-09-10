@@ -35,7 +35,21 @@ function bot(overrides: Partial<BotsPanelBot> = {}): BotsPanelBot {
     harnessPolicy: { defaultHarness: "claude", explicitModel: null },
     instructions: "Guard the realm.",
     memories: [],
-    responsibilities: [],
+    // Default-configured so the expanded card (with its Open-session
+    // control) renders; the design collapses unconfigured bots.
+    responsibilities: [
+      {
+        id: "resp-seed",
+        name: "Seeded duty",
+        instructions: "",
+        kind: "scheduled",
+        trigger: { kind: "scheduled", automationId: "auto-seed" },
+        enabled: true,
+        recipe: null,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
     currentSession: null,
     createdAt: 1,
     updatedAt: 1,

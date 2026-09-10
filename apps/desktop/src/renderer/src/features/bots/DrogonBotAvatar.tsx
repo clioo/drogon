@@ -15,10 +15,15 @@ export function DrogonBotAvatar({
   preset,
   alt,
   className,
+  initials,
 }: {
   preset: DrogonBotCharacterPreset;
   alt: string;
   className?: string;
+  /** Fallback tile text when the preset has no artwork (the owner design's
+   *  initials tile — e.g. "AS"). Without it the Bot glyph renders, exactly
+   *  like the source's `none` fallback. */
+  initials?: string;
 }): React.JSX.Element {
   const src = getDrogonBotAvatarSrc(preset);
 
@@ -40,6 +45,13 @@ export function DrogonBotAvatar({
           decoding="async"
           className="size-full object-cover"
         />
+      ) : initials ? (
+        <span
+          aria-hidden
+          className="text-xs font-semibold text-foreground"
+        >
+          {initials}
+        </span>
       ) : (
         <Bot className="size-4" aria-hidden />
       )}

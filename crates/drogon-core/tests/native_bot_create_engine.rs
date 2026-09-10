@@ -109,7 +109,12 @@ fn create_is_born_empty_durable_scoped_and_never_starts_a_session() {
             "hostId":fx.workspace["hostId"], "workspaceId":fx.workspace["id"], "locale":"en-US"
         }),
     )));
-    assert_eq!(snapshot["bots"], json!([created]));
+    // The snapshot now projects the provisioned home (null until first
+    // provision, task_197f6a7eb370) — the created record itself does not
+    // carry it, so extend rather than compare verbatim.
+    let mut expected = created.clone();
+    expected["home"] = Value::Null;
+    assert_eq!(snapshot["bots"], json!([expected]));
     assert_eq!(snapshot["history"], json!([]));
 }
 

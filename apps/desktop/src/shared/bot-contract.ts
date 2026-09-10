@@ -164,6 +164,9 @@ export interface BotBridge {
     input: BotResponsibilityDeleteInput,
   ): Promise<Result<BotResponsibilityDeleteResult>>;
   botDelete?(input: BotDeleteInput): Promise<Result<BotDeleteResult>>;
+  /** Bots-page monitor read (this task): optional like every other
+   *  additive method so older callers keep compiling. */
+  botMonitorList?(input: BotMonitorListInput): Promise<Result<BotMonitorListResult>>;
 }
 
 // R7-E additive types: a scheduled responsibility is an automation owned by
@@ -220,6 +223,54 @@ export type BotDeleteResult = BotScope & {
   botId: string;
   removed: boolean;
   automationIds: string[];
+};
+
+// Bots-page monitor read (`bot.monitor_list`): the REAL durable state
+// behind the MONITORS column — daemon-computed health, the durable check
+// evidence (last check time/outcome, incident count) and the real failure
+// threshold constant. One wire view per monitor; rule-kind summary fields
+// (resource/maxBytes/scriptPath/…) are flattened in by native and stay
+// open-ended here so an unknown kind stays visible instead of hidden.
+export type BotMonitorHealth =
+  | "healthy"
+  | "degraded"
+  | "failing"
+  | "needs_approval"
+  | "disabled";
+
+export type BotMonitorView = {
+  monitorId: string;
+  version: number;
+  ruleKind: string;
+  projectId: string;
+  enabled: boolean;
+  approved: boolean;
+  responsibilityId: string | null;
+  cursor: string | null;
+  lastEventId: string | null;
+  health: BotMonitorHealth;
+  trigger: { kind: "manual" } | { kind: "scheduled"; cron: string };
+  consecutiveErrors: number;
+  lastError: string | null;
+  failureThreshold: number;
+  lastCheckAtMs: number | null;
+  lastCheckOutcome: "no_change" | "changed" | "error" | null;
+  incidentCount: number;
+  delegationsToday: { used: number; max: number };
+  /** Rule-kind summary fields (resource, maxBytes, scriptPath, …) —
+   *  display-only, keyed by what native's `summary_json` flattened in. */
+  [summaryField: string]: unknown;
+};
+
+export type BotMonitorListInput = BotScope & { botId: string };
+
+export type BotMonitorListResult = {
+  hostId: string;
+  /** The RESOLVED owning workspace id — an app-global "" request is
+   *  resolved daemon-side, so this is never the "" sentinel. */
+  workspaceId: string;
+  botId: string;
+  monitors: BotMonitorView[];
 };
 
 export type BotsPanelHostObservation = "live" | "unverifiable" | "exited";
@@ -320,6 +371,10 @@ export type BotsPanelBot = {
   instructions: string;
   memories: string[];
   responsibilities: BotsPanelResponsibility[];
+  /** Provisioned home (daemon-projected `bot_homes` row): the real
+   *  dedicated folder. `null` until first provision; `undefined` on
+   *  snapshots from daemon builds predating the projection. */
+  home?: { handle: string; path: string; homeWorkspaceId: string } | null;
   currentSession: BotsPanelSession | null;
   createdAt: number;
   updatedAt: number;
