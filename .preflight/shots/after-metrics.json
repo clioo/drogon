@@ -1,0 +1,103 @@
+{
+  "label": "after",
+  "shots": [
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-light-1440.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/full-after-light-1440.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-light-1100.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/full-after-light-1100.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-light-900.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/full-after-light-900.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-light-760.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/full-after-light-760.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-light-full-1440.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-light-full-1100.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-light-full-900.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-light-full-760.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-dark-1440.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/full-after-dark-1440.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-dark-1100.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/full-after-dark-1100.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-dark-900.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/full-after-dark-900.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-dark-760.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/full-after-dark-760.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-dark-full-1440.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-dark-full-1100.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-dark-full-900.png",
+    "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity/.preflight/shots/sidebar-after-dark-full-760.png"
+  ],
+  "assertions": [
+    {
+      "theme": "light",
+      "width": 1440,
+      "leftWidth": 280,
+      "overflowX": 0,
+      "bodyScrollWidth": 1440,
+      "innerWidth": 1440,
+      "overflowOK": true
+    },
+    {
+      "theme": "light",
+      "width": 1100,
+      "leftWidth": 280,
+      "overflowX": 0,
+      "bodyScrollWidth": 1100,
+      "innerWidth": 1100,
+      "overflowOK": true
+    },
+    {
+      "theme": "light",
+      "width": 900,
+      "leftWidth": 280,
+      "overflowX": 0,
+      "bodyScrollWidth": 900,
+      "innerWidth": 900,
+      "overflowOK": true
+    },
+    {
+      "theme": "light",
+      "width": 760,
+      "leftWidth": 280,
+      "overflowX": 0,
+      "bodyScrollWidth": 760,
+      "innerWidth": 760,
+      "overflowOK": true
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "leftWidth": 280,
+      "overflowX": 0,
+      "bodyScrollWidth": 1440,
+      "innerWidth": 1440,
+      "overflowOK": true
+    },
+    {
+      "theme": "dark",
+      "width": 1100,
+      "leftWidth": 280,
+      "overflowX": 0,
+      "bodyScrollWidth": 1100,
+      "innerWidth": 1100,
+      "overflowOK": true
+    },
+    {
+      "theme": "dark",
+      "width": 900,
+      "leftWidth": 280,
+      "overflowX": 0,
+      "bodyScrollWidth": 900,
+      "innerWidth": 900,
+      "overflowOK": true
+    },
+    {
+      "theme": "dark",
+      "width": 760,
+      "leftWidth": 280,
+      "overflowX": 0,
+      "bodyScrollWidth": 760,
+      "innerWidth": 760,
+      "overflowOK": true
+    }
+  ]
+}

@@ -715,7 +715,10 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, 
   }, { id: workspaceId, beforeSessionIds });
   await waitForSessionStripTab(page, launched.id, "live");
   await page.locator(`[role="tab"][data-tab-id="${launched.id}"]`).click();
-  const summaryToggle = page.locator('[data-worktree-card-id][data-active="true"]').getByRole("button", { name: /^\d+ agents$/ });
+  // The fork's compact summary pill names itself "Expand N agents. …" while
+  // collapsed (worktree-card-compact-agents.tsx); the rewrite's earlier pill
+  // read "N agents". Match either shape.
+  const summaryToggle = page.locator('[data-worktree-card-id][data-active="true"]').getByRole("button", { name: /^(?:Expand )?\d+ agents/ });
   if (await summaryToggle.count() && await summaryToggle.getAttribute("aria-expanded") === "false") await summaryToggle.click();
   // The Pi banner ("pi vX.Y.Z" + clear/exit hint) proves the TUI booted.
   await page.waitForFunction(renderedPiIsReady, launched.id, { timeout: 30000 });

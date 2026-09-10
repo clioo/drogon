@@ -11,6 +11,7 @@
    value instead of mirrored state. Plain input over this repo's theme.) */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { cn } from "../../lib/utils";
 
 export type WorktreeTitleRenameCommit =
   | { kind: "cancel" }
@@ -40,9 +41,15 @@ export function WorktreeTitleInlineRename({
   onBeginEditingConsumed,
   onEditingChange,
   onRename,
+  className,
+  showUnreadEmphasis = false,
 }: {
   displayName: string;
   disabled?: boolean;
+  /** Extra classes for the title text (the source's title sizing slot). */
+  className?: string;
+  /** The source's unread emphasis: the title reads semibold until visited. */
+  showUnreadEmphasis?: boolean;
   /**
    * Lets the parent (context-menu Rename, the rename shortcut) open the
    * editor imperatively. The parent clears its trigger in
@@ -237,7 +244,13 @@ export function WorktreeTitleInlineRename({
   // (and double-click) opens the editor instead.
   return (
     <span
-      className="shell-worktree-card-name"
+      className={cn(
+        "shell-worktree-card-name",
+        // The source's titleEmphasisClassName: unread titles read
+        // semibold; read titles stay regular.
+        showUnreadEmphasis ? "font-semibold" : "font-normal",
+        className,
+      )}
       data-worktree-title-inline-rename=""
       onDoubleClick={(event) => {
         if (disabled) return;

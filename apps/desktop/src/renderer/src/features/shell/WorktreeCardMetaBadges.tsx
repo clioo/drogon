@@ -3,11 +3,11 @@
    worktree-card-meta-row.tsx (adapter: the reference badges cover issue,
    Linear, Jira, review, comment, automation and CLI provenance over store
    state; the MVP subset projects branch, ahead/behind from `git.status`,
-   the linked-issue badge and the PR chip when a PR is known. The agent
-   summary lives on the card's summary line with the relative time, like
-   the fork's compact agent summary — never duplicated as a badge. Pure
-   projection over props.) */
-import { GitBranch, GitPullRequest } from "lucide-react";
+   the linked-issue badge and the PR chip when a PR is known).
+   Meta-row shape per the source's WorktreeCardMetaRow: the branch identity
+   sits left as plain 11px muted text (no glyph, not mono), the badges sit
+   right. Pure projection over props.) */
+import { GitPullRequest } from "lucide-react";
 import {
   getPrChipAccessibleLabel,
   getPrChipLabel,
@@ -59,8 +59,16 @@ export function WorktreeCardMetaBadges({
   pr,
 }: WorktreeCardMetaBadgesProps) {
   const aheadBehind = formatAheadBehindLabel(ahead, behind);
+  const branchText = branch.trim();
   return (
     <span className="shell-worktree-card-meta">
+      {/* The source's branch slot: TruncatedSidebarLabel text-[11px]
+          text-muted-foreground leading-none, left of the badges. */}
+      {branchText ? (
+        <span className="shell-worktree-card-branch" title={branchText}>
+          {branchText}
+        </span>
+      ) : null}
       {issueNumber !== null && (
         <span
           className="shell-worktree-card-issue"
@@ -69,12 +77,6 @@ export function WorktreeCardMetaBadges({
           #{issueNumber}
         </span>
       )}
-      {branch ? (
-        <span className="shell-worktree-card-branch">
-          <GitBranch size={12} aria-hidden="true" />
-          <span>{branch}</span>
-        </span>
-      ) : null}
       {aheadBehind && (
         <span
           className="shell-worktree-card-ahead-behind"

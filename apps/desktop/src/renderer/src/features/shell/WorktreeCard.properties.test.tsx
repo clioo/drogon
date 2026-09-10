@@ -3,11 +3,15 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "../../components/ui/tooltip";
 import { WorktreeCard } from "./WorktreeCard";
+import { clearWorktreeAgentExpansionStateForTests } from "./worktree-card-agents-expansion-state";
 import type { Session, Worktree } from "../../../../shared/session-contract";
 import type { CardProperty } from "./workspace-options-state";
 import { worktreeIssueLinkSchema, type WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  clearWorktreeAgentExpansionStateForTests();
+});
 const worktree: Worktree = { id: "wt", projectId: "p", workspaceId: "ws", path: "/tmp/card", branch: "feature", head: "", baseRef: null, createdAt: "2026-09-01T00:00:00Z", note: "A real saved note" };
 const session: Session = { id: "s", workspaceId: "ws", hostId: "h", incarnation: "1", command: "sh", args: [], cols: 80, rows: 24, verdict: "live", exitCode: null, createdAt: "2026-09-01T00:00:00Z", harnessId: null };
 function card(properties: Partial<Record<CardProperty, boolean>>, overrides: Partial<Worktree> = {}, options: { sessions?: Session[]; agentActivityDisplayMode?: "compact" | "full"; issueLinks?: WorktreeIssueLink[]; onSelect?: (id: string) => void; onSelectSession?: (id: string) => void } = {}) {
@@ -56,7 +60,7 @@ test("issue actions are independent controls, not nested inside the workspace se
 test("Compact activity counts roots, preserves child lineage and selects the child's actual session", () => {
   const child = { ...session, id: "child", parentSessionId: session.id };
   const first = card({}, {}, { agentActivityDisplayMode: "compact", sessions: [session, child, { ...session, id: "foreign", workspaceId: "elsewhere" }] });
-  expect(screen.queryByRole("button", { name: "2 agents" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Expand 2 agents/ })).toBeNull();
   expect(first.container.querySelector('.worktree-agent-lineage-children [data-worktree-agent-row="child"]')).not.toBeNull();
   expect(first.container.querySelector('[data-worktree-agent-row="foreign"]')).toBeNull();
   first.unmount();
@@ -64,7 +68,7 @@ test("Compact activity counts roots, preserves child lineage and selects the chi
   const view = card({}, {}, { agentActivityDisplayMode: "compact", sessions: [session, child, { ...session, id: "s2" }],
     onSelect: (id) => selected.push(`workspace:${id}`), onSelectSession: (id) => selected.push(`session:${id}`) });
   expect(view.container.querySelector('[data-worktree-agent-row="child"]')).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "2 agents" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Expand 2 agents/ }));
   expect(view.container.querySelectorAll('[data-worktree-agent-row]')).toHaveLength(3);
   const childRow = view.container.querySelector('.worktree-agent-lineage-children [data-worktree-agent-row="child"]')!;
   fireEvent.click(childRow);
@@ -73,7 +77,7 @@ test("Compact activity counts roots, preserves child lineage and selects the chi
 test("Compact activity summarizes multiple roots and expands the actual selectable rows", () => {
   const view = card({}, {}, { agentActivityDisplayMode: "compact", sessions: [session, { ...session, id: "s2" }] });
   expect(view.container.querySelector('[data-worktree-agent-row="s"]')).toBeNull();
-  const toggle = screen.getByRole("button", { name: "2 agents" });
+  const toggle = screen.getByRole("button", { name: /^Expand 2 agents/ });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(toggle);
   expect(view.container.querySelectorAll('[data-worktree-agent-row]')).toHaveLength(2);

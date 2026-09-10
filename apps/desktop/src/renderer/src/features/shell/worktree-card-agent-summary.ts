@@ -88,3 +88,63 @@ export function summarizeCardAgentStates(sessions: Session[]): string {
   }
   return parts.join(", ");
 }
+
+/** One same-state cluster of the compact "N agents" summary pill
+ *  (the source's `SummaryAgentGroup` over sessions). */
+export type SummarySessionGroup = {
+  state: AgentState;
+  sessions: Session[];
+};
+
+/** The source's `buildSummaryAgentGroups`: same-state clusters in
+ *  SUMMARY_STATE_ORDER, only groups with members. Feeds the compact
+ *  summary pill's state-dot clusters. */
+export function buildCardSummaryGroups(
+  sessions: Session[],
+): SummarySessionGroup[] {
+  const groups = new Map<AgentState, Session[]>();
+  for (const session of sessions) {
+    const state = sessionDotState(session);
+    const group = groups.get(state);
+    if (group) {
+      group.push(session);
+    } else {
+      groups.set(state, [session]);
+    }
+  }
+  return SUMMARY_STATE_ORDER.flatMap((state) => {
+    const groupSessions = groups.get(state);
+    return groupSessions ? [{ state, sessions: groupSessions }] : [];
+  });
+}
+
+/** The source's `summarizeAgentIdentities`, over the per-session harness
+ *  label this repo has instead of agent types: "Claude working; Codex exited". */
+export function summarizeSessionIdentities(
+  sessions: Session[],
+  labelFor: (session: Session) => string,
+): string {
+  return sessions
+    .map((session) => {
+      const stateLabel = formatSummaryStateLabel(sessionDotState(session));
+      return `${labelFor(session)} ${stateLabel}`;
+    })
+    .join("; ");
+}
+
+/** The source's `summarizeAgents` with a count-bearing subject: "2 agents
+ *  working" / "2 agents: 1 working, 1 exited" — the compact pill's
+ *  aria-label body. */
+export function summarizeAgentsForAria(
+  sessions: Session[],
+  subjectLabel: string,
+): string {
+  const summary = summarizeCardAgentStates(sessions);
+  if (!summary) return subjectLabel;
+  const multi = summary.includes(",");
+  // The single-session/uniform summaries already carry a subject ("1 session
+  // working" / "All sessions working"); replace it with the pill's own count
+  // subject so the label reads "2 agents working", like the source.
+  const body = summary.replace(/^(?:1 session|All sessions) /, "");
+  return multi ? `${subjectLabel}: ${summary}` : `${subjectLabel} ${body}`;
+}
