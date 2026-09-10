@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, Transaction};
 
 use crate::automations::storage as automations_storage;
+use crate::bot_self_mgmt as bot_self_storage;
+use crate::bots::monitors::storage as bot_monitors_storage;
 use crate::bots::storage as bots_storage;
 use crate::coordination_access;
 use crate::mentu::storage as mentu_storage;
@@ -149,6 +151,8 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
 pub enum StartupError {
     Automations(automations_storage::StorageError),
     Bots(bots_storage::StorageError),
+    BotSelf(bot_self_storage::SelfStorageError),
+    BotMonitors(bot_monitors_storage::StorageError),
     Orchestration(drogon_protocol::RpcError),
     /// Main-schema, recovery, or host-identity failure.
     Sqlite(rusqlite::Error),
@@ -159,6 +163,8 @@ impl std::fmt::Display for StartupError {
         match self {
             Self::Automations(e) => write!(f, "automations: {e}"),
             Self::Bots(e) => write!(f, "bots: {e}"),
+            Self::BotSelf(e) => write!(f, "bot_self: {e}"),
+            Self::BotMonitors(e) => write!(f, "bot_monitors: {e}"),
             Self::Orchestration(e) => write!(f, "orchestration: {}", e.message),
             Self::Sqlite(e) => write!(f, "sqlite error: {e}"),
         }
@@ -188,6 +194,17 @@ const VERSIONED_COMPONENTS: &[(&str, i64)] = &[
     (
         bots_storage::BOTS_SCHEMA_COMPONENT,
         bots_storage::BOTS_SCHEMA_VERSION,
+    ),
+    // P2 adopts the reviewed C10 checkpoint-1 monitor tables into the
+    // aggregate startup gate (previously UNADOPTED for production data).
+    (
+        bot_monitors_storage::MONITORS_SCHEMA_COMPONENT,
+        bot_monitors_storage::MONITORS_SCHEMA_VERSION,
+    ),
+    // P1/P3 Bot homes, audit actors and the monitor-event outbox.
+    (
+        bot_self_storage::SELF_SCHEMA_COMPONENT,
+        bot_self_storage::SELF_SCHEMA_VERSION,
     ),
     (
         mentu_storage::MENTU_SCHEMA_COMPONENT,
@@ -445,6 +462,8 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     create_tables(&tx)?;
     automations_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Automations)?;
     bots_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::Bots)?;
+    bot_monitors_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::BotMonitors)?;
+    bot_self_storage::apply_pending_steps_in_tx(&tx).map_err(StartupError::BotSelf)?;
     mentu_storage::apply_pending_steps_in_tx(&tx)?;
     crate::project::apply_pending_steps_in_tx(&tx)?;
     coordination_access::apply_pending_steps_in_tx(&tx)?;
