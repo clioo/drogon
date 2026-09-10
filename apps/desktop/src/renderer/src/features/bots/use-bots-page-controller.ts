@@ -18,16 +18,17 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   BotBridge,
-  BotLiveSession,
   BotRunHarnessSource,
   BotScope,
   BotsPanelBot,
   BotsPanelSnapshot,
+  BotSessionResolution,
 } from "./bots-panel-contracts";
 import {
   buildBotCreateBody,
   emptyBotCreateForm,
   emptyResponsibilityForm,
+  harnessSupportsConversationResume,
 } from "./bots-page-model";
 import type {
   BotCreateFormValues,
@@ -73,10 +74,12 @@ export type BotsPageControllerDeps = {
     handle: string | null;
     title: string | null;
   }) => void | Promise<void>;
-  /** Host-owned liveness lookup for the default Open-session click (Gap 2):
-   *  the recorded session ONLY when the daemon-owned verdict says it is not
-   *  exited, else null. See `BotsPanelProps.resolveBotSession`. */
-  resolveBotSession?: (input: { bot: BotsPanelBot }) => BotLiveSession | null;
+  /** Host-owned liveness lookup for the default Open-session click
+   *  (Defect 1): what the daemon knows about the Bot's recorded session --
+   *  focus it, reopen it with a resume, open fresh (no record), or refuse
+   *  because liveness is not established. See
+   *  `BotsPanelProps.resolveBotSession`. */
+  resolveBotSession?: (input: { bot: BotsPanelBot }) => BotSessionResolution;
 };
 
 function mintRequestId(prefix: string): string {
@@ -398,31 +401,56 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
         );
         return;
       }
-      // Gap 2 (task_926fddc5e769): a Bot is bound to ONE session. When the
-      // host confirms the Bot's recorded session is still live, the default
-      // click must FOCUS it, never dispatch a second one. `forceNew` is the
-      // explicit "start a fresh session" path and skips this check.
+      // Gap 2 (task_926fddc5e769) + Defect 1: a Bot is bound to ONE
+      // session. The host's resolution says FOCUS (live), REOPEN (known
+      // exited -- dispatch a fresh session that resumes the harness's own
+      // conversation), OPEN (no record -- a fresh session is correct), or
+      // UNKNOWN (recorded but liveness not established). `forceNew` is the
+      // explicit "start a fresh session" path and skips all of this. The
+      // UNKNOWN case is the actual bug this fixes: it must never fall
+      // through to a dispatch, or the first click duplicates the session.
+      let resume = false;
+      let resumeNotice: string | null = null;
       if (!options?.forceNew && resolveBotSession) {
-        const resumable = resolveBotSession({ bot: live });
-        if (resumable) {
+        const resolution = resolveBotSession({ bot: live });
+        if (resolution.kind === "focus") {
           setSelectedBotId(bot.id);
           await onOpenSession?.({
             botId: bot.id,
-            sessionId: resumable.sessionId,
-            incarnation: resumable.incarnation,
+            sessionId: resolution.session.sessionId,
+            incarnation: resolution.session.incarnation,
             harness: {
               harnessId:
-                resumable.harnessId ?? live.harnessPolicy.defaultHarness,
+                resolution.session.harnessId ??
+                live.harnessPolicy.defaultHarness,
               explicitModel: live.harnessPolicy.explicitModel,
             },
-            workspaceId: resumable.workspaceId,
-            hostId: resumable.hostId,
+            workspaceId: resolution.session.workspaceId,
+            hostId: resolution.session.hostId,
             displayName: live.displayIdentity.displayName,
             handle: live.displayIdentity.handle,
             title: live.displayIdentity.title,
           });
           return;
         }
+        if (resolution.kind === "unknown") {
+          setActionError(
+            "The daemon has not reported whether this Bot's session is still running, so opening another one could create a duplicate. Refresh and retry in a moment.",
+          );
+          return;
+        }
+        if (resolution.kind === "reopen") {
+          const harnessId =
+            resolution.harnessId ?? live.harnessPolicy.defaultHarness;
+          // Resume only through a harness that actually supports it; a
+          // harness without a resume mechanism gets a fresh session AND an
+          // honest notice, never a pretend continuation.
+          resume = harnessSupportsConversationResume(harnessId);
+          if (!resume) {
+            resumeNotice = `${harnessId} cannot reopen its previous conversation; a NEW session was opened instead.`;
+          }
+        }
+        // kind === "open": nothing recorded; a fresh session is correct.
       }
       const botRun = bridge?.botRun;
       if (!botRun) {
@@ -439,6 +467,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
           scope,
           bot: live,
           requestId: mintRequestId("bot-open-session"),
+          resume,
         });
         if (!response) {
           setActionError(
@@ -476,6 +505,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
           });
         }
         await load();
+        if (resumeNotice) setActionError(resumeNotice);
       } catch (launchFailure) {
         setActionError(
           `Could not open the Bot session: ${errorMessage(launchFailure)}`,

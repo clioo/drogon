@@ -59,6 +59,13 @@ const bot = z.object({
       // inspector): absent on an older daemon build, null once the
       // session is no longer live/tracked by this service instance.
       processId: z.number().int().nullable().optional(),
+      // Daemon-owned liveness facts (Defect 1/2): the recorded link's own
+      // workspace/incarnation/verdict, so the renderer can decide
+      // focus/reopen/open without searching the selected workspace's
+      // session list. Optional so an older daemon build still validates.
+      workspaceId: z.string().optional(),
+      incarnation: z.string().optional(),
+      verdict: z.enum(["live", "unverifiable", "exited"]).optional(),
     })
     .nullable(),
   createdAt: timestamp,
@@ -189,6 +196,9 @@ const openSessionTurn = globalScope
     requestId: id,
     botId: id,
     interactive: z.literal(true),
+    // Defect 2: reopen the harness's own prior conversation. Only valid on
+    // this dispatch, and native enforces the same rule.
+    resume: z.boolean().optional(),
     harness: harnessOverrides.nullable().optional(),
     locale: z.string().nullable().optional(),
   })

@@ -86,8 +86,15 @@ export type BotRunTurnInput = BotScope & {
          *  asked to confirm liveness or narrate the environment: those are
          *  daemon facts surfaced by the status pill and the Bot session
          *  inspector. A prompt alongside interactive is a native parse
-         *  error. */
+         *  error.
+         *
+         *  `resume` (Defect 2): reopen the harness's own most recent
+         *  conversation in the Bot's home (`--continue`, `codex resume
+         *  --last`) instead of starting blank. Native only accepts it on
+         *  this dispatch, and a harness that cannot resume is reported
+         *  honestly by the caller rather than faked. */
         interactive: true;
+        resume?: boolean;
         prompt?: never;
         responsibilityId?: never;
         reason?: never;
@@ -232,6 +239,29 @@ export type BotLiveSession = {
   harnessId: string | null;
 };
 
+/** What the host knows about a Bot's recorded session at the moment the user
+ *  clicks Open (Defect 1). The old `null`-means-"open fresh" contract
+ *  conflated "no recorded session" with "recorded but its liveness is not
+ *  known yet", so the first click after launch silently opened a SECOND
+ *  session. This union keeps the three cases apart:
+ *
+ *  - `focus`: the recorded session is live (or unverifiable-but-present);
+ *    focus it and dispatch NOTHING.
+ *  - `reopen`: the recorded session is known to have exited; open a new
+ *    session with the harness's resume mechanism so the conversation
+ *    continues.
+ *  - `open`: there is no recorded session at all; a fresh session is the
+ *    correct, honest behavior.
+ *  - `unknown`: a recorded session exists but its liveness cannot be
+ *    established (daemon build without the projection, or the snapshot has
+ *    not loaded). NEVER dispatch a new session here -- that is the
+ *    duplicate-creating bug; the caller refuses honestly instead. */
+export type BotSessionResolution =
+  | { kind: "focus"; session: BotLiveSession }
+  | { kind: "reopen"; sessionId: string; harnessId: string | null }
+  | { kind: "open" }
+  | { kind: "unknown" };
+
 export type BotsPanelTrigger =
   | { kind: "reactive"; event: string | null }
   | { kind: "scheduled"; automationId: string };
@@ -268,6 +298,14 @@ export type BotsPanelSession = {
    *  when the session is no longer live/tracked by this service instance;
    *  absent on a daemon build that predates this projection. */
   processId?: number | null;
+  /** Daemon-owned liveness facts for the recorded link (Defect 1/2): the
+   *  workspace the session runs in, the incarnation needed to focus it, and
+   *  the host's own verdict. Optional so an older daemon build still
+   *  validates; absent means the caller must treat the liveness as UNKNOWN
+   *  and must never dispatch a duplicate. */
+  workspaceId?: string;
+  incarnation?: string;
+  verdict?: "live" | "unverifiable" | "exited";
 };
 
 export type BotsPanelBot = {
@@ -391,7 +429,7 @@ export type BotsPanelProps = {
    *  "no resumable session", so the click dispatches a fresh one — the
    *  path used when the recorded session genuinely exited or never
    *  existed. */
-  resolveBotSession?: (input: { bot: BotsPanelBot }) => BotLiveSession | null;
+  resolveBotSession?: (input: { bot: BotsPanelBot }) => BotSessionResolution;
   /** Caller-observed liveness verdicts (live | unverifiable | exited), one per
    *  bot, from a real observation source. The panel renders them verbatim and
    *  never derives a verdict from the persisted record: a stored session is a

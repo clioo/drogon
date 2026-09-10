@@ -168,3 +168,21 @@ export function isResponsibilityFormReady(
     previewCronFires(form.cron, nowMs) !== null
   );
 }
+
+/** Whether a harness exposes a mechanism to reopen a prior conversation
+ *  (Defect 2). Every harness this app launches does — Claude Code, Pi,
+ *  OpenCode and Antigravity take `--continue`; Codex takes the
+ *  `resume --last` subcommand. The helper exists so a caller can refuse
+ *  honestly instead of presenting a blank session as a continuation if an
+ *  unknown/unsupported harness ever appears. */
+export function harnessSupportsConversationResume(
+  harnessId: string | null | undefined,
+): boolean {
+  return (
+    harnessId === "claude" ||
+    harnessId === "pi" ||
+    harnessId === "opencode" ||
+    harnessId === "antigravity" ||
+    harnessId === "codex"
+  );
+}

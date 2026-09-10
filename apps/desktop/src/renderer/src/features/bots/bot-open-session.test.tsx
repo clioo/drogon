@@ -441,7 +441,10 @@ describe("bot open session reuse", () => {
     const seeded = botWithRecordedSession();
     const fake = fakeBridge(seeded);
     const onOpenSession = vi.fn();
-    const resolveBotSession = vi.fn(() => liveSession);
+    const resolveBotSession = vi.fn(() => ({
+      kind: "focus" as const,
+      session: liveSession,
+    }));
     render(
       <BotsPanel
         snapshot={{ bots: [seeded], history: [] }}
@@ -472,10 +475,14 @@ describe("bot open session reuse", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("dispatches a fresh session when the recorded one has exited", async () => {
+  it("reopens a closed recorded session with the harness resume flag", async () => {
     const seeded = botWithRecordedSession();
     const fake = fakeBridge(seeded);
-    const resolveBotSession = vi.fn(() => null);
+    const resolveBotSession = vi.fn(() => ({
+      kind: "reopen" as const,
+      sessionId: "sess-live",
+      harnessId: "claude",
+    }));
     render(
       <BotsPanel
         snapshot={{ bots: [seeded], history: [] }}
@@ -486,14 +493,84 @@ describe("bot open session reuse", () => {
     );
     fireEvent.click(await screen.findByTestId("open-session-bot-1"));
     await waitFor(() => expect(fake.botRun).toHaveBeenCalledTimes(1));
+    const input = fake.botRun.mock.calls[0]![0] as Record<string, unknown>;
+    expect(input.resume).toBe(true);
     expect(resolveBotSession).toHaveBeenCalledWith({ bot: seeded });
+  });
+
+  it("opens fresh without resume when there is no recorded session", async () => {
+    const seeded = bot({ currentSession: null });
+    const fake = fakeBridge(seeded);
+    const resolveBotSession = vi.fn(() => ({ kind: "open" as const }));
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        resolveBotSession={resolveBotSession}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() => expect(fake.botRun).toHaveBeenCalledTimes(1));
+    const input = fake.botRun.mock.calls[0]![0] as Record<string, unknown>;
+    expect("resume" in input).toBe(false);
+  });
+
+  it("refuses honestly and dispatches NOTHING when liveness is unknown", async () => {
+    const seeded = botWithRecordedSession();
+    const fake = fakeBridge(seeded);
+    const onOpenSession = vi.fn();
+    const resolveBotSession = vi.fn(() => ({ kind: "unknown" as const }));
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        resolveBotSession={resolveBotSession}
+        onOpenSession={onOpenSession}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("could create a duplicate");
+    // The whole point of Defect 1: an unestablished liveness must never
+    // fall through to a fresh dispatch.
+    expect(fake.botRun).not.toHaveBeenCalled();
+    expect(onOpenSession).not.toHaveBeenCalled();
+  });
+
+  it("says a harness cannot resume rather than pretending a blank session is a continuation", async () => {
+    const seeded = botWithRecordedSession();
+    const fake = fakeBridge(seeded);
+    const resolveBotSession = vi.fn(() => ({
+      kind: "reopen" as const,
+      sessionId: "sess-live",
+      harnessId: "gemini",
+    }));
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        resolveBotSession={resolveBotSession}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() => expect(fake.botRun).toHaveBeenCalledTimes(1));
+    const input = fake.botRun.mock.calls[0]![0] as Record<string, unknown>;
+    expect("resume" in input).toBe(false);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("cannot reopen its previous conversation");
   });
 
   it("New session forces a fresh dispatch even when a live session is resumable", async () => {
     const seeded = botWithRecordedSession();
     const fake = fakeBridge(seeded);
     const onOpenSession = vi.fn();
-    const resolveBotSession = vi.fn(() => liveSession);
+    const resolveBotSession = vi.fn(() => ({
+      kind: "focus" as const,
+      session: liveSession,
+    }));
     render(
       <BotsPanel
         snapshot={{ bots: [seeded], history: [] }}

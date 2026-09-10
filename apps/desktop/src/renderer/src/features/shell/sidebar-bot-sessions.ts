@@ -18,6 +18,10 @@ export type SidebarBotSession = {
   botId: string;
   sessionId: string;
   displayName: string;
+  /** The Bot's character preset (Defect 3), rendered through the SAME
+   *  `DrogonBotAvatar` the Bots page uses so a character change shows up in
+   *  both places. `"none"`/unknown falls back to the Bot glyph. */
+  characterPreset: string;
   /** The harness the live session actually runs; null when neither the
    *  session nor the record carries one (never guessed). */
   harnessId: HarnessId | null;
@@ -52,6 +56,7 @@ export function buildSidebarBotSessions(
       botId: bot.id,
       sessionId: session.id,
       displayName: bot.displayIdentity.displayName,
+      characterPreset: bot.characterPreset,
       harnessId,
       state: botSessionState(session),
       workspaceId: session.workspaceId,

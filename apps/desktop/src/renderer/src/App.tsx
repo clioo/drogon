@@ -227,6 +227,8 @@ import { BOTS_PAGE_HOST_TESTID } from "./features/bots";
 import type { BotsPanelProps } from "../../shared/bot-contract";
 import { dispatchOpenBotSession } from "./features/bots/bot-session-open";
 import { mergeSessionsForBots } from "./features/bots/bot-session-visibility";
+import { resolveBotSession } from "./features/bots/bot-session-resolution";
+import { harnessSupportsConversationResume } from "./features/bots/bots-page-model";
 import { BotSessionHeader } from "./features/bots/BotSessionHeader";
 import { BotSessionInspector } from "./features/bots/BotSessionInspector";
 import {
@@ -1074,7 +1076,7 @@ export function App() {
   // rebuild on every session poll.
   const resolveBotSessionRef = useRef<
     NonNullable<BotsPanelProps["resolveBotSession"]>
-  >(() => null);
+  >(() => ({ kind: "open" }));
   // Bot-scoped chrome (bug-bot-a836b4ebf8be65505): identity/harness/home
   // facts the dispatched open-session turn echoed, keyed by the real
   // session id it opened — never invented, never re-derived by guessing.
@@ -2165,30 +2167,24 @@ export function App() {
     () => mergeSessionsForBots(allBotSessions, sessions),
     [allBotSessions, sessions],
   );
-  // Gap 2: the host owns liveness. A Bot's recorded session is resumable
-  // only when the daemon-owned session list still shows it AND has not
-  // positively confirmed it exited — reattaching to a dead session, or
-  // silently opening a second one for a live Bot, are both refused here.
-  // Checked against `sessionsForBots` (host-wide), never the
-  // workspace-scoped `sessions` alone: a Bot's session living in a
-  // different workspace than the one currently selected must still
-  // resolve as resumable.
-  resolveBotSessionRef.current = (input) => {
-    const recorded = input.bot.currentSession;
-    if (!recorded) return null;
-    const session = sessionsForBots.find(
-      (item) => item.id === recorded.sessionId,
-    );
-    if (!session) return null;
-    if (session.verdict === "exited") return null;
-    return {
-      sessionId: session.id,
-      incarnation: session.incarnation,
-      workspaceId: session.workspaceId,
-      hostId: session.hostId,
-      harnessId: session.harnessId ?? (recorded.harness || null),
-    };
-  };
+  // Defect 1: the host owns liveness, and the decision must be
+  // workspace-independent. The daemon projects the recorded link's own
+  // workspaceId/incarnation/verdict onto `bot.snapshot`, so the click no
+  // longer depends on the SELECTED workspace's session list (the old lookup
+  // missed on the first click from anywhere else and silently opened a
+  // second session). The host-wide `sessionsForBots` view (PR #431) supplies
+  // the freshest observed copy when this host still lists the session; the
+  // snapshot projection is the fallback, and an unestablished liveness is
+  // `unknown` -- never a fresh dispatch.
+  resolveBotSessionRef.current = ({ bot }) =>
+    resolveBotSession({
+      bot,
+      observed:
+        sessionsForBots.find(
+          (item) => item.id === bot.currentSession?.sessionId,
+        ) ?? null,
+      hostId: status?.hostId ?? "",
+    });
   // Gap 3: the sidebar's Chats section lists Bots with a session. Built from
   // the same daemon facts every other surface uses (the Bot snapshot's
   // currentSession link + the live session list), and the click handler
@@ -2209,27 +2205,41 @@ export function App() {
   const openSidebarBotSession = (botId: string) => {
     const bot = loadedBots.find((candidate) => candidate.id === botId);
     if (!bot) return;
-    const resumable = resolveBotSessionRef.current({ bot });
-    if (resumable) {
+    // Defect 1: the same host resolution the Bots page uses. Focus a live
+    // session, reopen a known-exited one with a resume, open fresh only when
+    // there is no record, and do NOTHING (never a duplicate) when liveness
+    // is not established.
+    const resolution = resolveBotSessionRef.current({ bot });
+    if (resolution.kind === "focus") {
       recordBotSession({
         botId: bot.id,
-        sessionId: resumable.sessionId,
-        incarnation: resumable.incarnation,
+        sessionId: resolution.session.sessionId,
+        incarnation: resolution.session.incarnation,
         harness: {
-          harnessId: resumable.harnessId ?? bot.harnessPolicy.defaultHarness,
+          harnessId:
+            resolution.session.harnessId ?? bot.harnessPolicy.defaultHarness,
           explicitModel: bot.harnessPolicy.explicitModel,
         },
-        workspaceId: resumable.workspaceId,
-        hostId: resumable.hostId,
+        workspaceId: resolution.session.workspaceId,
+        hostId: resolution.session.hostId,
         displayName: bot.displayIdentity.displayName,
         handle: bot.displayIdentity.handle,
         title: bot.displayIdentity.title,
       });
       return;
     }
+    if (resolution.kind === "unknown") return;
     if (!botsScope) return;
-    // The recorded session is gone or exited: dispatch a fresh one with the
-    // same open-session shape (no model turn) and focus it when it lands.
+    // The recorded session is gone or exited (or there never was one):
+    // dispatch a fresh open-session turn (no model turn) and focus it when
+    // it lands. `resume` continues the harness's own prior conversation for
+    // a known-exited session; a harness that cannot resume is not pretended
+    // into a continuation.
+    const resume =
+      resolution.kind === "reopen" &&
+      harnessSupportsConversationResume(
+        resolution.harnessId ?? bot.harnessPolicy.defaultHarness,
+      );
     void (async () => {
       const response = await dispatchOpenBotSession({
         bridge: botsGatedBridge,
@@ -2239,6 +2249,7 @@ export function App() {
           typeof crypto !== "undefined" && "randomUUID" in crypto
             ? crypto.randomUUID()
             : `bot-open-session-${Date.now()}`,
+        resume,
       });
       if (!response || !response.ok) return;
       if (response.result.outcome !== "dispatched") return;
@@ -2320,8 +2331,13 @@ export function App() {
         sessionId: terminal.id,
         incarnation: terminal.incarnation,
       });
-      if (result.ok)
+      if (result.ok) {
         setSessions((items) => updateSessionProjection(items, result.result));
+        // Refresh the Bot snapshot so its projected `currentSession.verdict`
+        // reflects the stop immediately (Defect 1/2: the next open must read
+        // "exited" and reopen with a resume, not focus the closed tab).
+        setBotsReload((value) => value + 1);
+      }
     } finally {
       setStoppingBotSession(false);
     }

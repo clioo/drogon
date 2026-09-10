@@ -16,17 +16,22 @@ import type {
 } from "./bots-panel-contracts";
 import { buildBotRunHarness } from "./bots-page-model";
 
-/** The exact `bot.run` input for an open-session dispatch. */
+/** The exact `bot.run` input for an open-session dispatch. `resume`
+ *  (Defect 2) is set only when the Bot's recorded session is known to have
+ *  exited and the harness can reopen its own conversation; it is never set
+ *  on a first open. */
 export function buildOpenBotSessionTurn(input: {
   scope: BotScope & { locale: string };
   bot: BotsPanelBot;
   requestId: string;
+  resume?: boolean;
 }): BotRunTurnInput {
   return {
     ...input.scope,
     requestId: input.requestId,
     botId: input.bot.id,
     interactive: true,
+    ...(input.resume ? { resume: true } : {}),
     harness: buildBotRunHarness(
       input.bot.harnessPolicy.defaultHarness,
       input.bot.harnessPolicy.explicitModel,
@@ -42,6 +47,7 @@ export async function dispatchOpenBotSession(input: {
   scope: BotScope & { locale: string };
   bot: BotsPanelBot;
   requestId: string;
+  resume?: boolean;
 }): Promise<Result<BotRunReceipt> | null> {
   const botRun = input.bridge?.botRun;
   if (!botRun) return null;

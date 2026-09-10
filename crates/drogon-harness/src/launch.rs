@@ -28,6 +28,14 @@ pub struct HarnessLaunchRequest {
     /// a user-facing tab gets. Absent (user tabs) means interactive.
     #[serde(default)]
     pub headless: bool,
+    /// Reopen the harness's OWN most recent conversation in this session's
+    /// working directory instead of starting a blank one. A closed Bot
+    /// session must resume the prior conversation, not merely open an empty
+    /// tab; the locator is per-harness and lives in [`resume_args`]. Only
+    /// meaningful for an interactive (non-headless) launch: a headless run
+    /// consumes a prompt and exits, so resuming one is refused.
+    #[serde(default)]
+    pub resume: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -61,6 +69,12 @@ pub fn plan_launch_with_args(
         .ok_or_else(|| invalid("Harness executable path is not UTF-8"))?
         .to_owned();
     let is_batch_launcher = is_script_launcher(executable);
+    if request.resume && request.headless {
+        return Err(invalid(
+            "Resume is only available for an interactive launch; a headless run has no \
+             conversation to pick up",
+        ));
+    }
     let mut args = default_args.to_vec();
     for (name, value) in [
         ("model", &request.model),
@@ -87,6 +101,14 @@ pub fn plan_launch_with_args(
     if request.headless && request.harness_id == HarnessId::Codex {
         args.push("exec".into());
     }
+    // Reopen the harness's own most recent conversation in the cwd. Codex's
+    // resume is a SUBCOMMAND, so it must lead the argv like `exec` above;
+    // every other harness takes its own `--continue`-style flag. Appending
+    // ahead of the model/effort/permission flags keeps the subcommand in
+    // command position while the shared options still apply to it (measured
+    // against each CLI's own `--help`, matching the ids this crate
+    // launches).
+    args.extend(resume_args(request.harness_id, request.resume));
     if let Some(provider) = &request.provider {
         if request.harness_id != HarnessId::Pi {
             return Err(invalid("Provider selection is available only for Pi"));
@@ -206,6 +228,49 @@ pub fn plan_launch_with_args(
         args,
         permission_mode: request.permission_mode,
     })
+}
+
+/// The harness-owned argv that reopens that harness's most recent
+/// conversation in the session's working directory, or nothing when resume
+/// was not requested. Each entry is the CLI's own documented continue
+/// entrypoint (verified against the installed binaries' `--help`):
+///
+/// - Claude Code: `--continue` (alias `-c`) — most recent conversation in
+///   the cwd.
+/// - Pi: `--continue` (alias `-c`).
+/// - OpenCode: `--continue` (alias `-c`).
+/// - Antigravity (`agy`): `--continue` (alias `-c`).
+/// - Codex: the `resume --last` SUBCOMMAND — `--last` skips the picker and
+///   picks the most recent session for the cwd.
+///
+/// A harness whose CLI has no continue entrypoint yields no argv; the caller
+/// that requested resume is the one that must state the limitation honestly
+/// (`harness_resume_is_supported`).
+fn resume_args(harness_id: HarnessId, resume: bool) -> Vec<String> {
+    if !resume {
+        return Vec::new();
+    }
+    match harness_id {
+        HarnessId::Codex => vec!["resume".into(), "--last".into()],
+        HarnessId::Claude | HarnessId::Pi | HarnessId::Opencode | HarnessId::Antigravity => {
+            vec!["--continue".into()]
+        }
+    }
+}
+
+/// Whether this harness exposes a mechanism to reopen a prior conversation.
+/// Every harness this crate launches does; the helper exists so a caller can
+/// refuse honestly instead of pretending a blank session is a continuation
+/// if that ever stops being true (`None`/unknown harness ids are unsupported).
+pub fn harness_resume_is_supported(harness_id: HarnessId) -> bool {
+    matches!(
+        harness_id,
+        HarnessId::Claude
+            | HarnessId::Pi
+            | HarnessId::Opencode
+            | HarnessId::Antigravity
+            | HarnessId::Codex
+    )
 }
 
 /// Characters cmd.exe re-parses out of a `.cmd`/`.bat` invocation's command
@@ -443,6 +508,7 @@ mod tests {
             prompt: Some(prompt.to_string()),
             permission_mode: PermissionMode::Inherit,
             headless,
+            resume: false,
         }
     }
 
@@ -560,6 +626,7 @@ mod tests {
             prompt: None,
             permission_mode: PermissionMode::Inherit,
             headless: false,
+            resume: false,
         }
     }
 
@@ -596,6 +663,89 @@ mod tests {
                 "{harness_id:?} must launch bare in inherit mode"
             );
         }
+    }
+
+    /// Resume (Defect 2): each harness's own continue entrypoint. Codex's is
+    /// the `resume --last` subcommand and must stay in command position
+    /// ahead of the model/effort flags; the rest take `--continue`.
+    #[test]
+    fn interactive_resume_uses_each_harnesss_own_continue_entrypoint() {
+        for harness_id in [
+            HarnessId::Claude,
+            HarnessId::Pi,
+            HarnessId::Opencode,
+            HarnessId::Antigravity,
+        ] {
+            let mut base = interactive(harness_id);
+            base.resume = true;
+            assert_eq!(
+                plan(&base),
+                ["--continue"],
+                "{harness_id:?} must reopen its most recent conversation with --continue"
+            );
+            assert!(harness_resume_is_supported(harness_id));
+        }
+        let mut codex = interactive(HarnessId::Codex);
+        codex.resume = true;
+        assert_eq!(plan(&codex), ["resume", "--last"]);
+        assert!(harness_resume_is_supported(HarnessId::Codex));
+    }
+
+    /// The resume subcommand/flag must not displace the options a resumed
+    /// launch still needs (model, effort, permissions).
+    #[test]
+    fn resume_keeps_the_launch_options() {
+        let mut claude = interactive(HarnessId::Claude);
+        claude.resume = true;
+        claude.model = Some("sonnet".to_string());
+        claude.permission_mode = PermissionMode::Unattended;
+        assert_eq!(
+            plan(&claude),
+            [
+                "--continue",
+                "--model",
+                "sonnet",
+                "--dangerously-skip-permissions"
+            ]
+        );
+
+        let mut codex = interactive(HarnessId::Codex);
+        codex.resume = true;
+        codex.model = Some("gpt-5".to_string());
+        codex.effort = Some("high".to_string());
+        assert_eq!(
+            plan(&codex),
+            [
+                "resume",
+                "--last",
+                "-m",
+                "gpt-5",
+                "-c",
+                "model_reasoning_effort=high"
+            ]
+        );
+    }
+
+    /// Resuming a headless one-shot run is meaningless and refused rather
+    /// than silently ignored.
+    #[test]
+    fn resume_is_refused_for_headless_runs() {
+        let mut base = request(HarnessId::Claude, "hi", true);
+        base.resume = true;
+        let error = match plan_launch(&base, Path::new("/usr/local/bin/claude")) {
+            Ok(_) => panic!("a headless resume must be refused"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "invalid_argument");
+    }
+
+    /// An open-session resume carries no prompt, and the continue flag
+    /// still lands in the argv.
+    #[test]
+    fn resume_without_a_prompt_still_carries_the_continue_flag() {
+        let mut pi = interactive(HarnessId::Pi);
+        pi.resume = true;
+        assert_eq!(plan(&pi), ["--continue"]);
     }
 
     #[test]
