@@ -405,6 +405,7 @@ impl Engine {
             "status" => Ok(self.status()),
             "runtime.shutdown" => self.do_runtime_shutdown(request),
             "harness.list" => self.harness_list(),
+            "harness.models" => self.harness_models(&request.params),
             "agent.settings" => self.agent_settings(),
             "agent.settings_update" => self.mutating(request, Self::do_agent_settings_update),
             "bot.snapshot" => self.bot_snapshot(&request.params),

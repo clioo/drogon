@@ -121,6 +121,53 @@ export type Harness = {
   availability: HarnessAvailability;
   executable: string | null;
 };
+/** One host-enumerated model, verbatim as the harness's own surface
+ *  reported it (capability facts stay raw strings, never interpreted). */
+export type HarnessModelEntry = {
+  provider: string | null;
+  id: string;
+  context: string | null;
+  maxOutput: string | null;
+  thinking: boolean | null;
+  images: boolean | null;
+};
+/** How the catalog was produced — source, version, and probe scope the UI
+ *  renders instead of an unearned "confirmed". */
+export type HarnessModelsProvenance = {
+  executable: string;
+  argv: string[];
+  version: string | null;
+  /** Wall-clock epoch ms of the probe; the UI derives honest age. */
+  probedAtEpochMs: number;
+  configScope: string;
+};
+/** How the enumeration attempt ended. Each variant renders distinctly;
+ *  none of them invents model rows. */
+export type HarnessModelsStatus =
+  | "enumerated"
+  | "not_installed"
+  | "unsupported_surface"
+  | "unsupported_platform"
+  | "parse_failed"
+  | "timed_out"
+  | "probe_failed"
+  | "isolation_failed";
+/** One harness's host-scoped model catalog as probed by the daemon
+ *  (`harness.models`). C01 honesty contract: installed vs discovered vs
+ *  unavailable vs unknown is carried explicitly, with source, version and
+ *  freshness — never a bare confident list. */
+export type HarnessModelsCatalog = {
+  harness: HarnessId;
+  availability: HarnessAvailability;
+  executable: string | null;
+  provenance: HarnessModelsProvenance | null;
+  entries: HarnessModelEntry[];
+  status: HarnessModelsStatus;
+  note: string | null;
+  /** Probe isolation roots retained on disk (unverifiable cleanup);
+ *  normally empty, non-empty is disclosed evidence. */
+  retainedRoots: string[];
+};
 export type HarnessLaunchInput = {
   workspaceId: string;
   harnessId: HarnessId;
@@ -171,6 +218,12 @@ export interface DesktopBridge extends FileBridge, BotBridge {
     launch?: SessionLaunchReuse,
   ): Promise<Result<Session>>;
   harnesses(): Promise<Result<{ hostId: string; harnesses: Harness[] }>>;
+  /** Live per-harness model catalog (`harness.models`), probed by the
+   *  daemon from the harness's own enumeration command under
+   *  credential-free isolation. Never model inference. */
+  harnessModels(input: {
+    harnessId: HarnessId;
+  }): Promise<Result<{ hostId: string; catalog: HarnessModelsCatalog }>>;
   startHarness(input: HarnessLaunchInput): Promise<Result<Session>>;
   read(input: Identity & { cursor: number }): Promise<Result<ReadResult>>;
   write(

@@ -418,6 +418,9 @@ function registerBridge() {
           return callNative("session.forget", value as object);
         case "harnesses":
           return callNative("harness.list", {});
+        // Live per-harness model catalog (capability harness.catalog.v1).
+        case "harnessModels":
+          return callNative("harness.models", value as object);
         case "startHarness": {
           const { requestId, ...params } = value as {
             requestId: string;

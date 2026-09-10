@@ -108,6 +108,9 @@ export const bridgeSchemas = {
   close: identity,
   forget: identity,
   harnesses: z.undefined(),
+  harnessModels: z.object({
+    harnessId: z.enum(["claude", "pi", "opencode", "antigravity", "codex"]),
+  }),
   startHarness: harnessLaunch,
   buildInfo: z.undefined(),
   // R13-B Ports panel (additive): { workspaceId }; main/usage's

@@ -89,7 +89,7 @@ export function classifySelection(input: {
     kind: "unverified",
     reason:
       input.scopeNote ??
-      "Manual entry: carried unverified against this host until catalog wiring lands.",
+      "Manual entry: carried unverified against this host — not confirmed by the host catalog.",
   };
 }
 

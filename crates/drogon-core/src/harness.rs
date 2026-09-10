@@ -1,9 +1,15 @@
 use std::path::PathBuf;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use drogon_harness::{
-    HarnessAvailability, HarnessId, HarnessLaunchPlan, HarnessLaunchRequest, discover, plan_launch,
+    CatalogProbe, HarnessAvailability, HarnessId, HarnessLaunchPlan, HarnessLaunchRequest,
+    HostCatalog, discover, plan_launch,
 };
 use drogon_protocol::RpcError;
+use drogon_protocol::harness_catalog::{
+    HarnessModelEntry, HarnessModelsAvailability, HarnessModelsCatalog, HarnessModelsParams,
+    HarnessModelsProvenance, HarnessModelsStatus,
+};
 use serde_json::{Value, json};
 
 use crate::session::session_admission;
@@ -61,6 +67,15 @@ struct ReadyHookInstall {
 
 impl Engine {
     pub(super) fn harness_list(&self) -> Result<Value, RpcError> {
+        let installations = self.discover_installations()?;
+        Ok(json!({"hostId": self.host_id, "harnesses": installations}))
+    }
+
+    /// The same installation discovery `harness.list` reports: PATH
+    /// discovery plus the agent-settings command overrides, so a model
+    /// catalog is always enumerated from the binary that would actually
+    /// launch — never a different resolution.
+    fn discover_installations(&self) -> Result<Vec<drogon_harness::HarnessInstallation>, RpcError> {
         let path = std::env::var_os("PATH");
         let mut installations = discover(path.as_deref());
         if let Some(settings) = self.read_agent_settings()? {
@@ -79,7 +94,38 @@ impl Engine {
                 }
             }
         }
-        Ok(json!({"hostId": self.host_id, "harnesses": installations}))
+        Ok(installations)
+    }
+
+    /// `harness.models`: the per-harness host model catalog (capability
+    /// `harness.catalog.v1`), served from the real
+    /// `drogon_harness::probe_host_catalog`. Read-only: no ledger row, no
+    /// session, no inference — the probe runs the harness's own
+    /// enumeration command under credential-free isolation and reports
+    /// exactly what it saw, including failures.
+    ///
+    /// C01 seam (see `selection_gate.rs`): probe custody lives in the
+    /// daemon. This arm settles it before replying — pending children are
+    /// reaped under a bounded budget, and retained isolation roots are
+    /// deleted only when containment is verified (the probe's own evidence
+    /// plus, after reaping, a provably empty process group); anything
+    /// unverifiable is kept on disk and disclosed in the response.
+    pub(super) fn harness_models(&self, params: &Value) -> Result<Value, RpcError> {
+        let parsed = HarnessModelsParams::from_params(params)?;
+        let harness = parse_harness_wire(&parsed.harness_id)?;
+        let installation = self
+            .discover_installations()?
+            .into_iter()
+            .find(|item| item.harness_id == harness);
+        let availability = installation
+            .as_ref()
+            .map(|item| item.availability)
+            .unwrap_or(HarnessAvailability::Missing);
+        let executable = installation.and_then(|item| item.executable);
+        let probe = drogon_harness::probe_host_catalog(harness, executable.as_deref());
+        let (catalog, retained_roots, custody_notes) = settle_probe_custody(probe);
+        let wire = wire_catalog(&catalog, availability, retained_roots, custody_notes);
+        Ok(json!({"hostId": self.host_id, "catalog": wire}))
     }
 
     pub(super) fn do_harness_start(&self, params: &Value) -> Result<Value, RpcError> {
@@ -492,6 +538,82 @@ impl Engine {
     }
 }
 
+/// Converts a probed [`HostCatalog`] into the protocol-owned wire shape.
+/// The enum arms are exhaustive over both sides, so a status drogon-harness
+/// learns to produce cannot silently miss the wire vocabulary.
+fn wire_catalog(
+    catalog: &HostCatalog,
+    availability: HarnessAvailability,
+    retained_roots: Vec<String>,
+    custody_notes: Vec<String>,
+) -> HarnessModelsCatalog {
+    let status = match catalog.status {
+        drogon_harness::EnumerationStatus::Enumerated => HarnessModelsStatus::Enumerated,
+        drogon_harness::EnumerationStatus::NotInstalled => HarnessModelsStatus::NotInstalled,
+        drogon_harness::EnumerationStatus::UnsupportedSurface => {
+            HarnessModelsStatus::UnsupportedSurface
+        }
+        drogon_harness::EnumerationStatus::UnsupportedPlatform => {
+            HarnessModelsStatus::UnsupportedPlatform
+        }
+        drogon_harness::EnumerationStatus::ParseFailed => HarnessModelsStatus::ParseFailed,
+        drogon_harness::EnumerationStatus::TimedOut => HarnessModelsStatus::TimedOut,
+        drogon_harness::EnumerationStatus::ProbeFailed => HarnessModelsStatus::ProbeFailed,
+        drogon_harness::EnumerationStatus::IsolationFailed => HarnessModelsStatus::IsolationFailed,
+    };
+    let mut note = catalog.note.clone();
+    for item in &custody_notes {
+        note = Some(match note.take() {
+            Some(note) => format!("{note}; {item}"),
+            None => item.clone(),
+        });
+    }
+    HarnessModelsCatalog {
+        harness: harness_id_wire(catalog.harness).to_string(),
+        availability: match availability {
+            HarnessAvailability::Available => HarnessModelsAvailability::Available,
+            HarnessAvailability::Missing => HarnessModelsAvailability::Missing,
+            HarnessAvailability::UnsupportedLauncher => {
+                HarnessModelsAvailability::UnsupportedLauncher
+            }
+        },
+        executable: catalog
+            .executable
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned()),
+        provenance: catalog
+            .provenance
+            .as_ref()
+            .map(|provenance| HarnessModelsProvenance {
+                executable: provenance.executable.to_string_lossy().into_owned(),
+                argv: provenance.argv.clone(),
+                version: provenance.version.clone(),
+                probed_at_epoch_ms: provenance
+                    .probed_at
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .and_then(|dur| u64::try_from(dur.as_millis()).ok())
+                    .unwrap_or(0),
+                config_scope: provenance.config_scope.clone(),
+            }),
+        entries: catalog
+            .entries
+            .iter()
+            .map(|entry| HarnessModelEntry {
+                provider: entry.provider.clone(),
+                id: entry.id.clone(),
+                context: entry.context.clone(),
+                max_output: entry.max_output.clone(),
+                thinking: entry.thinking,
+                images: entry.images,
+            })
+            .collect(),
+        status,
+        note,
+        retained_roots,
+    }
+}
+
 pub(crate) fn resolve_launch(
     request: &HarnessLaunchRequest,
 ) -> Result<HarnessLaunchPlan, RpcError> {
@@ -524,6 +646,169 @@ pub(crate) fn harness_id_wire(harness_id: HarnessId) -> &'static str {
         HarnessId::Antigravity => "antigravity",
         HarnessId::Codex => "codex",
     }
+}
+
+/// Parses the shared session contract's harness wire spelling (the same
+/// vocabulary `harness.start` accepts). An unknown id is a caller bug:
+/// `invalid_argument`, never an invented empty catalog.
+pub(crate) fn parse_harness_wire(wire: &str) -> Result<HarnessId, RpcError> {
+    let normalized = wire.trim().to_ascii_lowercase();
+    Ok(match normalized.as_str() {
+        "claude" => HarnessId::Claude,
+        "pi" => HarnessId::Pi,
+        "opencode" => HarnessId::Opencode,
+        "antigravity" | "agy" => HarnessId::Antigravity,
+        "codex" => HarnessId::Codex,
+        other => {
+            return Err(crate::error::invalid_argument(format!(
+                "Unknown harness id {other:?}; expected one of claude, pi, opencode, antigravity (agy), codex"
+            )));
+        }
+    })
+}
+
+/// How long one pending probe child gets to exit on its own before it is
+/// signalled, and again after `kill`, before custody is declared
+/// unverifiable. Bounded: the RPC never waits forever on a stuck child.
+const PROBE_REAP_BUDGET: Duration = Duration::from_secs(2);
+
+/// The outcome of settling one probe's custody: the catalog to report, the
+/// isolation roots still retained on disk (disclosed evidence), and any
+/// custody notes that must ride the response.
+type SettledProbe = (HostCatalog, Vec<String>, Vec<String>);
+
+/// C01 seam settlement (see `selection_gate.rs`'s held-seam docs): the
+/// daemon owns probe custody, never drops it, and deletes isolation roots
+/// only after containment is verified.
+///
+/// - Every `pending` child is reaped under a bounded budget, escalating to
+///   `kill` at the deadline; a child that still cannot be reaped is
+///   disclosed, never silently dropped.
+/// - Retained roots (the probe kept them because ITS cleanup checks could
+///   not verify the group) are deleted only when the probe's group
+///   evidence was clean AND every pending child exited AND — after
+///   reaping — each reaped child's process group is provably empty
+///   (`killpg` ESRCH). Anything less keeps the roots on disk and names
+///   them in the response and the note.
+fn settle_probe_custody(probe: CatalogProbe) -> SettledProbe {
+    let CatalogProbe {
+        mut catalog,
+        pending,
+        retained_roots,
+        cleanup_verified,
+        unverifiable,
+    } = probe;
+    let mut custody_notes: Vec<String> = unverifiable;
+    let mut all_reaped = true;
+    for mut child in pending {
+        let pid = child.pid;
+        let role = format!("{:?}", child.role).to_ascii_lowercase();
+        let reaped = wait_bounded(&mut child.child, Instant::now() + PROBE_REAP_BUDGET).is_some();
+        if !reaped {
+            // Escalate once, then wait a second bounded window.
+            let _ = child.child.kill();
+            let reaped_after_kill =
+                wait_bounded(&mut child.child, Instant::now() + PROBE_REAP_BUDGET).is_some();
+            if !reaped_after_kill {
+                all_reaped = false;
+                custody_notes.push(format!(
+                    "probe {role} child pid={pid} exited neither on its own nor after kill \
+                     within the reap budget; custody retained"
+                ));
+                // Never drop live custody waiting forever; forgetting the
+                // handle keeps the ownership explicit (and the child was
+                // already signalled).
+                std::mem::forget(child.child);
+                continue;
+            }
+            custody_notes.push(format!(
+                "probe {role} child pid={pid} needed a kill signal to exit"
+            ));
+        }
+        // Reaped. Containment for THIS child's group: the child led its
+        // own process group, so its pid is the pgid; a provably empty
+        // group is verified containment.
+        match process_group_empty(pid) {
+            Some(true) => {}
+            Some(false) => {
+                all_reaped = false;
+                custody_notes.push(format!(
+                    "probe {role} child pid={pid} reaped but its process group is not empty; \
+                     a descendant may survive"
+                ));
+            }
+            None => {
+                all_reaped = false;
+                custody_notes.push(format!(
+                    "probe {role} child pid={pid} reaped but group emptiness is unverifiable"
+                ));
+            }
+        }
+    }
+    let containment_verified = cleanup_verified && all_reaped;
+    let mut retained: Vec<String> = Vec::new();
+    for root in &retained_roots {
+        if containment_verified {
+            // Verified containment: the root is ours (created by the
+            // probe), so removing it is the bounded, owned cleanup.
+            let removed = std::fs::remove_dir_all(root).is_ok() && !root.exists();
+            if !removed {
+                retained.push(root.to_string_lossy().into_owned());
+                custody_notes.push(format!(
+                    "probe root {} could not be removed after verified containment",
+                    root.display()
+                ));
+            }
+        } else {
+            retained.push(root.to_string_lossy().into_owned());
+        }
+    }
+    if !retained.is_empty() {
+        let paths = retained.join(", ");
+        catalog.note = Some(match catalog.note.take() {
+            Some(note) => format!("{note}; probe root retained for inspection: {paths}"),
+            None => format!("probe root retained for inspection: {paths}"),
+        });
+    }
+    (catalog, retained, custody_notes)
+}
+
+/// Wait for a child to exit within the deadline. Returns its exit status,
+/// or `None` when the deadline passed first or the wait errored.
+fn wait_bounded(
+    child: &mut std::process::Child,
+    deadline: Instant,
+) -> Option<std::process::ExitStatus> {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if Instant::now() >= deadline => return None,
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => return None,
+        }
+    }
+}
+
+/// `Some(true)`: the group is provably empty (`killpg(pgid, 0)` ESRCH).
+/// `Some(false)`: a member is present. `None`: unverifiable (EPERM or an
+/// unexpected errno) — callers must treat containment as unproven.
+#[cfg(unix)]
+fn process_group_empty(pgid: u32) -> Option<bool> {
+    let rc = unsafe { libc::killpg(pgid as libc::pid_t, 0) };
+    if rc == 0 {
+        return Some(false);
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::ESRCH) => Some(true),
+        _ => None,
+    }
+}
+
+/// Non-unix builds have no process-group primitive: containment checks
+/// fail closed (never claim verified).
+#[cfg(not(unix))]
+fn process_group_empty(_pgid: u32) -> Option<bool> {
+    None
 }
 
 #[cfg(test)]

@@ -113,6 +113,47 @@ export const resultSchemas: Record<string, z.ZodType> = {
         supportedHarnessIds.has(item.harnessId),
       ),
     })),
+  "harness.models": z.object({
+    hostId: id,
+    catalog: z.object({
+      harness: z.enum([...supportedHarnessIds] as [string, ...string[]]),
+      availability: z.enum(["available", "missing", "unsupported_launcher"]),
+      executable: z.string().max(32768).nullable(),
+      provenance: z
+        .object({
+          executable: z.string().max(32768),
+          argv: z.array(z.string().max(256)),
+          version: z.string().max(256).nullable(),
+          probedAtEpochMs: z.number().int().nonnegative(),
+          configScope: z.string().max(512),
+        })
+        .nullable(),
+      entries: z
+        .array(
+          z.object({
+            provider: z.string().max(256).nullable(),
+            id: z.string().min(1).max(4096),
+            context: z.string().max(256).nullable(),
+            maxOutput: z.string().max(256).nullable(),
+            thinking: z.boolean().nullable(),
+            images: z.boolean().nullable(),
+          }),
+        )
+        .max(10000),
+      status: z.enum([
+        "enumerated",
+        "not_installed",
+        "unsupported_surface",
+        "unsupported_platform",
+        "parse_failed",
+        "timed_out",
+        "probe_failed",
+        "isolation_failed",
+      ]),
+      note: z.string().max(8192).nullable(),
+      retainedRoots: z.array(z.string().max(32768)).max(100),
+    }),
+  }),
   "harness.start": session,
   "agent.settings": agentSettingsResultSchema,
   "agent.settings_update": agentSettingsResultSchema,

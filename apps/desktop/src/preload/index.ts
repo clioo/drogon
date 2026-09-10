@@ -68,6 +68,7 @@ const bridge: DesktopBridge = {
   close: (value) => ipcRenderer.invoke("drogon:close", value),
   forget: (value) => ipcRenderer.invoke("drogon:forget", value),
   harnesses: () => ipcRenderer.invoke("drogon:harnesses"),
+  harnessModels: (value) => ipcRenderer.invoke("drogon:harnessModels", value),
   startHarness: (value) => ipcRenderer.invoke("drogon:startHarness", value),
   buildInfo: () => ipcRenderer.invoke("drogon:buildInfo"),
   daemon,
