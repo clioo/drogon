@@ -227,13 +227,36 @@ fn zoned_gap_skips_and_fold_singles_match_the_renderer_vectors() {
         vec![utc_ms(2026, 10, 2, 6, 0), utc_ms(2026, 10, 2, 6, 30),]
     );
     assert!(fold_resume.skipped.is_empty());
+
+    // Seconds-granularity fold: a six-field wall inside the overlap
+    // fires at its first occurrence, and resuming inside the later half
+    // jumps past the overlap without losing the first wall after it.
+    let fold_seconds =
+        timezone::preview_fires_in_zone("30 0 1 * * *", NY, utc_ms(2026, 10, 1, 4, 59) as f64, 2)
+            .unwrap();
+    assert_eq!(
+        fold_seconds.fires,
+        vec![
+            utc_ms(2026, 10, 1, 5, 0) + 30_000,
+            utc_ms(2026, 10, 2, 6, 0) + 30_000,
+        ]
+    );
+    assert!(fold_seconds.skipped.is_empty());
+    let fold_seconds_resume =
+        timezone::preview_fires_in_zone("30 0 1 * * *", NY, utc_ms(2026, 10, 1, 6, 0) as f64, 1)
+            .unwrap();
+    assert_eq!(
+        fold_seconds_resume.fires,
+        vec![utc_ms(2026, 10, 2, 6, 0) + 30_000]
+    );
+    assert!(fold_seconds_resume.skipped.is_empty());
 }
 
 /// (Month, day, hour, minute) wall time of a millisecond-epoch instant in
 /// an IANA zone. Year is deliberately excluded: schedule walls recur
 /// yearly, so assertions on them hold no matter when the test runs.
 fn wall_in_zone(ms: f64, zone: &str) -> (u32, u32, u32, u32) {
-    use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
+    use chrono::{DateTime, Datelike, Timelike, Utc};
     let utc = DateTime::<Utc>::from_timestamp((ms / 1000.0).floor() as i64, 0).unwrap();
     let tz: chrono_tz::Tz = zone.parse().unwrap();
     let local = utc.with_timezone(&tz).naive_local();
@@ -277,6 +300,31 @@ fn zone_edit_recomputes_the_next_run_in_the_new_zone() {
     assert_eq!(updated["timezone"], json!(NY));
     let ny_next = updated["nextRunAt"].as_f64().unwrap();
     assert_eq!(wall_in_zone(ny_next, NY), (1, 1, 0, 0));
+
+    // Future/first-occurrence oracle against the test's own clock (no
+    // Engine seam needed): both stored instants lie strictly after now,
+    // and each equals the first fire recomputed from now -- i.e. the
+    // stored slot is the next one, not just a same-walled later one.
+    // Millisecond-flake window, documented not hidden: if Jan-1
+    // 00:00:00.000Z falls between admission and `t0`, the recomputed
+    // first fire advances a year. Yearly walls make that the only seam.
+    let t0 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64;
+    assert!(utc_next > t0 && ny_next > t0);
+    assert_eq!(
+        timezone::preview_fires_in_zone("0 0 1 1 *", "UTC", t0, 1)
+            .unwrap()
+            .fires[0] as f64,
+        utc_next
+    );
+    assert_eq!(
+        timezone::preview_fires_in_zone("0 0 1 1 *", NY, t0, 1)
+            .unwrap()
+            .fires[0] as f64,
+        ny_next
+    );
 
     // History survives the zone edit (no rows fabricated by the edit).
     assert!(history(&engine, &automation_id).is_empty());
@@ -322,4 +370,27 @@ fn gap_slot_tick_records_skip_without_dispatching() {
     assert_eq!(after_restart.fired, 0);
     assert_eq!(after_restart.skipped_missed, 0);
     assert_eq!(history(&reopened, &automation_id).len(), 1);
+}
+
+#[test]
+fn seconds_interval_fold_skips_later_half_and_preserves_boundary() {
+    let boundary = utc_ms(2026, 10, 1, 7, 0);
+    for (from, expected) in [
+        (
+            utc_ms(2026, 10, 1, 5, 59) + 58_000,
+            vec![
+                utc_ms(2026, 10, 1, 5, 59) + 59_000,
+                boundary,
+                boundary + 1_000,
+            ],
+        ),
+        (
+            utc_ms(2026, 10, 1, 6, 30) + 15_000,
+            vec![boundary, boundary + 1_000, boundary + 2_000],
+        ),
+    ] {
+        let preview = timezone::preview_fires_in_zone("* * * * * *", NY, from as f64, 3).unwrap();
+        assert_eq!(preview.fires, expected);
+        assert!(preview.skipped.is_empty());
+    }
 }

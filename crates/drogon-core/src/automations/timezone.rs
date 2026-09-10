@@ -6,8 +6,10 @@
 //! existed) evaluate in UTC, bit-identical to the historical tick. The
 //! renderer keeps an Intl-based implementation of the same policy as an
 //! agreement reference (shared fire vectors in
-//! `automation-timezone-preview.test.ts`); the mounted editor consumes
-//! the authoritative `automation.preview` RPC, never local times.
+//! `automation-timezone-preview.test.ts`); the mounted editor will
+//! consume the authoritative `automation.preview` RPC once the held
+//! mount/preload/main wiring lands, and until then shows an honest
+//! unavailable state instead of local times.
 //!
 //! ## Policy (frozen)
 //!
@@ -59,10 +61,15 @@ pub const TIMEZONE_MAX_BYTES: usize = 64;
 /// pathological loop, never a legitimate schedule.
 const MAX_GAP_HOPS: usize = 4;
 
-/// Upper bound on forward hops past repeated (fall-back fold) slots. A
-/// full two-hour overlap at minute granularity holds 120 second halves;
-/// this covers every real zone with margin while still terminating.
-const MAX_FOLD_HOPS: usize = 512;
+/// Upper bound on fold overlaps crossed per fire computation. Overlaps
+/// are months apart, so more than a couple per computation is
+/// impossible; the bound only guarantees termination.
+const MAX_FOLD_OVERLAPS: usize = 4;
+
+/// Minute-by-minute bound for walking to the end of one fold overlap.
+/// Every real overlap is under three hours; thirty-six hours terminates
+/// on adversarial data while never cutting a genuine transition short.
+const OVERLAP_WALK_MINUTES: usize = 2160;
 
 /// Validates and canonicalizes a timezone param. `None`/blank means the
 /// legacy UTC behavior. `"UTC"` passes through. Anything else must parse
@@ -176,7 +183,7 @@ pub fn next_native_fire_ms(cron_expr: &str, timezone: &str, after_ms: f64) -> Op
     };
     let cron = Cron::from_str(cron_expr.trim()).ok()?;
     let mut after_secs = (after_ms / 1000.0).floor() as i64;
-    for _ in 0..MAX_FOLD_HOPS {
+    for _ in 0..MAX_FOLD_OVERLAPS {
         let start = DateTime::<Utc>::from_timestamp(after_secs, 0)?;
         let fire = cron
             .find_next_occurrence(&start.with_timezone(&tz), false)
@@ -184,7 +191,17 @@ pub fn next_native_fire_ms(cron_expr: &str, timezone: &str, after_ms: f64) -> Op
         if !is_fold_second_half(&tz, &fire) {
             return Some(fire.timestamp_millis());
         }
-        after_secs = fire.timestamp();
+        // Later half of a repeated wall: every first half at or before
+        // this instant has passed (otherwise `croner` would have yielded
+        // the earliest of them instead), so the whole overlap can be
+        // jumped at once regardless of the cron's granularity -- an
+        // every-second schedule crosses thousands of later halves in an
+        // ordinary one-hour fold, which occurrence-stepping could never
+        // bound honestly. Resume one second before the first fireable
+        // wall so that wall itself stays eligible under the strictly-after
+        // search (the second before is the skipped later half or a
+        // non-matching wall, never a lost fire).
+        after_secs = overlap_end_after(&tz, &fire)?.timestamp() - 1;
     }
     None
 }
@@ -198,6 +215,28 @@ fn is_fold_second_half(tz: &Tz, fire: &DateTime<Tz>) -> bool {
         LocalResult::Ambiguous(_, later) => fire == &later,
         _ => false,
     }
+}
+
+/// First fireable instant after the fold overlap containing a later half:
+/// the wall clock stepped forward minute by minute until it resolves to
+/// a single instant. Folds never touch gaps, so a `Gap` arm only steps
+/// over it. Bundle-backed (`chrono-tz`) resolution, minute granularity
+/// so seconds-grained crons are covered with one walk; overlap-end
+/// resolution is minute-granular by construction (sub-minute transition
+/// edges only exist in pre-1920 LMT data).
+fn overlap_end_after(tz: &Tz, later_half: &DateTime<Tz>) -> Option<DateTime<Tz>> {
+    // Truncate to the minute first: stepping whole minutes from a wall
+    // with seconds would overshoot the first single wall (e.g. from
+    // 1:59:59 straight to 2:00:59, losing 2:00:00-2:00:58).
+    let mut wall = later_half.naive_local().with_second(0)?;
+    for _ in 0..OVERLAP_WALK_MINUTES {
+        wall = wall.checked_add_signed(chrono::TimeDelta::try_minutes(1)?)?;
+        match tz.from_local_datetime(&wall) {
+            LocalResult::Single(dt) => return Some(dt),
+            LocalResult::Ambiguous(..) | LocalResult::None => {}
+        }
+    }
+    None
 }
 
 /// Next fire plus the gap skips advanced past to reach it. Preview-only:

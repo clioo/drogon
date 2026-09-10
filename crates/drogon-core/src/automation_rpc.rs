@@ -139,6 +139,18 @@ fn require_grace(value: Option<f64>) -> Result<f64, RpcError> {
     Ok(grace)
 }
 
+/// Computes the stored `next_run_at` for an admitted (already
+/// validated and normalized) cron+zone pair strictly after `now_ms`:
+/// the single computation shared by create, schedule-touching update,
+/// and run-now reschedules. Callers pass the real clock; same-module
+/// tests pass fixed clocks for deterministic gap/fold vectors. Pure:
+/// no DB, no ledger, no dispatch.
+fn admit_next_run_at(cron: &str, timezone: &str, now_ms: f64) -> Result<f64, RpcError> {
+    crate::automations::timezone::next_native_fire_ms(cron, timezone, now_ms)
+        .map(|ms| ms as f64)
+        .ok_or_else(|| invalid_argument("cron expression has no future occurrence from now"))
+}
+
 /// Harness model/provider override admission, mirroring the bounds
 /// `drogon-harness::plan_launch` enforces at dispatch (1..=512 bytes, no
 /// control characters, never flag-shaped) so a stored override can never
@@ -377,10 +389,7 @@ fn build_automation(
     new: NewAutomation,
 ) -> Result<Automation, RpcError> {
     admit_workspace(conn, host_id, &new.workspace_id)?;
-    let next_run_at =
-        crate::automations::timezone::next_native_fire_ms(&new.cron, &new.timezone, new.now_ms)
-            .ok_or_else(|| invalid_argument("cron expression has no future occurrence from now"))?
-            as f64;
+    let next_run_at = admit_next_run_at(&new.cron, &new.timezone, new.now_ms)?;
     Ok(Automation {
         id: new.id,
         creation_key: None,
@@ -586,14 +595,8 @@ impl crate::Engine {
                     automation.enabled = enabled;
                 }
                 if cron_touched {
-                    automation.next_run_at = crate::automations::timezone::next_native_fire_ms(
-                        &automation.rrule,
-                        &automation.timezone,
-                        now_ms,
-                    )
-                    .ok_or_else(|| {
-                        invalid_argument("cron expression has no future occurrence from now")
-                    })? as f64;
+                    automation.next_run_at =
+                        admit_next_run_at(&automation.rrule, &automation.timezone, now_ms)?;
                 }
                 automation.updated_at = now_ms;
                 storage::upsert_automation(tx, &automation)
@@ -756,12 +759,11 @@ impl crate::Engine {
                     Ok(DirectPrepareOutcome::Refused(refusal)) => {
                         let refusal_text = format!("{refusal:?}");
                         let reschedule = Reschedule {
-                            next_run_at: crate::automations::timezone::next_native_fire_ms(
+                            next_run_at: admit_next_run_at(
                                 &automation.rrule,
                                 &automation.timezone,
                                 now_ms,
                             )
-                            .map(|ms| ms as f64)
                             .unwrap_or(automation.next_run_at),
                             last_run_at: None,
                         };
@@ -816,13 +818,8 @@ impl crate::Engine {
                 let outcome = runner::dispatch_run_plan(&seam, &plan);
                 let observed_at = crate::now_unix_ms() as f64;
                 let reschedule = Reschedule {
-                    next_run_at: crate::automations::timezone::next_native_fire_ms(
-                        &automation.rrule,
-                        &automation.timezone,
-                        now_ms,
-                    )
-                    .map(|ms| ms as f64)
-                    .unwrap_or(automation.next_run_at),
+                    next_run_at: admit_next_run_at(&automation.rrule, &automation.timezone, now_ms)
+                        .unwrap_or(automation.next_run_at),
                     last_run_at: Some(now_ms),
                 };
                 let run_id = {
@@ -947,5 +944,90 @@ impl crate::Engine {
             session_exists,
         };
         serde_json::to_value(&detail).map_err(|e| internal_error(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::admit_next_run_at;
+    use crate::automations::scheduler;
+
+    /// Monday 2026-09-07T00:00:00Z in millisecond epoch.
+    const MONDAY_MIDNIGHT_MS: f64 = 1_788_739_200_000.0;
+
+    const NY: &str = "America/New_York";
+
+    /// Millisecond epoch for a UTC wall time, taking a 0-based month like
+    /// JavaScript `Date.UTC` so vectors read identically on both sides.
+    fn utc_ms(year: i32, month0: u32, day: u32, hour: u32, minute: u32) -> f64 {
+        let month = month0 + 1;
+        let y = if month <= 2 { year - 1 } else { year } as i64;
+        let era = if y >= 0 { y } else { y - 399 } / 400;
+        let yoe = y - era * 400;
+        let mp = (month as i64 + 9) % 12;
+        let doy = (153 * mp + 2) / 5 + day as i64 - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        let days = era * 146_097 + doe - 719_468;
+        (days * 86_400_000 + hour as i64 * 3_600_000 + minute as i64 * 60_000) as f64
+    }
+
+    #[test]
+    fn admission_matches_legacy_utc_evaluation() {
+        assert_eq!(utc_ms(2026, 8, 7, 0, 0), MONDAY_MIDNIGHT_MS);
+        for cron in ["* * * * *", "30 8 * * *", "0 9 * * 1-5", "0 0 29 2 *"] {
+            let legacy = scheduler::next_fire_ms(cron, MONDAY_MIDNIGHT_MS).unwrap() as f64;
+            assert_eq!(
+                admit_next_run_at(cron, "UTC", MONDAY_MIDNIGHT_MS).unwrap(),
+                legacy
+            );
+            assert_eq!(
+                admit_next_run_at(cron, "", MONDAY_MIDNIGHT_MS).unwrap(),
+                legacy
+            );
+        }
+    }
+
+    #[test]
+    fn admission_applies_gap_policy_in_zone() {
+        // Mar 8 2026 02:30 does not exist in America/New_York. Admission
+        // stores the native first fire; the tick records the gap skip.
+        assert_eq!(
+            admit_next_run_at("30 2 * * *", NY, utc_ms(2026, 2, 7, 0, 0)).unwrap(),
+            utc_ms(2026, 2, 7, 7, 30)
+        );
+        // Recomputed from inside the gap day, the stored slot is the
+        // shifted first-valid instant the tick will record skipped.
+        assert_eq!(
+            admit_next_run_at("30 2 * * *", NY, utc_ms(2026, 2, 8, 0, 0)).unwrap(),
+            utc_ms(2026, 2, 8, 7, 0)
+        );
+    }
+
+    #[test]
+    fn admission_fires_folds_once_at_the_first_occurrence() {
+        // Fixed-time fold: the earlier half only.
+        assert_eq!(
+            admit_next_run_at("30 1 * * *", NY, utc_ms(2026, 9, 31, 12, 0)).unwrap(),
+            utc_ms(2026, 10, 1, 5, 30)
+        );
+        // Interval fold: first halves only, later halves jumped past.
+        assert_eq!(
+            admit_next_run_at("*/30 1 * * *", NY, utc_ms(2026, 10, 1, 4, 59)).unwrap(),
+            utc_ms(2026, 10, 1, 5, 0)
+        );
+        assert_eq!(
+            admit_next_run_at("*/30 1 * * *", NY, utc_ms(2026, 10, 1, 5, 45)).unwrap(),
+            utc_ms(2026, 10, 2, 6, 0)
+        );
+        // Seconds-grained fold wall inside the overlap.
+        assert_eq!(
+            admit_next_run_at("30 0 1 * * *", NY, utc_ms(2026, 10, 1, 6, 0)).unwrap(),
+            utc_ms(2026, 10, 2, 6, 0) + 30_000.0
+        );
+    }
+
+    #[test]
+    fn admission_rejects_schedules_with_no_future_fire() {
+        assert!(admit_next_run_at("0 0 31 2 *", "UTC", MONDAY_MIDNIGHT_MS).is_err());
     }
 }
