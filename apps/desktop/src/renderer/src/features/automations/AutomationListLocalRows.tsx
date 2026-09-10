@@ -20,12 +20,16 @@ import { AutomationListLastRunCell } from "./AutomationListLastRunCell";
 import { AutomationListStatusCell } from "./AutomationListStatusCell";
 
 const LIST_TABLE_ROW_CLASS =
-  "gap-3 border-b border-border/50 px-0 py-2 text-sm transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
+  "group/list-table-row gap-3 border-b border-border/50 px-0 py-2 text-sm transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 const LIST_TABLE_ROW_SELECTED_CLASS = "bg-accent/60";
 
+// The frozen NAME cell stays opaque on the page wash, but must reveal the
+// row wash on hover/selection (translucent here, so transparent tracks it
+// exactly). The unnamed `group-hover:` never matched — the row had no
+// `group` — leaving a dark NAME cell on hover/selected rows (salute-row bug).
 const LIST_TABLE_STICKY_ROW_CELL_CLASS =
-  "sticky left-0 bg-background pr-2 group-hover:bg-transparent";
+  "sticky left-0 bg-background pr-2 transition-colors group-hover/list-table-row:bg-transparent group-data-[current=true]/list-table-row:bg-transparent";
 
 function isRowActivationKey(event: React.KeyboardEvent): boolean {
   return (
