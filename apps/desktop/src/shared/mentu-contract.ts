@@ -68,6 +68,33 @@ export type MentuStepVerification = {
   warnings: string[];
 };
 
+/** Why one recorded usage value is not a usable measurement. */
+export type MentuUsageInvalidReason =
+  | "not_a_number"
+  | "not_an_integer"
+  | "negative"
+  | "not_finite"
+  | "out_of_range";
+
+/** One rejected usage field: the run-record key exactly as written there
+ *  (e.g. `input_tokens`) and why its value was rejected. */
+export type MentuUsageIssue = {
+  field: string;
+  reason: MentuUsageInvalidReason;
+};
+
+/** The usage one run-record step entry observed, mirroring the daemon's
+ *  `MentuStepUsage` (`crates/drogon-protocol/src/mentu.rs`). A recorded 0
+ *  is a genuine measured zero only under `usageKnown: true`; rejected
+ *  values are marked in `invalid`, never silently dropped, never summed.
+ *  Null (and an absent `usage` on the step) means honestly unavailable. */
+export type MentuStepUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  usageKnown: boolean | null;
+  invalid: MentuUsageIssue[];
+};
+
 export type MentuStepRun = {
   label: string;
   backend: string;
@@ -80,6 +107,10 @@ export type MentuStepRun = {
   error: string | null;
   /** Recorded verification results; null when the run record carries none. */
   verification: MentuStepVerification | null;
+  /** The model the runtime recorded for this entry, when a string. */
+  model?: string | null;
+  /** Observed usage; null/absent when the record carries none. */
+  usage?: MentuStepUsage | null;
 };
 
 export type MentuRun = {
@@ -249,6 +280,23 @@ const stepVerification = z.object({
   errors: z.array(z.string()).optional().default([]),
   warnings: z.array(z.string()).optional().default([]),
 });
+const usageInvalidReason = z.enum([
+  "not_a_number",
+  "not_an_integer",
+  "negative",
+  "not_finite",
+  "out_of_range",
+]);
+const usageIssue = z.object({
+  field: z.string().min(1),
+  reason: usageInvalidReason,
+});
+const stepUsage = z.object({
+  inputTokens: z.number().int().nonnegative().nullable().optional().default(null),
+  outputTokens: z.number().int().nonnegative().nullable().optional().default(null),
+  usageKnown: z.boolean().nullable().optional().default(null),
+  invalid: z.array(usageIssue).optional().default([]),
+});
 const stepRun = z.object({
   label: z.string().min(1),
   backend: z.string().min(1),
@@ -260,6 +308,8 @@ const stepRun = z.object({
   errorPath: z.string().nullable().optional().default(null),
   error: z.string().nullable().optional().default(null),
   verification: stepVerification.nullable().optional().default(null),
+  model: z.string().nullable().optional().default(null),
+  usage: stepUsage.nullable().optional().default(null),
 });
 const run = z.object({
   id: z.string().min(1),

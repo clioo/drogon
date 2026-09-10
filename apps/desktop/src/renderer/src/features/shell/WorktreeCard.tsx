@@ -18,6 +18,7 @@ import type { Workspace } from "../../../../shared/session-contract";
 import { WorktreeContextMenu } from "./WorktreeContextMenu";
 import { WorktreeTitleInlineRename } from "./WorktreeTitleInlineRename";
 import { WorktreeCardMetaBadges } from "./WorktreeCardMetaBadges";
+import { WorktreeCardLinkedMetadata } from "./WorktreeCardLinkedMetadata";
 import {
   formatWorktreeCardSummaryLine,
   summarizeCardAgentStates,
@@ -30,6 +31,8 @@ import { WorktreeAgentRow } from "./WorktreeAgentRow";
 import { useGeneratedAgentTitles } from "../settings/agent-generated-titles";
 import { buildWorktreeAgentRowTree } from "./worktree-agent-lineage";
 import type { TabStripState } from "./tab-order";
+import type { CardProperty } from "./workspace-options-state";
+import type { WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
 
 // Fork worktree-card-agents-expansion-state.ts adaptation (issue #359):
 // disclosure state keyed by worktree id in a module map so a card remount
@@ -144,6 +147,12 @@ export function WorktreeCard({
   onSelectSession = null,
   activeSessionId = "",
   tabStrip,
+  showBranch = true,
+  showPr = true,
+  showProperties = {},
+  ports = [],
+  issueLinks = [],
+  agentActivityDisplayMode = "full",
 }: {
   worktree: Worktree;
   workspaces: Workspace[];
@@ -179,9 +188,19 @@ export function WorktreeCard({
    * Null for implicit folder worktrees, whose title is the folder.
    */
   onRename: ((name: string) => Promise<string | null>) | null;
+  /** Workspace options "Show properties" (workspace-options-state.ts):
+   *  suppresses the branch name + ahead/behind badges, or the PR chip.
+   *  Defaults preserve the card exactly as before this option existed. */
+  showBranch?: boolean;
+  showPr?: boolean;
+  showProperties?: Partial<Record<CardProperty, boolean>>;
+  agentActivityDisplayMode?: "compact" | "full";
+  ports?: readonly number[];
+  issueLinks?: readonly WorktreeIssueLink[];
 }) {
   const [beginEditing, setBeginEditing] = useState(false);
   const [, forceCollapsedParentsBump] = useState(0);
+  const [compactExpanded, setCompactExpanded] = useState(false);
   const attached = sessions.filter(
     (session) => session.workspaceId === worktree.workspaceId,
   );
@@ -234,7 +253,7 @@ export function WorktreeCard({
     getWorktreeIssueNumber(worktree.id),
   );
   const name = worktreeDisplayName(worktree, workspaces);
-  const note = worktree.note?.trim() ?? "";
+  const note = showProperties.comment === false ? "" : worktree.note?.trim() ?? "";
   const hostId =
     workspaces.find((item) => item.id === worktree.workspaceId)?.hostId ?? null;
   const gitStatus = useWorktreeGitStatus({
@@ -297,14 +316,14 @@ export function WorktreeCard({
               )}
             </span>
             <WorktreeCardMetaBadges
-              branch={worktree.branch}
-              ahead={gitStatus?.branch.ahead ?? null}
-              behind={gitStatus?.branch.behind ?? null}
-              upstream={gitStatus?.branch.upstream ?? null}
-              issueNumber={issueNumber}
-              pr={pr}
+              branch={showBranch ? worktree.branch : ""}
+              ahead={showBranch ? (gitStatus?.branch.ahead ?? null) : null}
+              behind={showBranch ? (gitStatus?.branch.behind ?? null) : null}
+              upstream={showBranch ? (gitStatus?.branch.upstream ?? null) : null}
+              issueNumber={showProperties.issue === false ? null : issueNumber}
+              pr={showPr ? pr : null}
             />
-            {worktree.baseRef ? (
+            {showBranch && worktree.baseRef ? (
               <span
                 className="shell-worktree-card-base"
                 title={`Based on ${worktree.baseRef}`}
@@ -340,6 +359,7 @@ export function WorktreeCard({
               </span>
             ) : null}
           </button>
+          <WorktreeCardLinkedMetadata worktree={worktree} properties={showProperties} ports={ports} issueLinks={issueLinks} />
           {/* Nested session rows (the fork's inline agent list): one row per
             session underneath the summary line, outside the select button
             so rows stay real buttons. Issue #359: rows with a recorded
@@ -347,13 +367,20 @@ export function WorktreeCard({
             chevron on the parent row and a boxed, indented children group
             beneath it (worktree-card-compact-agent-row.tsx /
             WorktreeCardAgents.renderCompactAgentBranch). */}
-          {rows.length > 0 ? (
+          {showProperties["inline-agents"] !== false && rows.length > 0 ? (
             <div
               className="shell-worktree-card-rows"
               role="group"
               aria-label={`${name} sessions`}
             >
-              {rootRows.map((row) =>
+              {agentActivityDisplayMode === "compact" && rootRows.length > 1 ? (
+                <button type="button" className="shell-worktree-card-summary"
+                  aria-expanded={compactExpanded} disabled={disabled}
+                  onClick={() => setCompactExpanded((expanded) => !expanded)}>
+                  {rootRows.length} agents
+                </button>
+              ) : null}
+              {(agentActivityDisplayMode === "full" || rootRows.length <= 1 || compactExpanded) && rootRows.map((row) =>
                 renderAgentBranch({
                   row,
                   ancestorSessionIds: new Set(),

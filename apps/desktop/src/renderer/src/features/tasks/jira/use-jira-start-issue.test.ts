@@ -69,12 +69,15 @@ describe("startWorkspaceFromJiraIssue", () => {
       seedName: "drog-42-fix-the-flux-capacitor",
       worktreeId: "wt-1",
       workspaceId: "ws-1",
+      identity: null,
+      intentId: expect.any(String),
     });
     expect(bridge.jiraStartIssue).toHaveBeenCalledWith({
       projectId: "p1",
       key: "DROG-42",
       siteId: undefined,
       title: "Fix the flux capacitor",
+      intentId: expect.any(String),
     });
   });
 
@@ -129,5 +132,122 @@ describe("startWorkspaceFromJiraIssue", () => {
       expect(outcome.displayName).toBe("DROG-42");
       expect(outcome.seedName).toBe("drog-42-fix-the-flux-capacitor");
     }
+  });
+
+  // C06: the resolved site URL yields the PROVISIONAL-tier identity on the
+  // outcome; no site URL stays unresolved (null), never derived from
+  // email/siteId.
+  it("carries the stable identity when the instance site URL resolves", async () => {
+    const bridge = bridgeWith({
+      ok: true,
+      result: {
+        ok: true,
+        key: "DROG-42",
+        url: "https://acme.atlassian.net/browse/DROG-42",
+        displayName: "DROG-42 Fix the flux capacitor",
+        seedName: "drog-42-fix-the-flux-capacitor",
+        worktree: {
+          id: "wt-1",
+          workspaceId: "ws-1",
+          repoPath: "/tmp/repo",
+          branch: "b",
+          title: "DROG-42 Fix the flux capacitor",
+          createdAt: "2026-01-01T00:00:00Z",
+          lastSessionAt: null,
+          baseRef: "main",
+        },
+      },
+    });
+    const outcome = await startWorkspaceFromJiraIssue(bridge, {
+      projectId: "p1",
+      issue: { ...issue, id: "10001" },
+      siteUrl: "https://ACME.atlassian.net/",
+    });
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.identity?.instance.kind).toBe("provisional");
+      if (outcome.identity?.instance.kind === "provisional") {
+        expect(outcome.identity.instance.endpointUrl).toBe("https://acme.atlassian.net");
+        expect(outcome.identity.instance.endpointId).toHaveLength(24);
+      }
+      expect(outcome.identity?.issueId).toBe("10001");
+      expect(outcome.identity?.key).toBe("DROG-42");
+    }
+  });
+
+  it("a legacy issue without an immutable id stays unresolved", async () => {
+    const bridge = bridgeWith({
+      ok: true,
+      result: {
+        ok: true,
+        key: "DROG-42",
+        url: "",
+        displayName: "DROG-42",
+        seedName: "drog-42",
+        worktree: {
+          id: "wt-1",
+          workspaceId: "ws-1",
+          repoPath: "/tmp/repo",
+          branch: "b",
+          title: "DROG-42",
+          createdAt: "2026-01-01T00:00:00Z",
+          lastSessionAt: null,
+          baseRef: "main",
+        },
+      },
+    });
+    const outcome = await startWorkspaceFromJiraIssue(bridge, {
+      projectId: "p1",
+      issue: { key: "DROG-42", title: "t", url: "", siteId: "legacy-site" },
+      siteUrl: "https://acme.atlassian.net",
+    });
+    expect(outcome).toMatchObject({ ok: true, identity: null });
+  });
+
+  it("coalesces a double click into one start operation", async () => {
+    const jiraStartIssue = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                ok: true,
+                result: {
+                  ok: true,
+                  key: "DROG-42",
+                  url: "u",
+                  displayName: "DROG-42",
+                  seedName: "drog-42",
+                  worktree: {
+                    id: "wt-1",
+                    workspaceId: "ws-1",
+                    repoPath: "/r",
+                    branch: "b",
+                    title: "DROG-42",
+                    createdAt: "2026-01-01T00:00:00Z",
+                    lastSessionAt: null,
+                    baseRef: "main",
+                  },
+                },
+              }),
+            5,
+          );
+        }),
+    );
+    const bridge = { jiraStartIssue } as unknown as JiraBridge;
+    const input = {
+      projectId: "p1",
+      issue: { ...issue, id: "10001" },
+      siteUrl: "https://acme.atlassian.net",
+    };
+    const [first, second] = await Promise.all([
+      startWorkspaceFromJiraIssue(bridge, input),
+      startWorkspaceFromJiraIssue(bridge, input),
+    ]);
+    expect(jiraStartIssue).toHaveBeenCalledTimes(1);
+    expect(first).toEqual(second);
+    // A later, separate start is a new operation (not deduped away).
+    await startWorkspaceFromJiraIssue(bridge, input);
+    expect(jiraStartIssue).toHaveBeenCalledTimes(2);
   });
 });

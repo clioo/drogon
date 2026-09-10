@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+import { markAcceptanceFailed, markAcceptancePassed } from "./acceptance-report-state.mjs";
+import { probeWorkspaceProperties } from "./probe-workspace-properties.mjs";
+import { probeChatLifecycle } from "./probe-chat-lifecycle.mjs";
+import { probeMixedVersionRecovery } from "./probe-mixed-version-recovery.mjs";
+import { seedPrivateClaudeKeyboard, probeClaudeTerminalInput } from "./probe-claude-terminal-input.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
@@ -14,6 +19,8 @@ import {
   runAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
+import { captureSettingsThemes, verifyThemeCaptures } from "./acceptance-theme.mjs";
+import { verifyRenderedUsageFixture, writeAcceptanceUsageFixture } from "./acceptance-usage-fixture.mjs";
 import {
   startForegroundObservation,
   verifyForegroundObservation,
@@ -44,8 +51,15 @@ import {
   seedLocalPiProvider,
   writeFixtureGh,
 } from "./probe-sealed-journeys.mjs";
+import {
+  closeModelFixtureForReport,
+  startAndSeedModelFixture,
+} from "./sealed-model-fixture-lifecycle.mjs";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import { probeSessionNavigation } from "./probe-session-navigation.mjs";
+import { probeTerminalInputLayout } from "./probe-terminal-input-layout.mjs";
+import { installPrivateAcceptanceEnvironment } from "./acceptance-private-environment.mjs";
+import { PI_PROVIDER, PI_MODEL_ID } from "./sealed-model-route.mjs";
 import {
   BUNDLE_ICON_FILE,
   bundlePaths,
@@ -95,19 +109,23 @@ const appDir = path.join(root, "apps", "desktop");
 const appRequire = createRequire(path.join(appDir, "package.json"));
 const electron = appRequire("electron");
 const fixture = await mkdtemp(path.join(tmpdir(), "dgu-"));
+const usageFixture = await writeAcceptanceUsageFixture(fixture);
 const dataDir = path.join(fixture, "data");
 let fixtureDaemon = packaged
   ? packagedFixtureDaemon(packaged.daemon, packaged.cli, dataDir)
   : null;
 const workspace = path.join(fixture, "folder");
 await mkdir(workspace);
-// R16-BB: the sealed journeys run every in-app agent launch on the
-// team-local free model (Pi resolves its config from this isolated dir,
-// never the user's ~/.pi) and the Tasks journey rides a deterministic gh
-// fixture that must be on the daemon PATH before it spawns.
-const piDir = path.join(fixture, "pi");
+// R16-BB: the sealed journeys run every in-app agent launch against the
+// sealed, loopback, test-owned model fixture (scripts/sealed-model-
+// fixture.mjs) -- never a real network endpoint (Pi resolves its config
+// from this isolated dir, never the user's ~/.pi) -- and the Tasks
+// journey rides a deterministic gh fixture that must be on the daemon
+// PATH before it spawns.
+const piDir = path.join(fixture, "home", ".pi", "agent");
 const fixtureBin = path.join(fixture, "bin");
-await seedLocalPiProvider(piDir);
+let modelFixture = null;
+let privateEnvironment = null;
 await writeFixtureGh(fixtureBin, [
   { number: 1, title: "Acceptance issue one" },
   { number: 2, title: "Acceptance issue two" },
@@ -141,6 +159,12 @@ const report = {
   cleanup: [],
   desktopPids: [],
   fixture,
+  usageFixture: {
+    source: "deterministic-offline-fixture",
+    path: usageFixture.path,
+    sha256: usageFixture.sha256,
+    unavailableFallback: "claude,codex",
+  },
 };
 let daemon, desktop, browser, page, registered;
 let foregroundObservation;
@@ -150,7 +174,7 @@ let ranUpgradeCheck = false; // guards the explicit exit in the upgrade path
 async function stopOwned(child, label) {
   if (!child) return;
   const result = await stopAcceptanceProcess(child);
-  if (result.forced || result.verdict !== "exited") report.status = "FAILED";
+  if (result.forced || result.verdict !== "exited") markAcceptanceFailed(report);
   if (result.forced)
     report.cleanup.push(`${label}: required force after timeout`);
   report.cleanup.push(`${label}: ${result.verdict}`);
@@ -168,6 +192,9 @@ async function launchDesktop(overrideDataDir = null) {
         DROGON_DATA_DIR: activeDataDir,
         DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
         DROGON_BACKGROUND_WINDOW: "1",
+        DROGON_USAGE_FIXTURE: usageFixture.path,
+        // Valid fixtures precede this guard; missing/invalid files still stay offline.
+        DROGON_USAGE_FORCE_UNAVAILABLE: "claude,codex",
         ...(withAgents ? { DROGON_WINDOW_BOUNDS: agentWindowBounds } : {}),
         PI_CODING_AGENT_DIR: piDir,
         ...(process.platform !== "win32" ? { SHELL: "/bin/sh" } : {}),
@@ -175,7 +202,7 @@ async function launchDesktop(overrideDataDir = null) {
           ? { PATH: `${fixtureBin}:/usr/bin:/bin:/usr/sbin:/sbin` }
           : {}),
         ...(withHarness
-          ? { PI_CODING_AGENT_DIR: path.join(fixture, "pi") }
+          ? { PI_CODING_AGENT_DIR: piDir }
           : {}),
       },
     },
@@ -252,6 +279,13 @@ async function relaunchDesktop() {
   throw lastError;
 }
 try {
+  // Every operation after the server starts is covered by final cleanup.
+  privateEnvironment = await installPrivateAcceptanceEnvironment(fixture);
+  assert.equal(privateEnvironment.piDir, piDir);
+  modelFixture = await startAndSeedModelFixture(async (baseUrl, instanceId) => {
+    await seedLocalPiProvider(piDir, baseUrl, instanceId);
+    report.claudeKeyboardIsolation = await seedPrivateClaudeKeyboard({ home: privateEnvironment.home, fixtureBin, workspace, baseUrl });
+  });
   if (process.env.DROGON_VERIFY_OS_FOCUS === "1") {
     foregroundObservation = await startForegroundObservation(output);
   }
@@ -315,6 +349,7 @@ try {
   }
   await launchDesktop();
   if (daemonError) throw daemonError;
+  await verifyRenderedUsageFixture(page, usageFixture, report.checks);
   if (fixtureDaemon) {
     await fixtureDaemon.capture();
     assert.equal(
@@ -428,6 +463,30 @@ try {
     return response.result.workspaces[0];
   });
   report.checks.push("isolated-renderer-and-real-folder-registration");
+  if (packaged && process.env.DROGON_MIXED_FROM_BUNDLE) {
+    await fixtureDaemon.stop();
+    fixtureDaemon = null;
+    const closeMixedDesktop = async () => {
+      if (browser) await browser.close();
+      browser = null;
+      await stopOwned(desktop, "mixed-version probe desktop");
+      desktop = null;
+      page = null;
+    };
+    report.checks.push(...await probeMixedVersionRecovery({
+      oldBundle: path.resolve(process.env.DROGON_MIXED_FROM_BUNDLE), packaged, fixture, fixtureBin, output,
+      close: closeMixedDesktop,
+      launch: async (data) => { await launchDesktop(data); return page; },
+    }));
+    await launchDesktop();
+    fixtureDaemon = packagedFixtureDaemon(packaged.daemon, packaged.cli, dataDir);
+    await fixtureDaemon.capture();
+    await page.getByRole("button", { name: "Sessions", exact: true }).click();
+  }
+  if (packaged && modelFixture)
+    report.checks.push(...await probeChatLifecycle({ page, cli: packaged.cli, dataDir, output }));
+  if (report.claudeKeyboardIsolation)
+    report.checks.push(...await probeClaudeTerminalInput({ page, workspaceId: registered.id, output }));
   await page
     .getByRole("button", { name: "New tab", exact: true })
     .last()
@@ -452,6 +511,9 @@ try {
     return value.ok ? value.result.sessions[0] : null;
   }, registered.id);
   assert.ok(original?.incarnation);
+  if (process.platform !== "win32") {
+    report.checks.push(...await probeTerminalInputLayout({ page, session: original, output, expectedHome: privateEnvironment.home, dataDir }));
+  }
   report.checks.push(await probeSessionNavigation({
     page, workspaceId: registered.id, session: original, marker,
   }));
@@ -606,13 +668,9 @@ try {
     await page.getByRole("tab").first().waitFor();
   }
   report.checks.push("keyboard-tab-navigation-and-sibling-close");
-  for (const colorScheme of ["light", "dark"]) {
-    await page.emulateMedia({ colorScheme });
-    await page.screenshot({
-      path: path.join(output, `${colorScheme}.png`),
-      animations: "disabled",
-    });
-  }
+  report.themeCaptures = await captureSettingsThemes(page, output);
+  verifyThemeCaptures(report.themeCaptures);
+  report.checks.push("real-settings-light-dark-captures");
   await page.setViewportSize({ width: 760, height: 600 });
   assert.equal(
     await page.evaluate(
@@ -624,7 +682,7 @@ try {
     path: path.join(output, "narrow.png"),
     animations: "disabled",
   });
-  report.checks.push("light-dark-captures-and-narrow-no-overflow");
+  report.checks.push("narrow-no-document-overflow");
   await page.getByRole("button", { name: /Close .* session/ }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
   report.checks.push("exact-session-close-through-ui");
@@ -748,6 +806,7 @@ try {
   assert.equal(advancedWorktree?.note, "BM2 child");
   assert.equal(advancedWorktree?.parentWorktreeId, parentWorktreeId);
   report.checks.push("composer-advanced-branch-parent-note-setup-sparse");
+  report.checks.push(...await probeWorkspaceProperties({ page, worktree: advancedWorktree, output }));
 
   if (withHarness) {
     // Quick Session is intentionally gated to the harness acceptance: it
@@ -853,19 +912,20 @@ try {
           "debug",
           process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli",
         );
-    // The model-dependent journeys (J1/J7/J8) run real inference on the
-    // team-local server; DROGON_SKIP_MODEL_JOURNEYS=1 exists only for
-    // local iteration when that server is unavailable — it never defaults.
-    // J1 runs first: it boots right after app launch, closest to a fresh
-    // model-server window, and warms the model for J7/J8 below.
+    // Product Pi execution uses the owned deterministic provider, never a
+    // real model endpoint. A state transition alone cannot prove that route.
     if (process.env.DROGON_SKIP_MODEL_JOURNEYS !== "1") {
+      const countingBefore = modelFixture.receipt().byKind.counting;
       report.checks.push(
         ...(await probePiAgentStateWorkingIdle({
+          getFixtureReceipt: () => modelFixture.receipt(),
           page,
           workspaceId: registered.id,
           output,
         })),
       );
+      assert.ok(modelFixture.receipt().byKind.counting > countingBefore, "interactive Pi must actually call the owned counting fixture");
+      report.checks.push("interactive-pi-turn-proven-by-owned-provider-receipt");
     }
     report.checks.push(
       ...(await probeJumpPaletteSwitch({ page, root, output })),
@@ -910,15 +970,6 @@ try {
         daemon: packaged.daemon,
         cli: packaged.cli,
       })),
-    );
-  }
-  if (bundle) {
-    // Re-verify the exact sealed identity after acceptance: a candidate that
-    // changed mid-run fails closed instead of producing a mismatched report.
-    const closing = await verifySealedBundle(bundle, candidateSealed);
-    assert.equal(closing.sealedDigest, report.sealedDigest);
-    report.checks.push(
-      "sealed-final-artifact-identity-unchanged-after-acceptance",
     );
   }
   if (!packaged) {
@@ -1129,7 +1180,7 @@ try {
         ]);
         assert.equal(session.ok, true, "shell session seed failed");
       }
-      // The free LOCAL model only (never paid): Pi on dgx-spark.
+      // Upgrade history uses the same owned provider, including older builds.
       const piSession = await oldCli([
         "harness",
         "start",
@@ -1138,11 +1189,11 @@ try {
         "--harness",
         "pi",
         "--provider",
-        "dgx-spark",
+        PI_PROVIDER,
         "--model",
-        "qwen3.8-flash-next-nvidia-nvfp4",
+        PI_MODEL_ID,
         "--prompt",
-        "reply with the single word ready",
+        "Reply with exactly this acceptance marker and nothing else: UPGRADE_SEEDED",
       ]);
       assert.equal(piSession.ok, true, `local Pi seed failed: ${piSession.error?.message ?? ""}`);
       const automation = await oldCli([
@@ -1222,7 +1273,7 @@ try {
       await stopOwned(desktop, "upgrade desktop");
       await stopUpgradePhaseDaemons().catch((error) => {
         report.cleanup.push(`upgrade-phase daemon cleanup: ${error.message}`);
-        report.status = "FAILED";
+        markAcceptanceFailed(report);
       });
       desktop = null;
       browser = null;
@@ -1259,7 +1310,7 @@ try {
       await stopOwned(desktop, "refusal desktop");
       await stopUpgradePhaseDaemons().catch((error) => {
         report.cleanup.push(`refusal-phase daemon cleanup: ${error.message}`);
-        report.status = "FAILED";
+        markAcceptanceFailed(report);
       });
       desktop = null;
       browser = null;
@@ -1267,7 +1318,13 @@ try {
     }
     ranUpgradeCheck = true;
   }
-  report.status = "PASSED";
+  if (bundle) {
+    // Includes every relaunch, mixed-version and migration phase.
+    const closing = await verifySealedBundle(bundle, candidateSealed);
+    assert.equal(closing.sealedDigest, report.sealedDigest);
+    report.checks.push("sealed-final-artifact-identity-unchanged-after-acceptance");
+  }
+  markAcceptancePassed(report);
 } catch (error) {
   report.error = error.message;
   report.errorStack = error.stack;
@@ -1304,7 +1361,7 @@ try {
       );
       report.cleanup.push("owned workspace sessions: exited");
     } catch {
-      report.status = "FAILED";
+      markAcceptanceFailed(report);
       report.cleanup.push("owned workspace sessions: unverifiable");
     }
   }
@@ -1316,8 +1373,26 @@ try {
       await fixtureDaemon.stop();
       report.cleanup.push("exact packaged fixture daemon and sessions: exited");
     } catch (error) {
-      report.status = "FAILED";
+      markAcceptanceFailed(report);
       report.cleanup.push(`packaged fixture cleanup: ${error.message}`);
+    }
+  }
+  if (modelFixture) {
+    // Never swallowed: closeModelFixtureForReport() never throws, and by
+    // this point every client that could hold a real connection to the
+    // fixture (the app/Pi, already stopped above) is gone -- so any
+    // outstanding stream or socket it reports is genuine leaked work, not
+    // a normal keep-alive artifact, and fails the run same as an
+    // unverifiable verdict does. The original functional error (if any)
+    // is preserved and appended to, never replaced.
+    report.modelFixtureReceipt = modelFixture.receipt();
+    const fixtureResult = await closeModelFixtureForReport(modelFixture);
+    report.cleanup.push(fixtureResult.cleanupLine);
+    if (fixtureResult.failed) {
+      markAcceptanceFailed(report);
+      report.error = [report.error, fixtureResult.errorDetail]
+        .filter(Boolean)
+        .join("; ");
     }
   }
   if (foregroundObservation) {
@@ -1327,10 +1402,11 @@ try {
       report.checks.push("macos-no-desktop-activation-or-visible-windows");
       report.cleanup.push("OS foreground observer: exited");
     } catch (error) {
-      report.status = "FAILED";
+      markAcceptanceFailed(report);
       report.error = [report.error, error.message].filter(Boolean).join("; ");
     }
   }
+  privateEnvironment?.restore();
   report.finishedAt = new Date().toISOString();
   await writeFile(
     path.join(output, "report.json"),

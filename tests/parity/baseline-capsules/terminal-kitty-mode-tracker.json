@@ -1,0 +1,46 @@
+{
+  "capsuleId": "terminal-kitty-mode-tracker",
+  "description": "Pure source output-stream keyboard-mode tracker; root read complete runtime closure and all assertions.",
+  "sourceRevision": "34ae1a1c926fd1ce1f174f7c6ef2f65e0a0c4168",
+  "sourceRevisionNote": "Verified via `git -C <source-root> rev-parse HEAD` at manifest authoring time; the runner re-verifies this on every invocation and refuses to stage on any mismatch.",
+  "license": {
+    "path": "LICENSE",
+    "sha256": "ff1b611f80580d49f4b97e93a97b24eb050b0671b26b8afe16341fab699112f3",
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) 2026 Lovecast Inc."
+  },
+  "entryTestFile": "src/shared/terminal-kitty-keyboard-mode-tracker.test.ts",
+  "files": [
+    {
+      "path": "src/shared/terminal-kitty-keyboard-mode-tracker.test.ts",
+      "role": "test",
+      "sha256": "35d462399f1e0372e32f2f1fd615b6a7e8d0976b860ef016ee38428b81e5fc7d"
+    },
+    {
+      "path": "src/shared/terminal-kitty-keyboard-mode-tracker.ts",
+      "role": "module",
+      "sha256": "2ee0bad47d4575046f71c16e0334a8ae8be531f0cfc67133abc287f8ae5aa403"
+    },
+    {
+      "path": "src/shared/terminal-kitty-keyboard-flags.ts",
+      "role": "module",
+      "sha256": "ee8ca63afdca8356fa12878e74973ff92d807aa8d99750b2415b42f4bccb0225"
+    }
+  ],
+  "dependencyClosureNote": "Only runtime dependency of tracker is sibling terminal-kitty-keyboard-flags.ts; all modules are pure strings/numbers/arrays, no DOM/fs/network/process.",
+  "expectedTestCounts": {
+    "files": 1,
+    "tests": 26
+  },
+  "sourceVitestVersion": "^4.1.11",
+  "sourceVitestConfigFile": "config/vitest.config.ts",
+  "sourceVitestConfigDifferencesFromCapsule": [
+    "source test.environment is 'node' (matches capsule; no difference here)",
+    "source defines a global constant ORCA_FEATURE_WALL_ENABLED='true' at build time; the capsule's generated config defines nothing, since the pinned files never reference it",
+    "source registers three setupFiles (config/scripts/happy-dom-offscreen-canvas.ts, config/scripts/happy-dom-mutation-observer-retention.ts, config/scripts/vitest-host-ports-setup.ts); the capsule registers none, since the pinned files touch no DOM/canvas/host-port surface",
+    "source sets hookTimeout=60000ms and testTimeout=30000ms for its full, heavier suite; the capsule uses Vitest's built-in defaults",
+    "source passes execArgv ['--no-experimental-webstorage','--expose-gc'] to the worker process for retention tests elsewhere in the suite; the capsule passes none, since the pinned files allocate nothing that a GC-timing test would observe",
+    "installed capsule runner uses vitest 5.0.0 (apps/desktop/node_modules/.bin/vitest); the source project pins vitest ^4.1.11 in its own package.json. This is a real, unverified compatibility gap for anything beyond these two plain arithmetic/clamping assertions -- do not treat a pass under 5.0.0 as proof the source suite passes under its own pinned 4.1.11."
+  ],
+  "isolationRationale": "All unchanged source tests exercise string scanning, resets, screen/stack switching and replay provenance. No scheduled timers, process or network."
+}

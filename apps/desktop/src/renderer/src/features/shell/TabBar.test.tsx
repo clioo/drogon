@@ -161,6 +161,30 @@ describe("TabBar strip order", () => {
     expect(onRetrySession).toHaveBeenCalledWith(dead);
   });
 
+  // Fidelity gap (user-feature-closure item 1): the reference's
+  // TerminalTabLeadingIcon renders the state dot *and* the agent identity
+  // glyph together ("status and identity answer different questions. Keep
+  // the agent logo beside the state glyph so parallel tabs remain
+  // scannable" — TerminalTabLeadingIcon.tsx). WorktreeAgentRow already
+  // ports this pair; the tab strip's SortableTab `icon` slot must too,
+  // without displacing the existing agent-state indicator.
+  it("shows the harness icon beside the agent-state indicator on a session tab (#user-feature-closure item 1)", () => {
+    const piSession: Session = { ...session("a"), harnessId: "pi" };
+    renderStrip({ sessions: [piSession, session("b"), session("c")] });
+    const tab = screen
+      .getAllByRole("tab")
+      .find((el) => el.getAttribute("data-tab-id") === "a");
+    expect(tab).toBeTruthy();
+    // The harness icon carries the fork's title (WorktreeAgentRow's own
+    // convention via formatRowHarnessLabel) so it's independently queryable
+    // from the state-icon tooltip.
+    expect(tab?.querySelector('[title="Pi"]')).toBeTruthy();
+    // The agent-state indicator must still be present, unreplaced.
+    expect(
+      tab?.querySelector('[aria-label], [role="status"], svg'),
+    ).toBeTruthy();
+  });
+
   it("keeps plain-arrow roving navigation (accept-desktop contract)", () => {
     const onSelect = vi.fn();
     const onRetry = vi.fn();

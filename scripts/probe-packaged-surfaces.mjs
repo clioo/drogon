@@ -10,6 +10,7 @@ import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import { readEditorValue, waitForEditorRegistered } from "./acceptance-editor-text.mjs";
 import { decodePng } from "./build-app-icon.mjs";
+import { captureThemeSurface, readRenderedTheme, restoreThemeAndViewport, selectSettingsTheme, verifyThemeCaptures } from "./acceptance-theme.mjs";
 
 // R16-BB: scheduled fixtures must never fire (and hammer the local model)
 // during the sealed run.
@@ -778,9 +779,19 @@ async function probeBotsCreateAndResponsibility({ page, output }) {
 /** Status bar: no horizontal overflow at every parity width and scheme. */
 async function probeStatusBarOverflow({ page, output }) {
   const original = page.viewportSize();
+  const originalTheme = await readRenderedTheme(page);
+  const themeCaptures = [];
+  let primaryError;
+  const restoreTarget = async () => {
+    await page.getByRole("button", { name: "Bots", exact: true }).click({ timeout: 10000 });
+    const panel = page.locator('[data-testid="bots-panel"]');
+    await panel.getByText("Acceptance Bot", { exact: true }).waitFor({ timeout: 10000 });
+    await panel.getByRole("button", { name: "Run Acceptance duty", exact: true }).waitFor({ timeout: 10000 });
+  };
   try {
     for (const colorScheme of PARITY_COLOR_SCHEMES) {
-      await page.emulateMedia({ colorScheme });
+      const selection = await selectSettingsTheme(page, colorScheme);
+      await restoreTarget();
       for (const width of PARITY_VIEWPORT_WIDTHS) {
         await page.setViewportSize({ width, height: 800 });
         const statusBar = page.locator('footer[data-testid="status-bar"]');
@@ -814,15 +825,20 @@ async function probeStatusBarOverflow({ page, output }) {
           .locator('[data-testid="resource-usage-segment"]')
           .waitFor();
         await statusBar.locator('[data-testid="ports-segment"]').waitFor();
-        await page.screenshot({
-          path: path.join(output, `status-bar-${width}-${colorScheme}.png`),
-          animations: "disabled",
-        });
+        const capture = await captureThemeSurface(
+          page, path.join(output, `status-bar-${width}-${colorScheme}.png`), selection,
+        );
+        if (width === PARITY_VIEWPORT_WIDTHS[0]) themeCaptures.push(capture);
       }
     }
+    verifyThemeCaptures(themeCaptures);
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    if (original) await page.setViewportSize(original);
-    await page.emulateMedia({ colorScheme: "light" });
+    await restoreThemeAndViewport(page, {
+      theme: originalTheme.choice, viewport: original, primaryError, restoreTarget,
+    });
   }
   return [
     "status-bar-no-overflow-at-1440-1100-900-760-light-and-dark",
@@ -836,8 +852,11 @@ async function probeStatusBarOverflow({ page, output }) {
  * viewport-only sidebar rules and persisted widths that would otherwise be
  * hidden by the shell's overflow clipping.
  */
-async function probeResponsiveParity({ page }) {
+async function probeResponsiveParity({ page, output }) {
   const original = page.viewportSize();
+  const originalTheme = await readRenderedTheme(page);
+  const themeCaptures = [];
+  let primaryError;
   const originalSidebarStorage = await page.evaluate(() => ({
     open: localStorage.getItem("drogon:right-sidebar:open"),
     width: localStorage.getItem("drogon:right-sidebar:width"),
@@ -927,8 +946,7 @@ async function probeResponsiveParity({ page }) {
     );
 
     for (const colorScheme of PARITY_COLOR_SCHEMES) {
-      await page.emulateMedia({ colorScheme });
-      await page.keyboard.press(`${mod}+,`);
+      const selection = await selectSettingsTheme(page, colorScheme, { leaveSettingsOpen: true });
       const settings = page.locator('section[aria-label="Settings"]');
       await settings.waitFor({ timeout: 15000 });
       for (const width of PARITY_VIEWPORT_WIDTHS) {
@@ -959,10 +977,15 @@ async function probeResponsiveParity({ page }) {
           },
           `settings-content@${width}px-${colorScheme}`,
         );
+        const capture = await captureThemeSurface(
+          page, path.join(output, `settings-${width}-${colorScheme}.png`), selection,
+        );
+        if (width === PARITY_VIEWPORT_WIDTHS[0]) themeCaptures.push(capture);
       }
       await page.getByRole("button", { name: "Back to app", exact: true }).click();
       await settings.waitFor({ state: "hidden" });
     }
+    verifyThemeCaptures(themeCaptures);
 
     // Do not leave the next acceptance probe with the intentionally oversized
     // test width. Restore the pre-probe preference and hydrate it through a
@@ -981,9 +1004,13 @@ async function probeResponsiveParity({ page }) {
     await page
       .getByRole("button", { name: "Reveal active workspace", exact: true })
       .waitFor({ timeout: 20000 });
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    if (original) await page.setViewportSize(original);
-    await page.emulateMedia({ colorScheme: "light" });
+    await restoreThemeAndViewport(page, {
+      theme: originalTheme.choice, viewport: original, primaryError,
+    });
   }
   return [
     "right-sidebar-open-choice-survives-reload",
@@ -1426,7 +1453,7 @@ export async function probePackagedSurfaces({
   // width and scheme, including persisted right-sidebar state and settings
   // overflow. This runs after the task journey so the workspace is real and
   // the probe does not need synthetic renderer state.
-  checks.push(...(await probeResponsiveParity({ page })));
+  checks.push(...(await probeResponsiveParity({ page, output })));
 
   // Terminal buffer registry: the debug registry exposes live xterm buffers
   // (the reader the shared helper evaluates), never an empty handle. A

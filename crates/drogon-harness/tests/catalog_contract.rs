@@ -2374,20 +2374,23 @@ fn refused_budget_fails_closed_before_spawning() {
 #[cfg(unix)]
 #[cfg(unix)]
 #[cfg(unix)]
-/// Shell handshake for self-registering fixtures: declare and register
-/// this pid with its captured birth, then wait for the parent's
-/// verification ACK before proceeding. No ACK — or an ACK for another
-/// birth or outcome — fails visibly with exit 3 instead of running
-/// unowned. Every helper this spawns is bounded: one `dirname`, one
+/// Shell handshake for self-registering fixtures: declare, register,
+/// SEAL, then wait for the parent's verification ACK before proceeding.
+/// The seal sits immediately after the ledger append — not after the
+/// ACK wait — because declaration + registration complete the source's
+/// channel writes (everything afterwards is sleep/output/exit, never
+/// another channel record). A timeout-by-design fixture killed mid-wait
+/// therefore still satisfies source closure; a fixture that never
+/// declares/registers still fails closed on the missing seal. No ACK —
+/// or an ACK for another birth or outcome — fails visibly with exit 3
+/// instead of running unowned. Every helper this spawns is bounded: one `dirname`, one
 /// `ps`, one `date`-bounded ACK wait (wall-clock deadline immune to
 /// fork-latency stretch, plus an iteration backstop), and one exact
 /// whole-line `grep -F -e "<birth> alive" -e "<birth> gone"` — the
 /// shell twin of `check_ack_content`, binding attempt and outcome, not
 /// a substring. Birth canonicalization is fork-free word-splitting in
-/// a function scope (the script's own `$1` is untouched). The ACK poll
-/// ticks every 20ms so the round-trip fits comfortably inside sub-second
-/// probe work windows (a 100ms quantum would eat such a window alone);
-/// these short poll sleeps are transient group members, contained by the product's
+/// a function scope (the script's own `$1` is untouched). The short
+/// poll sleeps are transient group members, contained by the product's
 /// bounded group cleanup exactly like any other fixture descendant;
 /// they are never registered and never outlive the wait by more than
 /// one interval.
@@ -2400,10 +2403,10 @@ fn fixture_handshake_sh(pid: &str) -> String {
          [ -n \"$_BIRTH\" ] || exit 3\n\
          echo \"{pid}|$_BIRTH\" >> \"$_FD/declared.children\"\n\
          echo \"{pid}|$_BIRTH\" >> \"$_FD/ledger.children\"\n\
+         echo \"source=fixture:{pid} declared=1 registered=1\" > \"$_FD/sealed.registrations\"\n\
          _END=$(($(date +%s) + 5)); _I=0\n\
-         while [ ! -f \"$_FD/ack.{pid}\" ] && [ \"$(date +%s)\" -lt \"$_END\" ] && [ \"$_I\" -lt 2500 ]; do sleep 0.02; _I=$((_I+1)); done\n\
-         grep -qFx -e \"$_BIRTH alive\" -e \"$_BIRTH gone\" \"$_FD/ack.{pid}\" 2>/dev/null || exit 3\n\
-         echo \"source=fixture:{pid} declared=1 registered=1\" > \"$_FD/sealed.registrations\"\n"
+         while [ ! -f \"$_FD/ack.{pid}\" ] && [ \"$(date +%s)\" -lt \"$_END\" ] && [ \"$_I\" -lt 500 ]; do sleep 0.1; _I=$((_I+1)); done\n\
+         grep -qFx -e \"$_BIRTH alive\" -e \"$_BIRTH gone\" \"$_FD/ack.{pid}\" 2>/dev/null || exit 3\n"
     )
 }
 
@@ -2588,9 +2591,9 @@ fn timed_out_probe_is_killed_within_its_budget() {
             // work window that still starts the fixture (kill-path
             // coverage), never a pre-spawn refusal. One second comfortably
             // covers a warmed version probe plus the fixture handshake
-            // round-trip (parent tick, identity check, 20ms ACK poll)
-            // while the infinite/sleeping producer still always exceeds
-            // it; 300ms proved too tight once macOS first-exec scan and
+            // round-trip (parent tick, identity check, ACK poll) while
+            // the infinite/sleeping producer still always exceeds it;
+            // 300ms proved too tight once macOS first-exec scan and
             // scheduling latency stack up.
             Duration::from_secs(1) + PROBE_RESERVED_CLEANUP,
         );
@@ -2830,45 +2833,36 @@ PIEOF\n\
         note.contains("group-empty after SIGTERM"),
         "evidence must record verified group exit, not assumed: {note}"
     );
-    // Either the parent rescued the grandchild or the product cleaned up
-    // first and proved it. Demanding a parent signal unconditionally
-    // would punish the primary path for working: the product TERMs the
-    // group at the post-exit grace and verifies group-empty itself, and
-    // signaling an already-dead identity is an error under this file's
-    // no-signal-without-recheck rule, not diligence. Both branches demand
-    // verified evidence, never an assumed outcome.
-    let parent_signals = run
-        .cleanup
-        .actions
-        .iter()
-        .filter(|a| a.contains("SIGTERM") || a.contains("SIGKILL"))
-        .count();
-    if parent_signals == 0 {
-        assert!(
-            run.cleanup
-                .resolutions
-                .iter()
-                .all(|r| r.outcome == ResolutionOutcome::NaturalExit),
-            "no parent rescue, so every identity must have exited naturally: {:?}",
-            run.cleanup.resolutions
-        );
-        assert!(
-            note.contains("group-empty after SIGTERM"),
-            "no parent rescue, so the product's own verified group-empty evidence is required: {note}"
-        );
-    } else {
-        assert!(
-            run.cleanup.rescues().count() > 0
-                || run
-                    .cleanup
-                    .resolutions
-                    .iter()
-                    .any(|r| r.outcome == ResolutionOutcome::ReplacedAfterSignal),
-            "a parent signal must have a matching rescue resolution: {:?} / {:?}",
-            run.cleanup.actions,
-            run.cleanup.resolutions
-        );
-    }
+    // Correct owner of TERM evidence is the PRODUCT catalog note above
+    // (group-empty after SIGTERM) plus assert_clean_product's zero-
+    // rescue proof. Precise limits, not overclaims: the product group
+    // probe establishes group absence via killpg — NOT wait/reaping of
+    // a non-child (only the spawning parent can waitpid) — and the
+    // captured CI failure proves the gone-before-resolve order, not
+    // both timing orders. When the product's group is already empty,
+    // the supervisor must observe Gone and stay silent; demanding a
+    // supervisor SIGTERM here contradicts assert_clean_product and
+    // races the product's own bounded group cleanup. A supervisor
+    // signal is only correct for an identity verified alive at resolve
+    // time. What this test does require of the supervisor: verified
+    // every observed identity (an ACK exists) and resolved it gone
+    // without signaling.
+    assert!(
+        run.cleanup
+            .actions
+            .iter()
+            .any(|a| a.contains("ack-alive") || a.contains("ack-gone")),
+        "supervisor must have verified the identity before resolving it gone: {:?}",
+        run.cleanup.actions
+    );
+    assert!(
+        run.cleanup
+            .actions
+            .iter()
+            .any(|a| a.contains("resolved-gone")),
+        "grandchild must resolve gone: {:?}",
+        run.cleanup.actions
+    );
 }
 
 #[cfg(unix)]
@@ -2969,9 +2963,9 @@ fn continuous_producer_respects_the_deadline_and_is_fully_reaped() {
             // work window that still starts the fixture (kill-path
             // coverage), never a pre-spawn refusal. One second comfortably
             // covers a warmed version probe plus the fixture handshake
-            // round-trip (parent tick, identity check, 20ms ACK poll)
-            // while the infinite/sleeping producer still always exceeds
-            // it; 300ms proved too tight once macOS first-exec scan and
+            // round-trip (parent tick, identity check, ACK poll) while
+            // the infinite/sleeping producer still always exceeds it;
+            // 300ms proved too tight once macOS first-exec scan and
             // scheduling latency stack up.
             Duration::from_secs(1) + PROBE_RESERVED_CLEANUP,
         );

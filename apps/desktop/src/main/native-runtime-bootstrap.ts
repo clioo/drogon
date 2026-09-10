@@ -69,7 +69,18 @@ export type BootstrapDeps = {
 
 export type BootstrapOutcome =
   | { kind: "not-packaged" }
-  | { kind: "already-healthy" }
+  /**
+   * The attached service answered `ok: true` — bootstrap correctly
+   * attaches and never spawns over it (see the docstring on
+   * `bootstrapNativeRuntime`), even when `capabilities` is missing entries
+   * this build assumes (a mixed-version data dir, e.g. an old `drogond`
+   * predating `agent.settings.v1`/`bot.snapshot.v1` — see
+   * `daemon-capabilities.ts`). `capabilities` is the live service's own
+   * list, verbatim, so a caller can surface the gap without a second
+   * round-trip and, crucially, without this module ever deciding to kill
+   * or restart the incumbent on its own.
+   */
+  | { kind: "already-healthy"; capabilities: string[] }
   | { kind: "unsupported-platform" }
   | { kind: "answered-but-not-ok"; code: string }
   | { kind: "observation-timed-out" }
@@ -178,7 +189,11 @@ export async function bootstrapNativeRuntime(
   if (initial.kind === "timed-out") return { kind: "observation-timed-out" };
   if (initial.kind === "failed")
     return { kind: "observation-failed", message: messageOf(initial.error) };
-  if (initial.value.ok) return { kind: "already-healthy" };
+  if (initial.value.ok)
+    return {
+      kind: "already-healthy",
+      capabilities: initial.value.result.capabilities,
+    };
   // Anything other than "nothing answered" means a connection *was* made —
   // some process already owns this endpoint, just not answering as expected
   // (wrong token, malformed reply). Spawning a second daemon against an

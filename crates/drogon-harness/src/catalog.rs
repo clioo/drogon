@@ -1472,6 +1472,13 @@ mod run {
         }
     }
 
+    /// Sleep at most `cap`, and never past `deadline`: every wait slice
+    /// on the escalation path is capped so no phase overruns the total.
+    fn sleep_capped(deadline: Instant, cap: Duration) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        std::thread::sleep(remaining.min(cap));
+    }
+
     /// Poll group membership until it is provably Empty or the deadline
     /// passes. `child` is reaped while polling: a leader that has exited
     /// but not been waited still counts as a group member, which would
@@ -1495,7 +1502,7 @@ mod run {
                 }
                 Err(_) => {}
             }
-            std::thread::sleep(Duration::from_millis(10));
+            sleep_capped(deadline, Duration::from_millis(10));
             last = group_status(pgid);
         }
         last
@@ -1505,9 +1512,10 @@ mod run {
     /// descendant exit. Returns whether the group was provably empty at
     /// the end; mere signal delivery is never reported as verified exit.
     /// Escalate the whole process group and collect checked evidence about
-    /// descendant exit. Every grace is capped by the absolute `total`
-    /// deadline — never a fresh allowance: when the total expires
-    /// mid-escalation that cut is recorded instead of overrunning it.
+    /// descendant exit. ONE central absolute-total gate stands BEFORE each
+    /// signal: an expired total records its cut and returns false WITHOUT
+    /// signaling — never a best-effort KILL after the total. Every grace
+    /// is capped by the total; cuts are recorded instead of overrun.
     /// Returns whether the group was provably empty at the end; mere
     /// signal delivery is never reported as verified exit.
     fn escalate_group(
@@ -1516,6 +1524,11 @@ mod run {
         evidence: &mut Vec<String>,
         total: Instant,
     ) -> bool {
+        if Instant::now() >= total {
+            evidence
+                .push("total deadline already expired before SIGTERM; no signal sent".to_string());
+            return false;
+        }
         signal_group(pgid, libc::SIGTERM, evidence);
         let term_deadline = std::cmp::min(Instant::now() + SIGNAL_GRACE, total);
         match wait_group_empty(pgid, child, term_deadline, evidence) {
@@ -1534,12 +1547,11 @@ mod run {
             GroupStatus::Present => {
                 if Instant::now() >= total {
                     evidence.push(
-                        "total deadline expired during SIGTERM grace; escalating without grace"
-                            .to_string(),
+                        "total deadline expired during SIGTERM grace; no SIGKILL sent".to_string(),
                     );
-                } else {
-                    evidence.push("group survived SIGTERM; escalating to SIGKILL".to_string());
+                    return false;
                 }
+                evidence.push("group survived SIGTERM; escalating to SIGKILL".to_string());
                 signal_group(pgid, libc::SIGKILL, evidence);
                 let kill_deadline = std::cmp::min(Instant::now() + SIGNAL_GRACE, total);
                 let final_status = wait_group_empty(pgid, child, kill_deadline, evidence);
@@ -1687,17 +1699,20 @@ mod run {
         }
         if !cleanup_verified {
             // Nonblocking setup failed: draining could block, so fail
-            // closed instead of probing further. The reap is bounded by
-            // the total — never an unbounded wait — and an unconfirmed
-            // reap crosses in `unreaped` instead of dropping.
+            // closed instead of probing further. escalate_group below
+            // already ends with KILL plus a bounded verify inside the
+            // total, so the extra kill that used to follow it is gone: it
+            // was either redundant or — past the total — a forbidden
+            // best-effort signal. The reap below is bounded by the total,
+            // and an unconfirmed reap crosses in `unreaped` instead of
+            // dropping.
             escalate_group(pgid, &mut child, &mut evidence, total);
-            let _ = child.kill();
             let reap_end = std::cmp::min(Instant::now() + REAP_GRACE, total);
             loop {
                 match child.try_wait() {
                     Ok(Some(_)) => break,
                     Ok(None) if Instant::now() < reap_end => {
-                        std::thread::sleep(Duration::from_millis(2));
+                        sleep_capped(reap_end, Duration::from_millis(2));
                     }
                     Ok(None) => break,
                     Err(err) => {
@@ -1888,7 +1903,7 @@ mod run {
                     leader_exited = Some(status);
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(5));
+                sleep_capped(reap_deadline, Duration::from_millis(5));
             }
         }
         if leader_exited.is_none() {
@@ -1912,7 +1927,7 @@ mod run {
                     leader_exited = Some(status);
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(5));
+                sleep_capped(kill_deadline, Duration::from_millis(5));
             }
             if leader_exited.is_none() {
                 cleanup_verified = false;

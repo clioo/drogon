@@ -138,6 +138,11 @@ pub fn parse_steps(run_json: &Value, mentu_run_id: &str) -> Vec<MentuStepRun> {
                 .to_string();
             let exit_code = step.get("exit_code").and_then(Value::as_i64);
             Some(MentuStepRun {
+                model: step
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                usage: crate::mentu::usage::extract_step_usage(step),
                 label,
                 backend,
                 status: step_status(step, exit_code),
