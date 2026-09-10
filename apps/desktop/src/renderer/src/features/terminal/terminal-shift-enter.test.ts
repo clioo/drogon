@@ -27,8 +27,10 @@ test("shell uses this PTY's observed negotiation and returns to legacy after pop
   expect(send.mock.calls).toEqual([["\x1b[13;2u"], ["\x1b\r"]]);
 });
 // Pi 0.85.1 (bundle-verified): CSI-u is its native Shift+Enter, accepted
-// with or without kitty negotiation. Legacy ESC CR is Alt+Enter (queue
-// follow-up) and bare LF is submit when kitty is inactive — so a Pi pane
+// with or without kitty negotiation. Legacy ESC CR is Alt+Enter which
+// submits directly in idle via followUp/onSubmit, and bare LF inserts
+// newline via the editor raw-data branch in both kitty states (never
+// submits) — per the adversarial review of PR #406 — so a Pi pane
 // must send CSI-u even when its tracker lost the push (snapshot reset,
 // truncated replay, boot race). This pin fails if the Pi encoding moves
 // off CSI-u again (the 2026-09-10 submit regression).
