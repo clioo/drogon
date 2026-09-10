@@ -530,7 +530,7 @@ pub enum WorktreeAction {
     /// Create a git worktree for a Project on branch NAME
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent] [--comment <TEXT>] [--agent <ID> [--prompt <TEXT>]] [--setup run|skip|inherit] [--activate]\nValid flags: --activate, --agent, --base, --base-branch, --comment, --data-dir, --help, --json, --name, --no-parent, --parent, --project, --prompt, --request-id, --retry-request, --run-hooks, --setup"
+        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent] [--comment <TEXT>] [--agent <ID> [--prompt <TEXT>]] [--setup run|skip|inherit] [--activate] [--issue <N>]\nValid flags: --activate, --agent, --base, --base-branch, --comment, --data-dir, --help, --issue, --json, --name, --no-parent, --parent, --project, --prompt, --request-id, --retry-request, --run-hooks, --setup"
     )]
     Create {
         #[arg(long, value_name = "ID")]
@@ -570,6 +570,9 @@ pub enum WorktreeAction {
         /// there is no desktop view to reveal)
         #[arg(long)]
         activate: bool,
+        /// Linked GitHub issue number (source `--issue`)
+        #[arg(long, value_name = "N")]
+        issue: Option<u64>,
     },
     /// List a Project's worktrees
     #[command(
@@ -595,7 +598,7 @@ pub enum WorktreeAction {
     /// Update Orca metadata for a worktree (note, parent)
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree set --id <ID> [--note <TEXT>|--no-note] [--parent <ID>|--no-parent] [--display-name <NAME>|--no-display-name]\nValid flags: --comment, --data-dir, --display-name, --help, --id, --json, --no-display-name, --no-note, --no-parent, --note, --parent, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree set --id <ID> [--note <TEXT>|--no-note] [--parent <ID>|--no-parent] [--display-name <NAME>|--no-display-name] [--issue <N>|--no-issue]\nValid flags: --comment, --data-dir, --display-name, --help, --id, --issue, --json, --no-display-name, --no-issue, --no-note, --no-parent, --note, --parent, --request-id, --retry-request"
     )]
     Set {
         #[arg(long, value_name = "ID")]
@@ -618,6 +621,12 @@ pub enum WorktreeAction {
         /// Clear the display title explicitly
         #[arg(long)]
         no_display_name: bool,
+        /// Linked GitHub issue number (source `--issue`)
+        #[arg(long, value_name = "N", conflicts_with = "no_issue")]
+        issue: Option<u64>,
+        /// Clear the linked issue explicitly
+        #[arg(long)]
+        no_issue: bool,
         /// Parent worktree id (same project only)
         #[arg(long, value_name = "ID", conflicts_with = "no_parent")]
         parent: Option<String>,
@@ -1091,6 +1100,7 @@ impl Cli {
                     run_hooks: _,
                     setup,
                     activate: _,
+                    issue,
                 } => {
                     require_nonempty("project", project)?;
                     require_nonempty("name", name)?;
@@ -1126,6 +1136,12 @@ impl Cli {
                             ));
                         }
                     }
+                    // Source `--issue`: a positive GitHub issue number.
+                    if let Some(issue) = issue
+                        && *issue == 0
+                    {
+                        return Err(CliError::Usage("--issue must be a positive integer".into()));
+                    }
                 }
                 WorktreeAction::Show { id } => {
                     require_nonempty("id", id)?;
@@ -1152,6 +1168,8 @@ impl Cli {
                     no_note,
                     display_name,
                     no_display_name,
+                    issue,
+                    no_issue,
                     parent,
                     no_parent,
                 } => {
@@ -1169,11 +1187,13 @@ impl Cli {
                         && !no_note
                         && display_name.is_none()
                         && !no_display_name
+                        && issue.is_none()
+                        && !no_issue
                         && parent.is_none()
                         && !no_parent
                     {
                         return Err(CliError::Usage(
-                            "worktree set requires --note/--no-note, --display-name/--no-display-name, or --parent/--no-parent"
+                            "worktree set requires --note/--no-note, --display-name/--no-display-name, --issue/--no-issue, or --parent/--no-parent"
                                 .into(),
                         ));
                     }
@@ -1800,6 +1820,7 @@ mod tests {
                     run_hooks: _,
                     setup: _,
                     activate: _,
+                    issue: _,
                 },
         } = &cli.command
         else {

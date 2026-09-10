@@ -1539,3 +1539,78 @@ fn worktree_create_run_hooks_warns_instead_of_pretending() {
         json!("run-hooks is a no-op: this runtime has no orca.yaml hook engine")
     );
 }
+
+#[test]
+fn worktree_create_and_update_roundtrip_the_linked_issue() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let project = ok(
+        &engine,
+        "project.add",
+        "li1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let created = ok(
+        &engine,
+        "worktree.create",
+        "li2",
+        json!({"projectId": project["id"], "name": "linked", "linkedIssue": 42}),
+    );
+    assert_eq!(created["linkedIssue"], json!(42));
+
+    // Tri-state update: absent preserves, a number sets, null clears.
+    let kept = ok(
+        &engine,
+        "worktree.update",
+        "li3",
+        json!({"worktreeId": created["id"], "note": "keep the issue"}),
+    );
+    assert_eq!(kept["linkedIssue"], json!(42));
+    let changed = ok(
+        &engine,
+        "worktree.update",
+        "li4",
+        json!({"worktreeId": created["id"], "linkedIssue": 7}),
+    );
+    assert_eq!(changed["linkedIssue"], json!(7));
+    let cleared = ok(
+        &engine,
+        "worktree.update",
+        "li5",
+        json!({"worktreeId": created["id"], "linkedIssue": null}),
+    );
+    assert_eq!(cleared["linkedIssue"], Value::Null);
+
+    // Non-positive numbers are refused on both verbs.
+    assert_eq!(
+        err_code(
+            &engine,
+            "worktree.create",
+            "li6",
+            json!({"projectId": project["id"], "name": "bad", "linkedIssue": 0}),
+        ),
+        "invalid_argument"
+    );
+    assert_eq!(
+        err_code(
+            &engine,
+            "worktree.update",
+            "li7",
+            json!({"worktreeId": created["id"], "linkedIssue": -3}),
+        ),
+        "invalid_argument"
+    );
+
+    // Old rows survive the v4 migration with a NULL issue.
+    drop(engine);
+    let reopened = Engine::open(data_dir.path()).unwrap();
+    let shown = ok(
+        &reopened,
+        "worktree.get",
+        "li8",
+        json!({"id": created["id"]}),
+    );
+    assert_eq!(shown["worktree"]["linkedIssue"], Value::Null);
+}

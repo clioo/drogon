@@ -22,7 +22,7 @@ type ComponentFixtures = &'static [(&'static str, i64)];
 const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("bots", 3, &[("bots-v1", 1), ("bots-v2", 2)]),
     ("automations", 2, &[("automations-v1", 1)]),
-    ("projects", 3, &[("projects-v1", 1)]),
+    ("projects", 4, &[("projects-v1", 1)]),
     ("mentu", 1, &[]),
     ("coordination_access", 1, &[]),
     ("orchestration_mail", 2, &[("orchestration-mail-v1", 1)]),

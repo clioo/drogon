@@ -946,6 +946,7 @@ async fn worktree(
             run_hooks,
             setup,
             activate,
+            issue,
         } => {
             // Real, durable creation provenance (Workspace Options "Hide:
             // CLI-created"): every worktree this command creates really was
@@ -980,6 +981,11 @@ async fn worktree(
                 setup.clone()
             };
             let mut local_warnings = Vec::new();
+            if let Some(issue) = issue
+                && *issue > 0
+            {
+                params["linkedIssue"] = json!(issue);
+            }
             if let Some(setup) = &effective_setup {
                 params["setupDecision"] = json!(setup);
                 if setup == "run" {
@@ -1131,6 +1137,8 @@ async fn worktree(
             no_note,
             display_name,
             no_display_name,
+            issue,
+            no_issue,
             parent,
             no_parent,
         } => {
@@ -1146,6 +1154,11 @@ async fn worktree(
                 params["title"] = Value::Null;
             } else if let Some(display_name) = display_name {
                 params["title"] = json!(display_name);
+            }
+            if *no_issue {
+                params["linkedIssue"] = Value::Null;
+            } else if let Some(issue) = issue {
+                params["linkedIssue"] = json!(issue);
             }
             if *no_parent {
                 params["parentWorktreeId"] = Value::Null;

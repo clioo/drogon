@@ -2815,3 +2815,97 @@ async fn worktree_create_setup_and_activate_warn_honestly() {
     assert_eq!(bad.status.code(), Some(2));
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_issue_maps_to_linked_issue() {
+    let dir = temp_data_dir("wtissue");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "wt-new",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-1",
+                    "path": "/repo/child",
+                    "branch": "child",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "linkedIssue": 42,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            ))
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--issue",
+            "42",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "worktree.create");
+    assert_eq!(request["params"]["linkedIssue"], 42);
+
+    // Zero is a client-side usage error; the daemon is never called.
+    let bad = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--issue",
+            "0",
+        ],
+    );
+    assert_eq!(bad.status.code(), Some(2));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_set_issue_and_no_issue_map_to_tri_state() {
+    let dir = temp_data_dir("wtsetiss");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "w1",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-1",
+                    "path": "/repo/w1",
+                    "branch": "w1",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            ))
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &["worktree", "set", "--id", "w1", "--issue", "7"],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["linkedIssue"], 7);
+
+    let output = run_cli(dir.path(), &["worktree", "set", "--id", "w1", "--no-issue"]);
+    assert_eq!(output.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["linkedIssue"], Value::Null);
+    drop(service);
+}

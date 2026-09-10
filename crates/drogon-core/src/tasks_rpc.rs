@@ -796,7 +796,7 @@ fn ensure_task_links_table(conn: &rusqlite::Connection) -> Result<(), RpcError> 
 
 fn worktree_struct(conn: &rusqlite::Connection, worktree_id: &str) -> Result<Worktree, RpcError> {
     conn.query_row(
-        "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id FROM worktrees WHERE id = ?1",
+        "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, linked_issue FROM worktrees WHERE id = ?1",
         [worktree_id],
         |row| {
             Ok(Worktree {
@@ -810,6 +810,7 @@ fn worktree_struct(conn: &rusqlite::Connection, worktree_id: &str) -> Result<Wor
                 title: row.get(7)?,
                 note: row.get(8)?,
                 parent_worktree_id: row.get(9)?,
+                linked_issue: row.get(10)?,
                 created_at: String::new(),
                 // Same partial-projection convention as `created_at`
                 // above: this helper only backs a task-link lookup, never
