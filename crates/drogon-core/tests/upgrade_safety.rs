@@ -23,7 +23,7 @@ type ComponentFixtures = &'static [(&'static str, i64)];
 /// version fails `every_component_fixture_migrates_to_current`.
 const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("bots", 3, &[("bots-v1", 1), ("bots-v2", 2)]),
-    ("bot_monitors", 1, &[]),
+    ("bot_monitors", 2, &[("bot_monitors-v1", 1)]),
     ("bot_self", 1, &[]),
     ("bot_delegation", 1, &[]),
     ("automations", 2, &[("automations-v1", 1)]),
@@ -49,6 +49,7 @@ fn fixture_sql(fixture: &str) -> &'static str {
         "bots-v1" => include_str!("fixtures/upgrades/bots-v1.sql"),
         "bots-v2" => include_str!("fixtures/upgrades/bots-v2.sql"),
         "automations-v1" => include_str!("fixtures/upgrades/automations-v1.sql"),
+        "bot_monitors-v1" => include_str!("fixtures/upgrades/bot_monitors-v1.sql"),
         "projects-v1" => include_str!("fixtures/upgrades/projects-v1.sql"),
         "main-schema-v1" => include_str!("fixtures/upgrades/main-schema-v1.sql"),
         "workspaces-only-pre-projects" => {
@@ -196,6 +197,32 @@ fn automations_v1_keeps_records_and_gains_the_composite_index() {
         )
         .unwrap();
     assert_eq!(index, 1, "v1→v2 adds the composite runs index");
+}
+
+#[test]
+fn bot_monitors_v1_row_revalidates_and_stays_approved_across_the_bump() {
+    let (dir, _engine) = open_seeded("bot-monitors-legacy", "bot_monitors-v1");
+    let conn = read_db(&dir);
+    assert_eq!(
+        version_of(&conn, "bot_monitors"),
+        2,
+        "the additive rule-kind bump records v2"
+    );
+    let payload: String = conn
+        .query_row(
+            "SELECT payload_json FROM bot_monitors WHERE id = 'mon-legacy'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let record: drogon_core::bots::monitors::record::MonitorRecord =
+        serde_json::from_str(&payload).unwrap();
+    record.validate().expect("legacy record re-validates");
+    assert!(
+        record.is_approved(),
+        "already-approved v1 monitors never need a mass re-approval"
+    );
+    assert_eq!(record.rule.kind_str(), "local_file_digest.v1");
 }
 
 #[test]

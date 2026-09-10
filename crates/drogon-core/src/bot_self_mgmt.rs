@@ -71,11 +71,16 @@ use crate::bot_mutation_rpc::{
 use crate::bots::monitors::commit::{CommitDecision, RetainReason, StoredMonitorState};
 use crate::bots::monitors::eval as monitor_eval;
 use crate::bots::monitors::record::{
-    MonitorRecord, MonitorTrigger, new_monitor as new_monitor_record,
+    MonitorRecord, MonitorTrigger, new_monitor as new_monitor_record, new_unapproved_monitor,
     staged_rule_edit as staged_monitor_rule_edit,
 };
 use crate::bots::monitors::result::{MonitorCheckResult, MonitorErrorKind};
-use crate::bots::monitors::rule::{LocalFileRule, MAX_FILE_BYTES, MonitorRule};
+use crate::bots::monitors::rule::{
+    DEFAULT_HTTP_BODY_BYTES, DEFAULT_HTTP_TIMEOUT_MS, DEFAULT_SCRIPT_OUTPUT_BYTES,
+    DEFAULT_SCRIPT_TIMEOUT_MS, HttpCursorSpec, HttpPollRule, LocalFileRule, MAX_FILE_BYTES,
+    MAX_HTTP_BODY_BYTES, MAX_HTTP_TIMEOUT_MS, MAX_SCRIPT_OUTPUT_BYTES, MAX_SCRIPT_TIMEOUT_MS,
+    MonitorRule, ScriptInterpreter, ScriptRule,
+};
 use crate::bots::monitors::storage as monitor_storage;
 use crate::bots::monitors::{backoff_ms, should_admit};
 use crate::bots::policy as bot_policy;
@@ -973,7 +978,7 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
         record: MonitorRecord,
         rev: i64,
         root: String,
-        max_bytes: u64,
+        file_rule: LocalFileRule,
     }
 
     let mut summary = MonitorTickSummary::default();
@@ -1002,8 +1007,14 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
                 summary.skipped += 1;
                 continue;
             }
-            let rule = record.rule.local_file().clone();
-            let root = match workspace::get_path(&conn, &rule.project_id) {
+            // P1 admits script/http rules and their approval, but execution
+            // arrives with the bounded runner (P2). Skip honestly instead of
+            // fabricating a file read for a kind that has no file to read.
+            let Some(file_rule) = record.rule.local_file().cloned() else {
+                summary.skipped += 1;
+                continue;
+            };
+            let root = match workspace::get_path(&conn, &file_rule.project_id) {
                 Ok(root) => root,
                 Err(_) => {
                     // Unknown workspace: an honest error check-in, committed below.
@@ -1011,17 +1022,17 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
                         record,
                         rev,
                         root: String::new(),
-                        max_bytes: rule.max_bytes,
+                        file_rule,
                     });
                     continue;
                 }
             };
-            if rule.host_id != engine.host_id {
+            if file_rule.host_id != engine.host_id {
                 summary.refused += 1;
                 continue;
             }
             out.push(Candidate {
-                max_bytes: rule.max_bytes,
+                file_rule,
                 record,
                 rev,
                 root,
@@ -1037,7 +1048,7 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
     let mut evaluated = Vec::with_capacity(candidates.len());
     for candidate in candidates {
         summary.evaluated += 1;
-        let rule = candidate.record.rule.local_file().clone();
+        let rule = candidate.file_rule.clone();
         let result = if candidate.root.is_empty() {
             monitor_eval::read_failure(
                 &candidate.record,
@@ -1046,7 +1057,7 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
                 now_ms,
             )
         } else {
-            match read_scoped_file(&candidate.root, &rule.resource, candidate.max_bytes) {
+            match read_scoped_file(&candidate.root, &rule.resource, rule.max_bytes) {
                 ScopedBytes::Bytes(bytes) => {
                     monitor_eval::evaluate_bytes(&candidate.record, &bytes, now_ms)
                 }
@@ -1056,7 +1067,7 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
                     MonitorErrorKind::Oversized,
                     format!(
                         "monitored file is {len} bytes, bound is {}",
-                        candidate.max_bytes.min(MAX_FILE_BYTES)
+                        rule.max_bytes.min(MAX_FILE_BYTES)
                     ),
                     now_ms,
                 ),
@@ -1069,7 +1080,7 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
     }
     // Phase C: commit each in its own BEGIN IMMEDIATE.
     for Evaluated { candidate, result } in evaluated {
-        let rule = candidate.record.rule.local_file().clone();
+        let rule = candidate.file_rule.clone();
         let decision = commit::decide_for_tick(&candidate.record, &result);
         match decision {
             CommitDecision::Advance { new_cursor, intent } => {
@@ -1231,7 +1242,17 @@ mod commit {
         record: &MonitorRecord,
         result: &MonitorCheckResult,
     ) -> CommitDecision {
-        let rule = record.rule.local_file();
+        // The tick only routes `local_file_digest.v1` candidates here (other
+        // kinds skip until the P2 runner); refuse anything else rather than
+        // inventing scope fields for a kind with no evaluator.
+        let Some(rule) = record.rule.local_file() else {
+            return CommitDecision::RefuseStale {
+                reason: format!(
+                    "rule kind {} has no commit evaluator in this build",
+                    record.rule.kind_str()
+                ),
+            };
+        };
         decide_commit(
             &monitor_state_of(record),
             &rule.host_id,
@@ -1400,15 +1421,16 @@ fn responsibility_view(bot_id: &str, tx: &Transaction, bot: &Bot) -> Vec<Value> 
 }
 
 fn monitor_view(record: &MonitorRecord) -> Value {
-    let rule = record.rule.local_file();
-    json!({
+    // Kind-specific fields (resource/maxBytes for the file kind;
+    // scriptPath/scriptHash/interpreter/argv/... for the script kind;
+    // urlHash/cursorSpec/... for the http kind) come from the rule itself.
+    // `ruleKind` lets the renderer fail closed on a kind it does not know.
+    let mut view = json!({
         "id": record.id,
         "version": record.version,
         "enabled": record.enabled,
         "approved": record.is_approved(),
         "health": monitor_health(record).as_str(),
-        "resource": rule.resource,
-        "maxBytes": rule.max_bytes,
         "trigger": record.trigger,
         "consecutiveErrors": record.consecutive_errors,
         "nextEligibleAtMs": record.next_eligible_at_ms,
@@ -1416,7 +1438,16 @@ fn monitor_view(record: &MonitorRecord) -> Value {
         "lastError": record.last_error,
         "lastEventId": record.last_event_id,
         "hasCursor": record.cursor.is_some(),
-    })
+        "secretRefs": record.secret_refs,
+    });
+    if let (Some(view), Some(rule_fields)) =
+        (view.as_object_mut(), record.rule.summary_json().as_object())
+    {
+        for (key, value) in rule_fields {
+            view.insert(key.clone(), value.clone());
+        }
+    }
+    view
 }
 
 // --- provision (P1) ---
@@ -2057,8 +2088,38 @@ struct SelfCreateMonitor {
     host_id: String,
     bot_id: String,
     actor_bot_id: String,
-    resource: String,
+    /// Rule kind. Defaults to the original `local_file_digest.v1` so old
+    /// callers are unchanged.
+    #[serde(default)]
+    kind: Option<String>,
+    // local_file_digest.v1
+    #[serde(default)]
+    resource: Option<String>,
+    #[serde(default)]
     max_bytes: Option<u64>,
+    // script_command.v1
+    #[serde(default)]
+    script_path: Option<String>,
+    #[serde(default)]
+    script_hash: Option<String>,
+    #[serde(default)]
+    interpreter: Option<String>,
+    #[serde(default)]
+    argv: Option<Vec<String>>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    #[serde(default)]
+    max_output_bytes: Option<u64>,
+    // http_poll.v1
+    #[serde(default)]
+    url_hash: Option<String>,
+    #[serde(default)]
+    max_body_bytes: Option<u64>,
+    #[serde(default)]
+    cursor_spec: Option<HttpCursorSpec>,
+    // shared
+    #[serde(default)]
+    secret_refs: Option<Vec<String>>,
     trigger: SelfTriggerWire,
     enabled: Option<bool>,
 }
@@ -2198,11 +2259,14 @@ fn admit_self_max_bytes(max_bytes: Option<u64>) -> Result<u64, RpcError> {
     Ok(bound)
 }
 
-/// Builds the server-resolved rule: scope always comes from the derived
+/// Builds the server-resolved file rule: scope always comes from the derived
 /// host and the provisioned home workspace — a client-supplied scope has
-/// no spelling, so cross-scope rules cannot be requested. Only the frozen
-/// `local_file_digest.v1` kind exists; scripts, interpreters and secrets
-/// stay refused by `MonitorRecord::validate`.
+/// no spelling, so cross-scope rules cannot be requested. The self RPC
+/// surface stays file-only through P1; the new `script_command.v1` and
+/// `http_poll.v1` kinds are admitted by [`validate_rule`] and constructed
+/// by [`build_self_script_rule`]/[`build_self_http_rule`], which P4 wires
+/// to the CLI. `MonitorRecord::validate` keeps the record consistent with
+/// whichever kind it holds.
 fn build_self_rule(
     host_id: &str,
     home_workspace_id: &str,
@@ -2223,6 +2287,175 @@ fn build_self_rule(
     // resource is denied at admission.
     monitor_eval::resolve_scoped_path("/home", resource).map_err(invalid_argument)?;
     Ok(rule)
+}
+
+/// Server-resolved admission for `script_command.v1`: scope is derived
+/// (never caller-supplied), the script path is contained like a resource,
+/// the interpreter must be in the allowlist, argv/refs/bounds go through
+/// the rule validator, and the pinned hash must be a real sha256. The
+/// caller (P4) hashes the approved script bytes; this function never reads
+/// or writes the script file.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_self_script_rule(
+    host_id: &str,
+    home_workspace_id: &str,
+    script_path: &str,
+    script_hash: &str,
+    interpreter: ScriptInterpreter,
+    argv: Vec<String>,
+    timeout_ms: Option<u64>,
+    max_output_bytes: Option<u64>,
+    secret_refs: Vec<String>,
+) -> Result<MonitorRule, RpcError> {
+    let timeout_ms = timeout_ms.unwrap_or(DEFAULT_SCRIPT_TIMEOUT_MS);
+    if !(crate::bots::monitors::rule::MIN_SCRIPT_TIMEOUT_MS..=MAX_SCRIPT_TIMEOUT_MS)
+        .contains(&timeout_ms)
+    {
+        return Err(invalid_argument(format!(
+            "timeoutMs must be 1..={MAX_SCRIPT_TIMEOUT_MS}"
+        )));
+    }
+    let max_output_bytes = max_output_bytes.unwrap_or(DEFAULT_SCRIPT_OUTPUT_BYTES);
+    if !(1..=MAX_SCRIPT_OUTPUT_BYTES).contains(&max_output_bytes) {
+        return Err(invalid_argument(format!(
+            "maxOutputBytes must be 1..={MAX_SCRIPT_OUTPUT_BYTES}"
+        )));
+    }
+    let rule = MonitorRule::ScriptCommand(ScriptRule {
+        host_id: host_id.to_string(),
+        project_id: home_workspace_id.to_string(),
+        script_path: script_path.to_string(),
+        script_hash: script_hash.to_string(),
+        interpreter,
+        argv,
+        timeout_ms,
+        max_output_bytes,
+        secret_refs,
+    });
+    crate::bots::monitors::rule::validate_rule(&rule).map_err(invalid_argument)?;
+    // Containment is proven now, not only at spawn time.
+    monitor_eval::resolve_scoped_path("/home", script_path).map_err(invalid_argument)?;
+    Ok(rule)
+}
+
+/// Server-resolved admission for `http_poll.v1`: scope is derived and the
+/// URL is supplied only as its approved sha256 hash (the sealed URL row is
+/// P0). Method is GET by construction; there is no method field to set.
+pub(crate) fn build_self_http_rule(
+    host_id: &str,
+    home_workspace_id: &str,
+    url_hash: &str,
+    timeout_ms: Option<u64>,
+    max_body_bytes: Option<u64>,
+    cursor_spec: HttpCursorSpec,
+    secret_refs: Vec<String>,
+) -> Result<MonitorRule, RpcError> {
+    let timeout_ms = timeout_ms.unwrap_or(DEFAULT_HTTP_TIMEOUT_MS);
+    if !(1..=MAX_HTTP_TIMEOUT_MS).contains(&timeout_ms) {
+        return Err(invalid_argument(format!(
+            "timeoutMs must be 1..={MAX_HTTP_TIMEOUT_MS}"
+        )));
+    }
+    let max_body_bytes = max_body_bytes.unwrap_or(DEFAULT_HTTP_BODY_BYTES);
+    if !(1..=MAX_HTTP_BODY_BYTES).contains(&max_body_bytes) {
+        return Err(invalid_argument(format!(
+            "maxBodyBytes must be 1..={MAX_HTTP_BODY_BYTES}"
+        )));
+    }
+    let rule = MonitorRule::HttpPoll(HttpPollRule {
+        host_id: host_id.to_string(),
+        project_id: home_workspace_id.to_string(),
+        url_hash: url_hash.to_string(),
+        timeout_ms,
+        max_body_bytes,
+        cursor_spec,
+        secret_refs,
+    });
+    crate::bots::monitors::rule::validate_rule(&rule).map_err(invalid_argument)?;
+    Ok(rule)
+}
+
+/// Kind dispatch for the agent-facing create surface. Scope is always
+/// `(derived host, provisioned home workspace)`; a client-supplied scope
+/// has no spelling. Unknown kinds are refused rather than guessed.
+fn build_self_rule_from_wire(
+    host_id: &str,
+    home_workspace_id: &str,
+    params: &SelfCreateMonitor,
+) -> Result<MonitorRule, RpcError> {
+    use crate::bots::monitors::rule as rule_kinds;
+    let kind = params
+        .kind
+        .as_deref()
+        .unwrap_or(rule_kinds::RULE_KIND_LOCAL_FILE_DIGEST);
+    match kind {
+        rule_kinds::RULE_KIND_LOCAL_FILE_DIGEST => {
+            let resource = params
+                .resource
+                .as_deref()
+                .ok_or_else(|| invalid_argument("resource is required for local_file_digest.v1"))?;
+            let max_bytes = admit_self_max_bytes(params.max_bytes)?;
+            build_self_rule(host_id, home_workspace_id, resource, max_bytes)
+        }
+        rule_kinds::RULE_KIND_SCRIPT_COMMAND => {
+            let script_path = params
+                .script_path
+                .as_deref()
+                .ok_or_else(|| invalid_argument("scriptPath is required for script_command.v1"))?;
+            let script_hash = params
+                .script_hash
+                .as_deref()
+                .ok_or_else(|| invalid_argument("scriptHash is required for script_command.v1"))?;
+            let interpreter = match params.interpreter.as_deref() {
+                Some("gh_api") => ScriptInterpreter::GhApi,
+                Some(other) => ScriptInterpreter::Unsupported(other.to_string()),
+                None => {
+                    return Err(invalid_argument(
+                        "interpreter is required for script_command.v1",
+                    ));
+                }
+            };
+            let argv = params
+                .argv
+                .clone()
+                .ok_or_else(|| invalid_argument("argv is required for script_command.v1"))?;
+            let secret_refs = params.secret_refs.clone().unwrap_or_default();
+            build_self_script_rule(
+                host_id,
+                home_workspace_id,
+                script_path,
+                script_hash,
+                interpreter,
+                argv,
+                params.timeout_ms,
+                params.max_output_bytes,
+                secret_refs,
+            )
+        }
+        rule_kinds::RULE_KIND_HTTP_POLL => {
+            let url_hash = params
+                .url_hash
+                .as_deref()
+                .ok_or_else(|| invalid_argument("urlHash is required for http_poll.v1"))?;
+            let cursor_spec = params
+                .cursor_spec
+                .clone()
+                .ok_or_else(|| invalid_argument("cursorSpec is required for http_poll.v1"))?;
+            let secret_refs = params.secret_refs.clone().unwrap_or_default();
+            build_self_http_rule(
+                host_id,
+                home_workspace_id,
+                url_hash,
+                params.timeout_ms,
+                params.max_body_bytes,
+                cursor_spec,
+                secret_refs,
+            )
+        }
+        other => Err(invalid_argument(format!(
+            "unknown monitor rule kind {other:?}"
+        ))),
+    }
 }
 
 /// Loads a monitor fenced to the actor's own Bot: missing, or owned by a
@@ -2263,36 +2496,43 @@ impl crate::Engine {
                 if owned.len() >= home.max_monitors.max(1) {
                     return Err(invalid_argument("bot monitor quota exceeded"));
                 }
-                let max_bytes = admit_self_max_bytes(params.max_bytes)?;
-                let rule = build_self_rule(
-                    &self.host_id,
-                    &home.home_workspace_id,
-                    &params.resource,
-                    max_bytes,
-                )?;
+                let rule =
+                    build_self_rule_from_wire(&self.host_id, &home.home_workspace_id, &params)?;
                 let trigger = admit_self_trigger(&params.trigger)?;
                 let now_ms = crate::now_unix_ms() as f64;
                 let id = uuid::Uuid::new_v4().to_string();
-                // Self-created monitors arrive approved for their exact
+                // A self-created file digest arrives approved for its exact
                 // initial rule (in-scope file digests only — see
-                // build_self_rule) but follow the caller's enabled flag
-                // (default on). Rule edits below re-approve only while
-                // they stay in-scope; anything else parks at
-                // needs-approval until the host re-provisions.
+                // build_self_rule) but follows the caller's enabled flag
+                // (default on). Every other kind is NEVER auto-approved: a
+                // script or http rule stages parked at needs-approval and
+                // only the user's explicit approve call on the exact rule
+                // hash arms it. That is the single consent point for a rule
+                // that can run code or hold credentials.
+                let file_kind = matches!(rule, MonitorRule::LocalFileDigest(_));
                 let approved = rule.approval_hash();
-                let mut record = new_monitor_record(
-                    id.clone(),
-                    Some(scope.bot_id.clone()),
-                    rule,
-                    trigger,
-                    approved,
-                    now_ms,
-                )
-                .map_err(invalid_argument)?;
+                let mut record = if file_kind {
+                    new_monitor_record(
+                        id.clone(),
+                        Some(scope.bot_id.clone()),
+                        rule,
+                        trigger,
+                        approved,
+                        now_ms,
+                    )
+                    .map_err(invalid_argument)?
+                } else {
+                    new_unapproved_monitor(
+                        id.clone(),
+                        Some(scope.bot_id.clone()),
+                        rule,
+                        trigger,
+                        now_ms,
+                    )
+                    .map_err(invalid_argument)?
+                };
                 record.enabled = params.enabled.unwrap_or(true);
-                if !record.is_approved() {
-                    return Err(storage_error("new monitor must be approved"));
-                }
+                debug_assert_eq!(record.is_approved(), file_kind);
                 monitor_storage::create_monitor(tx, &record).map_err(monitor_storage_error)?;
                 let at = crate::now_unix_ms() as f64;
                 audit(
@@ -2301,13 +2541,14 @@ impl crate::Engine {
                     &request.method,
                     &scope,
                     at,
-                    &json!({"monitorId": id}),
+                    &json!({"monitorId": id, "ruleKind": record.rule.kind_str()}),
                 )?;
                 Ok(json!({
                     "hostId": self.host_id,
                     "botId": scope.bot_id,
                     "monitorId": id,
-                    "approved": true,
+                    "ruleKind": record.rule.kind_str(),
+                    "approved": record.is_approved(),
                     "health": monitor_health(&record).as_str(),
                 }))
             },
@@ -2339,7 +2580,16 @@ impl crate::Engine {
                     )));
                 }
                 let now_ms = crate::now_unix_ms() as f64;
-                let current = record.rule.local_file().clone();
+                // P1 admits the new rule kinds and their approval; editing
+                // them through this file-only self surface arrives with the
+                // P4 CLI/flags. Refuse honestly instead of coercing a
+                // script/http rule into a file rule.
+                let Some(current) = record.rule.local_file().cloned() else {
+                    return Err(invalid_argument(format!(
+                        "editing rule kind {} is not available in this build",
+                        record.rule.kind_str()
+                    )));
+                };
                 let resource = params.resource.as_deref().unwrap_or(&current.resource);
                 let max_bytes = admit_self_max_bytes(params.max_bytes.or(Some(current.max_bytes)))?;
                 let rule =
@@ -2488,15 +2738,18 @@ impl crate::Engine {
         if scope.host_id != self.host_id {
             return Err(foreign_bot("request belongs to another execution host"));
         }
-        let (record, root) = {
+        let (record, root, file_rule) = {
             let conn = self.db.lock().unwrap();
             let tx = conn.unchecked_transaction().map_err(error::from_sqlite)?;
             let (_, _, _) = resolve_self_bot(&tx, &self.host_id, &scope)?;
             let (record, _) = load_owned_monitor(&tx, &scope.bot_id, &params.monitor_id)?;
-            let rule = record.rule.local_file().clone();
-            let root = workspace::get_path(&tx, &rule.project_id)
-                .map_err(|e| not_found(format!("monitor workspace is gone: {}", e.message)))?;
-            (record, root)
+            let file_rule = record.rule.local_file().cloned();
+            let root = match &file_rule {
+                Some(rule) => workspace::get_path(&tx, &rule.project_id)
+                    .map_err(|e| not_found(format!("monitor workspace is gone: {}", e.message)))?,
+                None => String::new(),
+            };
+            (record, root, file_rule)
         };
         let now_ms = crate::now_unix_ms() as f64;
         if !record.enabled {
@@ -2519,7 +2772,20 @@ impl crate::Engine {
                 "health": monitor_health(&record).as_str(),
             }));
         }
-        let rule = record.rule.local_file().clone();
+        // A script/http dry run has no evaluator in this build (P2 owns
+        // execution); report that honestly rather than reading a file for a
+        // rule that names none.
+        let Some(rule) = file_rule else {
+            return Ok(json!({
+                "hostId": self.host_id,
+                "botId": scope.bot_id,
+                "monitorId": record.id,
+                "eligible": false,
+                "reason": "unsupported_rule_kind",
+                "ruleKind": record.rule.kind_str(),
+                "health": monitor_health(&record).as_str(),
+            }));
+        };
         let outcome = match read_scoped_file(&root, &rule.resource, rule.max_bytes) {
             ScopedBytes::Bytes(bytes) => {
                 let result = monitor_eval::evaluate_bytes(&record, &bytes, now_ms);
@@ -2542,5 +2808,122 @@ impl crate::Engine {
             "health": monitor_health(&record).as_str(),
             "detail": outcome,
         }))
+    }
+}
+
+#[cfg(test)]
+mod rule_kind_admission_tests {
+    //! P1 admission for the new monitor rule kinds. These call the same
+    //! server-resolved constructors the P4 CLI will use; containment,
+    //! allowlist, bounds and bare-name secret refs are proven here, never
+    //! only at validation time.
+    use super::*;
+
+    #[test]
+    fn script_admission_pins_scope_allowlist_and_containment() {
+        let rule = build_self_script_rule(
+            "host-1",
+            "home-ws",
+            "scripts/watch.sh",
+            &"ab".repeat(32),
+            ScriptInterpreter::GhApi,
+            vec!["repos/clioo/drogon/pulls".to_string()],
+            None,
+            None,
+            vec!["GITHUB_TOKEN_REF".to_string()],
+        )
+        .expect("a well-formed script rule is admitted");
+        assert_eq!(rule.kind_str(), "script_command.v1");
+        assert_eq!(rule.scope(), ("host-1", "home-ws"));
+
+        // A non-allowlisted interpreter is refused.
+        assert!(
+            build_self_script_rule(
+                "host-1",
+                "home-ws",
+                "scripts/watch.sh",
+                &"ab".repeat(32),
+                ScriptInterpreter::Unsupported("bash".to_string()),
+                vec!["api".to_string()],
+                None,
+                None,
+                vec![],
+            )
+            .is_err()
+        );
+        // An escaping script path is refused at admission.
+        assert!(
+            build_self_script_rule(
+                "host-1",
+                "home-ws",
+                "../escape.sh",
+                &"ab".repeat(32),
+                ScriptInterpreter::GhApi,
+                vec!["api".to_string()],
+                None,
+                None,
+                vec![],
+            )
+            .is_err()
+        );
+        // A `KEY=value` secret ref is refused: names only, never values.
+        assert!(
+            build_self_script_rule(
+                "host-1",
+                "home-ws",
+                "scripts/watch.sh",
+                &"ab".repeat(32),
+                ScriptInterpreter::GhApi,
+                vec!["api".to_string()],
+                None,
+                None,
+                vec!["TOKEN=abc".to_string()],
+            )
+            .is_err()
+        );
+        // Out-of-range budgets are refused.
+        assert!(
+            build_self_script_rule(
+                "host-1",
+                "home-ws",
+                "scripts/watch.sh",
+                &"ab".repeat(32),
+                ScriptInterpreter::GhApi,
+                vec!["api".to_string()],
+                Some(MAX_SCRIPT_TIMEOUT_MS + 1),
+                None,
+                vec![],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn http_admission_binds_scope_and_url_hash() {
+        let rule = build_self_http_rule(
+            "host-1",
+            "home-ws",
+            &"cd".repeat(32),
+            None,
+            None,
+            HttpCursorSpec::ETag,
+            vec!["GRANOLA_TOKEN".to_string()],
+        )
+        .expect("a well-formed http rule is admitted");
+        assert_eq!(rule.kind_str(), "http_poll.v1");
+        assert_eq!(rule.scope(), ("host-1", "home-ws"));
+        // A non-hash URL field is refused (the URL itself never arrives here).
+        assert!(
+            build_self_http_rule(
+                "host-1",
+                "home-ws",
+                "https://example.test/api",
+                None,
+                None,
+                HttpCursorSpec::BodyDigest,
+                vec![],
+            )
+            .is_err()
+        );
     }
 }

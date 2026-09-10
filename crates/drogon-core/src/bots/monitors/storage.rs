@@ -18,7 +18,7 @@ use super::record::MonitorRecord;
 use super::result::MonitorCheckResult;
 
 pub const MONITORS_SCHEMA_COMPONENT: &str = "bot_monitors";
-pub const MONITORS_SCHEMA_VERSION: i64 = 1;
+pub const MONITORS_SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -157,12 +157,29 @@ pub fn apply_pending_steps_in_tx(tx: &Transaction) -> Result<()> {
             |r| r.get(0),
         )
         .optional()?;
-    if existing.is_none() {
-        create_tables(tx)?;
-        tx.execute(
-            "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
-            params![MONITORS_SCHEMA_COMPONENT, MONITORS_SCHEMA_VERSION],
-        )?;
+    match existing {
+        None => {
+            create_tables(tx)?;
+            tx.execute(
+                "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
+                params![MONITORS_SCHEMA_COMPONENT, MONITORS_SCHEMA_VERSION],
+            )?;
+        }
+        Some(found) if found < MONITORS_SCHEMA_VERSION => {
+            // v1 -> v2 is additive only: the new rule kinds live inside the
+            // existing `payload_json` column and add no table or column.
+            // `create_tables` stays idempotent so any additive index a
+            // future step adds is created here before the bump is recorded;
+            // rows are never rewritten, so already-approved monitors stay
+            // approved. `check_schema_not_ahead` above still refuses a
+            // newer-than-this-build version loudly.
+            create_tables(tx)?;
+            tx.execute(
+                "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
+                params![MONITORS_SCHEMA_COMPONENT, MONITORS_SCHEMA_VERSION],
+            )?;
+        }
+        Some(_) => {}
     }
     Ok(())
 }
@@ -179,13 +196,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             |r| r.get(0),
         )
         .optional()?;
-    if existing.is_some() {
+    if existing.is_some_and(|found| found >= MONITORS_SCHEMA_VERSION) {
         return Ok(());
     }
     let tx = conn.unchecked_transaction()?;
     create_tables(&tx)?;
     tx.execute(
-        "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
+        "INSERT OR REPLACE INTO schema_versions(component, version) VALUES (?1, ?2)",
         params![MONITORS_SCHEMA_COMPONENT, MONITORS_SCHEMA_VERSION],
     )?;
     tx.commit()?;
@@ -197,10 +214,12 @@ fn row_to_record(json: String) -> Result<MonitorRecord> {
 }
 
 fn scope_of(record: &MonitorRecord) -> (String, String, Option<String>) {
-    let rule = record.rule.local_file();
+    // Match on the enum: scope is common to every kind, and calling a
+    // file-only accessor here would silently mis-scope the new kinds.
+    let (host_id, project_id) = record.rule.scope();
     (
-        rule.host_id.clone(),
-        rule.project_id.clone(),
+        host_id.to_string(),
+        project_id.to_string(),
         record.bot_id.clone(),
     )
 }
@@ -574,5 +593,132 @@ mod tests {
             outcome,
             Err(CommitTxError::Storage(StorageError::StaleUpdate))
         ));
+    }
+
+    fn script_record(id: &str) -> MonitorRecord {
+        let rule = MonitorRule::ScriptCommand(super::super::rule::ScriptRule {
+            host_id: "h".to_string(),
+            project_id: "p".to_string(),
+            script_path: "scripts/watch.sh".to_string(),
+            script_hash: "ab".repeat(32),
+            interpreter: super::super::rule::ScriptInterpreter::GhApi,
+            argv: vec!["repos/clioo/drogon/pulls".to_string()],
+            timeout_ms: 30_000,
+            max_output_bytes: 65_536,
+            secret_refs: vec!["GITHUB_TOKEN_REF".to_string()],
+        });
+        let hash = rule.approval_hash();
+        new_monitor(
+            id.into(),
+            Some("bot-1".into()),
+            rule,
+            MonitorTrigger::Manual,
+            hash,
+            1.0,
+        )
+        .unwrap()
+    }
+
+    fn http_record(id: &str) -> MonitorRecord {
+        let rule = MonitorRule::HttpPoll(super::super::rule::HttpPollRule {
+            host_id: "h".to_string(),
+            project_id: "p".to_string(),
+            url_hash: "cd".repeat(32),
+            timeout_ms: 30_000,
+            max_body_bytes: 65_536,
+            cursor_spec: super::super::rule::HttpCursorSpec::BodyDigest,
+            secret_refs: vec!["GRANOLA_TOKEN".to_string()],
+        });
+        let hash = rule.approval_hash();
+        new_monitor(
+            id.into(),
+            Some("bot-1".into()),
+            rule,
+            MonitorTrigger::Manual,
+            hash,
+            1.0,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn mixed_kind_table_lists_and_scopes_through_the_enum() {
+        let conn = memory_db();
+        for rec in [
+            record("mon-file"),
+            script_record("mon-script"),
+            http_record("mon-http"),
+        ] {
+            create_monitor(&conn, &rec).unwrap();
+        }
+        let listed = list_all_monitors(&conn).unwrap();
+        assert_eq!(listed.len(), 3);
+        let kinds: Vec<&str> = listed.iter().map(|r| r.rule.kind_str()).collect();
+        assert!(kinds.contains(&"local_file_digest.v1"));
+        assert!(kinds.contains(&"script_command.v1"));
+        assert!(kinds.contains(&"http_poll.v1"));
+        // scope_of must match the enum: every kind resolves (h, p).
+        let scoped = list_monitors_for_project(&conn, "h", "p").unwrap();
+        assert_eq!(scoped.len(), 3);
+    }
+
+    #[test]
+    fn legacy_local_file_row_revalidates_and_stays_approved() {
+        // A row written by the v1 build: no v2 fields, old approval hash.
+        let conn = memory_db();
+        let legacy_json = concat!(
+            r#"{"id":"mon-legacy","botId":"bot-1","version":1,"rule":"#,
+            r#"{"kind":"local_file_digest.v1","hostId":"h","projectId":"p","#,
+            r#""resource":"notes/a.md","maxBytes":1024},"interpreter":null,"argv":[],"#,
+            r#""secretRefs":[],"trigger":{"kind":"manual"},"cursor":null,"enabled":true,"#,
+            r#""approvedRuleHash":""#,
+            "9b4ddd41a94811f6ba2b5a2d29398b2a9f5f181c93ea4655266f25c352209b71",
+            r#"","createdAtMs":1.0,"updatedAtMs":1.0,"consecutiveErrors":0,"#,
+            r#""nextEligibleAtMs":null,"lastEventId":null,"lastSuccessAtMs":null,"lastError":null}"#
+        );
+        conn.execute(
+            "INSERT INTO bot_monitors (id, host_id, project_id, bot_id, updated_at, rev, payload_json)
+             VALUES ('mon-legacy', 'h', 'p', 'bot-1', 1.0, 0, ?1)",
+            params![legacy_json],
+        )
+        .unwrap();
+        let (loaded, _) = get_monitor(&conn, "mon-legacy").unwrap().unwrap();
+        loaded.validate().expect("legacy row re-validates");
+        assert!(
+            loaded.is_approved(),
+            "already-approved legacy row stays approved"
+        );
+        assert_eq!(loaded.rule.approval_hash(), loaded.approved_rule_hash);
+    }
+
+    #[test]
+    fn schema_bump_records_v2_and_refuses_a_newer_build() {
+        // A v1 data dir migrates forward to v2 without touching rows.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_versions (component TEXT PRIMARY KEY, version INTEGER NOT NULL);
+             INSERT INTO schema_versions(component, version) VALUES ('bot_monitors', 1);",
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        let version: i64 = conn
+            .query_row(
+                "SELECT version FROM schema_versions WHERE component = 'bot_monitors'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, MONITORS_SCHEMA_VERSION);
+        // A version this build cannot read is refused loudly, never
+        // misinterpreted.
+        let future = Connection::open_in_memory().unwrap();
+        future
+            .execute_batch(
+                "CREATE TABLE schema_versions (component TEXT PRIMARY KEY, version INTEGER NOT NULL);
+                 INSERT INTO schema_versions(component, version) VALUES ('bot_monitors', 99);",
+            )
+            .unwrap();
+        let error = migrate(&future).unwrap_err();
+        assert!(error.to_string().contains("is newer than"), "{error}");
     }
 }
