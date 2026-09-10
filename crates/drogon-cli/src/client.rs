@@ -520,8 +520,11 @@ pub fn check_removed(removed: &Removed, expected_id: &str) -> Result<(), String>
 /// Also pins the agent-state/verdict/timestamp cross-field invariants the
 /// service actually implements: an exited session is always agentState
 /// `exited`, and `working`/`idle`/`needs_input` carry a non-null
-/// `agentStateAt` (activity stamp, or the hook-event stamp for the wait
-/// signal the card freshness ranking sorts on). An exited session honestly
+/// `agentStateAt` (activity stamp, the hook-event stamp for the wait
+/// signal, or the hook turn transition for hook-derived states that have
+/// produced no output yet — the fresh-session idle boundary and a silent
+/// hook-reported turn) the card freshness ranking sorts on. An exited
+/// session honestly
 /// keeps its last agent-state timestamp (#222: a pre-restart wait stamp
 /// outlives the exit in rows written before the daemon cleared them), so
 /// `exited` accepts a null or non-null `agentStateAt`; renderers treat it

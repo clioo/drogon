@@ -1,0 +1,348 @@
+//! Claude session status must be hook-driven, never keystroke-driven (bug:
+//! typing `wadasdasdda` at an idle Claude prompt flipped the project card to
+//! "working"). The reference (`/Users/carlos/Documents/Drogon-orca`) derives
+//! the sidebar status purely from harness hooks — `UserPromptSubmit` /
+//! `PreToolUse` / `PostToolUse` mean working, `Stop` means done,
+//! `PermissionRequest` means waiting, `SessionStart` lands an idle boundary —
+//! so local echo at the prompt can never spin the row. These tests drive the
+//! real PTY path against a fixture `claude` that echoes its stdin exactly
+//! like a TUI repainting the composer on every keystroke: the echo is the
+//! output the old activity clock misread as harness activity.
+//!
+//! Unix-only, like `agent_state_hook_events.rs`. No model inference: hooks
+//! are driven through the same `session.hook_event` RPC the hidden
+//! `drogon-cli internal hook-event` subcommand calls.
+
+use std::time::{Duration, Instant};
+
+use drogon_core::Engine;
+use drogon_protocol::{PROTOCOL_VERSION, Request};
+use serde_json::{Value, json};
+
+fn req(method: &str, request_id: &str, params: Value) -> Request {
+    serde_json::from_value(json!({
+        "protocol": PROTOCOL_VERSION,
+        "requestId": request_id,
+        "method": method,
+        "params": params,
+    }))
+    .unwrap()
+}
+
+fn ok(engine: &Engine, method: &str, params: Value) -> Value {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let response = engine.dispatch(req(method, &request_id, params));
+    assert!(
+        response.ok,
+        "expected ok for {method}: {:?}",
+        response.error
+    );
+    response.result.unwrap()
+}
+
+fn base64_of(text: &str) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(text.as_bytes())
+}
+
+fn base64_decode(text: &str) -> Vec<u8> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(text.as_bytes())
+        .unwrap()
+}
+
+/// Restores PATH on drop so the fixture harness never leaks into another test.
+struct SavedPath(Option<std::ffi::OsString>);
+
+impl SavedPath {
+    fn capture() -> Self {
+        Self(std::env::var_os("PATH"))
+    }
+}
+
+impl Drop for SavedPath {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            unsafe { std::env::set_var("PATH", path) };
+        } else {
+            unsafe { std::env::remove_var("PATH") };
+        }
+    }
+}
+
+/// Installs a fixture `claude` on PATH that echoes every written byte back —
+/// the TUI-composer behavior whose local echo must never read as harness
+/// activity.
+fn install_echoing_claude_fixture() {
+    let bin = tempfile::tempdir().unwrap();
+    let script = bin.path().join("claude");
+    std::fs::write(&script, "#!/bin/sh\ncat\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let mut paths =
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect::<Vec<_>>();
+    paths.insert(0, bin.path().to_path_buf());
+    unsafe { std::env::set_var("PATH", std::env::join_paths(&paths).unwrap()) };
+    // The tempdir must outlive the test: forget it (test-local, bounded).
+    std::mem::forget(bin);
+}
+
+fn register_workspace(engine: &Engine) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_string_lossy().to_string();
+    std::mem::forget(dir);
+    let ws = ok(engine, "workspace.register", json!({ "path": path }));
+    ws["id"].as_str().unwrap().to_string()
+}
+
+fn launch_claude(engine: &Engine, workspace_id: &str) -> Value {
+    ok(
+        engine,
+        "harness.start",
+        json!({ "workspaceId": workspace_id, "harnessId": "claude", "permissionMode": "inherit" }),
+    )
+}
+
+fn listed_state(engine: &Engine, session_id: &str) -> String {
+    let listed = ok(engine, "session.list", json!({}));
+    listed["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == session_id)
+        .unwrap_or_else(|| panic!("session {session_id} must be listed"))["agentState"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+fn hook_event(engine: &Engine, session_id: &str, incarnation: &str, event: &str) -> Value {
+    ok(
+        engine,
+        "session.hook_event",
+        json!({ "sessionId": session_id, "incarnation": incarnation, "event": event }),
+    )
+}
+
+/// Writes `text` to the session PTY and waits until its echo is observed in
+/// the output ring, so every state assertion below happens strictly AFTER
+/// the keystroke-driven output the derivation must ignore.
+fn write_and_wait_for_echo(engine: &Engine, session: &Value, text: &str) {
+    let session_id = session["id"].as_str().unwrap();
+    let incarnation = session["incarnation"].as_str().unwrap();
+    ok(
+        engine,
+        "session.write",
+        json!({
+            "sessionId": session_id,
+            "incarnation": incarnation,
+            "dataBase64": base64_of(text),
+        }),
+    );
+    let needle = text.trim();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut cursor = 0u64;
+    while Instant::now() < deadline {
+        let read = ok(
+            engine,
+            "session.read",
+            json!({ "sessionId": session_id, "incarnation": incarnation, "cursor": cursor }),
+        );
+        cursor = read["nextCursor"].as_u64().unwrap();
+        let bytes = base64_decode(read["dataBase64"].as_str().unwrap());
+        if String::from_utf8_lossy(&bytes).contains(needle) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("expected the keystroke echo {needle:?} to arrive as PTY output");
+}
+
+/// THE bug: typing at a fresh idle Claude prompt produced PTY echo, the
+/// activity clock read it as harness output, and the card span "working -
+/// just now" while nothing ran. Keystroke echo must leave the session idle.
+#[test]
+fn typing_at_a_fresh_claude_session_never_reads_working() {
+    let _saved_path = SavedPath::capture();
+    install_echoing_claude_fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_string();
+
+    write_and_wait_for_echo(&engine, &session, "wadasdasdda");
+
+    assert_eq!(
+        listed_state(&engine, &session_id),
+        "idle",
+        "local keystrokes at the composer must never flip the session to working"
+    );
+}
+
+/// The full hook lifecycle on the claude install surface: a submitted turn
+/// reads working (through output silence far past the activity window),
+/// Stop concludes it to idle, later keystroke echo cannot resurrect it,
+/// Notification parks it on needs_input, and a resumption clears the wait.
+#[test]
+fn claude_turn_lifecycle_reads_working_only_for_real_turns() {
+    let _saved_path = SavedPath::capture();
+    install_echoing_claude_fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    // Launch lands on the idle session boundary (the reference maps
+    // SessionStart to done): an idle TUI is idle before the first prompt.
+    assert_eq!(
+        listed_state(&engine, &session_id),
+        "idle",
+        "a freshly launched claude session is idle, not unknown/working"
+    );
+
+    // The user submits a prompt: the turn opens and reads working.
+    let working = hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
+    assert_eq!(working["agentState"], "working");
+
+    // Silent thinking far past the 3s activity window must not drop the
+    // hook-reported turn to idle mid-turn.
+    std::thread::sleep(Duration::from_millis(3300));
+    assert_eq!(
+        listed_state(&engine, &session_id),
+        "working",
+        "a hook-reported turn stays working through output silence"
+    );
+
+    // Tool lifecycle hooks keep the turn authoritative too.
+    let tooling = hook_event(&engine, &session_id, &incarnation, "PostToolUse");
+    assert_eq!(tooling["agentState"], "working");
+
+    // The turn ends: Stop concludes it to idle on the harness's authority.
+    let stopped = hook_event(&engine, &session_id, &incarnation, "Stop");
+    assert_eq!(stopped["agentState"], "idle");
+
+    // And typing at the now-idle prompt can never spin it back up — the
+    // exact regression from the bug report, on the post-turn side.
+    write_and_wait_for_echo(&engine, &session, "typing again after the turn\n");
+    assert_eq!(
+        listed_state(&engine, &session_id),
+        "idle",
+        "keystroke echo at the idle prompt must not resurrect working"
+    );
+
+    // Notification parks the session on a genuine wait; the next submit
+    // resumes the turn and clears it.
+    let waiting = hook_event(&engine, &session_id, &incarnation, "Notification");
+    assert_eq!(waiting["agentState"], "needs_input");
+    let resumed = hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
+    assert_eq!(resumed["agentState"], "working");
+    let done = hook_event(&engine, &session_id, &incarnation, "Stop");
+    assert_eq!(done["agentState"], "idle");
+}
+
+/// The per-session settings file must install the reference's claude turn
+/// lifecycle, not only the wait/stop pair: PreToolUse/PostToolUse carry the
+/// running turn (and clear a wait after a permission approval, which no
+/// generic output clear may do anymore), PermissionRequest is the immediate
+/// wait surface.
+#[test]
+fn settings_file_installs_the_full_claude_turn_lifecycle() {
+    let _saved_path = SavedPath::capture();
+    install_echoing_claude_fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+    let args = session["args"].as_array().unwrap();
+    let settings_pos = args
+        .iter()
+        .position(|arg| arg == "--settings")
+        .expect("claude launches must carry --settings");
+    let settings: Value = serde_json::from_str(
+        &std::fs::read_to_string(args[settings_pos + 1].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+
+    for event in [
+        "UserPromptSubmit",
+        "Notification",
+        "Stop",
+        "PreToolUse",
+        "PostToolUse",
+        "PermissionRequest",
+    ] {
+        let entries = settings["hooks"][event]
+            .as_array()
+            .unwrap_or_else(|| panic!("hooks.{event} must be installed"));
+        assert_eq!(entries.len(), 1, "one entry per event");
+        let command = entries[0]["hooks"][0]["command"].as_str().unwrap();
+        assert!(command.contains("internal hook-event"), "{command}");
+        assert!(command.contains(&format!("--event {event}")), "{command}");
+        assert!(command.contains(&format!("--session {session_id}")), "{command}");
+        assert!(
+            command.contains(&format!("--incarnation {incarnation}")),
+            "{command}"
+        );
+    }
+}
+
+/// When the user disables agent status hooks entirely there is no hook
+/// truth, so the claude session honestly falls back to the activity clock
+/// (keystroke echo reads working there — the documented hook-less policy,
+/// same as plain terminals), and the settings file carries no managed
+/// commands.
+#[test]
+fn hooks_disabled_claude_keeps_the_activity_policy() {
+    let _saved_path = SavedPath::capture();
+    install_echoing_claude_fixture();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("agent-settings.json"),
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "settings": {
+                "defaultTuiAgent": null,
+                "disabledTuiAgents": [],
+                "agentCmdOverrides": {},
+                "agentDefaultArgs": {},
+                "agentDefaultEnv": {},
+                "agentStatusHooksEnabled": false,
+                "tabAutoGenerateTitle": false,
+                "promptCacheTimerEnabled": false,
+                "promptCacheTtlMs": 300000,
+                "codexSessionSourceHome": ""
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+
+    // Launch-time disabled hooks install nothing: no --settings argv at all
+    // (runtime toggles neuter the file instead — see set_status_hooks_enabled).
+    assert!(
+        !session["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|arg| arg == "--settings"),
+        "launch-time disabled status hooks must not wire claude settings"
+    );
+
+    write_and_wait_for_echo(&engine, &session, "typed with hooks disabled\n");
+    assert_eq!(
+        listed_state(&engine, session["id"].as_str().unwrap()),
+        "working",
+        "hook-less sessions keep the activity-clock policy"
+    );
+}

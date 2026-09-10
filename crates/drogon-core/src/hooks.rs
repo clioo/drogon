@@ -1,14 +1,18 @@
-//! Per-session Claude Code hook settings (journey J1 `needs_input`).
+//! Per-session Claude Code hook settings (journey J1 agent state).
 //!
 //! When `harness.start` launches the claude harness, the daemon writes one
 //! settings file per session under `<data-dir>/hooks/` and passes it to
-//! claude with `--settings <file>`. The file carries `Notification` and
-//! `Stop` hooks that invoke `drogon-cli internal hook-event`, which calls
-//! back into `session.hook_event`: `Notification` marks the session
-//! `needs_input`, `Stop` clears it (the fork maps Claude's `Stop` to done —
-//! issue #360).
-//! Later PTY output clears the signal; the settings file is removed when
-//! the session exits. Nothing is ever written under `~/.claude`.
+//! claude with `--settings <file>`. The file carries the reference's turn
+//! lifecycle (the fork's `CLAUDE_EVENTS`): `UserPromptSubmit`,
+//! `PreToolUse`, and `PostToolUse` report the running turn, `Stop`
+//! concludes it (the fork maps Claude's `Stop` to done — issue #360), and
+//! `Notification`/`PermissionRequest` mark the session `needs_input`. Each
+//! hook invokes `drogon-cli internal hook-event`, which calls back into
+//! `session.hook_event`. The status is then hook-driven like the other
+//! harnesses — local keystroke echo at the composer is PTY output, but it
+//! fires no hook, so typing at an idle prompt can never flip the row to
+//! `working` (the sidebar-status bug). Nothing is ever written under
+//! `~/.claude`; the settings file is removed when the session exits.
 //!
 //! The filename is a launch nonce, not the session id: the `--settings`
 //! path must be part of the launch argv (fixed before admission mints the
@@ -93,11 +97,21 @@ pub(crate) fn cli_command() -> String {
 /// no matcher (these events carry none).
 pub(crate) fn settings_json(cli: &str, session_id: &str, incarnation: &str) -> Value {
     let entries = |event: &str| json!([{ "hooks": [{ "type": "command", "command": hook_command(cli, session_id, incarnation, event) }] }]);
+    // The reference's claude turn lifecycle (its `CLAUDE_EVENTS`, minus the
+    // subagent/teammate/compact roster events this repo does not model):
+    // turn-start (UserPromptSubmit/PreToolUse/PostToolUse), wait
+    // (Notification/PermissionRequest), turn-end (Stop). Every name is
+    // already classified in `agent_state` (the codex vocabulary shares the
+    // names, so no new classification entries). No matchers: an omitted
+    // matcher matches every tool.
     json!({
         "hooks": {
             "UserPromptSubmit": entries("UserPromptSubmit"),
             "Notification": entries("Notification"),
             "Stop": entries("Stop"),
+            "PreToolUse": entries("PreToolUse"),
+            "PostToolUse": entries("PostToolUse"),
+            "PermissionRequest": entries("PermissionRequest"),
         }
     })
 }
@@ -141,11 +155,13 @@ impl Engine {
     /// hook file (claude's `--settings`, OpenCode's status plugin, or Pi's
     /// agent-status extension, or Codex's managed `CODEX_HOME/hooks.json`). A
     /// wait event stamps the handle
-    /// `needs_input`; a clear event resets it explicitly for OpenCode, Pi, and
-    /// interactive Codex (see `SessionHandle::set_explicit_wait_clear`). For
-    /// Claude and headless runs, later PTY output/process exit provides the
-    /// ordinary completion behavior. A stale incarnation or an exited
-    /// session never gains a wait signal.
+    /// `needs_input`; a clear event resets it explicitly for OpenCode, Pi,
+    /// interactive Codex, and interactive Claude (see
+    /// `SessionHandle::set_explicit_wait_clear`) — the generic PTY-output
+    /// clear would let the composer's keystroke echo spend a real wait and
+    /// spin idle rows. Headless runs keep the ordinary completion behavior
+    /// (process exit; no hooks are installed for them). A stale incarnation
+    /// or an exited session never gains a wait signal.
     pub(crate) fn do_session_hook_event(&self, params: &Value) -> Result<Value, RpcError> {
         let event = require_str(params, "event")?;
         let Some(signal) = crate::agent_state::classify_hook_event(event) else {
@@ -236,9 +252,16 @@ mod tests {
     }
 
     #[test]
-    fn settings_json_has_notification_and_stop_hook_commands() {
+    fn settings_json_installs_the_turn_lifecycle_hook_commands() {
         let value = settings_json("drogon-cli", "sess-1", "inc-2");
-        for event in ["Notification", "Stop"] {
+        for event in [
+            "UserPromptSubmit",
+            "Notification",
+            "Stop",
+            "PreToolUse",
+            "PostToolUse",
+            "PermissionRequest",
+        ] {
             let entries = value["hooks"][event]
                 .as_array()
                 .unwrap_or_else(|| panic!("hooks.{event} must be an array"));
