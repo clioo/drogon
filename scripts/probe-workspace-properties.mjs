@@ -62,7 +62,7 @@ export async function probeWorkspaceProperties({ page, worktree, output }) {
     await card().getByText("KAN-1", { exact: true }).waitFor({ state: "hidden" });
     await card().getByText("BM2 child", { exact: true }).waitFor({ state: "hidden" });
     const compact = await page.evaluate(() => window.drogon.ui.get());
-    assert.deepEqual([...compact.worktreeCardProperties].sort(), ["status"]);
+    assert.deepEqual([...compact.worktreeCardProperties].sort(), ["status", "unread"]);
     checks.push("workspace-compact-applies-source-metadata-preset-not-only-density");
     await menu();
     await page.getByRole("menuitemradio", { name: "Detailed", exact: true }).click();
