@@ -155,6 +155,9 @@ pub struct WorktreeEnvelope {
 pub struct Removed {
     pub id: String,
     pub removed: bool,
+    /// `worktree rm --delete-branch`: whether the safe branch delete ran.
+    #[serde(default)]
+    pub branch_deleted: Option<bool>,
 }
 
 impl Workspace {

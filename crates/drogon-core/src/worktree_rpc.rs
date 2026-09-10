@@ -1317,13 +1317,25 @@ impl Engine {
     pub(super) fn do_worktree_remove(&self, params: &Value) -> Result<Value, RpcError> {
         let id = require_str(params, "id")?.to_string();
         let force = optional_bool(params, "force", false)?;
+        // Source `worktree rm --delete-branch`: after the checkout is gone,
+        // drop the now-orphaned branch with the *safe* `git branch -d`
+        // (never `-D`): branches carrying unmerged commits survive
+        // (worktree-remove-branch-deletion.test.ts).
+        let delete_branch = optional_bool(params, "deleteBranch", false)?;
 
-        let (project_path, worktree_path, workspace_id) = {
+        let (project_path, worktree_path, workspace_id, branch) = {
             let conn = self.db.lock().unwrap();
             conn.query_row(
-                "SELECT p.path, w.path, w.workspace_id FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE w.id = ?1",
+                "SELECT p.path, w.path, w.workspace_id, w.branch FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE w.id = ?1",
                 [&id],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                    ))
+                },
             )
             .optional()
             .map_err(error::from_sqlite)?
@@ -1339,12 +1351,23 @@ impl Engine {
         // never re-implements that check.
         run_git(Path::new(&project_path), &argv)?;
 
+        let mut branch_deleted = false;
+        if delete_branch && !branch.is_empty() {
+            // Best-effort safe delete: a refusal (unmerged work) leaves the
+            // branch and is not a removal failure — the worktree is already
+            // gone, which is what the caller asked for first.
+            let output = std::process::Command::new("git")
+                .args(["-C", &project_path, "branch", "-d", &branch])
+                .output();
+            branch_deleted = output.map(|o| o.status.success()).unwrap_or(false);
+        }
+
         let conn = self.db.lock().unwrap();
         conn.execute("DELETE FROM worktrees WHERE id = ?1", [&id])
             .map_err(error::from_sqlite)?;
         conn.execute("DELETE FROM workspaces WHERE id = ?1", [&workspace_id])
             .map_err(error::from_sqlite)?;
-        Ok(json!({ "id": id, "removed": true }))
+        Ok(json!({ "id": id, "removed": true, "branchDeleted": branch_deleted }))
     }
 
     /// Display-title rename (`worktree.rename { worktreeId, name }`).

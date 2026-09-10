@@ -838,8 +838,12 @@ async fn worktree(
                 Client::decode_checked(&call, "worktree.update", check_worktree)?;
             emit(call, json, || output::worktree_created(&worktree), 0, None)
         }
-        WorktreeAction::Rm { id, force } => {
-            let params = json!({ "id": id, "force": force });
+        WorktreeAction::Rm {
+            id,
+            force,
+            delete_branch,
+        } => {
+            let params = json!({ "id": id, "force": force, "deleteBranch": delete_branch });
             let call = client
                 .call("worktree.remove", params, request_id, DEFAULT_TIMEOUT)
                 .await?;

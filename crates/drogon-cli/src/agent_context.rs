@@ -266,11 +266,17 @@ pub fn all_commands() -> Vec<AgentCommand> {
             "worktree rm",
             &["worktree", "rm"],
             "Remove a worktree; refuses a dirty checkout unless --force",
-            "drogon-cli worktree rm <ID> [--force]",
-            &["force"],
+            "drogon-cli worktree rm <ID> [--force] [--delete-branch]",
+            &["delete-branch", "force"],
             &["ID"],
-            &["drogon-cli worktree rm wt-1 --json"],
-            &["Refuses a dirty checkout unless --force is passed."],
+            &[
+                "drogon-cli worktree rm wt-1 --json",
+                "drogon-cli worktree rm wt-1 --delete-branch",
+            ],
+            &[
+                "Refuses a dirty checkout unless --force is passed.",
+                "--delete-branch drops the orphaned branch with safe `git branch -d`: branches carrying unmerged commits survive.",
+            ],
         ),
         entry(
             "terminal rename",

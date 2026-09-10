@@ -127,7 +127,10 @@ pub fn worktree_list(list: &WorktreeList) -> String {
 }
 
 pub fn worktree_removed(removed: &Removed) -> String {
-    format!("Removed worktree {}.", removed.id)
+    match removed.branch_deleted {
+        Some(true) => format!("Removed worktree {} and deleted its branch.", removed.id),
+        _ => format!("Removed worktree {}.", removed.id),
+    }
 }
 
 pub fn project_removed(removed: &Removed) -> String {
@@ -611,7 +614,8 @@ mod tests {
         assert!(
             worktree_removed(&Removed {
                 id: "w1".into(),
-                removed: true
+                removed: true,
+                branch_deleted: None
             })
             .contains("w1")
         );

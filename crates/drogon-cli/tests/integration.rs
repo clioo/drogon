@@ -2209,3 +2209,24 @@ async fn worktree_create_rejects_parent_with_no_parent_before_any_call() {
     );
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_rm_delete_branch_flag_maps_and_prints() {
+    let dir = temp_data_dir("wtrdb");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"id": "w1", "removed": true, "branchDeleted": true}),
+            ))
+        }),
+    );
+    let output = run_cli(dir.path(), &["worktree", "rm", "w1", "--delete-branch"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("Removed worktree w1 and deleted its branch."));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "worktree.remove");
+    assert_eq!(request["params"]["deleteBranch"], true);
+    drop(service);
+}

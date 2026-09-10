@@ -496,12 +496,16 @@ pub enum WorktreeAction {
     /// Remove a worktree; refuses a dirty checkout unless --force
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree rm <ID> [--force]\nValid flags: --data-dir, --force, --help, --json, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree rm <ID> [--force] [--delete-branch]\nValid flags: --data-dir, --delete-branch, --force, --help, --json, --request-id, --retry-request"
     )]
     Rm {
         id: String,
         #[arg(long)]
         force: bool,
+        /// Also delete the now-orphaned branch (safe `git branch -d`;
+        /// branches with unmerged commits survive)
+        #[arg(long)]
+        delete_branch: bool,
     },
 }
 
@@ -1585,7 +1589,7 @@ mod tests {
 
         let cli = parse(&["worktree", "rm", "w1", "--force"]).unwrap();
         let Command::Worktree {
-            action: WorktreeAction::Rm { id, force },
+            action: WorktreeAction::Rm { id, force, .. },
         } = &cli.command
         else {
             panic!("wrong subcommand");

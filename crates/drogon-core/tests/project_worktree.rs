@@ -1213,3 +1213,113 @@ fn worktree_create_accepts_note_and_parent_and_validates_parent_project() {
         "invalid_argument"
     );
 }
+
+/// Source worktree-remove-branch-deletion.test.ts: `deleteBranch` removes the
+/// now-orphaned branch with the *safe* `git branch -d` — unmerged commits
+/// keep the branch — and a branch with merged commits is deleted.
+#[test]
+fn worktree_remove_with_delete_branch_deletes_merged_and_keeps_unmerged() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let project = ok(
+        &engine,
+        "project.add",
+        "db1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+
+    // Merged branch: deleted after the worktree goes.
+    let merged = ok(
+        &engine,
+        "worktree.create",
+        "db2",
+        json!({"projectId": project["id"], "name": "merged"}),
+    );
+    ok(
+        &engine,
+        "worktree.remove",
+        "db3",
+        json!({"id": merged["id"], "deleteBranch": true}),
+    );
+    let merged_gone = std::process::Command::new("git")
+        .args(["-C"])
+        .arg(repo.path())
+        .args(["rev-parse", "--verify", "-q", "merged"])
+        .output()
+        .unwrap();
+    assert!(
+        !merged_gone.status.success(),
+        "merged branch must be deleted"
+    );
+
+    // Unmerged branch: `branch -d` refuses and the branch survives.
+    let unmerged = ok(
+        &engine,
+        "worktree.create",
+        "db4",
+        json!({"projectId": project["id"], "name": "unmerged"}),
+    );
+    let unmerged_path = unmerged["path"].as_str().unwrap().to_string();
+    std::fs::write(format!("{unmerged_path}/work.txt"), "unmerged\n").unwrap();
+    git(std::path::Path::new(&unmerged_path), &["add", "work.txt"]);
+    git(
+        std::path::Path::new(&unmerged_path),
+        &["commit", "-q", "-m", "unmerged work"],
+    );
+    ok(
+        &engine,
+        "worktree.remove",
+        "db5",
+        json!({"id": unmerged["id"], "deleteBranch": true}),
+    );
+    let kept = std::process::Command::new("git")
+        .args(["-C"])
+        .arg(repo.path())
+        .args(["rev-parse", "--verify", "-q", "unmerged"])
+        .output()
+        .unwrap();
+    assert!(
+        kept.status.success(),
+        "unmerged branch must survive safe deletion"
+    );
+}
+
+/// The removal itself succeeds even when the safe branch deletion refuses:
+/// deleting the branch is best-effort after the worktree is gone.
+#[test]
+fn worktree_remove_without_delete_branch_keeps_the_branch() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let project = ok(
+        &engine,
+        "project.add",
+        "kb1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let created = ok(
+        &engine,
+        "worktree.create",
+        "kb2",
+        json!({"projectId": project["id"], "name": "kept"}),
+    );
+    ok(
+        &engine,
+        "worktree.remove",
+        "kb3",
+        json!({"id": created["id"]}),
+    );
+    let kept = std::process::Command::new("git")
+        .args(["-C"])
+        .arg(repo.path())
+        .args(["rev-parse", "--verify", "-q", "kept"])
+        .output()
+        .unwrap();
+    assert!(
+        kept.status.success(),
+        "the branch stays without deleteBranch"
+    );
+}
