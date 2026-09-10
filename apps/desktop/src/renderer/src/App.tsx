@@ -983,6 +983,21 @@ export function App() {
   useEffect(() => {
     if (route === BOTS_ROUTE_ID) setBotsReload((value) => value + 1);
   }, [route]);
+  // Bot-session persistence: this app-level snapshot (not the Bots page's
+  // own local one) is what the sidebar's Chats section reads. Without a
+  // trigger here, a session opened/rotated/exited while the Bots page is
+  // CLOSED would sit stale until the page is next revisited — a Bot
+  // session must stay known and truthful for as long as it is alive,
+  // never only while the page that opened it happens to still be open.
+  // Runs on the same cadence as the host-wide session-list poll below.
+  useEffect(() => {
+    if (!botsAvailable || botsScopeHost === null) return;
+    const timer = window.setInterval(
+      () => setBotsReload((value) => value + 1),
+      4000,
+    );
+    return () => window.clearInterval(timer);
+  }, [botsAvailable, botsScopeHost, botsScopeWorkspace, botsScopeLocale]);
   // Stable files base: Bots snapshot refreshes must never reset the Files
   // descriptor identity (mounted editor drafts/attempts). The bots layer
   // rebuilds on snapshot change; the files base below never does.
@@ -1067,6 +1082,16 @@ export function App() {
   const [botSessions, setBotSessions] = useState<Map<string, BotSessionMeta>>(
     () => new Map(),
   );
+  // Defect: a Bot session's Chats row (and the Gap-2 resume check) must
+  // stay truthful regardless of which workspace is currently selected —
+  // `sessions` below is deliberately scoped to `selected` (ordinary tab
+  // strip membership stays per-workspace, untouched by this fix), so a
+  // Bot's session living in a DIFFERENT workspace than the one you just
+  // switched to would otherwise vanish from `sessions` entirely and look
+  // exited/gone even though the daemon still runs it. This polls the
+  // full host-wide session list (`window.drogon.sessions()` with no
+  // `workspaceId`) on its own cadence, independent of `selected`.
+  const [allBotSessions, setAllBotSessions] = useState<Session[]>([]);
   // Live pid for the currently-focused Bot session, refreshed by the
   // polling effect below (bot.snapshot's projected `currentSession.processId`).
   // Keyed by session id so a stale read for a since-switched-away session
@@ -1844,6 +1869,32 @@ export function App() {
       cancelled = true;
     };
   }, [selected, status, revision]);
+  // Bot-session persistence (task_926fddc5e769 follow-up): the host-wide
+  // counterpart to the `selected`-scoped fetch above. Deliberately its OWN
+  // effect (not folded into the one above) so a workspace switch never
+  // resets or gates it — a Bot session must stay known and reachable for
+  // as long as it is alive, never only while its own workspace happens to
+  // be selected. Gated on `botsAvailable` so it does no work when Bots is
+  // withheld or the daemon is unreachable; a transient failure keeps the
+  // prior list rather than flashing every Bot session away.
+  useEffect(() => {
+    if (!botsAvailable || !status) {
+      setAllBotSessions([]);
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      const result = await window.drogon.sessions();
+      if (cancelled || !result.ok) return;
+      setAllBotSessions(result.result.sessions);
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [botsAvailable, status]);
   useEffect(() => {
     // J1 needs_input: main polls session.list for transitions (this repo
     // has no daemon push channel) and forwards them here. Clicking the
@@ -2067,6 +2118,11 @@ export function App() {
     // guess — same primitive the app already uses for out-of-band registry
     // moves.
     void reloadWorkspaces();
+    // The app-level Bots snapshot (sidebar Chats section) otherwise only
+    // refreshes on a timer or on re-entering the Bots page: bump it now so
+    // this Bot's row/state appear immediately, not up to several seconds
+    // later.
+    setBotsReload((value) => value + 1);
     if (route === BOTS_ROUTE_ID) closePageRoute(BOTS_ROUTE_ID);
   };
   openBotSessionRef.current = recordBotSession;
@@ -2100,14 +2156,29 @@ export function App() {
       );
     }
   }, [sessions]);
+  // The freshest copy wins per session id: `sessions` (the CURRENTLY
+  // selected workspace's own push-updated list) overrides the host-wide
+  // poll for any id both contain, so the workspace you are actually
+  // looking at never lags behind its own live updates.
+  const sessionsForBots = useMemo(() => {
+    const merged = new Map(allBotSessions.map((item) => [item.id, item]));
+    for (const item of sessions) merged.set(item.id, item);
+    return [...merged.values()];
+  }, [allBotSessions, sessions]);
   // Gap 2: the host owns liveness. A Bot's recorded session is resumable
   // only when the daemon-owned session list still shows it AND has not
   // positively confirmed it exited — reattaching to a dead session, or
   // silently opening a second one for a live Bot, are both refused here.
+  // Checked against `sessionsForBots` (host-wide), never the
+  // workspace-scoped `sessions` alone: a Bot's session living in a
+  // different workspace than the one currently selected must still
+  // resolve as resumable.
   resolveBotSessionRef.current = (input) => {
     const recorded = input.bot.currentSession;
     if (!recorded) return null;
-    const session = sessions.find((item) => item.id === recorded.sessionId);
+    const session = sessionsForBots.find(
+      (item) => item.id === recorded.sessionId,
+    );
     if (!session) return null;
     if (session.verdict === "exited") return null;
     return {
@@ -2122,14 +2193,18 @@ export function App() {
   // the same daemon facts every other surface uses (the Bot snapshot's
   // currentSession link + the live session list), and the click handler
   // resumes the live session or opens a fresh one through the exact same
-  // dispatch the Bots page uses.
+  // dispatch the Bots page uses. Uses `sessionsForBots` (host-wide) so the
+  // row stays present and truthful while the session lives, regardless of
+  // which workspace is currently selected — a Bot session disappears here
+  // only when it is actually closed/stopped, never merely navigated away
+  // from.
   const loadedBots =
     botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope)
       ? botsLoad.snapshot.bots
       : [];
   const sidebarBotSessions: SidebarBotSession[] = buildSidebarBotSessions(
     loadedBots,
-    sessions,
+    sessionsForBots,
   );
   const openSidebarBotSession = (botId: string) => {
     const bot = loadedBots.find((candidate) => candidate.id === botId);

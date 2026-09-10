@@ -60,7 +60,12 @@ export const bridgeSchemas = {
     .min(1)
     .max(32768)
     .refine((value) => !value.includes("\0")),
-  sessions: id,
+  // Optional (Bot-session persistence fix): omitting `workspaceId` asks
+  // main for the host-wide session list (every workspace) -- used to keep
+  // a Bot's session reachable/truthful in the sidebar regardless of which
+  // workspace is currently selected. Ordinary per-workspace callers keep
+  // passing the id unchanged.
+  sessions: id.optional(),
   // Additive (R12-E restart reuse): `start` also admits an object carrying
   // the prior session's recorded argv; the bare workspaceId string remains
   // valid for an ordinary new terminal.
