@@ -19,7 +19,6 @@ import { useCallback, useEffect, useState } from "react";
 import type { AutomationSummary } from "../../../../shared/automation-contract";
 import type {
   BotBridge,
-  BotLiveSession,
   BotMonitorView,
   BotRunHarnessSource,
   BotScope,
@@ -84,10 +83,6 @@ export type BotsPageControllerDeps = {
    *  because liveness is not established. See
    *  `BotsPanelProps.resolveBotSession`. */
   resolveBotSession?: (input: { bot: BotsPanelBot }) => BotSessionResolution;
-  /** Host-owned liveness lookup for the default Open-session click (Gap 2):
-   *  the recorded session ONLY when the daemon-owned verdict says it is not
-   *  exited, else null. See `BotsPanelProps.resolveBotSession`. */
-  resolveBotSession?: (input: { bot: BotsPanelBot }) => BotLiveSession | null;
   /** Host-supplied automation summary list (the redesigned AUTOMATIONS
    *  column joins scheduled responsibilities with their real scheduler
    *  record: cron, timezone, harness/model, next/last run). Optional so
