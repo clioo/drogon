@@ -64,6 +64,7 @@ fn unchanged_repeats_and_restarts_emit_nothing() {
         "host-1",
         "proj-1",
         "notes/status.md",
+        Some("bot-1"),
         &first,
         &CommitInput {
             expected_version: 1,
@@ -87,6 +88,7 @@ fn unchanged_repeats_and_restarts_emit_nothing() {
             "host-1",
             "proj-1",
             "notes/status.md",
+            Some("bot-1"),
             &repeat,
             &CommitInput {
                 expected_version: 1
@@ -125,6 +127,7 @@ fn one_new_version_creates_one_committed_local_event() {
             "host-1",
             "proj-1",
             "notes/status.md",
+            Some("bot-1"),
             &second,
             &CommitInput {
                 expected_version: 1
@@ -158,6 +161,7 @@ fn failures_retain_the_prior_cursor_with_honest_errors() {
                 "host-1",
                 "proj-1",
                 "notes/status.md",
+                Some("bot-1"),
                 &failure,
                 &CommitInput {
                     expected_version: 1
@@ -187,6 +191,7 @@ fn stale_duplicate_limited_and_disabled_work_never_admits() {
             "host-1",
             "proj-1",
             "notes/status.md",
+            Some("bot-1"),
             &fresh,
             &CommitInput {
                 expected_version: 0
@@ -216,6 +221,7 @@ fn stale_duplicate_limited_and_disabled_work_never_admits() {
             "host-1",
             "proj-1",
             "notes/status.md",
+            Some("bot-1"),
             &fresh,
             &CommitInput {
                 expected_version: 1
@@ -234,6 +240,7 @@ fn stale_duplicate_limited_and_disabled_work_never_admits() {
             "host-1",
             "proj-1",
             "notes/status.md",
+            Some("bot-1"),
             &fresh,
             &CommitInput {
                 expected_version: 1

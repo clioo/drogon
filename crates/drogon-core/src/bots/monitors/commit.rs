@@ -46,6 +46,23 @@ pub struct CommitInput {
 /// One outgoing local notification/event. The caller persists this value
 /// via C05 and delivers it (notification surface) outside the DB
 /// transaction. Never a model request.
+///
+/// Reconciliation with the C05 corrected API (`bots::delivery` at
+/// 37ca140, read-only): the caller maps this intent onto an
+/// `EnqueueResultRequest` field-for-field — `delivery_id` =
+/// [`MonitorEventIntent::delivery_id`], `bot_id`/`project_id`/`host_id`
+/// from this intent (`bot_id` is `None` for project-level monitors; the
+/// caller resolves the destination bot, this layer never invents one),
+/// `run_id` = the originating check id (or [`MonitorEventIntent::delivery_id`]
+/// when the caller folds check and event into one row), `payload_hash` =
+/// `payload_hash_for` over the exact rendered notification bytes (the
+/// renderer owns that copy; [`MonitorEventIntent::content_digest`] is the
+/// hash basis) — EXCEPT `conversation_id`, which this layer never mints:
+/// C05 conversation ids are versioned triples the native side owns
+/// (renderer parses native-minted ids only), so which conversation
+/// receives monitor events is a C05/C08/root routing decision and the
+/// precise small missing seam alongside the notification copy and the
+/// Engine/migration/scheduler hookup.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MonitorEventIntent {
     pub event_id: String,
@@ -55,7 +72,28 @@ pub struct MonitorEventIntent {
     pub host_id: String,
     pub project_id: String,
     pub resource: String,
+    /// Owning bot when the monitor was created from the Bot surface;
+    /// `None` for project-level monitors.
+    pub bot_id: Option<String>,
     pub observed_at_ms: f64,
+}
+
+impl MonitorEventIntent {
+    /// Stable C05 delivery id for this event: the content-bound event id.
+    /// Same event ⇒ same id, so C05's same-id + same-hash enqueue returns
+    /// the stored row instead of duplicating; different content mints a
+    /// different id by construction, so same-id + different-hash
+    /// `PayloadConflict` cannot arise from this layer.
+    pub fn delivery_id(&self) -> &str {
+        &self.event_id
+    }
+
+    /// The content digest behind this event (the cursor minus its `v1:`
+    /// prefix) — the hash basis the caller uses when it renders the exact
+    /// notification bytes for C05 `payload_hash_for`.
+    pub fn content_digest(&self) -> &str {
+        self.cursor.strip_prefix("v1:").unwrap_or(&self.cursor)
+    }
 }
 
 /// Why a commit retained the cursor without emitting.
@@ -110,6 +148,7 @@ pub fn decide_commit(
     host_id: &str,
     project_id: &str,
     resource: &str,
+    bot_id: Option<&str>,
     result: &MonitorCheckResult,
     input: &CommitInput,
 ) -> CommitDecision {
@@ -172,6 +211,7 @@ pub fn decide_commit(
                     host_id: host_id.to_string(),
                     project_id: project_id.to_string(),
                     resource: resource.to_string(),
+                    bot_id: bot_id.map(str::to_string),
                     observed_at_ms: result.observed_at_ms,
                 },
             }
@@ -212,6 +252,7 @@ mod tests {
             "h",
             "p",
             "notes/a.md",
+            Some("bot-1"),
             &result,
             &CommitInput {
                 expected_version: 2,
@@ -223,6 +264,11 @@ mod tests {
         };
         assert_eq!(cursor, format!("v1:{}", "bb".repeat(32)));
         assert_eq!(intent.event_id, format!("mev_{}", "cc".repeat(16)));
+        // C05 enqueue mapping surface: stable delivery id, hash basis for
+        // the payload hash, and the owning bot carried for routing.
+        assert_eq!(intent.delivery_id(), intent.event_id.as_str());
+        assert_eq!(intent.content_digest(), "bb".repeat(32).as_str());
+        assert_eq!(intent.bot_id.as_deref(), Some("bot-1"));
         // Replaying the same event after it committed cannot re-emit.
         let committed = StoredMonitorState {
             cursor: Some(cursor),
@@ -235,6 +281,7 @@ mod tests {
                 "h",
                 "p",
                 "notes/a.md",
+                Some("bot-1"),
                 &result,
                 &CommitInput {
                     expected_version: 2
@@ -258,6 +305,7 @@ mod tests {
                 "h",
                 "p",
                 "r",
+                None,
                 &old,
                 &CommitInput {
                     expected_version: 1
@@ -272,6 +320,7 @@ mod tests {
                 "h",
                 "p",
                 "r",
+                None,
                 &result,
                 &CommitInput {
                     expected_version: 1
@@ -291,6 +340,7 @@ mod tests {
                 "h",
                 "p",
                 "r",
+                None,
                 &no_change,
                 &CommitInput {
                     expected_version: 2
@@ -313,6 +363,7 @@ mod tests {
                 "h",
                 "p",
                 "r",
+                None,
                 &error,
                 &CommitInput {
                     expected_version: 2
