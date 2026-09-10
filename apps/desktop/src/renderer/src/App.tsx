@@ -154,6 +154,7 @@ import type { ProjectAction } from "./features/shell/ProjectList";
 import { createUntitledMarkdown } from "./features/shell/untitled-markdown";
 import type { FileOpenRequestCell } from "./features/workspaces/files-panel";
 import { openCommandPalette } from "./features/shell/open-palette";
+import { handleTextControlAppMenuPaste } from "./features/shell/text-control-paste";
 import {
   buildHarnessLaunchRetry,
   harnessLaunchForRetry,
@@ -3734,10 +3735,16 @@ export function App() {
       else toggleAppearanceFlag(command.key);
     });
     const offPaste = bridge?.onPaste(() => {
-      // Source fallback for a focused text control (app-menu-paste.ts
-      // performNativePaste); terminal-owned paste lands with the terminal
-      // paste bridge, not here.
-      document.execCommand("paste");
+      // Dialog/form inputs (Add Project et al): the Edit > Paste menu item
+      // arrives here over IPC with the key event already consumed in main,
+      // and document.execCommand("paste") is denied in Chromium, so the
+      // clipboard is read explicitly and inserted into the focused text
+      // control (text-control-paste.ts). Terminal and editor surfaces are
+      // excluded there — their own pipelines keep working untouched — and
+      // anything unclaimed keeps the legacy fallback below.
+      void handleTextControlAppMenuPaste().then((result) => {
+        if (result.status !== "pasted") document.execCommand("paste");
+      });
     });
     const offSelection = bridge?.onSelectionAction((action) => {
       document.execCommand(action === "copy" ? "copy" : "selectAll");
