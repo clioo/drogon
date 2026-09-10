@@ -28,7 +28,7 @@ const CAFFINATE_ARGS = ["-i", "-s"];
 
 export class AwakeController {
   private mode: AwakeMode = "off";
-  private child: ChildProcess | null = null;
+  private child: { handle: ChildProcess; pid: number } | null = null;
   private agentWorking = false;
   private readonly platform: NodeJS.Platform;
   private readonly spawn: CaffeinateSpawn;
@@ -91,24 +91,27 @@ export class AwakeController {
     }
     const owned = child;
     const clear = () => {
-      if (this.child === owned) this.child = null;
+      if (this.child?.handle === owned) this.child = null;
     };
     owned.on("error", clear);
     owned.on("exit", clear);
+    // Failed spawn handles arrive before their asynchronous error event.
+    const pid = owned.pid;
+    if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) return;
     // Detach from our lifetime bookkeeping, not from the OS: an explicit
     // stop/dispose still kills exactly this child.
     owned.unref?.();
-    this.child = owned;
+    this.child = { handle: owned, pid };
   }
 
   private stopOwned(): void {
     const owned = this.child;
     this.child = null;
-    if (!owned) return;
+    if (!owned || owned.handle.pid !== owned.pid) return;
     try {
-      owned.kill();
+      owned.handle.kill();
     } catch {
-      // Already gone; nothing else to release.
+      // Signaling failed; never fall back to another handle or process.
     }
   }
 }

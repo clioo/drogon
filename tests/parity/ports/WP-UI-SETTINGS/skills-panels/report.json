@@ -1,0 +1,18 @@
+{
+  "runner": "scripts/probe-skills-ui.mjs",
+  "status": "PASSED",
+  "startedAt": "2026-09-09T09:16:13.943Z",
+  "checks": [
+    "settings page opens and shows the Agent skills block",
+    "drogon-cli: not installed, shows `npx skills add https://github.com/clioo/drogon --skill drogon-cli --global`",
+    "orchestration: installed, shows `npx skills update orchestration --global`",
+    "screenshot captured: /Users/carlos/orca/workspaces/Drogon/skills/tests/parity/ports/WP-UI-SETTINGS/skills-panels/agent-skills.png"
+  ],
+  "cleanup": [
+    "cdp: browser disconnected",
+    "electron: exited"
+  ],
+  "desktopPids": [
+    42090
+  ]
+}

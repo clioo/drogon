@@ -15,6 +15,13 @@ import type { CliStatusResult } from "../../../../shared/settings-contract";
 import { Button } from "../../components/ui/button";
 import { Label } from "../../components/ui/label";
 import { windowSettingsBridge } from "./settings-bridge";
+import {
+  AgentSkillSetupPanel,
+  SkillsLoadingRow,
+  loadSkillsOverview,
+  type AgentSkillTopic,
+  type SkillsOverviewState,
+} from "./agent-skill-setup-panel";
 
 type ProbeState =
   | { status: "loading" }
@@ -23,6 +30,12 @@ type ProbeState =
 
 export function CliSection(): React.JSX.Element {
   const [probe, setProbe] = useState<ProbeState>({ status: "loading" });
+  const [skills, setSkills] = useState<SkillsOverviewState>({ status: "loading" });
+
+  const refreshSkills = useCallback(() => {
+    setSkills({ status: "loading" });
+    void loadSkillsOverview().then(setSkills);
+  }, []);
 
   const refresh = useCallback(() => {
     const bridge = windowSettingsBridge();
@@ -51,6 +64,10 @@ export function CliSection(): React.JSX.Element {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    refreshSkills();
+  }, [refreshSkills]);
 
   const loading = probe.status === "loading";
   const detail =
@@ -125,6 +142,53 @@ export function CliSection(): React.JSX.Element {
           </p>
         ) : null}
       </div>
+
+      <div className="space-y-3 rounded-xl border border-border/60 bg-card/50 p-4">
+        <div className="space-y-0.5">
+          <Label>Agent skills</Label>
+          <p className="text-xs text-muted-foreground">
+            Give agents Drogon-aware workspace, terminal, and progress
+            workflows.
+          </p>
+        </div>
+        {skills.status === "loading" ? <SkillsLoadingRow /> : null}
+        {skills.status === "unavailable" ? (
+          <p role="status" className="text-xs text-amber-600 dark:text-amber-400">
+            Not available: {skills.reason}
+          </p>
+        ) : null}
+        {skills.status === "ready"
+          ? skills.topics.map((topic: AgentSkillTopic) => (
+              <AgentSkillSetupPanel
+                key={topic.name}
+                topic={topic}
+                title={topicTitle(topic.name)}
+                description={topicDescription(topic.name, topic.description)}
+                installed={topic.installed}
+                loading={false}
+                error={null}
+                onRecheck={refreshSkills}
+              />
+            ))
+          : null}
+      </div>
     </section>
   );
+}
+
+/** Reference CliSection panel titles, Orca→Drogon. */
+function topicTitle(name: string): string {
+  return name === "orchestration" ? "Orchestration skill" : "CLI skill";
+}
+
+/** Reference CliSection panel copy for the CLI skill, generalized per topic
+ *  with the topic's own bundled description as the fallback detail. */
+function topicDescription(name: string, description: string): string {
+  if (name === "orchestration") {
+    return "Enables agents to use Drogon supervised multi-agent coordination.";
+  }
+  if (name === "drogon-cli") {
+    return "Enables agents to use Drogon workspace, terminal, and progress commands.";
+  }
+  return description;
 }
