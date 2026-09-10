@@ -551,6 +551,13 @@ pub enum WorktreeAction {
         /// Free-text note attached to the worktree (source `--comment`)
         #[arg(long, value_name = "TEXT")]
         comment: Option<String>,
+        /// Launch this harness in the worktree's first terminal
+        /// (source `--agent`; ids are the daemon's harness ids)
+        #[arg(long, value_name = "ID")]
+        agent: Option<String>,
+        /// Initial prompt for `--agent`; requires it
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        prompt: Option<String>,
     },
     /// List a Project's worktrees
     #[command(
@@ -1059,6 +1066,8 @@ impl Cli {
                     parent,
                     no_parent,
                     comment,
+                    agent,
+                    prompt,
                 } => {
                     require_nonempty("project", project)?;
                     require_nonempty("name", name)?;
@@ -1076,6 +1085,13 @@ impl Cli {
                     }
                     if let Some(comment) = comment {
                         require_nonempty("comment", comment)?;
+                    }
+                    // Source `getOptionalStartupAgent` copy.
+                    if agent.is_none() && prompt.is_some() {
+                        return Err(CliError::Usage("--prompt requires --agent".into()));
+                    }
+                    if let Some(agent) = agent {
+                        require_nonempty("agent", agent)?;
                     }
                 }
                 WorktreeAction::Show { id } => {
@@ -1746,6 +1762,8 @@ mod tests {
                     parent,
                     no_parent,
                     comment,
+                    agent: _,
+                    prompt: _,
                 },
         } = &cli.command
         else {

@@ -881,6 +881,8 @@ async fn worktree(
             parent,
             no_parent,
             comment,
+            agent,
+            prompt,
         } => {
             // Real, durable creation provenance (Workspace Options "Hide:
             // CLI-created"): every worktree this command creates really was
@@ -907,6 +909,34 @@ async fn worktree(
                 .await?;
             let worktree: Worktree =
                 Client::decode_checked(&call, "worktree.create", check_worktree)?;
+            // Source `--agent`: launch the harness in the new worktree's
+            // first terminal (its workspace) and surface the agent handle.
+            if let Some(agent) = agent {
+                let mut launch = json!({
+                    "workspaceId": worktree.workspace_id,
+                    "harnessId": agent,
+                });
+                launch["prompt"] = json!(prompt.clone().unwrap_or_default());
+                let launch_call = client
+                    .call("harness.start", launch, request_id, DEFAULT_TIMEOUT)
+                    .await?;
+                let session: Session =
+                    Client::decode_checked(&launch_call, "harness.start", check_session)?;
+                let handle = session.id.clone();
+                return emit(
+                    launch_call,
+                    json,
+                    || {
+                        format!(
+                            "{}\nAgent terminal {} ready.",
+                            output::worktree_created(&worktree),
+                            handle
+                        )
+                    },
+                    0,
+                    None,
+                );
+            }
             emit(call, json, || output::worktree_created(&worktree), 0, None)
         }
         WorktreeAction::List { project, limit } => {

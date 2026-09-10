@@ -249,8 +249,9 @@ pub fn all_commands() -> Vec<AgentCommand> {
             "worktree create",
             &["worktree", "create"],
             "Create a git worktree for a Project on branch NAME",
-            "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent] [--comment <TEXT>]",
+            "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent] [--comment <TEXT>] [--agent <ID> [--prompt <TEXT>]]",
             &[
+                "agent",
                 "base",
                 "base-branch",
                 "comment",
@@ -258,14 +259,17 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "no-parent",
                 "parent",
                 "project",
+                "prompt",
             ],
             &[],
             &[
                 "drogon-cli worktree create --project proj-1 --name feature --base main --json",
                 "drogon-cli worktree create --project proj-1 --name child --parent wt-parent",
+                "drogon-cli worktree create --project proj-1 --name task --agent pi --prompt 'sweep the fixtures'",
             ],
             &[
                 "--base-branch is an alias of --base: the new branch starts at that ref, otherwise at the project's HEAD.",
+                "--agent launches that harness in the new worktree's first terminal; --prompt requires --agent.",
                 "Refuses when a worktree with NAME already exists.",
                 "Requires a git project; a folder project has one implicit worktree.",
             ],

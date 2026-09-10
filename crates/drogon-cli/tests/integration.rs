@@ -2504,3 +2504,89 @@ async fn repo_search_refs_maps_query_and_limit_and_prints_refs() {
     assert_eq!(bad.status.code(), Some(2));
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_agent_launches_harness_in_the_new_workspace() {
+    let dir = temp_data_dir("wtagent");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("worktree.create") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "wt-new",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-new",
+                    "path": "/repo/child",
+                    "branch": "child",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            )),
+            Some("harness.start") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                session_result("agent-1"),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "hostId": "host-1",
+                    "serviceInstanceId": "svc-1",
+                    "protocol": 1,
+                    "capabilities": ["workspace.v1", "session.pty.v1", "harness.launch.v1"],
+                    "version": "0.1.0"
+                }),
+            )),
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--agent",
+            "pi",
+            "--prompt",
+            "sweep the fixtures",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let stdout = stdout(&output);
+    assert!(stdout.contains("agent-1"), "stdout: {stdout}");
+    let request = service.last_captured();
+    assert_eq!(request["method"], "harness.start");
+    assert_eq!(request["params"]["workspaceId"], "ws-new");
+    assert_eq!(request["params"]["harnessId"], "pi");
+    assert_eq!(request["params"]["prompt"], "sweep the fixtures");
+    drop(service);
+}
+
+#[test]
+fn worktree_create_prompt_requires_agent() {
+    // Source getOptionalStartupAgent: '--prompt requires --agent'.
+    let dir = temp_data_dir("wtprompt");
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--prompt",
+            "hi",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--prompt requires --agent"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}
