@@ -2100,3 +2100,112 @@ async fn terminal_rename_maps_title_and_prints_source_shape() {
     assert_eq!(request["params"]["title"], Value::Null);
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_maps_parent_no_parent_and_comment_flags() {
+    let dir = temp_data_dir("wtcp");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "wt-new",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-1",
+                    "path": "/repo/child",
+                    "branch": "child",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            ))
+        }),
+    );
+    // --parent maps to parentWorktreeId.
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--parent",
+            "wt-parent",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "worktree.create");
+    assert_eq!(request["params"]["parentWorktreeId"], "wt-parent");
+    // --comment maps to the note field.
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--comment",
+            "from the CLI",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["note"], "from the CLI");
+    // --no-parent sends an explicit null parent.
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--no-parent",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["parentWorktreeId"], Value::Null);
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_rejects_parent_with_no_parent_before_any_call() {
+    // Source index-worktree-create-parent.test.ts: the contradiction is a
+    // client-side error — the daemon is never called.
+    let dir = temp_data_dir("wtcc");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|_request| panic!("the daemon must not be called")),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--parent",
+            "wt-parent",
+            "--no-parent",
+        ],
+    );
+    // Native usage-error convention: pre-flight rejections exit 2; the
+    // daemon is never called either way.
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("Choose either one parent selector or --no-parent."),
+        "stderr: {}",
+        stderr(&output)
+    );
+    drop(service);
+}

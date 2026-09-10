@@ -429,7 +429,7 @@ pub enum WorktreeAction {
     /// Create a git worktree for a Project on branch NAME
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>]\nValid flags: --base, --base-branch, --data-dir, --help, --json, --name, --project, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent] [--comment <TEXT>]\nValid flags: --base, --base-branch, --comment, --data-dir, --help, --json, --name, --no-parent, --parent, --project, --request-id, --retry-request"
     )]
     Create {
         #[arg(long, value_name = "ID")]
@@ -441,6 +441,15 @@ pub enum WorktreeAction {
         /// flag; both spellings map to the one `baseRef` param.
         #[arg(long, visible_alias = "base-branch", value_name = "REF")]
         base: Option<String>,
+        /// Sidebar-nesting parent worktree id (source `--parent-worktree`)
+        #[arg(long, value_name = "ID")]
+        parent: Option<String>,
+        /// Create explicitly parentless (source `--no-parent`)
+        #[arg(long)]
+        no_parent: bool,
+        /// Free-text note attached to the worktree (source `--comment`)
+        #[arg(long, value_name = "TEXT")]
+        comment: Option<String>,
     },
     /// List a Project's worktrees
     #[command(
@@ -902,11 +911,26 @@ impl Cli {
                     project,
                     name,
                     base,
+                    parent,
+                    no_parent,
+                    comment,
                 } => {
                     require_nonempty("project", project)?;
                     require_nonempty("name", name)?;
                     if let Some(base) = base {
                         require_nonempty("base", base)?;
+                    }
+                    if let Some(parent) = parent {
+                        require_nonempty("parent", parent)?;
+                    }
+                    // Source `assertCreateParentFlagsCompatible` copy.
+                    if parent.is_some() && *no_parent {
+                        return Err(CliError::Usage(
+                            "Choose either one parent selector or --no-parent.".into(),
+                        ));
+                    }
+                    if let Some(comment) = comment {
+                        require_nonempty("comment", comment)?;
                     }
                 }
                 WorktreeAction::Show { id } => {
@@ -1540,6 +1564,9 @@ mod tests {
                     project,
                     name,
                     base,
+                    parent,
+                    no_parent,
+                    comment,
                 },
         } = &cli.command
         else {
@@ -1548,6 +1575,9 @@ mod tests {
         assert_eq!(project, "p1");
         assert_eq!(name, "feature");
         assert_eq!(base.as_deref(), Some("main"));
+        assert_eq!(parent, &None);
+        assert!(!*no_parent);
+        assert_eq!(comment, &None);
         assert!(cli.validate().is_ok());
 
         let cli = parse(&["worktree", "list", "--project", "p1"]).unwrap();
@@ -1596,6 +1626,7 @@ mod tests {
                         project,
                         name,
                         base,
+                        ..
                     },
             } = &cli.command
             else {

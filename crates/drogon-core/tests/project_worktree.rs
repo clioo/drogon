@@ -1157,3 +1157,59 @@ fn session_rename_sets_and_clears_the_durable_title() {
         "unexpected fence code: {fence}"
     );
 }
+
+#[test]
+fn worktree_create_accepts_note_and_parent_and_validates_parent_project() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let project = ok(
+        &engine,
+        "project.add",
+        "cp1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let parent = ok(
+        &engine,
+        "worktree.create",
+        "cp2",
+        json!({"projectId": project["id"], "name": "parent"}),
+    );
+    let child = ok(
+        &engine,
+        "worktree.create",
+        "cp3",
+        json!({
+            "projectId": project["id"],
+            "name": "child",
+            "parentWorktreeId": parent["id"],
+            "note": "from the CLI"
+        }),
+    );
+    assert_eq!(child["parentWorktreeId"], parent["id"]);
+    assert_eq!(child["note"], json!("from the CLI"));
+
+    // A parent from another project is refused at create time.
+    let other_repo = tempfile::tempdir().unwrap();
+    init_repo(other_repo.path());
+    let other_project = ok(
+        &engine,
+        "project.add",
+        "cp4",
+        json!({"path": other_repo.path().to_string_lossy()}),
+    );
+    assert_eq!(
+        err_code(
+            &engine,
+            "worktree.create",
+            "cp5",
+            json!({
+                "projectId": other_project["id"],
+                "name": "stray",
+                "parentWorktreeId": parent["id"]
+            }),
+        ),
+        "invalid_argument"
+    );
+}

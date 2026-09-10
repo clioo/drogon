@@ -705,6 +705,9 @@ async fn worktree(
             project,
             name,
             base,
+            parent,
+            no_parent,
+            comment,
         } => {
             // Real, durable creation provenance (Workspace Options "Hide:
             // CLI-created"): every worktree this command creates really was
@@ -714,6 +717,17 @@ async fn worktree(
             let mut params = json!({ "projectId": project, "name": name, "creator": "cli" });
             if let Some(base) = base {
                 params["baseRef"] = json!(base);
+            }
+            // `--no-parent` is an explicit null; `--parent` addresses the
+            // parent row by id; neither means the daemon's default.
+            if *no_parent || parent.is_some() {
+                params["parentWorktreeId"] = match parent {
+                    Some(parent) => json!(parent),
+                    None => Value::Null,
+                };
+            }
+            if let Some(comment) = comment {
+                params["note"] = json!(comment);
             }
             let call = client
                 .call("worktree.create", params, request_id, DEFAULT_TIMEOUT)
