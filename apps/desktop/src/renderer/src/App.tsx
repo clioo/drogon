@@ -226,6 +226,7 @@ import {
 import { BOTS_PAGE_HOST_TESTID } from "./features/bots";
 import type { BotsPanelProps } from "../../shared/bot-contract";
 import { dispatchOpenBotSession } from "./features/bots/bot-session-open";
+import { mergeSessionsForBots } from "./features/bots/bot-session-visibility";
 import { BotSessionHeader } from "./features/bots/BotSessionHeader";
 import { BotSessionInspector } from "./features/bots/BotSessionInspector";
 import {
@@ -2160,11 +2161,10 @@ export function App() {
   // selected workspace's own push-updated list) overrides the host-wide
   // poll for any id both contain, so the workspace you are actually
   // looking at never lags behind its own live updates.
-  const sessionsForBots = useMemo(() => {
-    const merged = new Map(allBotSessions.map((item) => [item.id, item]));
-    for (const item of sessions) merged.set(item.id, item);
-    return [...merged.values()];
-  }, [allBotSessions, sessions]);
+  const sessionsForBots = useMemo(
+    () => mergeSessionsForBots(allBotSessions, sessions),
+    [allBotSessions, sessions],
+  );
   // Gap 2: the host owns liveness. A Bot's recorded session is resumable
   // only when the daemon-owned session list still shows it AND has not
   // positively confirmed it exited — reattaching to a dead session, or
