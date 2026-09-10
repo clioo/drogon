@@ -22,6 +22,8 @@ import { jira } from "./jira";
 import { mentu } from "./mentu";
 import { botBridgeExtras } from "./bot";
 import { appMenu } from "./app-menu";
+import { ui } from "./workspace-ui-preferences";
+import { skills } from "./skills";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -119,5 +121,6 @@ Object.assign(
   botBridgeExtras,
   { appMenu },
   { filesWatch },
+  { ui, skills },
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

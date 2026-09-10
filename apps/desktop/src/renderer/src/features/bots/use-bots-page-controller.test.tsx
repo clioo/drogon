@@ -487,4 +487,47 @@ describe("use-bots-page-controller", () => {
     );
     expect(screen.queryByTestId("bots-empty")).toBeNull();
   });
+
+  // Packaged acceptance regression (probeBotPresetManualRun cleanup):
+  // returning to the Bots route after visiting Automations re-triggers
+  // App.tsx's fresh botSnapshot load (`setBotsLoad(null)` on route
+  // re-entry), which re-renders this SAME kept-alive panel with the
+  // pending placeholder for a real, observable window before the fresh
+  // snapshot hydrates -- during that window the bot's card, and its
+  // Delete control, do not exist in the DOM at all, even though the bot
+  // itself was never removed. A one-shot `locator.count()` taken in that
+  // window (rather than a retrying wait for the control to appear) reads
+  // 0 and skips the delete entirely, leaving the bot and its automation
+  // behind with no error raised anywhere -- exactly the observed
+  // "bot delete must remove its owned automations" failure. This is not
+  // a product defect: the panel already recovers correctly once the
+  // fresh snapshot lands, which is what the fix in
+  // scripts/probe-sealed-journeys.mjs (an accurate wait for the Delete
+  // control instead of a single count() check) now waits for.
+  it("has no Delete control while a route-reentry reload is pending, and deletes correctly once it hydrates", async () => {
+    const fake = fakeBridge([bot()]);
+    const { rerender } = render(
+      <BotsPanel
+        snapshot={{ bots: [], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        snapshotPending
+      />,
+    );
+    // The exact window the packaged acceptance run's one-shot count()
+    // raced against: no bot card, so no Delete control, for a real bot
+    // that still genuinely exists server-side.
+    expect(screen.queryByTestId("delete-bot-bot-1")).toBeNull();
+
+    rerender(
+      <BotsPanel
+        snapshot={{ bots: [bot()], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+      />,
+    );
+    const deleteButton = await screen.findByTestId("delete-bot-bot-1");
+    fireEvent.click(deleteButton);
+    await waitFor(() => expect(screen.getByTestId("bots-empty")).toBeTruthy());
+  });
 });

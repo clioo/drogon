@@ -19,7 +19,7 @@ pub(crate) const QUICK_SESSION_MARKER_OWNER: &str = "drogon";
 pub(crate) const QUICK_SESSION_DEFAULT_NAME: &str = "Quick Session";
 
 pub(crate) const PROJECTS_SCHEMA_COMPONENT: &str = "projects";
-pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 3;
+pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 5;
 
 fn create_v1_tables(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
@@ -44,6 +44,24 @@ fn create_v1_tables(tx: &Transaction) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS worktrees_project ON worktrees(project_id);",
     )
+}
+
+fn add_column_if_missing(
+    tx: &Transaction,
+    table: &str,
+    column: &str,
+    ddl: &str,
+) -> rusqlite::Result<()> {
+    let has_column: bool = tx
+        .prepare(&format!("PRAGMA table_info({table})"))?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|name| name == column);
+    if !has_column {
+        tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl}"))?;
+    }
+    Ok(())
 }
 
 /// Applies the `projects`/`worktrees` schema using the caller's already-open
@@ -79,23 +97,6 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         }
         Ok(())
     }
-    fn add_column_if_missing(
-        tx: &Transaction,
-        table: &str,
-        column: &str,
-        ddl: &str,
-    ) -> rusqlite::Result<()> {
-        let has_column: bool = tx
-            .prepare(&format!("PRAGMA table_info({table})"))?
-            .query_map([], |r| r.get::<_, String>(1))?
-            .collect::<Result<Vec<_>, _>>()?
-            .iter()
-            .any(|name| name == column);
-        if !has_column {
-            tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl}"))?;
-        }
-        Ok(())
-    }
     // v3: the composer Advanced rows — the worktree note and
     // sidebar-nesting parent, the project's setup script, the
     // Quick Session scratch marker, and per-project sparse-checkout
@@ -126,6 +127,8 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             create_v1_tables(tx)?;
             apply_v2_title_column(tx)?;
             apply_v3_composer_columns(tx)?;
+            backfill_projects_from_pre_existing_workspaces(tx)?;
+            apply_v5_workspace_options_columns(tx)?;
             tx.execute(
                 "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -146,6 +149,8 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         Some(1) => {
             apply_v2_title_column(tx)?;
             apply_v3_composer_columns(tx)?;
+            backfill_projects_from_pre_existing_workspaces(tx)?;
+            apply_v5_workspace_options_columns(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -153,12 +158,230 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         }
         Some(2) => {
             apply_v3_composer_columns(tx)?;
+            backfill_projects_from_pre_existing_workspaces(tx)?;
+            apply_v5_workspace_options_columns(tx)?;
+            tx.execute(
+                "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
+                params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
+            )?;
+        }
+        // The v4 recovery originally ran only in the `None` branch, so a
+        // store that had already been
+        // opened by a build between c2deb28 (Projects landing) and this fix
+        // -- already recorded at v3 -- would never run it, permanently
+        // stranding orphan workspaces from before Projects existed even
+        // after installing this fix. Every already-versioned arm now runs
+        // the same recovery once on its way to v4, additive and idempotent
+        // (backfill_projects_from_pre_existing_workspaces only touches
+        // workspaces rows with no matching projects row by path, so a
+        // second run over an already-recovered store is a no-op, and an
+        // intentionally `project.remove`d folder/git project's workspace
+        // row is deleted together with it -- see `remove` below -- so
+        // there is nothing left to resurrect for a deliberate removal).
+        Some(3) => {
+            backfill_projects_from_pre_existing_workspaces(tx)?;
+            apply_v5_workspace_options_columns(tx)?;
+            tx.execute(
+                "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
+                params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
+            )?;
+        }
+        // v5: Workspace Options metadata columns (workspace_status,
+        // is_pinned, is_archived, sort_order, manual_order,
+        // last_activity_at, linked_pr, creator) -- additive, and the same
+        // "run on every already-versioned arm on the way to current"
+        // pattern as v4's recovery above, so a store already at v4 before
+        // this fix landed still picks it up on its next open.
+        Some(4) => {
+            apply_v5_workspace_options_columns(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
             )?;
         }
         _ => {}
+    }
+    Ok(())
+}
+
+/// v5: Workspace Options metadata columns on `worktrees`, additive.
+/// `is_pinned`/`is_archived`/`sort_order` are `NOT NULL DEFAULT 0` (always
+/// present, matching the protocol's non-optional `Worktree` fields);
+/// `workspace_status`/`manual_order`/`last_activity_at`/`linked_pr`/
+/// `creator` are nullable ("no value yet" is a real, distinct state, not
+/// merely a zero).
+fn apply_v5_workspace_options_columns(tx: &Transaction) -> rusqlite::Result<()> {
+    add_column_if_missing(tx, "worktrees", "workspace_status", "TEXT")?;
+    add_column_if_missing(tx, "worktrees", "is_pinned", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(tx, "worktrees", "is_archived", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(tx, "worktrees", "sort_order", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(tx, "worktrees", "manual_order", "INTEGER")?;
+    add_column_if_missing(tx, "worktrees", "last_activity_at", "TEXT")?;
+    add_column_if_missing(tx, "worktrees", "linked_pr", "INTEGER")?;
+    add_column_if_missing(tx, "worktrees", "creator", "TEXT")?;
+    // A folder Project has no `worktrees` row at all -- `worktree.list`
+    // synthesizes its one implicit worktree straight from the `projects`
+    // row (see `worktree_rpc::do_worktree_list`). Its Workspace Options
+    // metadata (status/manual order) is real, durable state too, and must
+    // work for folder workspaces with real identity, so it lives on
+    // `projects` itself --
+    // the row that IS that implicit worktree's real identity -- rather
+    // than being defaulted every read. `sort_order`/`linked_pr`/`creator`
+    // are meaningless here: a folder project has exactly one worktree (no
+    // sibling to order against) and no branch (no PR to link, and its
+    // provenance is always "added via project.add", never worktree.create).
+    add_column_if_missing(tx, "projects", "workspace_status", "TEXT")?;
+    add_column_if_missing(tx, "projects", "is_pinned", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(tx, "projects", "is_archived", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(tx, "projects", "manual_order", "INTEGER")?;
+    add_column_if_missing(tx, "projects", "last_activity_at", "TEXT")?;
+    backfill_sort_order_and_last_activity(tx)?;
+    backfill_project_last_activity(tx)?;
+    Ok(())
+}
+
+/// Same honesty as `backfill_sort_order_and_last_activity`: a folder
+/// project with no recorded activity yet is, at minimum, as recently
+/// active as its own creation.
+fn backfill_project_last_activity(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute(
+        "UPDATE projects SET last_activity_at = created_at WHERE last_activity_at IS NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+/// `sort_order`: every pre-existing row lands on the column's own `DEFAULT
+/// 0` the first time this runs; assign each of those a stable, increasing
+/// stamp in `created_at` order (ties broken by `id`) so Sort by "Manual"
+/// keeps their natural creation order before anyone has ever dragged one.
+/// Idempotent: a worktree genuinely created (post-migration) with a real
+/// assigned `sort_order` is never 0, so a second run touches nothing.
+///
+/// `last_activity_at`: a worktree with no recorded activity yet is, at
+/// minimum, as recently active as its own creation -- never left blank.
+fn backfill_sort_order_and_last_activity(tx: &Transaction) -> rusqlite::Result<()> {
+    let ids: Vec<String> = tx
+        .prepare("SELECT id FROM worktrees WHERE sort_order = 0 ORDER BY created_at, id")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (index, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE worktrees SET sort_order = ?1 WHERE id = ?2",
+            params![(index as i64) + 1, id],
+        )?;
+    }
+    tx.execute(
+        "UPDATE worktrees SET last_activity_at = created_at WHERE last_activity_at IS NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Upgrade safety (user-feature-closure item 5): a data dir written by a
+/// daemon from before Projects existed (dc12c7a and earlier -- this module
+/// was added in c2deb28) registered workspaces (folder AND git) directly
+/// via `workspace::register`, with no owning `projects` row at all --
+/// `project::list` only ever reads `projects`, so those workspaces silently
+/// disappeared from the sidebar after an upgrade even though the row (and
+/// the user's registration) was never lost.
+///
+/// Runs on every schema-version arm on the way to `PROJECTS_SCHEMA_VERSION`:
+/// a user who already opened a data dir with some intermediate build after
+/// Projects landed (c2deb28) but before this recovery existed already has
+/// projects schema v3 recorded,
+/// so gating this to only the fresh "no recorded version" branch would
+/// permanently strand their pre-Projects orphans even after installing
+/// this fix. Additive and idempotent either way -- it only ever inserts
+/// for a `workspaces` row with no matching `projects` row at the same
+/// path, so re-running it (every already-versioned arm, every future
+/// reopen once landed at current) is a no-op past the first real hit.
+///
+/// Never resurrects an intentional `project.remove`: that call deletes the
+/// project's `workspaces` row in the same transaction (see `remove` below),
+/// so a deliberately removed folder or git project's workspace is
+/// genuinely gone from `workspaces` too -- there is nothing left here to
+/// find and re-insert.
+///
+/// - `folder`: gets a `projects` row (new uuid, same path/name/host/
+///   created_at, no default_base_ref), mirroring `project::add`'s own
+///   folder-project shape. No `worktrees` row is created or needed --
+///   `worktree_rpc.rs`'s `do_worktree_list` synthesizes a folder project's
+///   one implicit worktree from the existing `workspaces` row at read
+///   time, exactly like any other folder project.
+/// - `git`: gets a `projects` row AND a `worktrees` row reusing the SAME
+///   `workspace_id` (never a new one -- the orphaned workspace becomes
+///   that worktree, not a sibling of it), so the registration is fully
+///   preserved as an immediately session-attachable primary checkout
+///   (`worktree.path == project.path`), not merely visible with zero
+///   usable worktrees. `branch`/`head` default to empty: migrations never
+///   shell out to git (`workspace.rs`'s own protocol invariant -- "Do not
+///   run Git mutations for registration"), so the real branch can't be
+///   read here; `WorktreeCard`'s live git-status probe (`git.status.v1`,
+///   session-side, not migration-side) corrects the displayed branch on
+///   first render.
+fn backfill_projects_from_pre_existing_workspaces(tx: &Transaction) -> rusqlite::Result<()> {
+    // A `workspaces` row already referenced by a real `worktrees.workspace_id`
+    // is NOT orphaned -- it is a git project's own (possibly non-primary)
+    // worktree, already correctly wired to its project (worktrees existed
+    // even at the projects schema's v1). Only its path failing to match
+    // any `projects.path` made it LOOK orphaned (a project's own root path
+    // is never the same as one of its secondary worktrees' paths); without
+    // this exclusion the backfill tried to insert a second, colliding
+    // project+worktree for an already-registered worktree (UNIQUE
+    // constraint on `worktrees.path`/`worktrees.workspace_id`).
+    let orphaned_folders: Vec<(String, String, String, String)> = tx
+        .prepare(
+            "SELECT path, name, host_id, created_at FROM workspaces
+             WHERE kind = 'folder'
+               AND path NOT IN (SELECT path FROM projects)
+               AND id NOT IN (SELECT workspace_id FROM worktrees)",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (path, name, host_id, created_at) in orphaned_folders {
+        tx.execute(
+            "INSERT INTO projects (id, host_id, path, name, kind, default_base_ref, created_at)
+             VALUES (?1, ?2, ?3, ?4, 'folder', NULL, ?5)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                host_id,
+                path,
+                name,
+                created_at
+            ],
+        )?;
+    }
+
+    let orphaned_git: Vec<(String, String, String, String, String)> = tx
+        .prepare(
+            "SELECT id, path, name, host_id, created_at FROM workspaces
+             WHERE kind = 'git'
+               AND path NOT IN (SELECT path FROM projects)
+               AND id NOT IN (SELECT workspace_id FROM worktrees)",
+        )?
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (workspace_id, path, name, host_id, created_at) in orphaned_git {
+        let project_id = uuid::Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO projects (id, host_id, path, name, kind, default_base_ref, created_at)
+             VALUES (?1, ?2, ?3, ?4, 'git', NULL, ?5)",
+            params![project_id, host_id, path, name, created_at],
+        )?;
+        tx.execute(
+            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, created_at)
+             VALUES (?1, ?2, ?3, ?4, '', '', NULL, ?5)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project_id,
+                workspace_id,
+                path,
+                created_at
+            ],
+        )?;
     }
     Ok(())
 }
@@ -444,6 +667,7 @@ pub(crate) fn changes(conn: &Connection) -> Result<Value, drogon_protocol::RpcEr
     for row in preset_rows {
         digest.update(row.map_err(error::from_sqlite)?.as_bytes());
     }
+    crate::project_card_revision::update(conn, &mut digest)?;
     Ok(json!({ "revision": format!("{:x}", digest.finalize()) }))
 }
 
@@ -701,6 +925,7 @@ impl Engine {
         &self,
         params: &Value,
     ) -> Result<Value, drogon_protocol::RpcError> {
+        let _workspace_admission = self.workspace_lifecycle_gate.write().unwrap();
         let id = require_str(params, "id")?;
         let scratch: Option<String> = {
             let conn = self.db.lock().unwrap();
@@ -712,6 +937,10 @@ impl Engine {
             .optional()
             .map_err(error::from_sqlite)?
         };
+        if let Some(path) = &scratch {
+            self.validate_quick_session_scratch(id, path)?;
+            self.settle_quick_session_members(path)?;
+        }
         let conn = self.db.lock().unwrap();
         let removed = remove(&conn, id)?;
         drop(conn);
@@ -725,15 +954,22 @@ impl Engine {
         Ok(removed)
     }
 
-    /// Deletes a Quick Session scratch folder after its project row is
-    /// gone. Any doubt about ownership (moved directory, foreign marker,
-    /// path outside the quick-sessions root) skips the delete rather than
-    /// risking user files.
     fn cleanup_quick_session_scratch(
         &self,
         project_id: &str,
         path: &str,
     ) -> Result<(), drogon_protocol::RpcError> {
+        let candidate = self.validate_quick_session_scratch(project_id, path)?;
+        std::fs::remove_dir_all(&candidate)
+            .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}")))
+    }
+
+    /// Check before any destructive action and again immediately before unlink.
+    fn validate_quick_session_scratch(
+        &self,
+        project_id: &str,
+        path: &str,
+    ) -> Result<std::path::PathBuf, drogon_protocol::RpcError> {
         let root = self.data_dir.join(QUICK_SESSION_ROOT);
         let canonical_root = std::fs::canonicalize(&root).unwrap_or(root);
         let candidate = std::fs::canonicalize(path)
@@ -757,8 +993,7 @@ impl Engine {
                 "quick session scratch marker ownership mismatch; not deleting",
             ));
         }
-        std::fs::remove_dir_all(&candidate)
-            .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}")))
+        Ok(candidate)
     }
 
     /// Quick Session (`project.quickSessionCreate`): the fork's composer

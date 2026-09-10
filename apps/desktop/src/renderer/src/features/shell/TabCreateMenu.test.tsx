@@ -104,6 +104,41 @@ describe("matchesTabCreateQuery", () => {
   });
 });
 
+describe("TabCreateMenu trigger accessibility (#user-feature-closure item 2)", () => {
+  // Fidelity: the reference's "+" trigger is a native `<button>` (no ARIA
+  // role shim) inside `.tab-row-window-drag`, which opts every descendant
+  // `button` out of the titlebar drag region (main.css) and the base-layer
+  // `:where(button:not(:disabled)) { cursor: pointer }` rule gives it the
+  // pointer cursor without a component-level `cursor-pointer` class. None of
+  // that is observable through jsdom's computed style (no real CSS cascade),
+  // so this test pins the DOM contract those global rules and Electron's
+  // drag-region opt-out both depend on: a real, enabled, keyboard-reachable
+  // `<button type="button">` — not a div/span with a click handler.
+  it("renders the trigger as a native enabled button with the fork's accessible name", () => {
+    mount();
+    const trigger = screen.getByRole("button", { name: "New tab" });
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.getAttribute("type")).toBe("button");
+    expect((trigger as HTMLButtonElement).disabled).toBe(false);
+    expect(trigger.getAttribute("title")).toBe("New tab");
+  });
+
+  it("disables the trigger (native semantics, no click handler workaround) when disabled", () => {
+    mount({ disabled: true });
+    const trigger = screen.getByRole("button", { name: "New tab" });
+    expect((trigger as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("opens the menu from the keyboard via Enter, the same as a pointer click", () => {
+    mount();
+    const trigger = screen.getByRole("button", { name: "New tab" });
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(screen.getAllByRole("menuitem").length).toBeGreaterThan(0);
+  });
+});
+
 describe("TabCreateMenu order and copy", () => {
   it("lists static entries, harness entries, then Agent settings in fork order", () => {
     const onOpenAgentSettings = vi.fn();

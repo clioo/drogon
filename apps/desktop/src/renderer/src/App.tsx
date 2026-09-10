@@ -60,6 +60,11 @@ import {
   composerAgentLaunchInput,
   type ComposerAgentSelection,
 } from "./features/new-workspace/composer-submit";
+import {
+  CLIENT_WORKTREE_CREATE_MAX_ATTEMPTS,
+  getClientWorktreeCreateCandidate,
+  isRetryableWorktreeCreateConflict,
+} from "./features/new-workspace/worktree-create-retry";
 // R16-AO (#231): every launch path resolves the Settings → Agents default
 // permission mode (yolo/unattended for Claude Code, like the fork) instead
 // of hardcoding one.
@@ -128,6 +133,7 @@ import {
 import { unreadDockBadgeCount } from "./features/shell/unread-badge-count";
 import { Landing } from "./features/landing/Landing";
 import { NewSessionDialog } from "./features/sessions/NewSessionDialog";
+import { ServiceCapabilityNotice } from "./features/shell/ServiceCapabilityNotice";
 import { NoWorkspacePage } from "./features/shell/NoWorkspacePage";
 import {
   findWorkspaceForPath,
@@ -211,6 +217,10 @@ import {
   isBotsAvailable,
   registerBotsRoute,
 } from "./bots-mount";
+import {
+  isAgentSettingsAvailable,
+  shouldGateLaunchOnAgentSettingsReadiness,
+} from "./daemon-capabilities";
 import { BOTS_PAGE_HOST_TESTID } from "./features/bots";
 import {
   planBrowserRehydrate,
@@ -1452,7 +1462,7 @@ export function App() {
   // below, so a routed-but-unavailable page falls back to the session
   // view instead of rendering an empty page. Back/Close return through
   // the view history, which restores the previous session entry.
-  const botsPageActive = route === BOTS_ROUTE_ID && botsAlive;
+  const botsPageActive = route === BOTS_ROUTE_ID;
   const automationsPageActive =
     route === AUTOMATIONS_ROUTE_ID && automationsAlive && filesProps !== null;
   const tasksPageActive = route === TASKS_ROUTE_ID && tasksAlive;
@@ -1576,7 +1586,14 @@ export function App() {
   }, [status?.serviceInstanceId]);
   const harnessLaunchMemoryRef = useRef<HarnessLaunchMemory>(new Map());
   const startHarnessTracked = async (input: HarnessLaunchInput) => {
-    if (!(await agentSettingsState.ensureReady())) {
+    // User-feature-closure item 7 (coordinator review): a mixed-version old
+    // daemon missing agent.settings.v1 made every launch here fail opaque
+    // ("settings_unavailable") forever -- see
+    // shouldGateLaunchOnAgentSettingsReadiness's own doc for why.
+    if (
+      shouldGateLaunchOnAgentSettingsReadiness(status !== null, liveCapabilities) &&
+      !(await agentSettingsState.ensureReady())
+    ) {
       return {
         ok: false,
         error: { code: "settings_unavailable", message: agentSettingsState.getSnapshot().error ?? "Could not load agent settings. Retry the connection.", retryable: true },
@@ -2065,6 +2082,7 @@ export function App() {
     name: string;
     baseRef?: string;
     branch?: string;
+    reuseBranch?: boolean;
     note?: string;
     parentWorktreeId?: string;
     sparse?: string[];
@@ -2078,11 +2096,27 @@ export function App() {
     const { setupScript, waitForSetup, agent, ...createInput } = input;
     let created: Worktree;
     try {
-      const result = await bridge.worktreeCreate(createInput);
-      if (!result.ok) return result.error.message;
-      created = result.result;
-    } catch {
-      return "Could not create the worktree. Retry the connection.";
+      // The fork's client-side suffix retry (worktree-create-retry-policy):
+      // a branch/folder collision suffixed the candidate instead of failing
+      // the create, so picking a busy branch still lands a workspace.
+      created = await (async () => {
+        let lastFailure: string | null = null;
+        for (let attempt = 0; attempt < CLIENT_WORKTREE_CREATE_MAX_ATTEMPTS; attempt += 1) {
+          const name = getClientWorktreeCreateCandidate(createInput.name, attempt);
+          const result = await bridge.worktreeCreate!({
+            ...createInput,
+            name,
+          });
+          if (result.ok) return result.result;
+          lastFailure = result.error.message;
+          if (!isRetryableWorktreeCreateConflict(lastFailure)) break;
+        }
+        return Promise.reject(new Error(lastFailure ?? "worktree.create failed"));
+      })();
+    } catch (error) {
+      return error instanceof Error && error.message
+        ? error.message
+        : "Could not create the worktree. Retry the connection.";
     }
     const workspaceId = created.workspaceId;
     selectWorkspaceId(workspaceId);
@@ -3870,6 +3904,11 @@ export function App() {
                   onDefaultHarnessChange={changeDefaultHarness}
                   harnessDefaults={harnessDefaults}
                   onHarnessDefaultChange={changeHarnessDefault}
+                  agentSettingsCapabilityAvailable={
+                    status === null
+                      ? undefined
+                      : isAgentSettingsAvailable(liveCapabilities)
+                  }
                   notifyOnAgentNeedsInput={notifyOnAgentNeedsInput}
                   onNotifyChange={changeNotifyOnAgentNeedsInput}
                   notifyOnAgentTaskComplete={notifyOnAgentTaskComplete}
@@ -4255,7 +4294,7 @@ export function App() {
                 )}
               </section>
             ) : null}
-            {botsAlive ? (
+            {botsAlive || route === BOTS_ROUTE_ID ? (
               // No aria-label (see the Tasks host above): the Bots page
               // root is already `<main>`, so any label here would nest
               // `region Bots` around it — the double wrap from #128.
@@ -4268,7 +4307,11 @@ export function App() {
                   display: route === BOTS_ROUTE_ID ? undefined : "none",
                 }}
               >
-                {botsDescriptor && filesProps ? (
+                {!botsAvailable ? (
+                  <div className="empty-state">
+                    <ServiceCapabilityNotice feature="Bots" connected={status !== null} />
+                  </div>
+                ) : botsDescriptor && filesProps ? (
                   <MountedPanel
                     descriptor={botsDescriptor}
                     workspace={filesProps.workspace}

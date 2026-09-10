@@ -1,6 +1,7 @@
 // Adapter model for the ported Orca task-page components. The source
 // threads one giant `TaskPageComposerActionsModel` through every component;
-// this repo keeps the same field names but only the GitHub + Jira subset
+// this repo keeps the same field names but only the GitHub + Jira +
+// Linear subset
 // the components actually read, assembled by TasksPage.tsx from the
 // bridges.
 import type { Dispatch, JSX, RefObject, SetStateAction } from "react";
@@ -39,6 +40,10 @@ import type {
   JiraIssueSortDirection,
 } from "./jira/jira-issue-sorter";
 import type { JiraIssueCreationDialogState } from "./jira/use-jira-issue-creation";
+import type {
+  IssueDetails,
+  WorktreeIssueLink,
+} from "../../../../shared/worktree-issue-contract";
 
 /** One row of the GitHub list: a TaskIssue/TaskPullRequest projected into the source's work-item shape. */
 export type TaskPageWorkItem = GitHubWorkItemLike & {
@@ -113,7 +118,7 @@ export type TaskPageSourceContextSummary = { label: string; title: string };
 export type TaskPageSourceAvailabilityNotice = { label: string; blocking: boolean } | null;
 
 export type TaskPageModel = {
-  // Source bar. Wider than today's GitHub-only options so a deep-linked
+  // Source bar. Wider than one provider so a deep-linked
   // source (sidebar chips, #346) stays selected for R17-B's Jira surface.
   taskSource: TaskSource;
   visibleSourceOptions: SourceOption[];
@@ -192,7 +197,7 @@ export type TaskPageModel = {
 
   // Refs (scroll position reset across page changes).
   githubListScrollRef: RefObject<HTMLDivElement | null>;
-} & TaskPageJiraModelFields;
+} & TaskPageJiraModelFields & TaskPageLinearModelFields;
 
 // R17-B: the Jira source surface (fork task-page/jira/Content.tsx +
 // Filters.tsx + SourceBar.tsx wiring), assembled by TasksPage.tsx over
@@ -242,6 +247,36 @@ export type TaskPageJiraModelFields = {
   onJiraIssuePatched: (issue: JiraIssue) => void;
   /** The R17-C create dialog state (the fork's newJiraIssue* slice). */
   jiraCreationDialog: JiraIssueCreationDialogState;
+};
+
+// The Linear source surface: the renderer-local fixture provider (no
+// daemon RPC) with start/link/unlink through the durable project bridge.
+// Field names mirror the Jira surface; kept as an intersected field set
+// so chrome tests can spread linearSurfaceModelDefaults().
+export type TaskPageLinearModelFields = {
+  linearConnected: boolean;
+  linearConnectOpen: boolean;
+  setLinearConnectOpen: (open: boolean) => void;
+  /** Re-reads the local connection after the connect dialog succeeds. */
+  refreshLinearStatus: () => void;
+  linearIssues: IssueDetails[];
+  linearLoading: boolean;
+  linearError: string | null;
+  linearSearchInput: string;
+  setLinearSearchInput: Dispatch<SetStateAction<string>>;
+  handleRefreshLinearIssues: () => void;
+  /** Durable `worktreeIssueLinks` rows for the selected project. */
+  linearLinks: WorktreeIssueLink[];
+  /** Link-picker rows: the selected project's worktrees. */
+  linearWorktrees: { id: string; label: string }[];
+  /** `${action}:${identifier}` of the in-flight start/link/unlink, if any. */
+  linearBusyKey: string | null;
+  handleStartLinearItem: (issue: IssueDetails) => void;
+  handleLinkLinearItem: (issue: IssueDetails, worktreeId: string) => void;
+  handleUnlinkLinearItem: (issue: IssueDetails) => void;
+  onOpenLinearWorktree: (worktreeId: string) => void;
+  openLinearIssueUrl: (url: string) => Promise<unknown> | unknown;
+  writeLinearClipboardText: (text: string) => Promise<unknown> | unknown;
 };
 
 export type TaskPageModelProps = { model: TaskPageModel };

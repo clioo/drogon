@@ -330,11 +330,178 @@ fn validate_recipe_value(value: &Value) -> Result<(), RpcError> {
     Ok(())
 }
 
+/// How long a save lock may be held by a dead writer before a contender
+/// reaps it: writes hold the lock for milliseconds, so anything older is
+/// a crash leftover, never a live save.
+const SAVE_LOCK_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+/// How long a save waits for a live holder before refusing: contention is
+/// brief (one check plus one rename); a longer wait means the holder died
+/// without leaving a parseable lock, and failing beats piling up.
+const SAVE_LOCK_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+const SAVE_LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(5);
+
+/// A held per-recipe save lock. `Drop` removes the lock file only when it
+/// still carries our own content, so a holder never deletes a lock that a
+/// stale-reap already transferred to someone else.
+struct RecipeLock {
+    path: PathBuf,
+    content: Vec<u8>,
+}
+
+impl Drop for RecipeLock {
+    fn drop(&mut self) {
+        if fs::read(&self.path).is_ok_and(|bytes| bytes == self.content) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn save_lock_content() -> Vec<u8> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{} {stamp}", std::process::id()).into_bytes()
+}
+
+fn save_lock_is_stale(path: &Path) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        return false;
+    };
+    let mut parts = text.split_whitespace();
+    let nanos: Option<u128> = parts.next().and_then(|_| parts.next()?.parse().ok());
+    let Some(nanos) = nanos else {
+        return false;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(nanos);
+    now.saturating_sub(nanos) > SAVE_LOCK_STALE_AFTER.as_nanos()
+}
+
+/// Acquires the per-recipe save lock, serializing every writer (expected
+/// and legacy) across threads and processes. The lock is held across the
+/// hash check AND the rename, so two competing same-hash writers cannot
+/// both succeed: the loser blocks, then re-checks against the winner's
+/// bytes and receives the conflict. Uses only `create_new` exclusivity
+/// plus stale-reaping — no flock, so it behaves identically on every
+/// platform CI covers.
+fn acquire_recipe_lock(dir: &Path, file_name: &str) -> Result<RecipeLock, RpcError> {
+    use std::io::Write as _;
+    let path = dir.join(format!(".{file_name}.lock"));
+    let start = std::time::Instant::now();
+    loop {
+        let content = save_lock_content();
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                if file
+                    .write_all(&content)
+                    .and_then(|()| file.sync_all())
+                    .is_err()
+                {
+                    let _ = fs::remove_file(&path);
+                    return Err(error::io_error("cannot claim the recipe save lock."));
+                }
+                return Ok(RecipeLock { path, content });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if save_lock_is_stale(&path) {
+                    // A crash leftover: reap and immediately retry. A live
+                    // contender racing the same reap loses `create_new`
+                    // and loops, so at most one holder emerges.
+                    let _ = fs::remove_file(&path);
+                    continue;
+                }
+                if start.elapsed() > SAVE_LOCK_BUDGET {
+                    return Err(error::io_error(
+                        "timed out waiting for another recipe save to finish.",
+                    ));
+                }
+                std::thread::sleep(SAVE_LOCK_POLL);
+            }
+            Err(e) => return Err(error::io_error(e.to_string())),
+        }
+    }
+}
+
+/// The locked write half of every save: validates, lands the bytes
+/// through an exclusively-created temp file renamed over the recipe
+/// (readers never see torn bytes, and two writers never share a temp
+/// name). The caller must hold the recipe lock.
+fn write_recipe_locked(path: &Path, content: &str) -> Result<(), RpcError> {
+    let value: Value = serde_json::from_str(content)
+        .map_err(|e| error::invalid_argument(format!("Invalid JSON: {e}")))?;
+    validate_recipe_value(&value)?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| error::invalid_argument("Recipe reference is outside .mentu/recipes."))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?;
+    // Exclusive temp creation: `fs::write` would truncate a colliding
+    // name, silently merging two writers into one temp file.
+    let mut tmp = None;
+    for _ in 0..4 {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let candidate = dir.join(format!(".{file_name}.tmp-{}-{stamp}", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                use std::io::Write as _;
+                if file.write_all(content.as_bytes()).is_err() {
+                    let _ = fs::remove_file(&candidate);
+                    return Err(error::io_error("cannot write the recipe temp file."));
+                }
+                tmp = Some(candidate);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(error::io_error(e.to_string())),
+        }
+    }
+    let Some(tmp) = tmp else {
+        return Err(error::io_error("cannot claim a recipe temp file."));
+    };
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(error::io_error(e.to_string()));
+    }
+    Ok(())
+}
+
+fn recipe_dir_and_name(path: &Path) -> Result<(&Path, String), RpcError> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| error::invalid_argument("Recipe reference is outside .mentu/recipes."))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?
+        .to_string();
+    Ok((dir, file_name))
+}
+
 /// Writes `content` as the new source of an existing recipe and returns
-/// the reloaded detail (with the new content hash). The target resolves
-/// through [`resolve_recipe_path`]'s containment and symlink checks, then
-/// the write lands atomically: a temp file in the same directory renamed
-/// over the recipe, so a crash never leaves half a recipe behind.
+/// the reloaded detail (with the new content hash). Serialized against
+/// every other saver through the per-recipe lock (including legacy
+/// callers with no expected hash); the write itself lands atomically
+/// (exclusive temp file renamed over the recipe), so a crash never leaves
+/// half a recipe behind and readers never see torn bytes.
 pub fn save_recipe(
     workspace_root: &Path,
     recipe_id: &str,
@@ -346,26 +513,219 @@ pub fn save_recipe(
         ));
     }
     let path = resolve_recipe_path(workspace_root, recipe_id)?;
-    let value: Value = serde_json::from_str(content)
+    let (dir, file_name) = recipe_dir_and_name(&path)?;
+    // The lock serializes legacy writers against expected-hash writers:
+    // a legacy save can no longer slip between an expected check and its
+    // rename (the expected writer then conflicts instead of losing).
+    let _lock = acquire_recipe_lock(dir, &file_name)?;
+    write_recipe_locked(&path, content)?;
+    load_recipe(workspace_root, recipe_id)
+}
+
+/// Wire error code for a stale expected-hash save: another editor
+/// changed the recipe after the caller loaded it, so the write is
+/// refused and the caller's draft is preserved (never last-write-wins).
+/// Constructed inline (the `mentu_approval_consumed` precedent in
+/// `storage.rs`) until the protocol registry grants a shared constructor.
+/// The message carries the current on-disk hash so the caller can offer
+/// reload/review choices without a second round trip.
+pub const RECIPE_CONFLICT_CODE: &str = "mentu_recipe_conflict";
+
+fn valid_content_hash(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Compare-and-save: writes `content` only when the recipe's exact
+/// current on-disk bytes still hash to `expected_hash` (the hash the
+/// caller saw at load time). The per-recipe lock is held across the hash
+/// check AND the rename, so two competing same-hash writers cannot both
+/// succeed: the loser blocks on the lock, then re-checks against the
+/// winner's bytes and receives the conflict with its draft intact. On
+/// mismatch nothing is written and a [`RECIPE_CONFLICT_CODE`] error
+/// carries the current hash, so the caller keeps its draft and offers
+/// reload/review instead of silently overwriting another editor's save.
+pub fn save_recipe_expected(
+    workspace_root: &Path,
+    recipe_id: &str,
+    content: &str,
+    expected_hash: &str,
+) -> Result<MentuRecipeDetail, RpcError> {
+    if !valid_content_hash(expected_hash) {
+        return Err(error::invalid_argument(
+            "Invalid Mentu recipe content hash.",
+        ));
+    }
+    if content.len() as u64 > MAX_RECIPE_SOURCE_BYTES {
+        return Err(error::invalid_argument(
+            "Updated recipe source exceeds the 1 MiB safety limit.",
+        ));
+    }
+    let path = resolve_recipe_path(workspace_root, recipe_id)?;
+    let (dir, file_name) = recipe_dir_and_name(&path)?;
+    let _lock = acquire_recipe_lock(dir, &file_name)?;
+    // The check runs INSIDE the lock: any writer that changed the bytes
+    // either finished before we locked (we see its hash) or blocks until
+    // we release (it sees ours). No interleaving survives.
+    let bytes = fs::read(&path).map_err(|e| error::io_error(e.to_string()))?;
+    let current = sha256_hex(&bytes);
+    if current != expected_hash {
+        return Err(RpcError::new(
+            RECIPE_CONFLICT_CODE,
+            format!(
+                "Recipe changed since it was loaded (current {current}); \
+                 reload and reapply your edits — your draft was not written."
+            ),
+        ));
+    }
+    write_recipe_locked(&path, content)?;
+    load_recipe(workspace_root, recipe_id)
+}
+
+/// The execution settings C03 edits on one agent step: the executable
+/// harness backend plus the exact model id. `None` leaves the field as
+/// the recipe carries it; `Some("")` removes the field (back to the
+/// recipe-root inherit). Provider identity and credentials are NOT recipe
+/// fields (a Pi binding lives in the root `providers` map owned by the
+/// caller's credential resolution) and are never invented here.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentStepExecution {
+    pub backend: Option<String>,
+    pub model: Option<String>,
+}
+
+/// One agent step's effective execution identity, as the approved
+/// snapshot records it: exactly what the recipe carries, never a
+/// substituted default.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentStepIdentity {
+    pub label: String,
+    pub backend: String,
+    pub model: Option<String>,
+}
+
+/// True for backends that execute through an agent harness rather than
+/// the local shell. `shell` (explicit or inherited default) is the only
+/// non-agent backend: every other backend name — registered harness or
+/// runtime-owned (`openai`, `deepseek`, `ollama`, custom) — may carry
+/// agent execution fields, and executability itself is decided by the
+/// pinned-runtime translation check in `execution`, never here.
+pub fn is_agent_backend(backend: &str) -> bool {
+    !backend.eq_ignore_ascii_case("shell")
+}
+
+/// The backend a step actually executes with: its own `backend`, else the
+/// recipe root `backend`, else the runtime `shell` default.
+pub fn effective_step_backend(step: &Value, root_backend: Option<&str>) -> String {
+    step.get("backend")
+        .and_then(Value::as_str)
+        .or(root_backend)
+        .unwrap_or("shell")
+        .to_string()
+}
+
+/// Lists every agent step's execution identity in document order.
+/// Non-agent (`shell`) steps are omitted, never annotated: they must not
+/// gain fake agent fields. Operates on parsed recipe JSON so unknown
+/// fields are irrelevant — nothing is rewritten here.
+pub fn list_agent_steps(recipe: &Value) -> Result<Vec<AgentStepIdentity>, RpcError> {
+    let root = recipe
+        .as_object()
+        .ok_or_else(|| error::invalid_argument("Recipe must be a JSON object."))?;
+    let root_backend = root.get("backend").and_then(Value::as_str);
+    let steps = root
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| error::invalid_argument("Recipe has no \"steps\" array."))?;
+    let mut out = Vec::new();
+    for step in steps {
+        let Some(label) = step.get("label").and_then(Value::as_str) else {
+            continue;
+        };
+        let backend = effective_step_backend(step, root_backend);
+        if !is_agent_backend(&backend) {
+            continue;
+        }
+        out.push(AgentStepIdentity {
+            label: label.to_string(),
+            backend,
+            model: step
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        });
+    }
+    Ok(out)
+}
+
+/// Rewrites only one agent step's execution settings inside `content` and
+/// returns the new source text (2-space pretty plus trailing newline, the
+/// renderer's own convention). Every other step, every dependency, every
+/// unknown JSON field and every relative-resource reference (`prompt_file`,
+/// `dir`) is preserved byte-for-meaning: the edit touches only the
+/// addressed step object's `backend`/`model` keys over the parsed `Value`
+/// (serde_json preserves document key order), then re-validates with the
+/// same rules the load path enforces.
+///
+/// Refusals (nothing rewritten): unknown step label; a `model` for a step
+/// whose effective backend is `shell` (non-agent steps must not gain fake
+/// agent fields — pick an agent backend first); content that is not a
+/// valid recipe.
+pub fn update_agent_step_execution(
+    content: &str,
+    step_label: &str,
+    execution: &AgentStepExecution,
+) -> Result<String, RpcError> {
+    let mut value: Value = serde_json::from_str(content)
         .map_err(|e| error::invalid_argument(format!("Invalid JSON: {e}")))?;
     validate_recipe_value(&value)?;
-    let dir = path
-        .parent()
-        .ok_or_else(|| error::invalid_argument("Recipe reference is outside .mentu/recipes."))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = dir.join(format!(".{file_name}.tmp-{}-{stamp}", std::process::id()));
-    if let Err(e) = fs::write(&tmp, content).and_then(|()| fs::rename(&tmp, &path)) {
-        let _ = fs::remove_file(&tmp);
-        return Err(error::io_error(e.to_string()));
+    let root_backend = value
+        .get("backend")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let steps = value
+        .get_mut("steps")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| error::invalid_argument("Recipe has no \"steps\" array."))?;
+    let step = steps
+        .iter_mut()
+        .find(|step| step.get("label").and_then(Value::as_str) == Some(step_label))
+        .ok_or_else(|| {
+            error::invalid_argument(format!("Recipe step {step_label} is no longer available."))
+        })?;
+    if let Some(backend) = &execution.backend {
+        if backend.is_empty() {
+            step.as_object_mut()
+                .ok_or_else(|| error::invalid_argument("Recipe step must be an object."))?
+                .remove("backend");
+        } else {
+            step["backend"] = Value::String(backend.clone());
+        }
     }
-    load_recipe(workspace_root, recipe_id)
+    let effective = effective_step_backend(step, root_backend.as_deref());
+    if let Some(model) = &execution.model {
+        if !model.is_empty() && !is_agent_backend(&effective) {
+            return Err(error::invalid_argument(format!(
+                "Step '{step_label}' uses the shell backend and carries no model selection; \
+                 choose an agent backend before setting a model."
+            )));
+        }
+        let object = step
+            .as_object_mut()
+            .ok_or_else(|| error::invalid_argument("Recipe step must be an object."))?;
+        if model.is_empty() {
+            object.remove("model");
+        } else {
+            object.insert("model".to_string(), Value::String(model.clone()));
+        }
+    }
+    // `reasoning`/`thinking` overrides ride the step untouched: Pi refuses
+    // them at translation time (execution), so inventing or stripping them
+    // here would pre-empt the honest refusal.
+    let updated = format!("{:#}\n", value);
+    let revalidated: Value = serde_json::from_str(&updated)
+        .map_err(|e| error::invalid_argument(format!("Invalid JSON: {e}")))?;
+    validate_recipe_value(&revalidated)?;
+    Ok(updated)
 }
 
 #[cfg(test)]
@@ -508,5 +868,311 @@ mod tests {
         );
         // The refused writes left the recipe untouched.
         assert_eq!(load_recipe(dir.path(), "hello").unwrap().source, VALID);
+    }
+
+    #[test]
+    fn expected_save_writes_only_from_the_loaded_hash() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        let loaded = load_recipe(dir.path(), "hello").unwrap();
+        let next = VALID.replace("\"tiny\"", "\"edited\"");
+        let saved = save_recipe_expected(dir.path(), "hello", &next, &loaded.content_hash).unwrap();
+        assert_eq!(saved.source, next);
+        assert_ne!(saved.content_hash, loaded.content_hash);
+    }
+
+    #[test]
+    fn expected_save_refuses_a_stale_hash_and_keeps_both_contents() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        let stale = load_recipe(dir.path(), "hello").unwrap();
+        // Another editor lands first.
+        let other = VALID.replace("\"tiny\"", "\"other\"");
+        let landed = save_recipe(dir.path(), "hello", &other).unwrap();
+        // Our save from the stale hash is refused; nothing is written.
+        let ours = VALID.replace("\"tiny\"", "\"ours\"");
+        let err =
+            save_recipe_expected(dir.path(), "hello", &ours, &stale.content_hash).unwrap_err();
+        assert_eq!(err.code, RECIPE_CONFLICT_CODE);
+        assert!(
+            err.message.contains(&landed.content_hash),
+            "conflict carries the current hash for reload/review: {}",
+            err.message
+        );
+        assert_eq!(load_recipe(dir.path(), "hello").unwrap().source, other);
+        // Saving from the fresh hash succeeds.
+        let retry = save_recipe_expected(dir.path(), "hello", &ours, &landed.content_hash).unwrap();
+        assert_eq!(retry.source, ours);
+    }
+
+    fn recipe_dir_entries(root: &Path) -> Vec<String> {
+        fs::read_dir(recipes_root(root))
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn competing_same_hash_writers_exactly_one_wins() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        let base = load_recipe(dir.path(), "hello").unwrap();
+        // Eight threads race from the same loaded hash. The per-recipe
+        // lock serializes check-and-rename: exactly one save lands, the
+        // other seven conflict against the winner's bytes.
+        let results: Vec<_> = (0..8)
+            .map(|i| {
+                let root = dir.path().to_path_buf();
+                let hash = base.content_hash.clone();
+                std::thread::spawn(move || {
+                    let content = VALID.replace("\"tiny\"", &format!("\"writer-{i}\""));
+                    save_recipe_expected(&root, "hello", &content, &hash)
+                        .map(|d| d.source)
+                        .map_err(|e| e.code)
+                })
+            })
+            .map(|h| h.join().unwrap())
+            .collect();
+        let wins = results.iter().filter(|r| r.is_ok()).count();
+        let conflicts = results
+            .iter()
+            .filter(|r| *r == &Err(RECIPE_CONFLICT_CODE.to_string()))
+            .count();
+        assert_eq!(wins, 1, "exactly one same-hash writer lands: {results:?}");
+        assert_eq!(conflicts, 7, "every loser conflicts: {results:?}");
+        // The winner's bytes are whole; no lock or temp files leak.
+        let on_disk = load_recipe(dir.path(), "hello").unwrap();
+        assert!(results.into_iter().any(|r| r == Ok(on_disk.source.clone())));
+        assert_eq!(
+            recipe_dir_entries(dir.path()),
+            vec!["hello.json".to_string()]
+        );
+    }
+
+    #[test]
+    fn legacy_and_expected_writers_serialize_without_torn_bytes() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        let base = load_recipe(dir.path(), "hello").unwrap();
+        let legacy_content = VALID.replace("\"tiny\"", "\"legacy\"");
+        let expected_content = VALID.replace("\"tiny\"", "\"expected\"");
+        // A legacy save (no hash) racing an expected save: both run under
+        // the same lock, so the bytes on disk are always exactly one of
+        // the two contents — never a mix. The expected writer either wins
+        // outright, conflicts against a legacy that landed first, or lands
+        // first and is then overwritten by the legacy save (legacy carries
+        // no base to conflict on — that path is why the hash exists).
+        // What the lock guarantees, and what is asserted: no torn bytes,
+        // no leftover files, and every result consistent with the disk.
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let root = dir.path().to_path_buf();
+        let hash = base.content_hash.clone();
+        let legacy = {
+            let root = root.clone();
+            let barrier = std::sync::Arc::clone(&barrier);
+            let content = legacy_content.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                save_recipe(&root, "hello", &content).map(|d| d.source)
+            })
+        };
+        let expected = std::thread::spawn(move || {
+            barrier.wait();
+            save_recipe_expected(&root, "hello", &expected_content, &hash)
+                .map(|d| d.source)
+                .map_err(|e| e.code)
+        });
+        let legacy = legacy.join().unwrap();
+        let expected = expected.join().unwrap();
+        assert!(legacy.is_ok(), "legacy save lands: {legacy:?}");
+        let on_disk = load_recipe(dir.path(), "hello").unwrap().source;
+        let expected_content = VALID.replace("\"tiny\"", "\"expected\"");
+        assert!(
+            on_disk == legacy_content || on_disk == expected_content,
+            "bytes are whole: {on_disk:?}"
+        );
+        match expected {
+            Ok(source) => assert!(
+                source == expected_content
+                    && (on_disk == expected_content || on_disk == legacy_content),
+                "an Ok expected save wrote exactly its content"
+            ),
+            Err(code) => {
+                assert_eq!(code, RECIPE_CONFLICT_CODE);
+                assert_eq!(on_disk, legacy_content);
+            }
+        }
+        assert_eq!(
+            recipe_dir_entries(dir.path()),
+            vec!["hello.json".to_string()]
+        );
+    }
+
+    #[test]
+    fn expected_save_rejects_a_malformed_hash_before_any_io() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        for bad in ["", "abc", &"z".repeat(64)] {
+            let err = save_recipe_expected(dir.path(), "hello", VALID, bad).unwrap_err();
+            assert_eq!(err.code, "invalid_argument");
+        }
+        assert_eq!(load_recipe(dir.path(), "hello").unwrap().source, VALID);
+    }
+
+    const AGENT_RECIPE: &str = r#"{
+        "name": "two-step",
+        "backend": "shell",
+        "customRoot": {"keep": true},
+        "steps": [
+            {"label": "build", "prompt": "make", "prompt_file": "docs/build.md", "depends_on": [], "customStep": 1},
+            {"label": "review", "backend": "codex", "prompt": "review", "depends_on": ["build"]}
+        ]
+    }"#;
+
+    #[test]
+    fn agent_step_edit_sets_backend_and_model_and_preserves_everything_else() {
+        let updated = update_agent_step_execution(
+            AGENT_RECIPE,
+            "review",
+            &AgentStepExecution {
+                backend: None,
+                model: Some("gpt-5.6-luna".to_string()),
+            },
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&updated).unwrap();
+        let steps = value.get("steps").and_then(Value::as_array).unwrap();
+        // Edited step carries the model; untouched fields survive.
+        assert_eq!(
+            steps[1].get("model").and_then(Value::as_str),
+            Some("gpt-5.6-luna")
+        );
+        assert_eq!(
+            steps[1].get("backend").and_then(Value::as_str),
+            Some("codex")
+        );
+        assert_eq!(
+            steps[1].get("prompt").and_then(Value::as_str),
+            Some("review")
+        );
+        assert_eq!(
+            steps[1]
+                .get("depends_on")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+        // The other step is byte-for-meaning identical, resources included.
+        assert_eq!(steps[0].get("backend"), None);
+        assert_eq!(
+            steps[0].get("prompt_file").and_then(Value::as_str),
+            Some("docs/build.md")
+        );
+        assert_eq!(steps[0].get("customStep").and_then(Value::as_i64), Some(1));
+        assert!(steps[0].get("model").is_none(), "shell step gains no model");
+        // Unknown root fields round-trip.
+        assert_eq!(
+            value
+                .get("customRoot")
+                .and_then(|r| r.get("keep"))
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn agent_step_edit_can_move_a_step_between_backends() {
+        let updated = update_agent_step_execution(
+            AGENT_RECIPE,
+            "build",
+            &AgentStepExecution {
+                backend: Some("claude".to_string()),
+                model: Some("sonnet".to_string()),
+            },
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&updated).unwrap();
+        let steps = value.get("steps").and_then(Value::as_array).unwrap();
+        assert_eq!(
+            steps[0].get("backend").and_then(Value::as_str),
+            Some("claude")
+        );
+        assert_eq!(
+            steps[0].get("model").and_then(Value::as_str),
+            Some("sonnet")
+        );
+        // Prompt, resources and custom fields survive the backend move.
+        assert_eq!(steps[0].get("prompt").and_then(Value::as_str), Some("make"));
+        assert_eq!(
+            steps[0].get("prompt_file").and_then(Value::as_str),
+            Some("docs/build.md")
+        );
+    }
+
+    #[test]
+    fn agent_step_edit_refuses_a_model_on_a_shell_step() {
+        let err = update_agent_step_execution(
+            AGENT_RECIPE,
+            "build",
+            &AgentStepExecution {
+                backend: None,
+                model: Some("gpt-5.6-luna".to_string()),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "invalid_argument");
+        assert!(
+            err.message.contains("shell"),
+            "unexpected message: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn agent_step_edit_refuses_unknown_steps_and_invalid_recipes() {
+        assert!(
+            update_agent_step_execution(
+                AGENT_RECIPE,
+                "missing",
+                &AgentStepExecution {
+                    backend: None,
+                    model: None
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            update_agent_step_execution(
+                "{not json",
+                "build",
+                &AgentStepExecution {
+                    backend: None,
+                    model: None
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            update_agent_step_execution(
+                r#"{"name": "x"}"#,
+                "build",
+                &AgentStepExecution {
+                    backend: None,
+                    model: None
+                },
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn list_agent_steps_skips_shell_and_reports_models() {
+        let value: Value = serde_json::from_str(AGENT_RECIPE).unwrap();
+        let agents = list_agent_steps(&value).unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].label, "review");
+        assert_eq!(agents[0].backend, "codex");
+        assert_eq!(agents[0].model, None);
     }
 }

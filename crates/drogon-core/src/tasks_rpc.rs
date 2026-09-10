@@ -811,6 +811,18 @@ fn worktree_struct(conn: &rusqlite::Connection, worktree_id: &str) -> Result<Wor
                 note: row.get(8)?,
                 parent_worktree_id: row.get(9)?,
                 created_at: String::new(),
+                // Same partial-projection convention as `created_at`
+                // above: this helper only backs a task-link lookup, never
+                // a `worktree.list` response, so Workspace Options
+                // metadata is left at its defaults.
+                workspace_status: None,
+                is_pinned: false,
+                is_archived: false,
+                sort_order: 0,
+                manual_order: None,
+                last_activity_at: None,
+                linked_pr: None,
+                creator: None,
             })
         },
     )
@@ -947,10 +959,44 @@ impl Engine {
     }
 
     pub(super) fn do_tasks_show(&self, value: &Value) -> Result<Value, RpcError> {
+        // Additive composer source (the fork's GitHub smart field): an
+        // optional `mode: "pulls"` looks a PR up by number via `gh pr view`
+        // and returns `{ pull }`; the default stays the issue path with
+        // `{ issue }`. Read from the raw params so the shared struct stays
+        // coordinator-owned.
+        let mode = match value.get("mode") {
+            None => "issues",
+            Some(raw) => match raw.as_str() {
+                Some("issues") => "issues",
+                Some("pulls") => "pulls",
+                _ => {
+                    return Err(error::invalid_argument(
+                        "mode must be \"issues\" or \"pulls\"",
+                    ));
+                }
+            },
+        };
         let params: TasksShowParams = decode(value)?;
         let source = params.validate()?;
         let (_, project_path, _) = self.tasks_git_project_path(&params.project_id)?;
         let repo = resolve_tasks_repo(&project_path, source)?;
+        if mode == "pulls" {
+            let stdout = run_gh(
+                Path::new(&project_path),
+                &pr_view_argv(&repo, params.number),
+            )?;
+            let raw: GhPullRequest = serde_json::from_str(&stdout)
+                .map_err(|_| error::io_error("gh pr view returned unparsable JSON".to_string()))?;
+            let pull = convert_pull(raw)?;
+            if pull.number != params.number {
+                return Err(error::io_error(
+                    "gh pr view returned a different pull request than requested".to_string(),
+                ));
+            }
+            let pull = serde_json::to_value(&pull)
+                .map_err(|_| error::internal_error("Could not serialize tasks show pull"))?;
+            return Ok(json!({ "pull": pull }));
+        }
         let stdout = run_gh(Path::new(&project_path), &view_argv(&repo, params.number))?;
         let raw: GhIssue = serde_json::from_str(&stdout)
             .map_err(|_| error::io_error("gh issue view returned unparsable JSON".to_string()))?;

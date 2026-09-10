@@ -43,6 +43,8 @@ pub mod git_worktree;
 mod harness;
 mod hooks;
 mod project;
+mod project_card_revision;
+mod quick_session_delete;
 // R16-BC (additive): `ports.kill` — workspace-owned process stop.
 mod ports;
 mod ring;
@@ -51,6 +53,7 @@ mod session_env;
 mod workspace;
 mod workspace_file_rpc;
 mod workspace_files;
+mod worktree_issues;
 mod worktree_rpc;
 
 mod service_quiescence;
@@ -105,6 +108,7 @@ const CAPABILITIES: &[&str] = &[
     "runtime.quiescent-shutdown.v1",
     drogon_protocol::project::PROJECT_CAPABILITY,
     drogon_protocol::worktree::WORKTREE_CAPABILITY,
+    drogon_protocol::worktree_issues::CAPABILITY,
     drogon_protocol::tasks::TASKS_CAPABILITY,
     "session.agent-state.v1",
     // R2-S: the Bots page (list/create/chat/history) is real end-to-end as
@@ -165,6 +169,8 @@ pub struct Engine {
     service_instance_id: String,
     sessions: Mutex<HashMap<String, Arc<SessionHandle>>>,
     agent_settings_lock: Mutex<()>,
+    /// Fence PTY admission while deleting a Chat and settling its members.
+    workspace_lifecycle_gate: RwLock<()>,
     ledger: RequestLedger,
     /// In-memory desktop command relay (browser.relay.v1). Never persisted;
     /// a daemon restart drops every queued command.
@@ -259,6 +265,7 @@ impl Engine {
             service_instance_id: uuid::Uuid::new_v4().to_string(),
             sessions: Mutex::new(HashMap::new()),
             agent_settings_lock: Mutex::new(()),
+            workspace_lifecycle_gate: RwLock::new(()),
             ledger: RequestLedger::default(),
             desktop_relay: Mutex::new(RelayState::default()),
             worker_cli: None,
@@ -485,7 +492,11 @@ impl Engine {
                 self.mutating(request, Self::do_project_save_sparse_preset)
             }
             "worktree.create" => self.mutating(request, Self::do_worktree_create),
+            "worktree.branch_search" => self.do_worktree_branch_search(&request.params),
             "worktree.list" => self.do_worktree_list(&request.params),
+            "worktree.issueLinks" => self.do_worktree_issue_links(&request.params),
+            "worktree.linkIssue" => self.mutating(request, Self::do_worktree_link_issue),
+            "worktree.unlinkIssue" => self.mutating(request, Self::do_worktree_unlink_issue),
             "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
             "worktree.rename" => self.mutating(request, Self::do_worktree_rename),
             "worktree.update" => self.mutating(request, Self::do_worktree_update),
@@ -648,6 +659,7 @@ impl Engine {
     }
 
     fn do_session_start(&self, params: &Value) -> Result<Value, RpcError> {
+        let _workspace_admission = self.workspace_lifecycle_gate.read().unwrap();
         let workspace_id = require_str(params, "workspaceId")?.to_string();
         // Additive (R12-E restart reuse): `command` is optional. Absent, the
         // daemon spawns its own default interactive shell — the same spawn a

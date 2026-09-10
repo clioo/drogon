@@ -1,0 +1,44 @@
+{
+  "run_id": "run_20260907B_partial001",
+  "recipe_name": "usage-partial",
+  "started_at": "2026-09-07T21:00:00Z",
+  "ended_at": "2026-09-07T21:00:12Z",
+  "outcome": "ok",
+  "cloud_mode": "local-only",
+  "recipe_ref": ".mentu/recipes/usage-partial.json",
+  "events_file": "events.jsonl",
+  "state_file": "state.json",
+  "baseline_file": "baseline.json",
+  "steps": [
+    {
+      "label": "build",
+      "backend": "pi",
+      "model": "glm-5.3-flash",
+      "outcome": "ok",
+      "local_complete": true,
+      "exit_code": 0,
+      "duration_seconds": 7,
+      "attempts": 1,
+      "input_tokens": 50,
+      "output_tokens": 40,
+      "output_file": "build.stdout",
+      "error_file": "build.stderr",
+      "warnings": [],
+      "hooks": []
+    },
+    {
+      "label": "lint",
+      "backend": "shell",
+      "outcome": "ok",
+      "local_complete": true,
+      "exit_code": 0,
+      "duration_seconds": 2,
+      "attempts": 1,
+      "output_file": "lint.stdout",
+      "error_file": "lint.stderr",
+      "warnings": [],
+      "hooks": []
+    }
+  ],
+  "hooks": []
+}

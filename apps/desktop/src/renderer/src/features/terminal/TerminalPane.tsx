@@ -20,6 +20,10 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ILinkProvider, ILink } from "@xterm/xterm";
 import { TerminalInputQueue } from "./terminal-input-queue";
+import { preventTerminalBacktabNavigation } from "./terminal-backtab-navigation";
+import { createTerminalShiftEnterHandler } from "./terminal-shift-enter";
+import { createTerminalGeometrySync } from "./terminal-geometry-sync";
+import { TerminalKittyKeyboardModeTracker } from "../../../../shared/terminal-kitty-keyboard-mode-tracker";
 import { attachTerminalMouseWheelMultiplier } from "./terminal-tui-wheel";
 import { resolveTerminalJisYenInput } from "./terminal-jis-yen-input";
 import {
@@ -637,6 +641,7 @@ export function TerminalPane({
     // when cols/rows match, so the attach offer and the DPR repair must run
     // explicitly — they are the only path that rebuilds a stale backing
     // store and glyph atlas.
+    let geometrySync: ReturnType<typeof createTerminalGeometrySync> | null = null;
     const fitAndSyncTerminal = () => {
       if (disposed || !hasMeasurableTerminalBox(mount)) return;
       try {
@@ -646,6 +651,7 @@ export function TerminalPane({
       }
       if (webgl.addon === null) attachWebgl();
       repairTerminalWebglBackingStore(terminal);
+      geometrySync?.request({ cols: terminal.cols, rows: terminal.rows });
     };
     const osc52Handler = createOsc52OscHandler({
       // OSC 52 clipboard defaults on (source gate); queries stay blocked.
@@ -864,8 +870,13 @@ export function TerminalPane({
       () => !disposed && canWrite,
       report,
     );
+    const kittyModes = new TerminalKittyKeyboardModeTracker();
+    kittyModes.resetForSnapshot();
+    const claimShiftEnter = createTerminalShiftEnterHandler(() => kittyModes.flags, (data) => terminal.input(data, true));
     let optionKeyLocations: TerminalOptionKeyLocation = 0;
     terminal.attachCustomKeyEventHandler((event) => {
+      if (canWrite && claimShiftEnter(event)) return false;
+      if (canWrite) preventTerminalBacktabNavigation(event);
       optionKeyLocations = updateTerminalOptionKeyLocation(
         optionKeyLocations,
         event,
@@ -1050,6 +1061,7 @@ export function TerminalPane({
     // returning service resumes on its own; scrollback stays untouched.
     const scheduleReadRetry = () => {
       canWrite = false;
+      geometrySync?.invalidate();
       projectUnverifiable();
       if (!disposed) timeout = setTimeout(read, TERMINAL_READ_RETRY_MS);
     };
@@ -1089,15 +1101,15 @@ export function TerminalPane({
     // 0x0 containers stay deferred: the ResizeObserver below retries once
     // the pane has a live box (fork canMeasurePaneForFit).
     const fitTerminal = () => fitAndSyncTerminal();
-    const resize = terminal.onResize(({ cols, rows }) => {
-      if (canWrite && !disposed)
-        void window.drogon
-          .resize({ ...inputIdentity, cols, rows })
-          .then((result) => {
-            if (!result.ok) report(result.error.message);
-          })
-          .catch(() => report("Terminal resize could not be confirmed."));
+    geometrySync = createTerminalGeometrySync({
+      isReady: () => canWrite && !disposed && paneVisible.current,
+      send: async ({ cols, rows }) => {
+        const result = await window.drogon.resize({ ...inputIdentity, cols, rows });
+        if (!result.ok) throw new Error(result.error.message);
+      },
+      onError: (error) => report(error instanceof Error ? error.message : "Terminal resize could not be confirmed."),
     });
+    const resize = terminal.onResize((grid) => geometrySync?.request(grid));
     const observer = new ResizeObserver(fitTerminal);
     observer.observe(mount);
     // Reveal is a recovery boundary (fork terminal-visibility-resume): a pane
@@ -1232,10 +1244,9 @@ export function TerminalPane({
             // Track DECA 2004 (bracketed paste) transitions in the PTY
             // output so the paste policy brackets/decrypts exactly when the
             // app asked.
-            observeTerminalBracketedPasteModeOutput(
-              terminal,
-              outputDecoder.decode(chunk),
-            );
+            const decodedOutput = outputDecoder.decode(chunk, { stream: true });
+            kittyModes.scanReplay(decodedOutput);
+            observeTerminalBracketedPasteModeOutput(terminal, decodedOutput);
             await new Promise<void>((resolve) =>
               terminal.write(chunk, resolve),
             );
@@ -1243,6 +1254,8 @@ export function TerminalPane({
           }
           caughtUp.current = bytes.length < TERMINAL_READ_PAGE_BYTES;
           canWrite = value.session.verdict === "live";
+          if (canWrite) geometrySync?.flush();
+          else geometrySync?.invalidate();
           if (bytes.length > 0) lastActivityAt = Date.now();
           emitSessionUpdate(value.session);
           observeProcessExit(value.session);
@@ -1253,14 +1266,17 @@ export function TerminalPane({
           terminal.write("\r\n[Earlier output is no longer retained]\r\n");
         // Track DECA 2004 (bracketed paste) transitions in the PTY output so
         // the paste policy brackets/decrypts exactly when the app asked.
-        observeTerminalBracketedPasteModeOutput(
-          terminal,
-          outputDecoder.decode(bytes),
-        );
+        const decodedOutput = outputDecoder.decode(bytes, { stream: true });
+        if (value.truncated) kittyModes.resetForSnapshot();
+        if (caughtUp.current && !value.truncated) kittyModes.scan(decodedOutput);
+        else kittyModes.scanReplay(decodedOutput);
+        observeTerminalBracketedPasteModeOutput(terminal, decodedOutput);
         await new Promise<void>((resolve) => terminal.write(bytes, resolve));
         if (disposed) return;
         cursor = value.nextCursor;
         canWrite = value.session.verdict === "live";
+        if (canWrite) geometrySync?.flush();
+        else geometrySync?.invalidate();
         if (bytes.length > 0) lastActivityAt = Date.now();
         emitSessionUpdate(value.session);
         if (bytes.length < TERMINAL_READ_PAGE_BYTES) caughtUp.current = true;
@@ -1281,6 +1297,7 @@ export function TerminalPane({
       disposed = true;
       live.current = null;
       webglSyncRef.current = null;
+      geometrySync?.dispose();
       unregisterTerminalDebugHandle(session.id, terminal);
       setSearchAddon(null);
       clearTimeout(timeout);

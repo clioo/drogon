@@ -312,6 +312,26 @@ fn required_string(object: &Value, key: &str) -> Result<String, RpcError> {
     Ok(trimmed.to_string())
 }
 
+/// Like [`required_string`], but the empty string is a legitimate value
+/// here, not a violation: it is the deliberate host-global scope sentinel
+/// (bot.snapshot's `workspaceId: ""` aggregation, #348) that
+/// `revalidate_run_scope`/`authorized_prepare` resolve to the bot's real
+/// owning workspace via `bot_mutation_rpc::resolve_bot_owning_workspace`.
+/// Matches `BotDeleteParams`/`BotResponsibilityCreateParams`/
+/// `BotResponsibilityDeleteParams` in `drogon_protocol::bot`, which are
+/// plain serde `String` fields with no non-empty enforcement, for the same
+/// scope. The field must still be present and a string -- only the
+/// non-empty requirement is dropped.
+fn required_workspace_id(object: &Value, key: &str) -> Result<String, RpcError> {
+    let value = object
+        .get(key)
+        .ok_or_else(|| invalid_argument(format!("missing required field {key}")))?;
+    value
+        .as_str()
+        .map(|text| text.to_string())
+        .ok_or_else(|| invalid_argument(format!("field {key} must be a string")))
+}
+
 fn optional_string(object: &Value, key: &str) -> Result<Option<String>, RpcError> {
     match object.get(key) {
         None | Some(Value::Null) => Ok(None),
@@ -396,7 +416,7 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         }
     };
     Ok(BotRunRequest {
-        workspace_id: required_string(params, "workspaceId")?,
+        workspace_id: required_workspace_id(params, "workspaceId")?,
         asserted_host_id: required_string(params, "hostId")?,
         bot_id: required_string(params, "botId")?,
         turn,
@@ -545,9 +565,18 @@ pub fn build_receipt(
 /// callback; a persisted, structured `Refused` receipt for fresh
 /// admission).
 enum WorkspaceScope {
-    Ok { folder: String },
+    Ok,
+    /// The deliberate empty-string host-global sentinel (mirrors
+    /// `bot_mutation_rpc::authorize_existing_bot_scope`'s own handling of
+    /// `workspaceId: ""`, e.g. a run issued from the host-global Bots
+    /// view): no workspace row to look up yet, but the asserted host still
+    /// gates admission. The actual owning folder/workspace is resolved
+    /// afterward, by bot id, in [`authorized_prepare`] -- never here.
+    HostGlobal,
     UnknownWorkspace,
-    ForeignWorkspaceHost { workspace_host_id: String },
+    ForeignWorkspaceHost {
+        workspace_host_id: String,
+    },
     ForeignAssertedHost,
 }
 
@@ -556,6 +585,12 @@ fn lookup_workspace_scope(
     derived_host_id: &str,
     request: &BotRunRequest,
 ) -> Result<WorkspaceScope, RpcError> {
+    if request.workspace_id.is_empty() {
+        if request.asserted_host_id != derived_host_id {
+            return Ok(WorkspaceScope::ForeignAssertedHost);
+        }
+        return Ok(WorkspaceScope::HostGlobal);
+    }
     let workspace = {
         let mut statement = conn
             .prepare("SELECT host_id, path FROM workspaces WHERE id = ?1")
@@ -577,7 +612,7 @@ fn lookup_workspace_scope(
             Err(e) => Err(internal_error(format!("workspace lookup failed: {e}")))?,
         }
     };
-    let (workspace_host_id, folder) = match workspace {
+    let (workspace_host_id, _folder) = match workspace {
         Some(pair) => pair,
         None => return Ok(WorkspaceScope::UnknownWorkspace),
     };
@@ -587,7 +622,13 @@ fn lookup_workspace_scope(
     if request.asserted_host_id != derived_host_id {
         return Ok(WorkspaceScope::ForeignAssertedHost);
     }
-    Ok(WorkspaceScope::Ok { folder })
+    // The exact-match folder is no longer threaded through from here: both
+    // callers ([`revalidate_run_scope`] and [`authorized_prepare`]) now
+    // resolve the bot's true owning (folder, workspaceId) themselves via
+    // [`crate::bot_mutation_rpc::resolve_bot_owning_workspace`], which
+    // re-derives it -- this scope check's only remaining job is admitting
+    // or refusing the ASSERTED workspace/host, not naming a folder.
+    Ok(WorkspaceScope::Ok)
 }
 
 /// Replay-time scope revalidation ONLY: workspace-ownership +
@@ -604,7 +645,7 @@ pub fn revalidate_run_scope(
     request: &BotRunRequest,
 ) -> Result<(), RpcError> {
     match lookup_workspace_scope(conn, derived_host_id, request)? {
-        WorkspaceScope::Ok { .. } => Ok(()),
+        WorkspaceScope::Ok | WorkspaceScope::HostGlobal => Ok(()),
         WorkspaceScope::UnknownWorkspace => Err(scope_denied(format!(
             "workspace {} not found",
             request.workspace_id
@@ -669,8 +710,40 @@ pub fn authorized_prepare(
     attempt_at: f64,
 ) -> Result<BotRunPrepare, RpcError> {
     let workspace_id = request.workspace_id.clone();
-    let folder = match lookup_workspace_scope(conn, derived_host_id, request)? {
-        WorkspaceScope::Ok { folder } => folder,
+    let (folder, workspace_id) = match lookup_workspace_scope(conn, derived_host_id, request)? {
+        // Both a real, host-owned workspace and the host-global sentinel
+        // are a VALID asserted scope (checked above); neither is
+        // necessarily the bot's OWN home, though -- a stale workspace
+        // selection or the host-global Bots view both assert a scope the
+        // bot may not actually live in. Resolve the bot's true owning
+        // (folder, workspaceId) here, the same primitive `bot.delete` and
+        // `bot.responsibility_create`/`delete` already share, so the
+        // staged ledger and the shell-fixture session launch it triggers
+        // always target the bot's real workspace, never the caller's
+        // possibly-stale assertion.
+        WorkspaceScope::Ok | WorkspaceScope::HostGlobal => {
+            match crate::bot_mutation_rpc::resolve_bot_owning_workspace(
+                conn,
+                derived_host_id,
+                &request.workspace_id,
+                &request.asserted_host_id,
+                &request.bot_id,
+            ) {
+                Ok(resolved) => resolved,
+                Err(e) if e.code == "not_found" => {
+                    return Ok(BotRunPrepare::Refused {
+                        workspace_id,
+                        refusal: json!({
+                            "type": "bot",
+                            "kind": "unknownBot",
+                            "botId": request.bot_id,
+                        }),
+                        error: format!("bot {} not found", request.bot_id),
+                    });
+                }
+                Err(e) => return Err(e),
+            }
+        }
         WorkspaceScope::UnknownWorkspace => {
             return Ok(BotRunPrepare::Refused {
                 error: format!("workspace {workspace_id} not found"),

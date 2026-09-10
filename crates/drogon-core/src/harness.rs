@@ -72,6 +72,7 @@ impl Engine {
     }
 
     pub(super) fn do_harness_start(&self, params: &Value) -> Result<Value, RpcError> {
+        let _workspace_admission = self.workspace_lifecycle_gate.read().unwrap();
         let workspace_id = require_str(params, "workspaceId")?;
         let request: HarnessLaunchRequest = serde_json::from_value(params.clone())
             .map_err(|_| error::invalid_argument("Invalid harness launch preferences"))?;
