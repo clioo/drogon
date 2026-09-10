@@ -1,6 +1,6 @@
 # Sealed-build manifest — DRAFT rev-3 (prep lane; `execution` filled by the gated lane)
 
-Status: `DRAFT-rev3` (supersedes rev-2: E1-hydrated, all hashes regenerated).
+Status: `DRAFT-rev4` (supersedes rev-3: E1 pins split HISTORICAL vs current, runtime wording corrected, execution nulls marked TODO-EXECUTION-GATE, non-qualification footer added).
 Sections `source`, `assets`, `e1`, `runtime`, `helpers` are frozen from
 read-only evidence below. Section `execution` is `null` until the gated lane
 runs `10-WRAPPED-STAGES.md`. Hash classes stay distinct: source/asset bytes
@@ -12,7 +12,8 @@ of a fresh attestation (it is not stage input).
 
 ```json
 {
- "status": "DRAFT-rev3",
+ "status": "DRAFT-rev4",
+ "nonQualification": "59ed is not an accepted combined candidate; no native/build/E2/install permission follows from metadata.",
  "source": {
   "repo": "clioo/drogon",
   "ref": "origin/main",
@@ -63,14 +64,14 @@ of a fresh attestation (it is not stage input).
   ]
  },
  "e1": {
-  "note": "E1 sealed-BUILD stage runner, CURRENT interface as read (owner path .preflight/gui-qa-build/, read-only). Replaces rev-2 E1-request for S7/S8/S9. E2 (--bundle/--files/upgrade/installed/inference) stays forbidden.",
+  "note": "E1 sealed-BUILD stage runner, SNAPSHOT OF REV-3 READ (owner correcting EOF1): three of four files already differ live (see files[].status); interface text below describes the rev-3 read and is HISTORICAL alignment, never current qualification. Exec lane must re-read current E1 source before authoring any per-run manifest. Replaces rev-2 E1-request for S7/S8/S9. E2 (--bundle/--files/upgrade/installed/inference) stays forbidden.",
   "files": {
-   "bootstrap-build-outer.sh": "e3bf68616fe42c0f6d654982d9b322c09fd3c881dc6941bcae3e3a344906c567",
-   "gui-qa-build-outer.mjs": "6e029fd9eaaac4e7664aac6695ff89cae1a7882792a5484c7b5ab23799ff3437",
-   "build-manifest.mjs": "71e62a0ea8bbbcc2ddbb049e789b3820cec59e08d93df7749b3b5690f71c6721",
-   "gui-qa-build-control.test.mjs": "00a16d4b43c09da54cf703e4a845d49845d5d8aa4c7513903d5484a3a4bf40c6"
+   "bootstrap-build-outer.sh": {"sha256": "e3bf68616fe42c0f6d654982d9b322c09fd3c881dc6941bcae3e3a344906c567", "status": "CURRENT as of rev-4 live read 2026-09-10 (equals pinned snapshot)"},
+   "gui-qa-build-outer.mjs": {"sha256": "6e029fd9eaaac4e7664aac6695ff89cae1a7882792a5484c7b5ab23799ff3437", "status": "HISTORICAL alignment only (rev-3 read 2026-09-10); live bytes differ (owner correcting EOF1); NEVER current qualification"},
+   "build-manifest.mjs": {"sha256": "71e62a0ea8bbbcc2ddbb049e789b3820cec59e08d93df7749b3b5690f71c6721", "status": "HISTORICAL alignment only (rev-3 read 2026-09-10); live bytes differ (owner correcting EOF1); NEVER current qualification"},
+   "gui-qa-build-control.test.mjs": {"sha256": "00a16d4b43c09da54cf703e4a845d49845d5d8aa4c7513903d5484a3a4bf40c6", "status": "HISTORICAL alignment only (rev-3 read 2026-09-10); live bytes differ (owner correcting EOF1); NEVER current qualification"}
   },
-  "howVerified": "sha256sum actual bytes by direct read; content read in full (outer 557 lines, manifest 424 lines)",
+  "howVerified": "rev-3: sha256sum actual bytes by direct read; content read in full (outer 557 lines, manifest 424 lines). rev-4: live re-hash shows outer/manifest/tests differ (EOF1 in progress); only bootstrap still matches. Pins above are NOT re-presented as current.",
   "cli": "--output-root <dir> --source-manifest <abs.json> --stage <s7-install|s8-fetch|s9-package> --budget-sec <N,1..3600,SECONDS,must equal manifest stage budget>",
   "manifestVersion": 1,
   "manifestShape": {
@@ -164,9 +165,9 @@ of a fresh attestation (it is not stage input).
   "custody": "frozen: monotonic budget+30s reserve, handle-spawn (no shell/detached), identity+deadline rechecks before signals, every outer signal/force/rescue=>FAIL, unverifiable on unknown, roots retained"
  },
  "runtime": {
-  "note": "READ-ONLY REFERENCE, provenance-only. Staged, never executed, NOT active runtime, never stage input, never contacted by this lane. Hash below is record-transcribed and deliberately NOT regenerated (regeneration requires contact).",
+  "note": "READ-ONLY REFERENCE, provenance-only. Not executed/contacted BY THIS PREP LANE; historical PR399 executed this runtime; it is NOT a currently accepted stage input. Hash below is record-transcribed and deliberately NOT regenerated (regeneration requires contact).",
   "provenanceRecord": "/tmp/drogon-muse-glm-critical-qa/qa-critical-399-muse-task.txt",
-  "stagedAt": "/Users/carlos/orca/workspaces/Drogon/qa-399-integrated-ui-astra/.qa/visual-PR-399 (runtime-preparation-receipt.json + runtime-staging/) \u2014 NOT CONTACTED",
+  "stagedAt": "/Users/carlos/orca/workspaces/Drogon/qa-399-integrated-ui-astra/.qa/visual-PR-399 (runtime-preparation-receipt.json + runtime-staging/) \u2014 not contacted BY THIS PREP LANE",
   "mentuRelease": "Mentu0.5.0",
   "mentuCommit": "c82ccfa0ebbe77d62193e068821ba6e74f87a8d3",
   "binarySha256": "f00528a940185e9433ad65b02e7de251d7d3d856c9d24d38f8b1474a1ca8bc5d",
@@ -195,25 +196,25 @@ of a fresh attestation (it is not stage input).
   }
  },
  "execution": {
-  "runDir": null,
-  "sourceManifest": null,
-  "sourceHead": null,
+  "runDir": "TODO-EXECUTION-GATE",
+  "sourceManifest": "TODO-EXECUTION-GATE",
+  "sourceHead": "TODO-EXECUTION-GATE",
   "packaged": {
-   "bundle": null,
-   "revision": null,
-   "artifactDigest": null,
-   "sealedDigest": null,
-   "noticeCount": null,
-   "signed": null
+   "bundle": "TODO-EXECUTION-GATE",
+   "revision": "TODO-EXECUTION-GATE",
+   "artifactDigest": "TODO-EXECUTION-GATE",
+   "sealedDigest": "TODO-EXECUTION-GATE",
+   "noticeCount": "TODO-EXECUTION-GATE",
+   "signed": "TODO-EXECUTION-GATE"
   },
   "acceptance": {
-   "kind": null,
-   "status": null,
-   "reportPath": null,
-   "osForeground": null
+   "kind": "TODO-EXECUTION-GATE",
+   "status": "TODO-EXECUTION-GATE",
+   "reportPath": "TODO-EXECUTION-GATE",
+   "osForeground": "TODO-EXECUTION-GATE"
   },
-  "stageReceipts": null,
-  "callerTreeUnchanged": null
+  "stageReceipts": "TODO-EXECUTION-GATE",
+  "callerTreeUnchanged": "TODO-EXECUTION-GATE"
  }
 }
 ```
@@ -232,10 +233,8 @@ of a fresh attestation (it is not stage input).
   record entry (it names the `.1ebb84a0.snapshot.mjs` generation, not current
   bytes); `helpers` now carries the actual-byte hash `c6bd3a28…`.
 - `runtime.binarySha256` is transcribed from
-  `/tmp/drogon-muse-glm-critical-qa/qa-critical-399-muse-task.txt` ("staged
-  NOT executed"). Regenerating it would require contacting the binary's host
-  path, which the lane rules forbid; it stays provenance-only and is never
-  stage input — the E1 gate attests only what the fresh clone contains.
+  `/tmp/drogon-muse-glm-critical-qa/qa-critical-399-muse-task.txt`. Not executed/contacted BY THIS PREP LANE; historical PR399 executed this runtime; it is NOT a currently accepted stage input. Regenerating the hash would require contacting the binary's host
+  path, which the lane rules forbid; it stays provenance-only — the E1 gate attests only what the fresh clone contains.
 - `e1` pins are interface alignment, not copied tool bytes: E1 attests
   per-run tool bytes from the execution `sourceManifest` (authored post-S6);
   the owner test-fixture paths (`/opt/homebrew/bin/cargo`) are convention
@@ -245,3 +244,7 @@ of a fresh attestation (it is not stage input).
   post-S6 (`$RUN/source-manifest.json`, shape `build-manifest.mjs`
   `validateBuildManifestShape`, version 1); `sealedDigest` comes from
   `sealedBundleDigest` at S9/S11, never from legacy metadata.
+
+## Non-qualification footer
+
+59ed is not an accepted combined candidate; no native/build/E2/install permission follows from metadata. This manifest is prep-lane evidence only: digests attest file bytes, never product acceptance; every execution field marked TODO-EXECUTION-GATE requires its named gate; install remains a separate dispatch behind `install-preview.mjs` plus the rollback plan.

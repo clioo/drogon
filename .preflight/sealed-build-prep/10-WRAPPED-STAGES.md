@@ -158,8 +158,12 @@ Rev-2 requested E1; the owner has since shipped the E1 sealed-BUILD runner
 under the same ownership (interface refs: `20-MANIFEST-DRAFT.md` → `e1`).
 This section replaces the rev-2 extension request. E2 stays pending (§S11).
 
-E1 interface (current, read in full): bootstrap
-`…/.preflight/gui-qa-build/bootstrap-build-outer.sh` (`e3bf6861…06567`)
+E1 interface (rev-3 read; HISTORICAL alignment — three of four files differ
+live under owner EOF1 correction; see manifest `e1.files[].status`, and
+re-read current E1 source before authoring any per-run manifest). Rev-3
+snapshot: bootstrap
+`…/.preflight/gui-qa-build/bootstrap-build-outer.sh` (`e3bf6861…06567`, still
+matching live at rev-4)
 + outer `gui-qa-build-outer.mjs` (`6e029fd9…f993437`, 557 lines) + manifest
 module `build-manifest.mjs` (`71e62a0e…06721`, 424 lines) + control tests
 `gui-qa-build-control.test.mjs` (`00a16d4b…bf40c6`, 512 lines). CLI takes

@@ -70,8 +70,9 @@ and separately gated (S10 → coordinator ack of bundle identity → S11).
   dir; PATH scoping is per-stage env, never exported globally.
 - Lane isolation: prep docs live only under `.preflight/sealed-build-prep/`;
   `features/mentu/**`, active-lane files, and coordinator-owned files were read
-  only (or not at all). The prepared runtime binary and other worktrees were
-  never contacted.
+  only (or not at all). The prepared runtime binary was not executed/contacted
+  BY THIS PREP LANE (historical PR399 executed this runtime; it is NOT a
+  currently accepted stage input); other worktrees were never contacted.
 
 ## Rev-2 rework record (frozen-helper custody; supersedes rev-1 wrapper)
 
@@ -89,9 +90,12 @@ Prep docs stay on `codex/sealed-build-prep` and never merge as-is.
 ## Rev-3 rework record (E1 hydration + hash corrigenda; machine-verified)
 
 E1 shipped under the same ownership (`.preflight/gui-qa-build/`: bootstrap
-`e3bf6861…`, outer `6e029fd9…` 557 lines, `build-manifest.mjs` `71e62a0e…`
+`e3bf6861…` (still matching live at rev-4), outer `6e029fd9…` 557 lines,
+`build-manifest.mjs` `71e62a0e…`
 424 lines/MANIFEST_VERSION=1, control tests `00a16d4b…` 512 lines — all read
-in full, hashed by direct read). `10-WRAPPED-STAGES.md` S7/S8/S9 now invoke
+in full at rev-3; the latter three are HISTORICAL alignment at rev-4, live
+bytes differ under owner EOF1 correction, never current qualification;
+all four hashed by direct read). `10-WRAPPED-STAGES.md` S7/S8/S9 now invoke
 the E1 outer via a per-run source manifest authored post-S6 (budgets
 1200/1200/1800 s, exact argv table, byte-attested tools, complete-log and
 owned-pid focus gates); S10 parses the E1 complete `stdout.log`. E2
@@ -106,6 +110,22 @@ reads for helper/E1 bytes; every embedded hash re-verified by extraction
 against fresh computation before commit (27/27 valid, all 64-hex). The
 prepared-runtime binary hash stays record-transcribed by rule (contact
 forbidden; provenance-only, never stage input).
+
+## Rev-4 audit corrections (this commit)
+
+(1) E1 drift: live re-hash shows `gui-qa-build-outer.mjs`,
+`build-manifest.mjs`, `gui-qa-build-control.test.mjs` differ from the rev-3
+pins (owner correcting EOF1); manifest `e1.files[]` now carries per-entry
+`HISTORICAL` vs `CURRENT` status, and the pin is never presented as current
+— the exec lane must re-read E1 source before authoring any per-run
+manifest. (2) Runtime wording replaced verbatim: not executed/contacted BY
+THIS PREP LANE; historical PR399 executed this runtime; NOT a currently
+accepted stage input (manifest `runtime`, report constraints, stagedAt).
+(3) Every `execution` null is now an explicit `"TODO-EXECUTION-GATE"`
+string (15 fields) — no invented runDir/manifest/tool values anywhere.
+(4) Non-qualification footer added (manifest JSON key + prose): 59ed is not
+an accepted combined candidate; no native/build/E2/install permission
+follows from metadata.
 
 ## Left for the gated execution lane
 
