@@ -1,63 +1,124 @@
-// MIT Copyright (c) 2026 Lovecast Inc. The fork's setTaskResumeState
-// ({ jiraPreset, jiraQuery }) rides a settings RPC there; Drogon has no
-// such RPC, so this module persists the same two fields in localStorage —
-// reopening the Tasks page restores the Jira preset/query exactly like the
-// fork's resume restoration. Corrupt or foreign-shaped entries are ignored
-// and storage failures never throw (same discipline as
-// tasks-page-seed-storage).
+// MIT Copyright (c) 2026 Lovecast Inc. C06: renderer-side storage for the
+// Tasks page's Jira resume state and issue→session resume hints.
+//
+// Two different kinds of state, two different rules:
+//
+// 1. The fork's list resume state (jiraPreset + jiraQuery,
+//    `use-task-page-resume-restoration.ts`) is view-steering UI state —
+//    fork-faithfully persisted in localStorage under a `drogon:tasks-`
+//    key, exactly like `issue-source-preference.ts`. Best-effort: losing
+//    it never corrupts anything.
+// 2. The stable issue→session resume hints are IN-MEMORY ONLY: the durable
+//    link registry lives in the daemon (crates/drogon-core/src/jira/
+//    session_links.rs) — a renderer-persistent link registry would fork
+//    the truth. This module only caches, for the current renderer session,
+//    which session a task last resumed, and provides the conservative
+//    liveness classification shared by the issue workspace and the
+//    session-links panel.
 
+// --- 1. The fork's list resume state (localStorage, fork-faithful) --------
+
+const RESUME_STATE_KEY = "drogon:tasks-jira-resume-state";
+
+/** The fork's persisted Jira list state: the active preset and the last
+ * applied JQL query, restored before the first list fetch. */
 export type JiraTaskResumeState = {
-  jiraPreset: string;
-  jiraQuery: string;
+  jiraPreset?: string;
+  jiraQuery?: string;
 };
 
-const STORAGE_KEY = "drogon:tasks-jira-resume:v1";
-
-const PRESET_IDS = new Set(["assigned", "reported", "all", "done"]);
-
-function isResumeStateLike(value: unknown): value is JiraTaskResumeState {
-  if (typeof value !== "object" || value === null) return false;
-  const state = value as Record<string, unknown>;
-  return (
-    typeof state.jiraPreset === "string" &&
-    typeof state.jiraQuery === "string" &&
-    PRESET_IDS.has(state.jiraPreset)
-  );
-}
-
-/** The fork's resume-restoration read: last session's Jira preset + query. */
+/** Sync read for the list state's `useState` initializer; absent or corrupt
+ * storage reads as `null` (the fork's first-open shape). */
 export function readJiraTaskResumeState(
   storage: Pick<Storage, "getItem"> = localStorage,
-): JiraTaskResumeState | undefined {
+): JiraTaskResumeState | null {
   try {
-    const raw = storage.getItem(STORAGE_KEY);
-    if (!raw) return undefined;
+    const raw = storage.getItem(RESUME_STATE_KEY);
+    if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    return isResumeStateLike(parsed) ? parsed : undefined;
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const state: JiraTaskResumeState = {};
+    const preset = (parsed as Record<string, unknown>).jiraPreset;
+    const query = (parsed as Record<string, unknown>).jiraQuery;
+    if (typeof preset === "string" && preset.length <= 64) state.jiraPreset = preset;
+    if (typeof query === "string" && query.length <= 512) state.jiraQuery = query;
+    return state.jiraPreset === undefined && state.jiraQuery === undefined ? null : state;
   } catch {
-    return undefined;
+    return null;
   }
 }
 
-/** The fork's setTaskResumeState write, scoped to the Jira fields. */
+/** Best-effort persistence; a private-mode/quota write failure must not
+ *  block the list itself. */
 export function writeJiraTaskResumeState(
   state: JiraTaskResumeState,
-  storage: Pick<Storage, "getItem" | "setItem"> = localStorage,
+  storage: Pick<Storage, "setItem"> = localStorage,
 ): void {
   try {
-    storage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const payload: JiraTaskResumeState = {};
+    if (state.jiraPreset !== undefined) payload.jiraPreset = state.jiraPreset;
+    if (state.jiraQuery !== undefined) payload.jiraQuery = state.jiraQuery;
+    if (payload.jiraPreset === undefined && payload.jiraQuery === undefined) return;
+    storage.setItem(RESUME_STATE_KEY, JSON.stringify(payload));
   } catch {
-    // A lost resume state only costs the next open its restored query.
+    // View-steering state only; losing it never corrupts anything.
   }
 }
 
-/** Test seam: drops the persisted Jira resume state. */
-export function clearJiraTaskResumeState(
-  storage: Pick<Storage, "removeItem"> = localStorage,
-): void {
-  try {
-    storage.removeItem(STORAGE_KEY);
-  } catch {
-    // Nothing to clear through.
+// --- 2. Stable-link resume hints (in-memory, daemon owns the truth) -------
+
+export type JiraSessionState = "live" | "unverifiable" | "exited" | "no-session";
+
+export type JiraResumeHint = {
+  linkKey: string;
+  sessionId: string;
+  workspaceId: string | null;
+  decidedAt: string;
+};
+
+/** Module-level, renderer-lifetime cache — never persisted anywhere. */
+const resumeHints = new Map<string, JiraResumeHint>();
+
+/** Remember which session a task last resumed (current renderer session). */
+export function rememberJiraResume(hint: {
+  linkKey: string;
+  sessionId: string;
+  workspaceId: string | null;
+}): JiraResumeHint {
+  const full: JiraResumeHint = { ...hint, decidedAt: new Date().toISOString() };
+  resumeHints.set(hint.linkKey, full);
+  return full;
+}
+
+/** The cached resume hint, or null (including after a renderer reload — by
+ * design: the daemon's link is re-read, never approximated from cache). */
+export function peekJiraResume(linkKey: string): JiraResumeHint | null {
+  return resumeHints.get(linkKey) ?? null;
+}
+
+export function clearJiraResume(linkKey: string): void {
+  resumeHints.delete(linkKey);
+}
+
+/**
+ * The daemon-verdict → actionable-state mapping, conservative exactly like
+ * `resolve_session_state`: loss of contact (missing row, unknown verdict)
+ * is `unverifiable`, never `exited`.
+ */
+export function classifyJiraSessionState(
+  verdict: string | null | undefined,
+): JiraSessionState {
+  switch (verdict) {
+    case "live":
+      return "live";
+    case "exited":
+      return "exited";
+    case "unverifiable":
+      return "unverifiable";
+    case null:
+    case undefined:
+      return "no-session";
+    default:
+      return "unverifiable";
   }
 }
