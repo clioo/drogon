@@ -64,7 +64,7 @@ const PROJECT_ORDER_BY_LABEL: Record<WorkspaceProjectOrderBy, string> = {
   recent: "Recent activity",
 };
 const CARD_LAYOUT_LABEL: Record<WorkspaceCardLayout, string> = {
-  comfortable: "Comfortable",
+  comfortable: "Default",
   compact: "Compact",
 };
 
