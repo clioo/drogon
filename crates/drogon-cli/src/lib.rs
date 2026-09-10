@@ -33,6 +33,7 @@ pub fn run_on_cli_stack<T: Send + 'static>(
 }
 
 pub mod agent_context;
+pub mod bundled_skill_guides;
 pub mod cli;
 pub mod client;
 pub mod commands;
@@ -47,6 +48,8 @@ mod orchestration_task_dependencies;
 mod orchestration_timeout;
 pub mod output;
 pub mod paths;
+pub mod skill_metadata;
 pub mod skills;
+pub mod skills_agents;
 pub mod transport;
 pub mod wire;
