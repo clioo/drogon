@@ -114,7 +114,7 @@ fn is_bad_id(value: &str, field: &str) -> Option<String> {
     None
 }
 
-fn validate_secret_ref(value: &str) -> Result<(), String> {
+pub(crate) fn validate_secret_ref(value: &str) -> Result<(), String> {
     if value.is_empty() || value.len() > 128 {
         return Err("secret reference must be 1..=128 bytes".to_string());
     }

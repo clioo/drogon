@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, Transaction};
 
 use crate::automations::storage as automations_storage;
+use crate::bot_secrets as bot_secrets_storage;
 use crate::bot_self_mgmt as bot_self_storage;
 use crate::bots::monitors::storage as bot_monitors_storage;
 use crate::bots::storage as bots_storage;
@@ -209,6 +210,11 @@ const VERSIONED_COMPONENTS: &[(&str, i64)] = &[
     (
         bot_self_storage::SELF_SCHEMA_COMPONENT,
         bot_self_storage::SELF_SCHEMA_VERSION,
+    ),
+    // P0 per-Bot secret grants (user-minted, re-checked every tick).
+    (
+        bot_secrets_storage::SECRETS_SCHEMA_COMPONENT,
+        bot_secrets_storage::SECRETS_SCHEMA_VERSION,
     ),
     (
         crate::bots::delegation::DELEGATION_SCHEMA_COMPONENT,
@@ -476,6 +482,12 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     // rows and the event outbox belong to the BotMonitors/BotSelf
     // components above (forward, never duplicated here).
     crate::bots::delegation::apply_pending_steps_in_tx(&tx).map_err(StartupError::Delegation)?;
+    // P0 per-Bot secret grants (user-minted, re-checked every tick).
+    bot_secrets_storage::apply_pending_steps_in_tx(&tx)
+        .map_err(|e| StartupError::Sqlite(match e {
+            bot_secrets_storage::SecretStorageError::Sqlite(sqlite) => sqlite,
+            other => rusqlite::Error::ToSqlConversionFailure(Box::new(other)),
+        }))?;
     mentu_storage::apply_pending_steps_in_tx(&tx)?;
     crate::project::apply_pending_steps_in_tx(&tx)?;
     coordination_access::apply_pending_steps_in_tx(&tx)?;
