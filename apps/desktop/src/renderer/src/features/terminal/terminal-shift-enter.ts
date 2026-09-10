@@ -6,8 +6,10 @@
  * Pi (0.85.1, verified in @earendil-works/pi-coding-agent bundle): its
  * NATIVE_SHIFT_ENTER_SEQUENCE is CSI-u (`ESC[13;2u`), accepted as
  * shift+enter whether or not kitty negotiated (parseKitty checked first).
- * When kitty is inactive, legacy `ESC CR` parses as alt+enter (queue
- * follow-up, not newline) and bare LF parses as submit — so a Pi pane
+ * When kitty is inactive, legacy `ESC CR` parses as alt+enter which
+ * submits directly in idle via followUp/onSubmit, and bare LF inserts
+ * newline via the editor raw-data branch in both kitty states (never
+ * submits) — per the adversarial review of PR #406 — so a Pi pane
  * whose tracker lost its push (snapshot reset / truncated replay / boot
  * race) must still send CSI-u. Shell keeps source parity (negotiated
  * CSI-u, else Alt-Enter fallback) because plain shells do not accept CSI-u. */
