@@ -289,7 +289,7 @@ pub(crate) fn resolve_bot_owning_workspace(
 /// `WorkspaceMode`, `MissedRunPolicy`), no parallel tables. Bounds mirror
 /// `automation.create` exactly (name/prompt/cron), so a responsibility that
 /// passes here always describes an automation the scheduler can fire.
-fn require_responsibility_name(name: &str) -> Result<String, RpcError> {
+pub(crate) fn require_responsibility_name(name: &str) -> Result<String, RpcError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err(invalid_argument("name must contain visible text"));
@@ -303,7 +303,7 @@ fn require_responsibility_name(name: &str) -> Result<String, RpcError> {
     Ok(trimmed.to_string())
 }
 
-fn require_responsibility_prompt(prompt: &str) -> Result<String, RpcError> {
+pub(crate) fn require_responsibility_prompt(prompt: &str) -> Result<String, RpcError> {
     if prompt.trim().is_empty() {
         return Err(invalid_argument("prompt must contain visible text"));
     }
@@ -319,7 +319,7 @@ fn require_responsibility_prompt(prompt: &str) -> Result<String, RpcError> {
 /// The Bot's harness must be directly launchable: the owned automation the
 /// scheduler fires carries no per-run override, so a non-launchable policy
 /// value would strand a live cron with no runner behind it.
-fn require_launchable_harness(harness: &str) -> Result<String, RpcError> {
+pub(crate) fn require_launchable_harness(harness: &str) -> Result<String, RpcError> {
     let trimmed = harness.trim();
     if serde_json::from_value::<drogon_harness::HarnessId>(json!(trimmed)).is_err() {
         return Err(invalid_argument(
@@ -384,7 +384,7 @@ fn parse_responsibility_params<T: serde::de::DeserializeOwned>(
 /// still rejected outright, exactly like the pre-existing exact-match
 /// behavior: only the deliberate empty-string host-global sentinel (#348)
 /// gets the bot-id-based benefit of the doubt.
-fn authorize_existing_bot_scope(
+pub(crate) fn authorize_existing_bot_scope(
     conn: &Connection,
     derived_host_id: &str,
     workspace_id: &str,
@@ -401,22 +401,22 @@ fn authorize_existing_bot_scope(
     owned_folder_for(conn, derived_host_id, workspace_id, asserted_host_id).map(|_| ())
 }
 
-struct NewResponsibilityAutomation {
-    host_id: String,
-    workspace_id: String,
-    bot_id: String,
-    harness: String,
-    name: String,
-    prompt: String,
-    cron: String,
-    now_ms: f64,
+pub(crate) struct NewResponsibilityAutomation {
+    pub(crate) host_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) bot_id: String,
+    pub(crate) harness: String,
+    pub(crate) name: String,
+    pub(crate) prompt: String,
+    pub(crate) cron: String,
+    pub(crate) now_ms: f64,
 }
 
 /// Builds the Bot-owned automation for a new scheduled responsibility,
 /// mirroring `automation.create`'s construction (local execution target,
 /// `Existing` workspace mode, UTC cron) with `bot_id` set -- the only
 /// Bot-ownership field, per `automations::records`.
-fn build_responsibility_automation(
+pub(crate) fn build_responsibility_automation(
     new: NewResponsibilityAutomation,
 ) -> Result<Automation, RpcError> {
     let next_run_at = scheduler::next_fire_ms(&new.cron, new.now_ms)

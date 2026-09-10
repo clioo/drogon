@@ -10,8 +10,8 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    AutomationAction, BrowserAction, Cli, Command, HarnessAction, InternalAction, ProjectAction,
-    TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
+    AutomationAction, BotAction, BrowserAction, Cli, Command, HarnessAction, InternalAction,
+    ProjectAction, TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
@@ -99,6 +99,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Browser { action } => browser(&client, &request_id, json, action).await,
         Command::Harness { action } => harness(&client, &request_id, json, action).await,
         Command::Automation { action } => automation(&client, &request_id, json, action).await,
+        Command::Bot { action } => bot(&client, &request_id, json, action).await,
         Command::Orchestration { command } => {
             crate::orchestration_commands::run(&client, &request_id, json, command).await
         }
@@ -929,6 +930,410 @@ fn emit_raw(call: CallOk) -> Result<RunOutcome, CliError> {
         exit_code: 0,
         stderr_note: None,
     })
+}
+
+/// Scoped Bot self-management: every call asserts actor == target (the
+/// service denies cross-Bot scope, stale revisions and scope escape) and
+/// preflights the `bot.self.v1` capability first, like the harness and
+/// automation commands.
+async fn bot(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &BotAction,
+) -> Result<RunOutcome, CliError> {
+    let status = capability_preflight(client, request_id, "bot.self.v1", "bot").await?;
+    let scope = |bot: &str, workspace: &str| {
+        json!({
+            "botId": bot,
+            "actorBotId": bot,
+            "workspaceId": workspace,
+            "hostId": status.host_id,
+        })
+    };
+    match action {
+        BotAction::Provision { bot, workspace } => {
+            let call = client
+                .call(
+                    "bot.self_provision",
+                    scope(bot, workspace),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            emit(call, json, || format!("provisioned bot {bot}"), 0, None)
+        }
+        BotAction::List { bot, workspace } => {
+            let call = client
+                .call(
+                    "bot.self_list",
+                    scope(bot, workspace),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result = call.result.clone();
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "bot {bot}: {} automations, {} monitors, audit {}",
+                        result
+                            .get("automations")
+                            .and_then(|v| v.as_array())
+                            .map(|a| a.len())
+                            .unwrap_or(0),
+                        result
+                            .get("monitors")
+                            .and_then(|v| v.as_array())
+                            .map(|a| a.len())
+                            .unwrap_or(0),
+                        result
+                            .get("auditCount")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0),
+                    )
+                },
+                0,
+                None,
+            )
+        }
+        BotAction::CreateAutomation {
+            bot,
+            workspace,
+            name,
+            schedule,
+            prompt,
+            disabled,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["name"] = json!(name);
+            params["schedule"] = json!(schedule);
+            params["prompt"] = json!(prompt);
+            if *disabled {
+                params["enabled"] = json!(false);
+            }
+            let call = client
+                .call(
+                    "bot.self_create_automation",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result = call.result.clone();
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "created automation {}",
+                        result
+                            .get("automationId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?")
+                    )
+                },
+                0,
+                None,
+            )
+        }
+        BotAction::UpdateAutomation {
+            bot,
+            workspace,
+            responsibility,
+            expected_bot_rev,
+            name,
+            prompt,
+            schedule,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["responsibilityId"] = json!(responsibility);
+            params["expectedBotRev"] = json!(expected_bot_rev);
+            if let Some(name) = name {
+                params["name"] = json!(name);
+            }
+            if let Some(prompt) = prompt {
+                params["prompt"] = json!(prompt);
+            }
+            if let Some(schedule) = schedule {
+                params["schedule"] = json!(schedule);
+            }
+            let call = client
+                .call(
+                    "bot.self_update_automation",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            emit(
+                call,
+                json,
+                || format!("updated automation {responsibility}"),
+                0,
+                None,
+            )
+        }
+        BotAction::EnableAutomation {
+            bot,
+            workspace,
+            responsibility,
+            expected_bot_rev,
+        }
+        | BotAction::DisableAutomation {
+            bot,
+            workspace,
+            responsibility,
+            expected_bot_rev,
+        } => {
+            let enabled = matches!(action, BotAction::EnableAutomation { .. });
+            let mut params = scope(bot, workspace);
+            params["responsibilityId"] = json!(responsibility);
+            params["expectedBotRev"] = json!(expected_bot_rev);
+            params["enabled"] = json!(enabled);
+            let call = client
+                .call(
+                    "bot.self_set_automation_enabled",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "{} automation {responsibility}",
+                        if enabled { "enabled" } else { "disabled" }
+                    )
+                },
+                0,
+                None,
+            )
+        }
+        BotAction::DeleteAutomation {
+            bot,
+            workspace,
+            responsibility,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["responsibilityId"] = json!(responsibility);
+            let call = client
+                .call(
+                    "bot.self_delete_automation",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            emit(
+                call,
+                json,
+                || format!("deleted automation {responsibility}"),
+                0,
+                None,
+            )
+        }
+        BotAction::TestAutomation {
+            bot,
+            workspace,
+            responsibility,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["responsibilityId"] = json!(responsibility);
+            let call = client
+                .call(
+                    "bot.self_test_automation",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result = call.result.clone();
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "automation {responsibility} eligible: {}",
+                        result
+                            .get("eligible")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false)
+                    )
+                },
+                0,
+                None,
+            )
+        }
+        BotAction::CreateMonitor {
+            bot,
+            workspace,
+            resource,
+            max_bytes,
+            cron,
+            manual,
+            disabled,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["resource"] = json!(resource);
+            if let Some(max_bytes) = max_bytes {
+                params["maxBytes"] = json!(max_bytes);
+            }
+            params["trigger"] = if *manual {
+                json!({"kind": "manual"})
+            } else {
+                json!({"kind": "scheduled", "cron": cron.as_deref().unwrap_or("* * * * *")})
+            };
+            if *disabled {
+                params["enabled"] = json!(false);
+            }
+            let call = client
+                .call(
+                    "bot.self_create_monitor",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result = call.result.clone();
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "created monitor {}",
+                        result
+                            .get("monitorId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?")
+                    )
+                },
+                0,
+                None,
+            )
+        }
+        BotAction::UpdateMonitor {
+            bot,
+            workspace,
+            monitor,
+            expected_rev,
+            resource,
+            max_bytes,
+            cron,
+            manual,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["monitorId"] = json!(monitor);
+            params["expectedRev"] = json!(expected_rev);
+            if let Some(resource) = resource {
+                params["resource"] = json!(resource);
+            }
+            if let Some(max_bytes) = max_bytes {
+                params["maxBytes"] = json!(max_bytes);
+            }
+            if *manual {
+                params["trigger"] = json!({"kind": "manual"});
+            } else if let Some(cron) = cron {
+                params["trigger"] = json!({"kind": "scheduled", "cron": cron});
+            }
+            let call = client
+                .call(
+                    "bot.self_update_monitor",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            emit(call, json, || format!("updated monitor {monitor}"), 0, None)
+        }
+        BotAction::EnableMonitor {
+            bot,
+            workspace,
+            monitor,
+            expected_rev,
+        }
+        | BotAction::DisableMonitor {
+            bot,
+            workspace,
+            monitor,
+            expected_rev,
+        } => {
+            let enabled = matches!(action, BotAction::EnableMonitor { .. });
+            let mut params = scope(bot, workspace);
+            params["monitorId"] = json!(monitor);
+            params["expectedRev"] = json!(expected_rev);
+            params["enabled"] = json!(enabled);
+            let call = client
+                .call(
+                    "bot.self_set_monitor_enabled",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "{} monitor {monitor}",
+                        if enabled { "enabled" } else { "disabled" }
+                    )
+                },
+                0,
+                None,
+            )
+        }
+        BotAction::DeleteMonitor {
+            bot,
+            workspace,
+            monitor,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["monitorId"] = json!(monitor);
+            let call = client
+                .call(
+                    "bot.self_delete_monitor",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            emit(call, json, || format!("deleted monitor {monitor}"), 0, None)
+        }
+        BotAction::TestMonitor {
+            bot,
+            workspace,
+            monitor,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["monitorId"] = json!(monitor);
+            let call = client
+                .call("bot.self_test_monitor", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let result = call.result.clone();
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "monitor {monitor} eligible: {} ({})",
+                        result
+                            .get("eligible")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        result.get("health").and_then(|v| v.as_str()).unwrap_or("?"),
+                    )
+                },
+                0,
+                None,
+            )
+        }
+    }
 }
 
 #[cfg(test)]

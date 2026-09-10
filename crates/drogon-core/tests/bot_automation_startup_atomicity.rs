@@ -397,6 +397,8 @@ fn two_concurrent_engine_open_calls_against_the_same_data_dir_both_succeed_consi
         final_snapshot.schema_versions,
         vec![
             ("automations".to_string(), 2),
+            ("bot_monitors".to_string(), 1),
+            ("bot_self".to_string(), 1),
             ("bots".to_string(), 3),
             ("coordination_access".to_string(), 1),
             ("mentu".to_string(), 1),

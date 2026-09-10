@@ -7,6 +7,7 @@ mod automation_rpc;
 pub mod automations;
 mod bot_mutation_rpc;
 pub mod bot_run_rpc;
+pub mod bot_self_mgmt;
 mod bot_snapshot_rpc;
 pub mod bots;
 pub mod claim_identity;
@@ -116,6 +117,9 @@ const CAPABILITIES: &[&str] = &[
     // (apps/desktop/src/renderer/src/bots-mount.ts) has referenced this
     // exact string all along, dark until now.
     "bot.snapshot.v1",
+    // Bot self-management (P1–P4): provisioned homes, scheduler-backed
+    // monitors, audit actors, and the scoped bot.self_* API.
+    crate::bot_self_mgmt::BOT_SELF_CAPABILITY,
     // R5-S: Mentu (recipes, content-bound approval, execution through the
     // pinned mentu-recipes runtime, run evidence, retry).
     drogon_protocol::mentu::MENTU_CAPABILITY,
@@ -409,6 +413,18 @@ impl Engine {
             "bot.responsibility_create" => self.bot_responsibility_create(request),
             "bot.responsibility_delete" => self.bot_responsibility_delete(request),
             "bot.delete" => self.bot_delete(request),
+            "bot.self_provision" => self.bot_self_provision(request),
+            "bot.self_list" => self.bot_self_list(request),
+            "bot.self_create_automation" => self.bot_self_create_automation(request),
+            "bot.self_update_automation" => self.bot_self_update_automation(request),
+            "bot.self_set_automation_enabled" => self.bot_self_set_automation_enabled(request),
+            "bot.self_delete_automation" => self.bot_self_delete_automation(request),
+            "bot.self_test_automation" => self.bot_self_test_automation(request),
+            "bot.self_create_monitor" => self.bot_self_create_monitor(request),
+            "bot.self_update_monitor" => self.bot_self_update_monitor(request),
+            "bot.self_set_monitor_enabled" => self.bot_self_set_monitor_enabled(request),
+            "bot.self_delete_monitor" => self.bot_self_delete_monitor(request),
+            "bot.self_test_monitor" => self.bot_self_test_monitor(request),
             "automation.create" => self.automation_create(request),
             "automation.list" => self.automation_list(&request.params),
             "automation.update" => self.automation_update(request),

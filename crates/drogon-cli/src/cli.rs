@@ -120,6 +120,15 @@ pub enum Command {
         #[command(subcommand)]
         action: AutomationAction,
     },
+    /// Scoped Bot self-management: a Bot lists/creates/edits/enables/
+    /// disables/deletes/tests its OWN automations and monitors (requires
+    /// the service capability bot.self.v1; every mutation records the
+    /// acting Bot's id as audit actor and denies cross-Bot scope, stale
+    /// revisions and scope escape)
+    Bot {
+        #[command(subcommand)]
+        action: BotAction,
+    },
     /// Native coordination (requires the service capability
     /// orchestration.native.v1; the preflight decides before any method)
     Orchestration {
@@ -929,6 +938,137 @@ impl Cli {
                     {
                         return Err(CliError::Usage("--limit must be within 1..=200".into()));
                     }
+                }
+            },
+            Command::Bot { action } => match action {
+                BotAction::Provision { bot, workspace } | BotAction::List { bot, workspace } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                }
+                BotAction::CreateAutomation {
+                    bot,
+                    workspace,
+                    name,
+                    schedule,
+                    prompt,
+                    ..
+                } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("name", name)?;
+                    require_nonempty("schedule", schedule)?;
+                    if prompt.trim().is_empty() {
+                        return Err(CliError::Usage("--prompt must contain visible text".into()));
+                    }
+                }
+                BotAction::UpdateAutomation {
+                    bot,
+                    workspace,
+                    responsibility,
+                    name,
+                    prompt,
+                    schedule,
+                    ..
+                } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("responsibility", responsibility)?;
+                    if name.is_none() && prompt.is_none() && schedule.is_none() {
+                        return Err(CliError::Usage(
+                            "update-automation requires at least one of --name, --prompt, --schedule"
+                                .into(),
+                        ));
+                    }
+                }
+                BotAction::EnableAutomation {
+                    bot,
+                    workspace,
+                    responsibility,
+                    ..
+                }
+                | BotAction::DisableAutomation {
+                    bot,
+                    workspace,
+                    responsibility,
+                    ..
+                }
+                | BotAction::DeleteAutomation {
+                    bot,
+                    workspace,
+                    responsibility,
+                }
+                | BotAction::TestAutomation {
+                    bot,
+                    workspace,
+                    responsibility,
+                } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("responsibility", responsibility)?;
+                }
+                BotAction::CreateMonitor {
+                    bot,
+                    workspace,
+                    resource,
+                    cron,
+                    manual,
+                    ..
+                } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("resource", resource)?;
+                    if *manual && cron.is_some() {
+                        return Err(CliError::Usage("--manual takes no --cron".into()));
+                    }
+                }
+                BotAction::UpdateMonitor {
+                    bot,
+                    workspace,
+                    monitor,
+                    resource,
+                    max_bytes,
+                    cron,
+                    manual,
+                    ..
+                } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("monitor", monitor)?;
+                    if resource.is_none() && max_bytes.is_none() && cron.is_none() && !manual {
+                        return Err(CliError::Usage(
+                            "update-monitor requires at least one of --resource, --max-bytes, --cron, --manual"
+                                .into(),
+                        ));
+                    }
+                    if *manual && cron.is_some() {
+                        return Err(CliError::Usage("--manual takes no --cron".into()));
+                    }
+                }
+                BotAction::EnableMonitor {
+                    bot,
+                    workspace,
+                    monitor,
+                    ..
+                }
+                | BotAction::DisableMonitor {
+                    bot,
+                    workspace,
+                    monitor,
+                    ..
+                }
+                | BotAction::DeleteMonitor {
+                    bot,
+                    workspace,
+                    monitor,
+                }
+                | BotAction::TestMonitor {
+                    bot,
+                    workspace,
+                    monitor,
+                } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("monitor", monitor)?;
                 }
             },
             Command::Harness { action } => match action {
@@ -2017,5 +2157,330 @@ mod browser_tests {
         ])
         .unwrap();
         assert!(cli.validate().is_ok());
+    }
+}
+
+/// Scoped Bot self-management verbs: `--bot` names both actor and target
+/// (the service denies any cross-Bot spelling); `--workspace` is the scope
+/// assertion, resolved to the Bot's owning folder server-side like every
+/// other `bot.*` method.
+#[derive(Subcommand, Debug)]
+pub enum BotAction {
+    /// Provision the Bot's dedicated working folder and profile
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot provision --bot <ID> --workspace <ID>\nValid flags: --bot, --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+    )]
+    Provision {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+    },
+    /// List the Bot's own automations, monitors, home and audit count
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot list --bot <ID> --workspace <ID>\nValid flags: --bot, --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+    )]
+    List {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+    },
+    /// Create one of the Bot's own scheduled automations (runs in the
+    /// provisioned home workspace under the Bot's harness)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot create-automation --bot <ID> --workspace <ID> --name <NAME> --schedule <EXPR> --prompt <TEXT> [--disabled]\nValid flags: --bot, --data-dir, --disabled, --help, --json, --name, --prompt, --request-id, --retry-request, --schedule, --workspace"
+    )]
+    CreateAutomation {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "NAME")]
+        name: String,
+        #[arg(long, value_name = "EXPR")]
+        schedule: String,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        prompt: String,
+        #[arg(long)]
+        disabled: bool,
+    },
+    /// Edit one of the Bot's own automations (CAS on the Bot revision)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot update-automation --bot <ID> --workspace <ID> --responsibility <ID> --expected-bot-rev <N> [--name <NAME>] [--prompt <TEXT>] [--schedule <EXPR>]\nValid flags: --bot, --data-dir, --expected-bot-rev, --help, --json, --name, --prompt, --request-id, --responsibility, --retry-request, --schedule, --workspace"
+    )]
+    UpdateAutomation {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        responsibility: String,
+        #[arg(long, value_name = "N")]
+        expected_bot_rev: i64,
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        prompt: Option<String>,
+        #[arg(long, value_name = "EXPR")]
+        schedule: Option<String>,
+    },
+    /// Enable one of the Bot's own automations (CAS on the Bot revision)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot enable-automation --bot <ID> --workspace <ID> --responsibility <ID> --expected-bot-rev <N>\nValid flags: --bot, --data-dir, --expected-bot-rev, --help, --json, --request-id, --responsibility, --retry-request, --workspace"
+    )]
+    EnableAutomation {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        responsibility: String,
+        #[arg(long, value_name = "N")]
+        expected_bot_rev: i64,
+    },
+    /// Disable one of the Bot's own automations (CAS on the Bot revision)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot disable-automation --bot <ID> --workspace <ID> --responsibility <ID> --expected-bot-rev <N>\nValid flags: --bot, --data-dir, --expected-bot-rev, --help, --json, --request-id, --responsibility, --retry-request, --workspace"
+    )]
+    DisableAutomation {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        responsibility: String,
+        #[arg(long, value_name = "N")]
+        expected_bot_rev: i64,
+    },
+    /// Delete one of the Bot's own automations (run history is retained)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot delete-automation --bot <ID> --workspace <ID> --responsibility <ID>\nValid flags: --bot, --data-dir, --help, --json, --request-id, --responsibility, --retry-request, --workspace"
+    )]
+    DeleteAutomation {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        responsibility: String,
+    },
+    /// Admission-only test of one of the Bot's own automations (no dispatch)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot test-automation --bot <ID> --workspace <ID> --responsibility <ID>\nValid flags: --bot, --data-dir, --help, --json, --request-id, --responsibility, --retry-request, --workspace"
+    )]
+    TestAutomation {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        responsibility: String,
+    },
+    /// Create one of the Bot's own file monitors (in-scope resources only)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot create-monitor --bot <ID> --workspace <ID> --resource <PATH> [--max-bytes <N>] [--cron <EXPR> | --manual] [--disabled]\nValid flags: --bot, --cron, --data-dir, --disabled, --help, --json, --manual, --max-bytes, --request-id, --resource, --retry-request, --workspace"
+    )]
+    CreateMonitor {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "PATH")]
+        resource: String,
+        #[arg(long, value_name = "N")]
+        max_bytes: Option<u64>,
+        #[arg(long, value_name = "EXPR")]
+        cron: Option<String>,
+        #[arg(long)]
+        manual: bool,
+        #[arg(long)]
+        disabled: bool,
+    },
+    /// Edit one of the Bot's own monitors (CAS on the monitor revision)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot update-monitor --bot <ID> --workspace <ID> --monitor <ID> --expected-rev <N> [--resource <PATH>] [--max-bytes <N>] [--cron <EXPR> | --manual]\nValid flags: --bot, --cron, --data-dir, --expected-rev, --help, --json, --manual, --max-bytes, --monitor, --request-id, --resource, --retry-request, --workspace"
+    )]
+    UpdateMonitor {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        monitor: String,
+        #[arg(long, value_name = "N")]
+        expected_rev: i64,
+        #[arg(long, value_name = "PATH")]
+        resource: Option<String>,
+        #[arg(long, value_name = "N")]
+        max_bytes: Option<u64>,
+        #[arg(long, value_name = "EXPR")]
+        cron: Option<String>,
+        #[arg(long)]
+        manual: bool,
+    },
+    /// Enable one of the Bot's own monitors (CAS on the monitor revision)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot enable-monitor --bot <ID> --workspace <ID> --monitor <ID> --expected-rev <N>\nValid flags: --bot, --data-dir, --expected-rev, --help, --json, --monitor, --request-id, --retry-request, --workspace"
+    )]
+    EnableMonitor {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        monitor: String,
+        #[arg(long, value_name = "N")]
+        expected_rev: i64,
+    },
+    /// Disable one of the Bot's own monitors (CAS on the monitor revision)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot disable-monitor --bot <ID> --workspace <ID> --monitor <ID> --expected-rev <N>\nValid flags: --bot, --data-dir, --expected-rev, --help, --json, --monitor, --request-id, --retry-request, --workspace"
+    )]
+    DisableMonitor {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        monitor: String,
+        #[arg(long, value_name = "N")]
+        expected_rev: i64,
+    },
+    /// Delete one of the Bot's own monitors (check history is retained)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot delete-monitor --bot <ID> --workspace <ID> --monitor <ID>\nValid flags: --bot, --data-dir, --help, --json, --monitor, --request-id, --retry-request, --workspace"
+    )]
+    DeleteMonitor {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        monitor: String,
+    },
+    /// Dry-run test of one of the Bot's own monitors (no cursor commit)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot test-monitor --bot <ID> --workspace <ID> --monitor <ID>\nValid flags: --bot, --data-dir, --help, --json, --monitor, --request-id, --retry-request, --workspace"
+    )]
+    TestMonitor {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        monitor: String,
+    },
+}
+
+#[cfg(test)]
+mod bot_self_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("drogon-cli").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn bot_verbs_parse_with_scope_flags() {
+        let cli = parse(&["bot", "provision", "--bot", "b1", "--workspace", "w1"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bot {
+                action: BotAction::Provision { .. }
+            }
+        ));
+        let cli = parse(&[
+            "bot",
+            "create-automation",
+            "--bot",
+            "b1",
+            "--workspace",
+            "w1",
+            "--name",
+            "n",
+            "--schedule",
+            "* * * * *",
+            "--prompt",
+            "p",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bot {
+                action: BotAction::CreateAutomation { .. }
+            }
+        ));
+        let cli = parse(&[
+            "bot",
+            "create-monitor",
+            "--bot",
+            "b1",
+            "--workspace",
+            "w1",
+            "--resource",
+            "notes.md",
+            "--cron",
+            "* * * * *",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bot {
+                action: BotAction::CreateMonitor { .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn bot_verbs_validate_scope_and_exclusive_trigger() {
+        // Empty ids are usage errors, not round trips.
+        let cli = parse(&["bot", "list", "--bot", "", "--workspace", "w1"]).unwrap();
+        assert!(cli.validate().is_err());
+        // --manual takes no --cron.
+        let cli = parse(&[
+            "bot",
+            "create-monitor",
+            "--bot",
+            "b1",
+            "--workspace",
+            "w1",
+            "--resource",
+            "notes.md",
+            "--manual",
+            "--cron",
+            "* * * * *",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_err());
+        // Updates require at least one field.
+        let cli = parse(&[
+            "bot",
+            "update-automation",
+            "--bot",
+            "b1",
+            "--workspace",
+            "w1",
+            "--responsibility",
+            "r1",
+            "--expected-bot-rev",
+            "3",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_err());
     }
 }
