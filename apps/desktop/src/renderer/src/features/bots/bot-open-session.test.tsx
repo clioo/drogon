@@ -1,0 +1,247 @@
+// @vitest-environment jsdom
+/* bug-bot-open-session repro: "Open session" on a Bot card must open/create a
+   session for the bot instead of silently selecting it. The fork opens a real
+   harness tab (launch-drogon-bot-session); this repo's session primitive is
+   the daemon's headless `bot.run` chat turn (J8), so the click must dispatch
+   `bridge.botRun` with the bot's STORED harness overrides and reload — and
+   every failure (withheld bridge, daemon-unreachable transport throw,
+   refusal/unsupported outcome) must land in the shared action-error alert
+   instead of vanishing. The card itself stays reference-verbatim (static
+   Harness text); harness selection lives in the creation form's Agent
+   dropdown, which the last case pins. */
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { BotsPanel } from "./BotsPanel";
+import { BotCreationForm } from "./BotCreationForm";
+import { emptyBotCreateForm } from "./bots-page-model";
+import type { BotsPanelBot } from "./bots-panel-contracts";
+
+afterEach(cleanup);
+
+const scope = { hostId: "host-1", workspaceId: "ws-1", locale: "en-US" };
+
+function bot(overrides: Partial<BotsPanelBot> = {}): BotsPanelBot {
+  return {
+    id: "bot-1",
+    characterPreset: "jon-snow",
+    displayIdentity: { displayName: "Jon Snow", handle: null, title: null },
+    harnessPolicy: { defaultHarness: "claude", explicitModel: null },
+    instructions: "Guard the realm.",
+    memories: [],
+    responsibilities: [],
+    currentSession: null,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
+function dispatchedReceipt() {
+  return {
+    ok: true as const,
+    result: {
+      requestId: "req-1",
+      hostId: scope.hostId,
+      workspaceId: scope.workspaceId,
+      automationRunId: null,
+      responsibilityRunId: null,
+      messageId: "msg-1",
+      session: { sessionId: "sess-1", incarnation: "inc-1" },
+      outcome: "dispatched" as const,
+      refusal: null,
+      reason: null,
+      error: null,
+      observedAt: null,
+      recordedAt: 1,
+    },
+  };
+}
+
+/** Fake bridge over one bot: botRun is captured and its result is
+ *  caller-controlled, so the tests pin the dispatch contract without a
+ *  daemon. */
+function fakeBridge(
+  seeded: BotsPanelBot,
+  botRunImpl?: (...args: never[]) => Promise<unknown>,
+) {
+  let snapshots = 0;
+  const botRun = vi.fn(
+    botRunImpl ??
+      (async () => dispatchedReceipt() as unknown as never),
+  );
+  const bridge = {
+    botSnapshot: async () => {
+      snapshots += 1;
+      return {
+        ok: true as const,
+        result: { ...scope, bots: [seeded], history: [] },
+      };
+    },
+    botRun,
+  };
+  return { bridge, botRun, snapshots: () => snapshots };
+}
+
+describe("bot open session", () => {
+  it("dispatches a bot.run chat turn with the bot's stored harness and reloads", async () => {
+    const seeded = bot({
+      harnessPolicy: {
+        defaultHarness: "pi",
+        explicitModel: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+      },
+    });
+    const fake = fakeBridge(seeded);
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() => expect(fake.botRun).toHaveBeenCalledTimes(1));
+    const input = fake.botRun.mock.calls[0]![0] as Record<string, unknown>;
+    expect(input.botId).toBe("bot-1");
+    expect(typeof input.prompt).toBe("string");
+    expect((input.prompt as string).trim().length).toBeGreaterThan(0);
+    expect(input.harness).toMatchObject({
+      harnessId: "pi",
+      provider: "dgx-spark",
+      model: "qwen3.8-flash-next-nvidia-nvfp4",
+      permissionMode: "unattended",
+    });
+    // The post-dispatch reload is what lands the new session state.
+    await waitFor(() => expect(fake.snapshots()).toBeGreaterThanOrEqual(2));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("surfaces a daemon refusal instead of silence", async () => {
+    const seeded = bot();
+    const fake = fakeBridge(seeded, async () => ({
+      ok: true as const,
+      result: { ...dispatchedReceipt().result, outcome: "refused", error: "No harness available." },
+    }) as unknown as never);
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "No harness available.",
+      ),
+    );
+  });
+
+  it("surfaces a daemon-unreachable transport failure honestly", async () => {
+    const seeded = bot();
+    const fake = fakeBridge(seeded, async () => {
+      throw new Error("socket hang up");
+    });
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "socket hang up",
+      ),
+    );
+  });
+
+  it("explains instead of no-op when the bridge has no botRun", async () => {
+    const seeded = bot();
+    const snapshots = { count: 0 };
+    const readOnly = {
+      botSnapshot: async () => {
+        snapshots.count += 1;
+        return {
+          ok: true as const,
+          result: { ...scope, bots: [seeded], history: [] },
+        };
+      },
+    };
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={readOnly}
+        scope={scope}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(
+        /not connected|unavailable|botRun/i,
+      ),
+    );
+  });
+
+  it("keeps the fork's workspace refusal visible when no workspace is selected", async () => {
+    const seeded = bot();
+    const fake = fakeBridge(seeded);
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={{ ...scope, workspaceId: "" }}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Open a workspace before launching a Bot session.",
+      ),
+    );
+    expect(fake.botRun).not.toHaveBeenCalled();
+  });
+
+  it("offers the harness picker in the creation form (reference parity)", async () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <BotCreationForm
+        form={emptyBotCreateForm()}
+        busy={false}
+        onChange={onChange}
+        onCancel={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    const agent = screen.getByLabelText("Agent") as HTMLSelectElement;
+    const options = [...agent.options].map((option) => option.textContent);
+    expect(options).toEqual(
+      expect.arrayContaining(["Claude", "Pi", "OpenCode", "Antigravity", "Codex"]),
+    );
+    // Model stays harness-default unless Pi is picked.
+    expect(
+      (screen.getByLabelText("Model") as HTMLInputElement).disabled,
+    ).toBe(true);
+    fireEvent.change(agent, { target: { value: "pi" } });
+    expect(onChange).toHaveBeenCalledWith({ harnessId: "pi", model: "" });
+    rerender(
+      <BotCreationForm
+        form={{ ...emptyBotCreateForm(), harnessId: "pi" }}
+        busy={false}
+        onChange={onChange}
+        onCancel={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    expect(
+      (screen.getByLabelText("Model") as HTMLInputElement).disabled,
+    ).toBe(false);
+  });
+});

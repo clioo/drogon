@@ -5,8 +5,9 @@
    selection falling back to the first bot, and the fork's Escape chain
    (create form → responsibility form → close the page). `launchBot` keeps
    the fork's no-workspace refusal copy verbatim; with a workspace selected
-   it selects the bot (this repo has no worktree-session launcher yet — the
-   fork's launch-drogon-bot-session path, declared in the PR). Data-layer
+   it dispatches a `bot.run` chat turn with the bot's stored harness
+   overrides (this repo's headless session primitive — the fork's
+   launch-drogon-bot-session tab path is not ported). Data-layer
    adaptations (no zustand store, no window.api): the snapshot, bridge and
    scope are injected by the caller; the reload-after-every-mutation and
    busy-gate rules are the source's; the keep-alive host visibility gate on
@@ -21,6 +22,7 @@ import type {
 } from "./bots-panel-contracts";
 import {
   buildBotCreateBody,
+  buildBotRunHarness,
   emptyBotCreateForm,
   emptyResponsibilityForm,
 } from "./bots-page-model";
@@ -60,6 +62,13 @@ function mintRequestId(prefix: string): string {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/** The chat-turn text Open session dispatches: native wraps it in the bot's
+ *  operating prompt (identity, working style, standing instructions), so a
+ *  short opener is enough — the turn exists to open the session, and its
+ *  wording is what the history/message row carries. */
+export const BOT_OPEN_SESSION_PROMPT =
+  "Hi! Reply briefly to confirm this session is live.";
 
 export function useBotsPageController(deps: BotsPageControllerDeps) {
   const { snapshot, bridge, scope, onClose, onRunResponsibility } = deps;
@@ -304,19 +313,77 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     [busy, onRunResponsibility, localSnapshot, snapshot, load],
   );
 
-  // The fork's launchBot: launching needs a workspace, and the refusal copy
-  // is verbatim. This repo has no worktree-session launcher (the fork's
-  // launch-drogon-bot-session path is not ported), so with a workspace
-  // selected the closest in-surface action is selecting the bot.
+  // Open session (bug-bot-open-session): the fork's launchBot opens a real
+  // harness tab for the bot (launch-drogon-bot-session). This repo's session
+  // primitive is the daemon's headless `bot.run` chat turn (J8), so the click
+  // dispatches one with the bot's STORED harness overrides
+  // (buildBotRunHarness — the same resolution the mount uses for manual
+  // runs), selects the bot, then reloads so the new message/session state
+  // lands. The fork's no-workspace refusal copy stays verbatim (native
+  // resolves the bot's owning workspace only for a workspace-scoped call).
+  // Every other failure — a bridge without botRun (capability withheld),
+  // a daemon-unreachable transport throw, a refused/unsupported outcome —
+  // lands in the shared action-error alert, never a silent no-op.
   const launchBot = useCallback(
     async (bot: { id: string }): Promise<void> => {
+      if (busy) {
+        return;
+      }
       if (!scope || scope.workspaceId === "") {
         setActionError("Open a workspace before launching a Bot session.");
         return;
       }
-      setSelectedBotId(bot.id);
+      const botRun = bridge?.botRun;
+      if (!botRun) {
+        setActionError(
+          "Bot sessions are unavailable: the daemon bridge is not connected. Refresh and retry.",
+        );
+        return;
+      }
+      const live = (localSnapshot ?? snapshot).bots.find(
+        (candidate) => candidate.id === bot.id,
+      );
+      if (!live) {
+        setActionError(
+          "That bot is no longer in the snapshot; refresh and retry.",
+        );
+        return;
+      }
+      setBusy(true);
+      setActionError(null);
+      try {
+        const response = await botRun({
+          ...scope,
+          requestId: mintRequestId("bot-open-session"),
+          botId: bot.id,
+          prompt: BOT_OPEN_SESSION_PROMPT,
+          harness: buildBotRunHarness(
+            live.harnessPolicy.defaultHarness,
+            live.harnessPolicy.explicitModel,
+          ),
+        });
+        if (!response.ok) {
+          setActionError(response.error.message);
+          return;
+        }
+        if (response.result.outcome !== "dispatched") {
+          setActionError(
+            response.result.error ??
+              `The daemon ${response.result.outcome} the session. Refresh and retry.`,
+          );
+          return;
+        }
+        setSelectedBotId(bot.id);
+        await load();
+      } catch (launchFailure) {
+        setActionError(
+          `Could not open the Bot session: ${errorMessage(launchFailure)}`,
+        );
+      } finally {
+        setBusy(false);
+      }
     },
-    [scope],
+    [bridge, scope, busy, localSnapshot, snapshot, load],
   );
 
   return {
