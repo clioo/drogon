@@ -1024,6 +1024,25 @@ async fn automation(
                 Client::decode_checked(&call, "automation.list", check_automation_list)?;
             emit(call, json, || output::automation_list(&list), 0, None)
         }
+        AutomationAction::Show { id } => {
+            let call = client
+                .call(
+                    "automation.show",
+                    json!({ "id": id }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let summary: AutomationSummary =
+                Client::decode_checked(&call, "automation.show", check_automation)?;
+            emit(
+                call,
+                json,
+                || output::automation_line_public(&summary),
+                0,
+                None,
+            )
+        }
         AutomationAction::Run { id } => {
             let call = client
                 .call(

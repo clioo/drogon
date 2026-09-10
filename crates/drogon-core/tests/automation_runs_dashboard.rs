@@ -522,3 +522,29 @@ fn run_detail_rejects_unknown_and_blank_run_ids() {
         "invalid_argument"
     );
 }
+
+#[test]
+fn automation_show_returns_one_record_and_fences_unknown_ids() {
+    let dir = TempDir::new().unwrap();
+    let (engine, workspace_id) = engine_with_workspace(&dir);
+    let created = create_automation(&engine, "show-1", &workspace_id, "0 * * * *");
+    let automation_id = created["id"].as_str().unwrap().to_string();
+
+    let shown = ok(engine.dispatch(request(
+        "show-rpc",
+        "automation.show",
+        json!({"id": automation_id}),
+    )));
+    assert_eq!(shown["id"], json!(automation_id));
+    assert_eq!(shown["name"], json!("auto-show-1"));
+    assert_eq!(shown["workspaceId"], json!(workspace_id));
+
+    assert_eq!(
+        err_code(engine.dispatch(request(
+            "show-missing",
+            "automation.show",
+            json!({"id": "auto-nope"}),
+        ))),
+        "not_found"
+    );
+}

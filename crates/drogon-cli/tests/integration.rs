@@ -2285,3 +2285,45 @@ async fn worktree_set_display_name_and_comment_alias_map_to_update() {
     assert_eq!(request["params"]["title"], Value::Null);
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automation_show_fetches_one_record() {
+    let dir = temp_data_dir("autoshow");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("status") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "hostId": "host-1",
+                    "serviceInstanceId": "svc-1",
+                    "protocol": 1,
+                    "capabilities": ["automation.v1"],
+                    "version": "0.1.0"
+                }),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "auto-1",
+                    "name": "Nightly sweep",
+                    "cron": "0 * * * *",
+                    "workspaceId": "ws-1",
+                    "harness": "pi",
+                    "prompt": "sweep",
+                    "enabled": true,
+                    "nextRunAt": 1_800_000_000.0,
+                    "lastRunAt": null,
+                    "lastRun": null
+                }),
+            )),
+        }),
+    );
+    let output = run_cli(dir.path(), &["automation", "show", "auto-1"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("Nightly sweep"));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "automation.show");
+    assert_eq!(request["params"]["id"], "auto-1");
+    drop(service);
+}

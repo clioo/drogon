@@ -556,6 +556,16 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["Requires the service capability automation.v1."],
         ),
         entry(
+            "automation show",
+            &["automation", "show"],
+            "Show one automation by id",
+            "drogon-cli automation show <ID>",
+            &[],
+            &["ID"],
+            &["drogon-cli automation show auto-1 --json"],
+            &["Unknown ids answer the typed not_found error."],
+        ),
+        entry(
             "automation run",
             &["automation", "run"],
             "Run an automation now (manual trigger, recorded in history)",

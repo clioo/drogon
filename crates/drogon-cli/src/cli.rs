@@ -251,6 +251,12 @@ pub enum AutomationAction {
         override_usage = "drogon-cli automation list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
     )]
     List,
+    /// Show one automation by id
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation show <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    Show { id: String },
     /// Run an automation now (manual trigger, recorded in history)
     #[command(
         args_override_self = true,
@@ -1198,6 +1204,9 @@ impl Cli {
                     }
                 }
                 AutomationAction::List => {}
+                AutomationAction::Show { id } => {
+                    require_nonempty("id", id)?;
+                }
                 AutomationAction::Run { id } => {
                     require_nonempty("id", id)?;
                 }

@@ -430,6 +430,7 @@ impl Engine {
             "bot.delete" => self.bot_delete(request),
             "automation.create" => self.automation_create(request),
             "automation.list" => self.automation_list(&request.params),
+            "automation.show" => self.automation_show(&request.params),
             "automation.update" => self.automation_update(request),
             "automation.delete" => self.automation_delete(request),
             "automation.run_now" => self.automation_run_now(request),
