@@ -20,6 +20,7 @@ pub mod project;
 pub mod tasks;
 pub mod workspace_files;
 pub mod worktree;
+pub mod worktree_issues;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;

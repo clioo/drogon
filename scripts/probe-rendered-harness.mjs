@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { rename } from "node:fs/promises";
+import { PI_MODEL, PI_PROVIDER, PI_MODEL_ID } from "./sealed-model-route.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 import { waitForBridgeObservation } from "./acceptance-bridge-observation.mjs";
 
@@ -10,9 +11,12 @@ export function renderedPiIsReady(root = document) {
   const registry =
     typeof window !== "undefined" ? window.__drogonTerminals : undefined;
   let rendered = "";
+  const sessionId = typeof root === "string" ? root : null;
+  if (sessionId && !registry?.has(sessionId)) return false;
   if (registry && registry.size > 0) {
     const lines = [];
-    for (const terminal of registry.values()) {
+    const terminals = sessionId ? [registry.get(sessionId)] : registry.values();
+    for (const terminal of terminals) {
       const buffer = terminal.buffer.active;
       for (let row = 0; row < buffer.length; row += 1) {
         lines.push(buffer.getLine(row)?.translateToString(true) ?? "");
@@ -65,46 +69,6 @@ export function sessionStripTabGone({ id }) {
     document.querySelector(
       `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${CSS.escape(id)}"]`,
     ) === null
-  );
-}
-
-// Local-only model fixture for every agent launch in acceptance: never a
-// paid model.
-const PI_MODEL = "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4";
-const PI_PROVIDER = "dgx-spark";
-const PI_MODEL_ID = "qwen3.8-flash-next-nvidia-nvfp4";
-
-/**
- * Seeds the isolated `PI_CODING_AGENT_DIR` (a bare temp dir in acceptance)
- * with the team-local provider route so Pi can boot the local model: the
- * repo's QA doctrine runs in-app sessions only on this model, and the key
- * is the `"local"` placeholder, never a credential. Without it Pi reports
- * `Unknown provider` and exits before rendering.
- */
-async function seedLocalPiProvider(dataDir) {
-  const piDir = path.join(path.dirname(dataDir), "pi");
-  await mkdir(piDir, { recursive: true });
-  await writeFile(
-    path.join(piDir, "models.json"),
-    JSON.stringify({
-      providers: {
-        [PI_PROVIDER]: {
-          baseUrl: "http://100.85.64.21:9292/v1",
-          api: "openai-completions",
-          apiKey: "local",
-          models: [
-            {
-              id: PI_MODEL_ID,
-              name: PI_MODEL_ID,
-              reasoning: false,
-              input: ["text"],
-              contextWindow: 131072,
-              maxTokens: 4096,
-            },
-          ],
-        },
-      },
-    }),
   );
 }
 
@@ -190,7 +154,12 @@ export async function probeRenderedHarness({
     .getByRole("button", { name: "Back to app", exact: true })
     .click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
-  await seedLocalPiProvider(dataDir);
+  // The acceptance owner already seeded the same private fixture used by J1.
+  const beforeIds = await page.evaluate(async (id) => {
+    const reply = await window.drogon.sessions(id);
+    if (!reply.ok) throw new Error(reply.error.message);
+    return reply.result.sessions.map((session) => session.id);
+  }, workspaceId);
   // A click on the Pi row launches at once: no launch dialog may appear.
   await page
     .getByRole("button", { name: "New tab", exact: true })
@@ -206,20 +175,20 @@ export async function probeRenderedHarness({
   // Pi's `--approve`, and the stored `provider/model-id` shorthand splits
   // into the separate flags this Pi build requires (it rejects the
   // combined `--model provider/id` pattern).
-  const launched = await page.evaluate(async (id) => {
+  const launched = await page.evaluate(async ({ id, beforeIds }) => {
     const deadline = Date.now() + 15000;
     for (;;) {
       const result = await window.drogon.sessions(id);
       if (!result.ok) throw new Error(result.error.message);
       const live = result.result.sessions.find(
-        (session) => session.verdict === "live",
+        (session) => session.verdict === "live" && session.harnessId === "pi" && !beforeIds.includes(session.id),
       );
       if (live) return live;
       if (Date.now() > deadline)
         throw new Error("no live session after the Pi row launch");
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-  }, workspaceId);
+  }, { id: workspaceId, beforeIds });
   assert.ok(launched?.incarnation);
   assert.ok(
     launched.args.includes("--approve"),
@@ -227,9 +196,9 @@ export async function probeRenderedHarness({
   );
   assert.ok(
     launched.args.includes("--provider") &&
-      launched.args.includes("dgx-spark") &&
+      launched.args.includes(PI_PROVIDER) &&
       launched.args.includes("--model") &&
-      launched.args.includes("qwen3.8-flash-next-nvidia-nvfp4"),
+      launched.args.includes(PI_MODEL_ID),
     `Pi row launch must carry the stored provider/model, got ${JSON.stringify(launched.args)}`,
   );
   const identity = {
@@ -248,7 +217,7 @@ export async function probeRenderedHarness({
     },
     identity,
   );
-  await page.waitForFunction(renderedPiIsReady);
+  await page.waitForFunction(renderedPiIsReady, launched.id);
   await page.screenshot({
     path: path.join(output, "pi-running.png"),
     animations: "disabled",

@@ -430,6 +430,155 @@ fn unknown_workspace_is_refused_as_a_structured_receipt() {
     assert_eq!(error.code, "unauthorized");
 }
 
+// ---------------------------------------------------------------------
+// Owner-resolution parity with `bot.delete` / `bot.responsibility_create`
+// / `bot.responsibility_delete` (coordinator review gap: bot.run's own
+// workspace resolution was not yet migrated to
+// `bot_mutation_rpc::resolve_bot_owning_workspace`'s fallback). Mirrors
+// `bot_delete.rs`'s `delete_succeeds_with_the_host_global_empty_workspace_scope`
+// and `delete_succeeds_when_the_caller_names_a_different_registered_workspace`.
+// ---------------------------------------------------------------------
+
+/// Exactly the scope App.tsx's botsScope sends when no workspace is
+/// selected (#348's host-global fallback): `workspaceId: ""`. Both the
+/// replay-time `authorize` gate and the fresh `prepare` stage must admit
+/// it and resolve the bot's real home workspace -- never `unknownWorkspace`.
+#[test]
+fn bot_run_succeeds_with_the_host_global_empty_workspace_scope() {
+    let (_dir, _engine, conn, host) = fixture();
+    seed_workspace(&conn, &host);
+    seed_scheduled_bot(&conn, &host, true);
+
+    let request =
+        bot_run_rpc::parse_bot_run_request(&params(&host, json!({"workspaceId": ""}))).unwrap();
+
+    // The replay-time gate must admit the host-global sentinel too --
+    // otherwise a saved receipt for a host-global run could never replay.
+    bot_run_rpc::revalidate_run_scope(&conn, &host, &request)
+        .expect("host-global scope must be admitted on replay, not treated as unknownWorkspace");
+
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
+    let BotRunPrepare::ReadyResponsibility { plan, workspace_id } = prepared else {
+        panic!("expected Ready (resolved via the bot's own owning workspace), got {prepared:?}");
+    };
+    assert_eq!(
+        workspace_id, "ws-1",
+        "host-global scope must resolve to the bot's actual owning workspace"
+    );
+    assert_eq!(plan.folder, "/repo");
+    assert_eq!(
+        plan.params["workspaceId"],
+        json!("ws-1"),
+        "the staged shell-fixture session launch params must target the bot's true owning \
+         workspace, not the empty host-global assertion"
+    );
+}
+
+/// A second, validly-registered workspace under the same host -- the user
+/// switched to it while the Bots panel, holding this Bot, stayed mounted
+/// (App.tsx's keep-alive). The asserted scope is a real, host-owned
+/// workspace (so the authorize gate admits it, unlike a typo/foreign-host
+/// id), but it is NOT the bot's own home -- owner resolution must still
+/// route to `ws-1`, never silently run the bot's turn against `ws-2`.
+#[test]
+fn bot_run_succeeds_when_the_caller_names_a_different_registered_workspace() {
+    let (_dir, _engine, conn, host) = fixture();
+    seed_workspace(&conn, &host);
+    seed_scheduled_bot(&conn, &host, true);
+    conn.execute(
+        "INSERT INTO workspaces (id, path, name, kind, host_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params!["ws-2", "/other-repo", "other-repo", "folder", &host, "2026-09-09T00:00:00Z"],
+    )
+    .unwrap();
+
+    let request =
+        bot_run_rpc::parse_bot_run_request(&params(&host, json!({"workspaceId": "ws-2"}))).unwrap();
+
+    bot_run_rpc::revalidate_run_scope(&conn, &host, &request)
+        .expect("a real, host-owned workspace must be admitted even when it isn't the bot's own");
+
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
+    let BotRunPrepare::ReadyResponsibility { plan, workspace_id } = prepared else {
+        panic!("expected Ready (resolved via the bot's own owning workspace), got {prepared:?}");
+    };
+    assert_eq!(
+        workspace_id, "ws-1",
+        "a stale/mismatched-but-valid workspace assertion must still resolve to the bot's real \
+         owning workspace, never the caller's stale selection"
+    );
+    assert_eq!(plan.folder, "/repo");
+    assert_eq!(plan.params["workspaceId"], json!("ws-1"));
+}
+
+/// The bot-id-based fallback must never manufacture a bot that does not
+/// exist: a genuinely unknown bot under the host-global scope is still a
+/// structured `unknownBot` refusal, not a hard error and not a false Ready.
+#[test]
+fn bot_run_host_global_scope_still_refuses_a_bot_id_that_genuinely_does_not_exist() {
+    let (_dir, _engine, conn, host) = fixture();
+    seed_workspace(&conn, &host);
+    // No bot seeded at all.
+
+    let request = bot_run_rpc::parse_bot_run_request(&params(
+        &host,
+        json!({"workspaceId": "", "botId": "no-such-bot"}),
+    ))
+    .unwrap();
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
+    let BotRunPrepare::Refused {
+        workspace_id,
+        refusal,
+        error,
+    } = prepared
+    else {
+        panic!("expected Refused, got {prepared:?}");
+    };
+    assert_eq!(workspace_id, "");
+    assert_eq!(
+        refusal,
+        json!({"type": "bot", "kind": "unknownBot", "botId": "no-such-bot"})
+    );
+    assert_eq!(error, "bot no-such-bot not found");
+}
+
+/// The empty-workspace-id benefit of the doubt must never paper over a
+/// genuinely mismatched asserted HOST -- that defense (`ForeignAssertedHost`)
+/// is unrelated to which workspace was named and must still fire.
+#[test]
+fn bot_run_host_global_scope_still_refuses_a_foreign_asserted_host() {
+    let (_dir, _engine, conn, host) = fixture();
+    seed_workspace(&conn, &host);
+    seed_scheduled_bot(&conn, &host, true);
+
+    let request = bot_run_rpc::parse_bot_run_request(&params(
+        &host,
+        json!({"workspaceId": "", "hostId": "host-evil"}),
+    ))
+    .unwrap();
+
+    let error = bot_run_rpc::revalidate_run_scope(&conn, &host, &request).unwrap_err();
+    assert_eq!(error.code, "unauthorized");
+
+    let prepared =
+        bot_run_rpc::authorized_prepare(&conn, &host, "req-1", &request, 1_797_724_800.0).unwrap();
+    let BotRunPrepare::Refused { refusal, .. } = prepared else {
+        panic!("expected Refused, got {prepared:?}");
+    };
+    assert_eq!(
+        refusal,
+        json!({
+            "type": "workspace",
+            "kind": "foreignWorkspaceHost",
+            "workspaceId": "",
+            "assertedHostId": "host-evil",
+            "currentHostId": host,
+        })
+    );
+}
+
 /// REQUIRED PROOF: an owned `Ready` plan from [`bot_run_rpc::authorized_prepare`]
 /// outlives the `&Connection` scope that produced it -- `execute` runs with
 /// no `Connection` in scope at all, and `record` reopens one afterward.

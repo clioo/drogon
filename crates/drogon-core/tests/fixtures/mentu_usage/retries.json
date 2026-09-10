@@ -1,0 +1,63 @@
+{
+  "run_id": "run_20260907D_retries001",
+  "recipe_name": "usage-retries",
+  "started_at": "2026-09-07T22:00:00Z",
+  "ended_at": "2026-09-07T22:01:30Z",
+  "outcome": "ok",
+  "cloud_mode": "local-only",
+  "recipe_ref": ".mentu/recipes/usage-retries.json",
+  "events_file": "events.jsonl",
+  "state_file": "state.json",
+  "baseline_file": "baseline.json",
+  "steps": [
+    {
+      "label": "recover",
+      "backend": "pi",
+      "model": "model-a",
+      "outcome": "failed",
+      "local_complete": false,
+      "exit_code": 1,
+      "duration_seconds": 22,
+      "attempts": 1,
+      "input_tokens": 100,
+      "output_tokens": 50,
+      "output_file": "recover.stdout",
+      "error_file": "recover.stderr",
+      "warnings": ["Completion policy was not satisfied"],
+      "hooks": []
+    },
+    {
+      "label": "recover",
+      "backend": "pi",
+      "model": "model-b",
+      "outcome": "ok",
+      "completion_method": "provider_complete",
+      "local_complete": true,
+      "exit_code": 0,
+      "duration_seconds": 18,
+      "attempts": 2,
+      "input_tokens": 40,
+      "output_file": "recover2.stdout",
+      "error_file": "recover2.stderr",
+      "warnings": [],
+      "hooks": []
+    },
+    {
+      "label": "verify",
+      "backend": "shell",
+      "model": "model-a",
+      "outcome": "ok",
+      "local_complete": true,
+      "exit_code": 0,
+      "duration_seconds": 3,
+      "attempts": 1,
+      "input_tokens": 10,
+      "output_tokens": 5,
+      "output_file": "verify.stdout",
+      "error_file": "verify.stderr",
+      "warnings": [],
+      "hooks": []
+    }
+  ],
+  "hooks": []
+}

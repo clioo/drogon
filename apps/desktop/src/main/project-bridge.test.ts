@@ -74,7 +74,14 @@ describe("dispatchProjectRequest", () => {
       },
     );
     expect(seen[0]?.method).toBe("worktree.create");
-    expect(result).toEqual(created);
+    // Workspace Options metadata (schema v5) defaults honestly onto a
+    // response that predates those columns -- isPinned/isArchived/
+    // sortOrder are non-optional on the wire, so the validated result
+    // carries them even though this fixture's raw daemon response didn't.
+    expect(result).toEqual({
+      ok: true,
+      result: { ...created.result, isPinned: false, isArchived: false, sortOrder: 0 },
+    });
   });
 
   test("forwards the Advanced worktree fields without dropping them", async () => {
@@ -225,7 +232,12 @@ describe("dispatchProjectRequest", () => {
         params: { worktreeId: "t1", name: "My feature" },
       },
     ]);
-    expect(result).toEqual(renamed);
+    // See "forwards worktree.create with its params verbatim" above for
+    // why isPinned/isArchived/sortOrder default onto the validated result.
+    expect(result).toEqual({
+      ok: true,
+      result: { ...renamed.result, isPinned: false, isArchived: false, sortOrder: 0 },
+    });
   });
 
   test("rejects worktree.rename with a blank name before reaching the service", async () => {
@@ -266,7 +278,19 @@ describe("dispatchProjectRequest", () => {
       { projectId: "p1" },
       async () => listed,
     );
-    expect(result).toEqual(listed);
+    // See "forwards worktree.create with its params verbatim" above for
+    // why isPinned/isArchived/sortOrder default onto the validated result.
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        worktrees: listed.result.worktrees.map((worktree) => ({
+          ...worktree,
+          isPinned: false,
+          isArchived: false,
+          sortOrder: 0,
+        })),
+      },
+    });
   });
 
   test("registry watcher pushes exactly when the revision moves (issue #146)", async () => {
@@ -367,6 +391,18 @@ describe("dispatchProjectRequest", () => {
       { projectId: "p1" },
       async () => listed,
     );
-    expect(result).toEqual(listed);
+    // See "forwards worktree.create with its params verbatim" above for
+    // why isPinned/isArchived/sortOrder default onto the validated result.
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        worktrees: listed.result.worktrees.map((worktree) => ({
+          ...worktree,
+          isPinned: false,
+          isArchived: false,
+          sortOrder: 0,
+        })),
+      },
+    });
   });
 });

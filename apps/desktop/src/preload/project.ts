@@ -22,6 +22,9 @@ export const project: ProjectBridge = {
   worktreeRemove: (value) => ipcRenderer.invoke("drogon:worktreeRemove", value),
   worktreeRename: (value) => ipcRenderer.invoke("drogon:worktreeRename", value),
   worktreeUpdate: (value) => ipcRenderer.invoke("drogon:worktreeUpdate", value),
+  worktreeIssueLinks: (value) => ipcRenderer.invoke("drogon:worktreeIssueLinks", value),
+  worktreeLinkIssue: (value) => ipcRenderer.invoke("drogon:worktreeLinkIssue", value),
+  worktreeUnlinkIssue: (value) => ipcRenderer.invoke("drogon:worktreeUnlinkIssue", value),
   // Issue #146: registry pushes from main's `project.changes` poller (same
   // subscribe/unsubscribe shape as preload/notifications.ts).
   onProjectsChanged: (listener: (revision: string) => void) => {

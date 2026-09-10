@@ -22,6 +22,7 @@ import { jira } from "./jira";
 import { mentu } from "./mentu";
 import { botBridgeExtras } from "./bot";
 import { appMenu } from "./app-menu";
+import { ui } from "./workspace-ui-preferences";
 import { skills } from "./skills";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
@@ -120,8 +121,6 @@ Object.assign(
   botBridgeExtras,
   { appMenu },
   { filesWatch },
-  // Skills settings bridge (additive): Settings "Agent skills" panels read
-  // the bundled CLI's guide catalog plus installed state over home roots.
-  { skills },
+  { ui, skills },
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

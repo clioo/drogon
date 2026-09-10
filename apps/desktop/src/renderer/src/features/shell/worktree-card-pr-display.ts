@@ -5,6 +5,15 @@
    has no PR link store yet, so the card accepts an already-known PR and
    this module projects exactly that known-PR chip. Pure, unit-tested.) */
 
+import type { Worktree } from "../../../../shared/session-contract";
+import type { TaskPullRequest } from "../../../../shared/tasks-contract";
+import { findPullRequestForWorktree } from "../../../../shared/workspace-pr-status";
+
+export function resolveCardPullRequest(worktree: Worktree, pulls: readonly TaskPullRequest[]): WorktreeCardPrDisplay | null {
+  const pull = findPullRequestForWorktree(worktree, pulls);
+  return pull ? { provider: "github", number: pull.number, title: pull.title, state: pull.state, url: pull.url } : null;
+}
+
 export type WorktreeCardPrDisplay = {
   provider: "github" | "gitlab" | "bitbucket" | "azure-devops" | "gitea";
   number: number;
