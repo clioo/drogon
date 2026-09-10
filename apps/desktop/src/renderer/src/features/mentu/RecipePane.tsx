@@ -5,6 +5,7 @@
 // carries the `MentuBridge` and workspace id instead of a worktree id.
 
 import type { MentuBridge } from "../../../../shared/mentu-contract";
+import type { FileBridge } from "../../../../shared/file-contract";
 import { RecipePaneContent } from "./RecipePaneContent";
 import { RecipePaneHeader } from "./RecipePaneHeader";
 import { useMentuPaneController } from "./use-recipe-pane-controller";
@@ -12,11 +13,21 @@ import { useMentuPaneController } from "./use-recipe-pane-controller";
 export function RecipePane({
   bridge,
   workspaceId,
+  fileBridge = null,
+  hostId = null,
+  workspacePath = null,
 }: {
   bridge: MentuBridge;
   workspaceId: string;
+  fileBridge?: FileBridge | null;
+  hostId?: string | null;
+  workspacePath?: string | null;
 }): React.JSX.Element {
-  const controller = useMentuPaneController(bridge, workspaceId);
+  const controller = useMentuPaneController(bridge, workspaceId, {
+    fileBridge,
+    hostId,
+    workspacePath,
+  });
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-background" data-testid="recipe-pane">
       <RecipePaneHeader controller={controller} />

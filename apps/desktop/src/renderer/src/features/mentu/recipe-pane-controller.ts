@@ -20,6 +20,7 @@ import type {
   MentuRuntimeInfo,
   MentuStepEvidence,
 } from "../../../../shared/mentu-contract";
+import type { FileBridge } from "../../../../shared/file-contract";
 import type { Harness } from "../../../../shared/session-contract";
 import type { MentuPaneMode } from "../../../../shared/persistence-contracts/mentu-pane-types";
 import { buildRecipeGraph, type RecipeGraph } from "./recipe-graph";
@@ -43,11 +44,36 @@ import {
   type MentuDraftState,
 } from "./mentu-session-draft-state";
 import {
+  describeMentuRecipeDirectory,
+  invalidMentuRecipes,
+  probeMentuRecipeDirectory,
+  type MentuInvalidRecipe,
+  type MentuRecipeDirectoryStatus,
+} from "./recipe-directory-state";
+import {
   updateRecipeStepDocument,
   type RecipeStepDraft,
 } from "./recipe-pane-editor";
 
 const POLL_INTERVAL_MS = 750;
+
+/** The starter recipe the empty state offers to create: one deterministic
+ *  shell step, runnable by the pinned runtime without any model inference. */
+export function STARTER_RECIPE(name: string) {
+  return {
+    name,
+    description:
+      "Starter recipe created by Drogon. Edit the step, then Review and run.",
+    steps: [
+      {
+        label: "hello",
+        backend: "shell",
+        prompt: "printf 'Hello from Mentu\\n'",
+        timeout: 30,
+      },
+    ],
+  };
+}
 
 export type MentuReview = {
   recipeName: string;
@@ -67,6 +93,26 @@ export type MentuPaneController = {
   /** Re-runs the real recipe-list and runtime-info loads (the header's
    *  refresh affordance). */
   refreshRecipes: () => void;
+  /** Absolute workspace root, for showing the real recipes path. */
+  workspacePath: string | null;
+  /** Observed state of this workspace's `.mentu/recipes` directory
+   *  (missing / empty / files / unreadable / unknown), so the empty state
+   *  can say which situation the user is actually in. */
+  recipesDirectory: MentuRecipeDirectoryStatus;
+  directorySummary: string;
+  /** Every recipe file the daemon refused, with filename and reason. */
+  invalidRecipes: MentuInvalidRecipe[];
+  /** Human path of the workspace's recipe directory (absolute when the
+   *  workspace path is known). */
+  recipesPathLabel: string;
+  /** True when the surface can actually create the starter recipe (real
+   *  files write available for this workspace). */
+  canCreateStarter: boolean;
+  creatingStarter: boolean;
+  createStarterError: string | null;
+  /** Writes `.mentu/recipes/starter.json` (next free number if taken)
+   *  through the real files write, then selects it. */
+  createStarterRecipe: () => Promise<void>;
   selectedRecipeId: string | null;
   setSelectedRecipeId: (recipeId: string | null) => void;
   recipe: MentuRecipeDetail | null;
@@ -134,6 +180,14 @@ export type MentuPaneController = {
 export function useMentuPaneController(
   bridge: MentuBridge,
   workspaceId: string,
+  options?: {
+    /** Workspace files bridge: powers the empty state's honest directory
+     *  probe and the starter-recipe creation. Absent (or the files
+     *  capability withheld) degrades to saying less, never to guessing. */
+    fileBridge?: FileBridge | null;
+    hostId?: string | null;
+    workspacePath?: string | null;
+  },
 ): MentuPaneController {
   const [state, setState] = useMentuState(workspaceId);
   const harnessCatalog = useHarnessCatalog();
@@ -198,6 +252,27 @@ export function useMentuPaneController(
       cancelled = true;
     };
   }, [bridge, workspaceId, recipesGeneration]);
+
+  // The empty state names the real situation on disk (missing directory /
+  // empty directory / files that failed to parse), so it probes the actual
+  // `.mentu/recipes` directory once per recipe-list generation — the same
+  // moments the catalog itself reloads.
+  const fileBridge = options?.fileBridge ?? null;
+  const hostId = options?.hostId ?? null;
+  const workspacePath = options?.workspacePath ?? null;
+  const [recipesDirectory, setRecipesDirectory] =
+    useState<MentuRecipeDirectoryStatus>({ kind: "unknown" });
+  useEffect(() => {
+    let cancelled = false;
+    void probeMentuRecipeDirectory(fileBridge, { hostId, workspaceId }).then(
+      (status) => {
+        if (!cancelled) setRecipesDirectory(status);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [fileBridge, hostId, workspaceId, recipesGeneration]);
 
   useEffect(() => {
     let cancelled = false;
@@ -320,6 +395,55 @@ export function useMentuPaneController(
   const selectedNode = graph?.nodes.find((node) => node.id === state.selectedNodeId) ?? null;
   const validEntries = useMemo(() => recipes.filter((entry) => entry.valid), [recipes]);
   const invalidCount = recipes.length - validEntries.length;
+  const invalidRecipes = useMemo(() => invalidMentuRecipes(recipes), [recipes]);
+  const directorySummary = useMemo(
+    () => describeMentuRecipeDirectory(recipesDirectory, recipes),
+    [recipesDirectory, recipes],
+  );
+  const recipesPathLabel = workspacePath
+    ? `${workspacePath.replace(/\/+$/, "")}/.mentu/recipes`
+    : ".mentu/recipes";
+
+  // The empty state's way forward: create a real starter recipe in the real
+  // directory through the workspace's own files write (it creates parent
+  // directories), then select it so the surface immediately shows the
+  // graph. Deterministic naming: `starter.json`, then `starter-2.json`, …
+  // — never an overwrite of an existing recipe file.
+  const [creatingStarter, setCreatingStarter] = useState(false);
+  const [createStarterError, setCreateStarterError] = useState<string | null>(
+    null,
+  );
+  const canCreateStarter = fileBridge !== null && hostId !== null;
+  const createStarterRecipe = useCallback(async () => {
+    if (!fileBridge || hostId === null) return;
+    setCreatingStarter(true);
+    setCreateStarterError(null);
+    try {
+      const taken = new Set(recipes.map((recipe) => recipe.id));
+      let name = "starter";
+      let suffix = 1;
+      while (taken.has(`${name}.json`)) {
+        suffix += 1;
+        name = `starter-${suffix}`;
+      }
+      const fileName = `${name}.json`;
+      const written = await fileBridge.fileWrite({
+        hostId,
+        workspaceId,
+        path: `.mentu/recipes/${fileName}`,
+        content: `${JSON.stringify(STARTER_RECIPE(name), null, 2)}\n`,
+        requestId: `mentu-starter-${fileName}-${Date.now()}`,
+      });
+      if (!written.ok) {
+        setCreateStarterError(written.error.message);
+        return;
+      }
+      setState({ selectedRecipeId: fileName, selectedNodeId: null });
+      setRecipesGeneration((value) => value + 1);
+    } finally {
+      setCreatingStarter(false);
+    }
+  }, [fileBridge, hostId, recipes, setState, workspaceId]);
 
   // The effective draft text: the per-path draft when one exists, else the
   // saved bytes. `state.draftSource` mirrors it for the panel's read-only
@@ -674,6 +798,15 @@ export function useMentuPaneController(
     validEntries,
     invalidCount,
     refreshRecipes,
+    workspacePath,
+    recipesDirectory,
+    directorySummary,
+    invalidRecipes,
+    recipesPathLabel,
+    canCreateStarter,
+    creatingStarter,
+    createStarterError,
+    createStarterRecipe,
     selectedRecipeId: state.selectedRecipeId,
     setSelectedRecipeId,
     recipe,

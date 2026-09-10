@@ -61,7 +61,11 @@ export function RecipePaneHeader({
             </p>
           </div>
         </div>
-        <div className="ml-auto flex min-w-[220px] flex-wrap items-center gap-2">
+        {/* Why min(220px,100%): the fork pins this cluster at 220px, but
+            this surface can legitimately be narrower (Mentu as a tab with
+            both sidebars open); below 220px the cluster becomes the column
+            width and wraps instead of escaping the surface. */}
+        <div className="ml-auto flex min-w-[min(220px,100%)] flex-wrap items-center gap-2">
           <Label htmlFor="recipe-selector" className="sr-only">
             Recipe
           </Label>
@@ -136,6 +140,24 @@ export function RecipePaneHeader({
               {controller.saving ? "Saving…" : "Save"}
             </Button>
           </div>
+        </div>
+      ) : null}
+      {controller.selectedRecipeId && controller.invalidRecipes.length > 0 ? (
+        // Why: a recipe file the daemon refuses must never be silently
+        // skipped just because a valid recipe happens to be selected —
+        // this banner names every refused file with its reason, in the
+        // user's own workspace terms.
+        <div
+          className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-2 text-xs text-muted-foreground"
+          role="status"
+          data-testid="recipe-invalid-banner"
+        >
+          <AlertCircle className="size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 break-words">
+            {controller.invalidRecipes
+              .map((recipe) => `${recipe.path} — ${recipe.issue}`)
+              .join(" · ")}
+          </span>
         </div>
       ) : null}
       {controller.runtimeMessage ? (

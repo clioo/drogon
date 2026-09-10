@@ -4812,12 +4812,16 @@ export function App() {
                   surface renders in the tab area, exactly like the browser
                   and editor panes above, so the tab strip stays mounted and
                   keeps its membership. The panel is the `variant="tab"`
-                  MentuPanel the full-page route used to render, unchanged. */}
+                  MentuPanel the full-page route used to render, unchanged.
+                  Why overflow-hidden: the surface must never paint outside
+                  this column — an overflowing child used to slide beneath
+                  the right sidebar, whose rows then intercepted the clicks
+                  aimed at the hidden controls (Evidence sub-tab). */}
               <div
                 id="mentu-tab-panel"
                 role="tabpanel"
                 aria-labelledby={mentuTabActive ? "mentu-tab" : undefined}
-                className="active-session-panel"
+                className="active-session-panel overflow-hidden"
                 data-testid="mentu-tab-panel"
                 style={{
                   display: mentuTabActive ? undefined : "none",
@@ -4829,6 +4833,9 @@ export function App() {
                       bridge={mentuGatedBridge}
                       workspaceId={current.id}
                       variant="tab"
+                      fileBridge={filesGatedBridge}
+                      hostId={status?.hostId ?? null}
+                      workspacePath={current.path}
                     />
                   </div>
                 ) : null}
@@ -5041,6 +5048,9 @@ export function App() {
                             bridge={mentuGatedBridge}
                             workspaceId={filesProps.workspace.id}
                             variant="panel"
+                            fileBridge={filesGatedBridge}
+                            hostId={filesProps.status?.hostId ?? null}
+                            workspacePath={filesProps.workspace.path}
                           />
                         </section>
                       ),

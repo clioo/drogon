@@ -6,7 +6,7 @@
 // and observed token usage, staying honestly unavailable for everything
 // the record does not carry.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { MentuRecipeDetail, MentuRun } from "../../../../shared/mentu-contract";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
@@ -317,9 +317,90 @@ describe("MetricsView", () => {
 });
 
 describe("EmptyRecipeState", () => {
-  it("counts hidden invalid recipes", () => {
-    render(<EmptyRecipeState invalidCount={2} />);
+  it("keeps the reference fallback copy when nothing is known", () => {
+    render(<EmptyRecipeState invalidCount={0} />);
     expect(screen.getByText("Select a valid workspace recipe to view its graph.")).toBeTruthy();
-    expect(screen.getByText("2 invalid recipe files hidden from selection.")).toBeTruthy();
+  });
+
+  it("names every refused recipe file with its reason (never silently skipped)", () => {
+    render(
+      <EmptyRecipeState
+        invalidCount={2}
+        invalidRecipes={[
+          { id: "broken.json", path: ".mentu/recipes/broken.json", issue: "Invalid JSON: unexpected token" },
+          { id: "thin.json", path: ".mentu/recipes/thin.json", issue: "Recipe is missing \"name\" or \"steps\"." },
+        ]}
+        directorySummary="The .mentu/recipes directory holds 2 files and none of them is a valid recipe."
+        recipesPathLabel="/tmp/workspace/.mentu/recipes"
+      />,
+    );
+    expect(
+      screen.getByText(
+        "The .mentu/recipes directory holds 2 files and none of them is a valid recipe.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("2 recipe files failed validation:")).toBeTruthy();
+    expect(screen.getByText(".mentu/recipes/broken.json")).toBeTruthy();
+    expect(screen.getByText("Invalid JSON: unexpected token")).toBeTruthy();
+    expect(screen.getByText(".mentu/recipes/thin.json")).toBeTruthy();
+    expect(screen.getByText('Recipe is missing "name" or "steps".')).toBeTruthy();
+  });
+
+  it("shows the real recipes path and the CLI status verb", () => {
+    render(
+      <EmptyRecipeState
+        invalidCount={0}
+        recipesPathLabel="/tmp/workspace/.mentu/recipes"
+        workspaceId="ws-123"
+      />,
+    );
+    expect(screen.getByText("/tmp/workspace/.mentu/recipes")).toBeTruthy();
+    expect(
+      screen.getByText("drogon-cli mentu status --workspace ws-123"),
+    ).toBeTruthy();
+  });
+
+  it("blames the host, not the workspace, when the runtime is missing", () => {
+    render(
+      <EmptyRecipeState
+        invalidCount={0}
+        runtimeNote="No Mentu runtime is installed for this data directory."
+      />,
+    );
+    expect(
+      screen.getByText("No Mentu runtime is installed for this data directory."),
+    ).toBeTruthy();
+  });
+
+  it("offers the starter-recipe affordance and reports a failed write", () => {
+    const onCreateStarter = vi.fn();
+    const { rerender } = render(
+      <EmptyRecipeState
+        invalidCount={0}
+        canCreateStarter
+        creatingStarter={false}
+        onCreateStarter={onCreateStarter}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Create a starter recipe" });
+    fireEvent.click(button);
+    expect(onCreateStarter).toHaveBeenCalledTimes(1);
+    rerender(
+      <EmptyRecipeState
+        invalidCount={0}
+        canCreateStarter
+        creatingStarter={false}
+        createStarterError="workspace path's parent is not a directory"
+        onCreateStarter={onCreateStarter}
+      />,
+    );
+    expect(
+      screen.getByText("workspace path's parent is not a directory"),
+    ).toBeTruthy();
+  });
+
+  it("hides the affordance when it cannot really write files", () => {
+    render(<EmptyRecipeState invalidCount={0} canCreateStarter={false} />);
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

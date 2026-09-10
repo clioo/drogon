@@ -37,6 +37,7 @@ import {
   Circle,
   Clock3,
   FileJson,
+  FilePlus2,
   Gauge,
   Loader2,
   Maximize,
@@ -489,15 +490,122 @@ export function MetricsView({ run }: { run: MentuRun | null }): React.JSX.Elemen
   );
 }
 
-export function EmptyRecipeState({ invalidCount }: { invalidCount: number }): React.JSX.Element {
+export function EmptyRecipeState({
+  invalidCount,
+  invalidRecipes = [],
+  directory = { kind: "unknown" },
+  directorySummary,
+  recipesPathLabel,
+  workspaceId = null,
+  runtimeNote = null,
+  canCreateStarter = false,
+  creatingStarter = false,
+  createStarterError = null,
+  onCreateStarter,
+}: {
+  /** Kept from the reference: count of files hidden from selection. */
+  invalidCount: number;
+  /** Full detail for every refused file: filename plus the reason. */
+  invalidRecipes?: {
+    id: string;
+    path: string;
+    issue: string;
+  }[];
+  /** Observed on-disk state of `.mentu/recipes`. */
+  directory?: {
+    kind: "unknown" | "missing" | "empty" | "failed" | "present";
+    fileCount?: number;
+    reason?: string;
+  };
+  /** The honest one-line verdict (see describeMentuRecipeDirectory). */
+  directorySummary?: string;
+  /** Human path of the recipe directory shown as the source of truth. */
+  recipesPathLabel?: string;
+  /** Workspace id, for the real `drogon-cli mentu status` invocation. */
+  workspaceId?: string | null;
+  /** Present when the optional runtime is NOT usable on this host: the
+   *  empty state must blame the host, never the workspace. */
+  runtimeNote?: string | null;
+  canCreateStarter?: boolean;
+  creatingStarter?: boolean;
+  createStarterError?: string | null;
+  onCreateStarter?: () => void;
+}): React.JSX.Element {
   return (
-    <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-      <div>
-        <FileJson className="mx-auto mb-2 size-5" />
-        <p>Select a valid workspace recipe to view its graph.</p>
-        {invalidCount > 0 ? (
-          <p className="mt-1 text-xs">
-            {invalidCount} invalid recipe file{invalidCount === 1 ? "" : "s"} hidden from selection.
+    <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+      <div className="w-full max-w-md text-left">
+        <FileJson className="mx-auto mb-2 block size-5" />
+        <div className="text-center">
+          <p className="font-medium text-foreground">
+            {directorySummary ?? "Select a valid workspace recipe to view its graph."}
+          </p>
+          {recipesPathLabel ? (
+            <p className="mt-2 text-xs">
+              Recipes are read from{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+                {recipesPathLabel}
+              </code>
+            </p>
+          ) : null}
+        </div>
+        {invalidRecipes.length > 0 ? (
+          <div className="mt-3" data-testid="recipe-invalid-list">
+            <p className="text-xs font-medium text-foreground">
+              {invalidCount} recipe file{invalidCount === 1 ? "" : "s"} failed
+              validation:
+            </p>
+            <ul className="mt-1 space-y-1">
+              {invalidRecipes.map((recipe) => (
+                <li
+                  key={recipe.id}
+                  className="rounded-md border border-border bg-card px-2 py-1.5 text-xs"
+                >
+                  <span className="font-mono text-foreground">{recipe.path}</span>
+                  <span className="mt-0.5 block break-words text-muted-foreground">
+                    {recipe.issue}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {runtimeNote ? (
+          <p
+            className="mt-3 text-xs"
+            role="status"
+            data-testid="recipe-empty-runtime-note"
+          >
+            {runtimeNote}
+          </p>
+        ) : null}
+        {canCreateStarter && onCreateStarter ? (
+          <div className="mt-4 flex flex-col items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={creatingStarter}
+              data-testid="recipe-create-starter"
+              onClick={onCreateStarter}
+            >
+              <FilePlus2 />
+              {creatingStarter ? "Creating…" : "Create a starter recipe"}
+            </Button>
+            <p className="text-xs">
+              Writes a runnable one-step recipe into the directory above.
+            </p>
+            {createStarterError ? (
+              <p className="text-xs text-destructive" role="alert">
+                {createStarterError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        {workspaceId ? (
+          <p className="mt-4 text-center text-xs">
+            Check this workspace from a terminal with{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+              drogon-cli mentu status --workspace {workspaceId}
+            </code>
           </p>
         ) : null}
       </div>
