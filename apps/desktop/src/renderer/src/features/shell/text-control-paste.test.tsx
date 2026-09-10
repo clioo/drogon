@@ -207,5 +207,12 @@ describe("Add Project dialog paste (manual-equivalent)", () => {
     expect(
       (screen.getByLabelText(/Name/) as HTMLInputElement).getAttribute("spellcheck"),
     ).toBe("false");
+    // Why: never offer form-history completions over an identifier the
+    // user is inventing.
+    expect(
+      (screen.getByLabelText(/Name/) as HTMLInputElement).getAttribute(
+        "autocomplete",
+      ),
+    ).toBe("off");
   });
 });

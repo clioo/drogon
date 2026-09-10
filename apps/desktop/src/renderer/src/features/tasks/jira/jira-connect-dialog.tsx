@@ -257,6 +257,8 @@ export function TaskPageJiraConnectDialog({
                   clearErrorOnEdit();
                 }}
                 disabled={connectState === "connecting"}
+                // Why: URLs are identifiers, not prose.
+                spellCheck={false}
               />
             </div>
             {needsIdentity ? (
@@ -274,6 +276,8 @@ export function TaskPageJiraConnectDialog({
                     clearErrorOnEdit();
                   }}
                   disabled={connectState === "connecting"}
+                  // Why: usernames/emails are identifiers, not prose.
+                  spellCheck={false}
                 />
               </div>
             ) : null}

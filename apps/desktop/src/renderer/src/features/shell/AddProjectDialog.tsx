@@ -134,6 +134,9 @@ export function AddProjectDialog({
                 placeholder="Derived from the folder when blank"
                 // Why: project names are identifiers like the path above.
                 spellCheck={false}
+                // Why: never offer form-history completions over an
+                // identifier the user is inventing.
+                autoComplete="off"
               />
             </div>
             {error && (

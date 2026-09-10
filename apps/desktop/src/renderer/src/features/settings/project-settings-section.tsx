@@ -169,6 +169,9 @@ export function ProjectSettingsSection({
             rows={6}
             placeholder="pnpm install"
             aria-label="Setup script"
+            // Why (source SetupScriptPromptCardViews): shell commands are
+            // identifiers, not prose — spellcheck underlines are noise.
+            spellCheck={false}
             className="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           />
           <div className="flex items-center justify-between gap-3">
