@@ -729,7 +729,7 @@ pub fn monitors_for_bot(
 /// emitted, never a silent no-change.
 ///
 /// Both sides are canonicalized because the stored root itself may alias
-/// (macOS `/tmp` → `/private/tmp`): comparing a canonical file against a
+/// (e.g. a symlinked system temp dir): comparing a canonical file against a
 /// non-canonical root would false-positive on every read.
 ///
 /// Residual TOCTOU, stated not hidden: a path swapped between the
