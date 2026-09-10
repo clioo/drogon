@@ -89,6 +89,23 @@ describe("formatUiAutomationSchedule", () => {
     expect(formatUiAutomationSchedule("bogus")).toBe("Invalid schedule");
   });
 
+  it("renders zoned schedules verbatim with the zone named", () => {
+    // Explicit zones never convert: the cron wall time is the zone wall.
+    expect(formatUiAutomationSchedule("0 9 * * *", 360, "America/New_York")).toBe(
+      `Daily at ${localTime(9, 0)} (America/New_York)`,
+    );
+    expect(formatUiAutomationSchedule("30 14 * * 2", 0, "Asia/Tokyo")).toBe(
+      `Tuesdays at ${localTime(14, 30)} (Asia/Tokyo)`,
+    );
+    expect(formatUiAutomationSchedule("5 * * * *", 0, "Asia/Tokyo")).toBe(
+      "Hourly at :05 (Asia/Tokyo)",
+    );
+    // Explicit UTC matches the legacy UTC rendering exactly.
+    expect(formatUiAutomationSchedule("0 15 * * *", 360, "UTC")).toBe(
+      formatUiAutomationSchedule("0 15 * * *", 360),
+    );
+  });
+
   it("formats the clock portion with the OS locale, like the reference", () => {
     expect(formatAutomationScheduleTime(9, 5)).toBe(localTime(9, 5));
     expect(

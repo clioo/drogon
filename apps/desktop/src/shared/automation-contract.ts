@@ -21,6 +21,26 @@ const cron = z
   .max(256)
   .regex(/^[^\x00-\x1f\x7f]+$/);
 const harnessId = z.enum(["claude", "pi", "opencode", "antigravity", "codex"]);
+// IANA timezone admission: "UTC" plus any zone the host Intl database
+// resolves. The daemon re-validates against its own tz database and
+// rejects unknown zones instead of silently treating them as UTC.
+const timezone = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[^\x00-\x1f\x7f]+$/)
+  .refine(
+    (value) => {
+      if (value === "UTC") return true;
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: value });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "must be a valid IANA timezone" },
+  );
 // Pinned harness model/provider override (additive): the daemon stores and
 // launches with these when present; absent means the harness default.
 const harnessOption = z
@@ -35,6 +55,7 @@ const harnessOption = z
 export type AutomationCreateInput = {
   name: string;
   cron: string;
+  timezone?: string;
   workspaceId: string;
   harness: "claude" | "pi" | "opencode" | "antigravity" | "codex";
   prompt: string;
@@ -48,6 +69,7 @@ export type AutomationUpdateInput = {
   id: string;
   name?: string;
   cron?: string;
+  timezone?: string;
   workspaceId?: string;
   harness?: "claude" | "pi" | "opencode" | "antigravity" | "codex";
   prompt?: string;
@@ -70,6 +92,8 @@ export type AutomationSummary = {
   id: string;
   name: string;
   cron: string;
+  /** IANA zone the cron wall time evaluates in; absent means legacy UTC. */
+  timezone?: string;
   workspaceId: string | null;
   harness: string;
   model?: string;
@@ -94,6 +118,23 @@ export type AutomationRunView = {
   startedAt: number | null;
   dispatchedAt: number | null;
   createdAt: number;
+};
+
+export type AutomationPreviewSkipped = {
+  /** Local calendar date with no fire, e.g. "2026-03-08". */
+  date: string;
+  /** Local wall time that does not exist, e.g. "02:30". */
+  wallTime: string;
+  reason: string;
+};
+
+export type AutomationPreviewResult = {
+  /** Effective zone the preview evaluated in. */
+  timezone: string;
+  /** Next UTC fire instants (ms epoch), strictly after fromMs. */
+  fires: number[];
+  /** Fixed-time slots skipped as nonexistent local times (DST gaps). */
+  skipped: AutomationPreviewSkipped[];
 };
 
 export type AutomationRunNowResult = {
@@ -150,6 +191,12 @@ export interface AutomationBridge {
     status?: string;
   }): Promise<Result<AutomationRunsAllResult>>;
   run(input: { runId: string }): Promise<Result<AutomationRunDetail>>;
+  preview(input: {
+    cron: string;
+    timezone?: string;
+    fromMs?: number;
+    count?: number;
+  }): Promise<Result<AutomationPreviewResult>>;
 }
 
 // Renderer request envelope for the single `drogon:automation` IPC
@@ -164,6 +211,7 @@ export const automationRequestSchema = z.object({
     "history",
     "runsAll",
     "run",
+    "preview",
   ]),
   params: z.record(z.string(), z.unknown()).default({}),
 });
@@ -174,6 +222,7 @@ export const automationInputSchemas = {
   create: z.object({
     name: z.string().min(1).max(128),
     cron,
+    timezone: timezone.optional(),
     workspaceId: id,
     harness: harnessId,
     prompt: text(32768).refine((value) => value.trim().length > 0),
@@ -186,6 +235,7 @@ export const automationInputSchemas = {
     id,
     name: z.string().min(1).max(128).optional(),
     cron: cron.optional(),
+    timezone: timezone.optional(),
     workspaceId: id.optional(),
     harness: harnessId.optional(),
     prompt: text(32768)
@@ -220,6 +270,12 @@ export const automationInputSchemas = {
       .optional(),
   }),
   run: z.object({ runId: id }),
+  preview: z.object({
+    cron,
+    timezone: timezone.optional(),
+    fromMs: z.number().finite().nonnegative().optional(),
+    count: z.number().int().min(1).max(10).optional(),
+  }),
   list: z.object({}),
 };
 
@@ -236,6 +292,7 @@ const summarySchema = z.object({
   id: z.string(),
   name: z.string(),
   cron: z.string(),
+  timezone: z.string().optional(),
   workspaceId: z.string().nullable(),
   harness: z.string(),
   model: z.string().optional(),
@@ -267,6 +324,12 @@ const outputSnapshotSchema = z.object({
   content: z.string(),
   capturedAt: z.number(),
   truncated: z.boolean(),
+});
+
+const previewSkippedSchema = z.object({
+  date: z.string(),
+  wallTime: z.string(),
+  reason: z.string(),
 });
 
 // Native result validation (main side, after the RPC round trip).
@@ -305,6 +368,11 @@ export const automationResultSchemas = {
       sessionExists: z.boolean(),
     }),
   ),
+  "automation.preview": z.object({
+    timezone: z.string(),
+    fires: z.array(z.number()),
+    skipped: z.array(previewSkippedSchema),
+  }),
 };
 
 declare module "./session-contract" {

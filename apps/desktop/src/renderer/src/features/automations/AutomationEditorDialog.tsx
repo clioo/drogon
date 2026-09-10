@@ -11,7 +11,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { cn } from "./automation-class-names";
 import type { Workspace } from "../../../../shared/session-contract";
-import { previewCronFires } from "./automation-cron-preview";
+import { previewZonedCronFires } from "./automation-cron-preview";
 import {
   draftCron,
   type AutomationDraftErrors,
@@ -19,6 +19,7 @@ import {
 } from "./automation-editor-validation";
 import { formatAutomationDateTime } from "./automation-page-parts";
 import { AutomationSchedulePicker } from "./AutomationSchedulePicker";
+import { AutomationTimezonePicker } from "./AutomationTimezonePicker";
 import {
   AutomationTemplateEmptyState,
   getAutomationTemplates,
@@ -127,7 +128,9 @@ export function AutomationEditorDialog({
 
   const title = isEditing ? "Edit automation" : "Create automation";
   const cron = draftCron(draft);
-  const preview = cron === "" ? null : previewCronFires(cron, Date.now());
+  // Zone-aware preview: the cron wall time evaluates in the draft zone
+  // with the daemon's gap/fold policy, so this list matches the backend.
+  const preview = cron === "" ? null : previewZonedCronFires(cron, draft.timezone, Date.now());
 
   return (
     <div
@@ -247,6 +250,29 @@ export function AutomationEditorDialog({
             </EditorField>
             <div className="min-w-0 space-y-1.5">
               <div className={FIELD_LABEL_CLASS}>
+                <span className="text-muted-foreground">Timezone</span>
+              </div>
+              <AutomationTimezonePicker
+                timezone={draft.timezone}
+                onTimezoneChange={(timezone) =>
+                  onDraftChange((current) => ({
+                    ...current,
+                    timezone,
+                    scheduleWarning: null,
+                  }))
+                }
+              />
+              {errors.timezone ? (
+                <p role="alert" className="text-xs text-destructive">
+                  {errors.timezone}
+                </p>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                The schedule runs at this wall time in the selected zone.
+              </p>
+            </div>
+            <div className="min-w-0 space-y-1.5">
+              <div className={FIELD_LABEL_CLASS}>
                 <span className="text-muted-foreground">Schedule</span>
               </div>
               <AutomationSchedulePicker draft={draft} onDraftChange={onDraftChange} />
@@ -260,7 +286,17 @@ export function AutomationEditorDialog({
                   <span>Next runs: preview unavailable for this expression.</span>
                 ) : (
                   <span>
-                    Next runs: {preview.map((fire) => formatAutomationDateTime(fire)).join(" · ")}
+                    Next runs:{" "}
+                    {preview.fires.map((fire) => formatAutomationDateTime(fire)).join(" · ")}
+                    {preview.skipped.length > 0 ? (
+                      <span>
+                        {" · "}
+                        Skipped:{" "}
+                        {preview.skipped
+                          .map((skip) => `${skip.date} ${skip.wallTime} (DST gap)`)
+                          .join(" · ")}
+                      </span>
+                    ) : null}
                   </span>
                 )}
               </div>
