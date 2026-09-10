@@ -72,6 +72,18 @@ worker-quoted).
       "14a1a6416a61b2a6877e8b21b481e82d971c540c3138d07b62efadebfcc2bc5f  /Users/carlos/orca/workspaces/Drogon/gui-qa-owner-muse/.preflight/gui-qa-owner/bootstrap-outer.sh"
     ]
   },
+  "frozenHelpers": {
+    "note": "Custody owners for every finite stage (rev-2). Hashes observed by direct read 2026-09-10 and equal to the historical record; helper root /Users/carlos/orca/workspaces/Drogon/gui-qa-owner-muse (read-only, never modified, never executed by this lane).",
+    "record": "/tmp/drogon-muse-glm-critical-qa/pr399-grant-hashes.txt",
+    "bootstrap-outer.sh": "14a1a6416a61b2a6877e8b21b481e82d971c540c3138d07b62efadebfcc2bc5f",
+    "gui-qa-outer.mjs": "891a05c9ca9dd74447bd09822b0d87dae3d5975fb80d9977e614843bbbcf7258",
+    "gui-qa-launch.mjs": "5a199d4ec66ab7cdcca78dbe2b2a95b162963f6bd33e2b718e7f9b31ef7a7af3",
+    "primitiveLinkage": "helper-worktree scripts/acceptance-process.mjs, acceptance-foreground.mjs, acceptance-bridge-observation.mjs, live-child-exit-observer.py are sha256-identical to the source.* values above (observed by direct read).",
+    "ownerExtensions": {
+      "E1": "run-dir cwd scope + blessed absolute cargo (gates S7/S8/S9); owner review/tests required",
+      "E2": "bundle-acceptance form: --bundle/--files argv + full-journey sealed-fixture env (gates S11); owner review/tests required"
+    }
+  },
   "execution": {
     "runDir": null,
     "sourceHead": null,

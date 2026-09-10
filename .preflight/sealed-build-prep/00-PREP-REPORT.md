@@ -73,6 +73,19 @@ and separately gated (S10 → coordinator ack of bundle identity → S11).
   only (or not at all). The prepared runtime binary and other worktrees were
   never contacted.
 
+## Rev-2 rework record (frozen-helper custody; supersedes rev-1 wrapper)
+
+Rev-1 `run-stage.mjs` (custom detached-pgroup supervisor) was denied for
+execution and is DELETED in the rework commit (history preserves commit
+`8964399e` as evidence). Denial map D1–D8 lives in `10-WRAPPED-STAGES.md` §0.
+What changed: all finite stages run under the actual frozen helpers
+`bootstrap-outer.sh` + `gui-qa-outer.mjs` (hashes in §1, verified by direct
+read against `/tmp/drogon-muse-glm-critical-qa/pr399-grant-hashes.txt`);
+S0 gates sealed CONTENT (D8); S4 detaches to the exact sealed SHA (D7);
+stages needing foreign cwd (S7/S8/S9) or bundle argv (S11) are specified as
+owner extensions E1/E2 with review/tests — never a competing supervisor.
+Prep docs stay on `codex/sealed-build-prep` and never merge as-is.
+
 ## Left for the gated execution lane
 
 1. Coordinator gates: G1 (approve S0–S8 execution), G2 (ack S9 PACKAGED
