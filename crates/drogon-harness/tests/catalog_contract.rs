@@ -2731,7 +2731,12 @@ fn probe_output_beyond_the_cap_is_drained_not_kept() {
         probe.unverifiable
     );
     let catalog = &probe.catalog;
-    assert_eq!(catalog.status, EnumerationStatus::Enumerated);
+    assert_eq!(
+        catalog.status,
+        EnumerationStatus::Enumerated,
+        "probe note (spawn/version evidence for triage): {:?}",
+        catalog.note
+    );
     assert!(!catalog.entries.is_empty());
     assert!(
         start.elapsed() < Duration::from_secs(20),
