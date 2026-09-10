@@ -83,9 +83,13 @@ fn absent_timezone_means_utc_and_invalid_rejects() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, workspace_id) = engine_with_workspace(&dir);
 
-    // Absent zone: legacy UTC row, no timezone key on the wire.
+    // Canonical wire contract: the summary always carries the effective
+    // zone (normalize stores it, summarize projects it verbatim), so a
+    // legacy row reads "UTC" rather than omitting the key. There is no
+    // absent-vs-null tri-state; pre-zone readers treat an absent key as
+    // UTC and strip the unknown key either way.
     let legacy = create_zoned(&engine, "legacy-1", &workspace_id, "* * * * *", None);
-    assert!(legacy.get("timezone").is_none());
+    assert_eq!(legacy["timezone"], json!("UTC"));
     let legacy_id = legacy["id"].as_str().unwrap().to_string();
 
     // Explicit zone round-trips on the summary.
@@ -197,6 +201,43 @@ fn zoned_gap_skips_and_fold_singles_match_the_renderer_vectors() {
         NY,
         utc_ms(2026, 10, 1, 5, 30) as f64
     ));
+
+    // Interval fold: every repeated wall fires at its first occurrence
+    // only; the later halves never surface as fires or skips.
+    let fold_interval =
+        timezone::preview_fires_in_zone("*/30 1 * * *", NY, utc_ms(2026, 10, 1, 4, 59) as f64, 4)
+            .unwrap();
+    assert_eq!(
+        fold_interval.fires,
+        vec![
+            utc_ms(2026, 10, 1, 5, 0),
+            utc_ms(2026, 10, 1, 5, 30),
+            utc_ms(2026, 10, 2, 6, 0),
+            utc_ms(2026, 10, 2, 6, 30),
+        ]
+    );
+    assert!(fold_interval.skipped.is_empty());
+    // Resume from between the fold halves: both later halves are passed
+    // over, the next fires are the next day's single occurrences.
+    let fold_resume =
+        timezone::preview_fires_in_zone("*/30 1 * * *", NY, utc_ms(2026, 10, 1, 5, 45) as f64, 2)
+            .unwrap();
+    assert_eq!(
+        fold_resume.fires,
+        vec![utc_ms(2026, 10, 2, 6, 0), utc_ms(2026, 10, 2, 6, 30),]
+    );
+    assert!(fold_resume.skipped.is_empty());
+}
+
+/// (Month, day, hour, minute) wall time of a millisecond-epoch instant in
+/// an IANA zone. Year is deliberately excluded: schedule walls recur
+/// yearly, so assertions on them hold no matter when the test runs.
+fn wall_in_zone(ms: f64, zone: &str) -> (u32, u32, u32, u32) {
+    use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
+    let utc = DateTime::<Utc>::from_timestamp((ms / 1000.0).floor() as i64, 0).unwrap();
+    let tz: chrono_tz::Tz = zone.parse().unwrap();
+    let local = utc.with_timezone(&tz).naive_local();
+    (local.month(), local.day(), local.hour(), local.minute())
 }
 
 /// Millisecond epoch for a UTC wall time, taking a 0-based month like
@@ -219,11 +260,14 @@ fn zone_edit_recomputes_the_next_run_in_the_new_zone() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, workspace_id) = engine_with_workspace(&dir);
 
-    // Yearly Jan-1 midnight: UTC and EST (January) fires differ by exactly
-    // 5h no matter when the test runs, so the assertion is deterministic.
+    // Yearly Jan-1 midnight. Wall-clock assertions hold for any run date
+    // (including the Jan-1 00:00-05:00Z window, where the UTC and NY next
+    // fires fall in different years): each stored instant renders as
+    // Jan-1 midnight in its own zone, whatever the year.
     let created = create_zoned(&engine, "edit-1", &workspace_id, "0 0 1 1 *", None);
     let automation_id = created["id"].as_str().unwrap().to_string();
     let utc_next = created["nextRunAt"].as_f64().unwrap();
+    assert_eq!(wall_in_zone(utc_next, "UTC"), (1, 1, 0, 0));
 
     let updated = ok(engine.dispatch(request(
         "edit-2",
@@ -232,7 +276,7 @@ fn zone_edit_recomputes_the_next_run_in_the_new_zone() {
     )));
     assert_eq!(updated["timezone"], json!(NY));
     let ny_next = updated["nextRunAt"].as_f64().unwrap();
-    assert_eq!(ny_next - utc_next, 5.0 * 3_600_000.0);
+    assert_eq!(wall_in_zone(ny_next, NY), (1, 1, 0, 0));
 
     // History survives the zone edit (no rows fabricated by the edit).
     assert!(history(&engine, &automation_id).is_empty());

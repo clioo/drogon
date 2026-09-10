@@ -285,10 +285,20 @@ fn is_superseded(snapshot: &Automation, fresh: &Automation) -> bool {
 
 /// True when the tick's listed snapshot no longer matches the stored
 /// row on an evaluation-relevant field: a schedule edit landed between
-/// the tick's list and this fire. A stale evaluation never dispatches a
-/// superseded schedule -- the fresh row is re-evaluated on the next tick
-/// with its own slot identity -- and never records, so history stays
-/// clean. Reads the row fresh (one row, only for due automations).
+/// the tick's list and this fire.
+///
+/// Best-effort precheck, not an atomic invalidation: it spares the
+/// common case (an edit racing the scheduler thread) a wasted dispatch
+/// and keeps history clean, but an edit landing after this read and
+/// before admission/record still races. Closing that window needs the
+/// expected schedule bound inside the record transactions in `direct.rs`
+/// (a seam outside this slice): `record_direct_outcome`/`record_skip`
+/// would compare the stored row against the evaluated (rrule,
+/// next_run_at, timezone) under their `BEGIN IMMEDIATE` and return a
+/// stale outcome the tick drops. Until that guard exists, a stale
+/// evaluation here neither dispatches nor records, and the fresh row is
+/// re-evaluated on the next tick with its own slot identity. Reads the
+/// row fresh (one row, only for due automations).
 fn is_stale_evaluation(engine: &Engine, automation: &Automation) -> bool {
     let fresh = {
         let conn = engine.db.lock().unwrap();

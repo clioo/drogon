@@ -4,9 +4,10 @@
 //! [`Automation::timezone`](super::records::Automation::timezone); rows
 //! stored without a zone (including every row written before zones
 //! existed) evaluate in UTC, bit-identical to the historical tick. The
-//! renderer builds the same policy on the host Intl database
-//! (`automation-cron-preview.ts`), so editor previews and this backend
-//! agree fire-for-fire.
+//! renderer keeps an Intl-based implementation of the same policy as an
+//! agreement reference (shared fire vectors in
+//! `automation-timezone-preview.test.ts`); the mounted editor consumes
+//! the authoritative `automation.preview` RPC, never local times.
 //!
 //! ## Policy (frozen)
 //!
@@ -22,9 +23,10 @@
 //!   Interval/step/list schedules simply have no fire inside the gap, on
 //!   both sides.
 //! * A repeated local slot (fall-back fold) fires once, at its first
-//!   occurrence: `croner` yields the earlier instant for fixed-time jobs,
-//!   and the strictly-after reschedule from it advances past the later
-//!   half (covered by `automation_timezone.rs`).
+//!   occurrence -- for fixed-time and interval/step/list schedules alike:
+//!   `croner` yields the earlier instant for fixed-time jobs and both
+//!   halves for interval jobs, so [`next_native_fire_ms`] advances past
+//!   every later half (covered by `automation_timezone.rs`).
 //! * Missed-run grace and no-catch-up-storm behavior are unchanged: a gap
 //!   skip is one row per skipped slot, and ordinary missed slots keep the
 //!   existing grace path.
@@ -56,6 +58,11 @@ pub const TIMEZONE_MAX_BYTES: usize = 64;
 /// skip at most one slot per computation; the bound only stops a
 /// pathological loop, never a legitimate schedule.
 const MAX_GAP_HOPS: usize = 4;
+
+/// Upper bound on forward hops past repeated (fall-back fold) slots. A
+/// full two-hour overlap at minute granularity holds 120 second halves;
+/// this covers every real zone with margin while still terminating.
+const MAX_FOLD_HOPS: usize = 512;
 
 /// Validates and canonicalizes a timezone param. `None`/blank means the
 /// legacy UTC behavior. `"UTC"` passes through. Anything else must parse
@@ -152,21 +159,45 @@ fn gap_skip(tz: Tz, date: chrono::NaiveDate, pinned: &PinnedWall) -> GapSkip {
     }
 }
 
-/// Next fire plus the gap skips advanced past to reach it. Preview-only:
-/// storage always keeps the native instant (see [`next_native_fire_ms`])
-/// so a gap slot is still on record when the tick reaches it.
+/// Next cron fire strictly after `after_ms` (millisecond epoch) in an
+/// already-normalized zone: the first valid instant matching the pattern,
+/// with a fixed-time gap slot surfacing as the first instant after the
+/// gap. UTC zones go through the legacy evaluation, so legacy rows
+/// reproduce their stored `next_run_at` exactly. Repeated local slots
+/// (fall-back fold) yield their first occurrence only -- including
+/// interval/step/list schedules, where `croner` alone would also offer
+/// the later half (see [`is_fold_second_half`]). The tick stores this
+/// instant and lets [`is_gap_slot`] turn the gap-shifted ones into
+/// recorded skips when they come due.
 pub fn next_native_fire_ms(cron_expr: &str, timezone: &str, after_ms: f64) -> Option<i64> {
     let zone = resolve_zone(timezone).ok()?;
     let Some(tz) = zone else {
         return super::scheduler::next_fire_ms(cron_expr, after_ms);
     };
     let cron = Cron::from_str(cron_expr.trim()).ok()?;
-    let after_secs = (after_ms / 1000.0).floor() as i64;
-    let start = DateTime::<Utc>::from_timestamp(after_secs, 0)?;
-    let fire = cron
-        .find_next_occurrence(&start.with_timezone(&tz), false)
-        .ok()?;
-    Some(fire.timestamp_millis())
+    let mut after_secs = (after_ms / 1000.0).floor() as i64;
+    for _ in 0..MAX_FOLD_HOPS {
+        let start = DateTime::<Utc>::from_timestamp(after_secs, 0)?;
+        let fire = cron
+            .find_next_occurrence(&start.with_timezone(&tz), false)
+            .ok()?;
+        if !is_fold_second_half(&tz, &fire) {
+            return Some(fire.timestamp_millis());
+        }
+        after_secs = fire.timestamp();
+    }
+    None
+}
+
+/// True when `fire` is the later half of a repeated local wall time: its
+/// wall clock resolves to two instants and `fire` is the second. The
+/// frozen policy runs each repeated slot once, at its first occurrence,
+/// so callers advance past these without recording or dispatching.
+fn is_fold_second_half(tz: &Tz, fire: &DateTime<Tz>) -> bool {
+    match tz.from_local_datetime(&fire.naive_local()) {
+        LocalResult::Ambiguous(_, later) => fire == &later,
+        _ => false,
+    }
 }
 
 /// Next fire plus the gap skips advanced past to reach it. Preview-only:

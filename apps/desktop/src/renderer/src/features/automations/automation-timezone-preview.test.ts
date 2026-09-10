@@ -75,6 +75,37 @@ describe("previewZonedCronFires", () => {
     expect(preview?.skipped).toEqual([]);
   });
 
+  it("fires interval schedules on each repeated wall once, first half only", () => {
+    // Nov 1 01:00 and 01:30 each happen twice (EDT then EST); an
+    // interval schedule takes the first of each, never the later half.
+    const preview = previewZonedCronFires(
+      "*/30 1 * * *",
+      "America/New_York",
+      Date.UTC(2026, 10, 1, 4, 59),
+      4,
+    );
+    expect(preview?.fires).toEqual([
+      Date.UTC(2026, 10, 1, 5, 0), // Nov 1 01:00 EDT
+      Date.UTC(2026, 10, 1, 5, 30), // Nov 1 01:30 EDT
+      Date.UTC(2026, 10, 2, 6, 0), // Nov 2 01:00 EST
+      Date.UTC(2026, 10, 2, 6, 30), // Nov 2 01:30 EST
+    ]);
+    expect(preview?.skipped).toEqual([]);
+    // Resume from between the fold halves: both later halves are passed
+    // over in favor of the next day's single occurrences.
+    const resume = previewZonedCronFires(
+      "*/30 1 * * *",
+      "America/New_York",
+      Date.UTC(2026, 10, 1, 5, 45),
+      2,
+    );
+    expect(resume?.fires).toEqual([
+      Date.UTC(2026, 10, 2, 6, 0),
+      Date.UTC(2026, 10, 2, 6, 30),
+    ]);
+    expect(resume?.skipped).toEqual([]);
+  });
+
   it("fires interval schedules through the gap with no skip rows", () => {
     // Mar 8 06:59 UTC is 01:59 EST; the next minute walls are 03:00+ EDT.
     const preview = previewZonedCronFires(
