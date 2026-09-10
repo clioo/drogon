@@ -1,16 +1,18 @@
 {
   "name": "rewrite-foundation-verification",
-  "description": "Verify the first Drogon rewrite slice on a clean checkout. This does not implement deferred features or certify migration completion. Run only after coordinator integration; never concurrently with source-editing workers. Uses deterministic local builds and tests, not model inference.",
+  "description": "Verify the first Drogon rewrite slice on a clean checkout. This does not implement deferred features or certify migration completion. Run only after coordinator integration; never concurrently with source-editing workers. Uses deterministic local builds and tests, not model inference. Toolchain: Node 24 (pinned runtime preferred) and the packageManager-pinned pnpm resolved project-locally via scripts/recipe-toolchain.sh; never global installs.",
   "type": "sequence",
   "steps": [
     {
       "label": "clean-checkout",
       "backend": "shell",
-      "prompt": "git diff --quiet && git diff --cached --quiet && test -z \"$(git ls-files --others --exclude-standard)\" && node --version && cargo --version && pnpm --version && printf 'CHECKOUT_READY\\n'",
+      "prompt": "git diff --quiet && git diff --cached --quiet && test -z \"$(git ls-files --others --exclude-standard)\" && toolchain_env=$(sh scripts/recipe-toolchain.sh) && eval \"$toolchain_env\" && node --version && cargo --version && pnpm --version && printf 'CHECKOUT_READY\\n'",
       "completion_keyword": "CHECKOUT_READY",
       "expected_changes": [],
       "verify": {
-        "commands": ["git diff --quiet && git diff --cached --quiet"]
+        "commands": [
+          "git diff --quiet && git diff --cached --quiet && test -x .mentu/runtime/toolchain/node_modules/.bin/pnpm"
+        ]
       },
       "timeout": 60
     },
@@ -18,7 +20,7 @@
       "label": "build-and-test",
       "backend": "shell",
       "depends_on": ["clean-checkout"],
-      "prompt": "pnpm install --frozen-lockfile && cargo build --workspace --locked && cargo test --workspace --locked && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo fmt --all -- --check && pnpm typecheck && pnpm --filter @drogon/desktop test && pnpm --filter @drogon/desktop build && printf 'BUILD_VERIFIED\\n'",
+      "prompt": "toolchain_env=$(sh scripts/recipe-toolchain.sh) && eval \"$toolchain_env\" && pnpm install --frozen-lockfile && cargo build --workspace --locked && cargo test --workspace --locked && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo fmt --all -- --check && pnpm typecheck && pnpm --filter @drogon/desktop test && pnpm --filter @drogon/desktop build && printf 'BUILD_VERIFIED\\n'",
       "completion_keyword": "BUILD_VERIFIED",
       "expected_changes": [
         "target/",
@@ -37,7 +39,7 @@
       "label": "core-cli-acceptance",
       "backend": "shell",
       "depends_on": ["build-and-test"],
-      "prompt": "node scripts/accept-core-cli.mjs && printf 'CORE_CLI_VERIFIED\\n'",
+      "prompt": "toolchain_env=$(sh scripts/recipe-toolchain.sh) && eval \"$toolchain_env\" && node scripts/accept-core-cli.mjs && printf 'CORE_CLI_VERIFIED\\n'",
       "completion_keyword": "CORE_CLI_VERIFIED",
       "expected_changes": [".preflight/acceptance/"],
       "verify": {
@@ -51,7 +53,7 @@
       "label": "rendered-desktop-acceptance",
       "backend": "shell",
       "depends_on": ["core-cli-acceptance"],
-      "prompt": "node scripts/accept-desktop.mjs && printf 'DESKTOP_VERIFIED\\n'",
+      "prompt": "toolchain_env=$(sh scripts/recipe-toolchain.sh) && eval \"$toolchain_env\" && node scripts/accept-desktop.mjs && printf 'DESKTOP_VERIFIED\\n'",
       "completion_keyword": "DESKTOP_VERIFIED",
       "expected_changes": [".preflight/acceptance/"],
       "verify": {
