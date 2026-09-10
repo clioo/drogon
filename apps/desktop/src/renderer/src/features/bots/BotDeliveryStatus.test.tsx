@@ -9,7 +9,7 @@ afterEach(cleanup);
 function delivery(overrides: Partial<DeliveryView> = {}): DeliveryView {
   return {
     id: "del-1",
-    conversationId: "bot-1:proj-a",
+    conversationId: "v1:bot-1:proj-a:host-1",
     runId: "req-1",
     state: "pending",
     attempts: 0,

@@ -28,10 +28,28 @@
 //! [`ensure_schema`]), never a second database and never a raw transcript
 //! store: rows carry ids, hashes and states only. Every state change runs
 //! inside the caller's `rusqlite::Transaction` so a delivery row and its
-//! conversation update commit atomically. Until the storage owner adopts
-//! this table into the aggregate migration, [`ensure_schema`] is the
-//! standalone gate (idempotent, reopen-safe); the state-transition rules
-//! here are already final.
+//! conversation update commit atomically.
+//!
+//! Schema status (C05 follow-up correction): [`ensure_schema`] is an
+//! UNADOPTED schema proposal, not production migration acceptance. The
+//! precise integration the storage owner must apply is: add this table's
+//! DDL as the next step of the `bots` component migration chain
+//! (`bots::storage`, component `"bots"`, currently v3 → v4) inside
+//! `apply_pending_steps_in_tx`'s transaction — so the table, the
+//! `schema_versions` bump and the existing downgrade guard
+//! (`check_schema_not_ahead`) commit or roll back together with the
+//! aggregate gate — after which [`ensure_schema`] remains only an
+//! idempotent backstop for standalone tests. Until that handover lands,
+//! no production `Conversation`/delivery rows exist. The `_in_tx` helpers
+//! below take `&Transaction` precisely so the owner can call them inside
+//! that same aggregate transaction; they add no competing storage.
+//!
+//! Lock discipline: [`DeliveryTarget::send`] takes `&Delivery` (a detached
+//! value), never a `Connection` or `Transaction`, and no helper in this
+//! module performs network/target I/O under a DB lock. Production callers
+//! must drop the database guard before the send effect — the same
+//! discipline as `bot.run`'s staged `effect` phase — because the crash
+//! protocol depends on `begin_attempt` committing BEFORE the effect runs.
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -549,11 +567,12 @@ fn write_delivery(tx: &Transaction, delivery: &Delivery) -> Result<(), DeliveryE
     Ok(())
 }
 
-/// Idempotent, reopen-safe schema gate for the deliveries table. Uses
-/// `CREATE TABLE IF NOT EXISTS` only and never touches `schema_versions`:
-/// the aggregate-migration owner adopts this table when the handover
-/// lands; until then this keeps crash-injection tests and early consumers
-/// on the same table shape.
+/// Idempotent, reopen-safe schema gate for the deliveries table. UNADOPTED
+/// PROPOSAL (see the module doc): `CREATE TABLE IF NOT EXISTS` only, never
+/// touching `schema_versions`. The aggregate-migration owner adopts this
+/// DDL as the next `bots`-component step when the handover lands; until
+/// then this keeps crash-injection tests and early consumers on the same
+/// table shape.
 pub fn ensure_schema(conn: &Connection) -> Result<(), DeliveryError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS bot_conversation_deliveries (

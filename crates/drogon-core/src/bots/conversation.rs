@@ -1,4 +1,4 @@
-//! Canonical Bot conversation identity (C05).
+//! Canonical Bot conversation identity (C05, source-partial).
 //!
 //! A logical Bot conversation is the stable `(bot_id, project_id, host_id)`
 //! triple — never a provider-native session. A native
@@ -21,9 +21,43 @@
 //! [`Conversation`] in memory keyed by [`conversation_id`]. The ID
 //! derivation, validation and transition rules here are already final; only
 //! the durable projection is pending handover.
+//!
+//! Compatibility note (C05 follow-up): the first draft of this module
+//! (PR #390) derived `format!("{bot_id}:{project_id}")`, omitting the
+//! host and assuming UUID-shaped ids without delimiters while the
+//! validators admit arbitrary text. That scheme was never persisted —
+//! [`Conversation`] rows are unmounted, no historical migration exists —
+//! and is superseded here by the versioned [`conversation_id`] encoding
+//! below, which covers the full triple and round-trips arbitrary id text.
+//!
+//! C08 renewal-marker contract (proposal — NOT implemented here, owned by
+//! `bots::storage` when the root handover lands):
+//! ```sql
+//! CREATE TABLE bot_conversation_markers (
+//!     conversation_id TEXT PRIMARY KEY, -- per-conversation, never per-Bot
+//!     boundary_seq INTEGER NOT NULL,    -- monotonically increasing
+//!     boundary_date TEXT NOT NULL,      -- local YYYY-MM-DD for the seq
+//!     created_at REAL NOT NULL,
+//!     applied_to_session TEXT           -- nullable native ref, or NULL
+//! );
+//! ```
+//! - Scope is per `conversation_id`: two project conversations of one Bot
+//!   renew independently. A single per-Bot `applied_to_session` pointer is
+//!   rejected — it cannot address two conversations at once.
+//! - Admission is atomic: one transaction reads the marker row, the queue
+//!   head and the active turn; the next-eligible message is admitted only
+//!   when no turn is active, and the marker advance (`boundary_seq + 1`)
+//!   commits in that same transaction.
+//! - A marker write performs zero session/harness I/O and no inference:
+//!   renewal takes effect on the next admitted message's dispatch, never
+//!   mid-active-turn (switching the native link while `active_turn` is
+//!   `Some` is refused).
+//! - No catch-up storm: when several dates elapsed, exactly one boundary
+//!   advances per admission (`boundary_seq + 1`); the writer never
+//!   synthesizes N sessions or replays N days at once, and a bare marker
+//!   never spawns an empty session or inference by itself.
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use super::policy::harness_overrides;
 use super::records::Bot;
@@ -45,11 +79,21 @@ pub enum ConversationError {
     EmptyProjectId,
     EmptyHostId,
     IdTooLong(&'static str),
-    BotMismatch { expected: String, actual: String },
-    ProjectMismatch { expected: String, actual: String },
-    HostMismatch { expected: String, actual: String },
+    BotMismatch {
+        expected: String,
+        actual: String,
+    },
+    ProjectMismatch {
+        expected: String,
+        actual: String,
+    },
+    HostMismatch {
+        expected: String,
+        actual: String,
+    },
     EmptySessionId,
     EmptyIncarnation,
+    EmptyHarness,
     InvalidContextVersion(u64),
     EmptyContextHash,
     ContextHashTooLong,
@@ -59,6 +103,14 @@ pub enum ConversationError {
     NoActiveTurn,
     HasActiveTurn,
     UnknownConversation(String),
+    /// A conversation id that is not a `v1`-encoded triple (wrong version,
+    /// wrong part count, bad percent-escape, or empty decoded parts).
+    /// Never constructed from payload content beyond the offending id,
+    /// which is routing metadata, not a secret.
+    MalformedConversationId(String),
+    /// A frozen context view that does not belong to this Bot, carries a
+    /// zero version, or carries an empty hash.
+    ForeignFrozenContext,
 }
 
 impl std::fmt::Display for ConversationError {
@@ -82,6 +134,7 @@ impl std::fmt::Display for ConversationError {
             ),
             Self::EmptySessionId => write!(f, "native session id must be non-empty"),
             Self::EmptyIncarnation => write!(f, "native incarnation must be non-empty"),
+            Self::EmptyHarness => write!(f, "harness must be non-empty"),
             Self::InvalidContextVersion(v) => {
                 write!(f, "context version {v} is invalid; versions start at 1")
             }
@@ -93,6 +146,12 @@ impl std::fmt::Display for ConversationError {
             Self::NoActiveTurn => write!(f, "no active turn to steer"),
             Self::HasActiveTurn => write!(f, "a turn is already active"),
             Self::UnknownConversation(id) => write!(f, "unknown conversation {id}"),
+            Self::MalformedConversationId(id) => {
+                write!(f, "malformed conversation id {id}")
+            }
+            Self::ForeignFrozenContext => {
+                write!(f, "frozen context does not belong to this conversation")
+            }
         }
     }
 }
@@ -139,28 +198,117 @@ impl ConversationScope {
     }
 }
 
-/// Deterministic logical-conversation id for `(bot_id, project_id)`.
-///
-/// `host_id` is NOT part of the id: one host owns the conversation record
-/// (see [`ConversationScope`]); a second host never reopens the same row,
-/// it resolves its own scope and is rejected on mismatch instead.
-/// Bot and project ids in this tree are UUIDs without `:` so the
-/// concatenation is injective in practice; if a future id charset admits
-/// `:`, this must move to a length-prefixed encoding.
-pub fn conversation_id(bot_id: &str, project_id: &str) -> Result<String, ConversationError> {
-    let scope = ConversationScope::new(bot_id, project_id, "host-placeholder")?;
-    Ok(format!("{}:{}", scope.bot_id, scope.project_id))
+/// Version tag of the [`conversation_id`] encoding. Bumped only when the
+/// encoding itself changes; parsers refuse any other version rather than
+/// guessing.
+pub const CONVERSATION_ID_VERSION: &str = "v1";
+
+/// `encodeURIComponent`-compatible percent-encoding: bytes outside
+/// `A-Za-z0-9` and `-_.!~*'()` are emitted as `%XX` over the UTF-8
+/// encoding, exactly like the renderer's `encodeURIComponent`, so both
+/// sides agree byte-for-byte. Colons, `%` itself and every other
+/// delimiter always escape — encoded parts never contain a raw `:` and
+/// the triple join below stays injective for arbitrary id text.
+fn pct_encode(s: &str) -> String {
+    const BARE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()";
+    let mut out = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        if BARE.contains(&byte) {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
-/// Same as [`conversation_id`] but validates the real host as well and
-/// returns the full scope plus the derived id.
+fn pct_decode(s: &str) -> Result<String, ConversationError> {
+    let malformed = || ConversationError::MalformedConversationId(s.to_string());
+    let bytes = s.as_bytes();
+    let mut raw: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 2 >= bytes.len() {
+                return Err(malformed());
+            }
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).map_err(|_| malformed())?;
+            let byte = u8::from_str_radix(hex, 16).map_err(|_| malformed())?;
+            raw.push(byte);
+            i += 3;
+        } else if bytes[i] == b':' {
+            // A raw colon inside a part means the id was not minted by
+            // [`conversation_id`]; refuse rather than mis-split.
+            return Err(malformed());
+        } else {
+            raw.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(raw).map_err(|_| malformed())
+}
+
+/// Deterministic logical-conversation id for the full
+/// `(bot_id, project_id, host_id)` triple: `v1` plus one
+/// percent-encoded part per scope field. The host IS part of the id — the
+/// same Bot/project on two hosts resolves to two conversations, and each
+/// refuses the other's targets via [`Conversation::check_target`].
+/// Injective for arbitrary id text (validators admit colons, `%` and
+/// unicode): encoded parts never contain a raw `:`.
+pub fn conversation_id(
+    bot_id: &str,
+    project_id: &str,
+    host_id: &str,
+) -> Result<String, ConversationError> {
+    let scope = ConversationScope::new(bot_id, project_id, host_id)?;
+    Ok(format!(
+        "{}:{}:{}:{}",
+        CONVERSATION_ID_VERSION,
+        pct_encode(&scope.bot_id),
+        pct_encode(&scope.project_id),
+        pct_encode(&scope.host_id)
+    ))
+}
+
+/// Inverse of [`conversation_id`]: splits the version tag, decodes each
+/// part and re-validates the triple. Anything not minted by
+/// [`conversation_id`] is [`ConversationError::MalformedConversationId`].
+pub fn parse_conversation_id(id: &str) -> Result<ConversationScope, ConversationError> {
+    let malformed = || ConversationError::MalformedConversationId(id.to_string());
+    let mut parts = id.split(':');
+    let (version, bot, project, host, extra) = (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    );
+    if extra.is_some() {
+        return Err(malformed());
+    }
+    let (version, bot, project, host) = match (version, bot, project, host) {
+        (Some(v), Some(b), Some(p), Some(h)) => (v, b, p, h),
+        _ => return Err(malformed()),
+    };
+    if version != CONVERSATION_ID_VERSION {
+        return Err(malformed());
+    }
+    let scope =
+        ConversationScope::new(&pct_decode(bot)?, &pct_decode(project)?, &pct_decode(host)?)
+            .map_err(|_| malformed())?;
+    Ok(scope)
+}
+
+/// Validates the full triple and returns the scope plus the derived id.
+/// Repeated calls for the same triple return the same id; any scope field
+/// difference yields a different id.
 pub fn resolve_conversation(
     bot_id: &str,
     project_id: &str,
     host_id: &str,
 ) -> Result<(ConversationScope, String), ConversationError> {
     let scope = ConversationScope::new(bot_id, project_id, host_id)?;
-    let id = format!("{}:{}", scope.bot_id, scope.project_id);
+    let id = conversation_id(&scope.bot_id, &scope.project_id, &scope.host_id)?;
     Ok((scope, id))
 }
 
@@ -197,26 +345,45 @@ impl NativeRef {
     }
 }
 
-/// The effective harness/provider/model a turn actually runs with,
-/// resolved once from the Bot's stored policy and persisted here so
-/// recovery stays truthful even if the Bot's policy later changes.
+/// Where the [`EffectiveRuntime`] values came from. A conversation opened
+/// from a stored Bot starts as [`Self::ProposedFromPolicy`]: the Bot's
+/// policy defaults, never yet executed. The owner replaces it with
+/// [`Self::ActualDispatch`] via [`Conversation::record_effective_runtime`]
+/// once `harness.start` runs, carrying the exact params sent — only then
+/// may recovery call the values effective. Rendering a proposed runtime as
+/// effective would mislabel unexecuted defaults as observed truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EffectiveSource {
+    ProposedFromPolicy,
+    ActualDispatch,
+}
+
+/// The harness/provider/model a turn runs with. `source` tells whether the
+/// values are the Bot's stored-policy proposal or the params an actual
+/// dispatch sent; recovery must only trust [`EffectiveSource::ActualDispatch`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectiveRuntime {
     pub harness: String,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub source: EffectiveSource,
 }
 
 impl EffectiveRuntime {
-    pub fn new(
+    /// Proposed runtime from the Bot's stored policy (delegates to
+    /// `bots::policy::harness_overrides` so the provider/model split has a
+    /// single authority). Explicitly NOT yet dispatched: `source` is
+    /// [`EffectiveSource::ProposedFromPolicy`].
+    pub fn proposed(
         harness: &str,
         provider: Option<&str>,
         model: Option<&str>,
     ) -> Result<Self, ConversationError> {
         let harness = js_trim(harness).to_string();
         if harness.is_empty() {
-            return Err(ConversationError::EmptyHostId);
+            return Err(ConversationError::EmptyHarness);
         }
         let clean = |v: &str| {
             let t = js_trim(v);
@@ -237,39 +404,87 @@ impl EffectiveRuntime {
             harness,
             provider,
             model,
+            source: EffectiveSource::ProposedFromPolicy,
         })
     }
 
-    /// Single authority for policy resolution: delegates to
-    /// `bots::policy::harness_overrides` so the conversation never invents
-    /// a second provider/model split.
-    pub fn for_bot(bot: &Bot) -> Self {
+    /// The runtime an actual dispatch sent: same shape, tagged
+    /// [`EffectiveSource::ActualDispatch`]. The owner calls this with the
+    /// exact `harness.start` params (never re-derived from stored policy
+    /// at read time).
+    pub fn dispatched(
+        harness: &str,
+        provider: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<Self, ConversationError> {
+        let mut runtime = Self::proposed(harness, provider, model)?;
+        runtime.source = EffectiveSource::ActualDispatch;
+        Ok(runtime)
+    }
+
+    /// Single authority for the policy split: the Bot's stored defaults as
+    /// a proposal, never as dispatched truth.
+    pub fn proposed_from_bot(bot: &Bot) -> Self {
         let overrides = harness_overrides(bot);
         Self {
             harness: overrides.harness_id,
             provider: overrides.provider,
             model: overrides.model,
+            source: EffectiveSource::ProposedFromPolicy,
         }
     }
 }
 
-/// The context version/hash that produced a result: the identity version
-/// (C04, starts at 1) plus a sha256 over the canonical identity+memory
-/// snapshot, so a resumed conversation can say honestly which context a
-/// result came from.
+/// One frozen memory contribution, mirroring C04's `FrozenMemoryRef`
+/// (C04 source `bots::prompt` at ae8365b): the record id plus the exact
+/// version its content was read at. Scope/project travel with the stored
+/// memory rows; C05 keeps only what recovery must compare.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ContextRef {
+pub struct FrozenMemoryView {
+    pub id: String,
     pub version: u64,
-    pub hash: String,
+}
+
+/// The caller-supplied frozen prompt context: a projection of C04's
+/// `FrozenPromptContext` (`bot_id`, `identity_version`, `frozen_at`,
+/// per-memory id+version, `context_hash`). C05 never recomputes this hash
+/// — it adopts the exact reference the C04 scoped composer
+/// (`build_scoped_operating_prompt`) produced, whose fingerprint covers
+/// the identity version plus each visible memory's id, version, scope,
+/// project and content. Any locally-computed hash over bare contents
+/// would silently diverge from that authority and is refused by
+/// construction (there is no hash constructor here, only adoption).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrozenContextView {
+    pub bot_id: String,
     pub identity_version: u64,
+    pub frozen_at: f64,
+    pub memories: Vec<FrozenMemoryView>,
+    pub context_hash: String,
+}
+
+/// The context reference that produced a result: the adopted C04 frozen
+/// context. A resumed conversation states honestly which identity version
+/// and memory versions a result came from; later identity/memory edits
+/// apply only to subsequent turns, never retroactively.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextRef {
+    pub identity_version: u64,
+    pub frozen_at: f64,
+    pub hash: String,
+    pub memories: Vec<FrozenMemoryView>,
 }
 
 impl ContextRef {
-    pub fn new(version: u64, hash: &str, identity_version: u64) -> Result<Self, ConversationError> {
-        if version == 0 {
-            return Err(ConversationError::InvalidContextVersion(version));
-        }
+    pub fn new(
+        identity_version: u64,
+        frozen_at: f64,
+        hash: &str,
+        memories: Vec<FrozenMemoryView>,
+    ) -> Result<Self, ConversationError> {
         if identity_version == 0 {
             return Err(ConversationError::InvalidContextVersion(identity_version));
         }
@@ -280,27 +495,34 @@ impl ContextRef {
         if hash.len() > MAX_CONTEXT_HASH_LEN {
             return Err(ConversationError::ContextHashTooLong);
         }
+        for memory in &memories {
+            if memory.version == 0 {
+                return Err(ConversationError::InvalidContextVersion(0));
+            }
+        }
         Ok(Self {
-            version,
-            hash,
             identity_version,
+            frozen_at,
+            hash,
+            memories,
         })
     }
-}
 
-/// Canonical sha256 hex over `(identity_version, memory_contents)`.
-/// Pure and deterministic: the same identity+memories always hash the
-/// same, so recovery can compare hashes instead of trusting a version
-/// counter alone.
-pub fn compute_context_hash(identity_version: u64, memory_contents: &[&str]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(identity_version.to_le_bytes());
-    hasher.update([0u8]);
-    for memory in memory_contents {
-        hasher.update(memory.as_bytes());
-        hasher.update([0u8]);
+    /// Adopts a C04 frozen context for `bot_id`: refuses zero versions,
+    /// empty hashes and foreign-bot views rather than recording a context
+    /// the turn was never built from.
+    pub fn adopt(bot_id: &str, frozen: &FrozenContextView) -> Result<Self, ConversationError> {
+        if js_trim(bot_id) != js_trim(&frozen.bot_id) || js_trim(&frozen.bot_id).is_empty() {
+            return Err(ConversationError::ForeignFrozenContext);
+        }
+        Self::new(
+            frozen.identity_version,
+            frozen.frozen_at,
+            &frozen.context_hash,
+            frozen.memories.clone(),
+        )
+        .map_err(|_| ConversationError::ForeignFrozenContext)
     }
-    format!("{:x}", hasher.finalize())
 }
 
 /// Honest native-session liveness. `NoSession` means the conversation holds
@@ -416,11 +638,12 @@ impl Conversation {
         })
     }
 
-    /// Convenience: open directly from a stored [`Bot`] record, resolving
-    /// the effective runtime through the single policy authority and
-    /// stamping the caller's context/run. The Bot's own current session is
-    /// NOT adopted: the conversation starts with no native link until the
-    /// owner attaches the turn's real session via [`Self::attach_native`].
+    /// Convenience: open directly from a stored [`Bot`] record, carrying
+    /// the policy proposal as the provisional runtime (`source` is
+    /// [`EffectiveSource::ProposedFromPolicy` until the owner records the
+    /// actual dispatch). The Bot's own current session is NOT adopted: the
+    /// conversation starts with no native link until the owner attaches
+    /// the turn's real session via [`Self::attach_native`].
     pub fn open_from_bot(
         bot: &Bot,
         project_id: &str,
@@ -429,7 +652,7 @@ impl Conversation {
         context: ContextRef,
         now: f64,
     ) -> Result<Self, ConversationError> {
-        let effective = EffectiveRuntime::for_bot(bot);
+        let effective = EffectiveRuntime::proposed_from_bot(bot);
         Self::open(
             &bot.id,
             project_id,
@@ -503,6 +726,15 @@ impl Conversation {
     pub fn set_context(&mut self, context: ContextRef, now: f64) {
         self.identity_version = context.identity_version;
         self.context = context;
+        self.updated_at = now;
+    }
+
+    /// Records the runtime an actual dispatch sent, replacing the
+    /// provisional proposal. The owner calls this with the exact
+    /// `harness.start` params right after dispatch; recovery trusts only
+    /// [`EffectiveSource::ActualDispatch`] values.
+    pub fn record_effective_runtime(&mut self, effective: EffectiveRuntime, now: f64) {
+        self.effective = effective;
         self.updated_at = now;
     }
 
@@ -601,8 +833,14 @@ impl Conversation {
 }
 
 /// The small resolve/open surface C06/C08/C10/C11 consume instead of
-/// inventing their own launcher. All fields are caller-supplied; the only
-/// computation is the deterministic conversation id.
+/// inventing their own launcher. The runtime fields carry the stored-policy
+/// proposal (source `ProposedFromPolicy`); the owner records the actual
+/// dispatch via [`Conversation::record_effective_runtime`]. `context_hash`
+/// plus `identity_version` plus `memories` must be the exact C04 frozen
+/// context the turn was composed from — never a locally recomputed hash.
+/// (Source pin for the coordinator: `conversation::OpenConversationRequest`
+/// at this commit; C10 consumes `delivery::enqueue_in_tx` with the
+/// resulting [`ContextReferenceDto`].)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenConversationRequest {
@@ -610,26 +848,31 @@ pub struct OpenConversationRequest {
     pub project_id: String,
     pub host_id: String,
     pub originating_run_id: String,
-    pub harness: Option<String>,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub context_version: u64,
-    pub context_hash: String,
+    pub proposed_harness: Option<String>,
+    pub proposed_provider: Option<String>,
+    pub proposed_model: Option<String>,
     pub identity_version: u64,
+    pub frozen_at: f64,
+    pub context_hash: String,
+    pub memories: Vec<FrozenMemoryView>,
 }
 
 impl OpenConversationRequest {
     pub fn open(&self, now: f64) -> Result<Conversation, ConversationError> {
-        let effective = EffectiveRuntime::new(
-            self.harness.as_deref().unwrap_or(""),
-            self.provider.as_deref(),
-            self.model.as_deref(),
-        )
-        .map_err(|_| ConversationError::EmptyHostId)?;
+        let harness = self.proposed_harness.as_deref().unwrap_or("");
+        if js_trim(harness).is_empty() {
+            return Err(ConversationError::EmptyHarness);
+        }
+        let effective = EffectiveRuntime::proposed(
+            harness,
+            self.proposed_provider.as_deref(),
+            self.proposed_model.as_deref(),
+        )?;
         let context = ContextRef::new(
-            self.context_version,
-            &self.context_hash,
             self.identity_version,
+            self.frozen_at,
+            &self.context_hash,
+            self.memories.clone(),
         )?;
         Conversation::open(
             &self.bot_id,
@@ -645,10 +888,11 @@ impl OpenConversationRequest {
 
 /// The exact context-reference DTO a result producer (C06/C08/C10/C11)
 /// must attach when enqueueing a result for delivery: conversation id,
-/// scope triple, originating run, effective runtime, and the
-/// identity/context version+hash that produced the result. Consumers must
-/// not invent narrower shapes that drop any of these fields — recovery
-/// needs all of them to stay truthful.
+/// scope triple, originating run, runtime (with its proposed/actual
+/// source), and the adopted C04 frozen context (identity version,
+/// frozen-at, per-memory id+version, hash) that produced the result.
+/// Consumers must not invent narrower shapes that drop any of these
+/// fields — recovery needs all of them to stay truthful.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextReferenceDto {
@@ -660,9 +904,11 @@ pub struct ContextReferenceDto {
     pub effective_harness: String,
     pub effective_provider: Option<String>,
     pub effective_model: Option<String>,
-    pub context_version: u64,
-    pub context_hash: String,
+    pub effective_source: EffectiveSource,
     pub identity_version: u64,
+    pub frozen_at: f64,
+    pub context_hash: String,
+    pub memories: Vec<FrozenMemoryView>,
     pub native_session_id: Option<String>,
     pub native_incarnation: Option<String>,
 }
@@ -678,9 +924,11 @@ impl ContextReferenceDto {
             effective_harness: conversation.effective.harness.clone(),
             effective_provider: conversation.effective.provider.clone(),
             effective_model: conversation.effective.model.clone(),
-            context_version: conversation.context.version,
-            context_hash: conversation.context.hash.clone(),
+            effective_source: conversation.effective.source,
             identity_version: conversation.identity_version,
+            frozen_at: conversation.context.frozen_at,
+            context_hash: conversation.context.hash.clone(),
+            memories: conversation.context.memories.clone(),
             native_session_id: conversation.native.as_ref().map(|n| n.session_id.clone()),
             native_incarnation: conversation.native.as_ref().map(|n| n.incarnation.clone()),
         }

@@ -7,40 +7,70 @@ import {
   describeNativeLiveness,
   formatContextLabel,
   formatRuntimeLabel,
+  isConversationIdFor,
   isFifoAppend,
   isSameConversation,
-  resolveConversationId,
+  parseConversationId,
   validateConversationTarget,
 } from "./bot-conversation-state";
 
 describe("bot-conversation-state", () => {
-  it("resolves one id per bot/project and separates projects", () => {
-    const a = resolveConversationId({
+  it("parses native-minted ids and separates hosts", () => {
+    // Fixture ids below were minted by native `conversation_id` (the
+    // renderer never mints); parsing must recover the exact triple.
+    const scope = parseConversationId("v1:bot-1:proj-a:host-1");
+    expect(scope).toEqual({
       botId: "bot-1",
       projectId: "proj-a",
       hostId: "host-1",
     });
-    const again = resolveConversationId({
-      botId: "bot-1",
-      projectId: "proj-a",
-      hostId: "host-1",
+    expect(
+      isConversationIdFor("v1:bot-1:proj-a:host-1", {
+        botId: "bot-1",
+        projectId: "proj-a",
+        hostId: "host-1",
+      }),
+    ).toBe(true);
+    // Same Bot/project on another host is a different conversation.
+    expect(
+      isConversationIdFor("v1:bot-1:proj-a:host-2", {
+        botId: "bot-1",
+        projectId: "proj-a",
+        hostId: "host-1",
+      }),
+    ).toBe(false);
+    // Delimiter collisions stay distinct and round-trip.
+    expect(parseConversationId("v1:a%3Ab:c:h")).toEqual({
+      botId: "a:b",
+      projectId: "c",
+      hostId: "h",
     });
-    const other = resolveConversationId({
-      botId: "bot-1",
-      projectId: "proj-b",
-      hostId: "host-1",
+    expect(parseConversationId("v1:a:b%3Ac:h")).toEqual({
+      botId: "a",
+      projectId: "b:c",
+      hostId: "h",
     });
-    expect(again).toBe(a);
-    expect(other).not.toBe(a);
   });
 
-  it("rejects empty scope ids", () => {
-    expect(() =>
-      resolveConversationId({ botId: " ", projectId: "p", hostId: "h" }),
-    ).toThrow();
-    expect(() =>
-      resolveConversationId({ botId: "b", projectId: "", hostId: "h" }),
-    ).toThrow();
+  it("refuses ids it did not mint", () => {
+    for (const bad of [
+      "bot-1:proj-a",
+      "v1:bot-1:proj-a",
+      "v2:bot-1:proj-a:host-1",
+      "v1:bot-1:proj-a:host-1:extra",
+      "v1:%:proj-a:host-1",
+      "v1::proj-a:host-1",
+      "",
+    ]) {
+      expect(() => parseConversationId(bad)).toThrow();
+      expect(
+        isConversationIdFor(bad, {
+          botId: "bot-1",
+          projectId: "proj-a",
+          hostId: "host-1",
+        }),
+      ).toBe(false);
+    }
   });
 
   it("validates wrong-scope targets", () => {
@@ -175,16 +205,26 @@ describe("bot-conversation-state", () => {
     expect(
       formatContextLabel({
         identityVersion: 3,
-        contextVersion: 5,
+        memories: [{ id: "m-1", version: 2 }],
         contextHash: "a1b2c3d4e5",
       }),
-    ).toBe("identity v3 · context v5 · a1b2c3d4");
+    ).toBe("identity v3 · 1 memory · a1b2c3d4");
     expect(
       formatRuntimeLabel({
         effectiveHarness: "pi",
         effectiveProvider: "dgx-spark",
         effectiveModel: "qwen",
+        effectiveSource: "actualDispatch",
       }),
     ).toBe("pi · dgx-spark · qwen");
+    // A proposed runtime is labeled as proposed, never as dispatched truth.
+    expect(
+      formatRuntimeLabel({
+        effectiveHarness: "codex",
+        effectiveProvider: null,
+        effectiveModel: null,
+        effectiveSource: "proposedFromPolicy",
+      }),
+    ).toBe("codex (proposed)");
   });
 });

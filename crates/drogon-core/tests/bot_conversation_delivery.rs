@@ -7,8 +7,9 @@
 //! a controlled temp-file SQLite database.
 
 use drogon_core::bots::conversation::{
-    ActiveTurn, ContextRef, Conversation, EffectiveRuntime, NativeLiveness, NativeRef,
-    compute_context_hash, conversation_id, resolve_conversation,
+    ActiveTurn, ContextRef, Conversation, EffectiveRuntime, EffectiveSource, FrozenContextView,
+    FrozenMemoryView, NativeLiveness, NativeRef, conversation_id, parse_conversation_id,
+    resolve_conversation,
 };
 use drogon_core::bots::delivery::{
     Delivery, DeliveryRecovery, DeliveryState, DeliveryTarget, EnqueueResultRequest,
@@ -43,15 +44,45 @@ fn bot_fixture(id: &str) -> Bot {
     }
 }
 
-fn context_fixture() -> ContextRef {
-    let hash = compute_context_hash(1, &["first memory"]);
-    ContextRef::new(1, &hash, 1).expect("valid context")
+/// A C04 frozen-context projection: in production this exact shape arrives
+/// from C04's `build_scoped_operating_prompt` (`FrozenPromptContext`);
+/// C05 adopts it verbatim and never recomputes the hash.
+fn frozen_fixture(bot_id: &str) -> FrozenContextView {
+    FrozenContextView {
+        bot_id: bot_id.to_string(),
+        identity_version: 1,
+        frozen_at: 1.0,
+        memories: vec![FrozenMemoryView {
+            id: "m-1".to_string(),
+            version: 2,
+        }],
+        context_hash: "c04-frozen-hash-fixture".to_string(),
+    }
+}
+
+fn context_fixture(bot_id: &str) -> ContextRef {
+    ContextRef::adopt(bot_id, &frozen_fixture(bot_id)).expect("valid context")
 }
 
 fn open_conversation(bot_id: &str, project: &str) -> Conversation {
     let bot = bot_fixture(bot_id);
-    Conversation::open_from_bot(&bot, project, "host-1", "req-1", context_fixture(), 1.0)
-        .expect("valid open")
+    Conversation::open_from_bot(
+        &bot,
+        project,
+        "host-1",
+        "req-1",
+        context_fixture(bot_id),
+        1.0,
+    )
+    .expect("valid open")
+}
+
+/// The authoritative conversation id for delivery fixtures — always minted
+/// by native, never hand-joined.
+fn conv_id(bot: &str, project: &str) -> String {
+    resolve_conversation(bot, project, "host-1")
+        .expect("resolve")
+        .1
 }
 
 fn temp_db() -> (tempfile::TempDir, Connection) {
@@ -64,13 +95,16 @@ fn temp_db() -> (tempfile::TempDir, Connection) {
 
 #[test]
 fn repeated_resolve_finds_one_conversation_and_projects_stay_separate() {
-    let first = conversation_id("bot-1", "proj-a").expect("id");
-    let again = conversation_id("bot-1", "proj-a").expect("id");
+    let first = conversation_id("bot-1", "proj-a", "host-1").expect("id");
+    let again = conversation_id("bot-1", "proj-a", "host-1").expect("id");
     assert_eq!(first, again);
-    let other_project = conversation_id("bot-1", "proj-b").expect("id");
+    let other_project = conversation_id("bot-1", "proj-b", "host-1").expect("id");
     assert_ne!(first, other_project);
-    let other_bot = conversation_id("bot-2", "proj-a").expect("id");
+    let other_bot = conversation_id("bot-2", "proj-a", "host-1").expect("id");
     assert_ne!(first, other_bot);
+    // The host is part of the identity: one Bot/project on two hosts.
+    let other_host = conversation_id("bot-1", "proj-a", "host-2").expect("id");
+    assert_ne!(first, other_host);
 
     let (scope, id) = resolve_conversation("bot-1", "proj-a", "host-1").expect("resolve");
     assert_eq!(id, first);
@@ -81,6 +115,38 @@ fn repeated_resolve_finds_one_conversation_and_projects_stay_separate() {
     assert_eq!(a.id, b.id);
     let c = open_conversation("bot-1", "proj-b");
     assert_ne!(a.id, c.id);
+}
+
+#[test]
+fn conversation_ids_survive_delimiter_collisions_and_round_trip() {
+    // Validators admit arbitrary text: these pairs would collide under a
+    // naive `bot:project` join but must stay distinct here.
+    let tricky_a = conversation_id("a:b", "c", "h").expect("id");
+    let tricky_b = conversation_id("a", "b:c", "h").expect("id");
+    assert_ne!(tricky_a, tricky_b);
+    let pct = conversation_id("100%", "uni-☃", "h:1").expect("id");
+    for (id, bot, project, host) in [
+        (tricky_a.clone(), "a:b", "c", "h"),
+        (tricky_b.clone(), "a", "b:c", "h"),
+        (pct.clone(), "100%", "uni-☃", "h:1"),
+    ] {
+        let scope = parse_conversation_id(&id).expect("round-trips");
+        assert_eq!(scope.bot_id, bot);
+        assert_eq!(scope.project_id, project);
+        assert_eq!(scope.host_id, host);
+    }
+    // Nothing not minted here parses: legacy joins, versions, escapes.
+    for bad in [
+        "bot-1:proj-a",
+        "v2:bot-1:proj-a:host-1",
+        "v1:bot-1:proj-a",
+        "v1:bot-1:proj-a:host-1:extra",
+        "v1:%:proj-a:host-1",
+        "v1:%2:proj-a:host-1",
+        "",
+    ] {
+        assert!(parse_conversation_id(bad).is_err(), "must refuse {bad:?}");
+    }
 }
 
 #[test]
@@ -107,7 +173,7 @@ fn wrong_scope_targets_are_rejected() {
     .expect("new");
     let stored = enqueue_in_tx(&tx, &delivery).expect("enqueue");
     assert!(stored.check_target(&conv.id).is_ok());
-    assert!(stored.check_target("bot-1:proj-b").is_err());
+    assert!(stored.check_target(&conv_id("bot-1", "proj-b")).is_err());
     tx.rollback().expect("rollback");
     let _ = &mut conv;
 }
@@ -115,16 +181,10 @@ fn wrong_scope_targets_are_rejected() {
 #[test]
 fn replay_same_delivery_id_is_idempotent_and_changed_payload_conflicts() {
     let (_dir, conn) = temp_db();
+    let conv = conv_id("bot-1", "proj-a");
     let hash = payload_hash_for(b"same bytes");
     let first = Delivery::new(
-        "del-dup",
-        "bot-1:proj-a",
-        "bot-1",
-        "proj-a",
-        "host-1",
-        "req-1",
-        &hash,
-        1.0,
+        "del-dup", &conv, "bot-1", "proj-a", "host-1", "req-1", &hash, 1.0,
     )
     .expect("new");
     let tx = conn.unchecked_transaction().expect("tx");
@@ -132,29 +192,20 @@ fn replay_same_delivery_id_is_idempotent_and_changed_payload_conflicts() {
     assert_eq!(stored.state, DeliveryState::Pending);
     // Same id + same hash: no second locally committed result.
     let replay = Delivery::new(
-        "del-dup",
-        "bot-1:proj-a",
-        "bot-1",
-        "proj-a",
-        "host-1",
-        "req-1",
-        &hash,
-        2.0,
+        "del-dup", &conv, "bot-1", "proj-a", "host-1", "req-1", &hash, 2.0,
     )
     .expect("new");
     let again = enqueue_in_tx(&tx, &replay).expect("replay");
     assert_eq!(again.id, stored.id);
     assert_eq!(again.created_at, stored.created_at);
     assert_eq!(
-        list_for_conversation_in_tx(&tx, "bot-1:proj-a")
-            .expect("list")
-            .len(),
+        list_for_conversation_in_tx(&tx, &conv).expect("list").len(),
         1
     );
     // Changed payload with the same id is rejected and writes nothing.
     let changed = Delivery::new(
         "del-dup",
-        "bot-1:proj-a",
+        &conv,
         "bot-1",
         "proj-a",
         "host-1",
@@ -165,9 +216,7 @@ fn replay_same_delivery_id_is_idempotent_and_changed_payload_conflicts() {
     .expect("new");
     assert!(enqueue_in_tx(&tx, &changed).is_err());
     assert_eq!(
-        list_for_conversation_in_tx(&tx, "bot-1:proj-a")
-            .expect("list")
-            .len(),
+        list_for_conversation_in_tx(&tx, &conv).expect("list").len(),
         1
     );
     tx.commit().expect("commit");
@@ -177,12 +226,13 @@ fn replay_same_delivery_id_is_idempotent_and_changed_payload_conflicts() {
 fn crash_before_send_recovers_as_pending() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("crash-before.sqlite");
+    let conv = conv_id("bot-1", "proj-a");
     {
         let conn = Connection::open(&path).expect("open");
         ensure_schema(&conn).expect("schema");
         let delivery = Delivery::new(
             "del-before",
-            "bot-1:proj-a",
+            &conv,
             "bot-1",
             "proj-a",
             "host-1",
@@ -214,12 +264,13 @@ fn crash_before_send_recovers_as_pending() {
 fn crash_after_send_before_ack_recovers_as_uncertain_and_needs_reconciliation() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("crash-mid.sqlite");
+    let conv = conv_id("bot-1", "proj-a");
     {
         let conn = Connection::open(&path).expect("open");
         ensure_schema(&conn).expect("schema");
         let delivery = Delivery::new(
             "del-mid",
-            "bot-1:proj-a",
+            &conv,
             "bot-1",
             "proj-a",
             "host-1",
@@ -258,12 +309,13 @@ fn crash_after_send_before_ack_recovers_as_uncertain_and_needs_reconciliation() 
 fn crash_after_ack_recovers_as_delivered_noop() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("crash-after.sqlite");
+    let conv = conv_id("bot-1", "proj-a");
     {
         let conn = Connection::open(&path).expect("open");
         ensure_schema(&conn).expect("schema");
         let delivery = Delivery::new(
             "del-after",
-            "bot-1:proj-a",
+            &conv,
             "bot-1",
             "proj-a",
             "host-1",
@@ -305,9 +357,10 @@ impl DeliveryTarget for ScriptedTarget {
 #[test]
 fn timeout_after_possible_acceptance_is_uncertain_never_delivered() {
     // Deterministic target fixture: no session, no child, just a script.
+    // The fixture is called with a detached clone, never under a DB lock.
     let delivery = Delivery::new(
         "del-timeout",
-        "bot-1:proj-a",
+        &conv_id("bot-1", "proj-a"),
         "bot-1",
         "proj-a",
         "host-1",
@@ -350,7 +403,7 @@ fn failed_delivery_retries_only_with_explicit_approval() {
     let (_dir, conn) = temp_db();
     let delivery = Delivery::new(
         "del-fail",
-        "bot-1:proj-a",
+        &conv_id("bot-1", "proj-a"),
         "bot-1",
         "proj-a",
         "host-1",
@@ -477,25 +530,41 @@ fn stale_native_sessions_report_honest_liveness() {
 }
 
 #[test]
-fn effective_runtime_and_context_come_from_the_bot_record() {
+fn runtime_starts_proposed_and_only_dispatch_makes_it_effective() {
     let bot = bot_fixture("bot-1");
-    let effective = EffectiveRuntime::for_bot(&bot);
-    assert_eq!(effective.harness, "pi");
-    assert_eq!(effective.provider.as_deref(), Some("dgx-spark"));
-    assert_eq!(effective.model.as_deref(), Some("qwen"));
+    let proposed = EffectiveRuntime::proposed_from_bot(&bot);
+    assert_eq!(proposed.harness, "pi");
+    assert_eq!(proposed.provider.as_deref(), Some("dgx-spark"));
+    assert_eq!(proposed.model.as_deref(), Some("qwen"));
+    assert_eq!(proposed.source, EffectiveSource::ProposedFromPolicy);
 
-    let hash = compute_context_hash(7, &["a", "b"]);
-    let again = compute_context_hash(7, &["a", "b"]);
-    assert_eq!(hash, again);
-    assert_ne!(hash, compute_context_hash(8, &["a", "b"]));
-    let ctx = ContextRef::new(2, &hash, 7).expect("ctx");
-    assert_eq!(ctx.version, 2);
+    // Opening from a Bot carries the proposal, never dispatched truth.
+    let mut conv = open_conversation("bot-1", "proj-a");
+    assert_eq!(conv.effective.source, EffectiveSource::ProposedFromPolicy);
+    // The owner records the exact harness.start params after dispatch.
+    conv.record_effective_runtime(
+        EffectiveRuntime::dispatched("pi", Some("dgx-spark"), Some("qwen")).expect("dispatched"),
+        2.0,
+    );
+    assert_eq!(conv.effective.source, EffectiveSource::ActualDispatch);
+
+    // Context adoption refuses foreign-bot views and zero versions.
+    let frozen = frozen_fixture("bot-1");
+    let ctx = ContextRef::adopt("bot-1", &frozen).expect("adopts");
+    assert_eq!(ctx.identity_version, 1);
+    assert_eq!(ctx.memories.len(), 1);
+    assert_eq!(ctx.memories[0].version, 2);
+    assert!(ContextRef::adopt("bot-2", &frozen).is_err());
+    let mut zero = frozen_fixture("bot-1");
+    zero.identity_version = 0;
+    assert!(ContextRef::adopt("bot-1", &zero).is_err());
 
     // The enqueue-result DTO carries every field recovery needs.
-    let conv = open_conversation("bot-1", "proj-a");
     let dto = drogon_core::bots::conversation::ContextReferenceDto::from_conversation(&conv);
     assert_eq!(dto.conversation_id, conv.id);
     assert_eq!(dto.identity_version, conv.identity_version);
+    assert_eq!(dto.effective_source, EffectiveSource::ActualDispatch);
+    assert_eq!(dto.memories.len(), 1);
     let req = EnqueueResultRequest {
         delivery_id: "del-ctx".to_string(),
         conversation_id: dto.conversation_id.clone(),
