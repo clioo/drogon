@@ -57,6 +57,15 @@ export type BotsPageControllerDeps = {
    *  reads ride the app-global scope, but a new bot must land in a real
    *  workspace folder. Absent/empty means create is refused honestly. */
   createWorkspaceId?: string;
+  /** Host-owned in-app presentation for an opened session (BotsPanel's
+   *  `onOpenSession`, shared contract): called with the real dispatched
+   *  session so the host can open/focus the canonical tab in-app. */
+  onOpenSession?: (input: {
+    botId: string;
+    sessionId: string;
+    incarnation: string;
+    harness: BotRunHarnessSource;
+  }) => void | Promise<void>;
 };
 
 function mintRequestId(prefix: string): string {
@@ -83,6 +92,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     scope,
     onClose,
     onRunResponsibility,
+    onOpenSession,
     createWorkspaceId,
   } = deps;
 
@@ -336,14 +346,15 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     [busy, onRunResponsibility, localSnapshot, snapshot, load],
   );
 
-  // Open session (bug-bot-open-session, #348/R17-E follow-up): the fork's
-  // launchBot opens a real harness tab for the bot
-  // (launch-drogon-bot-session). This repo's session primitive is the
-  // daemon's headless `bot.run` chat turn (J8), so the click dispatches one
-  // with the bot's STORED harness overrides (buildBotRunHarness — the same
-  // resolution the mount uses for manual runs), selects the bot, then
-  // reloads so the new message/session state lands. Reads are app-global
-  // and native resolves the '' scope to the bot's owning workspace, so no
+  // Open session (bug-bot-open-session, #348/R17-E follow-up, Carlos
+  // directive on task_0436fdf3aa91): the click dispatches a `bot.run` chat
+  // turn with the bot's STORED harness overrides (buildBotRunHarness — the
+  // same resolution the mount uses for manual runs) — a REAL daemon
+  // session, not a greeting stub — selects the bot, hands the returned
+  // session to the host's `onOpenSession` (when supplied) so the app can
+  // open/focus the canonical Bot-linked tab in-app, then reloads so the
+  // new message/session state lands. Reads are app-global and native
+  // resolves the '' scope to the bot's owning workspace, so no
   // workspace-selection refusal remains: only a missing scope (unknown
   // host) refuses. Every other failure — a bridge without botRun
   // (capability withheld), a daemon-unreachable transport throw, a
@@ -401,6 +412,18 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
           return;
         }
         setSelectedBotId(bot.id);
+        const opened = response.result.session;
+        if (opened) {
+          await onOpenSession?.({
+            botId: bot.id,
+            sessionId: opened.sessionId,
+            incarnation: opened.incarnation,
+            harness: {
+              harnessId: live.harnessPolicy.defaultHarness,
+              explicitModel: live.harnessPolicy.explicitModel,
+            },
+          });
+        }
         await load();
       } catch (launchFailure) {
         setActionError(

@@ -212,6 +212,53 @@ describe("bot open session", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("hands the real dispatched session to the host for in-app presentation", async () => {
+    // Carlos directive: Open session must open the REAL session in-app.
+    // The panel's seam is the host callback, fired with native's own
+    // session identity (never invented): the host owns tab open/focus.
+    const seeded = bot();
+    const fake = fakeBridge(seeded);
+    const onOpenSession = vi.fn();
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        onOpenSession={onOpenSession}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() => expect(onOpenSession).toHaveBeenCalledTimes(1));
+    expect(onOpenSession).toHaveBeenCalledWith({
+      botId: "bot-1",
+      sessionId: "sess-1",
+      incarnation: "inc-1",
+      harness: { harnessId: "claude", explicitModel: null },
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("skips host presentation without a session, never inventing one", async () => {
+    const seeded = bot();
+    const fake = fakeBridge(seeded, async () => ({
+      ok: true as const,
+      result: { ...dispatchedReceipt().result, session: null },
+    }) as unknown as never);
+    const onOpenSession = vi.fn();
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        onOpenSession={onOpenSession}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() => expect(fake.snapshots()).toBeGreaterThanOrEqual(2));
+    expect(onOpenSession).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("explains instead of no-op when no scope is known", async () => {
     const seeded = bot();
     const fake = fakeBridge(seeded);

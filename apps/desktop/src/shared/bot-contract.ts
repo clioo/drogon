@@ -316,6 +316,19 @@ export type BotsPanelProps = {
      *  compiling; absent means the mount falls back to its own lookup. */
     harness?: BotRunHarnessSource;
   }) => void | Promise<void>;
+  /** Host-owned in-app presentation for an opened Bot session
+   *  (Carlos directive on task_0436fdf3aa91): the panel calls this after a
+   *  dispatched open-session turn with the REAL session native returned,
+   *  so the host can open/focus the canonical Bot-linked tab in-app
+   *  (in-app focus only, never OS activation). Optional like
+   *  onRunResponsibility; absent means the session stays daemon-side
+   *  (visible in the session list) with no host presentation. */
+  onOpenSession?: (input: {
+    botId: string;
+    sessionId: string;
+    incarnation: string;
+    harness: BotRunHarnessSource;
+  }) => void | Promise<void>;
   /** Caller-observed liveness verdicts (live | unverifiable | exited), one per
    *  bot, from a real observation source. The panel renders them verbatim and
    *  never derives a verdict from the persisted record: a stored session is a

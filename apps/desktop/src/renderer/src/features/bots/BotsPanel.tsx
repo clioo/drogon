@@ -44,6 +44,7 @@ export function BotsPanel({
   scope,
   snapshotPending,
   createWorkspaceId,
+  onOpenSession,
 }: BotsPanelHydrationProps) {
   const controller = useBotsPageController({
     snapshot,
@@ -53,6 +54,7 @@ export function BotsPanel({
     onRunResponsibility,
     snapshotPending,
     createWorkspaceId,
+    onOpenSession,
   });
   const {
     effective,
