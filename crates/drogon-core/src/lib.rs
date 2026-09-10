@@ -485,6 +485,7 @@ impl Engine {
                 self.mutating(request, Self::do_project_save_sparse_preset)
             }
             "worktree.create" => self.mutating(request, Self::do_worktree_create),
+            "worktree.branch_search" => self.do_worktree_branch_search(&request.params),
             "worktree.list" => self.do_worktree_list(&request.params),
             "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
             "worktree.rename" => self.mutating(request, Self::do_worktree_rename),

@@ -74,6 +74,8 @@ export function NewWorkspaceComposerModal({
     name: string;
     baseRef?: string;
     branch?: string;
+    /** The fork's "Reuse branch": check out the existing branch. */
+    reuseBranch?: boolean;
     note?: string;
     parentWorktreeId?: string;
     sparse?: string[];

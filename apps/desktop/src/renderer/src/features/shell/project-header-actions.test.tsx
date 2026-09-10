@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* MIT Copyright (c) 2026 Lovecast Inc.
    Regression tests for #278: the project header's hover-reveal actions
-   ("New worktree in <project>", "Project actions for <project>") must stay
+   ("Create new worktree for <project>", "Project actions for <project>") must stay
    above the row hit area — hit-testing an a11y/Playwright activation never
    establishes :hover first, so any pointer-events gate on the hidden
    container resolves the click to the drag-handle row beneath. Covers the
@@ -112,7 +112,7 @@ function mountList(groups: ProjectGroup[]) {
 
 function row(name: string): HTMLElement {
   const element = document.querySelector<HTMLElement>(
-    `[data-project-header-id] [aria-label="New worktree in ${name}"]`,
+    `[data-project-header-id] [aria-label="Create new worktree for ${name}"]`,
   )?.closest<HTMLElement>("[data-project-header-drag-handle]");
   if (!element) throw new Error(`no project row for ${name}`);
   return element;
@@ -133,7 +133,7 @@ describe("project header actions hit area (#278)", () => {
   test("clicking the New worktree action opens the composer for the project", () => {
     const { onCreateWorkspace } = mountList([group("p1", "drogon")]);
     const button = document.querySelector<HTMLElement>(
-      '[aria-label="New worktree in drogon"]',
+      '[aria-label="Create new worktree for drogon"]',
     );
     expect(button).toBeTruthy();
     fireEvent.click(button!);
@@ -163,7 +163,7 @@ describe("project header actions hit area (#278)", () => {
       });
     // A press on the action never arms the row drag…
     const button = document.querySelector<HTMLElement>(
-      '[aria-label="New worktree in drogon"]',
+      '[aria-label="Create new worktree for drogon"]',
     );
     pointer(button!, 10, 10);
     fireEvent.pointerMove(window, {
