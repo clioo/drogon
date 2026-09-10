@@ -17,6 +17,9 @@ import { MoreHorizontal, StickyNote } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { Session, Worktree } from "../../../../shared/session-contract";
 import { AgentStateIcon } from "./AgentStateIcon";
+import { HarnessMenuIcon } from "./TabCreateMenuIcons";
+import { WorktreeCardAffordances } from "./WorktreeCardAffordances";
+import { worktreeCardBranchLabel } from "./worktree-card-branch-identity";
 import {
   getWorktreeIssueNumber,
   subscribeWorktreeIssueLinks,
@@ -29,6 +32,7 @@ import { WorktreeTitleInlineRename } from "./WorktreeTitleInlineRename";
 import { WorktreeCardMetaBadges } from "./WorktreeCardMetaBadges";
 import { WorktreeCardLinkedMetadata } from "./WorktreeCardLinkedMetadata";
 import {
+  cardIdentitySession,
   formatWorktreeCardSummaryLine,
   summarizeCardAgentStates,
 } from "./worktree-card-agent-summary";
@@ -239,6 +243,10 @@ export function WorktreeCard({
   const rowSessions = rows.map((row) => row.session);
   const summary = summarizeCardSessions(rowSessions);
   const agentSummary = summarizeCardAgentStates(rowSessions);
+  // The agent identity drawn beside the status dot (the fork's summary-pill
+  // pairing of an AgentStateDot with the AgentIcon of the agents in that
+  // same state group); null when no session reported a harness.
+  const identitySession = cardIdentitySession(rowSessions);
   // Row activation selects the workspace first, then the session tab: the
   // workspace switch clears the active tab, so the tab selection must win
   // last in the same batch (mirrors the notification focus handler).
@@ -252,6 +260,10 @@ export function WorktreeCard({
     getWorktreeIssueNumber(worktree.id),
   );
   const name = worktreeDisplayName(worktree, workspaces);
+  // The meta row's branch slot: the real branch, or "" when it would only
+  // repeat the card title (the fork's `showBranch` de-dupe rule —
+  // worktree-card-presentation.tsx).
+  const branchLabel = worktreeCardBranchLabel(worktree.branch, name);
   const note = showProperties.comment === false ? "" : worktree.note?.trim() ?? "";
   // The card's one-line state sentence, folded into the accessible label
   // like the source's sr-only status announcement (the source draws no
@@ -270,7 +282,7 @@ export function WorktreeCard({
   // The source's meta-row presence test (hasMetaRow): the branch identity
   // or any badge — the agent rows tighten up under the title when absent.
   const hasMetaRow = Boolean(
-    worktree.branch ||
+    branchLabel ||
       (showBranch && (gitStatus?.branch.ahead ?? 0) + (gitStatus?.branch.behind ?? 0) > 0) ||
       (showPr && pr) ||
       (showProperties.issue !== false && issueNumber !== null),
@@ -308,7 +320,23 @@ export function WorktreeCard({
           className="shell-worktree-card-status-lane"
           data-worktree-card-status-slot=""
         >
-          <AgentStateIcon state={summary.state} size={12} />
+          {/* The card lane's own glyph set (the fork's StatusIndicator plus
+              the unread bell): an emerald filled dot for a live-but-quiet
+              worktree, the amber bell while the agent needs the user. */}
+          <AgentStateIcon state={summary.state} size={12} variant="card" />
+          {identitySession?.harnessId ? (
+            <span
+              className="shell-worktree-card-agent-avatar"
+              data-worktree-card-agent-avatar=""
+              title={formatRowHarnessLabel(identitySession.harnessId)}
+            >
+              <HarnessMenuIcon
+                harnessId={identitySession.harnessId}
+                displayName={formatRowHarnessLabel(identitySession.harnessId)}
+                size={13}
+              />
+            </span>
+          ) : null}
         </div>
         {/* Main column: the card is a flex row (select content beside the
             kebab), so the select button and the nested rows share one
@@ -338,7 +366,7 @@ export function WorktreeCard({
               // whenever the worktree has one (worktree-card-presentation's
               // showBranch); only the ahead/behind chips stay tied to this
               // repo's Branch property.
-              branch={worktree.branch}
+              branch={branchLabel}
               ahead={showBranch ? (gitStatus?.branch.ahead ?? null) : null}
               behind={showBranch ? (gitStatus?.branch.behind ?? null) : null}
               upstream={showBranch ? (gitStatus?.branch.upstream ?? null) : null}
@@ -427,6 +455,13 @@ export function WorktreeCard({
             </div>
           ) : null}
         </div>
+        {/* Right-side affordances (the fork's MetaIconBadge shell): the
+            terminal marker for a workspace that owns sessions and the
+            branch marker, ahead of the kebab. */}
+        <WorktreeCardAffordances
+          branch={worktree.branch}
+          sessionCount={rows.length}
+        />
         <span className="shell-worktree-card-menu">
           <button
             type="button"

@@ -240,6 +240,7 @@ import {
   buildSidebarBotSessions,
   type SidebarBotSession,
 } from "./features/shell/sidebar-bot-sessions";
+import { sidebarSessionView } from "./features/shell/sidebar-sessions";
 import {
   planBrowserRehydrate,
   windowBrowserBridge,
@@ -1899,11 +1900,13 @@ export function App() {
   // effect (not folded into the one above) so a workspace switch never
   // resets or gates it — a Bot session must stay known and reachable for
   // as long as it is alive, never only while its own workspace happens to
-  // be selected. Gated on `botsAvailable` so it does no work when Bots is
-  // withheld or the daemon is unreachable; a transient failure keeps the
-  // prior list rather than flashing every Bot session away.
+  // be selected. Gated on the daemon being connected only (it used to be
+  // gated on `botsAvailable`): the SAME list is the sidebar's session view,
+  // which must be host-wide whether or not Bots is advertised — see
+  // `sidebarSessions` below. A transient failure keeps the prior list rather
+  // than flashing every session away.
   useEffect(() => {
-    if (!botsAvailable || !status) {
+    if (!status) {
       setAllBotSessions([]);
       return;
     }
@@ -1919,7 +1922,7 @@ export function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [botsAvailable, status]);
+  }, [status]);
   useEffect(() => {
     // J1 needs_input: main polls session.list for transitions (this repo
     // has no daemon push channel) and forwards them here. Clicking the
@@ -2188,6 +2191,19 @@ export function App() {
   const sessionsForBots = useMemo(
     () => mergeSessionsForBots(allBotSessions, sessions),
     [allBotSessions, sessions],
+  );
+  // The sidebar's session view is the host-wide union above, NOT the
+  // `selected`-scoped `sessions`: every worktree card must list its own
+  // workspace's sessions (the reference's cards always list their agents) and
+  // the card order must not move when the selection does. With the scoped
+  // list, a card for any other worktree saw zero sessions — its rows were not
+  // rendered and "Sort by: Recent" fell back to `createdAt` for it — so
+  // clicking a card reordered the list and emptied the sibling below it.
+  // Split second panes are excluded exactly like `stripSessions` (R16-N).
+  const sidebarSessions = sidebarSessionView(
+    allBotSessions,
+    sessions,
+    splitSecondaryIds,
   );
   // Defect 1: the host owns liveness, and the decision must be
   // workspace-independent. The daemon projects the recorded link's own
@@ -4331,8 +4347,11 @@ export function App() {
             showAutomationsButton={appearanceFlags.automationsButtonVisible}
             groups={projectGroups}
             workspaces={workspaces}
-            // R16-N: split second panes are not sidebar rows either.
-            sessions={stripSessions}
+            // R16-N: split second panes are not sidebar rows either. This is
+            // the HOST-WIDE union, not the selected workspace's slice, so the
+            // cards keep their own sessions and their order is
+            // selection-independent (see `sidebarSessions`).
+            sessions={sidebarSessions}
             selectedWorkspaceId={selected}
             activeSessionId={activeRootId}
             tabStrip={tabStrip}

@@ -48,6 +48,15 @@ function renderMarkup(state: AgentState): string {
   return renderToStaticMarkup(React.createElement(AgentStateIcon, { state }));
 }
 
+function renderVariantMarkup(
+  state: AgentState,
+  variant: "card" | "row",
+): string {
+  return renderToStaticMarkup(
+    React.createElement(AgentStateIcon, { state, variant }),
+  );
+}
+
 const ALL_STATES: AgentState[] = [
   "working",
   "idle",
@@ -119,8 +128,7 @@ describe("AgentStateIcon", () => {
     expect(markup).not.toContain(" title=");
   });
 
-  it("keeps the question token above the contrast floor in both themes", () => {
-    const css = readFileSync(
+  it("keeps the question token above the contrast floor in both themes", () => {    const css = readFileSync(
       join(__dirname, "../../assets/main.css"),
       "utf8",
     );
@@ -148,5 +156,42 @@ describe("AgentStateIcon", () => {
       /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.agent-working-spinner\s*\{[^}]*\}/,
     )?.[0];
     expect(reducedMotionBlock).toContain("animation: none");
+  });
+});
+
+describe("AgentStateIcon variants", () => {
+  it("draws a filled emerald dot for a live-but-quiet card (the fork's StatusIndicator)", () => {
+    // The reference's StatusIndicator colours both `done` and `active`
+    // emerald; this repo's `idle` is the fork's concluded turn, so the card
+    // lane stops reading as "no information".
+    const markup = renderVariantMarkup("idle", "card");
+    expect(markup).toContain("bg-emerald-500");
+    expect(markup).not.toContain("bg-neutral-500/40");
+    expect(markup).toContain('aria-label="Idle"');
+  });
+
+  it("draws the fork's amber bell while the agent needs the user", () => {
+    const markup = renderVariantMarkup("needs_input", "card");
+    expect(markup).toContain("text-amber-500");
+    expect(markup).toContain("<svg");
+    // The card lane uses the bell, never the question glyph the rows keep.
+    expect(markup).not.toContain("text-agent-question");
+    expect(markup).toContain('aria-label="Waiting for input"');
+  });
+
+  it("draws the fork's emerald check-circle on a concluded agent row", () => {
+    const markup = renderVariantMarkup("idle", "row");
+    expect(markup).toContain("lucide-circle-check");
+    expect(markup).toContain("text-emerald-500");
+    expect(markup).toContain('aria-label="Idle"');
+  });
+
+  it("leaves a dead worktree grey in both variants", () => {
+    for (const variant of ["card", "row"] as const) {
+      const markup = renderVariantMarkup("exited", variant);
+      expect(markup).toContain("bg-neutral-500/40");
+      expect(markup).not.toContain("bg-emerald-500");
+      expect(markup).not.toContain("lucide-circle-check");
+    }
   });
 });

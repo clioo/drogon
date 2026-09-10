@@ -1,0 +1,1124 @@
+{
+  "endpoint": "ws://127.0.0.1:60865/devtools/browser/cfc49524-4ae6-48b8-807a-5ddb4950db39",
+  "widths": {
+    "light": {
+      "760": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/before/sidebar-after-light-760.png",
+        "sidebarWidth": 280,
+        "innerWidth": 760,
+        "dom": {
+          "order": [
+            "93e51301-9aba-4165-b716-de981cbec481",
+            "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+            "713a399c-5f45-4da9-8927-0e766f61383c",
+            "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+          ],
+          "cards": [
+            {
+              "id": "93e51301-9aba-4165-b716-de981cbec481",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "seconf-feature",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "sidebar-parity-2",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            }
+          ]
+        }
+      },
+      "900": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/before/sidebar-after-light-900.png",
+        "sidebarWidth": 280,
+        "innerWidth": 900,
+        "dom": {
+          "order": [
+            "93e51301-9aba-4165-b716-de981cbec481",
+            "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+            "713a399c-5f45-4da9-8927-0e766f61383c",
+            "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+          ],
+          "cards": [
+            {
+              "id": "93e51301-9aba-4165-b716-de981cbec481",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "seconf-feature",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "sidebar-parity-2",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            }
+          ]
+        }
+      },
+      "1100": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/before/sidebar-after-light-1100.png",
+        "sidebarWidth": 280,
+        "innerWidth": 1100,
+        "dom": {
+          "order": [
+            "93e51301-9aba-4165-b716-de981cbec481",
+            "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+            "713a399c-5f45-4da9-8927-0e766f61383c",
+            "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+          ],
+          "cards": [
+            {
+              "id": "93e51301-9aba-4165-b716-de981cbec481",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "seconf-feature",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "sidebar-parity-2",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            }
+          ]
+        }
+      },
+      "1440": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/before/sidebar-after-light-1440.png",
+        "sidebarWidth": 280,
+        "innerWidth": 1440,
+        "dom": {
+          "order": [
+            "93e51301-9aba-4165-b716-de981cbec481",
+            "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+            "713a399c-5f45-4da9-8927-0e766f61383c",
+            "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+          ],
+          "cards": [
+            {
+              "id": "93e51301-9aba-4165-b716-de981cbec481",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "seconf-feature",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "sidebar-parity-2",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            }
+          ]
+        }
+      }
+    },
+    "dark": {
+      "760": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/before/sidebar-after-dark-760.png",
+        "sidebarWidth": 280,
+        "innerWidth": 760,
+        "dom": {
+          "order": [
+            "93e51301-9aba-4165-b716-de981cbec481",
+            "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+            "713a399c-5f45-4da9-8927-0e766f61383c",
+            "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+          ],
+          "cards": [
+            {
+              "id": "93e51301-9aba-4165-b716-de981cbec481",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "seconf-feature",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "sidebar-parity-2",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            }
+          ]
+        }
+      },
+      "900": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/before/sidebar-after-dark-900.png",
+        "sidebarWidth": 280,
+        "innerWidth": 900,
+        "dom": {
+          "order": [
+            "93e51301-9aba-4165-b716-de981cbec481",
+            "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+            "713a399c-5f45-4da9-8927-0e766f61383c",
+            "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+          ],
+          "cards": [
+            {
+              "id": "93e51301-9aba-4165-b716-de981cbec481",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "seconf-feature",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "sidebar-parity-2",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            }
+          ]
+        }
+      },
+      "1100": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/before/sidebar-after-dark-1100.png",
+        "sidebarWidth": 280,
+        "innerWidth": 1100,
+        "dom": {
+          "order": [
+            "93e51301-9aba-4165-b716-de981cbec481",
+            "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+            "713a399c-5f45-4da9-8927-0e766f61383c",
+            "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+          ],
+          "cards": [
+            {
+              "id": "93e51301-9aba-4165-b716-de981cbec481",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "seconf-feature",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "sidebar-parity-2",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            }
+          ]
+        }
+      },
+      "1440": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/before/sidebar-after-dark-1440.png",
+        "sidebarWidth": 280,
+        "innerWidth": 1440,
+        "dom": {
+          "order": [
+            "93e51301-9aba-4165-b716-de981cbec481",
+            "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+            "713a399c-5f45-4da9-8927-0e766f61383c",
+            "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+          ],
+          "cards": [
+            {
+              "id": "93e51301-9aba-4165-b716-de981cbec481",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+              "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "seconf-feature",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "sidebar-parity-2",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            },
+            {
+              "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+              "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "No recent update",
+              "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": null,
+              "affordances": [],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": []
+            }
+          ]
+        }
+      }
+    }
+  },
+  "clicks": [
+    {
+      "clicked": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+      "order": [
+        "93e51301-9aba-4165-b716-de981cbec481",
+        "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+        "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+        "713a399c-5f45-4da9-8927-0e766f61383c"
+      ],
+      "cards": [
+        {
+          "id": "93e51301-9aba-4165-b716-de981cbec481",
+          "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+          "active": false,
+          "title": "clioo/drogon-qa-bot-monitors",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": []
+        },
+        {
+          "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+          "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+          "active": false,
+          "title": "seconf-feature",
+          "branchSlot": "seconf-feature",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": []
+        },
+        {
+          "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+          "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+          "active": true,
+          "title": "parity-card-subtitle",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "Working",
+          "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "color(srgb 1 1 1 / 0.0282353)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "color(srgb 0.207843 0.207843 0.207843 / 0.4)",
+          "rows": [
+            {
+              "session": "b8d0d5d3-48c2-459c-a427-e4498ef9c36a",
+              "text": "Terminal 1 - shnow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+          "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+          "active": false,
+          "title": "sidebar-parity-2",
+          "branchSlot": "sidebar-parity-2",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": []
+        }
+      ]
+    },
+    {
+      "clicked": "713a399c-5f45-4da9-8927-0e766f61383c",
+      "order": [
+        "93e51301-9aba-4165-b716-de981cbec481",
+        "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+        "713a399c-5f45-4da9-8927-0e766f61383c",
+        "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+      ],
+      "cards": [
+        {
+          "id": "93e51301-9aba-4165-b716-de981cbec481",
+          "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+          "active": false,
+          "title": "clioo/drogon-qa-bot-monitors",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": []
+        },
+        {
+          "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+          "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+          "active": false,
+          "title": "seconf-feature",
+          "branchSlot": "seconf-feature",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": []
+        },
+        {
+          "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+          "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+          "active": true,
+          "title": "sidebar-parity-2",
+          "branchSlot": "sidebar-parity-2",
+          "noteSlot": "",
+          "statusGlyphLabel": "Exited",
+          "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "color(srgb 1 1 1 / 0.0282353)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "color(srgb 0.980392 0.980392 0.980392 / 0.08)",
+          "rows": [
+            {
+              "session": "d245e7e1-e64a-413b-a149-84a5dbf52233",
+              "text": "Terminal 1 - truenow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+          "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+          "active": false,
+          "title": "parity-card-subtitle",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "color(srgb 0.207843 0.207843 0.207843 / 0.4)",
+          "rows": []
+        }
+      ]
+    },
+    {
+      "clicked": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+      "order": [
+        "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+        "93e51301-9aba-4165-b716-de981cbec481",
+        "713a399c-5f45-4da9-8927-0e766f61383c",
+        "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+      ],
+      "cards": [
+        {
+          "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+          "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+          "active": true,
+          "title": "seconf-feature",
+          "branchSlot": "seconf-feature",
+          "noteSlot": "",
+          "statusGlyphLabel": "Waiting for input",
+          "statusGlyphClasses": "lucide lucide-message-circle-question-mark text-agent-question",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "color(srgb 1 1 1 / 0.0282353)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "color(srgb 0.207843 0.207843 0.207843 / 0.4)",
+          "rows": [
+            {
+              "session": "560e5729-51e7-4d87-adf7-0035c956a53e",
+              "text": "Terminal 1 - Claudenow",
+              "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "93e51301-9aba-4165-b716-de981cbec481",
+          "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+          "active": false,
+          "title": "clioo/drogon-qa-bot-monitors",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": []
+        },
+        {
+          "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+          "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+          "active": false,
+          "title": "sidebar-parity-2",
+          "branchSlot": "sidebar-parity-2",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": []
+        },
+        {
+          "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+          "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+          "active": false,
+          "title": "parity-card-subtitle",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": []
+        }
+      ]
+    },
+    {
+      "clicked": "93e51301-9aba-4165-b716-de981cbec481",
+      "order": [
+        "93e51301-9aba-4165-b716-de981cbec481",
+        "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+        "713a399c-5f45-4da9-8927-0e766f61383c",
+        "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+      ],
+      "cards": [
+        {
+          "id": "93e51301-9aba-4165-b716-de981cbec481",
+          "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+          "active": true,
+          "title": "clioo/drogon-qa-bot-monitors",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "Idle",
+          "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "color(srgb 1 1 1 / 0.0282353)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "color(srgb 0.980392 0.980392 0.980392 / 0.08)",
+          "rows": [
+            {
+              "session": "dfd0c363-9318-464f-9fb5-b18fb1be4478",
+              "text": "Terminal 1 - Claudenow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+          "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+          "active": false,
+          "title": "seconf-feature",
+          "branchSlot": "seconf-feature",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "color(srgb 0.207843 0.207843 0.207843 / 0.4)",
+          "rows": []
+        },
+        {
+          "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+          "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+          "active": false,
+          "title": "sidebar-parity-2",
+          "branchSlot": "sidebar-parity-2",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": []
+        },
+        {
+          "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+          "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+          "active": false,
+          "title": "parity-card-subtitle",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "No recent update",
+          "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": null,
+          "affordances": [],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": []
+        }
+      ]
+    }
+  ],
+  "themes": {
+    "light": {
+      "dark": false,
+      "background": "rgb(255, 255, 255)"
+    },
+    "dark": {
+      "dark": true,
+      "background": "rgb(10, 10, 10)"
+    }
+  },
+  "final": {
+    "order": [
+      "93e51301-9aba-4165-b716-de981cbec481",
+      "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+      "713a399c-5f45-4da9-8927-0e766f61383c",
+      "404b3ed7-e954-49d5-8229-d96e24ac5c0c"
+    ],
+    "cards": [
+      {
+        "id": "93e51301-9aba-4165-b716-de981cbec481",
+        "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+        "active": true,
+        "title": "clioo/drogon-qa-bot-monitors",
+        "branchSlot": "clioo/drogon-qa-bot-monitors",
+        "noteSlot": "",
+        "statusGlyphLabel": "Idle",
+        "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+        "statusGlyphTag": "span-dot",
+        "agentAvatar": null,
+        "affordances": [],
+        "activeBorderColor": "color(srgb 1 1 1 / 0.0282353)",
+        "activeBorderWidth": "1px",
+        "activeBackground": "color(srgb 0.980392 0.980392 0.980392 / 0.08)",
+        "rows": [
+          {
+            "session": "dfd0c363-9318-464f-9fb5-b18fb1be4478",
+            "text": "Terminal 1 - Claudenow",
+            "glyph": "dot",
+            "harnessIcon": "svg"
+          }
+        ]
+      },
+      {
+        "id": "7f3afeed-0fac-4d8c-8b4e-c1292334c0aa",
+        "project": "e4c6e157-49ef-466b-8ce7-3e9d37db2871",
+        "active": false,
+        "title": "seconf-feature",
+        "branchSlot": "seconf-feature",
+        "noteSlot": "",
+        "statusGlyphLabel": "No recent update",
+        "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+        "statusGlyphTag": "svg",
+        "agentAvatar": null,
+        "affordances": [],
+        "activeBorderColor": "rgba(0, 0, 0, 0)",
+        "activeBorderWidth": "1px",
+        "activeBackground": "color(srgb 0.207843 0.207843 0.207843 / 0.4)",
+        "rows": []
+      },
+      {
+        "id": "713a399c-5f45-4da9-8927-0e766f61383c",
+        "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+        "active": false,
+        "title": "sidebar-parity-2",
+        "branchSlot": "sidebar-parity-2",
+        "noteSlot": "",
+        "statusGlyphLabel": "No recent update",
+        "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+        "statusGlyphTag": "svg",
+        "agentAvatar": null,
+        "affordances": [],
+        "activeBorderColor": "rgba(0, 0, 0, 0)",
+        "activeBorderWidth": "1px",
+        "activeBackground": "rgba(0, 0, 0, 0)",
+        "rows": []
+      },
+      {
+        "id": "404b3ed7-e954-49d5-8229-d96e24ac5c0c",
+        "project": "676d6b7d-ed4a-4058-b7d8-7ef5decac407",
+        "active": false,
+        "title": "parity-card-subtitle",
+        "branchSlot": "clioo/drogon-qa-bot-monitors",
+        "noteSlot": "",
+        "statusGlyphLabel": "No recent update",
+        "statusGlyphClasses": "lucide lucide-circle-dashed text-amber-500",
+        "statusGlyphTag": "svg",
+        "agentAvatar": null,
+        "affordances": [],
+        "activeBorderColor": "rgba(0, 0, 0, 0)",
+        "activeBorderWidth": "1px",
+        "activeBackground": "rgba(0, 0, 0, 0)",
+        "rows": []
+      }
+    ]
+  },
+  "expectUnstable": true,
+  "violations": [
+    "every worktree card must list its own session row",
+    "clicking 404b3ed7-e954-49d5-8229-d96e24ac5c0c reordered the sidebar: [\"93e51301-9aba-4165-b716-de981cbec481\",\"7f3afeed-0fac-4d8c-8b4e-c1292334c0aa\",\"404b3ed7-e954-49d5-8229-d96e24ac5c0c\",\"713a399c-5f45-4da9-8927-0e766f61383c\"] != [\"93e51301-9aba-4165-b716-de981cbec481\",\"7f3afeed-0fac-4d8c-8b4e-c1292334c0aa\",\"713a399c-5f45-4da9-8927-0e766f61383c\",\"404b3ed7-e954-49d5-8229-d96e24ac5c0c\"]",
+    "card 404b3ed7-e954-49d5-8229-d96e24ac5c0c lost/changed its rows after clicking 404b3ed7-e954-49d5-8229-d96e24ac5c0c: [\"b8d0d5d3-48c2-459c-a427-e4498ef9c36a\"] != []",
+    "card 713a399c-5f45-4da9-8927-0e766f61383c lost/changed its rows after clicking 713a399c-5f45-4da9-8927-0e766f61383c: [\"d245e7e1-e64a-413b-a149-84a5dbf52233\"] != []",
+    "clicking 7f3afeed-0fac-4d8c-8b4e-c1292334c0aa reordered the sidebar: [\"7f3afeed-0fac-4d8c-8b4e-c1292334c0aa\",\"93e51301-9aba-4165-b716-de981cbec481\",\"713a399c-5f45-4da9-8927-0e766f61383c\",\"404b3ed7-e954-49d5-8229-d96e24ac5c0c\"] != [\"93e51301-9aba-4165-b716-de981cbec481\",\"7f3afeed-0fac-4d8c-8b4e-c1292334c0aa\",\"713a399c-5f45-4da9-8927-0e766f61383c\",\"404b3ed7-e954-49d5-8229-d96e24ac5c0c\"]",
+    "card 7f3afeed-0fac-4d8c-8b4e-c1292334c0aa lost/changed its rows after clicking 7f3afeed-0fac-4d8c-8b4e-c1292334c0aa: [\"560e5729-51e7-4d87-adf7-0035c956a53e\"] != []",
+    "card 93e51301-9aba-4165-b716-de981cbec481 lost/changed its rows after clicking 93e51301-9aba-4165-b716-de981cbec481: [\"dfd0c363-9318-464f-9fb5-b18fb1be4478\"] != []"
+  ]
+}

@@ -1,0 +1,1601 @@
+{
+  "endpoint": "ws://127.0.0.1:62146/devtools/browser/3e2500be-de26-4381-a33d-d918558958c9",
+  "widths": {
+    "light": {
+      "760": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/after/sidebar-after-light-760.png",
+        "sidebarWidth": 280,
+        "innerWidth": 760,
+        "dom": {
+          "order": [
+            "246be1e4-075d-45b4-9741-3891d3c35f15",
+            "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+            "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+            "8701f05c-eb14-4f8d-9221-919852b2e3de"
+          ],
+          "cards": [
+            {
+              "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Idle",
+              "statusGlyphClasses": "block rounded-full bg-emerald-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+                  "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+                  "glyph": "lucide lucide-circle-check text-emerald-500",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Waiting for input",
+              "statusGlyphClasses": "text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch seconf-feature"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+                  "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+                  "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "Working",
+              "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+                  "text": "Terminal 1 - shnow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Exited",
+              "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch sidebar-parity-2"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+                  "text": "Terminal 1 - truenow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "900": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/after/sidebar-after-light-900.png",
+        "sidebarWidth": 280,
+        "innerWidth": 900,
+        "dom": {
+          "order": [
+            "246be1e4-075d-45b4-9741-3891d3c35f15",
+            "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+            "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+            "8701f05c-eb14-4f8d-9221-919852b2e3de"
+          ],
+          "cards": [
+            {
+              "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Idle",
+              "statusGlyphClasses": "block rounded-full bg-emerald-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+                  "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+                  "glyph": "lucide lucide-circle-check text-emerald-500",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Waiting for input",
+              "statusGlyphClasses": "text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch seconf-feature"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+                  "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+                  "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "Working",
+              "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+                  "text": "Terminal 1 - shnow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Exited",
+              "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch sidebar-parity-2"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+                  "text": "Terminal 1 - truenow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "1100": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/after/sidebar-after-light-1100.png",
+        "sidebarWidth": 280,
+        "innerWidth": 1100,
+        "dom": {
+          "order": [
+            "246be1e4-075d-45b4-9741-3891d3c35f15",
+            "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+            "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+            "8701f05c-eb14-4f8d-9221-919852b2e3de"
+          ],
+          "cards": [
+            {
+              "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Idle",
+              "statusGlyphClasses": "block rounded-full bg-emerald-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+                  "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+                  "glyph": "lucide lucide-circle-check text-emerald-500",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Waiting for input",
+              "statusGlyphClasses": "text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch seconf-feature"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+                  "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+                  "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "Working",
+              "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+                  "text": "Terminal 1 - shnow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Exited",
+              "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch sidebar-parity-2"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+                  "text": "Terminal 1 - truenow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "1440": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/after/sidebar-after-light-1440.png",
+        "sidebarWidth": 280,
+        "innerWidth": 1440,
+        "dom": {
+          "order": [
+            "246be1e4-075d-45b4-9741-3891d3c35f15",
+            "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+            "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+            "8701f05c-eb14-4f8d-9221-919852b2e3de"
+          ],
+          "cards": [
+            {
+              "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Idle",
+              "statusGlyphClasses": "block rounded-full bg-emerald-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+                  "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+                  "glyph": "lucide lucide-circle-check text-emerald-500",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Waiting for input",
+              "statusGlyphClasses": "text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch seconf-feature"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+                  "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+                  "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "Working",
+              "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+                  "text": "Terminal 1 - shnow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Exited",
+              "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch sidebar-parity-2"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+                  "text": "Terminal 1 - truenow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "dark": {
+      "760": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/after/sidebar-after-dark-760.png",
+        "sidebarWidth": 280,
+        "innerWidth": 760,
+        "dom": {
+          "order": [
+            "246be1e4-075d-45b4-9741-3891d3c35f15",
+            "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+            "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+            "8701f05c-eb14-4f8d-9221-919852b2e3de"
+          ],
+          "cards": [
+            {
+              "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Idle",
+              "statusGlyphClasses": "block rounded-full bg-emerald-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+                  "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+                  "glyph": "lucide lucide-circle-check text-emerald-500",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Waiting for input",
+              "statusGlyphClasses": "text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch seconf-feature"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+                  "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+                  "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "Working",
+              "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+                  "text": "Terminal 1 - shnow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Exited",
+              "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch sidebar-parity-2"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+                  "text": "Terminal 1 - truenow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "900": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/after/sidebar-after-dark-900.png",
+        "sidebarWidth": 280,
+        "innerWidth": 900,
+        "dom": {
+          "order": [
+            "246be1e4-075d-45b4-9741-3891d3c35f15",
+            "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+            "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+            "8701f05c-eb14-4f8d-9221-919852b2e3de"
+          ],
+          "cards": [
+            {
+              "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Idle",
+              "statusGlyphClasses": "block rounded-full bg-emerald-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+                  "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+                  "glyph": "lucide lucide-circle-check text-emerald-500",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Waiting for input",
+              "statusGlyphClasses": "text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch seconf-feature"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+                  "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+                  "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "Working",
+              "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+                  "text": "Terminal 1 - shnow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Exited",
+              "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch sidebar-parity-2"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+                  "text": "Terminal 1 - truenow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "1100": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/after/sidebar-after-dark-1100.png",
+        "sidebarWidth": 280,
+        "innerWidth": 1100,
+        "dom": {
+          "order": [
+            "246be1e4-075d-45b4-9741-3891d3c35f15",
+            "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+            "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+            "8701f05c-eb14-4f8d-9221-919852b2e3de"
+          ],
+          "cards": [
+            {
+              "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Idle",
+              "statusGlyphClasses": "block rounded-full bg-emerald-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+                  "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+                  "glyph": "lucide lucide-circle-check text-emerald-500",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Waiting for input",
+              "statusGlyphClasses": "text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch seconf-feature"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+                  "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+                  "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "Working",
+              "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+                  "text": "Terminal 1 - shnow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Exited",
+              "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch sidebar-parity-2"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+                  "text": "Terminal 1 - truenow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "1440": {
+        "file": "/Users/carlos/orca/workspaces/Drogon/drogon-sidebar-parity-2/.qa/shots/after/sidebar-after-dark-1440.png",
+        "sidebarWidth": 280,
+        "innerWidth": 1440,
+        "dom": {
+          "order": [
+            "246be1e4-075d-45b4-9741-3891d3c35f15",
+            "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+            "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+            "8701f05c-eb14-4f8d-9221-919852b2e3de"
+          ],
+          "cards": [
+            {
+              "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "clioo/drogon-qa-bot-monitors",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Idle",
+              "statusGlyphClasses": "block rounded-full bg-emerald-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+                  "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+                  "glyph": "lucide lucide-circle-check text-emerald-500",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+              "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+              "active": false,
+              "title": "seconf-feature",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Waiting for input",
+              "statusGlyphClasses": "text-amber-500",
+              "statusGlyphTag": "svg",
+              "agentAvatar": "svg-avatar",
+              "affordances": [
+                "1 terminal session",
+                "Branch seconf-feature"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+                  "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+                  "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "parity-card-subtitle",
+              "branchSlot": "clioo/drogon-qa-bot-monitors",
+              "noteSlot": "",
+              "statusGlyphLabel": "Working",
+              "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch clioo/drogon-qa-bot-monitors"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+                  "text": "Terminal 1 - shnow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            },
+            {
+              "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+              "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+              "active": false,
+              "title": "sidebar-parity-2",
+              "branchSlot": "",
+              "noteSlot": "",
+              "statusGlyphLabel": "Exited",
+              "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+              "statusGlyphTag": "span-dot",
+              "agentAvatar": null,
+              "affordances": [
+                "1 terminal session",
+                "Branch sidebar-parity-2"
+              ],
+              "activeBorderColor": "rgba(0, 0, 0, 0)",
+              "activeBorderWidth": "1px",
+              "activeBackground": "rgba(0, 0, 0, 0)",
+              "rows": [
+                {
+                  "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+                  "text": "Terminal 1 - truenow",
+                  "glyph": "dot",
+                  "harnessIcon": "svg"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "clicks": [
+    {
+      "clicked": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+      "order": [
+        "246be1e4-075d-45b4-9741-3891d3c35f15",
+        "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+        "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+        "8701f05c-eb14-4f8d-9221-919852b2e3de"
+      ],
+      "cards": [
+        {
+          "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+          "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+          "active": false,
+          "title": "clioo/drogon-qa-bot-monitors",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Idle",
+          "statusGlyphClasses": "block rounded-full bg-emerald-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": "svg-avatar",
+          "affordances": [
+            "1 terminal session",
+            "Branch clioo/drogon-qa-bot-monitors"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+              "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+              "glyph": "lucide lucide-circle-check text-emerald-500",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+          "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+          "active": false,
+          "title": "seconf-feature",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Waiting for input",
+          "statusGlyphClasses": "text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": "svg-avatar",
+          "affordances": [
+            "1 terminal session",
+            "Branch seconf-feature"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+              "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+              "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+          "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+          "active": false,
+          "title": "parity-card-subtitle",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "Working",
+          "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [
+            "1 terminal session",
+            "Branch clioo/drogon-qa-bot-monitors"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+              "text": "Terminal 1 - shnow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+          "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+          "active": true,
+          "title": "sidebar-parity-2",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Exited",
+          "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [
+            "1 terminal session",
+            "Branch sidebar-parity-2"
+          ],
+          "activeBorderColor": "color(srgb 0.985163 0.985163 0.985163 / 0.237882)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "color(srgb 0.207843 0.207843 0.207843 / 0.4)",
+          "rows": [
+            {
+              "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+              "text": "Terminal 1 - truenow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "clicked": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+      "order": [
+        "246be1e4-075d-45b4-9741-3891d3c35f15",
+        "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+        "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+        "8701f05c-eb14-4f8d-9221-919852b2e3de"
+      ],
+      "cards": [
+        {
+          "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+          "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+          "active": false,
+          "title": "clioo/drogon-qa-bot-monitors",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Idle",
+          "statusGlyphClasses": "block rounded-full bg-emerald-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": "svg-avatar",
+          "affordances": [
+            "1 terminal session",
+            "Branch clioo/drogon-qa-bot-monitors"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+              "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+              "glyph": "lucide lucide-circle-check text-emerald-500",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+          "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+          "active": false,
+          "title": "seconf-feature",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Waiting for input",
+          "statusGlyphClasses": "text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": "svg-avatar",
+          "affordances": [
+            "1 terminal session",
+            "Branch seconf-feature"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+              "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+              "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+          "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+          "active": true,
+          "title": "parity-card-subtitle",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "Working",
+          "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [
+            "1 terminal session",
+            "Branch clioo/drogon-qa-bot-monitors"
+          ],
+          "activeBorderColor": "color(srgb 0.985163 0.985163 0.985163 / 0.237882)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "color(srgb 0.207843 0.207843 0.207843 / 0.4)",
+          "rows": [
+            {
+              "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+              "text": "Terminal 1 - shnow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+          "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+          "active": false,
+          "title": "sidebar-parity-2",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Exited",
+          "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [
+            "1 terminal session",
+            "Branch sidebar-parity-2"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+              "text": "Terminal 1 - truenow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "clicked": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+      "order": [
+        "246be1e4-075d-45b4-9741-3891d3c35f15",
+        "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+        "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+        "8701f05c-eb14-4f8d-9221-919852b2e3de"
+      ],
+      "cards": [
+        {
+          "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+          "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+          "active": false,
+          "title": "clioo/drogon-qa-bot-monitors",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Idle",
+          "statusGlyphClasses": "block rounded-full bg-emerald-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": "svg-avatar",
+          "affordances": [
+            "1 terminal session",
+            "Branch clioo/drogon-qa-bot-monitors"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+              "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+              "glyph": "lucide lucide-circle-check text-emerald-500",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+          "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+          "active": true,
+          "title": "seconf-feature",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Waiting for input",
+          "statusGlyphClasses": "text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": "svg-avatar",
+          "affordances": [
+            "1 terminal session",
+            "Branch seconf-feature"
+          ],
+          "activeBorderColor": "color(srgb 0.985163 0.985163 0.985163 / 0.237882)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "color(srgb 0.207843 0.207843 0.207843 / 0.4)",
+          "rows": [
+            {
+              "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+              "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+              "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+          "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+          "active": false,
+          "title": "parity-card-subtitle",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "Working",
+          "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [
+            "1 terminal session",
+            "Branch clioo/drogon-qa-bot-monitors"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+              "text": "Terminal 1 - shnow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+          "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+          "active": false,
+          "title": "sidebar-parity-2",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Exited",
+          "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [
+            "1 terminal session",
+            "Branch sidebar-parity-2"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+              "text": "Terminal 1 - truenow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "clicked": "246be1e4-075d-45b4-9741-3891d3c35f15",
+      "order": [
+        "246be1e4-075d-45b4-9741-3891d3c35f15",
+        "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+        "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+        "8701f05c-eb14-4f8d-9221-919852b2e3de"
+      ],
+      "cards": [
+        {
+          "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+          "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+          "active": true,
+          "title": "clioo/drogon-qa-bot-monitors",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Idle",
+          "statusGlyphClasses": "block rounded-full bg-emerald-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": "svg-avatar",
+          "affordances": [
+            "1 terminal session",
+            "Branch clioo/drogon-qa-bot-monitors"
+          ],
+          "activeBorderColor": "color(srgb 0.985163 0.985163 0.985163 / 0.237882)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "color(srgb 0.207843 0.207843 0.207843 / 0.4)",
+          "rows": [
+            {
+              "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+              "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+              "glyph": "lucide lucide-circle-check text-emerald-500",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+          "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+          "active": false,
+          "title": "seconf-feature",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Waiting for input",
+          "statusGlyphClasses": "text-amber-500",
+          "statusGlyphTag": "svg",
+          "agentAvatar": "svg-avatar",
+          "affordances": [
+            "1 terminal session",
+            "Branch seconf-feature"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+              "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+              "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+          "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+          "active": false,
+          "title": "parity-card-subtitle",
+          "branchSlot": "clioo/drogon-qa-bot-monitors",
+          "noteSlot": "",
+          "statusGlyphLabel": "Working",
+          "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [
+            "1 terminal session",
+            "Branch clioo/drogon-qa-bot-monitors"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+              "text": "Terminal 1 - shnow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        },
+        {
+          "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+          "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+          "active": false,
+          "title": "sidebar-parity-2",
+          "branchSlot": "",
+          "noteSlot": "",
+          "statusGlyphLabel": "Exited",
+          "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+          "statusGlyphTag": "span-dot",
+          "agentAvatar": null,
+          "affordances": [
+            "1 terminal session",
+            "Branch sidebar-parity-2"
+          ],
+          "activeBorderColor": "rgba(0, 0, 0, 0)",
+          "activeBorderWidth": "1px",
+          "activeBackground": "rgba(0, 0, 0, 0)",
+          "rows": [
+            {
+              "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+              "text": "Terminal 1 - truenow",
+              "glyph": "dot",
+              "harnessIcon": "svg"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "themes": {
+    "light": {
+      "dark": false,
+      "background": "rgb(255, 255, 255)"
+    },
+    "dark": {
+      "dark": true,
+      "background": "rgb(10, 10, 10)"
+    }
+  },
+  "final": {
+    "order": [
+      "246be1e4-075d-45b4-9741-3891d3c35f15",
+      "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+      "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+      "8701f05c-eb14-4f8d-9221-919852b2e3de"
+    ],
+    "cards": [
+      {
+        "id": "246be1e4-075d-45b4-9741-3891d3c35f15",
+        "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+        "active": true,
+        "title": "clioo/drogon-qa-bot-monitors",
+        "branchSlot": "",
+        "noteSlot": "",
+        "statusGlyphLabel": "Idle",
+        "statusGlyphClasses": "block rounded-full bg-emerald-500",
+        "statusGlyphTag": "svg",
+        "agentAvatar": "svg-avatar",
+        "affordances": [
+          "1 terminal session",
+          "Branch clioo/drogon-qa-bot-monitors"
+        ],
+        "activeBorderColor": "color(srgb 0.985163 0.985163 0.985163 / 0.237882)",
+        "activeBorderWidth": "1px",
+        "activeBackground": "color(srgb 0.207843 0.207843 0.207843 / 0.4)",
+        "rows": [
+          {
+            "session": "6c908ba5-35af-4ebe-8b1e-f3a1d6b8a5ee",
+            "text": "Terminal 1 - Skip source control pending refresh when the tree is dirtynow",
+            "glyph": "lucide lucide-circle-check text-emerald-500",
+            "harnessIcon": "svg"
+          }
+        ]
+      },
+      {
+        "id": "dff07c6d-5b84-4669-b622-1321ec6d85f2",
+        "project": "feb69c27-54a9-4ebe-9755-46a512e75e86",
+        "active": false,
+        "title": "seconf-feature",
+        "branchSlot": "",
+        "noteSlot": "",
+        "statusGlyphLabel": "Waiting for input",
+        "statusGlyphClasses": "text-amber-500",
+        "statusGlyphTag": "svg",
+        "agentAvatar": "svg-avatar",
+        "affordances": [
+          "1 terminal session",
+          "Branch seconf-feature"
+        ],
+        "activeBorderColor": "rgba(0, 0, 0, 0)",
+        "activeBorderWidth": "1px",
+        "activeBackground": "rgba(0, 0, 0, 0)",
+        "rows": [
+          {
+            "session": "c43c383c-62b7-4445-abf0-8bfecd322ca1",
+            "text": "Terminal 1 - Rename the worktree card subtitle once the branch is knownnow",
+            "glyph": "lucide lucide-message-circle-question-mark text-agent-question",
+            "harnessIcon": "svg"
+          }
+        ]
+      },
+      {
+        "id": "459a4ff2-2fec-4b1e-9489-5f2f61e0d815",
+        "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+        "active": false,
+        "title": "parity-card-subtitle",
+        "branchSlot": "clioo/drogon-qa-bot-monitors",
+        "noteSlot": "",
+        "statusGlyphLabel": "Working",
+        "statusGlyphClasses": "agent-working-spinner block rounded-full border-2 border-yellow-500 border-t-transparent motion-reduce:border-t-yellow-500",
+        "statusGlyphTag": "span-dot",
+        "agentAvatar": null,
+        "affordances": [
+          "1 terminal session",
+          "Branch clioo/drogon-qa-bot-monitors"
+        ],
+        "activeBorderColor": "rgba(0, 0, 0, 0)",
+        "activeBorderWidth": "1px",
+        "activeBackground": "rgba(0, 0, 0, 0)",
+        "rows": [
+          {
+            "session": "5d1a5b4b-68b4-4ac9-aba4-12bb0379ac4f",
+            "text": "Terminal 1 - shnow",
+            "glyph": "dot",
+            "harnessIcon": "svg"
+          }
+        ]
+      },
+      {
+        "id": "8701f05c-eb14-4f8d-9221-919852b2e3de",
+        "project": "774abc2f-d253-4fea-98f1-fa0e2b7c8996",
+        "active": false,
+        "title": "sidebar-parity-2",
+        "branchSlot": "",
+        "noteSlot": "",
+        "statusGlyphLabel": "Exited",
+        "statusGlyphClasses": "block rounded-full bg-neutral-500/40",
+        "statusGlyphTag": "span-dot",
+        "agentAvatar": null,
+        "affordances": [
+          "1 terminal session",
+          "Branch sidebar-parity-2"
+        ],
+        "activeBorderColor": "rgba(0, 0, 0, 0)",
+        "activeBorderWidth": "1px",
+        "activeBackground": "rgba(0, 0, 0, 0)",
+        "rows": [
+          {
+            "session": "6969675c-d150-403f-a86f-461e3aed5bc8",
+            "text": "Terminal 1 - truenow",
+            "glyph": "dot",
+            "harnessIcon": "svg"
+          }
+        ]
+      }
+    ]
+  },
+  "expectUnstable": false,
+  "violations": []
+}

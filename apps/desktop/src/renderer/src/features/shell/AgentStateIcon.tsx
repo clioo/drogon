@@ -9,7 +9,7 @@
    keeps the unverifiable amber dashed ring, idle keeps the idle grey dot and
    exited keeps the inactive grey dot; no zustand, props only; the tooltip
    wrapper mirrors StateIndicatorTooltip over this repo's ui/tooltip port). */
-import { CircleDashed, MessageCircleQuestion } from "lucide-react";
+import { CircleCheck, CircleDashed, MessageCircleQuestion } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { AgentState } from "../../../../shared/session-contract";
 import {
@@ -83,6 +83,32 @@ function AgentQuestionIcon({ size }: { size: number }) {
   );
 }
 
+/**
+ * The reference's `FilledBellIcon`
+ * (src/renderer/src/components/sidebar/WorktreeCardHelpers.tsx), the amber
+ * bell the fork's card status lane draws while a workspace is unread — its
+ * "the agent needs the user" glyph, distinct from the question mark the
+ * agent rows use for the same wait.
+ */
+export function FilledBellIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      aria-hidden="true"
+      className="text-amber-500"
+    >
+      <path
+        fill="currentColor"
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M5.25 9A6.75 6.75 0 0 1 12 2.25 6.75 6.75 0 0 1 18.75 9v3.75c0 .526.214 1.03.594 1.407l.53.532a.75.75 0 0 1-.53 1.28H4.656a.75.75 0 0 1-.53-1.28l.53-.532A1.989 1.989 0 0 0 5.25 12.75V9Zm6.75 12a3 3 0 0 0 2.996-2.825.75.75 0 0 0-.748-.8h-4.5a.75.75 0 0 0-.748.8A3 3 0 0 0 12 21Z"
+      />
+    </svg>
+  );
+}
+
 function AgentStateTooltip({
   label,
   children,
@@ -101,17 +127,39 @@ function AgentStateTooltip({
 }
 
 /**
+ * Which glyph family a state marker belongs to. The reference draws the same
+ * state with a different glyph per surface: the card's status lane uses
+ * StatusIndicator (sidebar/StatusIndicator.tsx — a filled emerald dot for a
+ * quiet-but-live worktree, the amber bell for an unread one), while agent
+ * rows use AgentStateDot (components/AgentStateDot.tsx — an emerald
+ * check-circle for a concluded turn). Both read this repo's single
+ * `agentState`, whose `idle` is the fork's `done`/`active`:
+ * `agent_state::derive` documents that every turn-end hook the reference
+ * maps to `done` concludes an `idle` row here.
+ *  - "dot": the shared tab/Bot glyph (unchanged default)
+ *  - "card": the fork's StatusIndicator + unread bell
+ *  - "row": the fork's AgentStateDot
+ */
+export type AgentStateIconVariant = "dot" | "card" | "row";
+
+/**
  * Compact agent-state glyph shared by session tabs and worktree cards.
  * Working renders the compositor-driven spinner ring; needs_input the shared
  * question glyph; unknown the amber dashed ring; idle and exited quiet grey
  * dots. Callers size it with className-free `size` (icon pixels).
+ *
+ * `variant` selects the reference surface's glyph set (see
+ * `AgentStateIconVariant`); the default keeps every pre-existing call site
+ * glyph-for-glyph.
  */
 export function AgentStateIcon({
   state,
   size = 14,
+  variant = "dot",
 }: {
   state: AgentState;
   size?: number;
+  variant?: AgentStateIconVariant;
 }) {
   const kind = agentIconKind(state);
   const label = agentStateLabel(state);
@@ -133,13 +181,20 @@ export function AgentStateIcon({
       </span>
     );
   } else if (kind === "needs-input") {
+    // Why: the card lane draws the fork's amber unread bell (StatusIndicator's
+    // caller side in WorktreeCardStatusSlot); rows keep the question glyph
+    // (AgentStateDot's permission/waiting branch).
     indicator = (
       <span
         className="inline-flex shrink-0 items-center justify-center"
         style={boxStyle}
         aria-label={label}
       >
-        <AgentQuestionIcon size={size} />
+        {variant === "card" ? (
+          <FilledBellIcon size={size} />
+        ) : (
+          <AgentQuestionIcon size={size} />
+        )}
       </span>
     );
   } else if (kind === "unknown") {
@@ -159,7 +214,28 @@ export function AgentStateIcon({
         />
       </span>
     );
+  } else if (kind === "idle" && variant === "row") {
+    // Why: the reference's agent rows read a concluded turn as "done" and
+    // draw a filled emerald check-circle (AgentStateDot); it stays visually
+    // distinct from the grey idle/inactive dot at a glance.
+    indicator = (
+      <span
+        className="inline-flex shrink-0 items-center justify-center"
+        style={boxStyle}
+        aria-label={label}
+      >
+        <CircleCheck
+          size={size}
+          className="text-emerald-500"
+          aria-hidden="true"
+        />
+      </span>
+    );
   } else {
+    // idle/exited: the fork's StatusIndicator fills emerald for `done` /
+    // `active` and leaves `inactive` grey, so a live-but-quiet worktree
+    // stops reading as "no information".
+    const quiet = variant === "card" && kind === "idle";
     indicator = (
       <span
         className="inline-flex shrink-0 items-center justify-center"
@@ -167,7 +243,9 @@ export function AgentStateIcon({
         aria-label={label}
       >
         <span
-          className="block rounded-full bg-neutral-500/40"
+          className={
+            quiet ? "block rounded-full bg-emerald-500" : "block rounded-full bg-neutral-500/40"
+          }
           style={innerStyle}
         />
       </span>
