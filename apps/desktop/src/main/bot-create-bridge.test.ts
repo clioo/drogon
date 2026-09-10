@@ -45,6 +45,25 @@ describe("Bot creation boundary (not registered)", () => {
     );
   });
 
+  it("admits the app-global '' scope structurally; native owns folder policy (#348/R17-E)", async () => {
+    // The renderer files a new bot under its placement folder, but the
+    // input boundary must not reject the global sentinel itself: folder
+    // authority (including the honest unknown-workspace refusal) is
+    // native's, exactly like preset/harness/text policy above.
+    const call = vi.fn(async () => ({ ok: true as const, result: created }));
+    const next = { ...input, workspaceId: "" };
+    expect(await dispatchBotCreate(next, call)).toEqual({
+      ok: true,
+      result: created,
+    });
+    const { requestId, ...params } = next;
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      "bot.create",
+      params,
+      requestId,
+    );
+  });
+
   it("preserves transport ambiguity without retrying", async () => {
     const failure = new Error("Connection lost after submission");
     const call = vi.fn(async () => {

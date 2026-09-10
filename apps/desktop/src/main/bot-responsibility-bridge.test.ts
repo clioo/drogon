@@ -191,3 +191,87 @@ describe("Bot delete bridge", () => {
     ).toMatchObject({ ok: false, error: { code: "internal_error" } });
   });
 });
+
+describe("App-global '' scope (#348/R17-E)", () => {
+  it("passes '' through for responsibility-create and accepts the owning-workspace echo", async () => {
+    const resolved = { ...createResult, workspaceId: "owning-workspace" };
+    const call = vi.fn(async () => ({ ok: true as const, result: resolved }));
+    expect(
+      await dispatchBotResponsibilityCreate(
+        { ...createInput, workspaceId: "" },
+        call,
+      ),
+    ).toEqual({ ok: true, result: resolved });
+    const { requestId, ...rest } = createInput;
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      "bot.responsibility_create",
+      { ...rest, workspaceId: "" },
+      requestId,
+    );
+  });
+  it("passes '' through for responsibility-delete and accepts the owning-workspace echo", async () => {
+    const resolved = { ...deleteResult, workspaceId: "owning-workspace" };
+    const call = vi.fn(async () => ({ ok: true as const, result: resolved }));
+    expect(
+      await dispatchBotResponsibilityDelete(
+        { ...deleteInput, workspaceId: "" },
+        call,
+      ),
+    ).toEqual({ ok: true, result: resolved });
+  });
+  it("passes '' through for bot-delete and accepts the owning-workspace echo", async () => {
+    const resolved = { ...botDeleteResult, workspaceId: "owning-workspace" };
+    const call = vi.fn(async () => ({ ok: true as const, result: resolved }));
+    expect(
+      await dispatchBotDelete({ ...botDeleteInput, workspaceId: "" }, call),
+    ).toEqual({ ok: true, result: resolved });
+  });
+  it("accepts the verbatim '' echo for applied app-global deletes", async () => {
+    // Native resolves the owning folder for the mutation itself but echoes
+    // the requested id in delete receipts: ''-for-'' means applied under
+    // the global scope, not a mismatch.
+    const call = vi.fn(async () => ({
+      ok: true as const,
+      result: { ...deleteResult, workspaceId: "" },
+    }));
+    expect(
+      await dispatchBotResponsibilityDelete(
+        { ...deleteInput, workspaceId: "" },
+        call,
+      ),
+    ).toEqual({
+      ok: true,
+      result: { ...deleteResult, workspaceId: "" },
+    });
+    const botCall = vi.fn(async () => ({
+      ok: true as const,
+      result: { ...botDeleteResult, workspaceId: "" },
+    }));
+    expect(
+      await dispatchBotDelete({ ...botDeleteInput, workspaceId: "" }, botCall),
+    ).toEqual({
+      ok: true,
+      result: { ...botDeleteResult, workspaceId: "" },
+    });
+  });
+  it("still rejects a mismatched echo for workspace-scoped mutations", async () => {
+    await expect(
+      dispatchBotResponsibilityCreate(createInput, async () => ({
+        ok: true as const,
+        result: { ...createResult, workspaceId: "other" },
+      })),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal_error" },
+    });
+    await expect(
+      dispatchBotDelete(botDeleteInput, async () => ({
+        ok: true as const,
+        result: { ...botDeleteResult, workspaceId: "other" },
+      })),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal_error" },
+    });
+  });
+});

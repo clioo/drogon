@@ -3,11 +3,13 @@
    R17-E #348: the fork's exact controller semantics are restored — one
    shared busy/error channel for every action, first-bot auto-selection,
    selection falling back to the first bot, and the fork's Escape chain
-   (create form → responsibility form → close the page). `launchBot` keeps
-   the fork's no-workspace refusal copy verbatim; with a workspace selected
-   it dispatches a `bot.run` chat turn with the bot's stored harness
-   overrides (this repo's headless session primitive — the fork's
-   launch-drogon-bot-session tab path is not ported). Data-layer
+   (create form → responsibility form → close the page). `launchBot`
+   dispatches a `bot.run` chat turn with the bot's stored harness overrides
+   (this repo's headless session primitive — the fork's
+   launch-drogon-bot-session tab path is not ported); reads are app-global
+   (#348/R17-E) and native resolves the bot's owning workspace, so only a
+   missing scope refuses, while create carries the host's placement folder.
+   Data-layer
    adaptations (no zustand store, no window.api): the snapshot, bridge and
    scope are injected by the caller; the reload-after-every-mutation and
    busy-gate rules are the source's; the keep-alive host visibility gate on
@@ -51,6 +53,10 @@ export type BotsPageControllerDeps = {
    *  flight over a placeholder snapshot: start (and stay) in the fork's
    *  loading state instead of flashing the empty state. */
   snapshotPending?: boolean;
+  /** Placement folder for bot.create (BotsPanel's `createWorkspaceId`):
+   *  reads ride the app-global scope, but a new bot must land in a real
+   *  workspace folder. Absent/empty means create is refused honestly. */
+  createWorkspaceId?: string;
 };
 
 function mintRequestId(prefix: string): string {
@@ -71,7 +77,14 @@ export const BOT_OPEN_SESSION_PROMPT =
   "Hi! Reply briefly to confirm this session is live.";
 
 export function useBotsPageController(deps: BotsPageControllerDeps) {
-  const { snapshot, bridge, scope, onClose, onRunResponsibility } = deps;
+  const {
+    snapshot,
+    bridge,
+    scope,
+    onClose,
+    onRunResponsibility,
+    createWorkspaceId,
+  } = deps;
 
   const [localSnapshot, setLocalSnapshot] =
     useState<BotsPanelSnapshot | null>(null);
@@ -184,11 +197,21 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       );
       return;
     }
+    // Reads ride the app-global scope, but native files a new bot under an
+    // exact workspace folder (it has no owning bot to resolve one from),
+    // so create carries the host's placement folder instead of the global
+    // sentinel — which native would honestly reject as unknown workspace.
+    const placementWorkspaceId = createWorkspaceId ?? scope.workspaceId;
+    if (!placementWorkspaceId) {
+      setActionError("Select a workspace before creating a Bot.");
+      return;
+    }
     setBusy(true);
     setActionError(null);
     try {
       const response = await bridge.botCreate({
         ...scope,
+        workspaceId: placementWorkspaceId,
         requestId: mintRequestId("bot-create"),
         body: buildBotCreateBody(createForm),
       });
@@ -205,7 +228,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     } finally {
       setBusy(false);
     }
-  }, [bridge, scope, busy, createForm, load]);
+  }, [bridge, scope, busy, createForm, createWorkspaceId, load]);
 
   const submitResponsibility = useCallback(
     async (botId: string): Promise<void> => {
@@ -313,24 +336,28 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     [busy, onRunResponsibility, localSnapshot, snapshot, load],
   );
 
-  // Open session (bug-bot-open-session): the fork's launchBot opens a real
-  // harness tab for the bot (launch-drogon-bot-session). This repo's session
-  // primitive is the daemon's headless `bot.run` chat turn (J8), so the click
-  // dispatches one with the bot's STORED harness overrides
-  // (buildBotRunHarness — the same resolution the mount uses for manual
-  // runs), selects the bot, then reloads so the new message/session state
-  // lands. The fork's no-workspace refusal copy stays verbatim (native
-  // resolves the bot's owning workspace only for a workspace-scoped call).
-  // Every other failure — a bridge without botRun (capability withheld),
-  // a daemon-unreachable transport throw, a refused/unsupported outcome —
-  // lands in the shared action-error alert, never a silent no-op.
+  // Open session (bug-bot-open-session, #348/R17-E follow-up): the fork's
+  // launchBot opens a real harness tab for the bot
+  // (launch-drogon-bot-session). This repo's session primitive is the
+  // daemon's headless `bot.run` chat turn (J8), so the click dispatches one
+  // with the bot's STORED harness overrides (buildBotRunHarness — the same
+  // resolution the mount uses for manual runs), selects the bot, then
+  // reloads so the new message/session state lands. Reads are app-global
+  // and native resolves the '' scope to the bot's owning workspace, so no
+  // workspace-selection refusal remains: only a missing scope (unknown
+  // host) refuses. Every other failure — a bridge without botRun
+  // (capability withheld), a daemon-unreachable transport throw, a
+  // refused/unsupported outcome — lands in the shared action-error alert,
+  // never a silent no-op.
   const launchBot = useCallback(
     async (bot: { id: string }): Promise<void> => {
       if (busy) {
         return;
       }
-      if (!scope || scope.workspaceId === "") {
-        setActionError("Open a workspace before launching a Bot session.");
+      if (!scope) {
+        setActionError(
+          "Bot sessions are unavailable right now. Refresh and retry.",
+        );
         return;
       }
       const botRun = bridge?.botRun;

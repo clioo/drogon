@@ -1054,6 +1054,9 @@ export function App() {
         ),
         snapshotPending: freshBotsLoad === null,
         onClose: () => botsCloseRef.current(),
+        // Reads ride the app-global scope, but bot.create needs a real
+        // placement folder: the selected workspace, if any.
+        createWorkspaceId: current?.id,
       });
     return filesBaseRegistry;
   }, [

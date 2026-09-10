@@ -28,6 +28,12 @@ export type BotsPanelHydrationProps = BotsPanelProps & {
    *  placeholder snapshot instead of flashing the empty state. Cleared on
    *  hydration; never part of the shared contract. */
   snapshotPending?: boolean;
+  /** Placement folder for bot.create (#348/R17-E follow-up): reads ride the
+   *  app-global scope, but a new bot must land in a real workspace folder
+   *  (native has no owning bot to resolve it from). Supplied by the host
+   *  from the selected workspace; absent means create is refused with an
+   *  honest error instead of a native "workspace not found". */
+  createWorkspaceId?: string;
 };
 
 export function BotsPanel({
@@ -37,6 +43,7 @@ export function BotsPanel({
   bridge,
   scope,
   snapshotPending,
+  createWorkspaceId,
 }: BotsPanelHydrationProps) {
   const controller = useBotsPageController({
     snapshot,
@@ -45,6 +52,7 @@ export function BotsPanel({
     onClose,
     onRunResponsibility,
     snapshotPending,
+    createWorkspaceId,
   });
   const {
     effective,

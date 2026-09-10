@@ -190,7 +190,10 @@ describe("bot open session", () => {
     );
   });
 
-  it("keeps the fork's workspace refusal visible when no workspace is selected", async () => {
+  it("dispatches with the app-global scope instead of refusing (#348/R17-E)", async () => {
+    // Reads are app-global and native resolves '' to the bot's owning
+    // workspace: the old workspace-selection refusal is gone, the turn
+    // rides the live scope verbatim.
     const seeded = bot();
     const fake = fakeBridge(seeded);
     render(
@@ -201,12 +204,115 @@ describe("bot open session", () => {
       />,
     );
     fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() => expect(fake.botRun).toHaveBeenCalledTimes(1));
+    expect(fake.botRun.mock.calls[0]![0]).toMatchObject({
+      botId: "bot-1",
+      workspaceId: "",
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("explains instead of no-op when no scope is known", async () => {
+    const seeded = bot();
+    const fake = fakeBridge(seeded);
+    render(
+      <BotsPanel snapshot={{ bots: [seeded], history: [] }} bridge={fake.bridge} />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
-        "Open a workspace before launching a Bot session.",
-      ),
+      expect(screen.getByRole("alert").textContent).toMatch(/unavailable/i),
     );
     expect(fake.botRun).not.toHaveBeenCalled();
+  });
+
+  it("files create under the host's placement folder, not the global scope", async () => {
+    // Native files a new bot under an exact workspace folder (it has no
+    // owning bot to resolve one from), so create carries createWorkspaceId
+    // while reads stay app-global.
+    const seeded = bot();
+    const botCreate = vi.fn(async (createInput: {
+      body: {
+        characterPreset: string;
+        displayIdentity: {
+          displayName: string;
+          handle: string | null;
+          title: string | null;
+        };
+      };
+    }) => ({
+      ok: true as const,
+      result: bot({
+        id: "bot-new",
+        characterPreset: createInput.body.characterPreset,
+        displayIdentity: {
+          displayName: createInput.body.displayIdentity.displayName,
+          handle: createInput.body.displayIdentity.handle,
+          title: createInput.body.displayIdentity.title,
+        },
+      }),
+    }));
+    const bridge = {
+      botSnapshot: async () => ({
+        ok: true as const,
+        result: {
+          ...scope,
+          workspaceId: "",
+          bots: [seeded],
+          history: [],
+        },
+      }),
+      botCreate,
+    };
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={bridge}
+        scope={{ ...scope, workspaceId: "" }}
+        createWorkspaceId="ws-9"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New Bot" }));
+    fireEvent.change(screen.getByLabelText("Name (optional)"), {
+      target: { value: "Placed Bot" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Bot" }));
+    await waitFor(() => expect(botCreate).toHaveBeenCalledTimes(1));
+    expect(botCreate.mock.calls[0]![0]).toMatchObject({
+      workspaceId: "ws-9",
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("refuses create honestly with no placement folder", async () => {
+    const seeded = bot();
+    const botCreate = vi.fn();
+    const bridge = {
+      botSnapshot: async () => ({
+        ok: true as const,
+        result: {
+          ...scope,
+          workspaceId: "",
+          bots: [seeded],
+          history: [],
+        },
+      }),
+      botCreate,
+    };
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={bridge}
+        scope={{ ...scope, workspaceId: "" }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New Bot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Bot" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Select a workspace before creating a Bot.",
+      ),
+    );
+    expect(botCreate).not.toHaveBeenCalled();
   });
 
   it("offers the harness picker in the creation form (reference parity)", async () => {
