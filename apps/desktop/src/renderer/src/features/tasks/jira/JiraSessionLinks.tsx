@@ -17,14 +17,16 @@ import { Button } from "../../../components/ui/button";
 import type { JiraSessionState } from "../jira-task-resume-storage";
 
 /** One rendered binding. `identity` is null for an UNRESOLVED legacy row:
- * displayed for honesty, never relinked by account email or display key. */
+ * displayed for honesty, never relinked by account email or display key.
+ * `verified` is false for the provisional tier — a configured-endpoint
+ * label, never presented as the confirmed actual instance. */
 export type JiraSessionLinkView = {
   linkKey: string;
   identity: {
-    instanceId: string;
-    instanceUrl: string;
+    instanceKey: string;
     issueId: string;
     key: string;
+    verified: boolean;
   } | null;
   worktreeId: string;
   worktreeTitle: string;
@@ -135,16 +137,26 @@ export function JiraSessionLinks({
                   {view.worktreeTitle || view.worktreeId}
                 </span>
                 {view.identity ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => void onOpenIssue(view)}
-                    title={`Open ${view.identity.key} in Jira`}
-                  >
-                    <ExternalLink className="size-3" />
-                    {view.identity.key}
-                  </Button>
+                  <>
+                    {!view.identity.verified ? (
+                      <span
+                        className="text-xs text-muted-foreground"
+                        title="Bound to the configured endpoint only; the actual instance is not yet source-verified"
+                      >
+                        Unverified
+                      </span>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => void onOpenIssue(view)}
+                      title={`Open ${view.identity.key} in Jira`}
+                    >
+                      <ExternalLink className="size-3" />
+                      {view.identity.key}
+                    </Button>
+                  </>
                 ) : (
                   <span
                     className="text-xs text-muted-foreground"

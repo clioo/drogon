@@ -12,12 +12,12 @@ afterEach(() => cleanup());
 
 function view(overrides: Partial<JiraSessionLinkView> = {}): JiraSessionLinkView {
   return {
-    linkKey: "inst:10001",
+    linkKey: "provisional:inst:10001",
     identity: {
-      instanceId: "inst",
-      instanceUrl: "https://acme.atlassian.net",
+      instanceKey: "provisional:inst",
       issueId: "10001",
       key: "DROG-42",
+      verified: false,
     },
     worktreeId: "wt-1",
     worktreeTitle: "DROG-42 Fix the flux capacitor",
@@ -95,6 +95,34 @@ describe("JiraSessionLinks", () => {
       />,
     );
     expect(screen.getByText("Unresolved link")).toBeTruthy();
+  });
+
+  test("a provisional-tier row is labelled unverified; a source-backed one is not", () => {
+    const { rerender } = render(
+      <JiraSessionLinks
+        links={[view()]}
+        notice={null}
+        onResume={vi.fn()}
+        onOpenIssue={vi.fn()}
+        onUnlink={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Unverified")).toBeTruthy();
+    rerender(
+      <JiraSessionLinks
+        links={[
+          view({
+            identity: { ...view().identity!, verified: true },
+            linkKey: "cloudid:Aa1Bb2Cc3:10001",
+          }),
+        ]}
+        notice={null}
+        onResume={vi.fn()}
+        onOpenIssue={vi.fn()}
+        onUnlink={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("Unverified")).toBeNull();
   });
 
   test("connection-unavailable and issue-deleted are different notices", () => {

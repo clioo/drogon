@@ -15,8 +15,8 @@
 import type { JiraBridge, JiraIssue } from "../../../../../shared/jira-contract";
 import { getJiraIssueWorkspaceSeed } from "./jira-workspace-seed";
 import {
-  getJiraTaskIdentity,
   jiraTaskLinkId,
+  resolveProvisionalJiraTaskIdentity,
   type JiraTaskIdentity,
 } from "./jira-task-identity";
 
@@ -89,7 +89,7 @@ export async function startWorkspaceFromJiraIssue(
     intentId?: string;
   },
 ): Promise<JiraStartIssueOutcome> {
-  const identity = await getJiraTaskIdentity(
+  const identity = await resolveProvisionalJiraTaskIdentity(
     {
       issueId: input.issue.id ?? "",
       key: input.issue.key,

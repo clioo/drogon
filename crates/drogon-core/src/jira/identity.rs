@@ -1,26 +1,19 @@
 //! Jira site identity helpers (R17-A), ported from the fork's
-//! `src/main/jira/site-identity.ts`, plus C06's stable task/instance
-//! identity: an account-independent instance id and the immutable issue
-//! id that survive reconnects with another account, issue key/title
-//! renames and daemon restarts.
+//! `src/main/jira/site-identity.ts`, plus C06's stable task identity: an
+//! explicitly PROVISIONAL endpoint label, a source-backed instance
+//! identity tier with provenance, and the immutable issue id that survive
+//! reconnects, key/title renames and daemon restarts.
 //! MIT Copyright (c) 2026 Lovecast Inc.
-
-// C06: stable issue→session links. Declared here with `#[path]` because
-// `jira/mod.rs` is root-held; the file itself lives at
-// `jira/session_links.rs` and moves to `pub mod session_links;` in mod.rs
-// verbatim at handover (public path `drogon_core::jira::session_links`).
-#[path = "session_links.rs"]
-pub mod session_links;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use drogon_protocol::jira::JiraViewer;
 use sha2::Digest as _;
 
-/// Domain separation for [`jira_instance_id`], so an instance id can never
-/// collide with a legacy [`get_site_id`] connection id or any other hash
-/// built from the same URL alphabet.
-const INSTANCE_ID_DOMAIN: &[u8] = b"drogon-jira-instance-v1";
+/// Domain separation for [`provisional_endpoint_id`], so an endpoint label
+/// can never collide with a legacy [`get_site_id`] connection id or any
+/// other hash built from the same URL alphabet.
+const ENDPOINT_ID_DOMAIN: &[u8] = b"drogon-jira-endpoint-v1";
 
 /// Trim, default to `https://`, keep origin + path without trailing slash,
 /// and drop query/fragment — the fork's `normalizeJiraSiteUrl`.
@@ -113,22 +106,23 @@ pub fn to_viewer(data: &serde_json::Value, fallback_email: &str) -> JiraViewer {
     }
 }
 
-// --- C06: stable task/instance identity -----------------------------------
+// --- C06: stable task identity -------------------------------------------
 
-/// Stable, account-independent Jira instance id: sha256 over a domain-
-/// separated normalized site URL, base64url, first 24 chars. The SAME
-/// instance connected with a different account yields the SAME id, which
-/// is exactly what a reconnect must not break; two different instances
-/// (different hosts) can never share one id, so equal displayed issue
-/// keys stay isolated.
+/// Stable PROVISIONAL endpoint label: sha256 over a domain-separated,
+/// authority-case-folded normalized site URL, base64url, first 24 chars.
 ///
+/// This proves which endpoint was CONFIGURED — never which Jira instance
+/// actually answered. Two accounts configuring the same URL get the same
+/// label (the authority folds to lowercase), and two different hosts can
+/// never share one label, but a label is NOT a verified instance identity:
+/// see [`JiraInstanceIdentity::SourceBacked`] for the identity of record.
 /// Errs exactly when [`normalize_jira_site_url`] errs.
-pub fn jira_instance_id(site_url: &str) -> Result<String, String> {
+pub fn provisional_endpoint_id(site_url: &str) -> Result<String, String> {
     let normalized = normalize_jira_site_url(site_url)?;
     // DNS host case is not significant and the fork's normalizer keeps the
     // entered case, so the hash folds the authority to lowercase — the same
-    // instance typed as ACME.atlassian.net and acme.atlassian.net resolves
-    // to ONE id across accounts.
+    // endpoint typed as ACME.atlassian.net and acme.atlassian.net resolves
+    // to ONE label across accounts.
     let (scheme, rest) = normalized
         .split_once("://")
         .unwrap_or(("", normalized.as_str()));
@@ -137,7 +131,7 @@ pub fn jira_instance_id(site_url: &str) -> Result<String, String> {
         None => (rest, ""),
     };
     let mut hash = sha2::Sha256::new();
-    hash.update(INSTANCE_ID_DOMAIN);
+    hash.update(ENDPOINT_ID_DOMAIN);
     hash.update(b"\n");
     hash.update(scheme.as_bytes());
     hash.update(b"://");
@@ -145,6 +139,120 @@ pub fn jira_instance_id(site_url: &str) -> Result<String, String> {
     hash.update(path.as_bytes());
     let digest = hash.finalize();
     Ok(URL_SAFE_NO_PAD.encode(digest)[..24].to_string())
+}
+
+/// Where a source-backed instance identifier came from. Only identifiers
+/// read from an ACTUAL instance response payload (never from user
+/// configuration, never from the credential email) count as source-backed;
+/// producers are deterministic and covered by fixture payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstanceIdentitySource {
+    /// Jira Cloud tenant id (`cloudId`) from an accessible-resources-style
+    /// response payload, matched to the configured site URL.
+    CloudTenantId,
+    /// Jira Server/DC: the instance's OWN serverInfo-attested base URL —
+    /// the server attesting its canonical address, which is stronger
+    /// evidence than user configuration (Server/DC exposes no immutable
+    /// instance id).
+    ServerAttestedBaseUrl,
+}
+
+impl InstanceIdentitySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CloudTenantId => "cloud-tenant-id",
+            Self::ServerAttestedBaseUrl => "server-attested-base-url",
+        }
+    }
+
+    /// Namespace prefix so a source-backed key can never collide with (or
+    /// be forged by) a provisional endpoint label.
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::CloudTenantId => "cloudid",
+            Self::ServerAttestedBaseUrl => "server",
+        }
+    }
+}
+
+/// How the Jira instance is KNOWN. A configured URL alone yields only the
+/// [`JiraInstanceIdentity::Provisional`] tier; the identity of record is
+/// [`JiraInstanceIdentity::SourceBacked`] — an identifier read from an
+/// actual instance response, with provenance. A configured URL alone must
+/// never flip an unresolved legacy binding into a verified
+/// actual-instance identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JiraInstanceIdentity {
+    Provisional {
+        endpoint_id: String,
+        endpoint_url: String,
+    },
+    SourceBacked {
+        instance_key: String,
+        source: InstanceIdentitySource,
+        endpoint_url: String,
+        /// RFC3339 timestamp of the observation (fixture clock in tests).
+        observed_at: String,
+    },
+}
+
+impl JiraInstanceIdentity {
+    /// Namespaced composite key for stores: provisional labels and
+    /// source-backed identifiers live in DIFFERENT namespaces, so a
+    /// provisional label can never masquerade as the verified instance.
+    pub fn key(&self) -> String {
+        match self {
+            Self::Provisional { endpoint_id, .. } => format!("provisional:{endpoint_id}"),
+            Self::SourceBacked {
+                instance_key,
+                source,
+                ..
+            } => format!("{}:{instance_key}", source.prefix()),
+        }
+    }
+
+    pub fn endpoint_url(&self) -> &str {
+        match self {
+            Self::Provisional { endpoint_url, .. } | Self::SourceBacked { endpoint_url, .. } => {
+                endpoint_url
+            }
+        }
+    }
+
+    pub fn is_source_backed(&self) -> bool {
+        matches!(self, Self::SourceBacked { .. })
+    }
+}
+
+/// Extracts the Cloud tenant id (`cloudId`) for the configured site from an
+/// accessible-resources-style payload (an array of `{id, url, ...}`), the
+/// deterministic producer for [`InstanceIdentitySource::CloudTenantId`].
+/// Pure payload parsing — no network, no credential probing.
+pub fn cloud_tenant_id_from_accessible_resources(
+    payload: &serde_json::Value,
+    site_url: &str,
+) -> Option<String> {
+    let endpoint = fold_authority_case(&normalize_jira_site_url(site_url).ok()?);
+    for entry in payload.as_array()? {
+        let id = entry.get("id").and_then(serde_json::Value::as_str)?.trim();
+        let url = entry.get("url").and_then(serde_json::Value::as_str)?;
+        let entry_url = fold_authority_case(&normalize_jira_site_url(url).ok()?);
+        if !id.is_empty() && id.len() <= 128 && entry_url == endpoint {
+            return Some(id.to_string());
+        }
+    }
+    None
+}
+
+/// Extracts the Server/DC server-attested base URL from a serverInfo
+/// payload, the deterministic producer for
+/// [`InstanceIdentitySource::ServerAttestedBaseUrl`]. Returns the
+/// normalized, case-folded URL the SERVER attests (which may differ from
+/// what the user configured). Pure payload parsing.
+pub fn server_attested_base_url_from_server_info(payload: &serde_json::Value) -> Option<String> {
+    let base_url = payload.get("baseUrl").and_then(serde_json::Value::as_str)?;
+    let normalized = normalize_jira_site_url(base_url).ok()?;
+    Some(fold_authority_case(&normalized))
 }
 
 /// Fold the authority segment of a normalized URL to lowercase (scheme is
@@ -163,15 +271,13 @@ fn fold_authority_case(normalized: &str) -> String {
     }
 }
 
-/// The stable external identity of a Jira task (C06): provider plus the
-/// ACTUAL instance (derived from the normalized site URL, never from the
-/// credential email or the legacy per-account site id) plus the immutable
-/// REST issue id. `key` is display-only and may drift; `title` never
-/// participates at all.
+/// The stable external identity of a Jira task (C06): HOW the instance is
+/// known (provisional label vs source-backed identifier) plus the
+/// immutable REST issue id. `key` is display-only and may drift; `title`
+/// never participates at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JiraTaskIdentity {
-    pub instance_id: String,
-    pub instance_url: String,
+    pub instance: JiraInstanceIdentity,
     /// Immutable Jira REST id (`issues[].id`) — survives key renames and
     /// project moves within the instance.
     pub issue_id: String,
@@ -180,18 +286,7 @@ pub struct JiraTaskIdentity {
 }
 
 impl JiraTaskIdentity {
-    /// Resolves the identity from the instance site URL and the issue's
-    /// immutable id. Anything missing (no site URL, no issue id — e.g. an
-    /// issue read from a legacy list before C06) stays unresolved: this
-    /// constructor is the single gate, so no caller can silently fall back
-    /// to the account email or the display key.
-    pub fn resolve(site_url: &str, issue_id: &str, key: &str) -> Result<Self, String> {
-        let normalized = normalize_jira_site_url(site_url)?;
-        let instance_id = jira_instance_id(&normalized)?;
-        // Canonical display/canonical form: same folding as the id (scheme
-        // lowercase via normalize, authority case-folded here so both
-        // accounts' spellings agree). The legacy normalizer is untouched.
-        let instance_url = fold_authority_case(&normalized);
+    fn build(instance: JiraInstanceIdentity, issue_id: &str, key: &str) -> Result<Self, String> {
         let issue_id = issue_id.trim();
         if issue_id.is_empty() || issue_id.len() > 64 || issue_id.contains('\0') {
             return Err("Jira issue id is required for a stable task identity".to_string());
@@ -201,11 +296,52 @@ impl JiraTaskIdentity {
             return Err("Jira issue key is required for a stable task identity".to_string());
         }
         Ok(Self {
-            instance_id,
-            instance_url,
+            instance,
             issue_id: issue_id.to_string(),
             key: key.to_string(),
         })
+    }
+
+    /// Resolves the task identity at the PROVISIONAL tier: the endpoint is
+    /// known only from configuration, so the identity is explicitly a
+    /// provisional binding — never presented as a verified instance. Used
+    /// before a source response is available; legacy rows without an
+    /// immutable issue id still fail here (unresolved stays unresolved).
+    pub fn resolve_provisional(site_url: &str, issue_id: &str, key: &str) -> Result<Self, String> {
+        let normalized = normalize_jira_site_url(site_url)?;
+        let endpoint_id = provisional_endpoint_id(&normalized)?;
+        let instance = JiraInstanceIdentity::Provisional {
+            endpoint_id,
+            endpoint_url: fold_authority_case(&normalized),
+        };
+        Self::build(instance, issue_id, key)
+    }
+
+    /// Resolves the task identity at the SOURCE-BACKED tier — the identity
+    /// of record. `identifier` comes from a producer such as
+    /// [`cloud_tenant_id_from_accessible_resources`] or
+    /// [`server_attested_base_url_from_server_info`], never from user
+    /// configuration.
+    pub fn resolve_source_backed(
+        source: InstanceIdentitySource,
+        identifier: &str,
+        endpoint_url: &str,
+        observed_at: impl Into<String>,
+        issue_id: &str,
+        key: &str,
+    ) -> Result<Self, String> {
+        let identifier = identifier.trim();
+        if identifier.is_empty() || identifier.len() > 256 {
+            return Err("instance identifier is required".to_string());
+        }
+        let normalized = normalize_jira_site_url(endpoint_url)?;
+        let instance = JiraInstanceIdentity::SourceBacked {
+            instance_key: identifier.to_string(),
+            source,
+            endpoint_url: fold_authority_case(&normalized),
+            observed_at: observed_at.into(),
+        };
+        Self::build(instance, issue_id, key)
     }
 
     /// The provider half of the composite identity; matches the fork's
@@ -215,9 +351,10 @@ impl JiraTaskIdentity {
     }
 
     /// Deterministic composite link id, stable across restarts and safe to
-    /// log (no URL secrets): `{instance_id}:{issue_id}`.
+    /// log (no URL secrets): `{instance_key}:{issue_id}` where the instance
+    /// key is namespaced by identity tier.
     pub fn link_id(&self) -> String {
-        format!("{}:{}", self.instance_id, self.issue_id)
+        format!("{}:{}", self.instance.key(), self.issue_id)
     }
 }
 
@@ -277,21 +414,30 @@ mod tests {
     }
 
     #[test]
-    fn instance_id_is_account_independent_and_distinct_from_connection_id() {
-        // Same instance, another account: the stable instance id survives.
+    fn endpoint_label_is_account_independent_and_distinct_from_connection_id() {
+        // Same endpoint, another account: the provisional label survives.
         assert_eq!(
-            jira_instance_id("https://acme.atlassian.net").unwrap(),
-            jira_instance_id("https://acme.atlassian.net").unwrap()
+            provisional_endpoint_id("https://acme.atlassian.net").unwrap(),
+            provisional_endpoint_id("https://acme.atlassian.net").unwrap()
         );
         let identity_a =
-            JiraTaskIdentity::resolve("https://acme.atlassian.net", "10001", "DROG-42").unwrap();
-        let identity_b =
-            JiraTaskIdentity::resolve("https://ACME.atlassian.net/", "10001", "DROG-42").unwrap();
+            JiraTaskIdentity::resolve_provisional("https://acme.atlassian.net", "10001", "DROG-42")
+                .unwrap();
+        let identity_b = JiraTaskIdentity::resolve_provisional(
+            "https://ACME.atlassian.net/",
+            "10001",
+            "DROG-42",
+        )
+        .unwrap();
         assert_eq!(identity_a, identity_b);
-        // A different instance never shares the identity.
-        let other =
-            JiraTaskIdentity::resolve("https://globex.atlassian.net", "10001", "DROG-42").unwrap();
-        assert_ne!(identity_a.instance_id, other.instance_id);
+        // A different endpoint never shares the label.
+        let other = JiraTaskIdentity::resolve_provisional(
+            "https://globex.atlassian.net",
+            "10001",
+            "DROG-42",
+        )
+        .unwrap();
+        assert_ne!(identity_a.instance.key(), other.instance.key());
         assert_ne!(identity_a.link_id(), other.link_id());
         // Connection id stays email-tainted (legacy semantics preserved).
         assert_ne!(
@@ -299,24 +445,109 @@ mod tests {
             get_site_id("https://acme.atlassian.net", "b@x.com")
         );
         assert_ne!(
-            identity_a.instance_id,
+            identity_a.instance.key(),
             get_site_id("https://acme.atlassian.net", "a@x.com")
         );
     }
 
     #[test]
+    fn provisional_and_source_backed_tiers_are_namespaced_apart() {
+        let provisional =
+            JiraTaskIdentity::resolve_provisional("https://acme.atlassian.net", "10001", "DROG-42")
+                .unwrap();
+        let verified = JiraTaskIdentity::resolve_source_backed(
+            InstanceIdentitySource::CloudTenantId,
+            "Aa1Bb2Cc3",
+            "https://acme.atlassian.net",
+            "2026-01-01T00:00:00Z",
+            "10001",
+            "DROG-42",
+        )
+        .unwrap();
+        assert!(!provisional.instance.is_source_backed());
+        assert!(verified.instance.is_source_backed());
+        // A configured URL alone NEVER masquerades as the verified tier.
+        assert_ne!(provisional.link_id(), verified.link_id());
+        assert!(provisional.link_id().starts_with("provisional:"));
+        assert!(verified.link_id().starts_with("cloudid:"));
+        assert!(matches!(
+            verified.instance,
+            JiraInstanceIdentity::SourceBacked { ref source, .. } if *source == InstanceIdentitySource::CloudTenantId
+        ));
+    }
+
+    #[test]
+    fn cloud_tenant_id_producer_parses_fixture_payloads() {
+        let payload = serde_json::json!([
+            {"id": "Aa1Bb2Cc3", "url": "https://acme.atlassian.net", "name": "acme"},
+            {"id": "Other1", "url": "https://other.atlassian.net", "name": "other"}
+        ]);
+        assert_eq!(
+            cloud_tenant_id_from_accessible_resources(&payload, "https://acme.atlassian.net")
+                .as_deref(),
+            Some("Aa1Bb2Cc3")
+        );
+        // Case-folded matching against the configured endpoint.
+        assert_eq!(
+            cloud_tenant_id_from_accessible_resources(&payload, "https://ACME.atlassian.net/")
+                .as_deref(),
+            Some("Aa1Bb2Cc3")
+        );
+        // No matching entry (a different site) is honest None.
+        assert_eq!(
+            cloud_tenant_id_from_accessible_resources(&payload, "https://zeta.atlassian.net"),
+            None
+        );
+    }
+
+    #[test]
+    fn server_attested_base_url_producer_parses_fixture_payloads() {
+        let payload = serde_json::json!({"baseUrl": "https://jira.internal.example.com/", "version": "9.4.0"});
+        assert_eq!(
+            server_attested_base_url_from_server_info(&payload).as_deref(),
+            Some("https://jira.internal.example.com")
+        );
+        assert_eq!(
+            server_attested_base_url_from_server_info(&serde_json::json!({})),
+            None
+        );
+    }
+
+    #[test]
     fn identity_is_unresolved_without_instance_or_immutable_id() {
-        assert!(JiraTaskIdentity::resolve("https://acme.atlassian.net", "", "DROG-42").is_err());
-        assert!(JiraTaskIdentity::resolve("https://acme.atlassian.net", "  ", "DROG-42").is_err());
-        assert!(JiraTaskIdentity::resolve("", "10001", "DROG-42").is_err());
-        assert!(JiraTaskIdentity::resolve("https://", "10001", "DROG-42").is_err());
-        assert!(JiraTaskIdentity::resolve("https://acme.atlassian.net", "10001", "").is_err());
+        assert!(
+            JiraTaskIdentity::resolve_provisional("https://acme.atlassian.net", "", "DROG-42")
+                .is_err()
+        );
+        assert!(
+            JiraTaskIdentity::resolve_provisional("https://acme.atlassian.net", "  ", "DROG-42")
+                .is_err()
+        );
+        assert!(JiraTaskIdentity::resolve_provisional("", "10001", "DROG-42").is_err());
+        assert!(JiraTaskIdentity::resolve_provisional("https://", "10001", "DROG-42").is_err());
+        assert!(
+            JiraTaskIdentity::resolve_provisional("https://acme.atlassian.net", "10001", "")
+                .is_err()
+        );
+        assert!(
+            JiraTaskIdentity::resolve_source_backed(
+                InstanceIdentitySource::CloudTenantId,
+                "  ",
+                "https://acme.atlassian.net",
+                "2026-01-01T00:00:00Z",
+                "10001",
+                "DROG-42",
+            )
+            .is_err()
+        );
         // The display key is NOT an identity input: same instance + id but a
         // renamed key still resolves to the same link id.
         let before =
-            JiraTaskIdentity::resolve("https://acme.atlassian.net", "10001", "DROG-42").unwrap();
+            JiraTaskIdentity::resolve_provisional("https://acme.atlassian.net", "10001", "DROG-42")
+                .unwrap();
         let renamed =
-            JiraTaskIdentity::resolve("https://acme.atlassian.net", "10001", "OPS-9").unwrap();
+            JiraTaskIdentity::resolve_provisional("https://acme.atlassian.net", "10001", "OPS-9")
+                .unwrap();
         assert_eq!(before.link_id(), renamed.link_id());
     }
 }

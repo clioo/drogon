@@ -134,8 +134,9 @@ describe("startWorkspaceFromJiraIssue", () => {
     }
   });
 
-  // C06: the resolved site URL yields the stable identity on the outcome;
-  // no site URL stays unresolved (null), never derived from email/siteId.
+  // C06: the resolved site URL yields the PROVISIONAL-tier identity on the
+  // outcome; no site URL stays unresolved (null), never derived from
+  // email/siteId.
   it("carries the stable identity when the instance site URL resolves", async () => {
     const bridge = bridgeWith({
       ok: true,
@@ -164,13 +165,13 @@ describe("startWorkspaceFromJiraIssue", () => {
     });
     expect(outcome.ok).toBe(true);
     if (outcome.ok) {
-      expect(outcome.identity).toMatchObject({
-        provider: "jira",
-        instanceUrl: "https://acme.atlassian.net",
-        issueId: "10001",
-        key: "DROG-42",
-      });
-      expect(outcome.identity?.instanceId).toHaveLength(24);
+      expect(outcome.identity?.instance.kind).toBe("provisional");
+      expect(outcome.identity?.instance.endpointUrl).toBe("https://acme.atlassian.net");
+      expect(outcome.identity?.issueId).toBe("10001");
+      expect(outcome.identity?.key).toBe("DROG-42");
+      if (outcome.identity?.instance.kind === "provisional") {
+        expect(outcome.identity.instance.endpointId).toHaveLength(24);
+      }
     }
   });
 

@@ -1,23 +1,97 @@
-//! C06: stable Jira issue→session links, persisted in the daemon's SQLite
-//! database — the one native authority for "which Drogon worktree/session
-//! belongs to this Jira task". Distinct from root's `worktree_issue_links`
-//! card-property authority: rows here key on the STABLE task identity
-//! (instance id + immutable issue id, never the account email or display
-//! key), carry the actual session binding, and implement the start-intent
-//! lifecycle that makes double clicks and replayed requests idempotent.
-//! Unlinking never deletes the worktree, sessions or run history.
+//! C06 PROPOSAL (unwired): stable Jira issue→session links in the daemon's
+//! SQLite database. This file is NOT reachable from the daemon:
+//! `jira/mod.rs` is root-held and the additive `pub mod session_links;`
+//! export was requested through the coordinator. Until that handover the
+//! module is compiled ONLY by `tests/jira_session_links.rs` (test-local
+//! `#[path]`), so none of the tables below are created in production and
+//! nothing here claims durable integration. Root owns schema/migration
+//! reconciliation — this is the exact extension proposed for it, including
+//! the HOST scope: bindings are per Drogon `host_id`, because sessions are
+//! host-scoped and "reopen the correct session" must answer per host.
 //!
-//! Declared from `identity.rs` via `#[path]` while `jira/mod.rs` is
-//! root-held; the handover moves only the one `pub mod` line.
+//! Distinct from root's `worktree_issue_links` card-property authority:
+//! rows here key on the stable task identity tier (namespaced provisional
+//! endpoint label or source-backed instance identifier — never the account
+//! email or display key), carry the actual session binding, and implement
+//! the start-intent lifecycle that makes double clicks and replayed
+//! requests idempotent. Unlinking never deletes the worktree, sessions or
+//! run history.
+//!
+//! Deliberately self-contained (no `crate::` imports): the same file
+//! compiles inside the drogon-core lib (after the one-line mod handover,
+//! importing `drogon_core::jira::identity::JiraTaskIdentity`) and inside
+//! the integration-test crate unchanged.
 //! MIT Copyright (c) 2026 Lovecast Inc.
 
+use drogon_core::jira::identity::JiraTaskIdentity;
+use drogon_protocol::RpcError;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use super::JiraTaskIdentity;
-use crate::error;
-use crate::now_rfc3339;
-use drogon_protocol::RpcError;
+// --- local helpers (self-contained; no crate:: deps) -----------------------
+
+fn invalid(msg: impl Into<String>) -> RpcError {
+    RpcError::new("invalid_argument", msg)
+}
+
+fn not_found(msg: impl Into<String>) -> RpcError {
+    RpcError::new("not_found", msg)
+}
+
+fn from_sqlite(err: rusqlite::Error) -> RpcError {
+    RpcError::new("internal_error", format!("database error: {err}"))
+}
+
+/// Minimal UTC RFC3339 (second resolution) so this file needs no
+/// date crate; identical semantics to the Engine's clock helper.
+fn now_rfc3339() -> String {
+    let dur = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = dur.as_secs();
+    let (days, rem) = ((secs / 86_400) as i64, secs % 86_400);
+    let (hour, minute, second) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    // Howard Hinnant's civil-from-days (public domain).
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 * 7) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 400);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = era * 400 + yoe as i64 + i64::from(mo <= 2);
+    format!("{y:04}-{mo:02}-{d:02}T{hour:02}:{minute:02}:{second:02}")
+}
+
+// --- public shapes ----------------------------------------------------------
+
+/// Which identity tier a binding is keyed by. `Provisional` = the
+/// configured endpoint's stable label (never presented as verified);
+/// `SourceBacked` = an identifier read from an actual instance response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InstanceTier {
+    Provisional,
+    SourceBacked,
+}
+
+impl InstanceTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Provisional => "provisional",
+            Self::SourceBacked => "source-backed",
+        }
+    }
+
+    fn from_identity(identity: &JiraTaskIdentity) -> Self {
+        if identity.instance.is_source_backed() {
+            Self::SourceBacked
+        } else {
+            Self::Provisional
+        }
+    }
+}
 
 /// Lifecycle of a link row: `pending` from the durable worktree-creation
 /// checkpoint until the session receipt is bound, `linked` afterwards.
@@ -37,19 +111,24 @@ impl LinkState {
     }
 }
 
-/// One stable issue→session binding. `session_id` is the latest bound
-/// session; earlier sessions of the same workspace stay in the `sessions`
-/// table (historical run records are never touched here). `conversation_id`
-/// is reserved for the C05 bot-conversation variant — stored when a future
-/// caller provides it, never written by this module itself.
+/// One stable issue→session binding for ONE Drogon host. `session_id` is
+/// the latest bound session; earlier sessions of the same workspace stay in
+/// the `sessions` table (historical run records are never touched here).
+/// `conversation_id` is reserved for the C05 bot-conversation variant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JiraSessionLink {
-    pub instance_id: String,
+    pub host_id: String,
+    /// Namespaced instance key (`provisional:…`, `cloudid:…`, `server:…`).
+    pub instance_key: String,
+    pub instance_tier: InstanceTier,
+    /// Provenance of a source-backed identifier (`InstanceIdentitySource`),
+    /// `None` for the provisional tier.
+    pub instance_source: Option<String>,
+    pub instance_url: String,
     pub issue_id: String,
     /// Display key at bind time; renames do not affect lookups.
     pub key: String,
-    pub instance_url: String,
     pub project_id: String,
     pub worktree_id: String,
     pub workspace_id: Option<String>,
@@ -65,14 +144,10 @@ pub struct JiraSessionLink {
 }
 
 impl JiraSessionLink {
-    /// The stable composite identity of the linked task.
-    pub fn identity(&self) -> JiraTaskIdentity {
-        JiraTaskIdentity {
-            instance_id: self.instance_id.clone(),
-            instance_url: self.instance_url.clone(),
-            issue_id: self.issue_id.clone(),
-            key: self.key.clone(),
-        }
+    /// The stable composite link id (tier-namespaced), for logs and the
+    /// renderer's resume-hint cache.
+    pub fn link_id(&self) -> String {
+        format!("{}:{}", self.instance_key, self.issue_id)
     }
 }
 
@@ -80,7 +155,7 @@ impl JiraSessionLink {
 /// unknown verdict or a missing session row is `Unverifiable` — loss of
 /// contact never proves exit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum SessionResolution {
     Live,
     Unverifiable,
@@ -108,11 +183,15 @@ pub enum BeginIntentOutcome {
     /// The issue is durably linked already (possibly pending): the caller
     /// returns this binding instead of creating anything.
     Linked(Box<JiraSessionLink>),
+    /// A different in-flight start operation for the same identity+host+
+    /// project is pending: join it instead of racing it.
     InFlight {
         intent_id: String,
         worktree_id: Option<String>,
         workspace_id: Option<String>,
     },
+    /// This intent owns the start now; proceed to create the worktree and
+    /// checkpoint it with [`record_created_worktree`].
     Began,
 }
 
@@ -132,7 +211,8 @@ pub struct PendingRecovery {
 #[serde(rename_all = "camelCase")]
 pub struct JiraSessionLinkEvent {
     pub event: String,
-    pub instance_id: String,
+    pub host_id: String,
+    pub instance_key: String,
     pub issue_id: String,
     pub project_id: String,
     pub key: String,
@@ -144,14 +224,32 @@ pub struct JiraSessionLinkEvent {
     pub at: String,
 }
 
+// --- proposed schema (root-owned adoption) ----------------------------------
+//
+// Exact extension for reconciliation with root's schema ownership. All
+// three tables are created lazily by the same runtime discipline as
+// worktree_issue.rs (no startup migration), but adoption is root's call:
+//
+// jira_session_links — PK includes HOST scope:
+//   PRIMARY KEY (host_id, instance_key, issue_id, project_id)
+//   instance_state CHECK IN ('provisional','source-backed')
+//   FK project_id -> projects(id) ON DELETE CASCADE
+//   trigger jira_session_links_worktree_cleanup (AFTER DELETE ON worktrees)
+// jira_start_intents — PK intent_id, index (host_id, instance_key,
+//   issue_id, project_id, state)
+// jira_session_link_events — append-only, index (project_id, at)
+
 fn ensure_table(conn: &Connection) -> Result<(), RpcError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS jira_session_links (
-            instance_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            instance_key TEXT NOT NULL,
+            instance_tier TEXT NOT NULL CHECK(instance_tier IN ('provisional','source-backed')),
+            instance_source TEXT,
+            instance_url TEXT NOT NULL,
             issue_id TEXT NOT NULL,
             project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
             key TEXT NOT NULL,
-            instance_url TEXT NOT NULL,
             worktree_id TEXT NOT NULL,
             workspace_id TEXT,
             session_id TEXT,
@@ -160,7 +258,7 @@ fn ensure_table(conn: &Connection) -> Result<(), RpcError> {
             state TEXT NOT NULL CHECK(state IN ('pending','linked')),
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            PRIMARY KEY (instance_id, issue_id, project_id)
+            PRIMARY KEY (host_id, instance_key, issue_id, project_id)
         );
         CREATE INDEX IF NOT EXISTS jira_session_links_project
             ON jira_session_links(project_id);
@@ -171,7 +269,8 @@ fn ensure_table(conn: &Connection) -> Result<(), RpcError> {
         END;
         CREATE TABLE IF NOT EXISTS jira_start_intents (
             intent_id TEXT PRIMARY KEY,
-            instance_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            instance_key TEXT NOT NULL,
             issue_id TEXT NOT NULL,
             project_id TEXT NOT NULL,
             key TEXT NOT NULL,
@@ -183,11 +282,12 @@ fn ensure_table(conn: &Connection) -> Result<(), RpcError> {
             updated_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS jira_start_intents_identity
-            ON jira_start_intents(instance_id, issue_id, project_id, state);
+            ON jira_start_intents(host_id, instance_key, issue_id, project_id, state);
         CREATE TABLE IF NOT EXISTS jira_session_link_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             event TEXT NOT NULL,
-            instance_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            instance_key TEXT NOT NULL,
             issue_id TEXT NOT NULL,
             project_id TEXT NOT NULL,
             key TEXT NOT NULL,
@@ -201,17 +301,18 @@ fn ensure_table(conn: &Connection) -> Result<(), RpcError> {
         CREATE INDEX IF NOT EXISTS jira_session_link_events_project
             ON jira_session_link_events(project_id, at);",
     )
-    .map_err(error::from_sqlite)
+    .map_err(from_sqlite)
 }
 
 fn record_event(conn: &Connection, event: &str, link: &JiraSessionLink, detail: Option<&str>) {
     let _ = conn.execute(
         "INSERT INTO jira_session_link_events
-         (event, instance_id, issue_id, project_id, key, intent_id, worktree_id, workspace_id, session_id, detail, at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         (event, host_id, instance_key, issue_id, project_id, key, intent_id, worktree_id, workspace_id, session_id, detail, at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             event,
-            link.instance_id,
+            link.host_id,
+            link.instance_key,
             link.issue_id,
             link.project_id,
             link.key,
@@ -225,14 +326,25 @@ fn record_event(conn: &Connection, event: &str, link: &JiraSessionLink, detail: 
     );
 }
 
+const LINK_COLUMNS: &str = "host_id, instance_key, instance_tier, instance_source, instance_url, \
+issue_id, project_id, key, worktree_id, workspace_id, session_id, conversation_id, intent_id, \
+state, created_at, updated_at";
+
 fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<JiraSessionLink> {
+    let tier: String = row.get("instance_tier")?;
     let state: String = row.get("state")?;
     Ok(JiraSessionLink {
-        instance_id: row.get("instance_id")?,
-        issue_id: row.get("issue_id")?,
-        key: row.get("key")?,
+        host_id: row.get("host_id")?,
+        instance_key: row.get("instance_key")?,
+        instance_tier: match tier.as_str() {
+            "source-backed" => InstanceTier::SourceBacked,
+            _ => InstanceTier::Provisional,
+        },
+        instance_source: row.get("instance_source")?,
         instance_url: row.get("instance_url")?,
+        issue_id: row.get("issue_id")?,
         project_id: row.get("project_id")?,
+        key: row.get("key")?,
         worktree_id: row.get("worktree_id")?,
         workspace_id: row.get("workspace_id")?,
         session_id: row.get("session_id")?,
@@ -247,24 +359,41 @@ fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<JiraSessionLink> {
     })
 }
 
-const LINK_COLUMNS: &str = "instance_id, issue_id, project_id, key, instance_url, worktree_id, \
-workspace_id, session_id, conversation_id, intent_id, state, created_at, updated_at";
+fn link_row_from_identity(
+    identity: &JiraTaskIdentity,
+) -> (String, InstanceTier, Option<String>, String) {
+    let tier = InstanceTier::from_identity(identity);
+    let source = match &identity.instance {
+        drogon_core::jira::identity::JiraInstanceIdentity::SourceBacked { source, .. } => {
+            Some(source.as_str().to_string())
+        }
+        drogon_core::jira::identity::JiraInstanceIdentity::Provisional { .. } => None,
+    };
+    (
+        identity.instance.key(),
+        tier,
+        source,
+        identity.instance.endpoint_url().to_string(),
+    )
+}
 
 fn find_link_row(
     conn: &Connection,
+    host_id: &str,
     identity: &JiraTaskIdentity,
     project_id: &str,
 ) -> Result<Option<JiraSessionLink>, RpcError> {
+    let instance_key = identity.instance.key();
     conn.query_row(
         &format!(
             "SELECT {LINK_COLUMNS} FROM jira_session_links
-             WHERE instance_id = ?1 AND issue_id = ?2 AND project_id = ?3"
+             WHERE host_id = ?1 AND instance_key = ?2 AND issue_id = ?3 AND project_id = ?4"
         ),
-        params![identity.instance_id, identity.issue_id, project_id],
+        params![host_id, instance_key, identity.issue_id, project_id],
         row_to_link,
     )
     .optional()
-    .map_err(error::from_sqlite)
+    .map_err(from_sqlite)
 }
 
 fn project_exists(conn: &Connection, project_id: &str) -> Result<bool, RpcError> {
@@ -273,7 +402,7 @@ fn project_exists(conn: &Connection, project_id: &str) -> Result<bool, RpcError>
         [project_id],
         |row| row.get(0),
     )
-    .map_err(error::from_sqlite)
+    .map_err(from_sqlite)
 }
 
 fn require_worktree_project(
@@ -288,35 +417,39 @@ fn require_worktree_project(
             |row| row.get(0),
         )
         .optional()
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     match owner {
         Some(owner) if owner == project_id => Ok(()),
-        Some(owner) => Err(error::invalid_argument(format!(
+        Some(owner) => Err(invalid(format!(
             "worktree {worktree_id} belongs to project {owner}, not {project_id}"
         ))),
-        None => Err(error::not_found("worktree does not exist")),
+        None => Err(not_found("worktree does not exist")),
     }
 }
 
 /// Concurrency-safe start marker. Call BEFORE any worktree creation. All
 /// decisions are made inside one `&Connection` borrow (the Engine's db
 /// mutex in production), so two racing `jira.startIssue` calls serialize
-/// here: exactly one of them gets `Began` for a given identity+project.
+/// here: exactly one of them gets `Began` for a given host+identity+project.
 pub fn begin_intent(
     conn: &Connection,
+    host_id: &str,
     identity: &JiraTaskIdentity,
     project_id: &str,
     intent_id: &str,
 ) -> Result<BeginIntentOutcome, RpcError> {
     ensure_table(conn)?;
+    if host_id.trim().is_empty() {
+        return Err(invalid("host id is required"));
+    }
     if intent_id.trim().is_empty() || intent_id.len() > 128 {
-        return Err(error::invalid_argument("intent id is required"));
+        return Err(invalid("intent id is required"));
     }
     if !project_exists(conn, project_id)? {
-        return Err(error::not_found("project does not exist"));
+        return Err(not_found("project does not exist"));
     }
     // A durable binding answers everything: replays and second clicks.
-    if let Some(link) = find_link_row(conn, identity, project_id)? {
+    if let Some(link) = find_link_row(conn, host_id, identity, project_id)? {
         return Ok(BeginIntentOutcome::Linked(Box::new(link)));
     }
     // A replayed request under the SAME intent id resumes its own checkpoint.
@@ -327,7 +460,7 @@ pub fn begin_intent(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     if let Some((worktree_id, workspace_id)) = own {
         return Ok(BeginIntentOutcome::InFlight {
             intent_id: intent_id.to_string(),
@@ -339,13 +472,19 @@ pub fn begin_intent(
     let other: Option<String> = conn
         .query_row(
             "SELECT intent_id FROM jira_start_intents
-             WHERE instance_id = ?1 AND issue_id = ?2 AND project_id = ?3 AND state = 'pending'
+             WHERE host_id = ?1 AND instance_key = ?2 AND issue_id = ?3 AND project_id = ?4
+              AND state = 'pending'
              ORDER BY created_at, intent_id LIMIT 1",
-            params![identity.instance_id, identity.issue_id, project_id],
+            params![
+                host_id,
+                identity.instance.key(),
+                identity.issue_id,
+                project_id
+            ],
             |row| row.get(0),
         )
         .optional()
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     if let Some(other) = other {
         let checkpoint: Option<(Option<String>, Option<String>)> = conn
             .query_row(
@@ -354,7 +493,7 @@ pub fn begin_intent(
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
-            .map_err(error::from_sqlite)?;
+            .map_err(from_sqlite)?;
         if let Some((worktree_id, workspace_id)) = checkpoint {
             return Ok(BeginIntentOutcome::InFlight {
                 intent_id: other,
@@ -366,18 +505,19 @@ pub fn begin_intent(
     let now = now_rfc3339();
     conn.execute(
         "INSERT INTO jira_start_intents
-         (intent_id, instance_id, issue_id, project_id, key, state, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?6)",
+         (intent_id, host_id, instance_key, issue_id, project_id, key, state, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?7)",
         params![
             intent_id,
-            identity.instance_id,
+            host_id,
+            identity.instance.key(),
             identity.issue_id,
             project_id,
             identity.key,
             now
         ],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(from_sqlite)?;
     Ok(BeginIntentOutcome::Began)
 }
 
@@ -387,6 +527,7 @@ pub fn begin_intent(
 /// this start created — never an unrelated worktree, never a duplicate.
 pub fn record_created_worktree(
     conn: &Connection,
+    host_id: &str,
     identity: &JiraTaskIdentity,
     project_id: &str,
     intent_id: &str,
@@ -402,48 +543,52 @@ pub fn record_created_worktree(
              WHERE intent_id = ?4 AND state = 'pending'",
             params![worktree_id, workspace_id, now, intent_id],
         )
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     if updated == 0 {
-        return Err(error::not_found("pending start intent does not exist"));
+        return Err(not_found("pending start intent does not exist"));
     }
     // Upsert the pending link so a crash before the session receipt still
     // leaves exactly one binding for this identity+project.
-    let existing = find_link_row(conn, identity, project_id)?;
+    let existing = find_link_row(conn, host_id, identity, project_id)?;
+    let (instance_key, instance_tier, instance_source, instance_url) =
+        link_row_from_identity(identity);
     match existing {
         Some(link) if link.state == LinkState::Linked => {
             // Completed between checkpoint and now (post-recovery race):
             // keep the durable binding, refresh the display key only.
             conn.execute(
                 "UPDATE jira_session_links SET key = ?1, updated_at = ?2
-                 WHERE instance_id = ?3 AND issue_id = ?4 AND project_id = ?5",
+                 WHERE host_id = ?3 AND instance_key = ?4 AND issue_id = ?5 AND project_id = ?6",
                 params![
                     identity.key,
                     now,
-                    identity.instance_id,
+                    host_id,
+                    instance_key,
                     identity.issue_id,
                     project_id
                 ],
             )
-            .map_err(error::from_sqlite)?;
+            .map_err(from_sqlite)?;
         }
         Some(link) => {
             conn.execute(
                 "UPDATE jira_session_links SET worktree_id = ?1, workspace_id = ?2, key = ?3, \
                  instance_url = ?4, intent_id = ?5, updated_at = ?6
-                 WHERE instance_id = ?7 AND issue_id = ?8 AND project_id = ?9",
+                 WHERE host_id = ?7 AND instance_key = ?8 AND issue_id = ?9 AND project_id = ?10",
                 params![
                     worktree_id,
                     workspace_id,
                     identity.key,
-                    identity.instance_url,
+                    instance_url,
                     intent_id,
                     now,
-                    identity.instance_id,
-                    identity.issue_id,
-                    project_id
+                    link.host_id,
+                    link.instance_key,
+                    link.issue_id,
+                    link.project_id
                 ],
             )
-            .map_err(error::from_sqlite)?;
+            .map_err(from_sqlite)?;
             record_event(
                 conn,
                 "recovered",
@@ -453,10 +598,13 @@ pub fn record_created_worktree(
         }
         None => {
             let link = JiraSessionLink {
-                instance_id: identity.instance_id.clone(),
+                host_id: host_id.to_string(),
+                instance_key,
+                instance_tier,
+                instance_source,
+                instance_url,
                 issue_id: identity.issue_id.clone(),
                 key: identity.key.clone(),
-                instance_url: identity.instance_url.clone(),
                 project_id: project_id.to_string(),
                 worktree_id: worktree_id.to_string(),
                 workspace_id: workspace_id.map(str::to_string),
@@ -477,15 +625,19 @@ pub fn record_created_worktree(
 fn insert_link(conn: &Connection, link: &JiraSessionLink) -> Result<(), RpcError> {
     conn.execute(
         "INSERT INTO jira_session_links
-         (instance_id, issue_id, project_id, key, instance_url, worktree_id, workspace_id, \
-         session_id, conversation_id, intent_id, state, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+         (host_id, instance_key, instance_tier, instance_source, instance_url, issue_id, \
+         project_id, key, worktree_id, workspace_id, session_id, conversation_id, intent_id, \
+         state, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
-            link.instance_id,
+            link.host_id,
+            link.instance_key,
+            link.instance_tier.as_str(),
+            link.instance_source,
+            link.instance_url,
             link.issue_id,
             link.project_id,
             link.key,
-            link.instance_url,
             link.worktree_id,
             link.workspace_id,
             link.session_id,
@@ -496,7 +648,7 @@ fn insert_link(conn: &Connection, link: &JiraSessionLink) -> Result<(), RpcError
             link.updated_at
         ],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(from_sqlite)?;
     Ok(())
 }
 
@@ -509,9 +661,9 @@ pub fn complete_intent(
     session_id: Option<&str>,
 ) -> Result<JiraSessionLink, RpcError> {
     ensure_table(conn)?;
-    let now = now_rfc3339();
     struct IntentRow {
-        instance_id: String,
+        host_id: String,
+        instance_key: String,
         issue_id: String,
         project_id: String,
         key: String,
@@ -520,37 +672,60 @@ pub fn complete_intent(
     }
     let intent: Option<IntentRow> = conn
         .query_row(
-            "SELECT instance_id, issue_id, project_id, key, worktree_id, workspace_id
+            "SELECT host_id, instance_key, issue_id, project_id, key, worktree_id, workspace_id
              FROM jira_start_intents WHERE intent_id = ?1",
             [intent_id],
             |row| {
                 Ok(IntentRow {
-                    instance_id: row.get(0)?,
-                    issue_id: row.get(1)?,
-                    project_id: row.get(2)?,
-                    key: row.get(3)?,
-                    worktree_id: row.get(4)?,
-                    workspace_id: row.get(5)?,
+                    host_id: row.get(0)?,
+                    instance_key: row.get(1)?,
+                    issue_id: row.get(2)?,
+                    project_id: row.get(3)?,
+                    key: row.get(4)?,
+                    worktree_id: row.get(5)?,
+                    workspace_id: row.get(6)?,
                 })
             },
         )
         .optional()
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     let IntentRow {
-        instance_id,
+        host_id,
+        instance_key,
         issue_id,
         project_id,
         key,
         worktree_id,
         workspace_id,
-    } = intent.ok_or_else(|| error::not_found("start intent does not exist"))?;
-    let worktree_id = worktree_id
-        .ok_or_else(|| error::invalid_argument("start intent has no worktree checkpoint"))?;
+    } = intent.ok_or_else(|| not_found("start intent does not exist"))?;
+    let worktree_id =
+        worktree_id.ok_or_else(|| invalid("start intent has no worktree checkpoint"))?;
+    let now = now_rfc3339();
+    // Preserve the original created_at and instance columns on upsert.
+    let existing: Option<(String, String, Option<String>, String)> = conn
+        .query_row(
+            "SELECT created_at, instance_url, instance_source, instance_tier
+             FROM jira_session_links
+             WHERE host_id = ?1 AND instance_key = ?2 AND issue_id = ?3 AND project_id = ?4",
+            params![host_id, instance_key, issue_id, project_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(from_sqlite)?;
+    let (created_at, instance_url, instance_source, instance_tier) =
+        existing.unwrap_or_else(|| (now.clone(), String::new(), None, "provisional".to_string()));
     let link = JiraSessionLink {
-        instance_id,
+        host_id,
+        instance_key,
+        instance_tier: if instance_tier == "source-backed" {
+            InstanceTier::SourceBacked
+        } else {
+            InstanceTier::Provisional
+        },
+        instance_source,
+        instance_url,
         issue_id,
         key,
-        instance_url: String::new(),
         project_id,
         worktree_id: worktree_id.clone(),
         workspace_id,
@@ -558,38 +733,28 @@ pub fn complete_intent(
         conversation_id: None,
         intent_id: intent_id.to_string(),
         state: LinkState::Linked,
-        created_at: now.clone(),
-        updated_at: now,
-    };
-    // Preserve the original created_at/instance_url on upsert.
-    let existing = find_link_row(conn, &link.identity(), &link.project_id)?;
-    let (created_at, instance_url) = existing
-        .map(|l| (l.created_at, l.instance_url))
-        .unwrap_or_else(|| (link.created_at.clone(), String::new()));
-    let link = JiraSessionLink {
         created_at,
-        instance_url: if instance_url.is_empty() {
-            link.instance_url.clone()
-        } else {
-            instance_url
-        },
-        ..link
+        updated_at: now,
     };
     conn.execute(
         "INSERT INTO jira_session_links
-         (instance_id, issue_id, project_id, key, instance_url, worktree_id, workspace_id, \
-         session_id, conversation_id, intent_id, state, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'linked', ?11, ?12)
-         ON CONFLICT(instance_id, issue_id, project_id) DO UPDATE SET
+         (host_id, instance_key, instance_tier, instance_source, instance_url, issue_id, \
+         project_id, key, worktree_id, workspace_id, session_id, conversation_id, intent_id, \
+         state, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'linked', ?14, ?15)
+         ON CONFLICT(host_id, instance_key, issue_id, project_id) DO UPDATE SET
          key = excluded.key, session_id = excluded.session_id,
          worktree_id = excluded.worktree_id, workspace_id = excluded.workspace_id,
          intent_id = excluded.intent_id, state = 'linked', updated_at = excluded.updated_at",
         params![
-            link.instance_id,
+            link.host_id,
+            link.instance_key,
+            link.instance_tier.as_str(),
+            link.instance_source,
+            link.instance_url,
             link.issue_id,
             link.project_id,
             link.key,
-            link.instance_url,
             link.worktree_id,
             link.workspace_id,
             link.session_id,
@@ -599,20 +764,20 @@ pub fn complete_intent(
             link.updated_at
         ],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(from_sqlite)?;
     conn.execute(
         "UPDATE jira_start_intents SET state = 'completed', session_id = ?1, updated_at = ?2
          WHERE intent_id = ?3",
         params![session_id, now_rfc3339(), intent_id],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(from_sqlite)?;
     record_event(
         conn,
         "linked",
         &link,
         session_id.map(|_| "session receipt bound"),
     );
-    Ok(find_link_row(conn, &link.identity(), &link.project_id)?.unwrap_or(link))
+    Ok(link)
 }
 
 /// Marks a start intent abandoned (creation failed or the caller gave up).
@@ -627,65 +792,73 @@ pub fn abandon_intent(conn: &Connection, intent_id: &str, reason: &str) -> Resul
              WHERE intent_id = ?2 AND state = 'pending'",
             params![now, intent_id],
         )
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     if updated == 0 {
-        return Err(error::not_found("pending start intent does not exist"));
+        return Err(not_found("pending start intent does not exist"));
     }
-    let (instance_id, issue_id, project_id, key): (String, String, String, String) = conn
+    let (host_id, instance_key, issue_id, project_id, key): (
+        String,
+        String,
+        String,
+        String,
+        String,
+    ) = conn
         .query_row(
-            "SELECT instance_id, issue_id, project_id, key FROM jira_start_intents
+            "SELECT host_id, instance_key, issue_id, project_id, key FROM jira_start_intents
              WHERE intent_id = ?1",
             [intent_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     // Release the pending pointer only if it still belongs to this intent.
     let released = conn
         .execute(
             "DELETE FROM jira_session_links
-             WHERE instance_id = ?1 AND issue_id = ?2 AND project_id = ?3
-             AND state = 'pending' AND intent_id = ?4",
-            params![instance_id, issue_id, project_id, intent_id],
+             WHERE host_id = ?1 AND instance_key = ?2 AND issue_id = ?3 AND project_id = ?4
+             AND state = 'pending' AND intent_id = ?5",
+            params![host_id, instance_key, issue_id, project_id, intent_id],
         )
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     if released > 0 {
         let event = JiraSessionLink {
-            instance_id,
+            host_id,
+            instance_key,
+            instance_tier: InstanceTier::Provisional,
+            instance_source: None,
+            instance_url: String::new(),
             issue_id,
             project_id,
             key,
+            worktree_id: String::new(),
+            workspace_id: None,
+            session_id: None,
+            conversation_id: None,
             intent_id: intent_id.to_string(),
-            ..placeholder_link()
+            state: LinkState::Pending,
+            created_at: String::new(),
+            updated_at: String::new(),
         };
         record_event(conn, "abandoned", &event, Some(reason));
     }
     Ok(())
 }
 
-fn placeholder_link() -> JiraSessionLink {
-    JiraSessionLink {
-        instance_id: String::new(),
-        issue_id: String::new(),
-        key: String::new(),
-        instance_url: String::new(),
-        project_id: String::new(),
-        worktree_id: String::new(),
-        workspace_id: None,
-        session_id: None,
-        conversation_id: None,
-        intent_id: String::new(),
-        state: LinkState::Pending,
-        created_at: String::new(),
-        updated_at: String::new(),
-    }
-}
-
 /// Manual "link existing worktree/session" action: binds the identity to an
 /// existing worktree (and optional session) without creating anything.
 /// Re-linking an already-linked issue moves the binding; the previous
 /// binding stays in the event history.
+#[allow(clippy::too_many_arguments)]
 pub fn link_existing(
     conn: &Connection,
+    host_id: &str,
     identity: &JiraTaskIdentity,
     project_id: &str,
     worktree_id: &str,
@@ -693,20 +866,28 @@ pub fn link_existing(
     session_id: Option<&str>,
 ) -> Result<JiraSessionLink, RpcError> {
     ensure_table(conn)?;
+    if host_id.trim().is_empty() {
+        return Err(invalid("host id is required"));
+    }
     if !project_exists(conn, project_id)? {
-        return Err(error::not_found("project does not exist"));
+        return Err(not_found("project does not exist"));
     }
     require_worktree_project(conn, worktree_id, project_id)?;
     let now = now_rfc3339();
-    let existing = find_link_row(conn, identity, project_id)?;
+    let existing = find_link_row(conn, host_id, identity, project_id)?;
     let (created_at, intent_id) = existing
         .map(|l| (l.created_at, l.intent_id))
         .unwrap_or_else(|| (now.clone(), format!("manual-{}", now_rfc3339())));
+    let (instance_key, instance_tier, instance_source, instance_url) =
+        link_row_from_identity(identity);
     let link = JiraSessionLink {
-        instance_id: identity.instance_id.clone(),
+        host_id: host_id.to_string(),
+        instance_key,
+        instance_tier,
+        instance_source,
+        instance_url,
         issue_id: identity.issue_id.clone(),
         key: identity.key.clone(),
-        instance_url: identity.instance_url.clone(),
         project_id: project_id.to_string(),
         worktree_id: worktree_id.to_string(),
         workspace_id: workspace_id.map(str::to_string),
@@ -719,20 +900,24 @@ pub fn link_existing(
     };
     conn.execute(
         "INSERT INTO jira_session_links
-         (instance_id, issue_id, project_id, key, instance_url, worktree_id, workspace_id, \
-         session_id, conversation_id, intent_id, state, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'linked', ?11, ?12)
-         ON CONFLICT(instance_id, issue_id, project_id) DO UPDATE SET
+         (host_id, instance_key, instance_tier, instance_source, instance_url, issue_id, \
+         project_id, key, worktree_id, workspace_id, session_id, conversation_id, intent_id, \
+         state, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'linked', ?14, ?15)
+         ON CONFLICT(host_id, instance_key, issue_id, project_id) DO UPDATE SET
          key = excluded.key, instance_url = excluded.instance_url,
          worktree_id = excluded.worktree_id, workspace_id = excluded.workspace_id,
          session_id = excluded.session_id, intent_id = excluded.intent_id,
          state = 'linked', updated_at = excluded.updated_at",
         params![
-            link.instance_id,
+            link.host_id,
+            link.instance_key,
+            link.instance_tier.as_str(),
+            link.instance_source,
+            link.instance_url,
             link.issue_id,
             link.project_id,
             link.key,
-            link.instance_url,
             link.worktree_id,
             link.workspace_id,
             link.session_id,
@@ -742,7 +927,7 @@ pub fn link_existing(
             link.updated_at
         ],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(from_sqlite)?;
     record_event(conn, "linked", &link, Some("manual link"));
     Ok(link)
 }
@@ -752,66 +937,75 @@ pub fn link_existing(
 /// through [`link_existing`].
 pub fn unlink(
     conn: &Connection,
+    host_id: &str,
     identity: &JiraTaskIdentity,
     project_id: &str,
 ) -> Result<bool, RpcError> {
     ensure_table(conn)?;
-    let existing = find_link_row(conn, identity, project_id)?;
+    let existing = find_link_row(conn, host_id, identity, project_id)?;
     let Some(link) = existing else {
         return Ok(false);
     };
     conn.execute(
         "DELETE FROM jira_session_links
-         WHERE instance_id = ?1 AND issue_id = ?2 AND project_id = ?3",
-        params![identity.instance_id, identity.issue_id, project_id],
+         WHERE host_id = ?1 AND instance_key = ?2 AND issue_id = ?3 AND project_id = ?4",
+        params![
+            host_id,
+            identity.instance.key(),
+            identity.issue_id,
+            project_id
+        ],
     )
-    .map_err(error::from_sqlite)?;
+    .map_err(from_sqlite)?;
     record_event(conn, "unlinked", &link, None);
     Ok(true)
 }
 
-/// The durable binding for an identity within a project, if any.
+/// The durable binding for an identity within a host+project, if any.
 pub fn find_link(
     conn: &Connection,
+    host_id: &str,
     identity: &JiraTaskIdentity,
     project_id: &str,
 ) -> Result<Option<JiraSessionLink>, RpcError> {
     ensure_table(conn)?;
-    find_link_row(conn, identity, project_id)
+    find_link_row(conn, host_id, identity, project_id)
 }
 
-/// Every binding of a project (all instances/issues). Restart-safe: the
-/// renderer rebuilds its view from this after a reload.
+/// Every binding of a project on this host. Restart-safe: the renderer
+/// rebuilds its view from this after a reload.
 pub fn list_for_project(
     conn: &Connection,
+    host_id: &str,
     project_id: &str,
 ) -> Result<Vec<JiraSessionLink>, RpcError> {
     ensure_table(conn)?;
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {LINK_COLUMNS} FROM jira_session_links
-             WHERE project_id = ?1 ORDER BY created_at, instance_id, issue_id"
+             WHERE host_id = ?1 AND project_id = ?2 ORDER BY created_at, instance_key, issue_id"
         ))
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     let rows = stmt
-        .query_map([project_id], row_to_link)
-        .map_err(error::from_sqlite)?;
+        .query_map(params![host_id, project_id], row_to_link)
+        .map_err(from_sqlite)?;
     let mut links = Vec::new();
     for row in rows {
-        links.push(row.map_err(error::from_sqlite)?);
+        links.push(row.map_err(from_sqlite)?);
     }
     Ok(links)
 }
 
 /// The start_issue.rs replacement for title-based reuse: the durable
-/// binding's worktree for this identity+project. Legacy title lookup stays
-/// where root already codes it (only for pre-link workspaces).
+/// binding's worktree for this identity+host+project. Legacy title lookup
+/// stays where root already codes it (only for pre-link workspaces).
 pub fn find_worktree_for_identity(
     conn: &Connection,
+    host_id: &str,
     identity: &JiraTaskIdentity,
     project_id: &str,
 ) -> Result<Option<String>, RpcError> {
-    Ok(find_link(conn, identity, project_id)?.map(|link| link.worktree_id))
+    Ok(find_link(conn, host_id, identity, project_id)?.map(|link| link.worktree_id))
 }
 
 /// The durable checkpoint of a start whose session receipt never arrived.
@@ -820,6 +1014,7 @@ pub fn find_worktree_for_identity(
 /// resources. Returns `None` when there is nothing to recover.
 pub fn find_pending_recovery(
     conn: &Connection,
+    host_id: &str,
     identity: &JiraTaskIdentity,
     project_id: &str,
 ) -> Result<Option<PendingRecovery>, RpcError> {
@@ -829,16 +1024,22 @@ pub fn find_pending_recovery(
         .query_row(
             "SELECT i.intent_id, i.worktree_id, i.workspace_id FROM jira_start_intents i
              JOIN jira_session_links l ON l.intent_id = i.intent_id
-              AND l.instance_id = i.instance_id AND l.issue_id = i.issue_id
-              AND l.project_id = i.project_id AND l.state = 'pending'
-             WHERE i.instance_id = ?1 AND i.issue_id = ?2 AND i.project_id = ?3
-              AND i.state = 'pending' AND i.worktree_id IS NOT NULL
+              AND l.host_id = i.host_id AND l.instance_key = i.instance_key
+              AND l.issue_id = i.issue_id AND l.project_id = i.project_id
+              AND l.state = 'pending'
+             WHERE i.host_id = ?1 AND i.instance_key = ?2 AND i.issue_id = ?3
+              AND i.project_id = ?4 AND i.state = 'pending' AND i.worktree_id IS NOT NULL
              ORDER BY i.created_at, i.intent_id LIMIT 1",
-            params![identity.instance_id, identity.issue_id, project_id],
+            params![
+                host_id,
+                identity.instance.key(),
+                identity.issue_id,
+                project_id
+            ],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     let Some((intent_id, Some(worktree_id), workspace_id)) = row else {
         return Ok(None);
     };
@@ -870,410 +1071,49 @@ pub fn resolve_session_state(
             |row| row.get(0),
         )
         .optional()
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     Ok(match verdict.as_deref() {
         Some("live") => SessionResolution::Live,
         Some("exited") => SessionResolution::Exited,
-        Some("unverifiable") | None => SessionResolution::Unverifiable,
-        Some(_) => SessionResolution::Unverifiable,
+        _ => SessionResolution::Unverifiable,
     })
 }
 
-/// Append-only history for a project, oldest first.
+/// Append-only history for a project on this host, oldest first.
 pub fn history_for_project(
     conn: &Connection,
+    host_id: &str,
     project_id: &str,
 ) -> Result<Vec<JiraSessionLinkEvent>, RpcError> {
     ensure_table(conn)?;
     let mut stmt = conn
         .prepare(
-            "SELECT event, instance_id, issue_id, project_id, key, intent_id, worktree_id, \
-             workspace_id, session_id, detail, at FROM jira_session_link_events
-             WHERE project_id = ?1 ORDER BY id",
+            "SELECT event, host_id, instance_key, issue_id, project_id, key, intent_id, \
+             worktree_id, workspace_id, session_id, detail, at FROM jira_session_link_events
+             WHERE host_id = ?1 AND project_id = ?2 ORDER BY id",
         )
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     let rows = stmt
-        .query_map([project_id], |row| {
+        .query_map(params![host_id, project_id], |row| {
             Ok(JiraSessionLinkEvent {
                 event: row.get(0)?,
-                instance_id: row.get(1)?,
-                issue_id: row.get(2)?,
-                project_id: row.get(3)?,
-                key: row.get(4)?,
-                intent_id: row.get(5)?,
-                worktree_id: row.get(6)?,
-                workspace_id: row.get(7)?,
-                session_id: row.get(8)?,
-                detail: row.get(9)?,
-                at: row.get(10)?,
+                host_id: row.get(1)?,
+                instance_key: row.get(2)?,
+                issue_id: row.get(3)?,
+                project_id: row.get(4)?,
+                key: row.get(5)?,
+                intent_id: row.get(6)?,
+                worktree_id: row.get(7)?,
+                workspace_id: row.get(8)?,
+                session_id: row.get(9)?,
+                detail: row.get(10)?,
+                at: row.get(11)?,
             })
         })
-        .map_err(error::from_sqlite)?;
+        .map_err(from_sqlite)?;
     let mut events = Vec::new();
     for row in rows {
-        events.push(row.map_err(error::from_sqlite)?);
+        events.push(row.map_err(from_sqlite)?);
     }
     Ok(events)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::error;
-
-    /// Minimal host schema: the real daemon db has `projects`, `worktrees`
-    /// and `sessions` long before any link call; tests mirror just those
-    /// columns these functions touch. Pure in-process rusqlite — no Engine,
-    /// daemon, server or filesystem.
-    fn fixture_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE projects (id TEXT PRIMARY KEY);
-             CREATE TABLE worktrees (
-                id TEXT PRIMARY KEY,
-                project_id TEXT NOT NULL,
-                created_at TEXT NOT NULL
-             );
-             CREATE TABLE sessions (
-                id TEXT PRIMARY KEY,
-                workspace_id TEXT,
-                verdict TEXT NOT NULL
-             );
-             INSERT INTO projects (id) VALUES ('p1'), ('p2');",
-        )
-        .unwrap();
-        conn
-    }
-
-    fn add_worktree(conn: &Connection, id: &str, project_id: &str) {
-        conn.execute(
-            "INSERT INTO worktrees (id, project_id, created_at) VALUES (?1, ?2, '2026-01-01T00:00:00Z')",
-            params![id, project_id],
-        )
-        .unwrap();
-    }
-
-    fn add_session(conn: &Connection, id: &str, verdict: &str) {
-        conn.execute(
-            "INSERT INTO sessions (id, workspace_id, verdict) VALUES (?1, 'ws-1', ?2)",
-            params![id, verdict],
-        )
-        .unwrap();
-    }
-
-    fn identity(site: &str, issue_id: &str, key: &str) -> JiraTaskIdentity {
-        JiraTaskIdentity::resolve(site, issue_id, key).unwrap()
-    }
-
-    #[test]
-    fn replayed_intent_is_idempotent() {
-        let conn = fixture_db();
-        let id = identity("https://acme.atlassian.net", "10001", "DROG-42");
-        assert_eq!(
-            begin_intent(&conn, &id, "p1", "intent-1").unwrap(),
-            BeginIntentOutcome::Began
-        );
-        // The same request replayed (double click, retried RPC): the same
-        // intent, no second start grant.
-        assert_eq!(
-            begin_intent(&conn, &id, "p1", "intent-1").unwrap(),
-            BeginIntentOutcome::InFlight {
-                intent_id: "intent-1".to_string(),
-                worktree_id: None,
-                workspace_id: None
-            }
-        );
-        add_worktree(&conn, "wt-1", "p1");
-        record_created_worktree(&conn, &id, "p1", "intent-1", "wt-1", Some("ws-1")).unwrap();
-        // Replay after the checkpoint converges on the ONE pending binding
-        // (same worktree, no second creation).
-        assert!(matches!(
-            begin_intent(&conn, &id, "p1", "intent-1").unwrap(),
-            BeginIntentOutcome::Linked(ref l)
-                if l.worktree_id == "wt-1" && l.state == LinkState::Pending
-        ));
-    }
-
-    #[test]
-    fn concurrent_and_replayed_starts_cannot_create_two_bindings() {
-        let conn = fixture_db();
-        let id = identity("https://acme.atlassian.net", "10001", "DROG-42");
-        assert!(matches!(
-            begin_intent(&conn, &id, "p1", "intent-1").unwrap(),
-            BeginIntentOutcome::Began
-        ));
-        // A different request id for the same start operation joins the
-        // in-flight intent instead of racing it.
-        assert!(matches!(
-            begin_intent(&conn, &id, "p1", "intent-2").unwrap(),
-            BeginIntentOutcome::InFlight { ref intent_id, .. } if intent_id == "intent-1"
-        ));
-        add_worktree(&conn, "wt-1", "p1");
-        record_created_worktree(&conn, &id, "p1", "intent-1", "wt-1", Some("ws-1")).unwrap();
-        // Still only one binding (now pending on the checkpointed worktree),
-        // and the joined request sees exactly the same resources.
-        assert!(matches!(
-            begin_intent(&conn, &id, "p1", "intent-3").unwrap(),
-            BeginIntentOutcome::Linked(ref l) if l.worktree_id == "wt-1"
-        ));
-        let link = complete_intent(&conn, "intent-1", Some("s-1")).unwrap();
-        assert_eq!(link.worktree_id, "wt-1");
-        assert_eq!(link.session_id.as_deref(), Some("s-1"));
-        assert_eq!(link.state, LinkState::Linked);
-        // After completion every further start converges on the ONE link.
-        assert!(matches!(
-            begin_intent(&conn, &id, "p1", "intent-4").unwrap(),
-            BeginIntentOutcome::Linked(ref l) if l.worktree_id == "wt-1"
-        ));
-        assert_eq!(list_for_project(&conn, "p1").unwrap().len(), 1);
-    }
-
-    #[test]
-    fn crash_before_session_receipt_recovers_exactly_the_recorded_worktree() {
-        let conn = fixture_db();
-        let id = identity("https://acme.atlassian.net", "10001", "DROG-42");
-        begin_intent(&conn, &id, "p1", "intent-1").unwrap();
-        add_worktree(&conn, "wt-1", "p1");
-        // Durable checkpoint before the harness launch; the daemon "dies".
-        record_created_worktree(&conn, &id, "p1", "intent-1", "wt-1", Some("ws-1")).unwrap();
-        let recovery = find_pending_recovery(&conn, &id, "p1").unwrap().unwrap();
-        assert_eq!(recovery.intent_id, "intent-1");
-        assert_eq!(recovery.worktree_id, "wt-1");
-        assert_eq!(recovery.workspace_id.as_deref(), Some("ws-1"));
-        // Recovery completes against the recorded worktree — no duplicate
-        // creation, no adoption of anything else.
-        let link = complete_intent(&conn, &recovery.intent_id, None).unwrap();
-        assert_eq!(link.worktree_id, "wt-1");
-        assert_eq!(link.state, LinkState::Linked);
-        assert!(find_pending_recovery(&conn, &id, "p1").unwrap().is_none());
-    }
-
-    #[test]
-    fn recovery_never_adopts_a_vanished_or_foreign_worktree() {
-        let conn = fixture_db();
-        let id = identity("https://acme.atlassian.net", "10001", "DROG-42");
-        begin_intent(&conn, &id, "p1", "intent-1").unwrap();
-        add_worktree(&conn, "wt-1", "p1");
-        record_created_worktree(&conn, &id, "p1", "intent-1", "wt-1", Some("ws-1")).unwrap();
-        // The worktree disappeared (user deleted it mid-start): recovery
-        // refuses instead of adopting a random row.
-        conn.execute("DELETE FROM worktrees WHERE id = 'wt-1'", [])
-            .unwrap();
-        assert!(find_pending_recovery(&conn, &id, "p1").unwrap().is_none());
-        // A worktree in ANOTHER project is never adopted either.
-        add_worktree(&conn, "wt-other", "p2");
-        begin_intent(&conn, &id, "p1", "intent-2").unwrap();
-        assert!(record_created_worktree(&conn, &id, "p1", "intent-2", "wt-other", None).is_err());
-        assert!(find_pending_recovery(&conn, &id, "p1").unwrap().is_none());
-    }
-
-    #[test]
-    fn unlink_round_trip_preserves_worktree_sessions_and_history() {
-        let conn = fixture_db();
-        let id = identity("https://acme.atlassian.net", "10001", "DROG-42");
-        add_worktree(&conn, "wt-1", "p1");
-        add_session(&conn, "s-1", "exited");
-        let link = link_existing(&conn, &id, "p1", "wt-1", Some("ws-1"), Some("s-1")).unwrap();
-        assert_eq!(link.state, LinkState::Linked);
-        // Unlink removes ONLY the pointer.
-        assert!(unlink(&conn, &id, "p1").unwrap());
-        assert!(find_link(&conn, &id, "p1").unwrap().is_none());
-        let worktrees: i64 = conn
-            .query_row("SELECT COUNT(*) FROM worktrees", [], |r| r.get(0))
-            .unwrap();
-        let sessions: i64 = conn
-            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!((worktrees, sessions), (1, 1));
-        // History keeps the audit trail; a later relink appends.
-        let events = history_for_project(&conn, "p1").unwrap();
-        let names: Vec<&str> = events.iter().map(|e| e.event.as_str()).collect();
-        assert_eq!(names, vec!["linked", "unlinked"]);
-        link_existing(&conn, &id, "p1", "wt-1", Some("ws-1"), Some("s-1")).unwrap();
-        let events = history_for_project(&conn, "p1").unwrap();
-        assert_eq!(events.len(), 3);
-        // Unlinking again when nothing is linked is a no-op, not an error.
-        assert!(!unlink(&conn, &id, "p2").unwrap());
-    }
-
-    #[test]
-    fn deleting_the_worktree_cleans_only_the_pointer() {
-        let conn = fixture_db();
-        let id = identity("https://acme.atlassian.net", "10001", "DROG-42");
-        add_worktree(&conn, "wt-1", "p1");
-        link_existing(&conn, &id, "p1", "wt-1", None, None).unwrap();
-        conn.execute("DELETE FROM worktrees WHERE id = 'wt-1'", [])
-            .unwrap();
-        assert!(find_link(&conn, &id, "p1").unwrap().is_none());
-        // History is preserved through the cleanup.
-        assert_eq!(history_for_project(&conn, "p1").unwrap().len(), 1);
-    }
-
-    #[test]
-    fn session_resolution_distinguishes_live_verdicts_and_loss_of_contact() {
-        let conn = fixture_db();
-        let link_with = |session: Option<&str>| JiraSessionLink {
-            session_id: session.map(str::to_string),
-            ..placeholder_link()
-        };
-        add_session(&conn, "s-live", "live");
-        add_session(&conn, "s-exited", "exited");
-        add_session(&conn, "s-unver", "unverifiable");
-        assert_eq!(
-            resolve_session_state(&conn, &link_with(Some("s-live"))).unwrap(),
-            SessionResolution::Live
-        );
-        assert_eq!(
-            resolve_session_state(&conn, &link_with(Some("s-exited"))).unwrap(),
-            SessionResolution::Exited
-        );
-        assert_eq!(
-            resolve_session_state(&conn, &link_with(Some("s-unver"))).unwrap(),
-            SessionResolution::Unverifiable
-        );
-        // Row vanished / unknown verdict / never bound: never "exited".
-        assert_eq!(
-            resolve_session_state(&conn, &link_with(Some("s-gone"))).unwrap(),
-            SessionResolution::Unverifiable
-        );
-        add_session(&conn, "s-unknown", "weird-future-verdict");
-        assert_eq!(
-            resolve_session_state(&conn, &link_with(Some("s-unknown"))).unwrap(),
-            SessionResolution::Unverifiable
-        );
-        assert_eq!(
-            resolve_session_state(&conn, &link_with(None)).unwrap(),
-            SessionResolution::NoSession
-        );
-    }
-
-    #[test]
-    fn same_displayed_key_on_two_instances_stays_isolated() {
-        let conn = fixture_db();
-        let acme = identity("https://acme.atlassian.net", "10001", "DROG-42");
-        let globex = identity("https://globex.atlassian.net", "10002", "DROG-42");
-        add_worktree(&conn, "wt-a", "p1");
-        add_worktree(&conn, "wt-g", "p1");
-        link_existing(&conn, &acme, "p1", "wt-a", None, None).unwrap();
-        link_existing(&conn, &globex, "p1", "wt-g", None, None).unwrap();
-        assert_eq!(
-            find_worktree_for_identity(&conn, &acme, "p1")
-                .unwrap()
-                .as_deref(),
-            Some("wt-a")
-        );
-        assert_eq!(
-            find_worktree_for_identity(&conn, &globex, "p1")
-                .unwrap()
-                .as_deref(),
-            Some("wt-g")
-        );
-        assert_eq!(list_for_project(&conn, "p1").unwrap().len(), 2);
-        // The same instance in another project binds independently.
-        add_worktree(&conn, "wt-a2", "p2");
-        link_existing(&conn, &acme, "p2", "wt-a2", None, None).unwrap();
-        assert_eq!(
-            find_worktree_for_identity(&conn, &acme, "p2")
-                .unwrap()
-                .as_deref(),
-            Some("wt-a2")
-        );
-        assert_eq!(
-            find_worktree_for_identity(&conn, &acme, "p1")
-                .unwrap()
-                .as_deref(),
-            Some("wt-a")
-        );
-    }
-
-    #[test]
-    fn reconnect_with_renamed_key_and_title_keeps_the_binding() {
-        let conn = fixture_db();
-        add_worktree(&conn, "wt-1", "p1");
-        // Bound under the original account's view of the instance.
-        let original = identity("https://acme.atlassian.net", "10001", "DROG-42");
-        link_existing(&conn, &original, "p1", "wt-1", Some("ws-1"), Some("s-1")).unwrap();
-        // The SAME instance (same URL), another account, issue renamed:
-        // identity resolves to the same link id, and refreshing the display
-        // fields keeps the session binding.
-        let reconnected = identity("https://acme.atlassian.net", "10001", "OPS-77");
-        let existing = find_link(&conn, &reconnected, "p1").unwrap().unwrap();
-        assert_eq!(existing.worktree_id, "wt-1");
-        assert_eq!(existing.session_id.as_deref(), Some("s-1"));
-        let refreshed =
-            link_existing(&conn, &reconnected, "p1", "wt-1", Some("ws-1"), Some("s-1")).unwrap();
-        assert_eq!(refreshed.key, "OPS-77");
-        assert_eq!(refreshed.session_id.as_deref(), Some("s-1"));
-        // Still one row; the account email never appears anywhere.
-        assert_eq!(list_for_project(&conn, "p1").unwrap().len(), 1);
-    }
-
-    #[test]
-    fn begin_intent_validates_project_and_intent_id() {
-        let conn = fixture_db();
-        let id = identity("https://acme.atlassian.net", "10001", "DROG-42");
-        assert!(matches!(
-            begin_intent(&conn, &id, "missing", "i")
-                .unwrap_err()
-                .code
-                .as_str(),
-            "not_found"
-        ));
-        assert!(matches!(
-            begin_intent(&conn, &id, "p1", "  ")
-                .unwrap_err()
-                .code
-                .as_str(),
-            "invalid_argument"
-        ));
-        let long = "x".repeat(200);
-        assert!(matches!(
-            begin_intent(&conn, &id, "p1", &long)
-                .unwrap_err()
-                .code
-                .as_str(),
-            "invalid_argument"
-        ));
-    }
-
-    #[test]
-    fn complete_and_abandon_reject_missing_intents() {
-        let conn = fixture_db();
-        assert!(matches!(
-            complete_intent(&conn, "nope", None)
-                .unwrap_err()
-                .code
-                .as_str(),
-            "not_found"
-        ));
-        assert!(matches!(
-            abandon_intent(&conn, "nope", "why")
-                .unwrap_err()
-                .code
-                .as_str(),
-            "not_found"
-        ));
-        // Completing before the worktree checkpoint is refused: a session
-        // receipt without resources must not silently fabricate a binding.
-        begin_intent(
-            &conn,
-            &identity("https://acme.atlassian.net", "1", "DROG-1"),
-            "p1",
-            "i1",
-        )
-        .unwrap();
-        assert!(matches!(
-            complete_intent(&conn, "i1", Some("s"))
-                .unwrap_err()
-                .code
-                .as_str(),
-            "invalid_argument"
-        ));
-    }
-
-    #[test]
-    fn error_helpers_surface_sqlite_failures_with_codes() {
-        // Unused-import hygiene for the `error` alias inside tests.
-        let _ = error::invalid_argument("probe");
-    }
 }

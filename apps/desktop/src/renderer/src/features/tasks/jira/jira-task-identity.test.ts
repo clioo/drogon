@@ -1,12 +1,16 @@
-// C06: stable task identity — derivation parity with the daemon
+// C06: stable task identity — two-tier derivation parity with the daemon
 // (crates/drogon-core/src/jira/identity.rs) and the unresolved-legacy rule.
 import { describe, expect, it } from "vitest";
 import {
-  getJiraTaskIdentity,
-  jiraInstanceId,
+  cloudTenantIdFromAccessibleResources,
+  jiraInstanceKey,
   jiraTaskLinkId,
   normalizeJiraSiteUrl,
+  provisionalEndpointId,
+  resolveProvisionalJiraTaskIdentity,
+  resolveSourceBackedJiraTaskIdentity,
   sameJiraTaskIdentity,
+  serverAttestedBaseUrlFromServerInfo,
 } from "./jira-task-identity";
 
 describe("normalizeJiraSiteUrl (fork shape)", () => {
@@ -22,73 +26,129 @@ describe("normalizeJiraSiteUrl (fork shape)", () => {
   });
 });
 
-describe("jiraInstanceId", () => {
+describe("provisionalEndpointId (configured-endpoint label)", () => {
   it("is account-independent and case-folded like the daemon", async () => {
-    expect(await jiraInstanceId("https://acme.atlassian.net")).toBe(
-      await jiraInstanceId("https://ACME.atlassian.net/"),
+    expect(await provisionalEndpointId("https://acme.atlassian.net")).toBe(
+      await provisionalEndpointId("https://ACME.atlassian.net/"),
     );
-    expect(await jiraInstanceId("https://acme.atlassian.net")).toHaveLength(24);
-    expect(await jiraInstanceId("https://globex.atlassian.net")).not.toBe(
-      await jiraInstanceId("https://acme.atlassian.net"),
+    expect(await provisionalEndpointId("https://acme.atlassian.net")).toHaveLength(24);
+    expect(await provisionalEndpointId("https://globex.atlassian.net")).not.toBe(
+      await provisionalEndpointId("https://acme.atlassian.net"),
     );
   });
 
   it("is null for unresolvable input", async () => {
-    expect(await jiraInstanceId("")).toBeNull();
-    expect(await jiraInstanceId("https://")).toBeNull();
+    expect(await provisionalEndpointId("")).toBeNull();
+    expect(await provisionalEndpointId("https://")).toBeNull();
   });
 });
 
-describe("getJiraTaskIdentity", () => {
-  it("resolves from the immutable id + instance URL", async () => {
-    const identity = await getJiraTaskIdentity(
+describe("resolveProvisionalJiraTaskIdentity", () => {
+  it("resolves EXPLICITLY at the provisional tier", async () => {
+    const identity = await resolveProvisionalJiraTaskIdentity(
       { issueId: "10001", key: "DROG-42" },
       "https://acme.atlassian.net",
     );
-    expect(identity).toEqual({
-      provider: "jira",
-      instanceId: await jiraInstanceId("https://acme.atlassian.net"),
-      instanceUrl: "https://acme.atlassian.net",
-      issueId: "10001",
-      key: "DROG-42",
-    });
-    expect(jiraTaskLinkId(identity!)).toBe(
-      `${identity!.instanceId}:10001`,
-    );
+    expect(identity?.instance.kind).toBe("provisional");
+    expect(identity?.instance.endpointUrl).toBe("https://acme.atlassian.net");
+    const endpointId =
+      identity?.instance.kind === "provisional" ? identity.instance.endpointId : null;
+    expect(jiraInstanceKey(identity!.instance)).toBe(`provisional:${endpointId}`);
+    expect(jiraTaskLinkId(identity!)).toBe(`${jiraInstanceKey(identity!.instance)}:10001`);
   });
 
-  it("stays unresolved without an instance URL or immutable id", async () => {
+  it("stays unresolved without an endpoint URL or immutable id", async () => {
     expect(
-      await getJiraTaskIdentity({ issueId: "10001", key: "DROG-42" }, null),
+      await resolveProvisionalJiraTaskIdentity(
+        { issueId: "10001", key: "DROG-42" },
+        null,
+      ),
     ).toBeNull();
     expect(
-      await getJiraTaskIdentity({ issueId: "", key: "DROG-42" }, "https://acme.atlassian.net"),
-    ).toBeNull();
-    // The legacy per-account site id is never an identity input.
-    expect(
-      await getJiraTaskIdentity(
-        // `siteId` is extra data a legacy issue row carries; it must be
-        // ignored (the type accepts only the immutable id + display key).
-        { issueId: "", key: "DROG-42", ...( { siteId: "legacysiteid123" } as object) },
+      await resolveProvisionalJiraTaskIdentity(
+        { issueId: "", key: "DROG-42" },
         "https://acme.atlassian.net",
       ),
     ).toBeNull();
   });
 
-  it("compares by instance+issue id, not the display key", async () => {
-    const a = await getJiraTaskIdentity(
+  it("compares by endpoint+issue id, not the display key", async () => {
+    const a = await resolveProvisionalJiraTaskIdentity(
       { issueId: "10001", key: "DROG-42" },
       "https://acme.atlassian.net",
     );
-    const renamed = await getJiraTaskIdentity(
+    const renamed = await resolveProvisionalJiraTaskIdentity(
       { issueId: "10001", key: "OPS-9" },
       "https://acme.atlassian.net",
     );
-    const other = await getJiraTaskIdentity(
+    const other = await resolveProvisionalJiraTaskIdentity(
       { issueId: "10002", key: "DROG-42" },
       "https://acme.atlassian.net",
     );
     expect(sameJiraTaskIdentity(a!, renamed!)).toBe(true);
     expect(sameJiraTaskIdentity(a!, other!)).toBe(false);
+  });
+});
+
+describe("resolveSourceBackedJiraTaskIdentity (identity of record)", () => {
+  it("lives in a different namespace than the provisional tier", async () => {
+    const verified = resolveSourceBackedJiraTaskIdentity(
+      "cloud-tenant-id",
+      "Aa1Bb2Cc3",
+      "https://acme.atlassian.net",
+      "2026-01-01T00:00:00Z",
+      { issueId: "10001", key: "DROG-42" },
+    );
+    expect(verified?.instance.kind).toBe("source-backed");
+    expect(jiraInstanceKey(verified!.instance)).toBe("cloudid:Aa1Bb2Cc3");
+    // A configured URL alone NEVER produces the verified tier's key.
+    const provisional = await resolveProvisionalJiraTaskIdentity(
+      { issueId: "10001", key: "DROG-42" },
+      "https://acme.atlassian.net",
+    );
+    expect(jiraInstanceKey(provisional!.instance)).not.toEqual(
+      jiraInstanceKey(verified!.instance),
+    );
+    expect(sameJiraTaskIdentity(provisional!, verified!)).toBe(false);
+  });
+
+  it("rejects empty identifiers", () => {
+    expect(
+      resolveSourceBackedJiraTaskIdentity(
+        "cloud-tenant-id",
+        "  ",
+        "https://acme.atlassian.net",
+        "t",
+        { issueId: "10001", key: "DROG-42" },
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("deterministic producers (pure payload parsing)", () => {
+  it("cloudTenantIdFromAccessibleResources matches the configured endpoint", () => {
+    const payload = [
+      { id: "Aa1Bb2Cc3", url: "https://acme.atlassian.net", name: "acme" },
+      { id: "Other1", url: "https://other.atlassian.net", name: "other" },
+    ];
+    expect(cloudTenantIdFromAccessibleResources(payload, "https://acme.atlassian.net")).toBe(
+      "Aa1Bb2Cc3",
+    );
+    expect(cloudTenantIdFromAccessibleResources(payload, "https://ACME.atlassian.net/")).toBe(
+      "Aa1Bb2Cc3",
+    );
+    expect(
+      cloudTenantIdFromAccessibleResources(payload, "https://zeta.atlassian.net"),
+    ).toBeNull();
+  });
+
+  it("serverAttestedBaseUrlFromServerInfo reads the server's own attestation", () => {
+    expect(
+      serverAttestedBaseUrlFromServerInfo({
+        baseUrl: "https://jira.internal.example.com/",
+        version: "9.4.0",
+      }),
+    ).toBe("https://jira.internal.example.com");
+    expect(serverAttestedBaseUrlFromServerInfo({})).toBeNull();
   });
 });

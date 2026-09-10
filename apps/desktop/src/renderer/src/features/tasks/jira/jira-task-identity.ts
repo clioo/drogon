@@ -1,14 +1,22 @@
 // MIT Copyright (c) 2026 Lovecast Inc. C06: renderer mirror of the daemon's
-// stable Jira task identity (crates/drogon-core/src/jira/identity.rs). The
-// SAME derivation (domain-separated sha-256 over the authority-case-folded
-// normalized site URL) so the renderer and the daemon agree on which Jira
-// instance — never which credential — an issue belongs to. The immutable
-// REST issue id is required: an issue that cannot produce one stays
-// unresolved (null), and neither the account email nor the legacy per-
-// account site id is ever an identity input.
+// stable Jira task identity (crates/drogon-core/src/jira/identity.rs). Two
+// explicit tiers, never conflated:
+//
+// - PROVISIONAL: a stable ENDPOINT LABEL derived from the configured site
+//   URL (same domain-separated sha-256, authority case-folded). It proves
+//   which endpoint was configured — never which Jira instance answered.
+// - SOURCE-BACKED (identity of record): an identifier read from an actual
+//   instance response payload with provenance (Cloud tenant id from an
+//   accessible-resources-style payload; Server/DC server-attested
+//   serverInfo baseUrl). Producers are pure payload parsers, covered by
+//   fixture payloads — no network, no credential probing.
+//
+// The immutable REST issue id is required for any task identity: an issue
+// that cannot produce one stays unresolved (null), and neither the account
+// email nor the legacy per-account site id is ever an identity input.
 
-/** Domain separation, identical to the daemon's `INSTANCE_ID_DOMAIN`. */
-const INSTANCE_ID_DOMAIN = "drogon-jira-instance-v1";
+/** Domain separation, identical to the daemon's `ENDPOINT_ID_DOMAIN`. */
+const ENDPOINT_ID_DOMAIN = "drogon-jira-endpoint-v1";
 
 /** The fork's `normalizeJiraSiteUrl` (identity.rs port): default scheme,
  * strip query/fragment and trailing slash, keep origin+path. Returns null
@@ -37,7 +45,8 @@ function foldAuthorityCase(normalized: string): string {
   const slashIndex = withoutScheme.indexOf("/");
   const host = slashIndex >= 0 ? withoutScheme.slice(0, slashIndex) : withoutScheme;
   const path = slashIndex >= 0 ? withoutScheme.slice(slashIndex) : "";
-  return `${normalized.slice(0, normalized.length - withoutScheme.length)}${host.toLowerCase()}${path}`;
+  const scheme = normalized.slice(0, normalized.length - withoutScheme.length);
+  return `${scheme}${host.toLowerCase()}${path}`;
 }
 
 function base64Url(bytes: Uint8Array): string {
@@ -46,64 +55,177 @@ function base64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-async function sha256Hex(text: string): Promise<Uint8Array> {
+async function sha256(text: string): Promise<Uint8Array> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return new Uint8Array(digest);
 }
 
 /**
- * Stable, account-independent instance id: base64url(sha256(domain + "\n" +
+ * Stable PROVISIONAL endpoint label: base64url(sha256(domain + "\n" +
  * canonical url)) truncated to 24 chars — byte-identical to the daemon's
- * `jira_instance_id`. Null when the site URL cannot be normalized.
+ * `provisional_endpoint_id`. A configured URL alone never proves the
+ * actual instance. Null when the site URL cannot be normalized.
  */
-export async function jiraInstanceId(siteUrl: string): Promise<string | null> {
+export async function provisionalEndpointId(siteUrl: string): Promise<string | null> {
   const normalized = normalizeJiraSiteUrl(siteUrl);
   if (!normalized) return null;
   const canonical = foldAuthorityCase(normalized);
-  const digest = await sha256Hex(`${INSTANCE_ID_DOMAIN}\n${canonical}`);
+  const digest = await sha256(`${ENDPOINT_ID_DOMAIN}\n${canonical}`);
   return base64Url(digest).slice(0, 24);
+}
+
+/** Provenance of a source-backed instance identifier. */
+export type InstanceIdentitySource = "cloud-tenant-id" | "server-attested-base-url";
+
+/** How the Jira instance is known (daemon: `JiraInstanceIdentity`). */
+export type JiraInstanceIdentity =
+  | {
+      kind: "provisional";
+      endpointId: string;
+      endpointUrl: string;
+    }
+  | {
+      kind: "source-backed";
+      instanceKey: string;
+      source: InstanceIdentitySource;
+      endpointUrl: string;
+      observedAt: string;
+    };
+
+/**
+ * Namespaced composite key: provisional labels and source-backed
+ * identifiers live in DIFFERENT namespaces, so a configured URL can never
+ * masquerade as the verified instance (daemon: `JiraInstanceIdentity::key`).
+ */
+export function jiraInstanceKey(instance: JiraInstanceIdentity): string {
+  return instance.kind === "provisional"
+    ? `provisional:${instance.endpointId}`
+    : `${instance.source === "cloud-tenant-id" ? "cloudid" : "server"}:${instance.instanceKey}`;
 }
 
 /** The stable external identity of a Jira task (daemon: `JiraTaskIdentity`). */
 export type JiraTaskIdentity = {
-  provider: "jira";
-  instanceId: string;
-  /** Canonical (authority-case-folded) instance URL. */
-  instanceUrl: string;
+  instance: JiraInstanceIdentity;
   /** Immutable Jira REST id — survives key renames and project moves. */
   issueId: string;
   /** Display key (`DROG-42`); never part of the identity comparison. */
   key: string;
 };
 
-/**
- * Resolves the identity from the issue's immutable id and the ACTUAL
- * instance site URL (e.g. `site.siteUrl` from `jira.status`). Returns null
- * — unresolved — when either is missing, so a legacy issue list can never
- * silently fall back to the account email or the display key.
- */
-export async function getJiraTaskIdentity(
-  issue: Pick<JiraTaskIdentity, "issueId" | "key">,
-  siteUrl: string | null | undefined,
-): Promise<JiraTaskIdentity | null> {
-  const issueId = issue.issueId?.trim() ?? "";
-  if (!issueId || issueId.length > 64) return null;
-  const key = issue.key?.trim() ?? "";
-  if (!key || key.length > 64) return null;
-  if (!siteUrl) return null;
-  const instanceUrl = foldAuthorityCase(normalizeJiraSiteUrl(siteUrl) ?? "");
-  if (!instanceUrl) return null;
-  const instanceId = await jiraInstanceId(instanceUrl);
-  if (!instanceId) return null;
-  return { provider: "jira", instanceId, instanceUrl, issueId, key };
+/** Deterministic composite link id (tier-namespaced; daemon: `link_id`). */
+export function jiraTaskLinkId(identity: JiraTaskIdentity): string {
+  return `${jiraInstanceKey(identity.instance)}:${identity.issueId}`;
 }
 
-/** Deterministic composite link id (daemon: `link_id`). */
-export function jiraTaskLinkId(identity: JiraTaskIdentity): string {
-  return `${identity.instanceId}:${identity.issueId}`;
+function validateTaskParts(
+  issueId: string,
+  key: string,
+): { issueId: string; key: string } | null {
+  const id = issueId?.trim() ?? "";
+  if (!id || id.length > 64) return null;
+  const k = key?.trim() ?? "";
+  if (!k || k.length > 64) return null;
+  return { issueId: id, key: k };
+}
+
+/**
+ * Resolves the task identity at the PROVISIONAL tier: the endpoint is
+ * known only from configuration, so the result is explicitly provisional —
+ * never presented as a verified instance. Returns null — unresolved —
+ * when the instance URL or the immutable issue id is missing, so a legacy
+ * issue list can never silently fall back to the account email or the
+ * display key.
+ */
+export async function resolveProvisionalJiraTaskIdentity(
+  issue: { issueId: string; key: string },
+  siteUrl: string | null | undefined,
+): Promise<JiraTaskIdentity | null> {
+  const parts = validateTaskParts(issue.issueId, issue.key);
+  if (!parts) return null;
+  const normalized = normalizeJiraSiteUrl(siteUrl ?? "");
+  if (!normalized) return null;
+  const endpointId = await provisionalEndpointId(normalized);
+  if (!endpointId) return null;
+  return {
+    instance: { kind: "provisional", endpointId, endpointUrl: foldAuthorityCase(normalized) },
+    issueId: parts.issueId,
+    key: parts.key,
+  };
+}
+
+/**
+ * Resolves the task identity at the SOURCE-BACKED tier — the identity of
+ * record. `identifier` must come from one of the producers below, never
+ * from user configuration.
+ */
+export function resolveSourceBackedJiraTaskIdentity(
+  source: InstanceIdentitySource,
+  identifier: string,
+  endpointUrl: string,
+  observedAt: string,
+  issue: { issueId: string; key: string },
+): JiraTaskIdentity | null {
+  const id = identifier?.trim() ?? "";
+  if (!id || id.length > 256) return null;
+  const parts = validateTaskParts(issue.issueId, issue.key);
+  if (!parts) return null;
+  const normalized = normalizeJiraSiteUrl(endpointUrl);
+  if (!normalized) return null;
+  return {
+    instance: {
+      kind: "source-backed",
+      instanceKey: id,
+      source,
+      endpointUrl: foldAuthorityCase(normalized),
+      observedAt,
+    },
+    issueId: parts.issueId,
+    key: parts.key,
+  };
+}
+
+/**
+ * Extracts the Cloud tenant id (`cloudId`) for the configured site from an
+ * accessible-resources-style payload (`[{id, url, ...}]`) — the
+ * deterministic producer for the `cloud-tenant-id` source. Pure parsing.
+ */
+export function cloudTenantIdFromAccessibleResources(
+  payload: unknown,
+  siteUrl: string,
+): string | null {
+  const endpoint = foldAuthorityCase(normalizeJiraSiteUrl(siteUrl) ?? "");
+  if (!endpoint || !Array.isArray(payload)) return null;
+  for (const entry of payload) {
+    const id = typeof entry?.id === "string" ? entry.id.trim() : "";
+    const url = typeof entry?.url === "string" ? entry.url : "";
+    const entryUrl = foldAuthorityCase(normalizeJiraSiteUrl(url) ?? "");
+    if (id && id.length <= 128 && entryUrl && entryUrl === endpoint) {
+      return id;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extracts the Server/DC server-attested base URL from a serverInfo
+ * payload — the deterministic producer for `server-attested-base-url`.
+ * Returns the normalized URL the SERVER attests (which may differ from
+ * what the user configured). Pure parsing.
+ */
+export function serverAttestedBaseUrlFromServerInfo(payload: unknown): string | null {
+  const baseUrl =
+    typeof (payload as { baseUrl?: unknown })?.baseUrl === "string"
+      ? (payload as { baseUrl: string }).baseUrl
+      : null;
+  if (!baseUrl) return null;
+  const normalized = normalizeJiraSiteUrl(baseUrl);
+  return normalized ? foldAuthorityCase(normalized) : null;
 }
 
 /** Same stable task, regardless of display-key drift. */
 export function sameJiraTaskIdentity(a: JiraTaskIdentity, b: JiraTaskIdentity): boolean {
-  return a.instanceId === b.instanceId && a.issueId === b.issueId;
+  return (
+    jiraInstanceKey(a.instance) === jiraInstanceKey(b.instance) &&
+    a.issueId === b.issueId
+  );
 }
