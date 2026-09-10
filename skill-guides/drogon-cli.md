@@ -60,7 +60,7 @@ commands below (which additionally need a connected Drogon desktop).
 
 Run `drogon-cli status --json` first, then the narrowest command for the
 job. The full guide for supervised coordination is one guide away:
-`drogon-cli skills get orchestration`.
+`drogon-cli skills get --topic orchestration`.
 
 ## Workspaces
 
@@ -172,4 +172,4 @@ choose the narrowest command: `workspace list`, `project list`,
 `terminal wait`. When discovering flags from scratch, prefer
 `drogon-cli agent-context --json` over guessing. For supervised work with
 task ownership and completion tracking, read
-`drogon-cli skills get orchestration`.
+`drogon-cli skills get --topic orchestration`.

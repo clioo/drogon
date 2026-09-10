@@ -18,7 +18,7 @@ worker, decision gates, or ask and reply flows.
 Do not use it for full ownership handoffs. Requests phrased as hand off,
 handoff, handover, give this to another agent, or another worktree transfer
 ownership and the original agent stops: deliver the prompt with worktree
-and terminal commands from `drogon-cli skills get drogon-cli` and stop
+and terminal commands from `drogon-cli skills get --topic drogon-cli` and stop
 monitoring.
 
 ## Preconditions
@@ -154,4 +154,4 @@ Confirm `drogon-cli status --json` unless already checked this turn, then
 `run-create`, `task-create`, `worker-start`, and `check --wait` for the
 `final-report`. Full command shapes live behind the prose names above;
 terminal control and worktrees are in
-`drogon-cli skills get drogon-cli`.
+`drogon-cli skills get --topic drogon-cli`.
