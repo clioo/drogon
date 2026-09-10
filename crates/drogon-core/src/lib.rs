@@ -5,6 +5,7 @@
 
 mod automation_rpc;
 pub mod automations;
+mod bot_monitor_rpc;
 mod bot_mutation_rpc;
 pub mod bot_run_rpc;
 pub mod bot_self_mgmt;
@@ -426,6 +427,12 @@ impl Engine {
             "bot.self_set_monitor_enabled" => self.bot_self_set_monitor_enabled(request),
             "bot.self_delete_monitor" => self.bot_self_delete_monitor(request),
             "bot.self_test_monitor" => self.bot_self_test_monitor(request),
+            // P3 delegation chain (user/desktop lane): stage/approve/list
+            // bot-owned file monitors with responsibility binding. The
+            // bot.self_* verbs above are the Bot self-service lane.
+            "bot.monitor_create" => self.bot_monitor_create(request),
+            "bot.monitor_approve" => self.bot_monitor_approve(request),
+            "bot.monitor_list" => self.bot_monitor_list(&request.params),
             "automation.create" => self.automation_create(request),
             "automation.list" => self.automation_list(&request.params),
             "automation.update" => self.automation_update(request),

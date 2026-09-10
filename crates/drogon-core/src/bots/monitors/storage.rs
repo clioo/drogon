@@ -288,6 +288,29 @@ pub fn delete_monitor(conn: &Connection, id: &str) -> Result<bool> {
     Ok(deleted > 0)
 }
 
+/// Every monitor owned by one bot, in row order. The bot surface (list,
+/// approve) is bot-scoped; per-project listings stay the scoped read path
+/// for everything else.
+pub fn list_monitors_for_bot(conn: &Connection, bot_id: &str) -> Result<Vec<MonitorRecord>> {
+    let mut stmt =
+        conn.prepare("SELECT payload_json FROM bot_monitors WHERE bot_id = ?1 ORDER BY rowid")?;
+    let rows = stmt
+        .query_map(params![bot_id], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    rows.into_iter().map(row_to_record).collect()
+}
+
+/// Every monitor in the store, in row order. The delegation producer
+/// tick (and only it) uses this: per-project listings stay the scoped
+/// read path for everything else.
+pub fn list_all_monitors(conn: &Connection) -> Result<Vec<MonitorRecord>> {
+    let mut stmt = conn.prepare("SELECT payload_json FROM bot_monitors ORDER BY rowid")?;
+    let rows = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    rows.into_iter().map(row_to_record).collect()
+}
+
 pub fn list_monitors_for_project(
     conn: &Connection,
     host_id: &str,

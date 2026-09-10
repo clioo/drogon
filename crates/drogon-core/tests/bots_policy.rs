@@ -208,7 +208,7 @@ fn reactive_responsibility_refuses_polling_with_no_event() {
 }
 
 #[test]
-fn reactive_responsibility_with_a_supplied_event_dispatches_the_typed_unsupported_stub() {
+fn reactive_responsibility_with_a_supplied_event_passes_the_wired_gate() {
     let responsibility = reactive_responsibility("r1", None, true);
     let attempt = policy::evaluate_and_attempt_responsibility_dispatch(
         &responsibility,
@@ -218,9 +218,7 @@ fn reactive_responsibility_with_a_supplied_event_dispatches_the_typed_unsupporte
     );
     assert_eq!(
         attempt,
-        ResponsibilityDispatchAttempt::Dispatched(
-            ResponsibilityJobOutcome::UnsupportedReactiveDispatch
-        )
+        ResponsibilityDispatchAttempt::Dispatched(ResponsibilityJobOutcome::ReactiveReady)
     );
 }
 
@@ -240,9 +238,7 @@ fn reactive_responsibility_never_delegates_to_automation_evaluation_even_when_on
     );
     assert_eq!(
         attempt,
-        ResponsibilityDispatchAttempt::Dispatched(
-            ResponsibilityJobOutcome::UnsupportedReactiveDispatch
-        )
+        ResponsibilityDispatchAttempt::Dispatched(ResponsibilityJobOutcome::ReactiveReady)
     );
 }
 

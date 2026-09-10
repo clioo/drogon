@@ -218,6 +218,13 @@ pub struct TickSummary {
     /// process: closed out as `DispatchFailed` without claiming
     /// completion, never silently left behind.
     pub stranded: usize,
+    /// Monitor change events committed to the delegation outbox by the
+    /// producer tick this pass.
+    pub monitor_events: usize,
+    /// Delegated Bot responsibility runs actually dispatched this pass
+    /// (fresh dispatches; replays that joined an existing run are not
+    /// counted here).
+    pub delegations: usize,
 }
 
 fn harness_for(automation: &Automation) -> HarnessLaunchParams {
@@ -559,7 +566,45 @@ pub fn tick_once(engine: &Engine, now_ms: f64) -> TickSummary {
             msummary.events
         );
     }
+    summary.monitor_events += msummary.events;
+    // P3: drain the monitor-event outbox into Bot responsibility
+    // dispatches (best-effort; never fails the tick above).
+    drain_delegations(engine, now_ms, &mut summary);
     summary
+}
+
+/// Delegation-drain tail: drains the P2 monitor-event outbox
+/// (`bot_self_mgmt::record_monitor_event_in_tx` rows) into Bot
+/// responsibility dispatches. Best-effort by design: any failure is logged
+/// and counted, never propagated — a delegation fault must not fail the
+/// automation tick above. Holds no database guard across any seam call
+/// (the drain locks briefly per step; the harness dispatch runs lock-free).
+fn drain_delegations(engine: &Engine, now_ms: f64, summary: &mut TickSummary) {
+    let seam = EngineDispatchSeam::new(engine);
+    let delegation = crate::bots::delegation::drain_delegation_events(
+        &engine.db,
+        &engine.host_id,
+        &seam,
+        now_ms,
+    );
+    summary.delegations += delegation.dispatched;
+    if delegation.cap_exceeded > 0
+        || delegation.skipped_stale > 0
+        || delegation.failed > 0
+        || delegation.refused > 0
+    {
+        eprintln!(
+            "[delegation] drain: {} claimed, {} dispatched, {} joined, {} stale-skipped, \
+             {} cap-exceeded, {} refused, {} failed",
+            delegation.claimed,
+            delegation.dispatched,
+            delegation.joined_existing,
+            delegation.skipped_stale,
+            delegation.cap_exceeded,
+            delegation.refused,
+            delegation.failed
+        );
+    }
 }
 
 /// Reads one live handle's verdict/agent-state projection without holding

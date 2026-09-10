@@ -40,12 +40,12 @@
 //!    cursor write; on any failure persist neither.
 //!
 //! Scheduling/firing reuses the existing automation scheduler and runner
-//! (C08 owns admission and renewal); delivery reuses C05. This module
-//! defines no timer, runner, outbox, or launcher. The same-transaction
-//! cursor-CAS + C05-enqueue shape is proposed in
-//! [`storage::commit_advance_in_tx`] (UNADOPTED: the reviewed C05 API pin
-//! is still pending, so the enqueue side stays a caller closure and the
-//! monitor migration stays unadopted for production data).
+//! (C08 owns admission and renewal); the durable producer tick lives in
+//! `bot_self_mgmt`, and committed change events land in its outbox, which
+//! the delegation drain (`bots::delegation`) consumes. This module defines
+//! no timer, launcher, or model caller. The same-transaction cursor-CAS +
+//! outbox-enqueue shape is [`storage::commit_advance_in_tx`], whose
+//! caller-supplied `enqueue` closure is the outbox write.
 //!
 //! ## Approval, secrets, and policy
 //!
