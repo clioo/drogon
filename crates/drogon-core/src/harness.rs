@@ -3,7 +3,8 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use drogon_harness::{
     CatalogProbe, HarnessAvailability, HarnessId, HarnessLaunchPlan, HarnessLaunchRequest,
-    HostCatalog, discover, plan_launch,
+    HostCatalog, PROBE_TIMEOUT_DEFAULT, ProbeConfigSources, discover, plan_launch,
+    probe_host_catalog_with_config,
 };
 use drogon_protocol::RpcError;
 use drogon_protocol::harness_catalog::{
@@ -101,8 +102,10 @@ impl Engine {
     /// `harness.catalog.v1`), served from the real
     /// `drogon_harness::probe_host_catalog`. Read-only: no ledger row, no
     /// session, no inference — the probe runs the harness's own
-    /// enumeration command under credential-free isolation and reports
-    /// exactly what it saw, including failures.
+    /// enumeration command inside a private root, linking the user's own
+    /// config roots READ-ONLY when they exist so the list reflects the
+    /// providers that would actually run, and reports exactly what it saw,
+    /// including failures.
     ///
     /// C01 seam (see `selection_gate.rs`): probe custody lives in the
     /// daemon. This arm settles it before replying — pending children are
@@ -122,7 +125,18 @@ impl Engine {
             .map(|item| item.availability)
             .unwrap_or(HarnessAvailability::Missing);
         let executable = installation.and_then(|item| item.executable);
-        let probe = drogon_harness::probe_host_catalog(harness, executable.as_deref());
+        // Enumeration inside the probe's private root, with the user's own
+        // config roots linked READ-ONLY so the harness binary resolves the
+        // providers it would actually run with (Pi/OpenCode have a
+        // supported non-interactive list surface). The daemon never reads
+        // or copies the credential values; it links the user's files into
+        // the private root, which is what gets written to and cleaned up.
+        let probe = probe_host_catalog_with_config(
+            harness,
+            executable.as_deref(),
+            &probe_config_sources(self)?,
+            PROBE_TIMEOUT_DEFAULT,
+        );
         let (catalog, retained_roots, custody_notes) = settle_probe_custody(probe);
         let wire = wire_catalog(&catalog, availability, retained_roots, custody_notes);
         Ok(json!({"hostId": self.host_id, "catalog": wire}))
@@ -632,6 +646,65 @@ pub(crate) fn resolve_launch(
         .executable
         .ok_or_else(|| error::not_found("Harness is not installed on this execution host"))?;
     plan_launch(request, &executable)
+}
+
+/// User config roots the model probe may link READ-ONLY so the harness
+/// binary itself resolves the providers the user configured (option (a) of
+/// the model-catalog decision, disclosed in provenance). Resolution mirrors
+/// the launch path: the engine's own `agentDefaultEnv` override for that
+/// harness wins, then the process env, then the harness's documented
+/// default under `$HOME`. Missing dirs are omitted — the probe then runs
+/// credential-free and says so. The daemon never reads or copies the
+/// files' contents, and it never writes to these paths.
+fn probe_config_sources(engine: &Engine) -> Result<ProbeConfigSources, RpcError> {
+    let settings = engine.read_agent_settings()?;
+    let env_override = |harness: &str, key: &str| -> Option<PathBuf> {
+        settings
+            .as_ref()
+            .and_then(|settings| settings.agent_default_env.get(harness))
+            .and_then(|env| env.get(key))
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    // An explicit `agentDefaultEnv` override wins even when it points at a
+    // missing dir (the user configured that root; falling back to the
+    // default would silently disagree with the run). Only an unset override
+    // falls through to the process env, then the harness default.
+    let resolve = |harness: &str, key: &str, default: Option<PathBuf>| -> Option<PathBuf> {
+        match env_override(harness, key) {
+            Some(path) => Some(path).filter(|path| path.is_dir()),
+            None => std::env::var_os(key)
+                .map(PathBuf::from)
+                .filter(|path| path.is_dir())
+                .or_else(|| default.filter(|path| path.is_dir())),
+        }
+    };
+    let pi_agent_dir = resolve(
+        "pi",
+        "PI_CODING_AGENT_DIR",
+        home.as_ref().map(|home| home.join(".pi").join("agent")),
+    );
+    let opencode_config_dir = resolve(
+        "opencode",
+        "OPENCODE_CONFIG_DIR",
+        home.as_ref()
+            .map(|home| home.join(".config").join("opencode")),
+    );
+    let opencode_data_base = match env_override("opencode", "XDG_DATA_HOME") {
+        Some(path) => Some(path),
+        None => std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home.as_ref().map(|home| home.join(".local").join("share"))),
+    };
+    let opencode_data_dir = opencode_data_base
+        .map(|base| base.join("opencode"))
+        .filter(|path| path.is_dir());
+    Ok(ProbeConfigSources {
+        pi_agent_dir,
+        opencode_config_dir,
+        opencode_data_dir,
+    })
 }
 
 /// The wire spelling of the harness id, matching the shared session

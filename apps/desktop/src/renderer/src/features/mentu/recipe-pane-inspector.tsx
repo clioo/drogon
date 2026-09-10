@@ -27,8 +27,8 @@
 // existing callers/tests that only pass `backends: string[]` keep
 // rendering exactly as before).
 
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Link2, Lock, RefreshCw, Save, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, Link2, Lock, RefreshCw, ShieldCheck } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -48,7 +48,7 @@ import type {
   MentuRecipeStep,
 } from "./recipe-validation/mentu-recipe-document";
 import type { RecipeGraphNode } from "./recipe-graph";
-import { draftForRecipeStep, type RecipeStepDraft } from "./recipe-pane-editor";
+import { draftForRecipeStep, stepDraftsEqual, type RecipeStepDraft } from "./recipe-pane-editor";
 import { MentuAgentStepEditor } from "./MentuAgentStepEditor";
 import {
   modelCatalogReadout,
@@ -106,7 +106,7 @@ export function SelectedNodeInspector({
   editable,
   disabled,
   saving,
-  onSave,
+  onCommit,
   runtimeAvailable = true,
   runtimeMessage = null,
   loadedHash = null,
@@ -132,7 +132,14 @@ export function SelectedNodeInspector({
   editable: boolean;
   disabled: boolean;
   saving: boolean;
-  onSave: (draft: RecipeStepDraft) => Promise<void>;
+  /** Persist one step draft. Resolves with an explicit result so the
+   *  autosave shows a validation/write error inline and never claims a
+   *  save it did not make. `stepLabel` is explicit because a selection
+   *  change can race the debounce. */
+  onCommit: (
+    draft: RecipeStepDraft,
+    stepLabel: string,
+  ) => Promise<{ ok: boolean; message: string | null }>;
   /** Renderer-held selection inputs for the verdict; all optional until
    *  the controller wires them — absent data renders manual-unverified,
    *  never a confirmation. */
@@ -173,10 +180,128 @@ export function SelectedNodeInspector({
   // binding carries it), never a recipe field, so it lives beside the
   // draft rather than inside it.
   const [provider, setProvider] = useState("");
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [commitSaving, setCommitSaving] = useState(false);
+
+  // --- Autosave ---------------------------------------------------------
+  // The draft is the editor's source of truth; `committedRef` is the last
+  // draft the daemon accepted for THIS node. A debounce coalesces keystrokes,
+  // blur/Enter force a flush, and a selection change flushes the previous
+  // node's edit before adopting the new one. A refused write (invalid draft
+  // or daemon error) keeps the draft and shows the message; the last valid
+  // JSON on disk is untouched.
+  const AUTOSAVE_DELAY_MS = 400;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const committedRef = useRef<RecipeStepDraft>(
+    editStep ? draftForRecipeStep(editStep) : EMPTY_DRAFT,
+  );
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+  const labelRef = useRef<string | null>(node?.label ?? null);
+  const generationRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightRef = useRef(false);
+  const pendingRef = useRef(false);
+
+  const runCommit = useCallback(async () => {
+    const label = labelRef.current;
+    if (!label || !editable) return;
+    if (stepDraftsEqual(draftRef.current, committedRef.current)) return;
+    if (inFlightRef.current) {
+      pendingRef.current = true;
+      return;
+    }
+    inFlightRef.current = true;
+    pendingRef.current = false;
+    const generation = generationRef.current;
+    const snapshot = draftRef.current;
+    setCommitSaving(true);
+    const result = await onCommitRef.current(snapshot, label);
+    inFlightRef.current = false;
+    if (pendingRef.current) {
+      pendingRef.current = false;
+      void runCommit();
+    }
+    // A selection change moved on: the old node's write already landed (or
+    // failed) on disk, and the new node owns the UI state now.
+    if (generationRef.current !== generation) return;
+    setCommitSaving(false);
+    if (result.ok) {
+      committedRef.current = snapshot;
+      setCommitError(null);
+    } else {
+      setCommitError(result.message);
+    }
+  }, [editable]);
+
+  const scheduleCommit = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      void runCommit();
+    }, AUTOSAVE_DELAY_MS);
+  }, [runCommit]);
+
+  const flushCommit = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    void runCommit();
+  }, [runCommit]);
+
+  const updateDraft = useCallback(
+    (updater: (current: RecipeStepDraft) => RecipeStepDraft) => {
+      const next = updater(draftRef.current);
+      draftRef.current = next;
+      setDraft(next);
+      setCommitError(null);
+      scheduleCommit();
+    },
+    [scheduleCommit],
+  );
+
+  // Selection change: flush the previous node's dirty draft (its label is
+  // still captured), then adopt the newly selected node's saved values.
   useEffect(() => {
-    setDraft(editStep ? draftForRecipeStep(editStep) : EMPTY_DRAFT);
+    generationRef.current += 1;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    void runCommit();
+    const initial = editStep ? draftForRecipeStep(editStep) : EMPTY_DRAFT;
+    committedRef.current = initial;
+    draftRef.current = initial;
+    labelRef.current = node?.label ?? null;
+    setDraft(initial);
     setProvider("");
-  }, [node?.id, editStep]);
+    setCommitError(null);
+    pendingRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- editStep is read at switch time only
+  }, [node?.id]);
+
+  // Adopt external recipe updates (e.g. a source-editor edit) only while
+  // there are no unsaved local edits, so a slow commit never clobbers typing.
+  useEffect(() => {
+    if (inFlightRef.current) return;
+    if (!stepDraftsEqual(draftRef.current, committedRef.current)) return;
+    const incoming = editStep ? draftForRecipeStep(editStep) : EMPTY_DRAFT;
+    committedRef.current = incoming;
+    draftRef.current = incoming;
+    setDraft(incoming);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editStep]);
+
+  const onContainerKeyDown = (event: React.KeyboardEvent): void => {
+    // Enter commits like the fork's single-field affordances; textareas keep
+    // Enter for newlines (verify commands are one per line).
+    if (event.key === "Enter" && !(event.target instanceof HTMLTextAreaElement)) {
+      event.preventDefault();
+      flushCommit();
+    }
+  };
 
   const backendOptions = useMemo(() => {
     const available = backends;
@@ -252,26 +377,22 @@ export function SelectedNodeInspector({
         registered: backendRegistered,
         now: Date.now(),
         selectedModel: draft.model,
+        knownCount: modelOptions.filter((option) => option.group === "known").length,
       }),
-    [resolvedModelCatalog, resolvedCatalogLoading, resolvedCatalogError, backendRegistered, effectiveBackend, draft.model],
+    [resolvedModelCatalog, resolvedCatalogLoading, resolvedCatalogError, backendRegistered, effectiveBackend, draft.model, modelOptions],
   );
-  // Real save-state chip: "Saving…" while the save is in flight, "Unsaved
-  // edits" while the in-progress draft differs from the step's last saved
-  // values, else "JSON synced" — never a decorative always-on badge.
-  const savedDraft = editStep ? draftForRecipeStep(editStep) : EMPTY_DRAFT;
+  // Real save-state chip: a refused write wins (an invalid draft must never
+  // read "synced"), then in-flight, then unsaved, else synced — never a
+  // decorative always-on badge.
   const stepDirty =
-    editStep !== null &&
-    (draft.backend !== savedDraft.backend ||
-      draft.model !== savedDraft.model ||
-      draft.dependencies !== savedDraft.dependencies ||
-      draft.timeout !== savedDraft.timeout ||
-      draft.retries !== savedDraft.retries ||
-      draft.verifyCommands !== savedDraft.verifyCommands);
-  const syncChip = saving
-    ? { label: "Saving…", tone: "text-muted-foreground" }
-    : stepDirty
-      ? { label: "Unsaved edits", tone: "text-amber-600 dark:text-amber-400" }
-      : { label: "JSON synced", tone: "text-emerald-600 dark:text-emerald-400" };
+    editStep !== null && !stepDraftsEqual(draft, committedRef.current);
+  const syncChip = commitError
+    ? { label: "Not saved — invalid", tone: "text-destructive" }
+    : saving || commitSaving
+      ? { label: "Saving…", tone: "text-muted-foreground" }
+      : stepDirty
+        ? { label: "Unsaved edits", tone: "text-amber-600 dark:text-amber-400" }
+        : { label: "JSON synced", tone: "text-emerald-600 dark:text-emerald-400" };
   const verification = editStep?.verify
     ? [
         ...(editStep.verify.commands?.length
@@ -315,7 +436,7 @@ export function SelectedNodeInspector({
       </div>
       {node && editStep ? (
         <ScrollArea className="min-h-0 flex-1 pr-2">
-          <div className="space-y-3">
+          <div className="space-y-3" onKeyDown={onContainerKeyDown} onBlur={flushCommit}>
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Node</Label>
               <div className="relative">
@@ -346,7 +467,7 @@ export function SelectedNodeInspector({
                   onValueChange={(value) => {
                     // A backend change restarts the execution selection:
                     // the model and provider binding belong to the old one.
-                    setDraft((current) => ({
+                    updateDraft((current) => ({
                       ...current,
                       backend: value === INHERIT_VALUE ? "" : value,
                       model: "",
@@ -415,7 +536,7 @@ export function SelectedNodeInspector({
                 disabled={disabled}
                 onChangeProvider={setProvider}
                 onChangeModel={(model) =>
-                  setDraft((current) => ({ ...current, model }))
+                  updateDraft((current) => ({ ...current, model }))
                 }
                 modelOptions={modelOptions}
                 catalogReadout={catalogReadout}
@@ -446,7 +567,7 @@ export function SelectedNodeInspector({
                 id="recipe-step-dependencies"
                 value={draft.dependencies}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, dependencies: event.target.value }))
+                  updateDraft((current) => ({ ...current, dependencies: event.target.value }))
                 }
                 placeholder="build, frontend"
                 disabled={disabled}
@@ -463,7 +584,7 @@ export function SelectedNodeInspector({
                   inputMode="numeric"
                   value={draft.timeout}
                   onChange={(event) =>
-                    setDraft((current) => ({ ...current, timeout: event.target.value }))
+                    updateDraft((current) => ({ ...current, timeout: event.target.value }))
                   }
                   disabled={disabled}
                   className="h-8 text-xs"
@@ -478,7 +599,7 @@ export function SelectedNodeInspector({
                   inputMode="numeric"
                   value={draft.retries}
                   onChange={(event) =>
-                    setDraft((current) => ({ ...current, retries: event.target.value }))
+                    updateDraft((current) => ({ ...current, retries: event.target.value }))
                   }
                   disabled={disabled}
                   className="h-8 text-xs"
@@ -498,7 +619,7 @@ export function SelectedNodeInspector({
                 id="recipe-step-verify-commands"
                 value={draft.verifyCommands}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, verifyCommands: event.target.value }))
+                  updateDraft((current) => ({ ...current, verifyCommands: event.target.value }))
                 }
                 placeholder="test -f out.txt"
                 aria-label="Verify commands"
@@ -516,15 +637,15 @@ export function SelectedNodeInspector({
                 className="min-h-16 resize-none text-xs"
               />
             </div>
-            <Button
-              size="sm"
-              className="w-full"
-              disabled={disabled || saving}
-              onClick={() => void onSave(draft)}
-            >
-              <Save />
-              {saving ? "Saving…" : "Save to Mentu JSON"}
-            </Button>
+            {commitError ? (
+              <p
+                role="alert"
+                data-testid="mentu-step-save-error"
+                className="rounded-md border border-destructive/50 bg-destructive/5 p-2 text-[11px] text-destructive"
+              >
+                Not saved — the recipe JSON on disk is unchanged. {commitError}
+              </p>
+            ) : null}
             {saveConflict ? (
               <div
                 role="alert"

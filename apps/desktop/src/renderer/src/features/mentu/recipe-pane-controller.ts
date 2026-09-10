@@ -117,7 +117,10 @@ export type MentuPaneController = {
   discardDraft: () => void;
   applyDraft: () => boolean;
   saveDraft: () => Promise<void>;
-  saveSelectedStep: (draft: RecipeStepDraft) => Promise<void>;
+  saveSelectedStep: (
+    draft: RecipeStepDraft,
+    stepLabel: string,
+  ) => Promise<{ ok: boolean; message: string | null }>;
   busy: boolean;
   operationRunning: boolean;
   error: string | null;
@@ -542,14 +545,22 @@ export function useMentuPaneController(
   }, [draftIssues, draftSource, recipe]);
 
   const persistSource = useCallback(
-    async (content: string) => {
-      if (!recipe || !state.selectedRecipeId) return;
+    async (
+      content: string,
+      options?: { autosave?: boolean },
+    ): Promise<{ ok: boolean; message: string | null }> => {
+      if (!recipe || !state.selectedRecipeId) {
+        return { ok: false, message: "No recipe is loaded." };
+      }
       if (!bridge.mentuRecipeSave) {
-        setError("Recipe saving is unavailable in this desktop build.");
-        return;
+        const message = "Recipe saving is unavailable in this desktop build.";
+        setError(message);
+        return { ok: false, message };
       }
       setSaving(true);
-      setBusy(true);
+      // A step autosave must not flip the whole inspector into `busy` (that
+      // disables every input mid-typing); an explicit manual save still does.
+      if (!options?.autosave) setBusy(true);
       setError(null);
       setSaveNotice(null);
       const saved = await bridge.mentuRecipeSave({
@@ -558,10 +569,10 @@ export function useMentuPaneController(
         content,
       });
       setSaving(false);
-      setBusy(false);
+      if (!options?.autosave) setBusy(false);
       if (!saved.ok) {
         setError(saved.error.message);
-        return;
+        return { ok: false, message: saved.error.message };
       }
       setRecipe(saved.result.recipe);
       setDrafts({
@@ -570,11 +581,13 @@ export function useMentuPaneController(
       setState({ draftSource: saved.result.recipe.source });
       // The save invalidated every approval bound to the old hash on the
       // daemon; drop the client-side review/approval too, so running the
-      // edited recipe requires a fresh review.
+      // edited recipe requires a fresh review (the approval seam is not
+      // bypassed by autosave).
       setApproval(null);
       setReview(null);
       setConflict(null);
       setSaveNotice("Saved. Review the new content before running.");
+      return { ok: true, message: null };
     },
     [bridge, workspaceId, recipe, state.selectedRecipeId, setState],
   );
@@ -585,34 +598,43 @@ export function useMentuPaneController(
   }, [draftSource, persistSource, recipe]);
 
   // Structured step edit over the draft document, then straight through
-  // `mentu.recipe_save` like the fork's inspector save.
+  // `mentu.recipe_save` like the fork's inspector save. Returns an explicit
+  // result so the inspector's autosave can surface a refusal inline while
+  // leaving the last valid JSON on disk untouched.
   const saveSelectedStep = useCallback(
-    async (draft: RecipeStepDraft) => {
+    async (
+      draft: RecipeStepDraft,
+      stepLabel: string,
+    ): Promise<{ ok: boolean; message: string | null }> => {
       if (!recipe || !savedDocument) {
-        setError("Reload the source recipe before saving edits.");
-        return;
+        const message = "Reload the source recipe before saving edits.";
+        setError(message);
+        return { ok: false, message };
       }
-      if (!selectedNode) {
-        setError("Select a step to edit its configuration.");
-        return;
+      if (!stepLabel) {
+        const message = "Select a step to edit its configuration.";
+        setError(message);
+        return { ok: false, message };
       }
+      // The label is passed explicitly (not read from `selectedNode`): a
+      // debounced commit can land after the selection moved.
       const base = draftSource === recipe.source ? savedDocument : editDocument;
       if (!base) {
-        setError(
+        const message =
           draftIssues.length > 0
             ? `Fix or discard the draft source errors before editing steps: ${formatMentuValidationIssues(draftIssues)}`
-            : "The draft source cannot be projected for editing; discard it and retry.",
-        );
-        return;
+            : "The draft source cannot be projected for editing; discard it and retry.";
+        setError(message);
+        return { ok: false, message };
       }
-      const update = updateRecipeStepDocument(base, selectedNode.label, draft);
+      const update = updateRecipeStepDocument(base, stepLabel, draft);
       if (!update.ok) {
         setError(update.message);
-        return;
+        return { ok: false, message: update.message };
       }
       const next = stringifyMentuRecipeDocument(update.document);
       setDraftText(next);
-      await persistSource(next);
+      return await persistSource(next, { autosave: true });
     },
     [
       draftIssues,
@@ -621,7 +643,6 @@ export function useMentuPaneController(
       persistSource,
       recipe,
       savedDocument,
-      selectedNode,
       setDraftText,
     ],
   );

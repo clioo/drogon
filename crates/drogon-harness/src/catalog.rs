@@ -357,6 +357,29 @@ pub fn freshness_token(catalog: &HostCatalog) -> String {
     format!("{executable}|{version}|{}", keys.join(";"))
 }
 
+/// Where a probe may find the user's own harness configuration so the
+/// harness binary — never this crate — can resolve the providers the user
+/// actually configured. Resolved by the daemon, which already owns config
+/// resolution for launches (`harness.rs`); paths are never written to.
+///
+/// The probe does NOT read secret values: for Pi it links the user's own
+/// `models.json`/`models-store.json`/`auth.json` into its private root as
+/// read-only symlinks so `pi --list-models` reads its own credentials; for
+/// OpenCode it links `opencode.json` and `auth.json` into private dirs the
+/// same way. An empty `ProbeConfigSources` is the credential-free isolated
+/// probe (what every test fixture uses).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProbeConfigSources {
+    /// User's Pi agent dir (`PI_CODING_AGENT_DIR` or `~/.pi/agent`).
+    pub pi_agent_dir: Option<PathBuf>,
+    /// User's OpenCode config dir (`OPENCODE_CONFIG_DIR` or
+    /// `~/.config/opencode`); holds `opencode.json`.
+    pub opencode_config_dir: Option<PathBuf>,
+    /// User's OpenCode data dir (`$XDG_DATA_HOME/opencode` or
+    /// `~/.local/share/opencode`); holds `auth.json`.
+    pub opencode_data_dir: Option<PathBuf>,
+}
+
 /// Probe one harness's catalog, credential-free. `executable` is the
 /// discovered absolute path (callers pass [`crate::discover`] results).
 /// No probe reads, copies or mirrors user configuration or credentials; an
@@ -367,7 +390,12 @@ pub fn freshness_token(catalog: &HostCatalog) -> String {
 /// On non-unix platforms this fails closed with
 /// [`EnumerationStatus::UnsupportedPlatform`] before spawning anything.
 pub fn probe_host_catalog(harness: HarnessId, executable: Option<&Path>) -> CatalogProbe {
-    probe_host_catalog_with_budget(harness, executable, PROBE_TIMEOUT_DEFAULT)
+    probe_host_catalog_with_config(
+        harness,
+        executable,
+        &ProbeConfigSources::default(),
+        PROBE_TIMEOUT_DEFAULT,
+    )
 }
 
 /// [`probe_host_catalog`] with an explicit wall-clock budget (tests use a
@@ -380,6 +408,21 @@ pub fn probe_host_catalog(harness: HarnessId, executable: Option<&Path>) -> Cata
 pub fn probe_host_catalog_with_budget(
     harness: HarnessId,
     executable: Option<&Path>,
+    budget: Duration,
+) -> CatalogProbe {
+    probe_host_catalog_with_config(harness, executable, &ProbeConfigSources::default(), budget)
+}
+
+/// [`probe_host_catalog`] with the user's own config roots available so the
+/// harness binary resolves the providers the user configured. The daemon
+/// passes what it already resolved for launches; tests pass
+/// [`ProbeConfigSources::default`] (fully isolated) or a fixture root.
+/// Credential files are linked read-only, never read or copied, and the
+/// private probe root is what gets written to and cleaned up.
+pub fn probe_host_catalog_with_config(
+    harness: HarnessId,
+    executable: Option<&Path>,
+    config: &ProbeConfigSources,
     budget: Duration,
 ) -> CatalogProbe {
     let Some(executable) = executable else {
@@ -417,8 +460,8 @@ pub fn probe_host_catalog_with_budget(
     #[cfg(unix)]
     {
         match harness {
-            HarnessId::Pi => probe_pi(executable, budget),
-            HarnessId::Opencode => probe_opencode(executable, budget),
+            HarnessId::Pi => probe_pi(executable, config, budget),
+            HarnessId::Opencode => probe_opencode(executable, config, budget),
             HarnessId::Claude | HarnessId::Codex | HarnessId::Antigravity => {
                 probe_version_only(harness, executable, budget)
             }
@@ -618,6 +661,47 @@ fn create_private_dir(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Pi config files linked into the probe's private agent dir. The daemon
+/// never reads or copies them: they are read-only symlinks the `pi` binary
+/// itself resolves, exactly like a real run.
+#[cfg(unix)]
+pub const PI_PROBE_LINK_FILES: &[&str] = &["models.json", "models-store.json", "auth.json"];
+
+/// Symlink `names` from `source_dir` into `dest_dir` for every file that
+/// exists, returning the names actually linked (so provenance records the
+/// real scope). Credential files are never read or copied, and a missing
+/// source is skipped rather than failing the probe. Returns an empty vec
+/// for a missing `source_dir`.
+#[cfg(unix)]
+fn link_config_files(source_dir: &Path, dest_dir: &Path, names: &[&str]) -> Vec<String> {
+    let mut linked = Vec::new();
+    for name in names {
+        let source = source_dir.join(name);
+        if !source.is_file() {
+            continue;
+        }
+        if std::os::unix::fs::symlink(&source, dest_dir.join(name)).is_ok() {
+            linked.push((*name).to_string());
+        }
+    }
+    linked
+}
+
+/// Human-readable probe scope for provenance, derived from what was
+/// actually linked. Empty links is the honest credential-free isolated
+/// scope; otherwise the linked file names are stated (never their values).
+#[cfg(unix)]
+fn probe_config_scope(linked: &[String]) -> String {
+    if linked.is_empty() {
+        "private-isolated-root (credential-free)".to_string()
+    } else {
+        format!(
+            "private-isolated-root (user config linked read-only: {})",
+            linked.join(", ")
+        )
+    }
+}
+
 #[cfg(unix)]
 fn isolation_failed_catalog(harness: HarnessId, executable: &Path, reason: String) -> CatalogProbe {
     CatalogProbe {
@@ -630,7 +714,7 @@ fn isolation_failed_catalog(harness: HarnessId, executable: &Path, reason: Strin
                 argv: Vec::new(),
                 version: None,
                 probed_at: SystemTime::now(),
-                config_scope: "private-isolated-root (credential-free)".to_string(),
+                config_scope: "private-isolated-root (isolation setup failed)".to_string(),
             }),
             entries: Vec::new(),
             status: EnumerationStatus::IsolationFailed,
@@ -645,16 +729,17 @@ fn isolation_failed_catalog(harness: HarnessId, executable: &Path, reason: Strin
 }
 
 /// Pi: `--version` plus `pi --list-models` inside a private isolated root
-/// with an empty `PI_CODING_AGENT_DIR`. Without user auth the surface
-/// honestly reports "No models available"; that empty answer is the
-/// enumeration. `PI_OFFLINE=1` is set per the installed Pi 0.85.1 docs
-/// ("disable all startup network operations"); `PI_TELEMETRY=0` and
+/// whose `PI_CODING_AGENT_DIR` is either credential-free (no config
+/// source) or holds READ-ONLY symlinks to the user's own
+/// `models.json`/`models-store.json`/`auth.json` so Pi resolves the
+/// providers the user actually configured. The daemon never reads or
+/// copies those files; Pi reads them itself, exactly as a real run does,
+/// and every write lands in the private root that is removed on cleanup.
+/// `PI_OFFLINE=1` is set per the installed Pi 0.85.1 docs ("disable all
+/// startup network operations"); `PI_TELEMETRY=0` and
 /// `PI_SKIP_VERSION_CHECK=1` keep the probe from phoning home or nagging.
-/// Per coordinator safety guidance this probe never mirrors
-/// `auth.json`/`models-store.json` or any credential material to make more
-/// models visible.
 #[cfg(unix)]
-fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
+fn probe_pi(executable: &Path, config: &ProbeConfigSources, budget: Duration) -> CatalogProbe {
     // ONE total pre-spawn deadline across setup, both probes and
     // cleanup; the reserve stays untouched by work.
     let start = Instant::now();
@@ -669,6 +754,11 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
     if let Err(err) = create_private_dir(&pi_agent) {
         return isolation_failed_catalog(HarnessId::Pi, executable, err);
     }
+    let linked = match &config.pi_agent_dir {
+        Some(source) => link_config_files(source, &pi_agent, PI_PROBE_LINK_FILES),
+        None => Vec::new(),
+    };
+    let config_scope = probe_config_scope(&linked);
     env.push((
         "PI_CODING_AGENT_DIR".to_string(),
         pi_agent.to_string_lossy().into_owned(),
@@ -780,7 +870,7 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
                     argv: Vec::new(),
                     version,
                     probed_at: SystemTime::now(),
-                    config_scope: "private-isolated-root (credential-free)".to_string(),
+                    config_scope: config_scope.clone(),
                 }),
                 entries: Vec::new(),
                 status,
@@ -834,7 +924,8 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
     };
     let (provenance, status, entries, mut note) = match run {
         ProbeRun::Completed { stdout, stderr } => {
-            let provenance = probe_provenance(executable, argv.clone(), version);
+            let provenance =
+                probe_provenance(executable, argv.clone(), version, config_scope.clone());
             let (status, entries, mut note) = match parse_pi_list_models(&stdout) {
                 ParseOutcome::Entries(entries) => (
                     EnumerationStatus::Enumerated,
@@ -885,7 +976,7 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
             exit_code,
             ..
         } => (
-            probe_provenance(executable, argv.clone(), version),
+            probe_provenance(executable, argv.clone(), version, config_scope.clone()),
             EnumerationStatus::ProbeFailed,
             Vec::new(),
             Some(format!(
@@ -893,7 +984,7 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
             )),
         ),
         ProbeRun::TimedOut { evidence, .. } => (
-            probe_provenance(executable, argv.clone(), version),
+            probe_provenance(executable, argv.clone(), version, config_scope.clone()),
             EnumerationStatus::TimedOut,
             Vec::new(),
             Some(format!("probe exceeded its wall-clock budget; {evidence}")),
@@ -905,7 +996,7 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
             // NotInstalled stands.
             if matches!(v_run, ProbeRun::Completed { .. }) {
                 (
-                    probe_provenance(executable, argv.clone(), version),
+                    probe_provenance(executable, argv.clone(), version, config_scope.clone()),
                     EnumerationStatus::ProbeFailed,
                     Vec::new(),
                     Some(format!(
@@ -915,7 +1006,7 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
                 )
             } else {
                 (
-                    probe_provenance(executable, argv.clone(), version),
+                    probe_provenance(executable, argv.clone(), version, config_scope.clone()),
                     EnumerationStatus::NotInstalled,
                     Vec::new(),
                     Some(message),
@@ -923,7 +1014,7 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
             }
         }
         ProbeRun::HelperFailed { stream, error } => (
-            probe_provenance(executable, argv.clone(), version),
+            probe_provenance(executable, argv.clone(), version, config_scope.clone()),
             EnumerationStatus::ProbeFailed,
             Vec::new(),
             Some(format!(
@@ -962,13 +1053,19 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
 }
 
 /// OpenCode: `opencode models` (plain `provider/id` lines) inside a
-/// private isolated root whose `OPENCODE_CONFIG_DIR` is empty — OpenCode
-/// writes plugin `node_modules` into that dir (observed on 1.18.30), so
-/// the user's config dir is never the probe target. Scope note is
-/// explicit: the built-in catalog only; user-defined providers are not
-/// enumerated.
+/// private isolated root. When the user's own config is supplied,
+/// `opencode.json` is symlinked into the private `OPENCODE_CONFIG_DIR` and
+/// `auth.json` into a private data dir — OpenCode writes plugin
+/// `node_modules` and its DB into the PRIVATE dirs (observed on 1.18.30),
+/// never the user's, so enumeration reflects the user's configured
+/// providers without a single write to their config. An empty config
+/// source keeps the previous built-in-only catalog.
 #[cfg(unix)]
-fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
+fn probe_opencode(
+    executable: &Path,
+    config: &ProbeConfigSources,
+    budget: Duration,
+) -> CatalogProbe {
     // ONE total pre-spawn deadline across setup, both probes and
     // cleanup; the reserve stays untouched by work.
     let start = Instant::now();
@@ -983,6 +1080,26 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
     if let Err(err) = create_private_dir(&opencode_dir) {
         return isolation_failed_catalog(HarnessId::Opencode, executable, err);
     }
+    let mut linked: Vec<String> = Vec::new();
+    if let Some(source) = &config.opencode_config_dir {
+        linked.extend(link_config_files(source, &opencode_dir, &["opencode.json"]));
+    }
+    if let Some(data_source) = &config.opencode_data_dir {
+        let opencode_data = isolation.root().join("opencode-data");
+        if let Err(err) = create_private_dir(&opencode_data) {
+            return isolation_failed_catalog(HarnessId::Opencode, executable, err);
+        }
+        linked.extend(link_config_files(
+            data_source,
+            &opencode_data,
+            &["auth.json"],
+        ));
+        env.push((
+            "XDG_DATA_HOME".to_string(),
+            opencode_data.to_string_lossy().into_owned(),
+        ));
+    }
+    let config_scope = probe_config_scope(&linked);
     env.push((
         "OPENCODE_CONFIG_DIR".to_string(),
         opencode_dir.to_string_lossy().into_owned(),
@@ -1090,7 +1207,7 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
                     argv: Vec::new(),
                     version,
                     probed_at: SystemTime::now(),
-                    config_scope: "private-isolated-root (credential-free)".to_string(),
+                    config_scope: config_scope.clone(),
                 }),
                 entries: Vec::new(),
                 status,
@@ -1144,22 +1261,23 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
     };
     let (provenance, status, entries, mut note) = match run {
         ProbeRun::Completed { stdout, stderr } => {
-            let provenance = probe_provenance(executable, argv.clone(), version);
+            let provenance =
+                probe_provenance(executable, argv.clone(), version, config_scope.clone());
             let (status, entries, mut note) = match parse_opencode_models(&stdout) {
                 ParseOutcome::Entries(entries) => (
                     EnumerationStatus::Enumerated,
                     entries,
                     Some(
-                        "built-in catalog under a private isolated OPENCODE_CONFIG_DIR; \
-                         selections against user-defined providers are not \
-                         host-validated here"
+                        "enumeration scope is recorded in provenance (the private \
+                         config/data dirs); absence of a model here is not proof \
+                         it does not exist"
                             .to_string(),
                     ),
                 ),
                 ParseOutcome::Empty => (
                     EnumerationStatus::Enumerated,
                     Vec::new(),
-                    Some("opencode reported no models".to_string()),
+                    Some("opencode reported no models under this probe's config scope".to_string()),
                 ),
                 ParseOutcome::Malformed(sample) => (
                     EnumerationStatus::ParseFailed,
@@ -1189,13 +1307,13 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
             exit_code,
             ..
         } => (
-            probe_provenance(executable, argv.clone(), version),
+            probe_provenance(executable, argv.clone(), version, config_scope.clone()),
             EnumerationStatus::ProbeFailed,
             Vec::new(),
             Some(format!("opencode models exited {exit_code}: {stderr_tail}")),
         ),
         ProbeRun::TimedOut { evidence, .. } => (
-            probe_provenance(executable, argv.clone(), version),
+            probe_provenance(executable, argv.clone(), version, config_scope.clone()),
             EnumerationStatus::TimedOut,
             Vec::new(),
             Some(format!("probe exceeded its wall-clock budget; {evidence}")),
@@ -1207,7 +1325,7 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
             // NotInstalled stands.
             if matches!(v_run, ProbeRun::Completed { .. }) {
                 (
-                    probe_provenance(executable, argv.clone(), version),
+                    probe_provenance(executable, argv.clone(), version, config_scope.clone()),
                     EnumerationStatus::ProbeFailed,
                     Vec::new(),
                     Some(format!(
@@ -1217,7 +1335,7 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
                 )
             } else {
                 (
-                    probe_provenance(executable, argv.clone(), version),
+                    probe_provenance(executable, argv.clone(), version, config_scope.clone()),
                     EnumerationStatus::NotInstalled,
                     Vec::new(),
                     Some(message),
@@ -1225,7 +1343,7 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
             }
         }
         ProbeRun::HelperFailed { stream, error } => (
-            probe_provenance(executable, argv.clone(), version),
+            probe_provenance(executable, argv.clone(), version, config_scope.clone()),
             EnumerationStatus::ProbeFailed,
             Vec::new(),
             Some(format!(
@@ -1377,13 +1495,14 @@ fn probe_provenance(
     executable: &Path,
     argv: Vec<String>,
     version: Option<String>,
+    config_scope: String,
 ) -> ProbeProvenance {
     ProbeProvenance {
         executable: executable.to_path_buf(),
         argv,
         version,
         probed_at: SystemTime::now(),
-        config_scope: "private-isolated-root (credential-free)".to_string(),
+        config_scope,
     }
 }
 

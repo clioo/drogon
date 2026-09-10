@@ -73,7 +73,30 @@ fn fixture_bin(name: &str, body: &str) -> (tempfile::TempDir, PathBuf) {
 /// Engine with a settings file overriding one harness's command to an
 /// absolute fixture path — the same resolution `harness.start` launches
 /// with, so the catalog provably describes the binary that would run.
+/// `agentDefaultEnv` pins the probe's config sources at nonexistent paths
+/// so the default tests run the credential-free isolated probe
+/// deterministically, regardless of the developer's real harness config.
 fn engine_with_override(override_id: &str, command: &str) -> (tempfile::TempDir, Engine) {
+    engine_with_env_override(
+        override_id,
+        command,
+        json!({
+            "pi": { "PI_CODING_AGENT_DIR": "/nonexistent/drogon-probe-test-pi-agent" },
+            "opencode": {
+                "OPENCODE_CONFIG_DIR": "/nonexistent/drogon-probe-test-opencode",
+                "XDG_DATA_HOME": "/nonexistent/drogon-probe-test-data"
+            }
+        }),
+    )
+}
+
+/// Like [`engine_with_override`], but with an explicit `agentDefaultEnv`
+/// (used to hand the probe a real fixture config root).
+fn engine_with_env_override(
+    override_id: &str,
+    command: &str,
+    harness_env: Value,
+) -> (tempfile::TempDir, Engine) {
     let dir = tempfile::tempdir().unwrap();
     let envelope = json!({
         "version": 1,
@@ -82,7 +105,7 @@ fn engine_with_override(override_id: &str, command: &str) -> (tempfile::TempDir,
             "disabledTuiAgents": [],
             "agentCmdOverrides": { override_id: command },
             "agentDefaultArgs": {},
-            "agentDefaultEnv": {},
+            "agentDefaultEnv": harness_env,
             "agentStatusHooksEnabled": true,
             "tabAutoGenerateTitle": false,
             "promptCacheTimerEnabled": false,
@@ -166,7 +189,11 @@ fn pi_catalog_enumerates_real_entries_with_provenance_and_freshness() {
         "freshly probed: {probed_at} vs {now_ms}"
     );
     // Scope note and host identity ride along; nothing was retained.
-    assert!(catalog["note"].as_str().unwrap().contains("auth-gated"));
+    let note = catalog["note"].as_str().unwrap();
+    assert!(
+        note.contains("provenance") || note.contains("not proof"),
+        "note points at the recorded scope: {note}"
+    );
     assert_eq!(catalog["retainedRoots"], json!([]));
     assert_eq!(result["hostId"], host_id);
     // Read-only: no session was ever spawned.
@@ -309,4 +336,129 @@ fn catalog_matches_the_discovery_host_identity() {
     assert_eq!(result["hostId"], status["hostId"]);
     assert_eq!(result["catalog"]["status"], "not_installed");
     assert_eq!(result["catalog"]["availability"], "missing");
+}
+
+#[test]
+fn pi_catalog_links_the_configured_agent_dir_read_only() {
+    // A fake pi that only enumerates when the probe's own
+    // PI_CODING_AGENT_DIR actually contains the user's auth.json: the
+    // config the user configured must reach the child, as a read-only
+    // link, without the daemon reading or copying its contents.
+    let script = "#!/bin/sh\n\
+                  case \"$1\" in\n\
+                  \x20 --version) echo '0.85.1'; exit 0 ;;\n\
+                  \x20 --list-models)\n\
+                  \x20 if [ -e \"$PI_CODING_AGENT_DIR/auth.json\" ]; then\n\
+                  \x20   printf 'provider      model                context  max-out  thinking  images\\n';\n\
+                  \x20   printf 'kimi-coding   kimi-for-coding      262.1K   32.8K    yes       yes\\n';\n\
+                  \x20 else\n\
+                  \x20   echo 'No models available.';\n\
+                  \x20 fi\n\
+                  \x20 exit 0 ;;\n\
+                  *) exit 2 ;;\n\
+                  esac\n";
+    let (_bin, pi) = fixture_bin("pi", script);
+    let agent = tempfile::tempdir().unwrap();
+    for (name, body) in [
+        ("models.json", "{\"providers\":{}}"),
+        ("models-store.json", "{}"),
+        (
+            "auth.json",
+            "{\"kimi-coding\":{\"apiKey\":\"fixture-not-a-real-secret\"}}",
+        ),
+    ] {
+        std::fs::write(agent.path().join(name), body).unwrap();
+    }
+    let before = std::fs::read_to_string(agent.path().join("auth.json")).unwrap();
+    let (_dir, engine) = engine_with_env_override(
+        "pi",
+        &pi.to_string_lossy(),
+        json!({ "pi": { "PI_CODING_AGENT_DIR": agent.path().to_string_lossy() } }),
+    );
+    let catalog = catalog_of(call(&engine, "harness.models", json!({"harnessId": "pi"})));
+    assert_eq!(catalog["status"], "enumerated", "{catalog}");
+    let entries = catalog["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1, "{catalog}");
+    assert_eq!(entries[0]["id"], "kimi-for-coding");
+    let scope = catalog["provenance"]["configScope"].as_str().unwrap();
+    assert!(scope.contains("user config linked read-only"), "{scope}");
+    assert!(
+        scope.contains("auth.json"),
+        "scope names what was linked: {scope}"
+    );
+    assert!(
+        scope.contains("models.json"),
+        "scope names what was linked: {scope}"
+    );
+    // The user's config dir is untouched: same bytes, exactly the files we
+    // wrote (the probe linked them into its own private root, never wrote
+    // through the links).
+    assert_eq!(
+        std::fs::read_to_string(agent.path().join("auth.json")).unwrap(),
+        before
+    );
+    let mut names: Vec<String> = std::fs::read_dir(agent.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["auth.json", "models-store.json", "models.json"]);
+}
+
+#[test]
+fn opencode_catalog_links_the_configured_config_and_data_dirs_read_only() {
+    let script = "#!/bin/sh\n\
+                  case \"$1\" in\n\
+                  \x20 --version) echo '1.18.30'; exit 0 ;;\n\
+                  \x20 models)\n\
+                  \x20 if [ -e \"$OPENCODE_CONFIG_DIR/opencode.json\" ] && [ -e \"$XDG_DATA_HOME/auth.json\" ]; then\n\
+                  \x20   echo 'anthropic/claude-sonnet-4-5';\n\
+                  \x20 else\n\
+                  \x20   echo 'opencode/big-pickle';\n\
+                  \x20 fi\n\
+                  \x20 exit 0 ;;\n\
+                  *) exit 2 ;;\n\
+                  esac\n";
+    let (_bin, opencode) = fixture_bin("opencode", script);
+    let config = tempfile::tempdir().unwrap();
+    std::fs::write(config.path().join("opencode.json"), "{\"provider\":{}}").unwrap();
+    let data = tempfile::tempdir().unwrap();
+    std::fs::create_dir(data.path().join("opencode")).unwrap();
+    std::fs::write(
+        data.path().join("opencode").join("auth.json"),
+        "{\"anthropic\":{\"type\":\"api\",\"key\":\"fixture\"}}",
+    )
+    .unwrap();
+    let (_dir, engine) = engine_with_env_override(
+        "opencode",
+        &opencode.to_string_lossy(),
+        json!({
+            "opencode": {
+                "OPENCODE_CONFIG_DIR": config.path().to_string_lossy(),
+                "XDG_DATA_HOME": data.path().to_string_lossy()
+            }
+        }),
+    );
+    let catalog = catalog_of(call(
+        &engine,
+        "harness.models",
+        json!({"harnessId": "opencode"}),
+    ));
+    assert_eq!(catalog["status"], "enumerated", "{catalog}");
+    let entries = catalog["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1, "{catalog}");
+    assert_eq!(entries[0]["id"], "claude-sonnet-4-5");
+    let scope = catalog["provenance"]["configScope"].as_str().unwrap();
+    assert!(scope.contains("user config linked read-only"), "{scope}");
+    assert!(scope.contains("opencode.json"), "{scope}");
+    assert!(scope.contains("auth.json"), "{scope}");
+    // Source dirs untouched: exactly the files we wrote, and OpenCode's
+    // plugin node_modules landed in the probe's private root, not here.
+    let mut config_names: Vec<String> = std::fs::read_dir(config.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    config_names.sort();
+    assert_eq!(config_names, vec!["opencode.json"]);
+    assert!(data.path().join("opencode").join("auth.json").is_file());
 }

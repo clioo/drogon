@@ -5,9 +5,11 @@
 //! catalog/selection/translation slice: pure planning over bounded,
 //! provenance-recording enumeration probes. Those probes spawn the harness
 //! CLIs' own read-only enumeration commands (`--version`,
-//! `--list-models`, `models`) inside private, credential-free isolation —
-//! never an interactive or headless harness *session*, and never model
-//! inference.
+//! `--list-models`, `models`) inside private isolation — never an
+//! interactive or headless harness *session*, and never model inference.
+//! The isolation is credential-free unless the caller supplies the user's
+//! own config roots ([`ProbeConfigSources`]), which are linked READ-ONLY so
+//! the harness binary resolves the providers it would actually run with.
 
 mod catalog;
 mod discovery;
@@ -18,9 +20,10 @@ mod mentu_contract;
 mod selection;
 
 pub use catalog::{
-    CatalogEntry, CatalogProbe, EnumerationStatus, HostCatalog, PROBE_OUTPUT_CAP,
-    PROBE_RESERVED_CLEANUP, PROBE_TIMEOUT_DEFAULT, PendingProbeChild, ProbeChildRole,
-    ProbeProvenance, freshness_token, probe_host_catalog, probe_host_catalog_with_budget,
+    CatalogEntry, CatalogProbe, EnumerationStatus, HostCatalog, PI_PROBE_LINK_FILES,
+    PROBE_OUTPUT_CAP, PROBE_RESERVED_CLEANUP, PROBE_TIMEOUT_DEFAULT, PendingProbeChild,
+    ProbeChildRole, ProbeConfigSources, ProbeProvenance, freshness_token, probe_host_catalog,
+    probe_host_catalog_with_budget, probe_host_catalog_with_config,
 };
 pub use discovery::{HarnessAvailability, HarnessInstallation, discover, resolve_executable};
 pub use headless_env::{HeadlessEnvPlan, plan_headless_env};
