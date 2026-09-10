@@ -193,4 +193,19 @@ describe("Add Project dialog paste (manual-equivalent)", () => {
     expect(result.status).toBe("pasted");
     expect(nameInput.value).toBe("my-project");
   });
+  it("disables spellcheck on identifier inputs", () => {
+    render(<AddProjectDialog {...dialogProps} />);
+    // Why: paths and project names are identifiers, not prose — red
+    // underlines (and spelling suggestions) are noise, same as the
+    // source's location/rename fields. (jsdom has no spellcheck IDL, so
+    // assert the content attribute Chromium reads.)
+    expect(
+      (screen.getByLabelText("Folder or repository path") as HTMLInputElement).getAttribute(
+        "spellcheck",
+      ),
+    ).toBe("false");
+    expect(
+      (screen.getByLabelText(/Name/) as HTMLInputElement).getAttribute("spellcheck"),
+    ).toBe("false");
+  });
 });

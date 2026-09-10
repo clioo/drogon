@@ -112,6 +112,14 @@ export function DeleteWorktreeDialog({
       <DialogContent
         className="max-w-sm sm:max-w-sm"
         showCloseButton={false}
+        onOpenAutoFocus={(event) => {
+          // Why (source DeleteWorktreeDialog): this confirm exists to guard
+          // a destructive action the user already chose. Radix would pick
+          // the first tabbable control (Cancel), breaking the expected
+          // "Delete, Enter" keyboard flow.
+          event.preventDefault();
+          confirmButtonRef.current?.focus();
+        }}
       >
         <DialogTitle className="sr-only">Delete Workspace</DialogTitle>
         <form

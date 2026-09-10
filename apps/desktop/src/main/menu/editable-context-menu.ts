@@ -14,12 +14,12 @@ import { menuIpcChannels } from "../../shared/menu-contract";
 
 export type EditableContextMenuWebContents = Pick<
   Electron.WebContents,
-  "send"
+  "send" | "replaceMisspelling" | "session"
 >;
 
 export type EditableContextMenuParams = Pick<
   Electron.ContextMenuParams,
-  "isEditable" | "editFlags"
+  "isEditable" | "editFlags" | "misspelledWord" | "dictionarySuggestions"
 >;
 
 /**
@@ -32,8 +32,30 @@ export function buildEditableContextMenuTemplate(
   webContents: EditableContextMenuWebContents,
 ): MenuItemConstructorOptions[] {
   if (!params.isEditable) return [];
+  const template: MenuItemConstructorOptions[] = [];
+  // Why (source buildEditableContextMenuTemplate): prose inputs (commit
+  // message, task titles) keep spellcheck on, so a misspelled word offers
+  // up to five replacements plus Add to dictionary ahead of the edit items.
+  const suggestions = (params.dictionarySuggestions ?? []).slice(0, 5);
+  for (const suggestion of suggestions) {
+    template.push({
+      label: suggestion,
+      click: () => webContents.replaceMisspelling(suggestion),
+    });
+  }
+  if (params.misspelledWord) {
+    if (template.length > 0) template.push({ type: "separator" });
+    const misspelledWord = params.misspelledWord;
+    template.push({
+      label: "Add to dictionary",
+      click: () => {
+        webContents.session.addWordToSpellCheckerDictionary(misspelledWord);
+      },
+    });
+  }
+  if (template.length > 0) template.push({ type: "separator" });
   const canPaste = params.editFlags?.canPaste ?? true;
-  return [
+  template.push(
     { role: "cut" },
     { role: "copy" },
     {
@@ -47,5 +69,6 @@ export function buildEditableContextMenuTemplate(
       },
     },
     { role: "selectAll" },
-  ];
+  );
+  return template;
 }
