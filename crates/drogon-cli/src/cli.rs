@@ -129,6 +129,15 @@ pub enum Command {
         #[command(subcommand)]
         action: BotAction,
     },
+    /// Integration secrets: seal a value into the daemon's 0600 store or
+    /// list configured names (user-only; values are read from stdin for
+    /// `set`, never echoed, and never appear in argv; requires the service
+    /// capability bot.secrets.v1). Granting a name to a Bot is
+    /// `drogon-cli bot grant-secret`.
+    Secrets {
+        #[command(subcommand)]
+        action: SecretsAction,
+    },
     /// Native coordination (requires the service capability
     /// orchestration.native.v1; the preflight decides before any method)
     Orchestration {
@@ -1069,6 +1078,41 @@ impl Cli {
                     require_nonempty("bot", bot)?;
                     require_nonempty("workspace", workspace)?;
                     require_nonempty("monitor", monitor)?;
+                }
+                BotAction::GrantSecret {
+                    bot,
+                    workspace,
+                    secret_ref,
+                    kind,
+                    ..
+                } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("secret-ref", secret_ref)?;
+                    require_nonempty("kind", kind)?;
+                }
+                BotAction::RevokeSecret {
+                    bot,
+                    workspace,
+                    secret_ref,
+                    ..
+                } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("secret-ref", secret_ref)?;
+                }
+                BotAction::ListGrants { bot, workspace } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                }
+            },
+            Command::Secrets { action } => match action {
+                SecretsAction::Set { kind, name } | SecretsAction::Delete { kind, name } => {
+                    require_nonempty("kind", kind)?;
+                    require_nonempty("name", name)?;
+                }
+                SecretsAction::List { kind } => {
+                    require_nonempty("kind", kind)?;
                 }
             },
             Command::Harness { action } => match action {
@@ -2385,6 +2429,89 @@ pub enum BotAction {
         #[arg(long, value_name = "ID")]
         monitor: String,
     },
+    /// Grant an integration secret reference to the Bot (user-only; the
+    /// value stays in the sealed store, only the reference is granted;
+    /// requires the service capability bot.secrets.v1)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot grant-secret --bot <ID> --workspace <ID> --secret-ref <NAME> --kind <KIND> [--granted-by <USER>]\nValid flags: --bot, --data-dir, --granted-by, --help, --json, --kind, --request-id, --retry-request, --secret-ref, --workspace"
+    )]
+    GrantSecret {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "NAME")]
+        secret_ref: String,
+        #[arg(long, value_name = "KIND")]
+        kind: String,
+        #[arg(long, value_name = "USER")]
+        granted_by: Option<String>,
+    },
+    /// Revoke the Bot's secret reference grant (user-only; takes effect on
+    /// the Bot's NEXT monitor tick)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot revoke-secret --bot <ID> --workspace <ID> --secret-ref <NAME> [--granted-by <USER>]\nValid flags: --bot, --data-dir, --granted-by, --help, --json, --request-id, --retry-request, --secret-ref, --workspace"
+    )]
+    RevokeSecret {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "NAME")]
+        secret_ref: String,
+        #[arg(long, value_name = "USER")]
+        granted_by: Option<String>,
+    },
+    /// List the Bot's secret reference grants (names and metadata, never
+    /// values)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot list-grants --bot <ID> --workspace <ID>\nValid flags: --bot, --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+    )]
+    ListGrants {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SecretsAction {
+    /// Seal a secret value for an integration kind. The value is read from
+    /// stdin (pipe it in; do not type it as a flag).
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli secrets set --kind <KIND> --name <NAME> < value-on-stdin\nValid flags: --data-dir, --help, --json, --kind, --name, --request-id, --retry-request"
+    )]
+    Set {
+        #[arg(long, value_name = "KIND")]
+        kind: String,
+        #[arg(long, value_name = "NAME")]
+        name: String,
+    },
+    /// List configured secret NAMES for an integration kind (never values)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli secrets list --kind <KIND>\nValid flags: --data-dir, --help, --json, --kind, --request-id, --retry-request"
+    )]
+    List {
+        #[arg(long, value_name = "KIND")]
+        kind: String,
+    },
+    /// Delete the sealed value for an integration kind and name
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli secrets delete --kind <KIND> --name <NAME>\nValid flags: --data-dir, --help, --json, --kind, --name, --request-id, --retry-request"
+    )]
+    Delete {
+        #[arg(long, value_name = "KIND")]
+        kind: String,
+        #[arg(long, value_name = "NAME")]
+        name: String,
+    },
 }
 
 #[cfg(test)]
@@ -2444,6 +2571,112 @@ mod bot_self_tests {
                 action: BotAction::CreateMonitor { .. }
             }
         ));
+    }
+
+    #[test]
+    fn bot_secret_grant_verbs_parse_and_validate() {
+        let cli = parse(&[
+            "bot",
+            "grant-secret",
+            "--bot",
+            "b1",
+            "--workspace",
+            "w1",
+            "--secret-ref",
+            "GITHUB_TOKEN_REF",
+            "--kind",
+            "github",
+            "--granted-by",
+            "carlos",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bot {
+                action: BotAction::GrantSecret { .. }
+            }
+        ));
+        let cli = parse(&[
+            "bot",
+            "revoke-secret",
+            "--bot",
+            "b1",
+            "--workspace",
+            "w1",
+            "--secret-ref",
+            "GITHUB_TOKEN_REF",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bot {
+                action: BotAction::RevokeSecret { .. }
+            }
+        ));
+        let cli = parse(&["bot", "list-grants", "--bot", "b1", "--workspace", "w1"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bot {
+                action: BotAction::ListGrants { .. }
+            }
+        ));
+        // Empty scope ids and refs are usage errors.
+        let cli = parse(&[
+            "bot",
+            "grant-secret",
+            "--bot",
+            "",
+            "--workspace",
+            "w1",
+            "--secret-ref",
+            "X",
+            "--kind",
+            "github",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_err());
+        let cli = parse(&[
+            "bot",
+            "grant-secret",
+            "--bot",
+            "b1",
+            "--workspace",
+            "w1",
+            "--secret-ref",
+            "",
+            "--kind",
+            "github",
+        ])
+        .unwrap();
+        assert!(cli.validate().is_err());
+    }
+
+    #[test]
+    fn secrets_verbs_parse_and_validate() {
+        let cli = parse(&["secrets", "set", "--kind", "github", "--name", "GITHUB_TOKEN_REF"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Secrets {
+                action: SecretsAction::Set { .. }
+            }
+        ));
+        let cli = parse(&["secrets", "list", "--kind", "github"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Secrets {
+                action: SecretsAction::List { .. }
+            }
+        ));
+        let cli = parse(&["secrets", "delete", "--kind", "github", "--name", "N"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Secrets {
+                action: SecretsAction::Delete { .. }
+            }
+        ));
+        let cli = parse(&["secrets", "set", "--kind", "", "--name", "N"]).unwrap();
+        assert!(cli.validate().is_err());
     }
 
     #[test]

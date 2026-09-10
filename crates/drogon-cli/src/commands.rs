@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::{
     AutomationAction, BotAction, BrowserAction, Cli, Command, HarnessAction, InternalAction,
-    ProjectAction, TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
+    ProjectAction, SecretsAction, TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
@@ -99,7 +99,19 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Browser { action } => browser(&client, &request_id, json, action).await,
         Command::Harness { action } => harness(&client, &request_id, json, action).await,
         Command::Automation { action } => automation(&client, &request_id, json, action).await,
-        Command::Bot { action } => bot(&client, &request_id, json, action).await,
+        Command::Bot { action } => match action {
+            // User-only secret-grant verbs: no Bot-actor scope is asserted
+            // anywhere on this surface, and they preflight their own
+            // capability (bot.secrets.v1), so they skip the bot.self.v1
+            // preflight in `bot()`.
+            BotAction::GrantSecret { .. }
+            | BotAction::RevokeSecret { .. }
+            | BotAction::ListGrants { .. } => {
+                bot_secret_grants(&client, &request_id, json, action).await
+            }
+            other => bot(&client, &request_id, json, other).await,
+        },
+        Command::Secrets { action } => secrets(&client, &request_id, json, action).await,
         Command::Orchestration { command } => {
             crate::orchestration_commands::run(&client, &request_id, json, command).await
         }
@@ -1332,6 +1344,205 @@ async fn bot(
                 0,
                 None,
             )
+        }
+        // Grant verbs preflight bot.secrets.v1 in `bot_secret_grants`
+        // (routed there from run()); they never carry a Bot-actor scope.
+        BotAction::GrantSecret { .. } | BotAction::RevokeSecret { .. }
+        | BotAction::ListGrants { .. } => Err(CliError::Usage(
+            "bot grant-secret/revoke-secret/list-grants are user-only verbs without a Bot-actor scope".into(),
+        )),
+    }
+}
+
+/// User-only per-Bot secret grants (P0): NO Bot-actor scope is asserted
+/// anywhere on this surface, so there is no Bot self-grant path, and every
+/// call preflights the `bot.secrets.v1` capability. Grant and revoke are
+/// audited server-side with the granting user named; revocation takes
+/// effect on the Bot's NEXT monitor tick.
+async fn bot_secret_grants(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &BotAction,
+) -> Result<RunOutcome, CliError> {
+    let status = capability_preflight(client, request_id, "bot.secrets.v1", "bot").await?;
+    let scope = |bot: &str, workspace: &str| {
+        json!({
+            "botId": bot,
+            "workspaceId": workspace,
+            "hostId": status.host_id,
+        })
+    };
+    match action {
+        BotAction::GrantSecret {
+            bot,
+            workspace,
+            secret_ref,
+            kind,
+            granted_by,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["secretRef"] = json!(secret_ref);
+            params["kind"] = json!(kind);
+            if let Some(user) = granted_by {
+                params["grantedBy"] = json!(user);
+            }
+            let call = client
+                .call("bot.grant_secret", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "granted {kind}/{secret_ref} to bot {bot}{}",
+                        granted_by
+                            .as_deref()
+                            .map(|user| format!(" (by {user})"))
+                            .unwrap_or_default()
+                    )
+                },
+                0,
+                None,
+            )
+        }
+        BotAction::RevokeSecret {
+            bot,
+            workspace,
+            secret_ref,
+            granted_by,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["secretRef"] = json!(secret_ref);
+            if let Some(user) = granted_by {
+                params["grantedBy"] = json!(user);
+            }
+            let call = client
+                .call("bot.revoke_secret", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "revoked {secret_ref} from bot {bot} (next tick refuses){}",
+                        granted_by
+                            .as_deref()
+                            .map(|user| format!(" (by {user})"))
+                            .unwrap_or_default()
+                    )
+                },
+                0,
+                None,
+            )
+        }
+        BotAction::ListGrants { bot, workspace } => {
+            let call = client
+                .call("bot.list_secret_grants", scope(bot, workspace), request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let result = call.result.clone();
+            emit(
+                call,
+                json,
+                || {
+                    let grants = result
+                        .get("grants")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                    format!("bot {bot}: {grants} secret grant(s)")
+                },
+                0,
+                None,
+            )
+        }
+        _ => Err(CliError::Usage(
+            "only bot grant-secret / revoke-secret / list-grants reach this path".into(),
+        )),
+    }
+}
+
+/// User-only sealed integration-secret store (P0): `set` reads the value
+/// from STDIN (never argv, so `ps` and shell history never see it), seals
+/// it server-side into the 0600 store, and the value is never echoed back
+/// or persisted outside the sealed file. Granting a name to a Bot is
+/// `bot grant-secret`.
+async fn secrets(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &SecretsAction,
+) -> Result<RunOutcome, CliError> {
+    let _status = capability_preflight(client, request_id, "bot.secrets.v1", "secrets").await?;
+    match action {
+        SecretsAction::Set { kind, name } => {
+            use std::io::Read as _;
+            let mut raw = Vec::new();
+            std::io::stdin()
+                .read_to_end(&mut raw)
+                .map_err(|e| CliError::Usage(format!("cannot read value from stdin: {e}")))?;
+            // Trim exactly one trailing newline (and CRLF); any other byte
+            // is part of the value.
+            let mut value = raw;
+            if value.last() == Some(&b'\n') {
+                value.pop();
+                if value.last() == Some(&b'\r') {
+                    value.pop();
+                }
+            }
+            if value.is_empty() {
+                return Err(CliError::Usage(
+                    "empty stdin: pipe the secret value into `secrets set`".into(),
+                ));
+            }
+            let value = String::from_utf8(value)
+                .map_err(|_| CliError::Usage("secret value must be UTF-8".into()))?;
+            let call = client
+                .call(
+                    "secrets.set",
+                    json!({"kind": kind, "name": name, "value": value}),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            emit(
+                call,
+                json,
+                || format!("sealed {kind}/{name} (value never echoed)"),
+                0,
+                None,
+            )
+        }
+        SecretsAction::List { kind } => {
+            let call = client
+                .call("secrets.list", json!({"kind": kind}), request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let result = call.result.clone();
+            emit(
+                call,
+                json,
+                || {
+                    let names = result
+                        .get("names")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                    format!("{kind}: {names} configured secret name(s)")
+                },
+                0,
+                None,
+            )
+        }
+        SecretsAction::Delete { kind, name } => {
+            let call = client
+                .call(
+                    "secrets.delete",
+                    json!({"kind": kind, "name": name}),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            emit(call, json, || format!("deleted {kind}/{name}"), 0, None)
         }
     }
 }

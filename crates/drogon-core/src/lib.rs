@@ -8,6 +8,7 @@ pub mod automations;
 mod bot_monitor_rpc;
 mod bot_mutation_rpc;
 pub mod bot_run_rpc;
+pub mod bot_secrets;
 pub mod bot_self_mgmt;
 mod bot_snapshot_rpc;
 pub mod bots;
@@ -42,6 +43,7 @@ pub mod git;
 pub mod git_process;
 mod git_rpc;
 pub mod git_worktree;
+pub mod integrations;
 mod harness;
 mod hooks;
 mod project;
@@ -121,6 +123,10 @@ const CAPABILITIES: &[&str] = &[
     // Bot self-management (P1–P4): provisioned homes, scheduler-backed
     // monitors, audit actors, and the scoped bot.self_* API.
     crate::bot_self_mgmt::BOT_SELF_CAPABILITY,
+    // P0 per-Bot secret grants + the user-only sealed-secret surface
+    // (bot.grant_secret / bot.revoke_secret / bot.list_secret_grants,
+    // secrets.set/delete/list). No Bot actor exists on any of them.
+    crate::bot_secrets::BOT_SECRETS_CAPABILITY,
     // R5-S: Mentu (recipes, content-bound approval, execution through the
     // pinned mentu-recipes runtime, run evidence, retry).
     drogon_protocol::mentu::MENTU_CAPABILITY,
@@ -433,6 +439,13 @@ impl Engine {
             "bot.monitor_create" => self.bot_monitor_create(request),
             "bot.monitor_approve" => self.bot_monitor_approve(request),
             "bot.monitor_list" => self.bot_monitor_list(&request.params),
+            // P0 per-Bot secret grants + the user-only sealed-secret store.
+            "bot.grant_secret" => self.bot_grant_secret(request),
+            "bot.revoke_secret" => self.bot_revoke_secret(request),
+            "bot.list_secret_grants" => self.bot_list_secret_grants(&request.params),
+            "secrets.set" => self.mutating(request, Self::do_secrets_set),
+            "secrets.delete" => self.mutating(request, Self::do_secrets_delete),
+            "secrets.list" => self.secrets_list(&request.params),
             "automation.create" => self.automation_create(request),
             "automation.list" => self.automation_list(&request.params),
             "automation.update" => self.automation_update(request),

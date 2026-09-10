@@ -121,7 +121,7 @@ fn stale_update(message: impl Into<String>) -> RpcError {
     RpcError::new("stale_update", message.into())
 }
 
-fn bots_storage_error(e: bots_storage::StorageError) -> RpcError {
+pub(crate) fn bots_storage_error(e: bots_storage::StorageError) -> RpcError {
     match e {
         bots_storage::StorageError::NotFound(what) => not_found(format!("{what} not found")),
         bots_storage::StorageError::StaleUpdate => stale_update("bot changed since it was read"),
@@ -304,6 +304,8 @@ impl BotHomeProfile {
 pub enum SelfStorageError {
     Sqlite(rusqlite::Error),
     Json(serde_json::Error),
+    /// A caller-supplied audit actor value failed its namespace guard.
+    Invalid(String),
     /// `handle` is already pinned by a different Bot.
     HandleCollision {
         handle: String,
@@ -332,6 +334,7 @@ impl std::fmt::Display for SelfStorageError {
         match self {
             Self::Sqlite(e) => write!(f, "sqlite error: {e}"),
             Self::Json(e) => write!(f, "json error: {e}"),
+            Self::Invalid(message) => write!(f, "{message}"),
             Self::HandleCollision { handle, owner } => write!(
                 f,
                 "bot handle {handle:?} is already pinned by bot {owner:?}"
@@ -568,22 +571,62 @@ pub(crate) fn ensure_home_for_bot(
     Ok(pinned)
 }
 
-/// P3: records the Bot-origin actor atomically with the mutation it
-/// describes. The stored actor is the acting Bot's RAW id (no `bot:`
+/// Who performed an audited mutation. P3 knew only Bot actors; P0 secret
+/// grants are minted by a USER through the UI/host surface, so the actor
+/// gained a user arm (`crate::bot_secrets`). Storage stays single-column:
+/// a Bot actor is stored as the raw id (see `record_audit_in_tx`), a user
+/// actor as `user:<name>` — the `user:` prefix is reserved and rejected
+/// for Bot ids, so the two can never collide and every row still names
+/// its actor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuditActor {
+    /// A Bot acting on its own scope (`bot.self_*`); stored as the raw id.
+    Bot(String),
+    /// A named user acting through the UI/host surface (secret grants);
+    /// stored as `user:<name>`.
+    User(String),
+}
+
+impl AuditActor {
+    /// The value stored in `bot_audit.actor_bot_id`. The column keeps its
+    /// name for row compatibility; user actors carry their kind in the
+    /// value via the reserved `user:` prefix.
+    pub fn stored_value(&self) -> Result<String, String> {
+        match self {
+            Self::Bot(bot_id) => {
+                if bot_id.starts_with(USER_ACTOR_PREFIX) {
+                    return Err("bot id may not use the reserved user: actor prefix".to_string());
+                }
+                Ok(bot_id.clone())
+            }
+            Self::User(name) => Ok(format!("{USER_ACTOR_PREFIX}{name}")),
+        }
+    }
+}
+
+/// Reserved audit-actor prefix marking a USER identity.
+pub const USER_ACTOR_PREFIX: &str = "user:";
+
+/// P3: records the acting actor atomically with the mutation it
+/// describes. A Bot actor is stored as the acting Bot's RAW id (no `bot:`
 /// prefix — the `bot:` namespacing lives in the API field and column
 /// names, `actorBotId`/`actor_bot_id`, not the value, so rows join
-/// directly against `bot_id`/`target_bot_id`). `INSERT OR IGNORE` keeps a
+/// directly against `bot_id`/`target_bot_id`); a user actor is stored as
+/// `user:<name>` (see [`AuditActor`]). `INSERT OR IGNORE` keeps a
 /// ledger replay (same request_id, same params) from double-logging if
 /// work ever re-ran.
 pub fn record_audit_in_tx(
     tx: &Transaction,
     request_id: &str,
     method: &str,
-    actor_bot_id: &str,
+    actor: AuditActor,
     target_bot_id: &str,
     at: f64,
     detail: &Value,
 ) -> SelfResult<()> {
+    let actor_bot_id = actor
+        .stored_value()
+        .map_err(SelfStorageError::Invalid)?;
     let detail_json = serde_json::to_string(detail)?;
     tx.execute(
         "INSERT OR IGNORE INTO bot_audit
@@ -1301,7 +1344,7 @@ fn audit(
         tx,
         request_id,
         method,
-        &scope.actor_bot_id,
+        AuditActor::Bot(scope.actor_bot_id.clone()),
         &scope.bot_id,
         at,
         detail,
