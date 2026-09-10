@@ -294,6 +294,12 @@ pub(crate) struct LaunchOptions {
     pub(crate) cleanup_paths: Vec<std::path::PathBuf>,
     pub(crate) headless: bool,
     pub(crate) explicit_wait_clear: bool,
+    /// Land the session on the hook-ENDED (idle) boundary at admission
+    /// instead of the activity clock's fallback (claude: the reference
+    /// lands SessionStart as a done row, so keystroke echo at the fresh
+    /// prompt can never misreport as working). Only meaningful together
+    /// with `explicit_wait_clear`.
+    pub(crate) initial_hook_turn_ended: bool,
 }
 
 /// Variant of [`launch_reserved`] that registers cleanup ownership and
@@ -357,6 +363,15 @@ pub(crate) fn launch_reserved_with_cleanup(
             }
             if options.explicit_wait_clear {
                 handle.set_explicit_wait_clear();
+            }
+            if options.initial_hook_turn_ended {
+                // The launch itself is the session boundary: open the
+                // lifecycle at ENDED so the row reads idle on the harness's
+                // own authority until the first resumption hook — the
+                // activity clock's reading of keystroke echo at the fresh
+                // prompt is the sidebar-status bug. Same durable no-op as a
+                // turn-end hook (the reserved row already exists).
+                handle.end_hook_event();
             }
             for path in options.cleanup_paths {
                 handle.add_hook_cleanup_path(path);

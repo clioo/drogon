@@ -23,22 +23,21 @@
 //! The fork's exact wait/clear split (issue #360, 100% parity with the
 //! reference's agent-hook listeners): a session is `needs_input` only
 //! while the harness is genuinely waiting on the user — claude
-//! `Notification` (this repo's install surface for the fork's
-//! `PermissionRequest`), opencode `permission.asked`/`question.asked`, pi
-//! `tool_approval_requested`, codex `PermissionRequest`. Turn-end and
-//! idle signals are CLEARS, never waits: claude `Stop`, opencode
-//! `session.idle`, pi `agent_end`/`agent_settled` and codex `Stop` all
-//! mean the turn concluded (the reference maps every one of them to
-//! `done`), so a finished Pi turn reads `idle`, never `needs_input`.
+//! `Notification`/`PermissionRequest`, opencode
+//! `permission.asked`/`question.asked`, pi `tool_approval_requested`, codex
+//! `PermissionRequest`. Turn-end and idle signals are CLEARS, never waits:
+//! claude `Stop`, opencode `session.idle`, pi `agent_end`/`agent_settled`
+//! and codex `Stop` all mean the turn concluded (the reference maps every
+//! one of them to `done`), so a finished Pi turn reads `idle`, never
+//! `needs_input`.
 //!
-//! For claude, later PTY output alone clears the signal back to
-//! activity-based derivation (`session.rs`'s reader thread clears it
-//! unconditionally on every chunk) — a plain CLI that only redraws in
-//! response to real input. OpenCode, Pi, and interactive Codex can repaint
-//! while genuinely still waiting, so generic PTY output would clear a real
-//! wait signal within a frame or two and make "the agent is waiting for
-//! you" a lie. Their sessions opt out of the generic clear
-//! (`SessionHandle::set_explicit_wait_clear`) and are cleared only by their
+//! Hook-authoritative sessions (OpenCode, Pi, interactive Codex, and —
+//! since the sidebar-status bug — interactive Claude) clear waits only
+//! through their own hook events: OpenCode/Pi/Codex can repaint while
+//! genuinely still waiting, and claude's composer echo is output too —
+//! generic PTY output would clear a real wait and spin idle rows into
+//! `working` when the user merely types. Their sessions opt out of the
+//! generic clear (`SessionHandle::set_explicit_wait_clear`) and are cleared only by their
 //! own hook's events — the resumption events [`opencode_events::NEW_TURN`]/
 //! [`opencode_events::TOOL_START`]/[`opencode_events::PERMISSION_REPLIED`]/
 //! [`opencode_events::QUESTION_REPLIED`] and [`pi_events::AGENT_START`]/
@@ -47,13 +46,16 @@
 //! [`pi_events::AGENT_END`] — via [`classify_hook_event`]. Exit takes
 //! precedence over either mechanism.
 //!
-//! Those same explicit-clear sessions also derive `Working` from their
+//! Those explicit-clear sessions also derive `Working` from their
 //! hook lifecycle ([`HookTurn`]), not from the raw activity clock: a turn
 //! reported by a resumption hook stays `Working` through silent thinking
 //! past the activity window, and the user's own echo at an idle prompt
 //! never manufactures a spinner the agent's hooks never reported (#358
 //! fork parity — Orca's sidebar status is hook-driven, never
-//! output-driven). The turn-end clears conclude that lifecycle: they
+//! output-driven). Claude launches additionally land on the ENDED
+//! boundary (the reference maps `SessionStart` to a done row), so a fresh
+//! session is idle until its first `UserPromptSubmit` — keystroke echo at
+//! the composer is PTY output, but it fires no hook. The turn-end clears conclude that lifecycle: they
 //! close the turn and read `idle` on the harness's own authority, so the
 //! user's echo at the idle prompt after a finished turn does not spin the
 //! row back to `working` either.
@@ -61,9 +63,9 @@
 use std::time::Duration;
 
 /// Claude Code `--settings` hook event names (`hooks.rs`'s
-/// `settings_json`/`hook_command`). `Notification` stays the wait signal
-/// (this install's surface for the fork's `PermissionRequest`); `Stop` is
-/// a turn-end clear — the fork maps Claude's `Stop` to `done`.
+/// `settings_json`/`hook_command`). `Notification` and `PermissionRequest`
+/// are the wait signals; `Stop` is a turn-end clear — the fork maps
+/// Claude's `Stop` to `done`.
 pub(crate) mod claude_events {
     pub(crate) const STOP: &str = "Stop";
     pub(crate) const NOTIFICATION: &str = "Notification";
@@ -219,9 +221,10 @@ impl AgentState {
 }
 
 /// Hook-authoritative turn fact for sessions that opted into explicit
-/// wait clearing (OpenCode/Pi/interactive Codex). `Untracked` keeps the
-/// purely activity-based derivation (Claude, plain shells): without a
-/// hook lifecycle there is no other truth to report.
+/// wait clearing (OpenCode/Pi/interactive Codex, interactive Claude).
+/// `Untracked` keeps the purely activity-based derivation (plain shells,
+/// hook-less launches): without a hook lifecycle there is no other truth
+/// to report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HookTurn {
     /// No hook lifecycle governs this session; the activity clock decides.

@@ -42,13 +42,21 @@ enum PendingHookInstall {
 /// The install once admission minted real identity: every artifact to
 /// remove on exit (claude/opencode: one; pi: its `--extension` file and its
 /// sibling load marker), the environment overlay to apply on top of the
-/// base session environment, and whether this harness clears `needs_input`
+/// base session environment, whether this harness clears `needs_input`
 /// only through its own hook events (see
-/// `SessionHandle::set_explicit_wait_clear`).
+/// `SessionHandle::set_explicit_wait_clear`), and whether admission lands
+/// the session on the hook-ENDED (idle) boundary instead of the activity
+/// clock's fallback.
 struct ReadyHookInstall {
     cleanup_paths: Vec<PathBuf>,
     extra_env: Vec<(String, String)>,
     explicit_wait_clear: bool,
+    /// Land the session on the hook-ENDED (idle) boundary at admission:
+    /// the harness's own launch is a session boundary, and the clock's
+    /// first reading of keystroke echo would misreport it as working
+    /// (claude — the reference lands SessionStart as a done row). Ignored
+    /// for `explicit_wait_clear: false` installs.
+    initial_hook_turn_ended: bool,
 }
 
 impl Engine {
@@ -318,6 +326,9 @@ impl Engine {
                     explicit_wait_clear: ready
                         .as_ref()
                         .is_some_and(|install| install.explicit_wait_clear),
+                    initial_hook_turn_ended: ready
+                        .as_ref()
+                        .is_some_and(|install| install.initial_hook_turn_ended),
                 },
             ) {
                 Ok(launched) => launched,
@@ -362,7 +373,22 @@ impl Engine {
                 Ok(Some(ReadyHookInstall {
                     cleanup_paths: vec![path],
                     extra_env: Vec::new(),
-                    explicit_wait_clear: false,
+                    // Claude's status is hook-driven like OpenCode/Pi/Codex
+                    // (fork parity): the settings file installs the turn
+                    // lifecycle, and generic PTY output must never clear a
+                    // wait or spin the row — the user's keystroke echo at the
+                    // composer is output too, and it flipped idle sessions to
+                    // `working` under the activity clock (sidebar-status
+                    // bug). With hooks disabled at launch this arm is not
+                    // reached and the session keeps the activity policy.
+                    explicit_wait_clear: true,
+                    // Launch lands on the idle session boundary: the
+                    // reference maps SessionStart to a done row ("'working'
+                    // would show a phantom spinner on an idle TUI"), so a
+                    // fresh session is idle until its first UserPromptSubmit
+                    // instead of falling back to the activity clock — whose
+                    // reading of keystroke echo is exactly this bug.
+                    initial_hook_turn_ended: true,
                 }))
             }
             PendingHookInstall::Opencode {
@@ -393,6 +419,9 @@ impl Engine {
                     cleanup_paths: vec![overlay],
                     extra_env,
                     explicit_wait_clear: true,
+                    // OpenCode/Pi/Codex keep the pre-existing policy: before
+                    // the first hook event the activity clock decides.
+                    initial_hook_turn_ended: false,
                 }))
             }
             PendingHookInstall::Pi { path } => {
@@ -410,6 +439,9 @@ impl Engine {
                     cleanup_paths: vec![path, marker],
                     extra_env,
                     explicit_wait_clear: true,
+                    // OpenCode/Pi/Codex keep the pre-existing policy: before
+                    // the first hook event the activity clock decides.
+                    initial_hook_turn_ended: false,
                 }))
             }
             PendingHookInstall::Codex {
@@ -451,6 +483,9 @@ impl Engine {
                     cleanup_paths: vec![home],
                     extra_env,
                     explicit_wait_clear: install_hooks,
+                    // OpenCode/Pi/Codex keep the pre-existing policy: before
+                    // the first hook event the activity clock decides.
+                    initial_hook_turn_ended: false,
                 }))
             }
         }

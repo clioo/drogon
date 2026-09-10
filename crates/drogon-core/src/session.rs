@@ -85,6 +85,15 @@ pub(crate) struct SessionHandle {
     /// later clear has removed yet. `None` for sessions that never got
     /// one — sessions without a managed hook keep purely activity-based states.
     needs_input_at: Mutex<Option<String>>,
+    /// Wall-clock stamp of the most recent hook lifecycle transition (turn
+    /// start via a resumption hook, turn end via a turn-end hook, or the
+    /// admission boundary). Pairs an `Instant` for ordering against
+    /// `last_activity` with the renderable RFC 3339 string. Backs the
+    /// `agentStateAt` of hook-derived `working`/`idle` states: a turn
+    /// reported by hooks with no PTY output yet (silent harnesses, the
+    /// fresh-session idle boundary) still owes the card a freshness stamp,
+    /// which the activity clock alone cannot provide.
+    hook_transition_at: Mutex<Option<(Instant, String)>>,
     agent_prompt_preview: Mutex<Option<String>>,
     cache_idle_at: Mutex<Option<String>>,
     /// Per-session harness hook install artifacts `harness.start` wrote for
@@ -95,12 +104,15 @@ pub(crate) struct SessionHandle {
     /// directory tree). Empty for sessions launched without hook wiring.
     hook_cleanup_paths: Mutex<Vec<std::path::PathBuf>>,
     suspended_hook_files: Mutex<Vec<(std::path::PathBuf, Vec<u8>)>>,
-    /// OpenCode/Pi/Codex opt out of the reader thread's generic
+    /// OpenCode/Pi/Codex/Claude opt out of the reader thread's generic
     /// activity-based clear (set by `harness.rs` via
     /// [`Self::set_explicit_wait_clear`]): their hook lifecycle is authoritative
     /// once a wait signal is reported, so any unrelated PTY byte clearing
-    /// `needs_input_at` would make "waiting for you" a lie. Claude and plain
-    /// sessions keep the default generic-activity clear.
+    /// `needs_input_at` would make "waiting for you" a lie — and for claude
+    /// the clock's reading of the composer's keystroke echo flipped idle
+    /// sessions to `working` (sidebar-status bug), which is why claude
+    /// joined them. Plain sessions and hook-less launches keep the default
+    /// generic-activity clear.
     explicit_wait_clear: AtomicBool,
     /// In-memory turn fact for `explicit_wait_clear` sessions, one of
     /// `TURN_INACTIVE`/`TURN_ACTIVE`/`TURN_ENDED`: opened by resumption
@@ -162,6 +174,7 @@ impl SessionHandle {
             reader_done: AtomicBool::new(false),
             last_activity: Mutex::new(None),
             needs_input_at: Mutex::new(None),
+            hook_transition_at: Mutex::new(None),
             agent_prompt_preview: Mutex::new(None),
             cache_idle_at: Mutex::new(None),
             hook_cleanup_paths: Mutex::new(Vec::new()),
@@ -187,6 +200,13 @@ impl SessionHandle {
             }
             saved.clear();
         } else if saved.is_empty() {
+            // The hook lifecycle loses its authority with the files: drop
+            // the turn fact so the session falls back to the activity clock
+            // (the documented `HookTurn::Inactive` policy) instead of
+            // stranding its last hook-reported state forever — a turn
+            // disabled mid-run would otherwise read `working` with no hook
+            // ever able to conclude it.
+            self.turn_fact.store(TURN_INACTIVE, Ordering::Release);
             let paths = self.hook_cleanup_paths.lock().unwrap().clone();
             for root in paths {
                 let path = match self.harness_id.as_deref() {
@@ -270,6 +290,7 @@ impl SessionHandle {
         // The wait hook hands the session back to the user: any turn the
         // resumption hook opened is parked, not running.
         self.turn_fact.store(TURN_INACTIVE, Ordering::Release);
+        *self.hook_transition_at.lock().unwrap() = None;
         let stamp = crate::now_rfc3339();
         *self.needs_input_at.lock().unwrap() = Some(stamp.clone());
         persist_wait_signal(self, Some(&stamp));
@@ -287,6 +308,9 @@ impl SessionHandle {
         self.turn_fact.store(TURN_ACTIVE, Ordering::Release);
         *self.needs_input_at.lock().unwrap() = None;
         persist_wait_signal(self, None);
+        // The turn start is the freshness origin for a hook-reported turn
+        // whose harness has not emitted output yet.
+        *self.hook_transition_at.lock().unwrap() = Some((Instant::now(), crate::now_rfc3339()));
     }
 
     /// Turn-end signal (`agent_state`'s `HookSignal::TurnEnd` names:
@@ -299,11 +323,17 @@ impl SessionHandle {
         self.turn_fact.store(TURN_ENDED, Ordering::Release);
         *self.needs_input_at.lock().unwrap() = None;
         persist_wait_signal(self, None);
+        // The turn-end moment is the freshness origin for the hook-declared
+        // idle boundary — including a session with no PTY output at all yet
+        // (fresh claude launch), which the client contract requires to
+        // carry a non-null `agentStateAt`.
+        *self.hook_transition_at.lock().unwrap() = Some((Instant::now(), crate::now_rfc3339()));
     }
 
     /// Opts this session out of the reader thread's generic activity-based
     /// clear. Admission sets it before starting the reader thread for
-    /// OpenCode/Pi/Codex sessions — see the field doc for why.
+    /// OpenCode/Pi/Codex and interactive Claude sessions — see the field doc
+    /// for why.
     pub(crate) fn set_explicit_wait_clear(&self) {
         self.explicit_wait_clear.store(true, Ordering::Release);
     }
@@ -1169,18 +1199,36 @@ pub(crate) fn snapshot(handle: &SessionHandle) -> Value {
 /// An uncleared hook signal reports `needs_input` with its own stamp; the
 /// reader thread clears it on the next output chunk.
 fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, Option<String>) {
-    let (activity, wall_clock_at) = match &*handle.last_activity.lock().unwrap() {
+    let last_activity_instant = &*handle.last_activity.lock().unwrap();
+    let (activity, wall_clock_at) = match last_activity_instant {
         None => (Activity::NeverObserved, None),
         Some((instant, at)) => (Activity::LastActiveAgo(instant.elapsed()), Some(at.clone())),
     };
+    // Hook-derived `working`/`idle` without PTY output yet (silent harness
+    // turn, fresh-session idle boundary) dates from the hook transition;
+    // otherwise the later of the two clocks is the state's freshness
+    // origin — flowing output refreshes it exactly as before.
+    let hook_transition_at = handle.hook_transition_at.lock().unwrap().clone();
+    let state_at = match (last_activity_instant, &hook_transition_at) {
+        (Some((activity_instant, _at)), Some((hook_instant, hook_at))) => {
+            if hook_instant > activity_instant {
+                Some(hook_at.clone())
+            } else {
+                wall_clock_at
+            }
+        }
+        (None, Some((_, hook_at))) => Some(hook_at.clone()),
+        _ => wall_clock_at,
+    };
     let needs_input_at = handle.needs_input_at.lock().unwrap().clone();
     let hook_turn = if !handle.explicit_wait_clear.load(Ordering::Acquire) {
-        // #360 fork parity even for hook-untracked sessions (Claude, plain
-        // shells): a turn-end hook reads as `idle` — the reference maps
-        // every Stop to done. Turn-start facts stay ignored for them
-        // (their `Working` comes from the activity clock; #358 keeps them
-        // untracked, and Claude repaints only on real input so the idle
-        // fact cannot strand a live turn the way a TUI spinner would).
+        // Hook-less sessions (plain terminals, headless and hook-disabled
+        // launches) keep activity-based `Working`, but a turn-end hook still
+        // reads as `idle` — the reference maps every Stop to done (#360).
+        // Hook-authoritative sessions (OpenCode/Pi/Codex, interactive
+        // Claude) use their full turn fact: `Working` is hook-driven, never
+        // output-driven (#358), so the composer's keystroke echo — which is
+        // PTY output too — cannot spin an idle row back to working.
         match handle.hook_turn_fact() {
             agent_state::HookTurn::Ended => agent_state::HookTurn::Ended,
             _ => agent_state::HookTurn::Untracked,
@@ -1195,7 +1243,7 @@ fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, O
         hook_turn,
     );
     let at = match state {
-        AgentState::Working | AgentState::Idle => wall_clock_at,
+        AgentState::Working | AgentState::Idle => state_at,
         AgentState::NeedsInput => needs_input_at,
         AgentState::Exited | AgentState::Unknown => None,
     };
