@@ -12,9 +12,10 @@
 // "captured/unavailable" per stream; this view additionally renders the
 // loaded content in scrollable blocks (the only way to show evidence
 // CONTENT the daemon went to read), spelling truncation with the full
-// path. Metrics the daemon run record does not carry (token counts, cost,
-// models, invocation counts) render the reference's honest "unavailable"
-// states; Drogon estimates nothing.
+// path. Metrics the daemon run record does not carry (cost, invocation
+// counts) render the reference's honest "unavailable" states; observed
+// token usage and models render through the dedicated MentuUsageMetrics
+// component when the record carries them. Drogon estimates nothing.
 
 import { Activity, ArrowRight, Clock3, FileJson, Gauge } from "lucide-react";
 import type {
@@ -31,6 +32,7 @@ import {
 } from "./recipe-graph";
 import { RecipeVerification } from "./RecipeVerification";
 import { statusLabel } from "./run-status";
+import { UsageStepMetrics, UsageTokenCards } from "./MentuUsageMetrics";
 
 function MetricValue({ value, exact }: { value: string; exact: boolean }): React.JSX.Element {
   return (
@@ -302,8 +304,7 @@ export function MetricsView({ run }: { run: MentuRun | null }): React.JSX.Elemen
       </p>
       <div className="grid gap-2 @md/mentu-metrics:grid-cols-2 @2xl/mentu-metrics:grid-cols-4">
         <MetricValue value={durationValue} exact={knownDurations.length > 0 && durationUnknown === 0} />
-        <MetricValue value="Input tokens: unavailable" exact={false} />
-        <MetricValue value="Output tokens: unavailable" exact={false} />
+        <UsageTokenCards steps={run.steps} />
         <MetricValue value="Cost: unavailable" exact={false} />
       </div>
       <p className="text-xs text-muted-foreground">
@@ -347,9 +348,7 @@ export function MetricsView({ run }: { run: MentuRun | null }): React.JSX.Elemen
                         : "unavailable"}
                     </span>
                     <span>Harness: {step.backend}</span>
-                    <span>Model: unavailable</span>
-                    <span>Input tokens: unavailable</span>
-                    <span>Output tokens: unavailable</span>
+                    <UsageStepMetrics step={step} />
                   </div>
                 ))}
               </div>
