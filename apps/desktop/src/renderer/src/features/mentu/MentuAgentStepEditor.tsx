@@ -115,7 +115,11 @@ export function MentuAgentStepEditor({
               }
               disabled={disabled}
             >
-              <SelectTrigger size="sm" className="h-8 w-auto shrink-0 text-[11px]">
+              <SelectTrigger
+                size="sm"
+                className="h-8 w-auto shrink-0 text-[11px]"
+                aria-label="Model quick pick"
+              >
                 <SelectValue placeholder="Quick pick" />
               </SelectTrigger>
               <SelectContent>
