@@ -34,7 +34,7 @@ export function getRemoveProjectDialogCopy(
       targetClassName: "break-all font-medium text-foreground",
       descriptionBeforeName: "This permanently deletes ",
       descriptionAfterName:
-        " and its files. This cannot be undone. Other chats and projects are never affected.",
+        ", including its files, and stops its running sessions. This cannot be undone. Other chats and projects are never affected.",
       cancelLabel: "Cancel",
       confirmLabel: "Delete",
     };

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { probeWorkspaceProperties } from "./probe-workspace-properties.mjs";
+import { probeChatLifecycle } from "./probe-chat-lifecycle.mjs";
+import { seedPrivateClaudeKeyboard, probeClaudeTerminalInput } from "./probe-claude-terminal-input.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
@@ -278,9 +280,10 @@ try {
   // Every operation after the server starts is covered by final cleanup.
   privateEnvironment = await installPrivateAcceptanceEnvironment(fixture);
   assert.equal(privateEnvironment.piDir, piDir);
-  modelFixture = await startAndSeedModelFixture((baseUrl, instanceId) =>
-    seedLocalPiProvider(piDir, baseUrl, instanceId),
-  );
+  modelFixture = await startAndSeedModelFixture(async (baseUrl, instanceId) => {
+    await seedLocalPiProvider(piDir, baseUrl, instanceId);
+    report.claudeKeyboardIsolation = await seedPrivateClaudeKeyboard({ home: privateEnvironment.home, fixtureBin, workspace, baseUrl });
+  });
   if (process.env.DROGON_VERIFY_OS_FOCUS === "1") {
     foregroundObservation = await startForegroundObservation(output);
   }
@@ -458,6 +461,7 @@ try {
     return response.result.workspaces[0];
   });
   report.checks.push("isolated-renderer-and-real-folder-registration");
+  report.checks.push(...await probeClaudeTerminalInput({ page, workspaceId: registered.id, output }));
   await page
     .getByRole("button", { name: "New tab", exact: true })
     .last()
@@ -805,6 +809,7 @@ try {
   }
   // Later probes address the folder workspace, so select its card again.
   await page.getByRole("button", { name: "Select folder" }).click();
+  report.checks.push(...await probeChatLifecycle({ page, dataDir, output }));
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
   if (withFiles) {
     report.checks.push(

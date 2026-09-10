@@ -16,6 +16,7 @@
 
 import assert from "node:assert/strict";
 import { probePiShiftEnter } from "./probe-pi-terminal-input.mjs";
+import { probePiLayout } from "./probe-pi-layout.mjs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -521,7 +522,7 @@ async function waitForTabAgentState(page, sessionId, label, timeoutMs) {
       const tab = document.querySelector(
         `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${CSS.escape(id)}"]`,
       );
-      return tab?.querySelector(`[aria-label="${wanted}"]`) !== null;
+      return Boolean(tab?.querySelector(`[aria-label="${wanted}"]`));
     },
     { id: sessionId, wanted: label },
     { timeout: timeoutMs },
@@ -534,7 +535,7 @@ async function waitForCardRowAgentState(page, sessionId, label, timeoutMs) {
       const row = document.querySelector(
         `[data-worktree-agent-row="${CSS.escape(id)}"]`,
       );
-      return row?.querySelector(`[aria-label="${wanted}"]`) !== null;
+      return Boolean(row?.querySelector(`[aria-label="${wanted}"]`));
     },
     { id: sessionId, wanted: label },
     { timeout: timeoutMs },
@@ -551,7 +552,7 @@ async function waitForTabAgentStateOutcome(page, sessionId, timeoutMs) {
       // bounded wait until the post-turn state is settled (Idle or expose a
       // real waiting/exit outcome to the assertion below).
       for (const label of ["Idle", "Waiting for input", "Exited"]) {
-        if (tab?.querySelector(`[aria-label="${label}"]`) !== null) return label;
+        if (tab?.querySelector(`[aria-label="${label}"]`)) return label;
       }
       return null;
     },
@@ -705,6 +706,9 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, 
     }
   }, { id: workspaceId, beforeSessionIds });
   await waitForSessionStripTab(page, launched.id, "live");
+  await page.locator(`[role="tab"][data-tab-id="${launched.id}"]`).click();
+  const summaryToggle = page.locator('[data-worktree-card-id][data-active="true"]').getByRole("button", { name: /^\d+ agents$/ });
+  if (await summaryToggle.count() && await summaryToggle.getAttribute("aria-expanded") === "false") await summaryToggle.click();
   // The Pi banner ("pi vX.Y.Z" + clear/exit hint) proves the TUI booted.
   await page.waitForFunction(renderedPiIsReady, launched.id, { timeout: 30000 });
   try {
@@ -801,6 +805,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, 
           ? "agent-state-idle.png"
           : "agent-state-waiting.png",
       );
+      await probePiLayout({ page, session: launched, output, getFixtureReceipt });
       // Close the session through its own tab control.
       await page
         .locator(
@@ -837,6 +842,8 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, 
   }
   return [
     "pi-shift-enter-inserts-a-real-editor-newline-without-submitting",
+    "pi-real-tui-reconnect-narrow-layout-retains-reply-and-unclipped-grid",
+    "pi-shift-enter-still-works-after-narrow-layout-reconnect",
     "pi-local-session-shows-working-then-idle-in-tab-badge",
     "pi-local-session-shows-working-then-idle-in-worktree-card-row",
   ];

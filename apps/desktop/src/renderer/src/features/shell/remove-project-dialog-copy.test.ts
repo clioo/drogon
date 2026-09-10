@@ -25,6 +25,7 @@ describe("getRemoveProjectDialogCopy", () => {
     expect(copy.confirmLabel).toBe("Delete");
     expect(copy.descriptionAfterName).not.toContain("still on your disk");
     expect(copy.descriptionAfterName).toMatch(/permanently|cannot be undone/i);
+    expect(copy.descriptionAfterName).toContain("stops its running sessions");
   });
 
   it("names the exact chat, never a generic placeholder", () => {

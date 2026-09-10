@@ -44,6 +44,7 @@ mod harness;
 mod hooks;
 mod project;
 mod project_card_revision;
+mod quick_session_delete;
 // R16-BC (additive): `ports.kill` — workspace-owned process stop.
 mod ports;
 mod ring;
@@ -168,6 +169,8 @@ pub struct Engine {
     service_instance_id: String,
     sessions: Mutex<HashMap<String, Arc<SessionHandle>>>,
     agent_settings_lock: Mutex<()>,
+    /// Fence PTY admission while deleting a Chat and settling its members.
+    workspace_lifecycle_gate: RwLock<()>,
     ledger: RequestLedger,
     /// In-memory desktop command relay (browser.relay.v1). Never persisted;
     /// a daemon restart drops every queued command.
@@ -262,6 +265,7 @@ impl Engine {
             service_instance_id: uuid::Uuid::new_v4().to_string(),
             sessions: Mutex::new(HashMap::new()),
             agent_settings_lock: Mutex::new(()),
+            workspace_lifecycle_gate: RwLock::new(()),
             ledger: RequestLedger::default(),
             desktop_relay: Mutex::new(RelayState::default()),
             worker_cli: None,
@@ -654,6 +658,7 @@ impl Engine {
     }
 
     fn do_session_start(&self, params: &Value) -> Result<Value, RpcError> {
+        let _workspace_admission = self.workspace_lifecycle_gate.read().unwrap();
         let workspace_id = require_str(params, "workspaceId")?.to_string();
         // Additive (R12-E restart reuse): `command` is optional. Absent, the
         // daemon spawns its own default interactive shell — the same spawn a

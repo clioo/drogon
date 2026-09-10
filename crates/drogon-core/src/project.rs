@@ -925,6 +925,7 @@ impl Engine {
         &self,
         params: &Value,
     ) -> Result<Value, drogon_protocol::RpcError> {
+        let _workspace_admission = self.workspace_lifecycle_gate.write().unwrap();
         let id = require_str(params, "id")?;
         let scratch: Option<String> = {
             let conn = self.db.lock().unwrap();
@@ -936,6 +937,10 @@ impl Engine {
             .optional()
             .map_err(error::from_sqlite)?
         };
+        if let Some(path) = &scratch {
+            self.validate_quick_session_scratch(id, path)?;
+            self.settle_quick_session_members(path)?;
+        }
         let conn = self.db.lock().unwrap();
         let removed = remove(&conn, id)?;
         drop(conn);
@@ -949,15 +954,22 @@ impl Engine {
         Ok(removed)
     }
 
-    /// Deletes a Quick Session scratch folder after its project row is
-    /// gone. Any doubt about ownership (moved directory, foreign marker,
-    /// path outside the quick-sessions root) skips the delete rather than
-    /// risking user files.
     fn cleanup_quick_session_scratch(
         &self,
         project_id: &str,
         path: &str,
     ) -> Result<(), drogon_protocol::RpcError> {
+        let candidate = self.validate_quick_session_scratch(project_id, path)?;
+        std::fs::remove_dir_all(&candidate)
+            .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}")))
+    }
+
+    /// Check before any destructive action and again immediately before unlink.
+    fn validate_quick_session_scratch(
+        &self,
+        project_id: &str,
+        path: &str,
+    ) -> Result<std::path::PathBuf, drogon_protocol::RpcError> {
         let root = self.data_dir.join(QUICK_SESSION_ROOT);
         let canonical_root = std::fs::canonicalize(&root).unwrap_or(root);
         let candidate = std::fs::canonicalize(path)
@@ -981,8 +993,7 @@ impl Engine {
                 "quick session scratch marker ownership mismatch; not deleting",
             ));
         }
-        std::fs::remove_dir_all(&candidate)
-            .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}")))
+        Ok(candidate)
     }
 
     /// Quick Session (`project.quickSessionCreate`): the fork's composer

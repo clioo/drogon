@@ -18,7 +18,7 @@ export async function installPrivateAcceptanceEnvironment(fixture, env = process
     GIT_CONFIG_GLOBAL: path.join(home, ".gitconfig"),
     BASH_ENV: "", ENV: "",
   };
-  const keys = new Set([...Object.keys(replacements), ...Object.keys(env).filter((key) => /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL|AUTH_SOCK/i.test(key))]);
+  const keys = new Set([...Object.keys(replacements), ...Object.keys(env).filter((key) => /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL|AUTH_SOCK|^(ANTHROPIC_|CLAUDE_CODE_|AWS_|GOOGLE_|VERTEX_|AZURE_|OPENAI_)/i.test(key))]);
   const previous = new Map([...keys].map((key) => [key, env[key]]));
   for (const key of keys) delete env[key];
   Object.assign(env, replacements);
