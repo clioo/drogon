@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerSaveBlocker, session, shell } from "electron";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -27,6 +27,7 @@ import {
   zoomFocusedWindow,
 } from "./menu/register-app-menu";
 import { setUnreadDockBadgeCount } from "./dock/unread-badge";
+import { buildEditableContextMenuTemplate } from "./menu/editable-context-menu";
 import { suppressForegroundSideEffect } from "./background-test-mode";
 import { isAppWindowClipboardPermissionAllowed } from "./browser/browser-permission-policy";
 import {
@@ -489,6 +490,20 @@ function createWindow() {
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );
+  // Editable context menu (source editable-context-menu.ts): right-clicks
+  // on dialog inputs and settings fields get Cut/Copy/Paste/Select All.
+  // Paste routes over the shared app-menu paste channel so the renderer's
+  // single ownership path handles it; anything non-editable (terminal
+  // panes, Monaco, tab strips) keeps its own menu or none, as before.
+  window.webContents.on("context-menu", (_event, params) => {
+    if (!window || window.isDestroyed()) return;
+    const template = buildEditableContextMenuTemplate(
+      params,
+      window.webContents,
+    );
+    if (template.length === 0) return;
+    Menu.buildFromTemplate(template).popup({ window });
+  });
   // Restore visible launches once; background windows stay hidden across renderer reloads.
   window.once("ready-to-show", () => {
     if (window) {
