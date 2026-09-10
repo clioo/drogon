@@ -94,6 +94,32 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
     // Source `environment` verbs read a local pairing store; the native
     // runtime has none, so list is empty and show/rm answer typed not_found
     // without contacting a daemon.
+    // Source `project setups` reads a local setup store; the native runtime
+    // records none, so the honest answer is an empty list without a daemon.
+    if let Command::Project {
+        action: ProjectAction::Setups { project, host },
+    } = &cli.command
+    {
+        if let Some(project) = project {
+            require_nonempty(project)?;
+        }
+        if let Some(host) = host {
+            require_nonempty(host)?;
+        }
+        let setups = json!({ "setups": [] });
+        let call = CallOk {
+            request_id,
+            raw: json!({"ok": true, "result": setups}),
+            result: setups.clone(),
+        };
+        return emit(
+            call,
+            json,
+            || "No project host setups found.".to_string(),
+            0,
+            None,
+        );
+    }
     if let Command::Environment { action } = &cli.command {
         let local_error = |selector: &str| CliError::Local {
             error: drogon_protocol::RpcError::new(
@@ -706,6 +732,7 @@ async fn project(
     action: &ProjectAction,
 ) -> Result<RunOutcome, CliError> {
     match action {
+        ProjectAction::Setups { .. } => unreachable!("handled locally before Client::open"),
         ProjectAction::Add { path, name } => {
             let resolved = resolve_path_argument(path)?;
             let mut params = json!({ "path": resolved });
@@ -1515,6 +1542,15 @@ fn emit_raw(call: CallOk) -> Result<RunOutcome, CliError> {
     })
 }
 
+/// A blank filter value is a usage error, matching the source's
+/// required-flag rules.
+fn require_nonempty(value: &str) -> Result<(), CliError> {
+    if value.trim().is_empty() {
+        return Err(CliError::Usage("filter values must be non-empty".into()));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1564,4 +1600,13 @@ mod tests {
             "no lossy replacement"
         );
     }
+}
+
+/// A blank filter value is a usage error, matching the source's
+/// required-flag rules.
+fn require_nonempty(value: &str) -> Result<(), CliError> {
+    if value.trim().is_empty() {
+        return Err(CliError::Usage("filter values must be non-empty".into()));
+    }
+    Ok(())
 }

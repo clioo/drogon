@@ -169,6 +169,16 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["Answers typed not_found: the native runtime stores no environments."],
         ),
         entry(
+            "project setups",
+            &["project", "setups"],
+            "List project host setups",
+            "drogon-cli project setups [--project <ID>] [--host <HOST-ID>]",
+            &["host", "project"],
+            &[],
+            &["drogon-cli project setups --json"],
+            &["The native runtime records no setups, so the list is empty."],
+        ),
+        entry(
             "workspace add",
             &["workspace", "add"],
             "Register an existing directory as a workspace",

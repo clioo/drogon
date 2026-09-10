@@ -460,6 +460,19 @@ pub enum ProjectAction {
         override_usage = "drogon-cli project list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
     )]
     List,
+    /// List project host setups (the native runtime records none)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli project setups [--project <ID>] [--host <HOST-ID>]\nValid flags: --data-dir, --help, --host, --json, --project, --request-id, --retry-request"
+    )]
+    Setups {
+        /// Filter by project id
+        #[arg(long, value_name = "ID")]
+        project: Option<String>,
+        /// Filter by host id (`local` is the only reachable host)
+        #[arg(long, value_name = "HOST-ID")]
+        host: Option<String>,
+    },
     /// Remove a Project registration; files on disk are untouched
     #[command(
         args_override_self = true,
@@ -984,6 +997,14 @@ impl Cli {
                     }
                 }
                 ProjectAction::List => {}
+                ProjectAction::Setups { project, host } => {
+                    if let Some(project) = project {
+                        require_nonempty("project", project)?;
+                    }
+                    if let Some(host) = host {
+                        require_nonempty("host", host)?;
+                    }
+                }
                 ProjectAction::Remove { id } => {
                     require_nonempty("id", id)?;
                 }

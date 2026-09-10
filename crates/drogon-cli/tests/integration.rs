@@ -2434,3 +2434,19 @@ fn environment_list_is_empty_and_show_rm_answer_typed_not_found() {
     assert_eq!(removed.status.code(), Some(1));
     assert!(stderr(&removed).contains("not_found"));
 }
+
+#[test]
+fn project_setups_answers_an_empty_local_list() {
+    let dir = temp_data_dir("psetups");
+    let output = run_cli(dir.path(), &["project", "setups"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("No project host setups found."));
+    let filtered = run_cli(
+        dir.path(),
+        &["project", "setups", "--project", "p1", "--host", "local"],
+    );
+    assert_eq!(filtered.status.code(), Some(0));
+    let json = run_cli(dir.path(), &["project", "setups", "--json"]);
+    assert_eq!(json.status.code(), Some(0));
+    assert!(stdout(&json).contains("\"setups\": []"));
+}
