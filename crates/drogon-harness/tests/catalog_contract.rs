@@ -2440,17 +2440,18 @@ fn refused_budget_fails_closed_before_spawning() {
 /// therefore still satisfies source closure; a fixture that never
 /// declares/registers still fails closed on the missing seal. No ACK —
 /// or an ACK for another birth or outcome — fails visibly with exit 3
-/// instead of running unowned. Every helper this spawns is bounded: one `dirname`, one
-/// `ps`, one `date`-bounded ACK wait (wall-clock deadline immune to
-/// fork-latency stretch, plus an iteration backstop), and one exact
+/// instead of running unowned. Exact helper inventory per handshake
+/// run (all transient, all group-contained, none registered): one
+/// `dirname`, one `ps`, word-splitting canonicalization with zero forks
+/// (function scope; the script's own `$1` untouched), one `date`-bounded
+/// ACK wait (wall-clock deadline immune to fork-latency stretch, plus
+/// an iteration backstop), short poll `sleep`s (one per iteration, each
+/// exiting on its own well before the wait ends), and one exact
 /// whole-line `grep -F -e "<birth> alive" -e "<birth> gone"` — the
 /// shell twin of `check_ack_content`, binding attempt and outcome, not
-/// a substring. Birth canonicalization is fork-free word-splitting in
-/// a function scope (the script's own `$1` is untouched). The short
-/// poll sleeps are transient group members, contained by the product's
-/// bounded group cleanup exactly like any other fixture descendant;
-/// they are never registered and never outlive the wait by more than
-/// one interval.
+/// a substring. Marker writes outside this snippet fail their fixture
+/// visibly (`|| exit 3`). Residual, stated not solved: a transient alive
+/// at the instant of a group kill is reaped by exit, not tracked.
 #[cfg(unix)]
 fn fixture_handshake_sh(pid: &str) -> String {
     format!(
@@ -2640,8 +2641,26 @@ fn child_probe_and_report(harness: HarnessId, pi_script: &str, budget: Duration,
             registration_failures,
             probe_pending_pids,
             probe_retained_roots,
-            version_entered: dir.join(VERSION_MARKER_FILE).exists(),
-            enumeration_entered: dir.join(ENUMERATION_MARKER_FILE).exists(),
+            version_entered: match std::fs::try_exists(dir.join(VERSION_MARKER_FILE)) {
+                // A version marker that cannot be read fails closed as
+                // not-observed (the test requires it present).
+                Ok(present) => present,
+                Err(err) => {
+                    registration_failures.push(format!("version marker unreadable: {err}"));
+                    false
+                }
+            },
+            enumeration_entered: match std::fs::try_exists(dir.join(ENUMERATION_MARKER_FILE)) {
+                // An unreadable enumeration marker must NEVER read as
+                // absence: fail it as present so the run fails closed
+                // instead of passing on a lie.
+                Ok(present) => present,
+                Err(err) => {
+                    registration_failures
+                        .push(format!("enumeration marker unreadable: {err}"));
+                    true
+                }
+            },
             probe_cleanup_verified,
         },
     );
@@ -3122,8 +3141,8 @@ fn pi_failed_version_refuses_enumeration_under_supervision() {
             &format!(
                 "#!/bin/sh\n\
                  _FD=\"$(dirname \"$0\")\"\n\
-                 if [ \"$1\" = \"--version\" ]; then echo entered > \"$_FD/{}\"; {} echo 'version probe refused' >&2; exit 1; fi\n\
-                 echo entered > \"$_FD/{}\"\n\
+                 if [ \"$1\" = \"--version\" ]; then echo entered > \"$_FD/{}\" || exit 3; {} echo 'version probe refused' >&2; exit 1; fi\n\
+                 echo entered > \"$_FD/{}\" || exit 3\n\
                  {}\n\
                  cat <<'PIEOF'\n\
 provider      model\n\
@@ -3187,8 +3206,8 @@ fn opencode_failed_version_refuses_enumeration_under_supervision() {
             &format!(
                 "#!/bin/sh\n\
                  _FD=\"$(dirname \"$0\")\"\n\
-                 if [ \"$1\" = \"--version\" ]; then echo entered > \"$_FD/{}\"; {} echo 'version probe refused' >&2; exit 1; fi\n\
-                 echo entered > \"$_FD/{}\"\n\
+                 if [ \"$1\" = \"--version\" ]; then echo entered > \"$_FD/{}\" || exit 3; {} echo 'version probe refused' >&2; exit 1; fi\n\
+                 echo entered > \"$_FD/{}\" || exit 3\n\
                  {}\n\
                  cat <<'OCEOF'\n\
 MARKER/should-never-appear\n\
