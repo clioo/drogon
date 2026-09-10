@@ -229,25 +229,25 @@ describe("Workspace options: viewport/keyboard reachability (packaged acceptance
     const menu = screen.getByRole("menu");
     // Group by / Sort by / Project order / Card layout options (one
     // unambiguous label picked per section -- several labels repeat
-    // verbatim across sections, e.g. "Repo"/"Recent activity"/"Manual
-    // (drag order)", so those are covered via the count below instead).
+    // verbatim across sections, e.g. "Project"/"Recent"/"Manual", so those
+    // are covered via the count below instead).
     expect(
-      within(menu).getByRole("menuitemradio", { name: "Workspace status" }),
+      within(menu).getByRole("menuitemradio", { name: "Status" }),
     ).toBeTruthy();
     expect(
-      within(menu).getByRole("menuitemradio", { name: "Smart" }),
+      within(menu).getByRole("menuitemradio", { name: "Agent Activity" }),
     ).toBeTruthy();
     expect(
       within(menu).getByRole("menuitemradio", { name: "Compact" }),
     ).toBeTruthy();
     expect(
       within(menu).getAllByRole("menuitemradio", {
-        name: "Manual (drag order)",
+        name: "Manual",
       }),
     ).toHaveLength(2); // Sort by + Project order
     // Show properties / Hide checkboxes.
     expect(
-      within(menu).getByRole("menuitemcheckbox", { name: "Pull request" }),
+      within(menu).getByRole("menuitemcheckbox", { name: "PR/MR link" }),
     ).toBeTruthy();
     expect(
       within(menu).getByRole("menuitemcheckbox", { name: "CLI-created" }),
@@ -552,7 +552,7 @@ function clickDeleteForWorktree(worktreeId: string): void {
 }
 
 describe("Workspace options: Group by (cross-project)", () => {
-  test("Group by Workspace status moves cards from two different projects under one real status label, and an action still targets the real owning worktree", () => {
+  test("Group by Status moves cards from two different projects under one real status label, and an action still targets the real owning worktree", () => {
     const groups: ProjectGroup[] = [
       {
         project: project({ id: "a", name: "Alpha Repo" }),
@@ -587,7 +587,7 @@ describe("Workspace options: Group by (cross-project)", () => {
 
     openWorkspaceOptionsMenu();
     fireEvent.click(
-      within(screen.getByRole("menu")).getByText("Workspace status"),
+      within(screen.getByRole("menu")).getByText("Status"),
     );
 
     // One real status label header; both projects' cards render under it.
@@ -608,7 +608,7 @@ describe("Workspace options: Group by (cross-project)", () => {
     });
   });
 
-  test("Group by PR status buckets by real fetched pull-request state per project; an unfetched/failed project's cards land under 'PR status unavailable', never a false 'no pull request'", async () => {
+  test("Group by PR buckets by real fetched pull-request state per project; an unfetched/failed project's cards land under 'PR status unavailable', never a false 'no pull request'", async () => {
     const groups: ProjectGroup[] = [
       {
         project: project({ id: "a", name: "Alpha Repo" }),
@@ -675,7 +675,7 @@ describe("Workspace options: Group by (cross-project)", () => {
     mount({ groups });
 
     openWorkspaceOptionsMenu();
-    fireEvent.click(within(screen.getByRole("menu")).getByText("PR status"));
+    fireEvent.click(within(screen.getByRole("menu")).getByText("PR"));
 
     await waitFor(() => expect(tasksList).toHaveBeenCalled());
     await waitFor(() =>
@@ -881,7 +881,7 @@ test.each(["none", "repo", "workspace-status", "pr-status"] as const)(
     );
     openWorkspaceOptionsMenu();
     fireEvent.click(
-      screen.getByRole("menuitemcheckbox", { name: "Pull request" }),
+      screen.getByRole("menuitemcheckbox", { name: "PR/MR link" }),
     );
     await waitFor(() =>
       expect(screen.queryByLabelText("Linked PR #7: Open")).toBeNull(),

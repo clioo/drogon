@@ -1,37 +1,16 @@
 /* MIT Copyright (c) 2026 Lovecast Inc.
-   User-feature-closure item 4: the full "Workspace options" reference menu
-   -- Group by, Sort by, Project order, Card layout, Show properties, and
-   every Hide filter -- now acts on real, backend-durable data instead of
-   the reduced worker's shell-only localStorage model with two disabled
-   filters. Sources:
-   - groupBy/sortBy/hide filters/worktreeCardProperties/workspaceStatuses/
-     board prefs: `apps/desktop/src/shared/workspace-ui-preferences-contract.ts`
-     (`Pick`s off the shared `PersistedUIState` scaffold; root-approved
-     enums, never redeclared here).
-   - Per-worktree metadata (workspaceStatus, isPinned, sortOrder,
-     manualOrder, lastActivityAt, creator): `Worktree` fields backed by
-     `crates/drogon-protocol/src/worktree.rs` (schema v5), real and
-     durable, not derived client-side.
-   - PR status: `workspace-pr-status.ts`, correlating the existing
-     `tasks.list(mode: "pulls")` provider bridge by branch (see that
-     module's own doc for the exact boundary: real open/draft/merged/
-     closed state, `unavailable` when the provider call itself fails --
-     never a fabricated status).
-   Every field in `WorkspaceOptionsState` -- including `cardLayout` and
-   `showProperties`, which have no direct field in the pinned
-   `PersistedUIState` scaffold -- round-trips through the ONE shared
+   The "Workspace options" menu state. Every field acts on real,
+   backend-durable data and round-trips through the ONE shared
    `window.drogon.ui.get/set` store (main/workspace-ui-preferences.ts) via
-   `toSharedUIPreferences`/`fromSharedUIPreferences` below:
-   `showProperties.{branch,pr}` maps onto real `worktreeCardProperties`
-   array membership (no parallel boolean pair in the persisted shape) and
-   `cardLayout` rides the store's own additive Drogon-local field. There is
-   no second, private localStorage authority for any of this -- see
-   ProjectList.tsx's hydration/one-time-migration effect, which is the only
-   remaining reader of the legacy `drogon:shell:workspace-options` key
-   (`loadWorkspaceOptionsState`/`saveWorkspaceOptionsState` below stay only
-   for that one-shot migration and for tests that inject a bare
-   `Storage`-like double).
-   Pure, unit-tested. */
+   `toSharedUIPreferences`/`fromSharedUIPreferences`: `showProperties`
+   maps onto real `worktreeCardProperties` array membership and
+   `cardLayout` rides the store's own additive field. There is no second
+   localStorage authority -- `loadWorkspaceOptionsState` /
+   `saveWorkspaceOptionsState` stay only for the one-shot migration of the
+   legacy `drogon:shell:workspace-options` key (see ProjectList.tsx) and
+   for tests. Option order, copy and descriptions live in the
+   `WORKSPACE_*_OPTIONS` tables below, mirroring the reference menu; the
+   persisted ids are unchanged. Pure, unit-tested. */
 import type {
   Project,
   Session,
@@ -616,4 +595,89 @@ export function manualOrderRanksFromOrderedIds(
     ranks.set(id, (count - index) * MANUAL_ORDER_STRIDE);
   });
   return ranks;
+}
+
+/** Reference-parity view over the same state (ids unchanged): the
+ *  reference menu's option order, copy and descriptions. The menu
+ *  component renders from these; the persisted state shape above is
+ *  untouched. */
+export const WORKSPACE_GROUP_BY_OPTIONS = [
+  { id: "none", label: "None" },
+  { id: "workspace-status", label: "Status" },
+  { id: "pr-status", label: "PR" },
+  { id: "repo", label: "Project" },
+] as const satisfies readonly { id: WorkspaceGroupBy; label: string }[];
+
+export const WORKSPACE_SORT_OPTIONS = [
+  { id: "name", label: "Name", description: null },
+  {
+    id: "smart",
+    label: "Agent Activity",
+    description: "Agents that need attention, then most recent activity.",
+  },
+  { id: "recent", label: "Recent", description: null },
+  { id: "repo", label: "Project", description: null },
+  {
+    id: "manual",
+    label: "Manual",
+    description: "Drag workspaces to arrange them within each group.",
+  },
+] as const satisfies readonly { id: WorkspaceSortBy; label: string; description: string | null }[];
+
+export const WORKSPACE_PROJECT_ORDER_OPTIONS = [
+  {
+    id: "manual",
+    label: "Manual",
+    description: "Drag projects to arrange them",
+  },
+  {
+    id: "recent",
+    label: "Recent",
+    description: "Most recent workspace activity",
+  },
+] as const satisfies readonly { id: WorkspaceProjectOrderBy; label: string; description: string }[];
+
+export const WORKSPACE_CARD_LAYOUT_OPTIONS = [
+  { id: "comfortable", label: "Detailed" },
+  { id: "compact", label: "Compact" },
+] as const satisfies readonly { id: WorkspaceCardLayout; label: string }[];
+
+/** Show-properties render order matching the reference property list
+ *  (issues first, identity last); `cli`/`branch` are this repo's own
+ *  provenance/identity rows appended in the same spirit. */
+export const WORKSPACE_SHOW_PROPERTIES_DISPLAY_ORDER: readonly CardProperty[] = [
+  "issue",
+  "linear-issue",
+  "jira-issue",
+  "pr",
+  "automation",
+  "cli",
+  "comment",
+  "ports",
+  "inline-agents",
+  "branch",
+];
+
+/** Copy fixes over CARD_PROPERTY_OPTIONS labels (ids unchanged). */
+export const WORKSPACE_SHOW_PROPERTY_LABEL_OVERRIDES: Readonly<Partial<Record<CardProperty, string>>> = {
+  pr: "PR/MR link",
+};
+
+/** Active Workspace-Options filter count (hide-* switches only). */
+export function countWorkspaceOptionsActiveFilters(state: WorkspaceOptionsState): number {
+  return (
+    (state.hide.sleeping ? 1 : 0) +
+    (state.hide.defaultBranch ? 1 : 0) +
+    (state.hide.detachedHead ? 1 : 0) +
+    (state.hide.automationCreated ? 1 : 0) +
+    (state.hide.cliCreated ? 1 : 0)
+  );
+}
+
+export function hasWorkspaceOptionsActiveFilters(state: WorkspaceOptionsState): boolean {
+  return countWorkspaceOptionsActiveFilters(state) > 0;
+}
+
+export function getWorkspaceOptionsFilterLabel(count: number): string {
+  return `${count} filter${count === 1 ? "" : "s"}`;
 }

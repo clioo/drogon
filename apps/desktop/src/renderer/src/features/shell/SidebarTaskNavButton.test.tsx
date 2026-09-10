@@ -30,11 +30,13 @@ function renderButton({
   active = false,
   onOpenTasks = () => {},
   github = true,
+  linear = false,
   jira = false,
 }: {
   active?: boolean;
   onOpenTasks?: () => void;
   github?: boolean;
+  linear?: boolean;
   jira?: boolean;
 } = {}) {
   return render(
@@ -43,6 +45,7 @@ function renderButton({
         active={active}
         onOpenTasks={onOpenTasks}
         probeGitHubTasksAvailable={probe(github)}
+        probeLinearTasksAvailable={probe(linear)}
         probeJiraTasksAvailable={probe(jira)}
       />
     </TooltipProvider>,
@@ -129,6 +132,14 @@ describe("SidebarTaskNavButton provider chips", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open Jira tasks" }));
     expect(onOpenTasks).toHaveBeenCalledTimes(2);
     expect(consumePendingTaskSource()).toBe("jira");
+  });
+
+  test("renders the Linear chip once the local fixture connects", async () => {
+    const onOpenTasks = vi.fn();
+    renderButton({ onOpenTasks, github: false, linear: true });
+    fireEvent.click(await screen.findByRole("button", { name: "Open Linear tasks" }));
+    expect(onOpenTasks).toHaveBeenCalledTimes(1);
+    expect(consumePendingTaskSource()).toBe("linear");
   });
 
   test("gitlab and linear chips stay dark without an integration", async () => {

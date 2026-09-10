@@ -1,34 +1,8 @@
 /* MIT Copyright (c) 2026 Lovecast Inc.
-   User-feature-closure item 4: the full "Workspace options" menu. Every
-   control here is wired to the ONE shared, persisted WorkspaceOptionsState
-   (workspace-options-state.ts, backed end to end by
-   `window.drogon.ui`/schema v5) and acts on real data, live-rendered in
-   ProjectList.tsx:
-   - Group by: None/Repo (ProjectRow's existing per-project rendering) and
-     Workspace status/PR status (EntryGroupRow's cross-project rendering
-     over `groupWorktreesByWorkspaceStatus`/`groupWorktreesByPrStatus` --
-     PR status correlates the existing `tasks.list(mode: "pulls")`
-     provider bridge by branch; an unfetched/failed project's worktrees
-     bucket under "PR status unavailable", never a false "no pull
-     request").
-   - Sort by: Manual (the real `Worktree.manualOrder`, schema v5 -- the
-     SAME field ProjectList.tsx's drag commit persists via
-     `worktree.update` and the Kanban board's own column-drag will
-     read/write), Name, Recent activity (`Worktree.lastActivityAt`), Smart
-     (pinned first, then recent), Repo (by owning project name -- only
-     visibly different from Name under the two cross-project groupings,
-     where entries can carry different real projects).
-   - Project order: Manual (the existing project-header drag order) or
-     Recent (by each project's own most-recent real worktree activity).
-   - Card layout: source Default/Compact property presets.
-   - Show properties: branch, linked issues/PR, provenance, notes, attributed
-     ports and inline agents; activity supports compact/full lineage.
-   - Hide: Sleeping / Default branch / Detached HEAD / Automation-created /
-     CLI-created are all real, computed filters (schema v5's
-     `Worktree.creator`, set by every `drogon-cli worktree create` call;
-     "Automation-created" stays enabled even though no producer exists
-     yet in this build -- see `WorkspaceHideFilters`'s own doc) -- no
-     control here is disabled or inert. */
+   The full "Workspace options" menu over the one shared, persisted
+   WorkspaceOptionsState (workspace-options-state.ts, `window.drogon.ui` /
+   schema v5), live-rendered in ProjectList.tsx. Option order, copy and
+   descriptions follow the reference menu; the persisted ids are unchanged. */
 import {
   DropdownMenuCheckboxItem,
   DropdownMenuLabel,
@@ -36,7 +10,16 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
 } from "../../components/ui/dropdown-menu";
-import { CARD_PROPERTY_OPTIONS, cardPropertiesToFlags } from "./workspace-options-state";
+import {
+  CARD_PROPERTY_OPTIONS,
+  WORKSPACE_CARD_LAYOUT_OPTIONS,
+  WORKSPACE_GROUP_BY_OPTIONS,
+  WORKSPACE_PROJECT_ORDER_OPTIONS,
+  WORKSPACE_SHOW_PROPERTIES_DISPLAY_ORDER,
+  WORKSPACE_SHOW_PROPERTY_LABEL_OVERRIDES,
+  WORKSPACE_SORT_OPTIONS,
+  cardPropertiesToFlags,
+} from "./workspace-options-state";
 import { getWorktreeCardModeProperties } from "../../../../shared/worktree/card-properties";
 import type {
   WorkspaceCardLayout,
@@ -46,27 +29,52 @@ import type {
   WorkspaceSortBy,
 } from "./workspace-options-state";
 
-const GROUP_BY_LABEL: Record<WorkspaceGroupBy, string> = {
-  repo: "Repo",
-  none: "None",
-  "workspace-status": "Workspace status",
-  "pr-status": "PR status",
-};
-const SORT_BY_LABEL: Record<WorkspaceSortBy, string> = {
-  manual: "Manual (drag order)",
-  name: "Name",
-  recent: "Recent activity",
-  smart: "Smart",
-  repo: "Repo",
-};
-const PROJECT_ORDER_BY_LABEL: Record<WorkspaceProjectOrderBy, string> = {
-  manual: "Manual (drag order)",
-  recent: "Recent activity",
-};
-const CARD_LAYOUT_LABEL: Record<WorkspaceCardLayout, string> = {
-  comfortable: "Default",
-  compact: "Compact",
-};
+const GROUP_BY_LABEL: Record<WorkspaceGroupBy, string> = Object.fromEntries(
+  WORKSPACE_GROUP_BY_OPTIONS.map(({ id, label }) => [id, label]),
+) as Record<WorkspaceGroupBy, string>;
+const GROUP_BY_ORDER: readonly WorkspaceGroupBy[] =
+  WORKSPACE_GROUP_BY_OPTIONS.map(({ id }) => id);
+
+const SORT_BY_LABEL: Record<WorkspaceSortBy, string> = Object.fromEntries(
+  WORKSPACE_SORT_OPTIONS.map(({ id, label }) => [id, label]),
+) as Record<WorkspaceSortBy, string>;
+const SORT_BY_DESCRIPTION: Record<WorkspaceSortBy, string | null> =
+  Object.fromEntries(
+    WORKSPACE_SORT_OPTIONS.map(({ id, description }) => [id, description]),
+  ) as Record<WorkspaceSortBy, string | null>;
+const SORT_BY_ORDER: readonly WorkspaceSortBy[] = WORKSPACE_SORT_OPTIONS.map(
+  ({ id }) => id,
+);
+
+const PROJECT_ORDER_BY_LABEL: Record<WorkspaceProjectOrderBy, string> =
+  Object.fromEntries(
+    WORKSPACE_PROJECT_ORDER_OPTIONS.map(({ id, label }) => [id, label]),
+  ) as Record<WorkspaceProjectOrderBy, string>;
+const PROJECT_ORDER_BY_DESCRIPTION: Record<WorkspaceProjectOrderBy, string> =
+  Object.fromEntries(
+    WORKSPACE_PROJECT_ORDER_OPTIONS.map(({ id, description }) => [
+      id,
+      description,
+    ]),
+  ) as Record<WorkspaceProjectOrderBy, string>;
+const PROJECT_ORDER_BY_ORDER: readonly WorkspaceProjectOrderBy[] =
+  WORKSPACE_PROJECT_ORDER_OPTIONS.map(({ id }) => id);
+
+const CARD_LAYOUT_LABEL: Record<WorkspaceCardLayout, string> =
+  Object.fromEntries(
+    WORKSPACE_CARD_LAYOUT_OPTIONS.map(({ id, label }) => [id, label]),
+  ) as Record<WorkspaceCardLayout, string>;
+const CARD_LAYOUT_ORDER: readonly WorkspaceCardLayout[] =
+  WORKSPACE_CARD_LAYOUT_OPTIONS.map(({ id }) => id);
+
+const CARD_PROPERTY_LABEL: Readonly<Record<string, string>> = Object.fromEntries(
+  CARD_PROPERTY_OPTIONS.map(({ id, label }) => [
+    id,
+    WORKSPACE_SHOW_PROPERTY_LABEL_OVERRIDES[
+      id as keyof typeof WORKSPACE_SHOW_PROPERTY_LABEL_OVERRIDES
+    ] ?? label,
+  ]),
+);
 
 export function WorkspaceOptionsMenuSections({
   state,
@@ -85,7 +93,7 @@ export function WorkspaceOptionsMenuSections({
           onChange({ ...state, groupBy: value as WorkspaceGroupBy })
         }
       >
-        {(Object.keys(GROUP_BY_LABEL) as WorkspaceGroupBy[]).map((value) => (
+        {GROUP_BY_ORDER.map((value) => (
           <DropdownMenuRadioItem key={value} value={value}>
             {GROUP_BY_LABEL[value]}
           </DropdownMenuRadioItem>
@@ -101,8 +109,12 @@ export function WorkspaceOptionsMenuSections({
           onChange({ ...state, sortBy: value as WorkspaceSortBy })
         }
       >
-        {(Object.keys(SORT_BY_LABEL) as WorkspaceSortBy[]).map((value) => (
-          <DropdownMenuRadioItem key={value} value={value}>
+        {SORT_BY_ORDER.map((value) => (
+          <DropdownMenuRadioItem
+            key={value}
+            value={value}
+            title={SORT_BY_DESCRIPTION[value] ?? undefined}
+          >
             {SORT_BY_LABEL[value]}
           </DropdownMenuRadioItem>
         ))}
@@ -117,13 +129,15 @@ export function WorkspaceOptionsMenuSections({
           onChange({ ...state, projectOrderBy: value as WorkspaceProjectOrderBy })
         }
       >
-        {(Object.keys(PROJECT_ORDER_BY_LABEL) as WorkspaceProjectOrderBy[]).map(
-          (value) => (
-            <DropdownMenuRadioItem key={value} value={value}>
-              {PROJECT_ORDER_BY_LABEL[value]}
-            </DropdownMenuRadioItem>
-          ),
-        )}
+        {PROJECT_ORDER_BY_ORDER.map((value) => (
+          <DropdownMenuRadioItem
+            key={value}
+            value={value}
+            title={PROJECT_ORDER_BY_DESCRIPTION[value]}
+          >
+            {PROJECT_ORDER_BY_LABEL[value]}
+          </DropdownMenuRadioItem>
+        ))}
       </DropdownMenuRadioGroup>
       <DropdownMenuSeparator />
 
@@ -136,25 +150,23 @@ export function WorkspaceOptionsMenuSections({
           })
         }
       >
-        {(Object.keys(CARD_LAYOUT_LABEL) as WorkspaceCardLayout[]).map(
-          (value) => (
-            <DropdownMenuRadioItem key={value} value={value}>
-              {CARD_LAYOUT_LABEL[value]}
-            </DropdownMenuRadioItem>
-          ),
-        )}
+        {CARD_LAYOUT_ORDER.map((value) => (
+          <DropdownMenuRadioItem key={value} value={value}>
+            {CARD_LAYOUT_LABEL[value]}
+          </DropdownMenuRadioItem>
+        ))}
       </DropdownMenuRadioGroup>
       <DropdownMenuSeparator />
 
       <DropdownMenuLabel>Show properties</DropdownMenuLabel>
-      {CARD_PROPERTY_OPTIONS.map(({ id, label }) => (
+      {WORKSPACE_SHOW_PROPERTIES_DISPLAY_ORDER.map((id) => (
         <DropdownMenuCheckboxItem key={id}
           checked={state.showProperties[id] === true}
           onSelect={(event) => event.preventDefault()}
           onCheckedChange={(checked) => onChange({ ...state,
             showProperties: { ...state.showProperties, [id]: checked },
           })}
-        >{label}</DropdownMenuCheckboxItem>
+        >{CARD_PROPERTY_LABEL[id] ?? id}</DropdownMenuCheckboxItem>
       ))}
       <DropdownMenuLabel>Agent activity display</DropdownMenuLabel>
       <DropdownMenuRadioGroup value={state.agentActivityDisplayMode ?? "full"}
