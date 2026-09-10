@@ -20,10 +20,11 @@
 //! ## Time model
 //!
 //! All automation timestamps are millisecond-epoch `f64` (see
-//! `crate::now_unix_ms`). Cron evaluation runs in UTC: without a timezone
-//! database crate this build cannot resolve IANA names, so `create`/`update`
-//! only admit `"UTC"` and the scheduler matches minute boundaries in UTC.
-//! A `* * * * *` schedule therefore fires at the top of every UTC minute.
+//! `crate::now_unix_ms`). Cron evaluation runs in the automation's
+//! stored IANA zone ([`Automation::timezone`](super::records::Automation::timezone),
+//! resolved by [`super::timezone`]); rows stored without a zone evaluate
+//! in UTC exactly as before. A `* * * * *` schedule therefore fires at
+//! the top of every minute in its zone.
 //!
 //! ## Missed runs
 //!
@@ -233,9 +234,13 @@ fn harness_for(automation: &Automation) -> HarnessLaunchParams {
 
 fn reschedule_after(automation: &Automation, now_ms: f64, ran: bool) -> Reschedule {
     Reschedule {
-        next_run_at: next_fire_ms(&automation.rrule, now_ms)
-            .map(|ms| ms as f64)
-            .unwrap_or(automation.next_run_at),
+        next_run_at: super::timezone::next_native_fire_ms(
+            &automation.rrule,
+            &automation.timezone,
+            now_ms,
+        )
+        .map(|ms| ms as f64)
+        .unwrap_or(automation.next_run_at),
         last_run_at: if ran { Some(now_ms) } else { None },
     }
 }
@@ -267,10 +272,93 @@ fn unsupported_text(unsupported: &RunUnsupported) -> String {
     }
 }
 
-/// Fires one due automation: missed-past-grace records a skip, otherwise
+/// Pure supersede check behind [`is_stale_evaluation`]: any difference
+/// on an evaluation-relevant field means the snapshot's slot identity
+/// (`scheduled:{next_run_at}`) or dispatch parameters no longer describe
+/// the stored schedule, so the evaluation must not dispatch.
+fn is_superseded(snapshot: &Automation, fresh: &Automation) -> bool {
+    fresh.rrule != snapshot.rrule
+        || fresh.next_run_at != snapshot.next_run_at
+        || fresh.enabled != snapshot.enabled
+        || fresh.timezone != snapshot.timezone
+}
+
+/// True when the tick's listed snapshot no longer matches the stored
+/// row on an evaluation-relevant field: a schedule edit landed between
+/// the tick's list and this fire.
+///
+/// Best-effort precheck, not an atomic invalidation: it spares the
+/// common case (an edit racing the scheduler thread) a wasted dispatch
+/// and keeps history clean, but an edit landing after this read and
+/// before admission/record still races -- and even a comparison inside
+/// the record transactions would follow the runner dispatch, so it
+/// could not prevent a stale launch either. Fully closing the window
+/// needs the expected-schedule claim checked at effect (dispatch) time,
+/// which crosses the runner/harness seam held outside this slice; that
+/// stays a reserved-seam proposal. Until then, a stale evaluation here
+/// neither dispatches nor records, and the fresh row is re-evaluated on
+/// the next tick with its own slot identity. Reads the row fresh (one
+/// row, only for due automations).
+fn is_stale_evaluation(engine: &Engine, automation: &Automation) -> bool {
+    let fresh = {
+        let conn = engine.db.lock().unwrap();
+        match super::storage::get_automation(&conn, &automation.id) {
+            Ok(row) => row,
+            Err(e) => {
+                eprintln!(
+                    "[automations] tick re-read failed for {}: {e}",
+                    automation.id
+                );
+                return true;
+            }
+        }
+    };
+    let Some(fresh) = fresh else {
+        // Deleted between list and fire: nothing to dispatch or record.
+        return true;
+    };
+    is_superseded(automation, &fresh)
+}
+
+/// Fires one due automation: a DST-gap slot records a skip (never
+/// dispatches), a missed-past-grace slot records a skip, otherwise
 /// prepares, dispatches through the existing runner seam, and records.
 /// Holds no database guard across the seam call.
 fn fire_due(engine: &Engine, automation: &Automation, now_ms: f64) -> TickFire {
+    if is_stale_evaluation(engine, automation) {
+        return TickFire::Stale;
+    }
+    if let Some(gap) = super::timezone::gap_skip_for_slot(
+        &automation.rrule,
+        &automation.timezone,
+        automation.next_run_at,
+    ) {
+        let reschedule = reschedule_after(automation, now_ms, false);
+        let recorded = {
+            let conn = engine.db.lock().unwrap();
+            direct::record_skip(
+                &conn,
+                &automation.id,
+                &slot_request_id(engine, automation),
+                AutomationRunTrigger::Scheduled,
+                AutomationRunStatus::SkippedMissed,
+                Some(gap.reason),
+                automation.next_run_at,
+                now_ms,
+                reschedule,
+            )
+        };
+        return match recorded {
+            Ok(_) => TickFire::SkippedMissed,
+            Err(e) => {
+                eprintln!(
+                    "[automations] failed to record gap skip for {}: {e}",
+                    automation.id
+                );
+                TickFire::Failed
+            }
+        };
+    }
     let grace_ms = automation.missed_run_grace_minutes * 60.0 * 1000.0;
     if now_ms > automation.next_run_at + grace_ms {
         let reschedule = reschedule_after(automation, now_ms, false);
@@ -400,6 +488,10 @@ enum TickFire {
     SkippedMissed,
     Refused,
     Failed,
+    /// The listed snapshot was superseded by a schedule edit (or the row
+    /// was deleted) before this fire ran: nothing dispatched, nothing
+    /// recorded; the fresh row is re-evaluated on the next tick.
+    Stale,
 }
 
 /// Stable per-slot request id so a retried tick for the same slot upserts
@@ -447,6 +539,7 @@ pub fn tick_once(engine: &Engine, now_ms: f64) -> TickSummary {
             TickFire::SkippedMissed => summary.skipped_missed += 1,
             TickFire::Refused => summary.refused += 1,
             TickFire::Failed => summary.failed += 1,
+            TickFire::Stale => {}
         }
     }
     reconcile_outstanding(engine, now_ms, &mut summary);
@@ -594,5 +687,83 @@ pub fn spawn(engine: Arc<Engine>, interval: Duration) -> SchedulerHandle {
 impl Drop for SchedulerHandle {
     fn drop(&mut self) {
         self.stop.store(true, AtomicOrdering::Release);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::records::{
+        Automation, ExecutionTargetType, MissedRunPolicy, SchedulerOwner, WorkspaceMode,
+    };
+    use super::is_superseded;
+
+    fn sample(id: &str) -> Automation {
+        Automation {
+            id: id.to_string(),
+            creation_key: None,
+            name: "sweep".to_string(),
+            prompt: "do the thing".to_string(),
+            precheck: None,
+            agent_id: "pi".to_string(),
+            model: None,
+            provider: None,
+            run_context: None,
+            source_context: None,
+            project_id: "w1".to_string(),
+            execution_target_type: ExecutionTargetType::Local,
+            execution_target_id: "host-1".to_string(),
+            execution_target_generation: None,
+            scheduler_owner: SchedulerOwner::LocalHostService,
+            workspace_mode: WorkspaceMode::Existing,
+            workspace_id: Some("w1".to_string()),
+            base_branch: None,
+            setup_decision: None,
+            reuse_session: false,
+            timezone: "UTC".to_string(),
+            rrule: "* * * * *".to_string(),
+            dtstart: 0.0,
+            enabled: true,
+            next_run_at: 1000.0,
+            last_run_at: None,
+            missed_run_policy: MissedRunPolicy::RunOnceWithinGrace,
+            missed_run_grace_minutes: 15.0,
+            created_at: 0.0,
+            updated_at: 0.0,
+            bot_id: None,
+        }
+    }
+
+    #[test]
+    fn identical_rows_are_not_superseded() {
+        assert!(!is_superseded(&sample("a"), &sample("a")));
+    }
+
+    #[test]
+    fn schedule_edits_supersede_the_listed_snapshot() {
+        let snapshot = sample("a");
+        let mut cron_edit = sample("a");
+        cron_edit.rrule = "0 9 * * *".to_string();
+        assert!(is_superseded(&snapshot, &cron_edit));
+        let mut slot_edit = sample("a");
+        slot_edit.next_run_at = 2000.0;
+        assert!(is_superseded(&snapshot, &slot_edit));
+        let mut zone_edit = sample("a");
+        zone_edit.timezone = "America/New_York".to_string();
+        assert!(is_superseded(&snapshot, &zone_edit));
+        let mut disable = sample("a");
+        disable.enabled = false;
+        assert!(is_superseded(&snapshot, &disable));
+    }
+
+    #[test]
+    fn prompt_only_edits_do_not_supersede_evaluation() {
+        // A prompt/harness edit keeps the slot identity, so the due slot
+        // still fires (with the fresh row's prompt); only schedule fields
+        // version the evaluation.
+        let snapshot = sample("a");
+        let mut prompt_edit = sample("a");
+        prompt_edit.prompt = "new prompt".to_string();
+        prompt_edit.updated_at = 5000.0;
+        assert!(!is_superseded(&snapshot, &prompt_edit));
     }
 }

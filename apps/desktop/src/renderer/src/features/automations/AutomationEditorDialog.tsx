@@ -11,14 +11,15 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { cn } from "./automation-class-names";
 import type { Workspace } from "../../../../shared/session-contract";
-import { previewCronFires } from "./automation-cron-preview";
+import type { AutomationPreviewResult } from "../../../../shared/automation-contract";
+import { formatAutomationDateTime } from "./automation-page-parts";
 import {
   draftCron,
   type AutomationDraftErrors,
   type AutomationEditorDraft,
 } from "./automation-editor-validation";
-import { formatAutomationDateTime } from "./automation-page-parts";
 import { AutomationSchedulePicker } from "./AutomationSchedulePicker";
+import { AutomationTimezonePicker } from "./AutomationTimezonePicker";
 import {
   AutomationTemplateEmptyState,
   getAutomationTemplates,
@@ -79,6 +80,12 @@ function AutomationTemplateCard({
 const selectClass =
   "h-9 w-full min-w-0 rounded-md border border-input bg-input/30 px-3 py-1 text-sm shadow-xs outline-none dark:bg-input/30 focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
+export type AutomationPreviewState =
+  | { status: "loading" }
+  | { status: "ready"; preview: AutomationPreviewResult }
+  | { status: "error"; message: string }
+  | { status: "unavailable" };
+
 export type AutomationEditorDialogProps = {
   open: boolean;
   isEditing: boolean;
@@ -86,6 +93,13 @@ export type AutomationEditorDialogProps = {
   draft: AutomationEditorDraft;
   workspaces: Workspace[];
   errors: AutomationDraftErrors;
+  /**
+   * Backend preview (`automation.preview`) for the draft schedule. The
+   * daemon is the only preview authority: until the caller wires this to
+   * the bridge the dialog shows an honest unavailable state, never
+   * locally computed times presented as agreement.
+   */
+  previewState?: AutomationPreviewState;
   onDraftChange: (updater: (current: AutomationEditorDraft) => AutomationEditorDraft) => void;
   onApplyTemplate: (template: AutomationTemplate) => void;
   onOpenChange: (open: boolean) => void;
@@ -99,6 +113,7 @@ export function AutomationEditorDialog({
   draft,
   workspaces,
   errors,
+  previewState = { status: "unavailable" },
   onDraftChange,
   onApplyTemplate,
   onOpenChange,
@@ -127,7 +142,6 @@ export function AutomationEditorDialog({
 
   const title = isEditing ? "Edit automation" : "Create automation";
   const cron = draftCron(draft);
-  const preview = cron === "" ? null : previewCronFires(cron, Date.now());
 
   return (
     <div
@@ -247,6 +261,29 @@ export function AutomationEditorDialog({
             </EditorField>
             <div className="min-w-0 space-y-1.5">
               <div className={FIELD_LABEL_CLASS}>
+                <span className="text-muted-foreground">Timezone</span>
+              </div>
+              <AutomationTimezonePicker
+                timezone={draft.timezone}
+                onTimezoneChange={(timezone) =>
+                  onDraftChange((current) => ({
+                    ...current,
+                    timezone,
+                    scheduleWarning: null,
+                  }))
+                }
+              />
+              {errors.timezone ? (
+                <p role="alert" className="text-xs text-destructive">
+                  {errors.timezone}
+                </p>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                The schedule runs at this wall time in the selected zone.
+              </p>
+            </div>
+            <div className="min-w-0 space-y-1.5">
+              <div className={FIELD_LABEL_CLASS}>
                 <span className="text-muted-foreground">Schedule</span>
               </div>
               <AutomationSchedulePicker draft={draft} onDraftChange={onDraftChange} />
@@ -256,11 +293,32 @@ export function AutomationEditorDialog({
                 </p>
               ) : null}
               <div className="text-xs text-muted-foreground" data-testid="automations-preview">
-                {preview === null ? (
+                {cron === "" ? (
                   <span>Next runs: preview unavailable for this expression.</span>
+                ) : previewState.status === "ready" ? (
+                  <span>
+                    Next runs:{" "}
+                    {previewState.preview.fires
+                      .map((fire) => formatAutomationDateTime(fire))
+                      .join(" · ")}
+                    {previewState.preview.skipped.length > 0 ? (
+                      <span>
+                        {" · "}
+                        Skipped:{" "}
+                        {previewState.preview.skipped
+                          .map((skip) => `${skip.date} ${skip.wallTime} (DST gap)`)
+                          .join(" · ")}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : previewState.status === "loading" ? (
+                  <span>Next runs: loading preview…</span>
+                ) : previewState.status === "error" ? (
+                  <span>Next runs unavailable: {previewState.message}</span>
                 ) : (
                   <span>
-                    Next runs: {preview.map((fire) => formatAutomationDateTime(fire)).join(" · ")}
+                    Next runs: preview unavailable. The schedule still saves;
+                    the daemon is the preview authority.
                   </span>
                 )}
               </div>

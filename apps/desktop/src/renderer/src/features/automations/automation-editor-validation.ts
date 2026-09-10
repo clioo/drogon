@@ -2,7 +2,7 @@
 // local-automation editor dialog. Cron validity reuses the existing
 // automation-cron-preview helper (the daemon's croner stays authoritative);
 // grace bounds mirror the shared automation-contract schema (0..10080).
-import { previewCronFires } from "./automation-cron-preview";
+import { previewCronFires, isValidTimezone, localTimezone } from "./automation-cron-preview";
 import { localPresetToUtcCronParts, localToUtcOffsetMinutes } from "./automation-local-cron";
 import { describeAutomationSchedule } from "./automation-schedule-label";
 
@@ -23,6 +23,8 @@ export type AutomationEditorDraft = {
   time: string;
   /** "0".."6" Sunday-first, backing the weekly picker. */
   dayOfWeek: string;
+  /** IANA zone the wall time evaluates in; absent is the legacy UTC path. */
+  timezone: string;
   customSchedule: string;
   enabled: boolean;
   graceMinutes: string;
@@ -38,6 +40,10 @@ export function blankAutomationDraft(workspaceId: string): AutomationEditorDraft
     preset: "daily",
     time: "09:00",
     dayOfWeek: "1",
+    // New schedules are explicitly zoned in the host local zone, so the
+    // wall time needs no local->UTC conversion on save (the legacy UTC
+    // path only applies to rows stored without a zone).
+    timezone: localTimezone(),
     customSchedule: "",
     enabled: true,
     graceMinutes: "15",
@@ -80,10 +86,12 @@ export function parseAutomationDraftTime(value: string): {
 }
 
 /**
- * Builds the stored cron for a draft. Preset times are entered as local
- * wall-clock values and converted to the UTC the daemon evaluates (custom
- * cron stays verbatim UTC). `offsetMinutes` defaults to the live local
- * offset; tests pass explicit values.
+ * Builds the stored cron for a draft. With an explicit zone the preset
+ * wall time is stored verbatim in that zone — no local->UTC conversion,
+ * so a zoned schedule is never double-converted. Drafts without a zone
+ * keep the legacy behavior (local wall converted to the UTC the daemon
+ * evaluates). `offsetMinutes` defaults to the live local offset; tests
+ * pass explicit values. Custom cron stays verbatim in both paths.
  */
 export function draftCron(
   draft: AutomationEditorDraft,
@@ -94,6 +102,17 @@ export function draftCron(
   if (draft.preset === "hourly") {
     // Minute-only crons need no conversion.
     return buildAutomationCronSchedule({ preset: "hourly", hour, minute });
+  }
+  if (draft.timezone.trim() !== "") {
+    // Explicitly zoned (including explicit UTC): the wall time belongs to
+    // the zone, so it is stored as-is.
+    const day = Math.max(0, Math.min(6, Math.floor(Number(draft.dayOfWeek) || 0)));
+    return buildAutomationCronSchedule({
+      preset: draft.preset,
+      hour,
+      minute,
+      dayOfWeek: day,
+    });
   }
   const utc = localPresetToUtcCronParts(
     draft.preset,
@@ -123,6 +142,7 @@ export type AutomationDraftErrors = {
   workspaceId?: string;
   harness?: string;
   schedule?: string;
+  timezone?: string;
   graceMinutes?: string;
 };
 
@@ -151,6 +171,9 @@ export function validateAutomationDraft(
     errors.schedule = "Enter a five-field cron.";
   } else if (!isValidAutomationCron(cron)) {
     errors.schedule = "Enter a valid five-field cron before saving.";
+  }
+  if (draft.timezone.trim() !== "" && !isValidTimezone(draft.timezone.trim())) {
+    errors.timezone = "Pick a valid timezone.";
   }
   const graceText = draft.graceMinutes.trim();
   if (graceText !== "") {

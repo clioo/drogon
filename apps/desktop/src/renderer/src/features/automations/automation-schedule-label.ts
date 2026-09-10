@@ -196,19 +196,31 @@ export function describeAutomationSchedule(
 }
 
 /**
- * Localized (here: English) schedule label for UI surfaces. The descriptor
- * carries UTC cron parts; they render as the local wall clock, like the
- * reference. `offsetMinutes` defaults to the live local offset; tests pass
- * explicit values.
+ * Localized (here: English) schedule label for UI surfaces. With no
+ * zone (or "UTC") the descriptor carries UTC cron parts and they render
+ * as the local wall clock, like the reference. With an explicit IANA zone
+ * the cron parts already are that zone's wall time, so they render
+ * verbatim with the zone named — never double-converted. `offsetMinutes`
+ * defaults to the live local offset; tests pass explicit values.
  */
 export function formatUiAutomationScheduleDescriptor(
   descriptor: AutomationScheduleDescriptor,
   offsetMinutes: number = localToUtcOffsetMinutes(),
+  timezone?: string | null,
 ): string {
   if (descriptor.kind === "invalid") return "Invalid schedule";
-  if (descriptor.kind === "custom") return "Custom schedule";
+  if (descriptor.kind === "custom")
+    return timezone && timezone !== "UTC" ? `Custom schedule (${timezone})` : "Custom schedule";
   if (descriptor.kind === "hourly") {
-    return `Hourly at :${String(descriptor.minute).padStart(2, "0")}`;
+    const base = `Hourly at :${String(descriptor.minute).padStart(2, "0")}`;
+    return timezone && timezone !== "UTC" ? `${base} (${timezone})` : base;
+  }
+  if (timezone && timezone !== "UTC") {
+    const time = formatAutomationScheduleTime(descriptor.hour, descriptor.minute);
+    const zoned = (label: string): string => `${label} (${timezone})`;
+    if (descriptor.kind === "daily") return zoned(`Daily at ${time}`);
+    if (descriptor.kind === "weekdays") return zoned(`Weekdays at ${time}`);
+    return zoned(`${EN_DAY_NAMES[descriptor.dayOfWeek]}s at ${time}`);
   }
   const dayOfWeek =
     descriptor.kind === "weekly" ? descriptor.dayOfWeek : null;
@@ -228,10 +240,12 @@ export function formatUiAutomationScheduleDescriptor(
 export function formatUiAutomationSchedule(
   scheduleExpression: string,
   offsetMinutes: number = localToUtcOffsetMinutes(),
+  timezone?: string | null,
 ): string {
   return formatUiAutomationScheduleDescriptor(
     describeAutomationSchedule(scheduleExpression),
     offsetMinutes,
+    timezone,
   );
 }
 

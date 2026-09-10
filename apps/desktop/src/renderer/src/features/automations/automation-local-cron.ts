@@ -1,15 +1,13 @@
-// Local wall-clock <-> UTC-cron conversion for preset schedules.
+// Local wall-clock <-> UTC-cron conversion for legacy schedules.
 //
-// The daemon evaluates cron in UTC and stores no timezone (it has no tz
-// database crate), while the editor's time field and every schedule label
-// speak the user's local wall clock, like the reference (which stores the
-// local IANA zone next to a local wall time). These helpers bridge the two:
-// preset drafts convert local -> UTC on save, schedule labels convert
-// UTC -> local on display, so entering "9:00 AM" fires at 9 AM local and
-// the list shows "Daily at 9:00 AM".
+// The daemon evaluates each schedule's cron wall time in its stored IANA
+// zone (legacy rows: UTC). Explicitly zoned schedules store the wall time
+// verbatim — no conversion — while rows stored without a zone keep the
+// historical behavior below: preset drafts converted local -> UTC on save,
+// schedule labels convert UTC -> local on display, so entering "9:00 AM"
+// fired at 9 AM local and the list shows "Daily at 9:00 AM".
 //
-// Custom cron stays verbatim UTC end to end (the CLI documents "schedule
-// runs in UTC"); only preset shapes convert.
+// Custom cron stays verbatim end to end in both paths.
 //
 // Limitations (documented, not silent):
 // - The offset is captured at save/display time. Across a DST transition

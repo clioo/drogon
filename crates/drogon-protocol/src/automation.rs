@@ -36,6 +36,10 @@ pub enum AutomationRunTrigger {
 pub struct AutomationCreateParams {
     pub name: String,
     pub cron: String,
+    /// IANA zone the cron wall time evaluates in. Absent means UTC
+    /// (legacy behavior). Present-but-invalid is rejected, never coerced.
+    #[serde(default)]
+    pub timezone: Option<String>,
     pub workspace_id: String,
     pub harness: String,
     pub prompt: String,
@@ -61,6 +65,10 @@ pub struct AutomationUpdateParams {
     pub name: Option<String>,
     #[serde(default)]
     pub cron: Option<String>,
+    /// Present string replaces the stored zone (recomputing the next run);
+    /// absent/null leaves it unchanged. Invalid zones are rejected.
+    #[serde(default)]
+    pub timezone: Option<String>,
     #[serde(default)]
     pub workspace_id: Option<String>,
     #[serde(default)]
@@ -116,6 +124,46 @@ pub struct AutomationRunsAllParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AutomationPreviewParams {
+    pub cron: String,
+    /// IANA zone to evaluate in; absent means UTC. Invalid zones reject.
+    #[serde(default)]
+    pub timezone: Option<String>,
+    /// Millisecond epoch to preview strictly after; defaults to now.
+    #[serde(default)]
+    pub from_ms: Option<f64>,
+    /// How many fires to list (1..=10, default 3).
+    #[serde(default)]
+    pub count: Option<u64>,
+}
+
+/// One fixed-time slot with no fire: its local wall time does not exist
+/// (DST gap). The daemon records the same skip when the tick advances
+/// past it, so this preview and the backend agree.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationPreviewSkipped {
+    /// Local calendar date with no fire, e.g. `"2026-03-08"`.
+    pub date: String,
+    /// Local wall time that does not exist, e.g. `"02:30"`.
+    pub wall_time: String,
+    pub reason: String,
+}
+
+/// `automation.preview` result: authoritative next fires plus gap skips,
+/// evaluated with the same semantics as the scheduler tick.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationPreviewResult {
+    /// Effective zone the preview evaluated in.
+    pub timezone: String,
+    /// Next UTC fire instants (ms epoch), strictly after `from_ms`.
+    pub fires: Vec<f64>,
+    pub skipped: Vec<AutomationPreviewSkipped>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AutomationRunParams {
     pub run_id: String,
 }
@@ -139,6 +187,10 @@ pub struct AutomationSummary {
     pub id: String,
     pub name: String,
     pub cron: String,
+    /// Stored IANA zone, when one was recorded at create/update. Additive:
+    /// absent means the legacy UTC evaluation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
     #[serde(default)]
     pub workspace_id: Option<String>,
     pub harness: String,
@@ -297,6 +349,7 @@ mod tests {
             id: "a1".into(),
             name: "nightly".into(),
             cron: "* * * * *".into(),
+            timezone: None,
             workspace_id: Some("w1".into()),
             harness: "pi".into(),
             model: None,
@@ -486,6 +539,7 @@ mod tests {
             id: "a1".into(),
             name: "nightly".into(),
             cron: "* * * * *".into(),
+            timezone: Some("America/New_York".into()),
             workspace_id: Some("w1".into()),
             harness: "pi".into(),
             model: Some("qwen3.8-flash-next-nvidia-nvfp4".into()),
@@ -499,15 +553,76 @@ mod tests {
         let value = serde_json::to_value(&summary).unwrap();
         assert_eq!(value["model"], json!("qwen3.8-flash-next-nvidia-nvfp4"));
         assert_eq!(value["provider"], json!("dgx-spark"));
+        assert_eq!(value["timezone"], json!("America/New_York"));
         let back: AutomationSummary = serde_json::from_value(value).unwrap();
         assert_eq!(back, summary);
         summary.model = None;
         summary.provider = None;
+        summary.timezone = None;
         let bare = serde_json::to_value(&summary).unwrap();
         assert!(bare.get("model").is_none());
         assert!(bare.get("provider").is_none());
+        assert!(bare.get("timezone").is_none());
         let back: AutomationSummary = serde_json::from_value(bare).unwrap();
         assert_eq!(back, summary);
+    }
+
+    #[test]
+    fn create_and_update_params_carry_optional_timezone() {
+        let create: AutomationCreateParams = serde_json::from_value(json!({
+            "name": "nightly", "cron": "0 9 * * *",
+            "timezone": "America/New_York",
+            "workspaceId": "w1", "harness": "pi", "prompt": "sweep",
+        }))
+        .unwrap();
+        assert_eq!(create.timezone.as_deref(), Some("America/New_York"));
+        let bare: AutomationCreateParams = serde_json::from_value(json!({
+            "name": "nightly", "cron": "0 9 * * *",
+            "workspaceId": "w1", "harness": "pi", "prompt": "sweep",
+        }))
+        .unwrap();
+        assert_eq!(bare.timezone, None);
+        let update: AutomationUpdateParams =
+            serde_json::from_value(json!({"id": "a1", "timezone": "Asia/Tokyo"})).unwrap();
+        assert_eq!(update.timezone.as_deref(), Some("Asia/Tokyo"));
+        // Unknown fields are still rejected.
+        assert!(
+            serde_json::from_value::<AutomationCreateParams>(
+                json!({"name": "x", "cron": "* * * * *", "workspaceId": "w1",
+                   "harness": "pi", "prompt": "s", "bogus": 1}),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn preview_params_and_result_use_exact_wire_keys() {
+        let params: AutomationPreviewParams = serde_json::from_value(json!({
+            "cron": "30 2 * * *", "timezone": "America/New_York",
+            "fromMs": 1_000.0, "count": 3,
+        }))
+        .unwrap();
+        assert_eq!(params.timezone.as_deref(), Some("America/New_York"));
+        assert_eq!(params.count, Some(3));
+        let bare: AutomationPreviewParams =
+            serde_json::from_value(json!({"cron": "* * * * *"})).unwrap();
+        assert_eq!(bare.timezone, None);
+        assert!(serde_json::from_value::<AutomationPreviewParams>(json!({"bogus": 1})).is_err());
+        let result = AutomationPreviewResult {
+            timezone: "America/New_York".into(),
+            fires: vec![1_771_000_000_000.0],
+            skipped: vec![AutomationPreviewSkipped {
+                date: "2026-03-08".into(),
+                wall_time: "02:30".into(),
+                reason: "DST gap".into(),
+            }],
+        };
+        let value = serde_json::to_value(&result).unwrap();
+        assert_eq!(value["timezone"], json!("America/New_York"));
+        assert_eq!(value["fires"], json!([1_771_000_000_000.0]));
+        assert_eq!(value["skipped"][0]["wallTime"], json!("02:30"));
+        let back: AutomationPreviewResult = serde_json::from_value(value).unwrap();
+        assert_eq!(back, result);
     }
 
     #[test]

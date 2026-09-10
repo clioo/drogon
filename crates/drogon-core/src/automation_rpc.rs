@@ -2,12 +2,14 @@
 //! manual `run_now`, and run `history` for bot-free cron automations.
 //!
 //! These compose the existing pieces without duplicating them: cron
-//! validation and rescheduling come from [`automations::scheduler`],
-//! eligibility and dispatch from [`automations::direct`] +
+//! validation and rescheduling come from [`automations::scheduler`] with
+//! IANA-zone evaluation from [`automations::timezone`], eligibility and
+//! dispatch from [`automations::direct`] +
 //! [`automations::runner`]'s seam, and durability from
 //! [`automations::storage`]. The schedule lives in `Automation::rrule`
-//! (the reference stores cron there too); only `"UTC"` is admitted as a
-//! timezone in v1 because this build has no timezone database crate.
+//! (the reference stores cron there too) with its wall-time zone in
+//! `Automation::timezone` (absent/legacy rows evaluate in UTC); unknown
+//! zones are rejected at admission, never coerced.
 //!
 //! `create`/`update`/`delete` run on the atomic ledger path (DB-only, one
 //! transaction with the receipt). `run_now` runs on the effect ledger path
@@ -24,12 +26,13 @@ use drogon_protocol::{
     Request, RpcError,
     automation::{
         AutomationCreateParams, AutomationDeleteParams, AutomationHistoryParams,
-        AutomationHistoryResult, AutomationListResult, AutomationRunDetail, AutomationRunListItem,
-        AutomationRunNowOutcome, AutomationRunNowParams, AutomationRunNowResult,
-        AutomationRunOutputFormat, AutomationRunOutputSnapshotView, AutomationRunParams,
-        AutomationRunStatus as WireStatus, AutomationRunTrigger as WireTrigger, AutomationRunView,
-        AutomationRunsAllParams, AutomationRunsAllResult, AutomationSummary,
-        AutomationUpdateParams, LastRunSummary,
+        AutomationHistoryResult, AutomationListResult, AutomationPreviewParams,
+        AutomationPreviewResult, AutomationPreviewSkipped, AutomationRunDetail,
+        AutomationRunListItem, AutomationRunNowOutcome, AutomationRunNowParams,
+        AutomationRunNowResult, AutomationRunOutputFormat, AutomationRunOutputSnapshotView,
+        AutomationRunParams, AutomationRunStatus as WireStatus,
+        AutomationRunTrigger as WireTrigger, AutomationRunView, AutomationRunsAllParams,
+        AutomationRunsAllResult, AutomationSummary, AutomationUpdateParams, LastRunSummary,
     },
 };
 
@@ -134,6 +137,18 @@ fn require_grace(value: Option<f64>) -> Result<f64, RpcError> {
         )));
     }
     Ok(grace)
+}
+
+/// Computes the stored `next_run_at` for an admitted (already
+/// validated and normalized) cron+zone pair strictly after `now_ms`:
+/// the single computation shared by create, schedule-touching update,
+/// and run-now reschedules. Callers pass the real clock; same-module
+/// tests pass fixed clocks for deterministic gap/fold vectors. Pure:
+/// no DB, no ledger, no dispatch.
+fn admit_next_run_at(cron: &str, timezone: &str, now_ms: f64) -> Result<f64, RpcError> {
+    crate::automations::timezone::next_native_fire_ms(cron, timezone, now_ms)
+        .map(|ms| ms as f64)
+        .ok_or_else(|| invalid_argument("cron expression has no future occurrence from now"))
 }
 
 /// Harness model/provider override admission, mirroring the bounds
@@ -336,6 +351,11 @@ fn summarize(conn: &Connection, automation: &Automation) -> Result<AutomationSum
         id: automation.id.clone(),
         name: automation.name.clone(),
         cron: automation.rrule.clone(),
+        timezone: if automation.timezone.is_empty() {
+            None
+        } else {
+            Some(automation.timezone.clone())
+        },
         workspace_id: automation.workspace_id.clone(),
         harness: automation.agent_id.clone(),
         model: automation.model.clone(),
@@ -352,6 +372,7 @@ struct NewAutomation {
     id: String,
     name: String,
     cron: String,
+    timezone: String,
     workspace_id: String,
     harness: String,
     prompt: String,
@@ -368,9 +389,7 @@ fn build_automation(
     new: NewAutomation,
 ) -> Result<Automation, RpcError> {
     admit_workspace(conn, host_id, &new.workspace_id)?;
-    let next_run_at = scheduler::next_fire_ms(&new.cron, new.now_ms)
-        .ok_or_else(|| invalid_argument("cron expression has no future occurrence from now"))?
-        as f64;
+    let next_run_at = admit_next_run_at(&new.cron, &new.timezone, new.now_ms)?;
     Ok(Automation {
         id: new.id,
         creation_key: None,
@@ -392,7 +411,7 @@ fn build_automation(
         base_branch: None,
         setup_decision: None,
         reuse_session: false,
-        timezone: "UTC".to_string(),
+        timezone: new.timezone,
         rrule: new.cron,
         dtstart: new.now_ms,
         enabled: new.enabled,
@@ -420,6 +439,8 @@ impl crate::Engine {
         let params: AutomationCreateParams = parse_params(&request.params, "automation.create")?;
         let name = require_name(&params.name)?;
         let cron = scheduler::validate_cron(&params.cron).map_err(invalid_argument)?;
+        let timezone = crate::automations::timezone::normalize_timezone(params.timezone.as_deref())
+            .map_err(invalid_argument)?;
         let workspace_id = require_id(&params.workspace_id, "workspaceId")?;
         let harness = require_harness(&params.harness)?;
         let prompt = require_prompt(&params.prompt)?;
@@ -443,6 +464,7 @@ impl crate::Engine {
                         id: uuid::Uuid::new_v4().to_string(),
                         name: name.clone(),
                         cron: cron.clone(),
+                        timezone: timezone.clone(),
                         workspace_id: workspace_id.clone(),
                         harness: harness.clone(),
                         prompt: prompt.clone(),
@@ -489,6 +511,12 @@ impl crate::Engine {
             .cron
             .as_deref()
             .map(scheduler::validate_cron)
+            .transpose()
+            .map_err(invalid_argument)?;
+        let timezone = params
+            .timezone
+            .as_deref()
+            .map(|zone| crate::automations::timezone::normalize_timezone(Some(zone)))
             .transpose()
             .map_err(invalid_argument)?;
         let workspace_id = params
@@ -554,6 +582,12 @@ impl crate::Engine {
                     automation.rrule = cron;
                     cron_touched = true;
                 }
+                if let Some(timezone) = timezone.clone() {
+                    // A zone edit re-anchors the same wall time in the new
+                    // zone, so the next run is always recomputed.
+                    automation.timezone = timezone;
+                    cron_touched = true;
+                }
                 if let Some(enabled) = params.enabled {
                     if enabled && !automation.enabled && automation.next_run_at <= now_ms {
                         cron_touched = true;
@@ -561,10 +595,8 @@ impl crate::Engine {
                     automation.enabled = enabled;
                 }
                 if cron_touched {
-                    automation.next_run_at = scheduler::next_fire_ms(&automation.rrule, now_ms)
-                        .ok_or_else(|| {
-                            invalid_argument("cron expression has no future occurrence from now")
-                        })? as f64;
+                    automation.next_run_at =
+                        admit_next_run_at(&automation.rrule, &automation.timezone, now_ms)?;
                 }
                 automation.updated_at = now_ms;
                 storage::upsert_automation(tx, &automation)
@@ -629,6 +661,50 @@ impl crate::Engine {
         serde_json::to_value(&result).map_err(|e| internal_error(e.to_string()))
     }
 
+    /// Authoritative schedule preview: next fires plus DST-gap skips,
+    /// evaluated with the tick's exact zone semantics. Read-only: no
+    /// ledger entry, no run rows, no dispatch -- the editor renders this
+    /// so its preview and the backend agree by construction.
+    pub(crate) fn automation_preview(&self, params: &Value) -> Result<Value, RpcError> {
+        let params: AutomationPreviewParams = parse_params(params, "automation.preview")?;
+        let cron = scheduler::validate_cron(&params.cron).map_err(invalid_argument)?;
+        let timezone = crate::automations::timezone::normalize_timezone(params.timezone.as_deref())
+            .map_err(invalid_argument)?;
+        let from_ms = params
+            .from_ms
+            .unwrap_or_else(|| crate::now_unix_ms() as f64);
+        if !from_ms.is_finite() || from_ms < 0.0 {
+            return Err(invalid_argument(
+                "fromMs must be a non-negative millisecond epoch",
+            ));
+        }
+        let count = params.count.unwrap_or(3);
+        if count == 0 || count > 10 {
+            return Err(invalid_argument("count must be within 1..=10"));
+        }
+        let preview = crate::automations::timezone::preview_fires_in_zone(
+            &cron,
+            &timezone,
+            from_ms,
+            count as usize,
+        )
+        .ok_or_else(|| invalid_argument("cron expression has no future occurrence from there"))?;
+        let result = AutomationPreviewResult {
+            timezone: preview.timezone,
+            fires: preview.fires.iter().map(|ms| *ms as f64).collect(),
+            skipped: preview
+                .skipped
+                .iter()
+                .map(|skip| AutomationPreviewSkipped {
+                    date: skip.local_date.clone(),
+                    wall_time: skip.wall_time.clone(),
+                    reason: skip.reason.clone(),
+                })
+                .collect(),
+        };
+        serde_json::to_value(&result).map_err(|e| internal_error(e.to_string()))
+    }
+
     pub(crate) fn automation_run_now(&self, request: &Request) -> Result<Value, RpcError> {
         let params: AutomationRunNowParams = parse_params(&request.params, "automation.run_now")?;
         let id = require_id(&params.id, "id")?;
@@ -683,9 +759,12 @@ impl crate::Engine {
                     Ok(DirectPrepareOutcome::Refused(refusal)) => {
                         let refusal_text = format!("{refusal:?}");
                         let reschedule = Reschedule {
-                            next_run_at: scheduler::next_fire_ms(&automation.rrule, now_ms)
-                                .map(|ms| ms as f64)
-                                .unwrap_or(automation.next_run_at),
+                            next_run_at: admit_next_run_at(
+                                &automation.rrule,
+                                &automation.timezone,
+                                now_ms,
+                            )
+                            .unwrap_or(automation.next_run_at),
                             last_run_at: None,
                         };
                         let run_id = {
@@ -739,8 +818,7 @@ impl crate::Engine {
                 let outcome = runner::dispatch_run_plan(&seam, &plan);
                 let observed_at = crate::now_unix_ms() as f64;
                 let reschedule = Reschedule {
-                    next_run_at: scheduler::next_fire_ms(&automation.rrule, now_ms)
-                        .map(|ms| ms as f64)
+                    next_run_at: admit_next_run_at(&automation.rrule, &automation.timezone, now_ms)
                         .unwrap_or(automation.next_run_at),
                     last_run_at: Some(now_ms),
                 };
@@ -866,5 +944,115 @@ impl crate::Engine {
             session_exists,
         };
         serde_json::to_value(&detail).map_err(|e| internal_error(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::admit_next_run_at;
+    use crate::automations::scheduler;
+
+    /// Monday 2026-09-07T00:00:00Z in millisecond epoch.
+    const MONDAY_MIDNIGHT_MS: f64 = 1_788_739_200_000.0;
+
+    const NY: &str = "America/New_York";
+    /// Millisecond epoch for a UTC wall time, taking a 0-based month like
+    /// JavaScript `Date.UTC` so vectors read identically on both sides.
+    fn utc_ms(year: i32, month0: u32, day: u32, hour: u32, minute: u32) -> f64 {
+        let month = month0 + 1;
+        let y = if month <= 2 { year - 1 } else { year } as i64;
+        let era = if y >= 0 { y } else { y - 399 } / 400;
+        let yoe = y - era * 400;
+        let mp = (month as i64 + 9) % 12;
+        let doy = (153 * mp + 2) / 5 + day as i64 - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        let days = era * 146_097 + doe - 719_468;
+        (days * 86_400_000 + hour as i64 * 3_600_000 + minute as i64 * 60_000) as f64
+    }
+
+    #[test]
+    fn admission_matches_legacy_utc_evaluation() {
+        assert_eq!(utc_ms(2026, 8, 7, 0, 0), MONDAY_MIDNIGHT_MS);
+        for cron in ["* * * * *", "30 8 * * *", "0 9 * * 1-5", "0 0 29 2 *"] {
+            let legacy = scheduler::next_fire_ms(cron, MONDAY_MIDNIGHT_MS).unwrap() as f64;
+            assert_eq!(
+                admit_next_run_at(cron, "UTC", MONDAY_MIDNIGHT_MS).unwrap(),
+                legacy
+            );
+            assert_eq!(
+                admit_next_run_at(cron, "", MONDAY_MIDNIGHT_MS).unwrap(),
+                legacy
+            );
+        }
+    }
+
+    #[test]
+    fn admission_applies_gap_policy_in_zone() {
+        // Mar 8 2026 02:30 does not exist in America/New_York. Admission
+        // stores the native first fire; the tick records the gap skip.
+        assert_eq!(
+            admit_next_run_at("30 2 * * *", NY, utc_ms(2026, 2, 7, 0, 0)).unwrap(),
+            utc_ms(2026, 2, 7, 7, 30)
+        );
+        // Recomputed from inside the gap day, the stored slot is the
+        // shifted first-valid instant the tick will record skipped.
+        assert_eq!(
+            admit_next_run_at("30 2 * * *", NY, utc_ms(2026, 2, 8, 0, 0)).unwrap(),
+            utc_ms(2026, 2, 8, 7, 0)
+        );
+    }
+
+    #[test]
+    fn admission_fires_folds_once_at_the_first_occurrence() {
+        // Fixed-time fold: the earlier half only.
+        assert_eq!(
+            admit_next_run_at("30 1 * * *", NY, utc_ms(2026, 9, 31, 12, 0)).unwrap(),
+            utc_ms(2026, 10, 1, 5, 30)
+        );
+        // Interval fold: first halves only, later halves jumped past.
+        assert_eq!(
+            admit_next_run_at("*/30 1 * * *", NY, utc_ms(2026, 10, 1, 4, 59)).unwrap(),
+            utc_ms(2026, 10, 1, 5, 0)
+        );
+        assert_eq!(
+            admit_next_run_at("*/30 1 * * *", NY, utc_ms(2026, 10, 1, 5, 45)).unwrap(),
+            utc_ms(2026, 10, 2, 6, 0)
+        );
+        // Seconds-grained fold wall inside the overlap.
+        assert_eq!(
+            admit_next_run_at("30 0 1 * * *", NY, utc_ms(2026, 10, 1, 6, 0)).unwrap(),
+            utc_ms(2026, 10, 2, 6, 0) + 30_000.0
+        );
+    }
+
+    #[test]
+    fn zone_edit_scenario_is_deterministic_at_fixed_clocks() {
+        use crate::automations::timezone::preview_fires_in_zone;
+        // Fixed admission clock: yearly walls, future-ness and
+        // first-occurrence hold with zero flake. This vector pins May;
+        // the January-window relationship (zones' next fires falling in
+        // different years) is covered by the integration wall assertions,
+        // which hold for any run date.
+        let t0 = utc_ms(2026, 4, 17, 12, 0);
+        let utc_next = admit_next_run_at("0 0 1 1 *", "UTC", t0).unwrap();
+        let ny_next = admit_next_run_at("0 0 1 1 *", NY, t0).unwrap();
+        assert_eq!(utc_next, utc_ms(2027, 0, 1, 0, 0));
+        assert_eq!(ny_next, utc_ms(2027, 0, 1, 0, 0) + 5.0 * 3_600_000.0);
+        assert!(utc_next > t0 && ny_next > t0);
+        assert_eq!(
+            preview_fires_in_zone("0 0 1 1 *", "UTC", t0, 1)
+                .unwrap()
+                .fires[0] as f64,
+            utc_next
+        );
+        assert_eq!(
+            preview_fires_in_zone("0 0 1 1 *", NY, t0, 1).unwrap().fires[0] as f64,
+            ny_next
+        );
+    }
+
+    #[test]
+    fn admission_rejects_schedules_with_no_future_fire() {
+        assert!(admit_next_run_at("0 0 31 2 *", "UTC", MONDAY_MIDNIGHT_MS).is_err());
     }
 }

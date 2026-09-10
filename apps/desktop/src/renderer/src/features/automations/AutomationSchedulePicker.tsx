@@ -31,9 +31,11 @@ function buildCustomScheduleSeed(
   if (draft.preset === "custom") {
     return "";
   }
-  // The preset is still the previous one here, so draftCron converts the
-  // same local wall time the preset would have stored: switching to custom
-  // seeds the equivalent expression instead of shifting the schedule.
+  // The preset is still the previous one here, so draftCron renders the
+  // same wall time the preset stored: switching to custom seeds the
+  // equivalent expression instead of shifting the schedule (zoned drafts
+  // seed the in-zone wall time verbatim; legacy drafts keep the UTC
+  // conversion inside draftCron).
   return offsetMinutes === undefined
     ? draftCron(draft)
     : draftCron(draft, offsetMinutes);
