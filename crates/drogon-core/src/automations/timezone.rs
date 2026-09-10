@@ -67,9 +67,14 @@ const MAX_GAP_HOPS: usize = 4;
 const MAX_FOLD_OVERLAPS: usize = 4;
 
 /// Minute-by-minute bound for walking to the end of one fold overlap.
-/// Every real overlap is under three hours; thirty-six hours terminates
-/// on adversarial data while never cutting a genuine transition short.
+/// Resolution past the bound fails closed with no fire rather than
+/// looping; genuine overlaps end orders of magnitude sooner.
 const OVERLAP_WALK_MINUTES: usize = 2160;
+
+/// Backward second-scan bound for pinpointing the overlap end inside
+/// its minute wall. tzdata transitions carry second precision, so this
+/// covers any sub-minute edge with margin.
+const OVERLAP_REWIND_SECONDS: i64 = 120;
 
 /// Validates and canonicalizes a timezone param. `None`/blank means the
 /// legacy UTC behavior. `"UTC"` passes through. Anything else must parse
@@ -219,24 +224,48 @@ fn is_fold_second_half(tz: &Tz, fire: &DateTime<Tz>) -> bool {
 
 /// First fireable instant after the fold overlap containing a later half:
 /// the wall clock stepped forward minute by minute until it resolves to
-/// a single instant. Folds never touch gaps, so a `Gap` arm only steps
-/// over it. Bundle-backed (`chrono-tz`) resolution, minute granularity
-/// so seconds-grained crons are covered with one walk; overlap-end
-/// resolution is minute-granular by construction (sub-minute transition
-/// edges only exist in pre-1920 LMT data).
+/// a single instant, then refined backward to the first valid second.
+/// Folds never touch gaps, so a `Gap` arm only steps over it.
+/// Bundle-backed (`chrono-tz`) resolution at both granularities, so
+/// seconds-grained crons are covered with one walk plus one scan.
 fn overlap_end_after(tz: &Tz, later_half: &DateTime<Tz>) -> Option<DateTime<Tz>> {
     // Truncate to the minute first: stepping whole minutes from a wall
     // with seconds would overshoot the first single wall (e.g. from
     // 1:59:59 straight to 2:00:59, losing 2:00:00-2:00:58).
     let mut wall = later_half.naive_local().with_second(0)?;
+    let mut first_single_minute: Option<DateTime<Tz>> = None;
     for _ in 0..OVERLAP_WALK_MINUTES {
         wall = wall.checked_add_signed(chrono::TimeDelta::try_minutes(1)?)?;
         match tz.from_local_datetime(&wall) {
-            LocalResult::Single(dt) => return Some(dt),
+            LocalResult::Single(dt) => {
+                first_single_minute = Some(dt);
+                break;
+            }
             LocalResult::Ambiguous(..) | LocalResult::None => {}
         }
     }
-    None
+    refine_overlap_end(tz, first_single_minute?)
+}
+
+/// Pins the overlap end to the first valid second: the minute walk only
+/// brackets it inside one minute wall, and transitions carry second
+/// precision. Scans backward from the minute wall; the first non-single
+/// second met means the boundary is the second right after it. Falls
+/// back to the minute wall when the whole scan stays single.
+fn refine_overlap_end(tz: &Tz, minute_wall: DateTime<Tz>) -> Option<DateTime<Tz>> {
+    let end_secs = minute_wall.timestamp();
+    for back in 1..=OVERLAP_REWIND_SECONDS {
+        let probe = DateTime::<Utc>::from_timestamp(end_secs - back, 0)?;
+        let wall = tz.from_utc_datetime(&probe.naive_utc()).naive_local();
+        match tz.from_local_datetime(&wall) {
+            LocalResult::Single(_) => continue,
+            LocalResult::Ambiguous(..) | LocalResult::None => {
+                return DateTime::<Utc>::from_timestamp(end_secs - back + 1, 0)
+                    .map(|dt| dt.with_timezone(tz));
+            }
+        }
+    }
+    Some(minute_wall)
 }
 
 /// Next fire plus the gap skips advanced past to reach it. Preview-only:

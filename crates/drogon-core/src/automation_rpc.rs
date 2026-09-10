@@ -956,7 +956,6 @@ mod tests {
     const MONDAY_MIDNIGHT_MS: f64 = 1_788_739_200_000.0;
 
     const NY: &str = "America/New_York";
-
     /// Millisecond epoch for a UTC wall time, taking a 0-based month like
     /// JavaScript `Date.UTC` so vectors read identically on both sides.
     fn utc_ms(year: i32, month0: u32, day: u32, hour: u32, minute: u32) -> f64 {
@@ -1023,6 +1022,31 @@ mod tests {
         assert_eq!(
             admit_next_run_at("30 0 1 * * *", NY, utc_ms(2026, 10, 1, 6, 0)).unwrap(),
             utc_ms(2026, 10, 2, 6, 0) + 30_000.0
+        );
+    }
+
+    #[test]
+    fn zone_edit_scenario_is_deterministic_at_fixed_clocks() {
+        use crate::automations::timezone::preview_fires_in_zone;
+        // Fixed admission clock: yearly walls, future-ness and
+        // first-occurrence hold with zero flake, whatever the run date
+        // (including the Jan-1 00:00-05:00Z window, where the two zones'
+        // next fires fall in different years).
+        let t0 = utc_ms(2026, 4, 17, 12, 0);
+        let utc_next = admit_next_run_at("0 0 1 1 *", "UTC", t0).unwrap();
+        let ny_next = admit_next_run_at("0 0 1 1 *", NY, t0).unwrap();
+        assert_eq!(utc_next, utc_ms(2027, 0, 1, 0, 0));
+        assert_eq!(ny_next, utc_ms(2027, 0, 1, 0, 0) + 5.0 * 3_600_000.0);
+        assert!(utc_next > t0 && ny_next > t0);
+        assert_eq!(
+            preview_fires_in_zone("0 0 1 1 *", "UTC", t0, 1)
+                .unwrap()
+                .fires[0] as f64,
+            utc_next
+        );
+        assert_eq!(
+            preview_fires_in_zone("0 0 1 1 *", NY, t0, 1).unwrap().fires[0] as f64,
+            ny_next
         );
     }
 

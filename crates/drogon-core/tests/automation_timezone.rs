@@ -283,10 +283,11 @@ fn zone_edit_recomputes_the_next_run_in_the_new_zone() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, workspace_id) = engine_with_workspace(&dir);
 
-    // Yearly Jan-1 midnight. Wall-clock assertions hold for any run date
-    // (including the Jan-1 00:00-05:00Z window, where the UTC and NY next
-    // fires fall in different years): each stored instant renders as
-    // Jan-1 midnight in its own zone, whatever the year.
+    // Yearly Jan-1 midnight. Wall assertions hold for any run date:
+    // each stored instant renders as Jan-1 midnight in its own zone.
+    // Future- and first-occurrence oracles for this scenario live with
+    // fixed clocks in the admission unit tests (`automation_rpc.rs`),
+    // where no real-clock race is possible.
     let created = create_zoned(&engine, "edit-1", &workspace_id, "0 0 1 1 *", None);
     let automation_id = created["id"].as_str().unwrap().to_string();
     let utc_next = created["nextRunAt"].as_f64().unwrap();
@@ -300,31 +301,6 @@ fn zone_edit_recomputes_the_next_run_in_the_new_zone() {
     assert_eq!(updated["timezone"], json!(NY));
     let ny_next = updated["nextRunAt"].as_f64().unwrap();
     assert_eq!(wall_in_zone(ny_next, NY), (1, 1, 0, 0));
-
-    // Future/first-occurrence oracle against the test's own clock (no
-    // Engine seam needed): both stored instants lie strictly after now,
-    // and each equals the first fire recomputed from now -- i.e. the
-    // stored slot is the next one, not just a same-walled later one.
-    // Millisecond-flake window, documented not hidden: if Jan-1
-    // 00:00:00.000Z falls between admission and `t0`, the recomputed
-    // first fire advances a year. Yearly walls make that the only seam.
-    let t0 = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as f64;
-    assert!(utc_next > t0 && ny_next > t0);
-    assert_eq!(
-        timezone::preview_fires_in_zone("0 0 1 1 *", "UTC", t0, 1)
-            .unwrap()
-            .fires[0] as f64,
-        utc_next
-    );
-    assert_eq!(
-        timezone::preview_fires_in_zone("0 0 1 1 *", NY, t0, 1)
-            .unwrap()
-            .fires[0] as f64,
-        ny_next
-    );
 
     // History survives the zone edit (no rows fabricated by the edit).
     assert!(history(&engine, &automation_id).is_empty());
