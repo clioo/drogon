@@ -270,7 +270,7 @@ export function WorktreeCard({
   // The source's meta-row presence test (hasMetaRow): the branch identity
   // or any badge — the agent rows tighten up under the title when absent.
   const hasMetaRow = Boolean(
-    (showBranch && worktree.branch) ||
+    worktree.branch ||
       (showBranch && (gitStatus?.branch.ahead ?? 0) + (gitStatus?.branch.behind ?? 0) > 0) ||
       (showPr && pr) ||
       (showProperties.issue !== false && issueNumber !== null),
@@ -334,7 +334,11 @@ export function WorktreeCard({
               />
             </span>
             <WorktreeCardMetaBadges
-              branch={showBranch ? worktree.branch : ""}
+              // The fork's classic meta row shows the branch identity
+              // whenever the worktree has one (worktree-card-presentation's
+              // showBranch); only the ahead/behind chips stay tied to this
+              // repo's Branch property.
+              branch={worktree.branch}
               ahead={showBranch ? (gitStatus?.branch.ahead ?? null) : null}
               behind={showBranch ? (gitStatus?.branch.behind ?? null) : null}
               upstream={showBranch ? (gitStatus?.branch.upstream ?? null) : null}

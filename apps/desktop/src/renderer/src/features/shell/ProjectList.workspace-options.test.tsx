@@ -437,7 +437,7 @@ describe("Workspace options: Group by", () => {
 });
 
 describe("Workspace options: Show properties", () => {
-  test("unchecking Branch hides the branch badge on every card", () => {
+  test("the branch identity shows on every card like the source's classic meta row", () => {
     const groups: ProjectGroup[] = [
       {
         project: project(),
@@ -447,15 +447,17 @@ describe("Workspace options: Show properties", () => {
       },
     ];
     const { container } = mount({ groups });
-    // Source Default omits Branch; explicitly opt in before testing uncheck.
-    expect(container.querySelector(".shell-worktree-card-branch")).toBeNull();
+    // The fork's classic meta row shows the branch identity whenever the
+    // worktree has one, independent of the Branch display property (which
+    // gates only the ahead/behind chips).
+    const branch = container.querySelector(".shell-worktree-card-branch");
+    expect(branch?.textContent).toBe("feature-x");
     openWorkspaceOptionsMenu();
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Branch" }));
-    expect(container.querySelector(".shell-worktree-card-branch")).toBeTruthy();
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Branch" }));
-
-    expect(container.querySelector(".shell-worktree-card-branch")).toBeNull();
-    // The card itself, and its title, are untouched -- only the badge is gone.
+    expect(container.querySelector(".shell-worktree-card-branch")?.textContent).toBe(
+      "feature-x",
+    );
+    // The card itself, and its title, are untouched.
     expect(screen.getByText("My Worktree")).toBeTruthy();
   });
 });
