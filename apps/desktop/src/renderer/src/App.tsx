@@ -259,7 +259,7 @@ import {
 import { MENTU_OPEN_TAB_EVENT, MentuPanel } from "./features/mentu/MentuPanel";
 import { refreshWorktreeIssueLinks } from "./features/tasks/issue-links";
 import { TasksPage } from "./features/tasks/TasksPage";
-import { loadBotSnapshot } from "./bots-loader";
+import { loadBotSnapshot, resolveBotsScope } from "./bots-loader";
 import type { BotsLoadResult } from "./bots-loader";
 import { FILES_CAPABILITY } from "../../shared/file-contract";
 import { subscribeWorkspaceFilesChanged } from "./features/file-explorer/files-watch";
@@ -915,27 +915,14 @@ export function App() {
   );
   // Bots snapshot loads through the gated bridge for the exact live scope;
   // results carry their scope triple and render only on scope match, so no
-  // stale snapshot ever shows for another workspace/host. No run control:
-  // the panel is read-only until the BotRun bridge lands.
-  // #348: with no workspace selected the scope falls back to the app-global
-  // empty-workspace scope (""), matching the fork's app-global
-  // window.api.bots.list() — the Bots page loads across all of the host's
-  // workspaces instead of never loading. The native bot.snapshot RPC admits
-  // the empty-workspace scope as this host-global variant.
-  const botsScope =
-    current && status
-      ? {
-          hostId: status.hostId,
-          workspaceId: current.id,
-          locale: settings.get("locale"),
-        }
-      : status
-        ? {
-            hostId: status.hostId,
-            workspaceId: "",
-            locale: settings.get("locale"),
-          }
-        : null;
+  // stale snapshot ever shows for another host. No run control: the panel
+  // is read-only until the BotRun bridge lands.
+  // #348/R17-E: the scope is always the app-global empty-workspace scope
+  // (""), matching the fork's app-global window.api.bots.list() — narrowing
+  // to the selected workspace's folder rendered 'No Bots yet' for bots
+  // owned elsewhere. The native bot.snapshot RPC admits the empty-workspace
+  // scope as this host-global variant.
+  const botsScope = resolveBotsScope(status, settings.get("locale"));
   const botsScopeHost = botsScope?.hostId ?? null;
   const botsScopeWorkspace = botsScope?.workspaceId ?? null;
   const botsScopeLocale = botsScope?.locale ?? null;
