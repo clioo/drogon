@@ -141,27 +141,24 @@ pub fn provisional_endpoint_id(site_url: &str) -> Result<String, String> {
     Ok(URL_SAFE_NO_PAD.encode(digest)[..24].to_string())
 }
 
-/// Where a source-backed instance identifier came from. Only identifiers
+/// Where a source-backed identity claim came from. Only identifiers
 /// read from an ACTUAL instance response payload (never from user
-/// configuration, never from the credential email) count as source-backed;
-/// producers are deterministic and covered by fixture payloads.
+/// configuration, never from the credential email) count; producers are
+/// deterministic and covered by fixture payloads. Evidence tiers differ:
+/// only the Cloud tenant id proves IMMUTABLE installation continuity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstanceIdentitySource {
     /// Jira Cloud tenant id (`cloudId`) from an accessible-resources-style
-    /// response payload, matched to the configured site URL.
+    /// response payload, matched to the configured site URL. The tenant id
+    /// survives endpoint/domain changes: this is the one source that
+    /// proves immutable installation continuity.
     CloudTenantId,
-    /// Jira Server/DC: the instance's OWN serverInfo-attested base URL —
-    /// the server attesting its canonical address, which is stronger
-    /// evidence than user configuration (Server/DC exposes no immutable
-    /// instance id).
-    ServerAttestedBaseUrl,
 }
 
 impl InstanceIdentitySource {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::CloudTenantId => "cloud-tenant-id",
-            Self::ServerAttestedBaseUrl => "server-attested-base-url",
         }
     }
 
@@ -170,22 +167,29 @@ impl InstanceIdentitySource {
     fn prefix(self) -> &'static str {
         match self {
             Self::CloudTenantId => "cloudid",
-            Self::ServerAttestedBaseUrl => "server",
         }
     }
 }
 
 /// How the Jira instance is KNOWN. A configured URL alone yields only the
-/// [`JiraInstanceIdentity::Provisional`] tier; the identity of record is
-/// [`JiraInstanceIdentity::SourceBacked`] — an identifier read from an
-/// actual instance response, with provenance. A configured URL alone must
-/// never flip an unresolved legacy binding into a verified
-/// actual-instance identity.
+/// [`JiraInstanceIdentity::Provisional`] tier. Server-attested endpoint
+/// responses yield [`JiraInstanceIdentity::EndpointAttested`] — continuity
+/// evidence for the endpoint, explicitly NOT an immutable installation id
+/// (a moved endpoint can keep the same installation). Only
+/// [`JiraInstanceIdentity::SourceBacked`] with the Cloud tenant id proves
+/// immutable installation continuity, and it is the identity of record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JiraInstanceIdentity {
     Provisional {
         endpoint_id: String,
         endpoint_url: String,
+    },
+    /// The instance's OWN serverInfo-attested base URL: stronger than user
+    /// configuration for ENDPOINT continuity, but unresolved for immutable
+    /// installation identity — never labeled verified stable identity.
+    EndpointAttested {
+        attested_url: String,
+        observed_at: String,
     },
     SourceBacked {
         instance_key: String,
@@ -197,12 +201,15 @@ pub enum JiraInstanceIdentity {
 }
 
 impl JiraInstanceIdentity {
-    /// Namespaced composite key for stores: provisional labels and
-    /// source-backed identifiers live in DIFFERENT namespaces, so a
-    /// provisional label can never masquerade as the verified instance.
+    /// Namespaced composite key for stores: the three tiers live in
+    /// DIFFERENT namespaces, so no weaker tier can masquerade as a stronger
+    /// one.
     pub fn key(&self) -> String {
         match self {
             Self::Provisional { endpoint_id, .. } => format!("provisional:{endpoint_id}"),
+            Self::EndpointAttested { attested_url, .. } => {
+                format!("attested:{}", attested_url)
+            }
             Self::SourceBacked {
                 instance_key,
                 source,
@@ -213,14 +220,31 @@ impl JiraInstanceIdentity {
 
     pub fn endpoint_url(&self) -> &str {
         match self {
-            Self::Provisional { endpoint_url, .. } | Self::SourceBacked { endpoint_url, .. } => {
-                endpoint_url
+            Self::Provisional { endpoint_url, .. }
+            | Self::EndpointAttested {
+                attested_url: endpoint_url,
+                ..
             }
+            | Self::SourceBacked { endpoint_url, .. } => endpoint_url,
         }
     }
 
     pub fn is_source_backed(&self) -> bool {
         matches!(self, Self::SourceBacked { .. })
+    }
+
+    /// True ONLY when this identity proves immutable installation
+    /// continuity (the Cloud tenant id). Endpoint attestation does not:
+    /// a moved endpoint keeps the same installation, so an attested URL
+    /// must stay unresolved for immutable-instance continuity.
+    pub fn is_immutable_instance_identity(&self) -> bool {
+        matches!(
+            self,
+            Self::SourceBacked {
+                source: InstanceIdentitySource::CloudTenantId,
+                ..
+            }
+        )
     }
 }
 
@@ -246,9 +270,12 @@ pub fn cloud_tenant_id_from_accessible_resources(
 
 /// Extracts the Server/DC server-attested base URL from a serverInfo
 /// payload, the deterministic producer for
-/// [`InstanceIdentitySource::ServerAttestedBaseUrl`]. Returns the
-/// normalized, case-folded URL the SERVER attests (which may differ from
-/// what the user configured). Pure payload parsing.
+/// [`JiraInstanceIdentity::EndpointAttested`]. Returns the normalized,
+/// case-folded URL the SERVER attests (which may differ from what the user
+/// configured). ATTENTION: this is ENDPOINT continuity evidence only — a
+/// moved endpoint can keep the same installation, so it is unresolved for
+/// immutable-instance continuity, never verified stable identity. Pure
+/// payload parsing.
 pub fn server_attested_base_url_from_server_info(payload: &serde_json::Value) -> Option<String> {
     let base_url = payload.get("baseUrl").and_then(serde_json::Value::as_str)?;
     let normalized = normalize_jira_site_url(base_url).ok()?;
@@ -317,11 +344,30 @@ impl JiraTaskIdentity {
         Self::build(instance, issue_id, key)
     }
 
+    /// Resolves the task identity from a server-attested endpoint URL
+    /// (see [`server_attested_base_url_from_server_info`]). ENDPOINT
+    /// continuity only: the result is explicitly unresolved for immutable
+    /// installation identity — `is_immutable_instance_identity()` is
+    /// false — and must never be presented as verified stable identity.
+    pub fn resolve_endpoint_attested(
+        attested_url: &str,
+        observed_at: impl Into<String>,
+        issue_id: &str,
+        key: &str,
+    ) -> Result<Self, String> {
+        let normalized = normalize_jira_site_url(attested_url)?;
+        let instance = JiraInstanceIdentity::EndpointAttested {
+            attested_url: fold_authority_case(&normalized),
+            observed_at: observed_at.into(),
+        };
+        Self::build(instance, issue_id, key)
+    }
+
     /// Resolves the task identity at the SOURCE-BACKED tier — the identity
     /// of record. `identifier` comes from a producer such as
-    /// [`cloud_tenant_id_from_accessible_resources`] or
-    /// [`server_attested_base_url_from_server_info`], never from user
-    /// configuration.
+    /// [`cloud_tenant_id_from_accessible_resources`], never from user
+    /// configuration. Only the Cloud tenant id proves immutable
+    /// installation continuity.
     pub fn resolve_source_backed(
         source: InstanceIdentitySource,
         identifier: &str,
@@ -501,16 +547,49 @@ mod tests {
     }
 
     #[test]
-    fn server_attested_base_url_producer_parses_fixture_payloads() {
+    fn server_attested_base_url_producer_yields_endpoint_attestation_only() {
         let payload = serde_json::json!({"baseUrl": "https://jira.internal.example.com/", "version": "9.4.0"});
+        let attested = server_attested_base_url_from_server_info(&payload);
         assert_eq!(
-            server_attested_base_url_from_server_info(&payload).as_deref(),
+            attested.as_deref(),
             Some("https://jira.internal.example.com")
         );
         assert_eq!(
             server_attested_base_url_from_server_info(&serde_json::json!({})),
             None
         );
+        // Endpoint attestation is a DIFFERENT tier: source-observed, but
+        // explicitly unresolved for immutable-instance continuity (a moved
+        // endpoint can keep the same installation).
+        let identity = JiraTaskIdentity::resolve_endpoint_attested(
+            attested.as_deref().unwrap(),
+            "2026-01-01T00:00:00Z",
+            "10001",
+            "DROG-42",
+        )
+        .unwrap();
+        assert!(matches!(
+            identity.instance,
+            JiraInstanceIdentity::EndpointAttested { .. }
+        ));
+        assert!(!identity.instance.is_source_backed());
+        assert!(!identity.instance.is_immutable_instance_identity());
+        assert!(identity.link_id().starts_with("attested:"));
+    }
+
+    #[test]
+    fn cloud_tenant_id_is_the_immutable_instance_evidence_tier() {
+        let verified = JiraTaskIdentity::resolve_source_backed(
+            InstanceIdentitySource::CloudTenantId,
+            "Aa1Bb2Cc3",
+            "https://acme.atlassian.net",
+            "2026-01-01T00:00:00Z",
+            "10001",
+            "DROG-42",
+        )
+        .unwrap();
+        assert!(verified.instance.is_source_backed());
+        assert!(verified.instance.is_immutable_instance_identity());
     }
 
     #[test]

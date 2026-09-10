@@ -85,6 +85,16 @@ export type JiraInstanceIdentity =
       endpointUrl: string;
     }
   | {
+      /** ENDPOINT continuity evidence only: a moved endpoint can keep the
+       * same installation, so this is unresolved for immutable-instance
+       * continuity — never presented as verified stable identity. */
+      kind: "endpoint-attested";
+      attestedUrl: string;
+      observedAt: string;
+    }
+  | {
+      /** The identity of record (Cloud tenant id — immutable installation
+       * continuity). */
       kind: "source-backed";
       instanceKey: string;
       source: InstanceIdentitySource;
@@ -93,14 +103,24 @@ export type JiraInstanceIdentity =
     };
 
 /**
- * Namespaced composite key: provisional labels and source-backed
- * identifiers live in DIFFERENT namespaces, so a configured URL can never
- * masquerade as the verified instance (daemon: `JiraInstanceIdentity::key`).
+ * Namespaced composite key: the three tiers live in DIFFERENT namespaces,
+ * so a weaker tier can never masquerade as a stronger one (daemon:
+ * `JiraInstanceIdentity::key`).
  */
 export function jiraInstanceKey(instance: JiraInstanceIdentity): string {
-  return instance.kind === "provisional"
-    ? `provisional:${instance.endpointId}`
-    : `${instance.source === "cloud-tenant-id" ? "cloudid" : "server"}:${instance.instanceKey}`;
+  switch (instance.kind) {
+    case "provisional":
+      return `provisional:${instance.endpointId}`;
+    case "endpoint-attested":
+      return `attested:${instance.attestedUrl}`;
+    case "source-backed":
+      return `${instance.source === "cloud-tenant-id" ? "cloudid" : "server"}:${instance.instanceKey}`;
+  }
+}
+
+/** True only for immutable installation continuity (Cloud tenant id). */
+export function isImmutableInstanceIdentity(instance: JiraInstanceIdentity): boolean {
+  return instance.kind === "source-backed" && instance.source === "cloud-tenant-id";
 }
 
 /** The stable external identity of a Jira task (daemon: `JiraTaskIdentity`). */
@@ -208,9 +228,12 @@ export function cloudTenantIdFromAccessibleResources(
 
 /**
  * Extracts the Server/DC server-attested base URL from a serverInfo
- * payload — the deterministic producer for `server-attested-base-url`.
+ * payload — the deterministic producer for the `endpoint-attested` tier.
  * Returns the normalized URL the SERVER attests (which may differ from
- * what the user configured). Pure parsing.
+ * what the user configured). ATTENTION: endpoint continuity evidence only
+ * — a moved endpoint can keep the same installation, so this is
+ * unresolved for immutable-instance continuity, never verified stable
+ * identity. Pure parsing.
  */
 export function serverAttestedBaseUrlFromServerInfo(payload: unknown): string | null {
   const baseUrl =
@@ -220,6 +243,31 @@ export function serverAttestedBaseUrlFromServerInfo(payload: unknown): string | 
   if (!baseUrl) return null;
   const normalized = normalizeJiraSiteUrl(baseUrl);
   return normalized ? foldAuthorityCase(normalized) : null;
+}
+
+/**
+ * Resolves the task identity from a server-attested endpoint URL (see
+ * `serverAttestedBaseUrlFromServerInfo`). ENDPOINT continuity only:
+ * `isImmutableInstanceIdentity` is false on the result.
+ */
+export function resolveEndpointAttestedJiraTaskIdentity(
+  attestedUrl: string,
+  observedAt: string,
+  issue: { issueId: string; key: string },
+): JiraTaskIdentity | null {
+  const parts = validateTaskParts(issue.issueId, issue.key);
+  if (!parts) return null;
+  const normalized = normalizeJiraSiteUrl(attestedUrl);
+  if (!normalized) return null;
+  return {
+    instance: {
+      kind: "endpoint-attested",
+      attestedUrl: foldAuthorityCase(normalized),
+      observedAt,
+    },
+    issueId: parts.issueId,
+    key: parts.key,
+  };
 }
 
 /** Same stable task, regardless of display-key drift. */

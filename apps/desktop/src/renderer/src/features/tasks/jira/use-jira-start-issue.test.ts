@@ -166,12 +166,12 @@ describe("startWorkspaceFromJiraIssue", () => {
     expect(outcome.ok).toBe(true);
     if (outcome.ok) {
       expect(outcome.identity?.instance.kind).toBe("provisional");
-      expect(outcome.identity?.instance.endpointUrl).toBe("https://acme.atlassian.net");
-      expect(outcome.identity?.issueId).toBe("10001");
-      expect(outcome.identity?.key).toBe("DROG-42");
       if (outcome.identity?.instance.kind === "provisional") {
+        expect(outcome.identity.instance.endpointUrl).toBe("https://acme.atlassian.net");
         expect(outcome.identity.instance.endpointId).toHaveLength(24);
       }
+      expect(outcome.identity?.issueId).toBe("10001");
+      expect(outcome.identity?.key).toBe("DROG-42");
     }
   });
 

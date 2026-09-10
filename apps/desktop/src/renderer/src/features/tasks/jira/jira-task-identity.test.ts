@@ -3,10 +3,12 @@
 import { describe, expect, it } from "vitest";
 import {
   cloudTenantIdFromAccessibleResources,
+  isImmutableInstanceIdentity,
   jiraInstanceKey,
   jiraTaskLinkId,
   normalizeJiraSiteUrl,
   provisionalEndpointId,
+  resolveEndpointAttestedJiraTaskIdentity,
   resolveProvisionalJiraTaskIdentity,
   resolveSourceBackedJiraTaskIdentity,
   sameJiraTaskIdentity,
@@ -142,7 +144,7 @@ describe("deterministic producers (pure payload parsing)", () => {
     ).toBeNull();
   });
 
-  it("serverAttestedBaseUrlFromServerInfo reads the server's own attestation", () => {
+  it("serverAttestedBaseUrlFromServerInfo yields ENDPOINT attestation only", () => {
     expect(
       serverAttestedBaseUrlFromServerInfo({
         baseUrl: "https://jira.internal.example.com/",
@@ -150,5 +152,29 @@ describe("deterministic producers (pure payload parsing)", () => {
       }),
     ).toBe("https://jira.internal.example.com");
     expect(serverAttestedBaseUrlFromServerInfo({})).toBeNull();
+    // The attested URL is a third tier: source-observed but explicitly
+    // unresolved for immutable-instance continuity (a moved endpoint can
+    // keep the same installation).
+    const identity = resolveEndpointAttestedJiraTaskIdentity(
+      "https://jira.internal.example.com",
+      "2026-01-01T00:00:00Z",
+      { issueId: "10001", key: "DROG-42" },
+    );
+    expect(identity?.instance.kind).toBe("endpoint-attested");
+    expect(jiraInstanceKey(identity!.instance)).toBe(
+      "attested:https://jira.internal.example.com",
+    );
+    expect(isImmutableInstanceIdentity(identity!.instance)).toBe(false);
+  });
+
+  it("cloudTenantId remains the only immutable-instance evidence tier", () => {
+    const verified = resolveSourceBackedJiraTaskIdentity(
+      "cloud-tenant-id",
+      "Aa1Bb2Cc3",
+      "https://acme.atlassian.net",
+      "2026-01-01T00:00:00Z",
+      { issueId: "10001", key: "DROG-42" },
+    );
+    expect(isImmutableInstanceIdentity(verified!.instance)).toBe(true);
   });
 });

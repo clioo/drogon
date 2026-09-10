@@ -67,12 +67,15 @@ fn now_rfc3339() -> String {
 // --- public shapes ----------------------------------------------------------
 
 /// Which identity tier a binding is keyed by. `Provisional` = the
-/// configured endpoint's stable label (never presented as verified);
-/// `SourceBacked` = an identifier read from an actual instance response.
+/// configured endpoint's stable label; `EndpointAttested` = a server-
+/// observed endpoint URL (continuity evidence only, unresolved for
+/// immutable-instance identity); `SourceBacked` = the Cloud tenant id,
+/// the one immutable-installation identity of record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum InstanceTier {
     Provisional,
+    EndpointAttested,
     SourceBacked,
 }
 
@@ -80,15 +83,22 @@ impl InstanceTier {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Provisional => "provisional",
+            Self::EndpointAttested => "endpoint-attested",
             Self::SourceBacked => "source-backed",
         }
     }
 
     fn from_identity(identity: &JiraTaskIdentity) -> Self {
-        if identity.instance.is_source_backed() {
-            Self::SourceBacked
-        } else {
-            Self::Provisional
+        match identity.instance {
+            drogon_core::jira::identity::JiraInstanceIdentity::Provisional { .. } => {
+                Self::Provisional
+            }
+            drogon_core::jira::identity::JiraInstanceIdentity::EndpointAttested { .. } => {
+                Self::EndpointAttested
+            }
+            drogon_core::jira::identity::JiraInstanceIdentity::SourceBacked { .. } => {
+                Self::SourceBacked
+            }
         }
     }
 }
@@ -244,7 +254,7 @@ fn ensure_table(conn: &Connection) -> Result<(), RpcError> {
         "CREATE TABLE IF NOT EXISTS jira_session_links (
             host_id TEXT NOT NULL,
             instance_key TEXT NOT NULL,
-            instance_tier TEXT NOT NULL CHECK(instance_tier IN ('provisional','source-backed')),
+        instance_tier TEXT NOT NULL CHECK(instance_tier IN ('provisional','endpoint-attested','source-backed')),
             instance_source TEXT,
             instance_url TEXT NOT NULL,
             issue_id TEXT NOT NULL,
@@ -338,6 +348,7 @@ fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<JiraSessionLink> {
         instance_key: row.get("instance_key")?,
         instance_tier: match tier.as_str() {
             "source-backed" => InstanceTier::SourceBacked,
+            "endpoint-attested" => InstanceTier::EndpointAttested,
             _ => InstanceTier::Provisional,
         },
         instance_source: row.get("instance_source")?,
@@ -362,12 +373,12 @@ fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<JiraSessionLink> {
 fn link_row_from_identity(
     identity: &JiraTaskIdentity,
 ) -> (String, InstanceTier, Option<String>, String) {
+    use drogon_core::jira::identity::JiraInstanceIdentity;
     let tier = InstanceTier::from_identity(identity);
     let source = match &identity.instance {
-        drogon_core::jira::identity::JiraInstanceIdentity::SourceBacked { source, .. } => {
-            Some(source.as_str().to_string())
-        }
-        drogon_core::jira::identity::JiraInstanceIdentity::Provisional { .. } => None,
+        JiraInstanceIdentity::SourceBacked { source, .. } => Some(source.as_str().to_string()),
+        JiraInstanceIdentity::Provisional { .. }
+        | JiraInstanceIdentity::EndpointAttested { .. } => None,
     };
     (
         identity.instance.key(),
@@ -719,6 +730,8 @@ pub fn complete_intent(
         instance_key,
         instance_tier: if instance_tier == "source-backed" {
             InstanceTier::SourceBacked
+        } else if instance_tier == "endpoint-attested" {
+            InstanceTier::EndpointAttested
         } else {
             InstanceTier::Provisional
         },
