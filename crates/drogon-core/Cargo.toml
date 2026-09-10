@@ -25,6 +25,7 @@ hmac = "=0.12.1"
 getrandom = "=0.4.3"
 icu_collator = "=2.2.1"
 icu_locale = "=2.2.0"
+url = "=2.5.8"
 cap-std = "=4.0.3"
 
 [target.'cfg(unix)'.dependencies]

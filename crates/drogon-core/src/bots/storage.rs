@@ -587,6 +587,32 @@ fn get_bot_with_rev(
     .transpose()
 }
 
+/// The folder owning `bot_id` under `host_id`, if any -- a direct
+/// primary-key lookup (`bots.id`), independent of which workspace the
+/// caller currently has selected. See bot_mutation_rpc.rs's
+/// `resolve_bot_owning_folder` for why this exists: `bot.snapshot`'s
+/// host-global scope (workspaceId: "", R17-E #348) aggregates bots across
+/// every folder a host owns via `list_bots_with_folders`, but the wire
+/// contract it serializes to (`BotsPanelBot`) carries no
+/// workspaceId/folder field -- so a mutation (delete/run/responsibility
+/// create or delete) issued from that view, or from any workspace other
+/// than the one this specific bot happens to live in, has no
+/// caller-supplied `workspace_id` that could ever resolve to the bot's
+/// own folder through the exact-match path alone.
+pub(crate) fn folder_for_bot_id(
+    conn: &Connection,
+    host_id: &str,
+    bot_id: &str,
+) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT folder FROM bots WHERE id = ?1 AND host_id = ?2",
+            params![bot_id, host_id],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
 /// Every Bot in scope in insertion (`rowid`) order, with no display-name
 /// sort applied. For internal maintenance operations that scan every Bot
 /// but do not present an ordered list to a user (ownership repair,
@@ -677,14 +703,6 @@ pub fn list_bots_with_folders(
     Ok(pairs)
 }
 
-/// Compare-and-swap write: succeeds only if `expected_rev` still matches
-/// the row's current internal `rev` (see the module doc's
-/// "Cross-connection contention" -- **not** keyed off `updated_at`, which
-/// stays a plain source-visible field). `pub` (rather than an
-/// internal-only helper) so tests can drive this exact primitive across
-/// two independent `rusqlite::Connection`s to the same database file,
-/// proving a real cross-connection fence rather than a process-local
-/// mutex.
 /// The internal `rev` snapshot for a row, for tests driving [`cas_write`]
 /// directly across two real connections (see the module doc's
 /// "Cross-connection contention"). Never part of the serialized [`Bot`]
@@ -699,6 +717,14 @@ pub fn current_rev(
     Ok(get_bot_with_rev(conn, host_id, folder, id)?.map(|(_, rev)| rev))
 }
 
+/// Compare-and-swap write: succeeds only if `expected_rev` still matches
+/// the row's current internal `rev` (see the module doc's
+/// "Cross-connection contention" -- **not** keyed off `updated_at`, which
+/// stays a plain source-visible field). `pub` (rather than an
+/// internal-only helper) so tests can drive this exact primitive across
+/// two independent `rusqlite::Connection`s to the same database file,
+/// proving a real cross-connection fence rather than a process-local
+/// mutex.
 pub fn cas_write(
     conn: &Connection,
     host_id: &str,

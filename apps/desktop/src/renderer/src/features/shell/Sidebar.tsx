@@ -13,10 +13,10 @@ import type {
 } from "../../../../shared/session-contract";
 import type { ProjectGroup } from "./project-adapter";
 import { SidebarNav } from "./SidebarNav";
-import { RecentSessions } from "../sessions/RecentSessions";
 import type { TabStripState } from "./tab-order";
 import { ProjectList } from "./ProjectList";
 import type { ProjectAction } from "./ProjectList";
+import { ChatsList } from "./ChatsList";
 import { SidebarFooter } from "./sidebar-footer";
 import type { SettingsSectionId } from "../settings/settings-sections";
 import {
@@ -157,15 +157,6 @@ export function Sidebar({
             showAutomationsButton={showAutomationsButton}
           />
           <div ref={scrollRef} className="shell-sidebar-scroll">
-            {onNewSession && <RecentSessions
-              groups={groups}
-              workspaces={workspaces}
-              selectedWorkspaceId={selectedWorkspaceId}
-              active={route === null}
-              disabled={workspaceDisabled}
-              onSelect={onSelectWorkspace}
-              onNew={onNewSession}
-            />}
             <ProjectList
               groups={groups.filter((group) => !group.project.quickSession)}
               workspaces={workspaces}
@@ -190,6 +181,19 @@ export function Sidebar({
               onSubmitRemoveProject={onSubmitRemoveProject}
               onSubmitRename={onSubmitRenameWorktree}
               onOpenProjectSettings={onOpenProjectSettings}
+            />
+            <ChatsList
+              groups={groups.filter((group) => group.project.quickSession)}
+              workspaces={workspaces}
+              sessions={sessions}
+              selectedWorkspaceId={selectedWorkspaceId}
+              activeSessionId={activeSessionId}
+              tabStrip={tabStrip}
+              disabled={workspaceDisabled}
+              onSelectWorkspace={onSelectWorkspace}
+              onSelectSession={onSelectSession}
+              onSubmitRemove={onSubmitRemoveProject}
+              onCreate={onNewSession ?? null}
             />
           </div>
           <SidebarFooter

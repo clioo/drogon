@@ -811,6 +811,18 @@ fn worktree_struct(conn: &rusqlite::Connection, worktree_id: &str) -> Result<Wor
                 note: row.get(8)?,
                 parent_worktree_id: row.get(9)?,
                 created_at: String::new(),
+                // Same partial-projection convention as `created_at`
+                // above: this helper only backs a task-link lookup, never
+                // a `worktree.list` response, so Workspace Options
+                // metadata is left at its defaults.
+                workspace_status: None,
+                is_pinned: false,
+                is_archived: false,
+                sort_order: 0,
+                manual_order: None,
+                last_activity_at: None,
+                linked_pr: None,
+                creator: None,
             })
         },
     )

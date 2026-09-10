@@ -537,10 +537,96 @@ fn start_issue_creates_a_worktree_named_the_forks_way() {
         json!({"projectId": fx.project_id, "key": "DROG-1"}),
     );
     assert_eq!(again["worktree"]["id"], started["worktree"]["id"]);
+    fx.ctx.ok(
+        "worktree.rename",
+        json!({"worktreeId": started["worktree"]["id"], "name": "My working title"}),
+    );
+    let renamed = fx.ctx.ok(
+        "jira.startIssue",
+        json!({"projectId": fx.project_id, "key": "DROG-1"}),
+    );
+    assert_eq!(
+        renamed["worktree"]["id"], started["worktree"]["id"],
+        "renaming a workspace must not detach its issue identity"
+    );
+    assert_eq!(renamed["worktree"]["title"], "My working title");
     let listed = fx
         .ctx
         .ok("worktree.list", json!({"projectId": fx.project_id}));
     assert_eq!(listed["worktrees"].as_array().unwrap().len(), 1);
+    let links = fx
+        .ctx
+        .ok("worktree.issueLinks", json!({"projectId": fx.project_id}));
+    assert_eq!(links["links"].as_array().unwrap().len(), 1);
+    assert_eq!(links["links"][0]["worktreeId"], started["worktree"]["id"]);
+    assert_eq!(links["links"][0]["provider"], "jira");
+    assert_eq!(links["links"][0]["identifier"], "DROG-1");
+    assert_eq!(links["links"][0]["url"], started["url"]);
+    fx.ctx
+        .ok("worktree.remove", json!({"id": started["worktree"]["id"]}));
+    assert_eq!(
+        fx.ctx
+            .ok("worktree.issueLinks", json!({"projectId": fx.project_id}))["links"],
+        json!([])
+    );
+}
+
+#[test]
+fn the_same_issue_key_on_another_site_does_not_reassign_a_workspace() {
+    let first_site = FixtureServer::new();
+    let second_site = FixtureServer::new();
+    let fx = GitFixture::new(&first_site);
+    let first = fx.ctx.ok(
+        "jira.startIssue",
+        json!({"projectId": fx.project_id, "key": "DROG-1"}),
+    );
+    fx.ctx.connect(&second_site);
+    let second = fx.ctx.ok(
+        "jira.startIssue",
+        json!({"projectId": fx.project_id, "key": "DROG-1"}),
+    );
+    assert_ne!(
+        first["worktree"]["id"], second["worktree"]["id"],
+        "issue keys are scoped to a Jira site"
+    );
+    let links = fx
+        .ctx
+        .ok("worktree.issueLinks", json!({"projectId": fx.project_id}));
+    assert_eq!(links["links"].as_array().unwrap().len(), 2);
+    for (started, site) in [(&first, &first_site), (&second, &second_site)] {
+        let link = links["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|link| link["worktreeId"] == started["worktree"]["id"])
+            .unwrap();
+        assert!(link["url"].as_str().unwrap().starts_with(&site.site_url()));
+    }
+}
+
+#[test]
+fn an_offline_start_keeps_previously_observed_issue_metadata() {
+    let server = FixtureServer::new();
+    let fx = GitFixture::new(&server);
+    let first = fx.ctx.ok(
+        "jira.startIssue",
+        json!({"projectId": fx.project_id, "key": "DROG-1"}),
+    );
+    let before = fx
+        .ctx
+        .ok("worktree.issueLinks", json!({"projectId": fx.project_id}));
+    drop(server);
+    let resumed = fx.ctx.ok(
+        "jira.startIssue",
+        json!({"projectId": fx.project_id, "key": "DROG-1"}),
+    );
+    assert_eq!(first["worktree"]["id"], resumed["worktree"]["id"]);
+    assert_eq!(
+        before,
+        fx.ctx
+            .ok("worktree.issueLinks", json!({"projectId": fx.project_id})),
+        "a failed provider read must not erase known metadata"
+    );
 }
 
 #[test]

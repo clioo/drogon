@@ -2,18 +2,21 @@
 // (R16-BB): J1 agent state (Pi local-model session working → idle), J5 jump
 // palette workspace switch, J6 Tasks start-from-issue, J7 Automations Run
 // now with a real agent run + detail snapshot, J8 Bots preset create +
-// manual responsibility run on the free local model, J9 Mentu approve & run
+// manual responsibility run on the owned provider fixture, J9 Mentu approve & run
 // with step evidence, and J10 Settings theme persisting across a packaged
 // relaunch. J12's segment assertions live in probe-packaged-surfaces.mjs.
 //
 // Every probe is a real CDP journey against the running app: no mocked
-// service, no mocked UI. Inference runs only on the team-local free model
-// (dgx-spark/qwen3.8-flash-next-nvidia-nvfp4, seeded through the isolated
-// PI_CODING_AGENT_DIR the accept harness sets up); Tasks rides a
-// deterministic gh fixture on the daemon PATH. Each probe deletes the
-// bots, automations and worktrees it created before returning.
+// service, no mocked UI. Inference runs only against the sealed, loopback,
+// test-owned model fixture (scripts/sealed-model-fixture.mjs; never a real
+// network endpoint), seeded in both private HOME and PI_CODING_AGENT_DIR.
+// Tasks rides a deterministic gh fixture on the
+// daemon PATH. Each probe deletes the bots, automations and worktrees it
+// created before returning.
 
 import assert from "node:assert/strict";
+import { probePiShiftEnter } from "./probe-pi-terminal-input.mjs";
+import { probePiLayout } from "./probe-pi-layout.mjs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -27,12 +30,16 @@ import {
   renderedPiIsReady,
   waitForSessionStripTab,
 } from "./probe-rendered-harness.mjs";
+import {
+  assertLoopbackHost,
+  healthUrlFor,
+  isOwnedFixtureHealth,
+} from "./sealed-model-fixture.mjs";
 
 // Local-only model for every in-app agent launch in acceptance: never a
 // paid model. Same route probe-rendered-harness.mjs seeds for --harness pi.
-export const PI_PROVIDER = "dgx-spark";
-export const PI_MODEL_ID = "qwen3.8-flash-next-nvidia-nvfp4";
-export const PI_MODEL = `${PI_PROVIDER}/${PI_MODEL_ID}`;
+import { PI_PROVIDER, PI_MODEL_ID, PI_MODEL } from "./sealed-model-route.mjs";
+export { PI_PROVIDER, PI_MODEL_ID, PI_MODEL } from "./sealed-model-route.mjs";
 
 // A cron that never fires during the run: responsibilities must exist (the
 // Run control needs one) without the scheduler racing the manual run.
@@ -132,17 +139,79 @@ export function mentuStepsAll(steps, expected) {
 // Setup helpers (used by accept-desktop.mjs before the daemon spawns)
 // ---------------------------------------------------------------------------
 
-/** Seeds the isolated Pi config dir with the team-local free model route. */
-export async function seedLocalPiProvider(piDir) {
+// The sealed model fixture's baseUrl, communicated from accept-desktop.mjs
+// (which owns starting/stopping scripts/sealed-model-fixture.mjs) to this
+// script's process. Both seedLocalPiProvider and waitForFixtureReady accept
+// an explicit baseUrl argument for tests/direct callers; this env var is
+// only the default plumbing for the real acceptance harness.
+import { selectSettingsTheme, captureThemeSurface } from "./acceptance-theme.mjs";
+
+// An owned deterministic fixture gets one run; failures must not be hidden by retries.
+const RUN_ATTEMPTS = 1;
+
+export const SEALED_MODEL_FIXTURE_BASE_URL_ENV =
+  "DROGON_SEALED_MODEL_FIXTURE_BASE_URL";
+
+function assertLoopbackBaseUrl(baseUrl) {
+  let parsed;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error(
+      `seedLocalPiProvider: baseUrl must be a valid URL, got ${JSON.stringify(baseUrl)}`,
+    );
+  }
+  if (parsed.protocol !== "http:" || parsed.username || parsed.password || parsed.pathname !== "/v1" || parsed.search || parsed.hash) {
+    throw new Error("baseUrl must be an HTTP loopback /v1 URL without userinfo or query");
+  }
+  assertLoopbackHost(parsed.hostname.replace(/^\[|\]$/g, ""));
+}
+
+/**
+ * Seeds the isolated Pi config dir with the owned loopback fixture route --
+ * ALWAYS the sealed, test-owned loopback fixture (scripts/sealed-model-
+ * fixture.mjs), never a real network endpoint. `baseUrl` is required,
+ * explicitly: pass it directly, or set SEALED_MODEL_FIXTURE_BASE_URL_ENV.
+ * A missing or non-loopback baseUrl throws -- there is no default that
+ * could silently reintroduce a real-network/paid-inference dependency.
+ *
+ * Coordinator review (fail-closed lifecycle correction): a caller that
+ * seeds with an explicit `baseUrl` argument, without also setting the env
+ * var itself, would otherwise leave every later argument-less
+ * waitForFixtureReady() call reading an unset env and failing closed even
+ * though the fixture is genuinely up. This function is the one place the
+ * baseUrl becomes known, so it is also the one place responsible for
+ * keeping the env var -- the default source every wait call falls back to
+ * -- consistent with whatever baseUrl was actually seeded.
+ */
+export async function seedLocalPiProvider(
+  piDir,
+  baseUrl = process.env[SEALED_MODEL_FIXTURE_BASE_URL_ENV],
+  instanceId,
+) {
+  if (!baseUrl) {
+    throw new Error(
+      `seedLocalPiProvider requires an explicit loopback baseUrl for the sealed model fixture (pass it as the second argument, or set ${SEALED_MODEL_FIXTURE_BASE_URL_ENV}); there is no default network endpoint.`,
+    );
+  }
+  assertLoopbackBaseUrl(baseUrl);
+  process.env[SEALED_MODEL_FIXTURE_BASE_URL_ENV] = baseUrl;
+  if (instanceId) process.env.DROGON_SEALED_MODEL_FIXTURE_INSTANCE_ID = instanceId;
+  else delete process.env.DROGON_SEALED_MODEL_FIXTURE_INSTANCE_ID;
   await mkdir(piDir, { recursive: true });
+  const settingsPath = path.join(piDir, "settings.json");
+  let settings = {};
+  try { settings = JSON.parse(await readFile(settingsPath, "utf8")); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+  await writeFile(settingsPath, JSON.stringify({ ...settings, defaultProvider: PI_PROVIDER, defaultModel: PI_MODEL_ID }) + "\n");
   await writeFile(
     path.join(piDir, "models.json"),
     JSON.stringify({
       providers: {
         [PI_PROVIDER]: {
-          baseUrl: "http://100.85.64.21:9292/v1",
+          baseUrl,
           api: "openai-completions",
-          apiKey: "local",
+          apiKey: "sealed-fixture-local",
           models: [
             {
               id: PI_MODEL_ID,
@@ -262,36 +331,45 @@ async function openPaletteWithRegistryChord(page, root) {
 }
 
 // ---------------------------------------------------------------------------
-// Node-side model-server quiet wait: between bounded attempts the probes
-// wait for a slot on the shared team-local server instead of burning a
-// retry into a 429 wall. Returns false on timeout so runs stay bounded.
+// Node-side fixture readiness: there is no shared, load-bearing real model
+// server left to wait out (the sealed fixture answers every recognized
+// prompt immediately, deterministically, and never returns 429). What
+// remains worth checking, cheaply, before spending one of a probe's bounded
+// attempts is that the fixture we are about to talk to is actually reachable
+// and is genuinely OUR owned fixture -- not a stale process, and never a
+// real endpoint. Returns false on timeout so runs stay bounded.
 // ---------------------------------------------------------------------------
 
-export const LOCAL_MODEL_BASE = "http://100.85.64.21:9292/v1";
-
-const MODEL_PROBE_BODY = JSON.stringify({
-  model: PI_MODEL_ID,
-  messages: [{ role: "user", content: "say OK" }],
-  max_tokens: 8,
-});
-
-export async function waitForModelQuiet(timeoutMs) {
+export async function waitForFixtureReady(
+  timeoutMs,
+  baseUrl = process.env[SEALED_MODEL_FIXTURE_BASE_URL_ENV],
+  expectedInstanceId = process.env.DROGON_SEALED_MODEL_FIXTURE_INSTANCE_ID,
+) {
+  if (!baseUrl || !expectedInstanceId || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return false;
+  assertLoopbackBaseUrl(baseUrl);
+  const healthUrl = healthUrlFor(baseUrl);
   const deadline = Date.now() + timeoutMs;
-  for (;;) {
+  while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${LOCAL_MODEL_BASE}/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: MODEL_PROBE_BODY,
-        signal: AbortSignal.timeout(10000),
+      // "error" on redirect: a health check must never silently follow a
+      // redirect to a different, possibly non-loopback/external base --
+      // that would defeat the whole point of pinning ownership below.
+      const response = await fetch(healthUrl, {
+        redirect: "error",
+        signal: AbortSignal.timeout(Math.max(1, Math.min(5000, Math.ceil(deadline - Date.now())))),
       });
-      if (response.ok) return true;
+      if (response.ok) {
+        const body = await response.json();
+        if (isOwnedFixtureHealth(body, expectedInstanceId)) return true;
+      }
     } catch {
-      // unreachable or timed out: keep waiting
+      // unreachable, redirected, or timed out: keep waiting
     }
-    if (Date.now() > deadline) return false;
-    await delay(4000);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    await delay(Math.min(250, remaining));
   }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -339,9 +417,9 @@ export async function probeJumpPaletteSwitch({ page, root, output }) {
     { timeout: 15000 },
   );
   for (const colorScheme of ["light", "dark"]) {
-    await page.emulateMedia({ colorScheme });
+    const selection = await selectSettingsTheme(page, colorScheme);
     await openPaletteWithRegistryChord(page, root);
-    await shot(page, output, `jump-palette-${colorScheme}.png`);
+    await captureThemeSurface(page, path.join(output, `jump-palette-${colorScheme}.png`), selection);
     await page.keyboard.press("Escape");
     await page.locator(".command-palette-input").waitFor({ state: "hidden" });
   }
@@ -452,7 +530,7 @@ async function waitForTabAgentState(page, sessionId, label, timeoutMs) {
       const tab = document.querySelector(
         `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${CSS.escape(id)}"]`,
       );
-      return tab?.querySelector(`[aria-label="${wanted}"]`) !== null;
+      return Boolean(tab?.querySelector(`[aria-label="${wanted}"]`));
     },
     { id: sessionId, wanted: label },
     { timeout: timeoutMs },
@@ -465,7 +543,7 @@ async function waitForCardRowAgentState(page, sessionId, label, timeoutMs) {
       const row = document.querySelector(
         `[data-worktree-agent-row="${CSS.escape(id)}"]`,
       );
-      return row?.querySelector(`[aria-label="${wanted}"]`) !== null;
+      return Boolean(row?.querySelector(`[aria-label="${wanted}"]`));
     },
     { id: sessionId, wanted: label },
     { timeout: timeoutMs },
@@ -482,7 +560,7 @@ async function waitForTabAgentStateOutcome(page, sessionId, timeoutMs) {
       // bounded wait until the post-turn state is settled (Idle or expose a
       // real waiting/exit outcome to the assertion below).
       for (const label of ["Idle", "Waiting for input", "Exited"]) {
-        if (tab?.querySelector(`[aria-label="${label}"]`) !== null) return label;
+        if (tab?.querySelector(`[aria-label="${label}"]`)) return label;
       }
       return null;
     },
@@ -500,7 +578,7 @@ async function waitForTabAgentStateOutcome(page, sessionId, timeoutMs) {
  * written after `armLines` so a previous attempt's error text cannot
  * false-positive.
  */
-async function runTurnUntilWorking(page, sessionId, prompt, armLines) {
+async function runTurnUntilWorking(page, sessionId, prompt, armLines, getFixtureReceipt) {
   // The strip's selection restore can hand the focus back to a previously
   // selected editor tab right after the launch revision; select the Pi
   // tab explicitly and prove the keystrokes land in ITS xterm (the
@@ -509,53 +587,33 @@ async function runTurnUntilWorking(page, sessionId, prompt, armLines) {
     `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${sessionId}"]`,
   );
   await piTab.click();
-  const xtermInput = page.locator(".xterm-helper-textarea");
+  const xtermInput = page.locator(".xterm-helper-textarea:visible");
   await xtermInput.focus();
   await page.waitForFunction(
-    () =>
-      document.activeElement?.classList.contains("xterm-helper-textarea") ??
-      false,
-    null,
+    (id) => document.activeElement === window.__drogonTerminals?.get(id)?.textarea,
+    sessionId,
     { timeout: 10000 },
   );
   await page.keyboard.type(prompt);
+  const shiftEnter = await probePiShiftEnter(page, sessionId, getFixtureReceipt);
+  console.log(`[j1] Pi newline without submission: ${JSON.stringify(shiftEnter)}`);
   await page.keyboard.press("Enter");
-  // The prompt echo's exact placement is a pi TUI detail (the submitted
-  // line may repaint away); the focus check above is the real guard. Do
-  // not await an echo here: a fast successful reply could otherwise finish
-  // before the 2s state poll observes Working.
-  void page
-    .waitForFunction(
-      ({ id, text }) => {
-        const terminal = window.__drogonTerminals?.get(id);
-        if (!terminal) return false;
-        const buffer = terminal.buffer.active;
-        for (let row = 0; row < buffer.length; row += 1) {
-          const line = buffer.getLine(row)?.translateToString(true) ?? "";
-          if (line.includes(text)) return true;
-        }
-        return false;
-      },
-      { id: sessionId, text: prompt.slice(0, 24) },
-      { timeout: 15000 },
-    )
-    .catch(() => console.log("[j1] prompt echo not observed; continuing"));
   const outcome = await page.waitForFunction(
     ({ id, afterLines }) => {
       const tab = document.querySelector(
         `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${CSS.escape(id)}"]`,
       );
-      if (tab?.querySelector('[aria-label="Working"]') !== null) return "working";
+      if (tab?.querySelector('[aria-label="Working"]')) return "working";
       // The error phrase wraps across buffer lines at narrow widths, so
       // join every row written since arming before matching.
       const registry = window.__drogonTerminals;
       if (!registry) return null;
       let text = "";
-      for (const terminal of registry.values()) {
-        const buffer = terminal.buffer.active;
-        for (let row = afterLines; row < buffer.length; row += 1)
-          text += buffer.getLine(row)?.translateToString(true) ?? "";
-      }
+      const terminal = registry.get(id);
+      if (!terminal) return null;
+      const buffer = terminal.buffer.active;
+      for (let row = afterLines; row < buffer.length; row += 1)
+        text += buffer.getLine(row)?.translateToString(true) ?? "";
       return /Retry\s*failed\s*after\s*3\s*attempts/.test(text) ? "error" : null;
     },
     { id: sessionId, afterLines: armLines },
@@ -566,16 +624,9 @@ async function runTurnUntilWorking(page, sessionId, prompt, armLines) {
   return value;
 }
 
-/** Current total line count across the terminal debug registry. */
-async function terminalLineCount(page) {
-  return page.evaluate(() => {
-    const registry = window.__drogonTerminals;
-    if (!registry) return 0;
-    let rows = 0;
-    for (const terminal of registry.values())
-      rows += terminal.buffer.active.length;
-    return rows;
-  });
+/** Only the launched session can satisfy its own output checks. */
+async function terminalLineCount(page, sessionId) {
+  return page.evaluate((id) => window.__drogonTerminals?.get(id)?.buffer.active.length ?? 0, sessionId);
 }
 
 /** Diagnostic dump for the J1 state waits: strip tabs, live sessions and
@@ -621,7 +672,7 @@ async function j1Diagnostics(page, workspaceId) {
   }, workspaceId);
 }
 
-export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }) {
+export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, getFixtureReceipt }) {
   // The packaged-surfaces prelude ends on Tasks; return through the real
   // Sessions nav before using the session header to set Pi defaults.
   await page
@@ -630,6 +681,11 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
     .click();
   await page.locator(".session-header").waitFor({ timeout: 30000 });
   await setPiDefaults(page);
+  const beforeSessionIds = await page.evaluate(async (id) => {
+    const reply = await window.drogon.sessions(id);
+    if (!reply.ok) throw new Error(reply.error.message);
+    return reply.result.sessions.map((session) => session.id);
+  }, workspaceId);
   await page
     .getByRole("button", { name: "New tab", exact: true })
     .first()
@@ -639,7 +695,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
   // "live" right after spawning; a session.list racing that window fails
   // the renderer's contract schema ("The service response does not match
   // the expected contract"), so poll defensively until the live row lands.
-  const launched = await page.evaluate(async (id) => {
+  const launched = await page.evaluate(async ({ id, beforeSessionIds }) => {
     const deadline = Date.now() + 20000;
     let lastError = "no live Pi session after the Pi row launch";
     for (;;) {
@@ -647,7 +703,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
         const result = await window.drogon.sessions(id);
         if (!result.ok) throw new Error(result.error.message);
         const live = result.result.sessions.find(
-          (session) => session.verdict === "live",
+          (session) => session.verdict === "live" && session.harnessId === "pi" && !beforeSessionIds.includes(session.id),
         );
         if (live) return live;
       } catch (error) {
@@ -656,10 +712,13 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
       if (Date.now() > deadline) throw new Error(lastError);
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-  }, workspaceId);
+  }, { id: workspaceId, beforeSessionIds });
   await waitForSessionStripTab(page, launched.id, "live");
+  await page.locator(`[role="tab"][data-tab-id="${launched.id}"]`).click();
+  const summaryToggle = page.locator('[data-worktree-card-id][data-active="true"]').getByRole("button", { name: /^\d+ agents$/ });
+  if (await summaryToggle.count() && await summaryToggle.getAttribute("aria-expanded") === "false") await summaryToggle.click();
   // The Pi banner ("pi vX.Y.Z" + clear/exit hint) proves the TUI booted.
-  await page.waitForFunction(renderedPiIsReady, null, { timeout: 30000 });
+  await page.waitForFunction(renderedPiIsReady, launched.id, { timeout: 30000 });
   try {
       // Establish the pre-prompt baseline first. The Pi startup banner also
       // produces PTY activity; without proving that it decayed to Idle, the
@@ -677,7 +736,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
       // would return immediately.
       const prompt =
         "Count from 1 to 200 separated by commas. Reply with only the numbers.";
-      let armLines = await terminalLineCount(page);
+      let armLines = await terminalLineCount(page, launched.id);
       // The shared server frees slots in millisecond bursts: the turn itself
       // is the only honest probe, so retry it in place — each retry spends
       // pi's own three API attempts — until the badge reaches Working. The
@@ -686,7 +745,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
       for (;;) {
         let outcome;
         try {
-          outcome = await runTurnUntilWorking(page, launched.id, prompt, armLines);
+          outcome = await runTurnUntilWorking(page, launched.id, prompt, armLines, getFixtureReceipt);
         } catch (error) {
           const diag = await j1Diagnostics(page, workspaceId).catch(
             () => "diagnostics unavailable",
@@ -697,7 +756,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
           );
         }
         if (outcome === "working") break;
-        armLines = await terminalLineCount(page);
+        armLines = await terminalLineCount(page, launched.id);
         assert.ok(
           Date.now() < deadline,
           "Pi turn never reached Working: the local model stayed overloaded",
@@ -740,6 +799,13 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
         `Pi turn ended in ${postTurnState}, not a settled state`,
       );
       await waitForCardRowAgentState(page, launched.id, postTurnState, 10000);
+      await page.waitForFunction((id) => {
+        const buffer = window.__drogonTerminals?.get(id)?.buffer.active;
+        if (!buffer) return false;
+        let text = "";
+        for (let row = 0; row < buffer.length; row++) text += buffer.getLine(row)?.translateToString(true) ?? "";
+        return /195,\s*196,\s*197,\s*198,\s*199,\s*200/.test(text);
+      }, launched.id, { timeout: 30000 });
       await shot(
         page,
         output,
@@ -747,6 +813,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
           ? "agent-state-idle.png"
           : "agent-state-waiting.png",
       );
+      await probePiLayout({ page, session: launched, output, getFixtureReceipt });
       // Close the session through its own tab control.
       await page
         .locator(
@@ -782,6 +849,9 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output }
       .catch(() => {});
   }
   return [
+    "pi-shift-enter-inserts-a-real-editor-newline-without-submitting",
+    "pi-real-tui-reconnect-narrow-layout-retains-reply-and-unclipped-grid",
+    "pi-shift-enter-still-works-after-narrow-layout-reconnect",
     "pi-local-session-shows-working-then-idle-in-tab-badge",
     "pi-local-session-shows-working-then-idle-in-worktree-card-row",
   ];
@@ -876,10 +946,11 @@ export async function probeMentuApproveRunEvidence({ page, workspace, output }) 
     "the second step's stdout evidence must carry the marker it read",
   );
   for (const colorScheme of ["light", "dark"]) {
-    await page.emulateMedia({ colorScheme });
-    await shot(page, output, `mentu-evidence-${colorScheme}.png`);
+    const selection = await selectSettingsTheme(page, colorScheme);
+    await evidence.waitFor();
+    await captureThemeSurface(page, path.join(output, `mentu-evidence-${colorScheme}.png`), selection);
   }
-  await page.emulateMedia({ colorScheme: "light" });
+  await selectSettingsTheme(page, "light");
   return [
     "mentu-approve-and-run-two-step-recipe-succeeds",
     "mentu-evidence-shows-both-step-statuses-and-outputs",
@@ -938,10 +1009,8 @@ export async function probeAutomationRunNowDetail({
       .locator(`[data-testid="automation-row-${id}"]`)
       .waitFor({ timeout: 30000 });
     await page.locator(`[data-testid="automation-row-${id}"]`).click();
-    // The detail pane's Run Now button triggers a real headless Pi run on
-    // the free local model; the Runs tab records it. The shared model
-    // server can answer 429 under load, so a failed run is retried
-    // boundedly — never silently, each attempt stays in the history.
+    // The real headless Pi run uses the owned deterministic fixture.
+    // A failed run fails acceptance rather than spending another Run click.
     await page
       .getByRole("button", { name: "Run Now", exact: true })
       .waitFor({ timeout: 15000 });
@@ -950,13 +1019,14 @@ export async function probeAutomationRunNowDetail({
     const history = page.locator('[data-testid="automation-history"]');
     let succeededRow = null;
     let markerVisible = false;
-    for (let attempt = 1; attempt <= 3 && !markerVisible; attempt += 1) {
+    for (let attempt = 1; attempt <= RUN_ATTEMPTS && !markerVisible; attempt += 1) {
       succeededRow = null;
-      // Spend a Run Now click only once the shared model server has a
-      // free slot (bounded), so attempts are not wasted into 429 walls.
+      // Spend a Run Now click only once the sealed model fixture answers
+      // as itself (bounded), so an attempt is never wasted on a fixture
+      // that is not actually up yet.
       assert.ok(
-        await waitForModelQuiet(60000),
-        `local model stayed overloaded before Run Now attempt ${attempt}`,
+        await waitForFixtureReady(60000),
+        `sealed model fixture was not ready before Run Now attempt ${attempt}`,
       );
       await page.getByRole("tab", { name: "Overview", exact: true }).click();
       await page
@@ -988,7 +1058,7 @@ export async function probeAutomationRunNowDetail({
           break;
         }
         assert.ok(
-          !/failed|error/i.test(text) || attempt < 3,
+          !/failed|error/i.test(text) || attempt < RUN_ATTEMPTS,
           `automation run failed on every attempt: ${text}`,
         );
         if (/failed|error/i.test(text)) break; // retry the run
@@ -1026,7 +1096,7 @@ export async function probeAutomationRunNowDetail({
         )
         .then(() => true)
         .catch(() => false);
-      if (!markerVisible && attempt < 3) {
+      if (!markerVisible && attempt < RUN_ATTEMPTS) {
         const automationsBreadcrumb = page
           .getByRole("navigation", { name: "Automations breadcrumb" })
           .getByRole("button", { name: "Automations", exact: true });
@@ -1078,6 +1148,9 @@ export async function probeBotPresetManualRun({
   output,
 }) {
   const marker = `BOT_${Date.now()}`;
+  const beforeAutomations = await runCliJson(cli, ["--data-dir", dataDir, "--json", "automation", "list"]);
+  assert.equal(beforeAutomations.ok, true, JSON.stringify(beforeAutomations));
+  const preservedAutomationIds = beforeAutomations.result.automations.map((automation) => automation.id);
   const botName = "Acceptance Bot R16BB";
   const dutyName = "Acceptance duty R16BB";
   await page.getByRole("button", { name: "Bots", exact: true }).click();
@@ -1119,6 +1192,19 @@ export async function probeBotPresetManualRun({
   const botId = botTestId?.startsWith("bot-") ? botTestId.slice(4) : null;
   assert.ok(botId, `bot card must carry bot-<id>, got ${botTestId}`);
   await shot(page, output, "bots-preset-created.png");
+  // Mutate from another real workspace: the bot, responsibility, run and
+  // deletion must retain their canonical owner, not follow this selection.
+  await page.getByRole("button", { name: "Select demo-b", exact: true }).click();
+  const foreignCard = page.locator('.shell-worktree-card[data-active="true"]').filter({ has: page.getByRole("button", { name: "Select demo-b", exact: true }) });
+  await foreignCard.waitFor();
+  const foreign = await page.evaluate(async ({ projectId, worktreeId }) => {
+    const result = await window.drogon.project.worktreeList({ projectId });
+    if (!result.ok) throw new Error(result.error.message);
+    return result.result.worktrees.find((worktree) => worktree.id === worktreeId);
+  }, { projectId: await foreignCard.getAttribute("data-worktree-card-project"), worktreeId: await foreignCard.getAttribute("data-worktree-card-id") });
+  assert(foreign && foreign.workspaceId !== workspaceId);
+  await page.getByRole("button", { name: "Bots", exact: true }).click();
+  await card.waitFor();
   // A responsibility whose cron never fires: the manual Run control is the
   // only way it executes during the run.
   await card
@@ -1145,11 +1231,7 @@ export async function probeBotPresetManualRun({
   await shot(page, output, "bots-responsibility-manual.png");
   let ownedAutomationId = null;
   try {
-    // The shared model server can answer 429 under load; each Run click
-    // records a real history row (a failed turn still terminates the run
-    // row at a terminal status verdict), so retry boundedly until a run's
-    // output carries the marker — never silently, every attempt stays
-    // visible in history.
+    // Exactly one run through the owned fixture; failures remain failures.
     // automation.list intentionally omits Bot ownership from its public
     // summary. Re-read the exact scope through the real Bot snapshot bridge;
     // the scheduled responsibility trigger carries the owned automation id.
@@ -1183,12 +1265,14 @@ export async function probeBotPresetManualRun({
     );
     let markerVisible = false;
     ownedAutomationId = owned.id;
-    for (let attempt = 1; attempt <= 3 && !markerVisible; attempt += 1) {
-      // Same bounded quiet-wait as J7: one manual run click per free
-      // slot on the shared model server.
+    const scheduled = await runCliJson(cli, ["--data-dir", dataDir, "--json", "automation", "list"]);
+    assert.equal(scheduled.ok, true, JSON.stringify(scheduled));
+    assert.equal(scheduled.result.automations.find((item) => item.id === ownedAutomationId)?.workspaceId, workspaceId);
+    for (let attempt = 1; attempt <= RUN_ATTEMPTS && !markerVisible; attempt += 1) {
+      // Same bounded fixture-readiness check as J7.
       assert.ok(
-        await waitForModelQuiet(60000),
-        `local model stayed overloaded before bot run attempt ${attempt}`,
+        await waitForFixtureReady(60000),
+        `sealed model fixture was not ready before bot run attempt ${attempt}`,
       );
       const panelButton = page
         .locator('[data-testid="bots-panel"]')
@@ -1299,47 +1383,81 @@ export async function probeBotPresetManualRun({
         .then(() => true)
         .catch(() => false);
       if (!markerVisible) {
-        assert.ok(attempt < 3, "bot run output never carried the marker");
+        assert.ok(attempt < RUN_ATTEMPTS, "bot run output never carried the marker");
         await page.getByRole("button", { name: "Bots", exact: true }).click();
         await panel.waitFor();
       }
     }
     assert.ok(markerVisible, "a bot run attempt must record the marker");
     for (const colorScheme of ["light", "dark"]) {
-      await page.emulateMedia({ colorScheme });
-      await shot(page, output, `bots-run-detail-${colorScheme}.png`);
+      const selection = await selectSettingsTheme(page, colorScheme);
+      // Settings navigation remounts run details; reopen the actual saved run.
+      await page.getByRole("button", { name: "Automations", exact: true }).first().click();
+      const breadcrumb = page.getByRole("navigation", { name: "Automations breadcrumb" })
+        .getByRole("button", { name: "Automations", exact: true });
+      if (await breadcrumb.isVisible()) await breadcrumb.click();
+      await page.locator(`[data-testid="automation-row-${ownedAutomationId}"]`).click();
+      await page.getByRole("tab", { name: /^Runs / }).click();
+      await page.locator('[data-testid^="history-run-"]').first().click();
+      await page.waitForFunction((wanted) => document.body.innerText.includes(wanted), marker, { timeout: 15000 });
+      await captureThemeSurface(page, path.join(output, `bots-run-detail-${colorScheme}.png`), selection);
     }
-    await page.emulateMedia({ colorScheme: "light" });
+    await selectSettingsTheme(page, "light");
+    const nativeSessions = await runCliJson(cli, ["--data-dir", dataDir, "--json", "rpc", "session.list"]);
+    assert.equal(nativeSessions.ok, true, JSON.stringify(nativeSessions));
+    const ownedRuns = nativeSessions.result.sessions.filter((session) => session.args.some((arg) => arg.includes(marker)));
+    assert.equal(ownedRuns.length, 1, "exactly one real bot process must carry this request marker");
+    assert.equal(ownedRuns[0].workspaceId, workspaceId);
+    assert.equal(ownedRuns[0].verdict, "exited");
     return [
+      "bots-cross-workspace-responsibility-and-run-retain-canonical-owner",
+      "bots-delete-from-foreign-workspace-removes-owned-automation-and-preserves-unrelated",
       "bots-preset-create-with-local-pi-model",
       "bots-manual-responsibility-run-history-row-exited",
       "bots-run-output-visible-in-automation-detail",
     ];
   } finally {
     // Leave nothing behind: bot delete removes its responsibilities and
-    // their automations (the confirm dialog's own copy states this). If an
-    // earlier UI action closed the renderer, preserve that original failure
-    // and let the outer acceptance cleanup own the daemon/session teardown.
+    // their automations, acting immediately with no confirm step (the
+    // fork-parity direct-delete controller; the pre-parity confirm dialog
+    // and its `bot-delete-confirm` testid are gone). If an earlier UI
+    // action closed the renderer, preserve that original failure and let
+    // the outer acceptance cleanup own the daemon/session teardown.
     if (!page.isClosed()) {
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Select demo-b", exact: true }).click();
       await page
         .getByRole("button", { name: "Bots", exact: true })
         .first()
         .click()
         .catch(() => {});
       await panel.waitFor().catch(() => {});
+      // Returning to the Bots route re-triggers App.tsx's fresh
+      // botSnapshot load (route re-entry clears the prior result to the
+      // pending placeholder before the reload lands), so this SAME
+      // kept-alive panel can genuinely paint its loading state -- with no
+      // bot card, and no Delete control, in the DOM -- for a real window
+      // right after the panel container itself exists. A one-shot count()
+      // taken in that window reads 0 and looks exactly like "already
+      // gone," silently skipping the delete outright. Wait for the real
+      // control to actually appear (retrying, not a single snapshot)
+      // before deciding it's missing.
       const deleteButton = panel.locator(`[data-testid="delete-bot-${botId}"]`);
-      if ((await deleteButton.count().catch(() => 0)) > 0) {
+      const deleteButtonReady = await deleteButton
+        .first()
+        .waitFor({ state: "visible", timeout: 30000 })
+        .then(() => true)
+        .catch(() => false);
+      if (deleteButtonReady) {
         await deleteButton.first().click().catch(() => {});
-        const confirm = page.locator('[data-testid="bot-delete-confirm"]');
-        if ((await confirm.count().catch(() => 0)) > 0)
-          await confirm
-            .getByRole("button", { name: "Delete", exact: true })
-            .click()
-            .catch(() => {});
         await panel
           .getByText(botName, { exact: true })
           .waitFor({ state: "hidden", timeout: 30000 })
           .catch(() => {});
+      } else {
+        console.error(
+          `probeBotPresetManualRun cleanup: delete-bot-${botId} never became visible; skipping the delete click (diagnostic only, the automation-list assertion below still enforces real cleanup).`,
+        );
       }
     }
     const listed = await runCliJson(
@@ -1347,13 +1465,13 @@ export async function probeBotPresetManualRun({
       ["--data-dir", dataDir, "--json", "automation", "list"],
       { timeout: 30000 },
     ).catch(() => null);
+    assert.equal(listed?.ok, true, "automation deletion must be verified, never inferred from a failed read");
     assert.ok(
-      ownedAutomationId === null ||
-        !listed?.result?.automations?.some(
-          (entry) => entry.id === ownedAutomationId,
-        ),
+      !listed.result.automations.some((entry) => entry.id === ownedAutomationId || entry.name === dutyName),
       "bot delete must remove its owned automations",
     );
+    for (const id of preservedAutomationIds)
+      assert(listed.result.automations.some((entry) => entry.id === id), "bot delete must preserve unrelated automations");
     if (!page.isClosed()) {
       const remainingBot = await page
         .evaluate(async ({ id, botId }) => {
@@ -1372,11 +1490,12 @@ export async function probeBotPresetManualRun({
           return snapshot.result.bots.some((entry) => entry.id === botId);
         }, { id: workspaceId, botId })
         .catch(() => null);
-      assert.notEqual(
+      assert.equal(
         remainingBot,
-        true,
-        "bot delete must remove the bot from the scoped snapshot",
+        false,
+        "bot delete must remove the bot from a successfully read scoped snapshot",
       );
+      await page.getByRole("button", { name: "Select folder", exact: true }).click();
     }
   }
 }
