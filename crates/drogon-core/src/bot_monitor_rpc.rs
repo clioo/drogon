@@ -93,6 +93,58 @@ fn parse_scope(params: &Value, method: &str) -> Result<MonitorScope, RpcError> {
     })
 }
 
+/// `bot.monitor_list`'s scope: identical to [`parse_scope`] except that
+/// `workspaceId` may be empty (the app-global read), in which case the
+/// bot's owning workspace is resolved daemon-side by
+/// `resolve_bot_scope` — the caller's assertion is never trusted where it
+/// disagrees with where the Bot lives.
+fn parse_scope_relaxed_workspace(params: &Value, method: &str) -> Result<MonitorScope, RpcError> {
+    let object = params
+        .as_object()
+        .ok_or_else(|| invalid_argument(format!("{method} params must be an object")))?;
+    for key in object.keys() {
+        let admitted = [
+            "workspaceId",
+            "hostId",
+            "botId",
+            "monitorId",
+            "resource",
+            "maxBytes",
+            "responsibilityId",
+            "responsibilityName",
+            "instructions",
+            "cron",
+            "manual",
+        ];
+        if !admitted.contains(&key.as_str()) {
+            return Err(invalid_argument(format!("{method}: unknown field {key}")));
+        }
+    }
+    let required = |key: &str| -> Result<String, RpcError> {
+        let text = object
+            .get(key)
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid_argument(format!("{method}: missing required field {key}")))?;
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Err(invalid_argument(format!(
+                "{method}: field {key} must be non-empty"
+            )));
+        }
+        Ok(trimmed.to_string())
+    };
+    Ok(MonitorScope {
+        workspace_id: object
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("")
+            .to_string(),
+        host_id: required("hostId")?,
+        bot_id: required("botId")?,
+    })
+}
+
 /// Resolve the Bot's owning `(folder, workspace_id)` — the same
 /// authoritative-owner routing `bot.run` uses — proving the Bot exists in
 /// the caller's asserted scope. Never trusts the caller's workspace
@@ -382,9 +434,43 @@ pub(crate) fn approve_monitor_in_tx(
     }))
 }
 
-/// `bot.monitor_list`: every monitor owned by the bot with its health and
+/// Wire outcome tag for one stored check row (the same vocabulary the
+/// renderer's `MonitorCheckView` uses; derived, never stored).
+fn check_outcome_str(result: &crate::bots::monitors::result::MonitorCheckResult) -> &'static str {
+    match result.outcome {
+        crate::bots::monitors::result::MonitorOutcome::NoChange { .. } => "no_change",
+        crate::bots::monitors::result::MonitorOutcome::Changed { .. } => "changed",
+        crate::bots::monitors::result::MonitorOutcome::Error { .. } => "error",
+    }
+}
+
+/// Durable evidence for the Bots page's monitor card: the newest check row
+/// (time + outcome) and the durable incident count, read from the same
+/// check rows `bot_self_mgmt::incidents_for_monitor` derives incidents
+/// from. All three are computed here so the UI never has to guess.
+fn monitor_check_evidence(conn: &Connection, monitor_id: &str) -> (Value, Value, i64) {
+    let checks = mstorage::list_checks_for_monitor(conn, monitor_id).unwrap_or_default();
+    let last = checks
+        .iter()
+        .max_by(|a, b| a.started_at_ms.total_cmp(&b.started_at_ms));
+    let (last_at, last_outcome) = match last {
+        Some(check) => (
+            json!(check.started_at_ms),
+            json!(check_outcome_str(&check.result)),
+        ),
+        None => (Value::Null, Value::Null),
+    };
+    let incident_count = crate::bot_self_mgmt::incidents_for_monitor(conn, monitor_id)
+        .map(|incidents| incidents.len() as i64)
+        .unwrap_or(0);
+    (last_at, last_outcome, incident_count)
+}
+
+/// `bot.monitor_list`: every monitor owned by the bot with its health,
 /// today's delegation budget (`delegationsToday: {used, max}`) — the
-/// honest state behind the cap.
+/// honest state behind the cap — and the durable check evidence the Bots
+/// page renders (`failureThreshold`, `lastCheckAtMs`, `lastCheckOutcome`,
+/// `incidentCount`).
 fn monitor_list_in_conn(
     conn: &Connection,
     scope: &MonitorScope,
@@ -397,6 +483,8 @@ fn monitor_list_in_conn(
         .iter()
         .map(|record| {
             let (_, project_id) = record.rule.scope();
+            let (last_check_at_ms, last_check_outcome, incident_count) =
+                monitor_check_evidence(conn, &record.id);
             let mut view = json!({
                 "monitorId": record.id,
                 "version": record.version,
@@ -415,6 +503,10 @@ fn monitor_list_in_conn(
                 "trigger": trigger_view(&record.trigger),
                 "consecutiveErrors": record.consecutive_errors,
                 "lastError": record.last_error,
+                "failureThreshold": crate::bot_self_mgmt::FAILURE_THRESHOLD,
+                "lastCheckAtMs": last_check_at_ms,
+                "lastCheckOutcome": last_check_outcome,
+                "incidentCount": incident_count,
                 "delegationsToday": {
                     "used": used,
                     "max": crate::bots::delegation::MAX_DELEGATIONS_PER_BOT_PER_DAY,
@@ -503,10 +595,22 @@ impl crate::Engine {
     }
 
     pub(crate) fn bot_monitor_list(&self, params: &Value) -> Result<Value, RpcError> {
-        let scope = parse_scope(params, "bot.monitor_list")?;
+        // The app-global Bots page reads (`bot.snapshot` #348) carries no
+        // per-bot workspace, so `workspaceId: ""` is admitted HERE ONLY and
+        // resolves to the bot's owning workspace — the same authoritative
+        // routing `bot.run` uses. The resolved scope is echoed so callers
+        // can verify what answered.
+        let scope = parse_scope_relaxed_workspace(params, "bot.monitor_list")?;
         let conn = self.db.lock().unwrap();
-        // Scope-proof first: the Bot must live in the asserted workspace.
-        resolve_bot_scope(&conn, &self.host_id, &scope)?;
-        monitor_list_in_conn(&conn, &scope, crate::now_unix_ms() as f64)
+        // Scope-proof first: the Bot must live in the asserted (or resolved)
+        // workspace.
+        let (_folder, resolved_workspace_id) = resolve_bot_scope(&conn, &self.host_id, &scope)?;
+        let mut result = monitor_list_in_conn(&conn, &scope, crate::now_unix_ms() as f64)?;
+        if let Some(object) = result.as_object_mut() {
+            object.insert("hostId".to_string(), json!(self.host_id));
+            object.insert("botId".to_string(), json!(scope.bot_id));
+            object.insert("workspaceId".to_string(), json!(resolved_workspace_id));
+        }
+        Ok(result)
     }
 }

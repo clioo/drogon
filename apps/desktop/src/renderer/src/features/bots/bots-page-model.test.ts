@@ -3,12 +3,21 @@ import {
   BOT_HARNESS_IDS,
   PRESETS,
   applyBotCharacterPreset,
+  botInitials,
+  botStatusPill,
   buildBotCreateBody,
   buildBotRunHarness,
+  collapsedRowNote,
+  countActiveBots,
   emptyBotCreateForm,
   emptyResponsibilityForm,
+  filterBots,
   isBotCreateFormReady,
   isResponsibilityFormReady,
+  monitorHealthPill,
+  monitorLastCheck,
+  monitorTitle,
+  monitorTriggerLabel,
 } from "./bots-page-model";
 
 describe("bots-page-model", () => {
@@ -185,5 +194,189 @@ describe("responsibility form model", () => {
         NOW,
       ),
     ).toBe(false);
+  });
+});
+
+describe("owner-design page model (task_197f6a7eb370)", () => {
+  const bot = (overrides = {}) =>
+    ({
+      id: "bot-1",
+      characterPreset: "none",
+      displayIdentity: { displayName: "Watcher", handle: null, title: null },
+      harnessPolicy: { defaultHarness: "pi", explicitModel: null },
+      instructions: "",
+      memories: [],
+      responsibilities: [],
+      currentSession: null,
+      createdAt: 1,
+      updatedAt: 1,
+      ...overrides,
+    }) as never;
+
+  const configuredBot = () =>
+    bot({
+      responsibilities: [
+        {
+          id: "resp-1",
+          name: "Nightly review",
+          instructions: "",
+          kind: "scheduled",
+          trigger: { kind: "scheduled", automationId: "auto-1" },
+          enabled: true,
+          recipe: null,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    });
+
+  it("derives initials from the first letters of the first two words", () => {
+    expect(botInitials("Arya Stark")).toBe("AS");
+    expect(botInitials("arya")).toBe("A");
+    expect(botInitials("  mad   dog ")).toBe("MD");
+    expect(botInitials("Åsa Bergström")).toBe("ÅB");
+    expect(botInitials("")).toBe("?");
+  });
+
+  it("renders Idle only for a bot with nothing configured at all", () => {
+    expect(
+      botStatusPill({ bot: bot(), monitorCount: 0 }).label,
+    ).toBe("Idle");
+    expect(
+      botStatusPill({ bot: bot(), monitorCount: 0 }).tone,
+    ).toBe("idle");
+    // Any real configuration flips the pill to the design's green state.
+    expect(
+      botStatusPill({ bot: configuredBot(), monitorCount: 0 }).label,
+    ).toBe("Ready for a purpose");
+    expect(
+      botStatusPill({ bot: bot(), monitorCount: 1 }).label,
+    ).toBe("Ready for a purpose");
+    expect(
+      botStatusPill({
+        bot: bot({
+          currentSession: {
+            sessionId: "s",
+            harness: "pi",
+            model: null,
+            startedAt: 1,
+            rotatedAt: null,
+          },
+        }),
+        monitorCount: 0,
+      }).label,
+    ).toBe("Ready for a purpose");
+  });
+
+  it("claims In session only from an observed live verdict, never from storage", () => {
+    const pill = botStatusPill({
+      bot: configuredBot(),
+      monitorCount: 0,
+      observedLiveness: "live",
+    });
+    expect(pill).toEqual({ label: "In session", tone: "live" });
+    // Loss of contact is never exit, and never a live claim either.
+    expect(
+      botStatusPill({
+        bot: configuredBot(),
+        monitorCount: 0,
+        observedLiveness: "unverifiable",
+      }).label,
+    ).not.toBe("In session");
+    expect(
+      botStatusPill({
+        bot: bot(),
+        monitorCount: 0,
+        observedLiveness: "exited",
+      }).label,
+    ).toBe("Idle");
+  });
+
+  it("counts active bots as everything beyond the muted Idle state", () => {
+    const monitors = { "bot-2": [{}] } as unknown as Record<string, never[]>;
+    const count = countActiveBots(
+      [bot({ id: "bot-1" }), bot({ id: "bot-2" }), configuredBot()],
+      monitors,
+    );
+    expect(count).toBe(2); // bot-2 (a monitor) + bot-3 (configured); bot-1 is Idle.
+  });
+
+  it("filters bots over real fields only, case-insensitively", () => {
+    const list = [
+      bot({
+        id: "a",
+        displayIdentity: { displayName: "Arya", handle: "arya", title: null },
+      }),
+      bot({ id: "b", instructions: "Guard the northern border" }),
+    ];
+    expect(filterBots(list, "ARYA").map((b) => b.id)).toEqual(["a"]);
+    expect(filterBots(list, "northern").map((b) => b.id)).toEqual(["b"]);
+    expect(filterBots(list, "")).toHaveLength(2);
+    expect(filterBots(list, "   ")).toHaveLength(2);
+    expect(filterBots(list, "zzz")).toEqual([]);
+  });
+
+  it("maps the daemon's durable health verdicts to chips", () => {
+    expect(monitorHealthPill("healthy")).toEqual({
+      label: "Watching",
+      tone: "watching",
+    });
+    expect(monitorHealthPill("degraded").label).toBe("Degraded");
+    expect(monitorHealthPill("failing").label).toBe("Failing");
+    expect(monitorHealthPill("needs_approval").label).toBe("Needs approval");
+    expect(monitorHealthPill("disabled").label).toBe("Paused");
+  });
+
+  it("titles monitors from the watched resource, never an invented name", () => {
+    expect(monitorTitle({ resource: "notes/status.md" } as never)).toBe(
+      "notes/status.md",
+    );
+    expect(
+      monitorTitle({ scriptPath: "scripts/check.sh" } as never),
+    ).toBe("scripts/check.sh");
+    // A kind with neither (and the summary absent) shows the rule kind.
+    expect(monitorTitle({ ruleKind: "http_poll.v1" } as never)).toBe(
+      "http_poll.v1",
+    );
+  });
+
+  it("renders LAST CHECK only from a real check row, with honest age", () => {
+    const now = 1_000_000_000;
+    expect(monitorLastCheck({ lastCheckAtMs: null } as never, now)).toBeNull();
+    const healthy = monitorLastCheck(
+      { health: "healthy", lastCheckAtMs: now - 8 * 60_000 } as never,
+      now,
+    );
+    expect(healthy).toEqual({ healthLabel: "Healthy", ageLabel: "8m ago" });
+    expect(
+      monitorLastCheck(
+        { health: "failing", lastCheckAtMs: now - 2 * 3_600_000 } as never,
+        now,
+      ),
+    ).toEqual({ healthLabel: "Failing", ageLabel: "2h ago" });
+    // A needs-approval monitor with an old check still shows the row age
+    // under the honest "Checked" word.
+    expect(
+      monitorLastCheck(
+        { health: "needs_approval", lastCheckAtMs: now - 30_000 } as never,
+        now,
+      )?.healthLabel,
+    ).toBe("Checked");
+  });
+
+  it("labels monitor triggers Manual or with the real cron", () => {
+    expect(monitorTriggerLabel({ kind: "manual" })).toBe("Manual");
+    expect(
+      monitorTriggerLabel({ kind: "scheduled", cron: "*/5 * * * *" }),
+    ).toBe("*/5 * * * *");
+  });
+
+  it("claims the standby workspace note only when a home exists", () => {
+    expect(collapsedRowNote({} as never)).toBe(
+      "No automations or monitors yet",
+    );
+    expect(collapsedRowNote({ home: { path: "/x" } } as never)).toBe(
+      "No automations or monitors yet · Standby workspace initialized",
+    );
   });
 });

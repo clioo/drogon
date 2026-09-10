@@ -33,6 +33,14 @@ const responsibility = z.object({
   createdAt: timestamp,
   updatedAt: timestamp,
 });
+const botHome = z.object({
+  // Provisioned-home projection (Bots page "Bot workspace" strip): the
+  // real path, handle and home workspace id claimed in the bot_homes
+  // component. Null when the Bot was never provisioned.
+  handle: z.string(),
+  path: z.string().min(1),
+  homeWorkspaceId: z.string(),
+});
 const bot = z.object({
   id: z.string(),
   characterPreset: z.string(),
@@ -48,6 +56,7 @@ const bot = z.object({
   instructions: z.string(),
   memories: z.array(z.string()),
   responsibilities: z.array(responsibility),
+  home: botHome.nullable().optional(),
   currentSession: z
     .object({
       sessionId: z.string(),
@@ -313,4 +322,68 @@ export const botDeleteResultSchema = globalScope.extend({
   botId: z.string(),
   removed: z.boolean(),
   automationIds: z.array(z.string()),
+});
+
+// Bots-page monitor read (`bot.monitor_list`): the read the redesigned
+// page's MONITORS column is built from. `workspaceId` admits the ""
+// app-global sentinel — native resolves the bot's owning workspace
+// daemon-side and echoes the RESOLVED id (never the "" request) in the
+// result, so the dispatcher's echo gate demands a real workspace id.
+export const botMonitorListInputSchema = z
+  .object({
+    hostId: id,
+    workspaceId: z
+      .string()
+      .max(128)
+      .regex(/^[^\x00-\x1f\x7f]*$/u),
+    botId: id,
+  })
+  .strict();
+
+export const botMonitorListResultSchema = z.object({
+  hostId: id,
+  botId: id,
+  workspaceId: id,
+  monitors: z.array(
+    z
+      .object({
+        monitorId: id,
+        version: z.number().int().nonnegative(),
+        ruleKind: z.string().min(1),
+        projectId: z.string(),
+        enabled: z.boolean(),
+        approved: z.boolean(),
+        responsibilityId: z.string().nullable(),
+        cursor: z.string().nullable(),
+        lastEventId: z.string().nullable(),
+        health: z.enum([
+          "healthy",
+          "degraded",
+          "failing",
+          "needs_approval",
+          "disabled",
+        ]),
+        trigger: z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("manual") }),
+          z.object({ kind: z.literal("scheduled"), cron: z.string() }),
+        ]),
+        consecutiveErrors: z.number().int().nonnegative(),
+        lastError: z.string().nullable(),
+        // Durable check evidence projected by native (never UI-derived).
+        failureThreshold: z.number().int().nonnegative(),
+        lastCheckAtMs: timestamp.nullable(),
+        lastCheckOutcome: z
+          .enum(["no_change", "changed", "error"])
+          .nullable(),
+        incidentCount: z.number().int().nonnegative(),
+        delegationsToday: z.object({
+          used: z.number().int().nonnegative(),
+          max: z.number().int().nonnegative(),
+        }),
+      })
+      // Rule-kind summary fields (resource, maxBytes, scriptPath, …) are
+      // flattened into the view by native; they are display-only here and
+      // unknown kinds must stay visible, so the summary stays open.
+      .passthrough(),
+  ),
 });

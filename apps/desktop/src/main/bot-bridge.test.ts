@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { dispatchBotRun, dispatchBotSnapshot } from "./bot-bridge";
+import {
+  dispatchBotMonitorList,
+  dispatchBotRun,
+  dispatchBotSnapshot,
+} from "./bot-bridge";
 
 const input = { hostId: "host", workspaceId: "workspace", locale: "en-US" };
 const snapshot = {
@@ -226,6 +230,110 @@ describe("Bot run bridge", () => {
       ok: false,
       error: { code: "invalid_argument" },
     });
+    expect(call).not.toHaveBeenCalled();
+  });
+});
+
+describe("Bot monitor list bridge", () => {
+  const monitorInput = { hostId: "host", workspaceId: "", botId: "bot-1" };
+  const monitorView = {
+    monitorId: "mon-1",
+    version: 1,
+    ruleKind: "local_file_digest.v1",
+    projectId: "proj-1",
+    enabled: true,
+    approved: true,
+    responsibilityId: null,
+    cursor: "crc-1",
+    lastEventId: null,
+    health: "healthy",
+    trigger: { kind: "scheduled", cron: "*/5 * * * *" },
+    consecutiveErrors: 0,
+    lastError: null,
+    failureThreshold: 3,
+    lastCheckAtMs: null,
+    lastCheckOutcome: null,
+    incidentCount: 0,
+    delegationsToday: { used: 0, max: 10 },
+    resource: "notes/status.md",
+    maxBytes: 65536,
+  };
+
+  it("admits the app-global '' request and demands native's resolved workspace echo", async () => {
+    const result = {
+      hostId: "host",
+      botId: "bot-1",
+      workspaceId: "resolved-ws",
+      monitors: [monitorView],
+    };
+    const call = vi.fn(async () => ({ ok: true as const, result }));
+    expect(await dispatchBotMonitorList(monitorInput, call)).toEqual({
+      ok: true,
+      result,
+    });
+    expect(call).toHaveBeenCalledExactlyOnceWith("bot.monitor_list", monitorInput);
+  });
+
+  it("rejects a resolved-echo of '' and a foreign bot id", async () => {
+    const call = vi.fn(async () => ({
+      ok: true as const,
+      result: {
+        hostId: "host",
+        botId: "bot-1",
+        workspaceId: "",
+        monitors: [],
+      },
+    }));
+    expect((await dispatchBotMonitorList(monitorInput, call)).ok).toBe(false);
+    const foreign = vi.fn(async () => ({
+      ok: true as const,
+      result: {
+        hostId: "host",
+        botId: "bot-other",
+        workspaceId: "resolved-ws",
+        monitors: [],
+      },
+    }));
+    expect((await dispatchBotMonitorList(monitorInput, foreign)).ok).toBe(false);
+  });
+
+  it("rejects malformed monitor rows and unknown health values", async () => {
+    const badHealth = vi.fn(async () => ({
+      ok: true as const,
+      result: {
+        hostId: "host",
+        botId: "bot-1",
+        workspaceId: "resolved-ws",
+        monitors: [{ ...monitorView, health: "fine" }],
+      },
+    }));
+    expect((await dispatchBotMonitorList(monitorInput, badHealth)).ok).toBe(
+      false,
+    );
+    const badShape = vi.fn(async () => ({
+      ok: true as const,
+      result: {
+        hostId: "host",
+        botId: "bot-1",
+        workspaceId: "resolved-ws",
+        monitors: [{ ...monitorView, failureThreshold: "three" }],
+      },
+    }));
+    expect((await dispatchBotMonitorList(monitorInput, badShape)).ok).toBe(
+      false,
+    );
+  });
+
+  it("refuses malformed requests before the native call", async () => {
+    const call = vi.fn();
+    expect(
+      (
+        await dispatchBotMonitorList(
+          { hostId: "", workspaceId: "", botId: "" },
+          call,
+        )
+      ).ok,
+    ).toBe(false);
     expect(call).not.toHaveBeenCalled();
   });
 });

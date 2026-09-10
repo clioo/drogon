@@ -44,6 +44,7 @@ impl Engine {
         let mut bots_json = serde_json::to_value(&bots)
             .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?;
         project_bots_trigger_automation_id(&mut bots_json);
+        project_bots_home(&tx, &mut bots_json);
         self.project_bots_current_session_facts(&conn, &mut bots_json);
         let result = json!({"hostId":self.host_id,"workspaceId":scope.workspace_id,"bots":bots_json,"history":history});
         if serde_json::to_vec(&result)
@@ -207,6 +208,43 @@ impl Engine {
         .optional()
         .ok()
         .flatten()
+    }
+}
+
+/// Provisioned-home projection (the Bots page's "Bot workspace" strip):
+/// for each Bot with a claimed home in the `bot_homes` component, adds a
+/// slim `home` object — the handle, the REAL provisioned path and the home
+/// workspace id — read from `bot_self_mgmt::home_for_bot`. A Bot that was
+/// never provisioned (no `bot.run`/`bot.self_provision` yet) gets
+/// `"home": null`: absence stays visible, never invented.
+fn project_bots_home(tx: &rusqlite::Transaction, bots_json: &mut Value) {
+    let Some(bots) = bots_json.as_array_mut() else {
+        return;
+    };
+    for bot in bots {
+        let Some(bot_id) = bot.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let home = match crate::bot_self_mgmt::home_for_bot(tx, bot_id) {
+            Ok(home) => home,
+            Err(_) => continue, // Read-only projection: a failed read leaves the field absent.
+        };
+        let Some(home) = home else {
+            if let Some(obj) = bot.as_object_mut() {
+                obj.insert("home".to_string(), Value::Null);
+            }
+            continue;
+        };
+        if let Some(obj) = bot.as_object_mut() {
+            obj.insert(
+                "home".to_string(),
+                json!({
+                    "handle": home.handle,
+                    "path": home.path,
+                    "homeWorkspaceId": home.home_workspace_id,
+                }),
+            );
+        }
     }
 }
 

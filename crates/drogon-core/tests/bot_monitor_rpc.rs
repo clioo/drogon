@@ -402,3 +402,48 @@ fn create_honors_cron_manual_and_rejects_bad_cron() {
     let monitors = listed["monitors"].as_array().unwrap();
     assert_eq!(monitors.len(), 3);
 }
+
+#[test]
+fn list_reports_check_evidence_defaults_and_threshold() {
+    let fixture = Fixture::new();
+    fixture.create(
+        "m-create",
+        json!({"monitorId": "mon-1", "resource": "notes/status.md"}),
+    );
+    fixture.approve("m-approve", "mon-1");
+    let listed = fixture.list();
+    let monitor = &listed["monitors"][0];
+    // The durable evidence fields the Bots page renders: the real failure
+    // threshold constant, and honest "no checks yet" defaults (never a
+    // fabricated timestamp or count).
+    assert_eq!(monitor["failureThreshold"], 3);
+    assert!(monitor["lastCheckAtMs"].is_null());
+    assert!(monitor["lastCheckOutcome"].is_null());
+    assert_eq!(monitor["incidentCount"], 0);
+}
+
+#[test]
+fn list_admits_empty_workspace_and_echoes_resolved_scope() {
+    let fixture = Fixture::new();
+    fixture.create(
+        "m-create",
+        json!({"monitorId": "mon-1", "resource": "notes/status.md"}),
+    );
+    // The app-global Bots page scope: empty workspace, resolved daemon-side.
+    let listed = ok(fixture.engine.dispatch(request(
+        "list-global",
+        "bot.monitor_list",
+        json!({"workspaceId": "", "hostId": fixture.host_id, "botId": fixture.bot_id}),
+    )));
+    assert_eq!(listed["hostId"], fixture.host_id);
+    assert_eq!(listed["botId"], fixture.bot_id);
+    assert_eq!(listed["workspaceId"], fixture.workspace_id);
+    assert_eq!(listed["monitors"].as_array().unwrap().len(), 1);
+    // An unknown bot still refuses (never fabricates an empty list).
+    let error = err(fixture.engine.dispatch(request(
+        "list-unknown",
+        "bot.monitor_list",
+        json!({"workspaceId": "", "hostId": fixture.host_id, "botId": "bot-nope"}),
+    )));
+    assert_eq!(error.code, "not_found", "{error:?}");
+}

@@ -16,8 +16,10 @@
    Escape is this repo's (#270 — the fork unmounts the page instead). */
 
 import { useCallback, useEffect, useState } from "react";
+import type { AutomationSummary } from "../../../../shared/automation-contract";
 import type {
   BotBridge,
+  BotMonitorView,
   BotRunHarnessSource,
   BotScope,
   BotsPanelBot,
@@ -29,6 +31,7 @@ import {
   emptyBotCreateForm,
   emptyResponsibilityForm,
   harnessSupportsConversationResume,
+  isBotUnconfigured,
 } from "./bots-page-model";
 import type {
   BotCreateFormValues,
@@ -80,6 +83,26 @@ export type BotsPageControllerDeps = {
    *  because liveness is not established. See
    *  `BotsPanelProps.resolveBotSession`. */
   resolveBotSession?: (input: { bot: BotsPanelBot }) => BotSessionResolution;
+  /** Host-supplied automation summary list (the redesigned AUTOMATIONS
+   *  column joins scheduled responsibilities with their real scheduler
+   *  record: cron, timezone, harness/model, next/last run). Optional so
+   *  callers without the automation namespace keep compiling; absent means
+   *  the column renders only what the bot record itself carries. */
+  automationList?: () => Promise<{
+    ok: boolean;
+    result?: { automations: AutomationSummary[] };
+  }>;
+  /** Host-supplied monitor read (the redesigned MONITORS column). Optional;
+   *  absent/unavailable means the column says so honestly instead of
+   *  rendering rows it cannot see. */
+  monitorList?: (input: {
+    hostId: string;
+    workspaceId: string;
+    botId: string;
+  }) => Promise<{
+    ok: boolean;
+    result?: { monitors: BotMonitorView[]; workspaceId: string };
+  }>;
 };
 
 function mintRequestId(prefix: string): string {
@@ -102,6 +125,8 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     onOpenSession,
     createWorkspaceId,
     resolveBotSession,
+    automationList,
+    monitorList,
   } = deps;
 
   const [localSnapshot, setLocalSnapshot] =
@@ -132,6 +157,24 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Redesigned page data: the real automation scheduler records (joined by
+  // automationId) and each bot's durable monitors. Both degrade honestly:
+  // a null list means "no data source", never an empty claim.
+  const [automationSummaries, setAutomationSummaries] = useState<
+    AutomationSummary[] | null
+  >(null);
+  const [monitorsByBotId, setMonitorsByBotId] = useState<Record<
+    string,
+    BotMonitorView[]
+  > | null>(null);
+  // Per-bot card expansion. Unset means "the design's default": configured
+  // bots render expanded, bots with nothing configured render as the
+  // compact collapsed row. Explicit toggles win over the default.
+  const [expandedOverrides, setExpandedOverrides] = useState<
+    Record<string, boolean>
+  >({});
+  // Header "Filter bots…" query (client-side, real fields only).
+  const [filterQuery, setFilterQuery] = useState("");
 
   // The fork's load(): one loader for mount, refresh and every post-mutation
   // reload; the fork auto-selects the first bot on a fresh snapshot (drives
@@ -162,6 +205,63 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       setLoading(false);
     }
   }, [bridge, scope]);
+
+  // Side reads for the redesigned columns. They ride the SNAPSHOT, not the
+  // bridge: a props-only read-only panel still joins real scheduler
+  // records and durable monitors when the host supplies the sources. Each
+  // degrades independently — a missing/failed source leaves that column's
+  // data unset, never an invented empty. Refetching whenever the snapshot
+  // identity changes also refreshes them after every post-mutation reload.
+  useEffect(() => {
+    if (!automationList) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const listed = await automationList();
+        if (!cancelled && listed.ok && listed.result) {
+          setAutomationSummaries(listed.result.automations);
+        }
+      } catch {
+        // Keep the previous summaries; the column stays honest.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [automationList, localSnapshot, snapshot]);
+
+  useEffect(() => {
+    if (!monitorList || !scope) return;
+    const bots = (localSnapshot ?? snapshot).bots;
+    if (bots.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const results = await Promise.allSettled(
+        bots.map(async (bot) => {
+          const listed = await monitorList({
+            hostId: scope.hostId,
+            workspaceId: scope.workspaceId,
+            botId: bot.id,
+          });
+          return { botId: bot.id, listed } as const;
+        }),
+      );
+      const nextMonitors: Record<string, BotMonitorView[]> = {};
+      let sawSource = false;
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue;
+        sawSource = true;
+        const { botId, listed } = result.value;
+        if (listed.ok && listed.result) {
+          nextMonitors[botId] = listed.result.monitors;
+        }
+      }
+      if (!cancelled && sawSource) setMonitorsByBotId(nextMonitors);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [monitorList, localSnapshot, snapshot, scope]);
 
   useEffect(() => {
     void load();
@@ -526,6 +626,27 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     ],
   );
 
+  // Explicit expand/collapse of a bot card. The flip is over the card's
+  // EFFECTIVE state (the design default — configured bots expanded,
+  // unconfigured bots collapsed — or the user's last toggle), so the
+  // first click on a default-expanded card collapses it.
+  const toggleExpanded = useCallback(
+    (botId: string): void => {
+      const bot = (localSnapshot ?? snapshot).bots.find(
+        (candidate) => candidate.id === botId,
+      );
+      const monitorCount = monitorsByBotId?.[botId]?.length ?? 0;
+      const defaultExpanded = bot
+        ? !isBotUnconfigured(bot, monitorCount)
+        : true;
+      setExpandedOverrides((current) => ({
+        ...current,
+        [botId]: !(current[botId] ?? defaultExpanded),
+      }));
+    },
+    [localSnapshot, snapshot, monitorsByBotId],
+  );
+
   return {
     effective,
     loading,
@@ -549,6 +670,12 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     deleteBot,
     runResponsibility,
     launchBot,
+    automationSummaries,
+    monitorsByBotId,
+    expandedOverrides,
+    toggleExpanded,
+    filterQuery,
+    setFilterQuery,
   };
 }
 
