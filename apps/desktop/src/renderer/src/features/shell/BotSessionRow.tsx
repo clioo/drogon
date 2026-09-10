@@ -6,10 +6,17 @@
 // and focused-row fill, and real button semantics with an aria-label. The
 // state text is the daemon-owned verdict's label (never a hook guess): the
 // owner asked for truthful live/idle/exited state in this surface.
+//
+// Defect 3: the owner asked to see the CHARACTER's avatar and name here.
+// The glyph is the SAME `DrogonBotAvatar` the Bots page renders (so a
+// character change is reflected in both places); the harness stays
+// identifiable through the existing `· <Harness>` suffix.
 import { Terminal } from "lucide-react";
 import { AgentStateIcon } from "./AgentStateIcon";
 import { agentStateLabel } from "./agent-state";
 import { HarnessMenuIcon } from "./TabCreateMenuIcons";
+import { DrogonBotAvatar } from "../bots/DrogonBotAvatar";
+import type { DrogonBotCharacterPreset } from "../bots/bot-characters";
 import type { SidebarBotSession } from "./sidebar-bot-sessions";
 import { formatRowHarnessLabel } from "./worktree-agent-rows";
 
@@ -51,6 +58,14 @@ export function BotSessionRow({
       title={row.title}
     >
       <AgentStateIcon state={row.state} size={13} />
+      <DrogonBotAvatar
+        preset={row.characterPreset as DrogonBotCharacterPreset}
+        alt={`${row.displayName} avatar`}
+        className="size-4"
+      />
+      {/* The harness glyph keeps its original slot ahead of the text (the
+          agent-row structure); the `· <Harness>` suffix below stays too, so
+          the harness is identifiable by icon and by name. */}
       <span className="inline-flex shrink-0" title={harnessLabel}>
         {row.harnessId ? (
           <HarnessMenuIcon

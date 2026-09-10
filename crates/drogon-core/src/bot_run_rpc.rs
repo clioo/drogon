@@ -256,7 +256,14 @@ pub enum RunTurn {
     /// the session is live" impossible. [`Engine::bot_run`]'s ROOT adapter
     /// -- never [`authorized_prepare`] alone -- is what strips `headless`
     /// and retargets the session at the Bot's own sandbox workspace.
-    OpenSession,
+    ///
+    /// `resume` (Defect 2): reopen the harness's OWN most recent
+    /// conversation in the Bot's home instead of starting a blank one. Set
+    /// by the caller only when the Bot's recorded session is known to have
+    /// exited; a live session is focused instead, never redispatched.
+    OpenSession {
+        resume: bool,
+    },
 }
 
 /// The strict, normalized request. The envelope `request_id` is deliberately
@@ -297,6 +304,10 @@ pub struct ChatPlan {
     /// message row (no turn was dispatched). `false` for a plain chat
     /// turn, which keeps the original one-shot headless contract.
     pub open_session: bool,
+    /// True when the open-session dispatch must reopen the harness's own
+    /// prior conversation (`--continue`, `codex resume --last`) rather than
+    /// start blank. Always false for a plain chat turn.
+    pub resume: bool,
 }
 
 /// Bound on the raw chat message: generous enough for a real conversational
@@ -417,6 +428,7 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         "eventIdentity",
         "prompt",
         "interactive",
+        "resume",
         "harness",
         "locale",
     ];
@@ -434,6 +446,17 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         Some(Value::Bool(value)) => Some(*value),
         Some(_) => return Err(invalid_argument("field interactive must be a boolean")),
     };
+    let resume = match object.get("resume") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(invalid_argument("field resume must be a boolean")),
+    };
+    if resume && interactive != Some(true) {
+        return Err(invalid_argument(
+            "field resume is only valid on an open-session dispatch (interactive: true): a chat \
+             turn or a responsibility invocation has no prior conversation to reopen",
+        ));
+    }
     let has_prompt = matches!(object.get("prompt"), Some(value) if !value.is_null());
     if interactive.is_some()
         && ["responsibilityId", "reason", "eventIdentity"]
@@ -470,7 +493,7 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         }
         RunTurn::Chat { prompt }
     } else if interactive == Some(true) {
-        RunTurn::OpenSession
+        RunTurn::OpenSession { resume }
     } else {
         if let Some(false) = interactive {
             return Err(invalid_argument(
@@ -941,6 +964,7 @@ pub fn authorized_prepare(
                 &workspace_id,
                 Some(&operating_prompt),
                 &harness_params,
+                false,
             );
             Ok(BotRunPrepare::ReadyChat {
                 plan: ChatPlan {
@@ -950,11 +974,12 @@ pub fn authorized_prepare(
                     prompt: prompt.clone(),
                     attempt_at,
                     open_session: false,
+                    resume: false,
                 },
                 workspace_id,
             })
         }
-        RunTurn::OpenSession => {
+        RunTurn::OpenSession { resume } => {
             // Same bot-existence gate as a chat turn, but NO prompt is
             // built or dispatched: the session opens live and IDLE, and
             // the harness's own interactive entrypoint waits for the
@@ -973,7 +998,8 @@ pub fn authorized_prepare(
                 });
             }
             let chat_request_id = format!("bot-open:{envelope_request_id}");
-            let params = build_chat_harness_start_params(&workspace_id, None, &harness_params);
+            let params =
+                build_chat_harness_start_params(&workspace_id, None, &harness_params, *resume);
             Ok(BotRunPrepare::ReadyChat {
                 plan: ChatPlan {
                     bot_id: request.bot_id.clone(),
@@ -982,6 +1008,7 @@ pub fn authorized_prepare(
                     prompt: String::new(),
                     attempt_at,
                     open_session: true,
+                    resume: *resume,
                 },
                 workspace_id,
             })
@@ -998,11 +1025,17 @@ fn build_chat_harness_start_params(
     workspace_id: &str,
     prompt: Option<&str>,
     harness_params: &HarnessLaunchParams,
+    resume: bool,
 ) -> Value {
     let mut params = json!({
         "workspaceId": workspace_id,
         "harnessId": harness_params.harness_id,
     });
+    if resume {
+        // Defect 2: reopen the harness's own prior conversation. Native's
+        // launch planner maps this to `--continue` / `codex resume --last`.
+        params["resume"] = json!(true);
+    }
     if let Some(prompt) = prompt {
         params["prompt"] = json!(prompt);
     }

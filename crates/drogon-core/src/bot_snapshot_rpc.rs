@@ -1,5 +1,5 @@
 use drogon_protocol::{MAX_FRAME_BYTES, RpcError};
-use rusqlite::params;
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -44,7 +44,7 @@ impl Engine {
         let mut bots_json = serde_json::to_value(&bots)
             .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?;
         project_bots_trigger_automation_id(&mut bots_json);
-        self.project_bots_current_session_pid(&mut bots_json);
+        self.project_bots_current_session_facts(&conn, &mut bots_json);
         let result = json!({"hostId":self.host_id,"workspaceId":scope.workspace_id,"bots":bots_json,"history":history});
         if serde_json::to_vec(&result)
             .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?
@@ -122,16 +122,27 @@ impl Engine {
         Ok((bots_json, history))
     }
 
-    /// Live-pid projection (Bot session inspector, bug-bot-a836b4ebf8be65505):
-    /// for each Bot whose `currentSession` names a session id this service
-    /// instance still holds a live handle for, adds `processId` to the
-    /// serialized `currentSession` object -- read straight off the daemon's
-    /// own in-memory session registry, never persisted (a pid outlives
-    /// neither the process it names nor this daemon run, so it is not a
-    /// storage-layer fact). A session this instance no longer tracks (daemon
-    /// restart, already exited) is left without the field, same as
-    /// `project_bots_trigger_automation_id`'s in-place JSON patching pattern.
-    fn project_bots_current_session_pid(&self, bots_json: &mut Value) {
+    /// Live-session projection for the Bot snapshot: for each Bot whose
+    /// `currentSession` names a session id this host knows, merge the daemon's
+    /// OWN session facts -- `workspaceId`, `incarnation`, `verdict` and, when
+    /// still running, the live OS `processId`.
+    ///
+    /// Why this exists (Defect 1): the renderer used to decide "resume or
+    /// dispatch a fresh session" by searching the SELECTED workspace's session
+    /// list, but a Bot's session runs in the Bot's own home workspace. On the
+    /// first click from anywhere else the lookup missed, so the app silently
+    /// opened a SECOND session. Projecting the daemon's own liveness facts onto
+    /// the Bot record makes the decision workspace-independent and
+    /// authoritative -- the snapshot is the fact, never a renderer guess.
+    ///
+    /// `verdict` is projected from the durable session row (or the live
+    /// handle when this instance still holds one); `processId` remains a
+    /// live-only in-memory fact, exactly as before (a pid outlives neither the
+    /// process it names nor this daemon run). A session this host has no row
+    /// for leaves the record untouched, so the renderer can tell "no record"
+    /// (safe to open fresh) apart from "recorded but unobserved" (never
+    /// dispatch a duplicate).
+    fn project_bots_current_session_facts(&self, conn: &Connection, bots_json: &mut Value) {
         let Some(bots) = bots_json.as_array_mut() else {
             return;
         };
@@ -144,33 +155,58 @@ impl Engine {
             else {
                 continue;
             };
-            let Some(pid) = self.session_process_id(&session_id) else {
+            let Some(facts) = self.recorded_session_facts(conn, &session_id) else {
                 continue;
             };
-            if let Some(session_obj) = bot
-                .get_mut("currentSession")
-                .and_then(Value::as_object_mut)
-            {
+            let Some(session_obj) = bot.get_mut("currentSession").and_then(Value::as_object_mut)
+            else {
+                continue;
+            };
+            for key in ["workspaceId", "incarnation", "verdict"] {
+                if let Some(value) = facts.get(key) {
+                    session_obj.insert(key.to_string(), value.clone());
+                }
+            }
+            if let Some(pid) = facts.get("processId").and_then(Value::as_u64) {
                 session_obj.insert("processId".to_string(), json!(pid));
             }
         }
     }
 
-    /// Live OS pid of a still-RUNNING tracked session's PTY child. `None`
-    /// when this service instance holds no handle for it (never tracked, or
-    /// already forgotten), the platform exposes no pid, or -- the case a
-    /// naive lookup would get wrong -- the handle's own child has already
-    /// been confirmed exited: session handles are deliberately RETAINED in
-    /// `self.sessions` after exit (so a closed tab can still be read back),
-    /// so `child_process_id()` alone answers "what pid did this process
-    /// have", not "is it still running". A Process ID row must gate on
-    /// `is_exited()` too, or it would keep reporting a defunct pid forever.
-    fn session_process_id(&self, session_id: &str) -> Option<u32> {
-        let handle = self.sessions.lock().unwrap().get(session_id).cloned()?;
-        if handle.is_exited() {
-            return None;
+    /// This host's facts for one session id: the live handle while it is
+    /// still RUNNING (freshest), else the durable `sessions` row. `None`
+    /// means no row on this host -- the caller must not invent facts.
+    ///
+    /// Lock order matches `Engine::do_session_list` (db then sessions): the
+    /// caller already holds the db lock, and the sessions lock is dropped
+    /// before any query so the two can never deadlock.
+    fn recorded_session_facts(&self, conn: &Connection, session_id: &str) -> Option<Value> {
+        let handle = self.sessions.lock().unwrap().get(session_id).cloned();
+        if let Some(handle) = handle
+            && !handle.is_exited()
+        {
+            let mut facts = crate::session::snapshot(&handle);
+            if let Some(pid) = handle.child_process_id() {
+                facts["processId"] = json!(pid);
+            }
+            return Some(facts);
         }
-        handle.child_process_id()
+        conn.query_row(
+            "SELECT workspace_id, incarnation, verdict, harness_id FROM sessions \
+             WHERE id = ?1 AND host_id = ?2",
+            params![session_id, self.host_id],
+            |row| {
+                Ok(json!({
+                    "workspaceId": row.get::<_, String>(0)?,
+                    "incarnation": row.get::<_, String>(1)?,
+                    "verdict": row.get::<_, String>(2)?,
+                    "harnessId": row.get::<_, Option<String>>(3)?,
+                }))
+            },
+        )
+        .optional()
+        .ok()
+        .flatten()
     }
 }
 

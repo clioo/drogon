@@ -30,6 +30,14 @@
 //!   never inherited, so nested sessions get a fresh identity),
 //! - all `ORCA_*` (a foreign runtime's identifiers).
 //!
+//! Harness-owned child-session markers are stripped too (see
+//! [`HARNESS_SESSION_ENV_KEYS`]): a harness spawned by a daemon that was
+//! itself launched from inside that harness must still be a clean TOP-LEVEL
+//! session. The reported failure was Claude Code printing "Transcript saving
+//! is off — inherited CLAUDE_CODE_CHILD_SESSION marker" (so there was no
+//! transcript to resume) because the app inherited a parent Claude session's
+//! identity; the product must not depend on how it was launched.
+//!
 //! The daemon's auth token is a file under the data dir, never an
 //! environment variable, so there is no token variable to strip.
 
@@ -61,6 +69,40 @@ pub(crate) fn cli_file_name() -> &'static str {
     }
 }
 
+/// Harness-owned session/identity variables a spawned process must never
+/// inherit. The daemon inherits its own environment from whatever launched
+/// it; if that was a harness session (a developer starting Drogon from
+/// inside `claude`, for example), the child harness reads the inherited
+/// markers as "I am a nested child" and silently stops persisting its
+/// transcript -- which makes the very resume this app promises impossible.
+/// The reference strips exactly these for every PTY it spawns
+/// (`src/main/ipc/pty/host-env/spawn-env-keys.ts`'s
+/// `CLAUDE_CHILD_SESSION_STAMP_ENV_KEYS`: `CLAUDE_CODE_CHILD_SESSION`,
+/// `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_BRIDGE_SESSION_ID`); this list
+/// adds the rest of the `CLAUDE_CODE_*` identity family observed on the
+/// installed binary (`CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_MESSAGING_SOCKET`,
+/// `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_SSE_PORT`) plus the bare
+/// `CLAUDECODE` marker Claude Code exports into its own tool children.
+///
+/// The per-key spelling is deliberate: a blanket prefix scrub would also
+/// remove a user's real `CLAUDE_CODE_OAUTH_TOKEN`/`CODEX_API_KEY` auth
+/// material. Codex's `CODEX_THREAD_ID`/`CODEX_SESSION_ID` are its documented
+/// child-session locators (measured on the installed binary). OpenCode, Pi
+/// and Antigravity expose no equivalent child-session stamp on their
+/// installed builds, so nothing is guessed for them here.
+pub(crate) const HARNESS_SESSION_ENV_KEYS: &[&str] = &[
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_BRIDGE_SESSION_ID",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "CLAUDECODE",
+    "CODEX_THREAD_ID",
+    "CODEX_SESSION_ID",
+];
+
 /// Whether an inherited variable is control-plane context that must not
 /// reach the child: a foreign runtime's identifiers or this runtime's own
 /// authority binding. The session-safe `DROGON_*` subset is set fresh by
@@ -70,9 +112,17 @@ pub(crate) fn cli_file_name() -> &'static str {
 /// runtime's private agent-dir override into interactive sessions — those
 /// use the user's real config. Only `harness.start --headless` layers a
 /// service-owned override back on (issue #187).
+///
+/// The harness-owned child-session markers in [`HARNESS_SESSION_ENV_KEYS`]
+/// are matched case-insensitively (Windows environment variables are
+/// case-insensitive) so a differently-cased inherited spelling cannot slip
+/// through.
 fn is_control_key(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
-    upper.starts_with("ORCA_") || upper.starts_with("DROGON_") || upper == "PI_CODING_AGENT_DIR"
+    upper.starts_with("ORCA_")
+        || upper.starts_with("DROGON_")
+        || upper == "PI_CODING_AGENT_DIR"
+        || HARNESS_SESSION_ENV_KEYS.contains(&upper.as_str())
 }
 
 /// PATH key/values of the inheriting process: the exact key spelling (Windows
@@ -363,9 +413,78 @@ mod tests {
             "MY_DROGON_VAR",
             "PI_CODING_AGENT",
             "PI_MODEL",
+            // Auth material must survive: a blanket `CLAUDE_CODE_`/`CODEX_`
+            // prefix scrub would strip a user's real credentials.
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CODEX_API_KEY",
+            "OPENCODE_API_KEY",
         ] {
             assert!(!is_control_key(key), "{key} must be inherited untouched");
         }
+    }
+
+    /// A daemon launched from inside a harness session must still spawn a
+    /// clean TOP-LEVEL harness child (Defect 2's env half): none of the
+    /// harness-owned child-session markers may reach the spawned command.
+    /// The reported failure was Claude Code disabling transcript saving (and
+    /// so making resume impossible) because `CLAUDE_CODE_CHILD_SESSION` was
+    /// inherited from the launching session.
+    #[test]
+    fn harness_child_session_markers_are_never_inherited() {
+        assert!(HARNESS_SESSION_ENV_KEYS.contains(&"CLAUDE_CODE_CHILD_SESSION"));
+        assert!(HARNESS_SESSION_ENV_KEYS.contains(&"CLAUDE_CODE_SESSION_ID"));
+        assert!(HARNESS_SESSION_ENV_KEYS.contains(&"CLAUDE_CODE_BRIDGE_SESSION_ID"));
+        for key in HARNESS_SESSION_ENV_KEYS {
+            assert!(is_control_key(key), "{key} must be stripped");
+            let lower = key.to_ascii_lowercase();
+            assert!(
+                is_control_key(&lower),
+                "{key} must match case-insensitively"
+            );
+        }
+    }
+
+    /// Real command composition: with the poisoned markers present in THIS
+    /// process's environment, `apply_to_command` marks every one removed,
+    /// and sets the session identity over the top. No spawn is needed to pin
+    /// the composed environment -- `CommandBuilder::get_env` reads the same
+    /// override map the child launch consumes.
+    #[test]
+    fn apply_to_command_strips_a_poisoned_parent_harness_identity() {
+        let poisoned = [
+            "CLAUDE_CODE_CHILD_SESSION",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CLAUDE_CODE_BRIDGE_SESSION_ID",
+            "CLAUDE_CODE_MESSAGING_SOCKET",
+            "CLAUDE_CODE_MESSAGING_TOKEN",
+            "CLAUDECODE",
+            "CODEX_THREAD_ID",
+        ];
+        // Keep the poison out of the assertion path's own process state
+        // afterwards (this test binary is shared with other tests).
+        for key in poisoned {
+            unsafe { std::env::set_var(key, "poison") };
+        }
+        let mut cmd = portable_pty::CommandBuilder::new("/bin/sh");
+        assert_eq!(
+            cmd.get_env("CLAUDE_CODE_CHILD_SESSION"),
+            Some(std::ffi::OsStr::new("poison")),
+            "the CommandBuilder must start from this process's environment"
+        );
+        apply_to_command(&mut cmd, Path::new("/data/x"), "ws-1", "sess-9");
+        for key in poisoned {
+            assert_eq!(
+                cmd.get_env(key),
+                None,
+                "{key} must never reach a spawned session"
+            );
+            unsafe { std::env::remove_var(key) };
+        }
+        assert_eq!(
+            cmd.get_env("DROGON_SESSION_ID"),
+            Some(std::ffi::OsStr::new("sess-9"))
+        );
     }
 
     #[test]

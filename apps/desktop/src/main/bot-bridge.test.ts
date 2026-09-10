@@ -197,4 +197,35 @@ describe("Bot run bridge", () => {
     ).toMatchObject({ ok: false, error: { code: "invalid_argument" } });
     expect(call).not.toHaveBeenCalled();
   });
+
+  it("admits the open-session resume flag and forwards it verbatim", async () => {
+    // Defect 2: the main-process input gate must accept `resume` on an
+    // open-session dispatch, or the renderer's resume request dies as
+    // "Invalid Bot run request." before it ever reaches native.
+    const call = vi.fn(async () => ({ ok: true as const, result: runReceipt }));
+    const openResume = {
+      hostId: "host",
+      workspaceId: "workspace",
+      requestId: "req-open-1",
+      botId: "bot-1",
+      interactive: true,
+      resume: true,
+      harness: { harnessId: "pi" },
+    };
+    expect(await dispatchBotRun(openResume, call)).toEqual({
+      ok: true,
+      result: runReceipt,
+    });
+    const { requestId, ...params } = openResume;
+    expect(call).toHaveBeenCalledExactlyOnceWith("bot.run", params, requestId);
+  });
+
+  it("refuses resume on a chat turn before IPC", async () => {
+    const call = vi.fn();
+    expect(await dispatchBotRun({ ...runInput, resume: true }, call)).toMatchObject({
+      ok: false,
+      error: { code: "invalid_argument" },
+    });
+    expect(call).not.toHaveBeenCalled();
+  });
 });

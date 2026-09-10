@@ -98,7 +98,7 @@ fn write_pi_fixture_staying_alive(bin: &std::path::Path) {
     let script = bin.join("pi");
     std::fs::write(
         &script,
-        "#!/bin/sh\necho CWD=$(pwd)\nfor arg in \"$@\"; do echo \"ARG:$arg\"; done\necho '---AGENTS---'\ncat AGENTS.md 2>/dev/null\necho '---CLAUDE---'\ncat CLAUDE.md 2>/dev/null\ntrap 'exit 0' TERM INT\nwhile IFS= read -r line; do echo \"you said: $line\"; done\n",
+        "#!/bin/sh\necho CWD=$(pwd)\n[ -f .drogon-prior-conversation ] && echo \"PRIOR:$(cat .drogon-prior-conversation)\"\necho \"prior conversation 1\" > .drogon-prior-conversation\nfor arg in \"$@\"; do echo \"ARG:$arg\"; done\necho '---AGENTS---'\ncat AGENTS.md 2>/dev/null\necho '---CLAUDE---'\ncat CLAUDE.md 2>/dev/null\necho \"CHILD_SESSION=${CLAUDE_CODE_CHILD_SESSION:-}\"\necho \"CODEX_THREAD=${CODEX_THREAD_ID:-}\"\ntrap 'exit 0' TERM INT\nwhile IFS= read -r line; do echo \"you said: $line\"; done\n",
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
@@ -745,4 +745,321 @@ fn editing_the_bot_identity_refreshes_the_files_the_next_session_reads() {
         "req-stop-2",
         json!({"sessionId": second_id, "incarnation": second_inc}),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Defect 2: a CLOSED Bot session must reopen the harness's own prior
+// conversation (`--continue` / `codex resume --last`), never a blank one.
+// ---------------------------------------------------------------------------
+
+/// The reopened session must carry the harness's own continue flag AND land
+/// in the same home where the prior conversation lives -- `--continue` picks
+/// the most recent conversation in the cwd, so the cwd being the same Bot
+/// home is the precondition that makes the flag meaningful. The fixture
+/// leaves a `.drogon-prior-conversation` marker on its first run and prints
+/// `PRIOR:<contents>` when it finds one; the resumed run must find it.
+#[test]
+fn reopened_bot_session_resumes_the_harness_conversation() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_pi_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+
+    // First, a fresh session: no `--continue`, no prior conversation yet.
+    let first = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-1",
+        fx.open_session_params(),
+    );
+    assert_eq!(first["outcome"], "dispatched", "{first:?}");
+    let first_id = first["session"]["sessionId"].as_str().unwrap().to_string();
+    let first_inc = first["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (first_output, _) = read_until(
+        &fx.engine,
+        &first_id,
+        &first_inc,
+        |text| text.contains("CHILD_SESSION="),
+        Duration::from_secs(20),
+    );
+    assert!(
+        !first_output.contains("ARG:--continue"),
+        "a fresh open must not claim to resume anything: {first_output:?}"
+    );
+    assert!(
+        !first_output.contains("PRIOR:"),
+        "the first session has no prior conversation: {first_output:?}"
+    );
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-1",
+        json!({"sessionId": first_id, "incarnation": first_inc}),
+    );
+
+    // The session is now CLOSED. Reopening must resume, not start blank.
+    let mut reopened_params = fx.open_session_params();
+    reopened_params["resume"] = json!(true);
+    let second = ok(&fx.engine, "bot.run", "req-open-2", reopened_params);
+    assert_eq!(second["outcome"], "dispatched", "{second:?}");
+    let second_id = second["session"]["sessionId"].as_str().unwrap().to_string();
+    let second_inc = second["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (second_output, verdict) = read_until(
+        &fx.engine,
+        &second_id,
+        &second_inc,
+        |text| text.contains("PRIOR:"),
+        Duration::from_secs(20),
+    );
+    assert_eq!(
+        verdict, "live",
+        "a resumed session is an interactive tab, not a one-shot run: {second_output:?}"
+    );
+    assert!(
+        second_output.contains("ARG:--continue"),
+        "the reopened session must pass the harness's own continue flag: {second_output:?}"
+    );
+    assert!(
+        second_output.contains("PRIOR:prior conversation 1"),
+        "the resumed session must run in the same Bot home the prior conversation \
+         lives in: {second_output:?}"
+    );
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-2",
+        json!({"sessionId": second_id, "incarnation": second_inc}),
+    );
+}
+
+/// The env half of Defect 2: a daemon launched from inside a harness session
+/// (the coordinator's own accident that produced "Transcript saving is off —
+/// inherited CLAUDE_CODE_CHILD_SESSION marker") must still spawn a clean
+/// TOP-LEVEL harness for a Bot. With the markers poisoned in THIS process's
+/// environment, the spawned fixture must observe them empty.
+#[test]
+fn poisoned_parent_harness_identity_never_reaches_the_spawned_bot_harness() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let _saved_child = SavedEnv::capture("CLAUDE_CODE_CHILD_SESSION");
+    let _saved_session = SavedEnv::capture("CLAUDE_CODE_SESSION_ID");
+    let _saved_entrypoint = SavedEnv::capture("CLAUDE_CODE_ENTRYPOINT");
+    let _saved_bridge = SavedEnv::capture("CLAUDE_CODE_BRIDGE_SESSION_ID");
+    let _saved_codex = SavedEnv::capture("CODEX_THREAD_ID");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_pi_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+
+    for key in [
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_BRIDGE_SESSION_ID",
+        "CODEX_THREAD_ID",
+    ] {
+        unsafe { std::env::set_var(key, "poison") };
+    }
+
+    let receipt = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-poisoned",
+        fx.open_session_params(),
+    );
+    assert_eq!(receipt["outcome"], "dispatched", "{receipt:?}");
+    let session_id = receipt["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let incarnation = receipt["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (output, _) = read_until(
+        &fx.engine,
+        &session_id,
+        &incarnation,
+        |text| text.contains("CODEX_THREAD="),
+        Duration::from_secs(20),
+    );
+    assert!(
+        output.contains("CHILD_SESSION=") && !output.contains("CHILD_SESSION=poison"),
+        "CLAUDE_CODE_CHILD_SESSION must never reach the Bot's harness: {output:?}"
+    );
+    assert!(
+        output.contains("CODEX_THREAD=") && !output.contains("CODEX_THREAD=poison"),
+        "CODEX_THREAD_ID must never reach the Bot's harness: {output:?}"
+    );
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-poisoned",
+        json!({"sessionId": session_id, "incarnation": incarnation}),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Defect 1's data half: the Bot record must carry the daemon's OWN liveness
+// facts, so the renderer can decide focus/reopen/open without guessing from
+// the selected workspace's session list.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn snapshot_projects_the_recorded_sessions_workspace_incarnation_and_verdict() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_pi_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+
+    let receipt = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-facts",
+        fx.open_session_params(),
+    );
+    let session_id = receipt["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let incarnation = receipt["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let home_workspace_id = receipt["workspaceId"].as_str().unwrap().to_string();
+
+    let snapshot = ok(
+        &fx.engine,
+        "bot.snapshot",
+        "req-snapshot-facts",
+        json!({"workspaceId": "", "hostId": fx.host, "locale": "en-US"}),
+    );
+    let bot = snapshot["bots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "bot-1")
+        .unwrap()
+        .clone();
+    let recorded = &bot["currentSession"];
+    assert_eq!(recorded["sessionId"], json!(session_id));
+    assert_eq!(
+        recorded["workspaceId"],
+        json!(home_workspace_id),
+        "the recorded link must name the Bot's OWN home workspace: {recorded:?}"
+    );
+    assert_eq!(
+        recorded["incarnation"],
+        json!(incarnation),
+        "the recorded link must carry the incarnation needed to focus it: {recorded:?}"
+    );
+    assert_eq!(
+        recorded["verdict"],
+        json!("live"),
+        "a running session must be projected live: {recorded:?}"
+    );
+
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-facts",
+        json!({"sessionId": session_id, "incarnation": incarnation}),
+    );
+
+    let after = ok(
+        &fx.engine,
+        "bot.snapshot",
+        "req-snapshot-facts-2",
+        json!({"workspaceId": "", "hostId": fx.host, "locale": "en-US"}),
+    );
+    let recorded_after = after["bots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "bot-1")
+        .unwrap()["currentSession"]
+        .clone();
+    assert_eq!(
+        recorded_after["verdict"],
+        json!("exited"),
+        "a closed session must be projected exited, which is what tells the \
+         renderer to reopen it with a resume instead of silently opening a \
+         second session: {recorded_after:?}"
+    );
+    assert_eq!(
+        recorded_after["incarnation"],
+        json!(incarnation),
+        "the exited record keeps the incarnation that names the closed session"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The wire contract: `resume` is only meaningful on an open-session dispatch.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn resume_is_rejected_outside_an_open_session_dispatch() {
+    use drogon_core::bot_run_rpc::parse_bot_run_request;
+
+    // resume + prompt: a chat turn has no prior conversation to reopen.
+    let with_prompt = json!({
+        "workspaceId": "ws-1",
+        "hostId": "host-1",
+        "botId": "bot-1",
+        "prompt": "hi",
+        "resume": true,
+        "harness": { "harnessId": "pi" },
+    });
+    let error = parse_bot_run_request(&with_prompt).expect_err("resume + prompt must be rejected");
+    assert_eq!(error.code, "invalid_argument");
+    assert!(
+        error.message.contains("open-session"),
+        "the refusal must name the only valid dispatch: {error:?}"
+    );
+
+    // resume without interactive: same refusal.
+    let without_interactive = json!({
+        "workspaceId": "ws-1",
+        "hostId": "host-1",
+        "botId": "bot-1",
+        "resume": true,
+        "responsibilityId": "resp-1",
+        "reason": "manual",
+        "eventIdentity": "evt-1",
+    });
+    let error = parse_bot_run_request(&without_interactive)
+        .expect_err("resume without interactive must be rejected");
+    assert_eq!(error.code, "invalid_argument");
+
+    // resume: true with interactive: true parses.
+    let admitted = json!({
+        "workspaceId": "ws-1",
+        "hostId": "host-1",
+        "botId": "bot-1",
+        "interactive": true,
+        "resume": true,
+        "harness": { "harnessId": "pi" },
+    });
+    assert!(parse_bot_run_request(&admitted).is_ok());
+
+    // A non-boolean resume is refused.
+    let bad_type = json!({
+        "workspaceId": "ws-1",
+        "hostId": "host-1",
+        "botId": "bot-1",
+        "interactive": true,
+        "resume": "yes",
+    });
+    let error = parse_bot_run_request(&bad_type).expect_err("non-boolean resume must be rejected");
+    assert_eq!(error.code, "invalid_argument");
 }

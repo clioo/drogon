@@ -176,6 +176,7 @@ describe("ChatsList Bot sessions", () => {
       botId: "bot-1",
       sessionId: "sess-1",
       displayName: "Arya Stark",
+      characterPreset: "arya",
       harnessId: "claude" as const,
       state: "working" as const,
       workspaceId: "ws-home",
@@ -185,6 +186,7 @@ describe("ChatsList Bot sessions", () => {
       botId: "bot-2",
       sessionId: "sess-2",
       displayName: "Tyrion",
+      characterPreset: "tyrion",
       harnessId: "pi" as const,
       state: "exited" as const,
       workspaceId: "ws-home-2",
@@ -225,6 +227,19 @@ describe("ChatsList Bot sessions", () => {
     expect(
       screen.getByRole("group", { name: "Bot sessions" }),
     ).toBeTruthy();
+  });
+
+  test("renders the character avatar and name in the Chats row", () => {
+    // Defect 3: the row must show the SAME character artwork the Bots page
+    // renders (through DrogonBotAvatar), keyed off the record's preset.
+    mountWithBots(() => {});
+    const avatar = screen.getByRole("img", { name: "Arya Stark avatar" });
+    const image = avatar.querySelector("img");
+    expect(image).not.toBeNull();
+    expect(image!.getAttribute("src")).toContain("arya");
+    // The harness stays identifiable by its suffix even with the avatar in
+    // the row.
+    expect(screen.getByText(/· Claude/)).toBeTruthy();
   });
 
   test("clicking a Bot row opens that Bot's session", () => {

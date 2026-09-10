@@ -58,6 +58,7 @@ describe("buildSidebarBotSessions", () => {
         botId: "bot-1",
         sessionId: "sess-1",
         displayName: "Arya Stark",
+        characterPreset: "arya",
         harnessId: "claude",
         state: "working",
         workspaceId: "ws-home",
@@ -83,6 +84,25 @@ describe("buildSidebarBotSessions", () => {
       buildSidebarBotSessions([bot()], [session({ verdict: "unverifiable" })])[0]!
         .state,
     ).toBe("unknown");
+  });
+
+  test("carries the character preset from the real Bot record", () => {
+    // Defect 3: the sidebar Chats row renders the character's avatar through
+    // the same component the Bots page uses, so the row must receive the
+    // preset from the real record -- not a decorator or a placeholder.
+    const rows = buildSidebarBotSessions(
+      [bot({ characterPreset: "jon-snow" })],
+      [session()],
+    );
+    expect(rows[0]!.characterPreset).toBe("jon-snow");
+  });
+
+  test("an unknown preset is passed through so the avatar falls back honestly", () => {
+    const rows = buildSidebarBotSessions(
+      [bot({ characterPreset: "none" })],
+      [session()],
+    );
+    expect(rows[0]!.characterPreset).toBe("none");
   });
 
   test("skips a recorded session this daemon does not observe at all", () => {
