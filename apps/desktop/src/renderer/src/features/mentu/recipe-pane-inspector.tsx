@@ -5,16 +5,29 @@
 // icons, keyboard handling and ARIA. Adapted only in the data layer: the
 // reference edits against an adapter catalog this repo's daemon does not
 // expose, so the backend select lists the draft's backends in use (plus the
-// daemon default); the Model field stays on the reference's read-only
-// branch for shell steps, while agent steps mount `MentuAgentStepEditor`
-// (editable exact model id, Pi-only provider binding, selection verdict),
+// daemon default and, when supplied, the real registered-harness catalog
+// from `harness.list` — see `harnessCatalog` below); the Model field stays
+// on the reference's read-only branch for shell steps, while agent steps
+// mount `MentuAgentStepEditor` (editable exact model id, Pi-only provider
+// binding, selection verdict, honest known/observed model quick-pick),
 // agent-gated like the daemon (`updateRecipeStepDocument` refuses a model
 // on a shell-effective step); and the draft gains an editable Verify
 // commands field (one command per line) because this repo's daemon
 // surfaces `verify.commands` per step.
+//
+// Target-design additions (owner-supplied mockup): a lock glyph marks the
+// read-only Node identity, a link glyph marks Depends on, and a
+// "JSON synced" chip reflects real save state (derived from `saving` plus
+// a local comparison of the in-progress draft against the step's saved
+// values — never a decorative always-on chip). The Harness / backend
+// field renders a real catalog (`harnessCatalog`, `harnessCatalogLoading`,
+// `harnessCatalogError`, `onRefreshHarnessCatalog` — all optional so
+// existing callers/tests that only pass `backends: string[]` keep
+// rendering exactly as before).
 
 import { useEffect, useMemo, useState } from "react";
-import { Save, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Link2, Lock, RefreshCw, Save, ShieldCheck } from "lucide-react";
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -27,10 +40,19 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
-import type { MentuRecipeStep } from "./recipe-validation/mentu-recipe-document";
+import type { Harness } from "../../../../shared/session-contract";
+import type {
+  MentuRecipeDefinition,
+  MentuRecipeStep,
+} from "./recipe-validation/mentu-recipe-document";
 import type { RecipeGraphNode } from "./recipe-graph";
 import { draftForRecipeStep, type RecipeStepDraft } from "./recipe-pane-editor";
 import { MentuAgentStepEditor } from "./MentuAgentStepEditor";
+import {
+  knownModelsForHarness,
+  modelCatalogStatusLine,
+  recipeObservedModels,
+} from "./mentu-model-registry";
 import {
   classifySelection,
   conflictMessage,
@@ -58,6 +80,22 @@ function ReadOnlyField({ label, value }: { label: string; value: string }): Reac
   );
 }
 
+/** True harness availability text, no invention: mirrors
+ *  `HarnessAvailability` verbatim rather than collapsing it to a bare
+ *  "available"/"not available" binary. */
+function availabilityLabel(availability: Harness["availability"]): string {
+  switch (availability) {
+    case "available":
+      return "Engine registered";
+    case "missing":
+      return "Not installed on this host";
+    case "unsupported_launcher":
+      return "Unsupported launcher on this OS";
+    default:
+      return availability;
+  }
+}
+
 export function SelectedNodeInspector({
   node,
   editStep,
@@ -75,6 +113,11 @@ export function SelectedNodeInspector({
   saveConflict = null,
   onReloadRecipe,
   onReviewCurrent,
+  harnessCatalog,
+  harnessCatalogLoading = false,
+  harnessCatalogError = null,
+  onRefreshHarnessCatalog,
+  recipeDefinition = null,
 }: {
   node: RecipeGraphNode | null;
   editStep: MentuRecipeStep | null;
@@ -97,6 +140,16 @@ export function SelectedNodeInspector({
   saveConflict?: SaveConflict | null;
   onReloadRecipe?: () => void;
   onReviewCurrent?: () => void;
+  /** Real registered-harness catalog (`harness.list`), when the caller
+   *  supplies one. Omitted keeps the select exactly as before (backends
+   *  in use only) — existing callers/tests are unaffected. */
+  harnessCatalog?: Harness[];
+  harnessCatalogLoading?: boolean;
+  harnessCatalogError?: string | null;
+  onRefreshHarnessCatalog?: () => void;
+  /** The loaded/edited recipe document, for the honest "observed in this
+   *  recipe" model quick-pick. Null renders no observed models. */
+  recipeDefinition?: MentuRecipeDefinition | null;
 }): React.JSX.Element {
   const [draft, setDraft] = useState<RecipeStepDraft>(() =>
     editStep ? draftForRecipeStep(editStep) : EMPTY_DRAFT,
@@ -114,6 +167,17 @@ export function SelectedNodeInspector({
     const available = backends;
     return [...new Set(editStep?.backend ? [editStep.backend, ...available] : available)];
   }, [backends, editStep?.backend]);
+  const registeredHarnesses = harnessCatalog ?? [];
+  const registeredIds = useMemo(
+    () => new Set(registeredHarnesses.map((harness) => harness.harnessId)),
+    [registeredHarnesses],
+  );
+  // Backend strings the recipe already uses that are not one of Drogon's
+  // registered harnesses (e.g. `shell`, or a Pi providers-map alias) —
+  // rendered plainly, exactly like the pre-catalog select did.
+  const unregisteredBackendOptions = backendOptions.filter(
+    (backend) => !registeredIds.has(backend as Harness["harnessId"]),
+  );
   // The backend the step executes with after this edit — the same inherit
   // chain the daemon's snapshot records. Only non-shell steps mount the
   // agent editor; shell steps keep the reference's read-only branch.
@@ -130,6 +194,40 @@ export function SelectedNodeInspector({
     currentHash,
     daemonRefusal,
   });
+  const selectedHarness = registeredHarnesses.find(
+    (harness) => harness.harnessId === effectiveBackend.toLowerCase(),
+  );
+  const knownModels = useMemo(
+    () => knownModelsForHarness(effectiveBackend),
+    [effectiveBackend],
+  );
+  const observedModels = useMemo(
+    () =>
+      recipeObservedModels(recipeDefinition, effectiveBackend, node?.label ?? null),
+    [recipeDefinition, effectiveBackend, node?.label],
+  );
+  const catalogStatusLine = modelCatalogStatusLine(
+    effectiveBackend,
+    knownModels,
+    observedModels,
+  );
+  // Real save-state chip: "Saving…" while the save is in flight, "Unsaved
+  // edits" while the in-progress draft differs from the step's last saved
+  // values, else "JSON synced" — never a decorative always-on badge.
+  const savedDraft = editStep ? draftForRecipeStep(editStep) : EMPTY_DRAFT;
+  const stepDirty =
+    editStep !== null &&
+    (draft.backend !== savedDraft.backend ||
+      draft.model !== savedDraft.model ||
+      draft.dependencies !== savedDraft.dependencies ||
+      draft.timeout !== savedDraft.timeout ||
+      draft.retries !== savedDraft.retries ||
+      draft.verifyCommands !== savedDraft.verifyCommands);
+  const syncChip = saving
+    ? { label: "Saving…", tone: "text-muted-foreground" }
+    : stepDirty
+      ? { label: "Unsaved edits", tone: "text-amber-600 dark:text-amber-400" }
+      : { label: "JSON synced", tone: "text-emerald-600 dark:text-emerald-400" };
   const verification = editStep?.verify
     ? [
         ...(editStep.verify.commands?.length
@@ -154,47 +252,114 @@ export function SelectedNodeInspector({
     >
       <div className="flex items-center gap-2">
         <ShieldCheck className="size-4 text-muted-foreground" />
-        <div>
+        <div className="min-w-0 flex-1">
           <h2 className="text-sm font-medium">Selected node</h2>
           <p className="text-xs text-muted-foreground">
             Step edits are written back to the Mentu JSON.
           </p>
         </div>
+        {node && editStep ? (
+          <Badge
+            variant="outline"
+            data-testid="mentu-json-sync-chip"
+            className={`shrink-0 gap-1 text-[10px] ${syncChip.tone}`}
+          >
+            <CheckCircle2 className="size-3" aria-hidden />
+            {syncChip.label}
+          </Badge>
+        ) : null}
       </div>
       {node && editStep ? (
         <ScrollArea className="min-h-0 flex-1 pr-2">
           <div className="space-y-3">
-            <ReadOnlyField label="Node" value={`${node.label} (${node.kind})`} />
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Harness / backend</Label>
-              <Select
-                value={draft.backend || INHERIT_VALUE}
-                onValueChange={(value) => {
-                  // A backend change restarts the execution selection:
-                  // the model and provider binding belong to the old one.
-                  setDraft((current) => ({
-                    ...current,
-                    backend: value === INHERIT_VALUE ? "" : value,
-                    model: "",
-                  }));
-                  setProvider("");
-                }}
-                disabled={disabled || backendOptions.length === 0}
-              >
-                <SelectTrigger size="sm" aria-label="Harness / backend">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={INHERIT_VALUE}>
-                    Inherit {inheritBackendLabel ?? "Mentu default"}
-                  </SelectItem>
-                  {backendOptions.map((backend) => (
-                    <SelectItem key={backend} value={backend}>
-                      {backend}
+              <Label className="text-xs text-muted-foreground">Node</Label>
+              <div className="relative">
+                <Input
+                  value={`${node.label} (${node.kind})`}
+                  readOnly
+                  aria-label="Node"
+                  className="h-8 pr-7 text-xs"
+                />
+                <Lock
+                  className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs text-muted-foreground">Harness / backend</Label>
+                {selectedHarness ? (
+                  <span className="text-[10px] text-muted-foreground">
+                    {availabilityLabel(selectedHarness.availability)}
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Select
+                  value={draft.backend || INHERIT_VALUE}
+                  onValueChange={(value) => {
+                    // A backend change restarts the execution selection:
+                    // the model and provider binding belong to the old one.
+                    setDraft((current) => ({
+                      ...current,
+                      backend: value === INHERIT_VALUE ? "" : value,
+                      model: "",
+                    }));
+                    setProvider("");
+                  }}
+                  disabled={disabled || (backendOptions.length === 0 && registeredHarnesses.length === 0)}
+                >
+                  <SelectTrigger size="sm" className="min-w-0 flex-1" aria-label="Harness / backend">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={INHERIT_VALUE}>
+                      Inherit {inheritBackendLabel ?? "Mentu default"}
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    {registeredHarnesses.map((harness) => (
+                      <SelectItem key={harness.harnessId} value={harness.harnessId}>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate">{harness.displayName}</span>
+                          <Badge variant="secondary" className="h-4 px-1 text-[9px]">
+                            CLI
+                          </Badge>
+                          {harness.availability !== "available" ? (
+                            <span className="text-[10px] text-muted-foreground">
+                              ({availabilityLabel(harness.availability)})
+                            </span>
+                          ) : null}
+                        </span>
+                      </SelectItem>
+                    ))}
+                    {unregisteredBackendOptions.map((backend) => (
+                      <SelectItem key={backend} value={backend}>
+                        {backend}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {onRefreshHarnessCatalog ? (
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    disabled={disabled || harnessCatalogLoading}
+                    onClick={onRefreshHarnessCatalog}
+                    aria-label="Refresh harness catalog"
+                  >
+                    <RefreshCw
+                      className={`size-3.5 ${harnessCatalogLoading ? "animate-spin" : ""}`}
+                    />
+                  </Button>
+                ) : null}
+              </div>
+              {harnessCatalogError ? (
+                <p className="text-[11px] text-destructive" role="status">
+                  Harness catalog unavailable: {harnessCatalogError}
+                </p>
+              ) : null}
             </div>
             {isAgentStep ? (
               <MentuAgentStepEditor
@@ -208,6 +373,10 @@ export function SelectedNodeInspector({
                 onChangeModel={(model) =>
                   setDraft((current) => ({ ...current, model }))
                 }
+                knownModels={knownModels}
+                observedModels={observedModels}
+                catalogStatusLine={catalogStatusLine}
+                onRefreshCatalog={onRefreshHarnessCatalog}
               />
             ) : (
               <div className="space-y-1.5">
@@ -227,6 +396,7 @@ export function SelectedNodeInspector({
             )}
             <div className="space-y-1.5">
               <Label htmlFor="recipe-step-dependencies" className="text-xs text-muted-foreground">
+                <Link2 className="mr-1 inline size-3" aria-hidden />
                 Depends on
               </Label>
               <Input
