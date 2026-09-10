@@ -244,6 +244,7 @@ mod tests {
             manual_order: None,
             last_activity_at: None,
             linked_pr: None,
+            linked_issue: None,
             creator: None,
         }
     }

@@ -437,6 +437,7 @@ impl Engine {
             "automation.history" => self.automation_history(&request.params),
             "automation.runs_all" => self.automation_runs_all(&request.params),
             "automation.run" => self.automation_run(request),
+            "automation.preview" => self.automation_preview(&request.params),
             "bot.history" => self.bot_history(&request.params),
             "files.list" => self.do_files_list(&request.params),
             // R16-AM (coordinator-owned one-liner): read-only ignored-paths
