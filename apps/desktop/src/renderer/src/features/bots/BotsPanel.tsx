@@ -45,6 +45,7 @@ export function BotsPanel({
   snapshotPending,
   createWorkspaceId,
   onOpenSession,
+  resolveBotSession,
 }: BotsPanelHydrationProps) {
   const controller = useBotsPageController({
     snapshot,
@@ -55,6 +56,7 @@ export function BotsPanel({
     snapshotPending,
     createWorkspaceId,
     onOpenSession,
+    resolveBotSession,
   });
   const {
     effective,
@@ -176,6 +178,9 @@ export function BotsPanel({
                       void runResponsibility(bot.id, responsibilityId);
                     }}
                     onLaunch={() => void launchBot(bot)}
+                    onLaunchNew={() =>
+                      void launchBot(bot, { forceNew: true })
+                    }
                   />
                 </div>
               ))}

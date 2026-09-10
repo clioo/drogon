@@ -17,6 +17,7 @@ import type { TabStripState } from "./tab-order";
 import { ProjectList } from "./ProjectList";
 import type { ProjectAction } from "./ProjectList";
 import { ChatsList } from "./ChatsList";
+import type { SidebarBotSession } from "./sidebar-bot-sessions";
 import { SidebarFooter } from "./sidebar-footer";
 import type { SettingsSectionId } from "../settings/settings-sections";
 import {
@@ -42,6 +43,8 @@ export function Sidebar({
   activeSessionId,
   tabStrip,
   onSelectSession,
+  botSessions = [],
+  onOpenBotSession,
   workspaceDisabled,
   addDisabled,
   onSelectWorkspace,
@@ -78,6 +81,10 @@ export function Sidebar({
   tabStrip: TabStripState;
   /** Selects a session tab when a nested card row is clicked. */
   onSelectSession: (sessionId: string) => void;
+  /** Bots with a session (Gap 3), rendered in the Chats section. */
+  botSessions?: SidebarBotSession[];
+  /** Opens/resumes a Bot's session from its Chats row. */
+  onOpenBotSession?: (botId: string) => void;
   workspaceDisabled: boolean;
   addDisabled: boolean;
   onSelectWorkspace: (workspaceId: string) => void;
@@ -184,6 +191,7 @@ export function Sidebar({
             />
             <ChatsList
               groups={groups.filter((group) => group.project.quickSession)}
+              botSessions={botSessions}
               workspaces={workspaces}
               sessions={sessions}
               selectedWorkspaceId={selectedWorkspaceId}
@@ -192,6 +200,7 @@ export function Sidebar({
               disabled={workspaceDisabled}
               onSelectWorkspace={onSelectWorkspace}
               onSelectSession={onSelectSession}
+              onOpenBotSession={onOpenBotSession}
               onSubmitRemove={onSubmitRemoveProject}
               onCreate={onNewSession ?? null}
             />

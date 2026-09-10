@@ -18,13 +18,14 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   BotBridge,
+  BotLiveSession,
   BotRunHarnessSource,
   BotScope,
+  BotsPanelBot,
   BotsPanelSnapshot,
 } from "./bots-panel-contracts";
 import {
   buildBotCreateBody,
-  buildBotRunHarness,
   emptyBotCreateForm,
   emptyResponsibilityForm,
 } from "./bots-page-model";
@@ -32,6 +33,7 @@ import type {
   BotCreateFormValues,
   ResponsibilityFormValues,
 } from "./bots-page-model";
+import { dispatchOpenBotSession } from "./bot-session-open";
 
 /** The App keep-alive host for the Bots page. Single source of truth
  *  shared by the host element and the Escape visibility check (same
@@ -71,6 +73,10 @@ export type BotsPageControllerDeps = {
     handle: string | null;
     title: string | null;
   }) => void | Promise<void>;
+  /** Host-owned liveness lookup for the default Open-session click (Gap 2):
+   *  the recorded session ONLY when the daemon-owned verdict says it is not
+   *  exited, else null. See `BotsPanelProps.resolveBotSession`. */
+  resolveBotSession?: (input: { bot: BotsPanelBot }) => BotLiveSession | null;
 };
 
 function mintRequestId(prefix: string): string {
@@ -92,6 +98,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     onRunResponsibility,
     onOpenSession,
     createWorkspaceId,
+    resolveBotSession,
   } = deps;
 
   const [localSnapshot, setLocalSnapshot] =
@@ -345,16 +352,20 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
   );
 
   // Open session (bug-bot-a836b4ebf8be65505; Carlos directive on
-  // task_e7c183ebc637): the click dispatches a `bot.run` OPEN-SESSION
-  // turn (`interactive: true`, NO prompt — the wire contract rejects a
-  // prompt outright) with the bot's STORED harness overrides
-  // (buildBotRunHarness — the same resolution the mount uses for manual
-  // runs). Native starts the harness's own interactive entrypoint in the
-  // Bot's provisioned home and delivers NOTHING to it: no model turn is
-  // burned, the session opens live and IDLE, and the owner's first real
-  // message is the first thing the harness ever sees. Liveness and
-  // environment are daemon facts (the header's status pill and the
-  // session inspector) — never a recital the model is asked to invent.
+  // task_e7c183ebc637; Gap 2 resume on task_926fddc5e769): the DEFAULT
+  // click first asks the host whether the Bot's recorded session is still
+  // live (`resolveBotSession`); if it is, it focuses that session and
+  // dispatches nothing. Only when there is no resumable session does it
+  // dispatch a `bot.run` OPEN-SESSION turn (`interactive: true`, NO prompt
+  // — the wire contract rejects a prompt outright) with the bot's STORED
+  // harness overrides (buildBotRunHarness — the same resolution the mount
+  // uses for manual runs). Native starts the harness's own interactive
+  // entrypoint in the Bot's provisioned home and delivers NOTHING to it:
+  // no model turn is burned, the session opens live and IDLE, and the
+  // owner's first real message is the first thing the harness ever sees.
+  // Liveness and environment are daemon facts (the header's status pill and
+  // the session inspector) — never a recital the model is asked to invent.
+  // `forceNew` (the card's "New session" control) skips the resume check.
   // The dispatch still selects the bot and hands the returned session to
   // the host's `onOpenSession` (when supplied) so the app can open/focus
   // the canonical Bot-linked tab in-app, then reloads so the new session
@@ -365,20 +376,16 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
   // daemon-unreachable transport throw, a refused/unsupported outcome —
   // lands in the shared action-error alert, never a silent no-op.
   const launchBot = useCallback(
-    async (bot: { id: string }): Promise<void> => {
+    async (
+      bot: { id: string },
+      options?: { forceNew?: boolean },
+    ): Promise<void> => {
       if (busy) {
         return;
       }
       if (!scope) {
         setActionError(
           "Bot sessions are unavailable right now. Refresh and retry.",
-        );
-        return;
-      }
-      const botRun = bridge?.botRun;
-      if (!botRun) {
-        setActionError(
-          "Bot sessions are unavailable: the daemon bridge is not connected. Refresh and retry.",
         );
         return;
       }
@@ -391,26 +398,54 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
         );
         return;
       }
+      // Gap 2 (task_926fddc5e769): a Bot is bound to ONE session. When the
+      // host confirms the Bot's recorded session is still live, the default
+      // click must FOCUS it, never dispatch a second one. `forceNew` is the
+      // explicit "start a fresh session" path and skips this check.
+      if (!options?.forceNew && resolveBotSession) {
+        const resumable = resolveBotSession({ bot: live });
+        if (resumable) {
+          setSelectedBotId(bot.id);
+          await onOpenSession?.({
+            botId: bot.id,
+            sessionId: resumable.sessionId,
+            incarnation: resumable.incarnation,
+            harness: {
+              harnessId:
+                resumable.harnessId ?? live.harnessPolicy.defaultHarness,
+              explicitModel: live.harnessPolicy.explicitModel,
+            },
+            workspaceId: resumable.workspaceId,
+            hostId: resumable.hostId,
+            displayName: live.displayIdentity.displayName,
+            handle: live.displayIdentity.handle,
+            title: live.displayIdentity.title,
+          });
+          return;
+        }
+      }
+      const botRun = bridge?.botRun;
+      if (!botRun) {
+        setActionError(
+          "Bot sessions are unavailable: the daemon bridge is not connected. Refresh and retry.",
+        );
+        return;
+      }
       setBusy(true);
       setActionError(null);
       try {
-        const response = await botRun({
-          ...scope,
+        const response = await dispatchOpenBotSession({
+          bridge,
+          scope,
+          bot: live,
           requestId: mintRequestId("bot-open-session"),
-          botId: bot.id,
-          // bug-bot-a836b4ebf8be65505 + task_e7c183ebc637: a live, IDLE,
-          // user-facing tab (native's own interactive TUI entrypoint, run
-          // against the Bot's own provisioned home) that dispatches NO
-          // model turn — there is no `prompt` on this call, by contract.
-          // The old dispatch asked the model to "confirm this session is
-          // live", and the model answered with fabricated working
-          // directories and model names the owner read as product output.
-          interactive: true,
-          harness: buildBotRunHarness(
-            live.harnessPolicy.defaultHarness,
-            live.harnessPolicy.explicitModel,
-          ),
         });
+        if (!response) {
+          setActionError(
+            "Bot sessions are unavailable: the daemon bridge is not connected. Refresh and retry.",
+          );
+          return;
+        }
         if (!response.ok) {
           setActionError(response.error.message);
           return;
@@ -449,7 +484,16 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
         setBusy(false);
       }
     },
-    [bridge, scope, busy, localSnapshot, snapshot, load],
+    [
+      bridge,
+      scope,
+      busy,
+      localSnapshot,
+      snapshot,
+      load,
+      resolveBotSession,
+      onOpenSession,
+    ],
   );
 
   return {

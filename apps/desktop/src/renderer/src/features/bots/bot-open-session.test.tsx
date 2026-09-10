@@ -411,3 +411,128 @@ describe("bot open session", () => {
     ).toBe(false);
   });
 });
+
+/** Gap 2 (task_926fddc5e769): a Bot is bound to ONE session. The default
+ *  "Open session" click must focus the recorded session the host confirms
+ *  is live instead of spawning a second one; a genuinely exited record
+ *  still opens a fresh session. */
+describe("bot open session reuse", () => {
+  function botWithRecordedSession(): BotsPanelBot {
+    return bot({
+      currentSession: {
+        sessionId: "sess-live",
+        harness: "claude",
+        model: null,
+        startedAt: 1,
+        rotatedAt: 1,
+      },
+    });
+  }
+
+  const liveSession = {
+    sessionId: "sess-live",
+    incarnation: "inc-live",
+    workspaceId: "ws-home",
+    hostId: "host-1",
+    harnessId: "claude",
+  };
+
+  it("focuses the live recorded session twice instead of dispatching a second one", async () => {
+    const seeded = botWithRecordedSession();
+    const fake = fakeBridge(seeded);
+    const onOpenSession = vi.fn();
+    const resolveBotSession = vi.fn(() => liveSession);
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        resolveBotSession={resolveBotSession}
+        onOpenSession={onOpenSession}
+      />,
+    );
+    const button = await screen.findByTestId("open-session-bot-1");
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(onOpenSession).toHaveBeenCalledTimes(2));
+    expect(fake.botRun).not.toHaveBeenCalled();
+    const expected = {
+      botId: "bot-1",
+      sessionId: "sess-live",
+      incarnation: "inc-live",
+      harness: { harnessId: "claude", explicitModel: null },
+      workspaceId: "ws-home",
+      hostId: "host-1",
+      displayName: "Jon Snow",
+      handle: null,
+      title: null,
+    };
+    expect(onOpenSession).toHaveBeenNthCalledWith(1, expected);
+    expect(onOpenSession).toHaveBeenNthCalledWith(2, expected);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("dispatches a fresh session when the recorded one has exited", async () => {
+    const seeded = botWithRecordedSession();
+    const fake = fakeBridge(seeded);
+    const resolveBotSession = vi.fn(() => null);
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        resolveBotSession={resolveBotSession}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() => expect(fake.botRun).toHaveBeenCalledTimes(1));
+    expect(resolveBotSession).toHaveBeenCalledWith({ bot: seeded });
+  });
+
+  it("New session forces a fresh dispatch even when a live session is resumable", async () => {
+    const seeded = botWithRecordedSession();
+    const fake = fakeBridge(seeded);
+    const onOpenSession = vi.fn();
+    const resolveBotSession = vi.fn(() => liveSession);
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        resolveBotSession={resolveBotSession}
+        onOpenSession={onOpenSession}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("new-session-bot-1"));
+    await waitFor(() => expect(fake.botRun).toHaveBeenCalledTimes(1));
+    expect(onOpenSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "sess-1" }),
+    );
+  });
+
+  it("shows the New session control only when a session could be resumed", async () => {
+    const seeded = bot();
+    const fresh = fakeBridge(seeded);
+    const { unmount } = render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fresh.bridge}
+        scope={scope}
+      />,
+    );
+    await screen.findByTestId("open-session-bot-1");
+    expect(screen.queryByTestId("new-session-bot-1")).toBeNull();
+    unmount();
+
+    const resumed = botWithRecordedSession();
+    render(
+      <BotsPanel
+        snapshot={{ bots: [resumed], history: [] }}
+        bridge={fakeBridge(resumed).bridge}
+        scope={scope}
+      />,
+    );
+    await screen.findByTestId("open-session-bot-1");
+    expect(screen.getByTestId("new-session-bot-1")).toBeTruthy();
+  });
+});

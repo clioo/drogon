@@ -543,6 +543,10 @@ pub(crate) fn ensure_home_for_bot(
     origin_workspace_id: &str,
 ) -> Result<BotHomeProfile, RpcError> {
     if let Some(existing) = home_for_bot(tx, &bot.id).map_err(self_storage_error)? {
+        // Refresh on every reuse, not just on first provision: an identity,
+        // instruction or memory edit must be visible to the NEXT session,
+        // and a stale AGENTS.md must never be left behind.
+        write_bot_identity_files(&existing.path, bot)?;
         return Ok(existing);
     }
     let handle = dir_handle_for_bot(bot).map_err(|e| invalid_argument(e.to_string()))?;
@@ -573,7 +577,18 @@ pub(crate) fn ensure_home_for_bot(
         updated_at: now_ms,
     };
     let (pinned, _provisioned) = claim_home_in_tx(tx, &profile).map_err(self_storage_error)?;
+    write_bot_identity_files(&pinned.path, bot)?;
     Ok(pinned)
+}
+
+/// Materializes the Bot's `AGENTS.md`/`CLAUDE.md` identity context files in
+/// its provisioned home (see `bots::context_files`). Called both when the
+/// home is first provisioned and on every later session open, so the
+/// harness always reads the Bot's CURRENT stored identity.
+fn write_bot_identity_files(home_path: &str, bot: &Bot) -> Result<(), RpcError> {
+    crate::bots::context_files::write_bot_context_files(std::path::Path::new(home_path), bot)
+        .map_err(|e| storage_error(format!("cannot write the Bot identity context files: {e}")))?;
+    Ok(())
 }
 
 /// Who performed an audited mutation. P3 knew only Bot actors; P0 secret
@@ -629,9 +644,7 @@ pub fn record_audit_in_tx(
     at: f64,
     detail: &Value,
 ) -> SelfResult<()> {
-    let actor_bot_id = actor
-        .stored_value()
-        .map_err(SelfStorageError::Invalid)?;
+    let actor_bot_id = actor.stored_value().map_err(SelfStorageError::Invalid)?;
     let detail_json = serde_json::to_string(detail)?;
     tx.execute(
         "INSERT OR IGNORE INTO bot_audit
@@ -1501,6 +1514,7 @@ impl crate::Engine {
                 };
                 let (pinned, provisioned) =
                     claim_home_in_tx(tx, &profile).map_err(self_storage_error)?;
+                write_bot_identity_files(&pinned.path, &bot)?;
                 let at = crate::now_unix_ms() as f64;
                 audit(
                     tx,

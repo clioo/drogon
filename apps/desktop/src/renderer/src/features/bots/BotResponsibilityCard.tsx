@@ -28,7 +28,14 @@
    falls to the Bot glyph exactly like the fork's `none`. */
 
 import { useState } from "react";
-import { CalendarClock, ChevronDown, Play, Plus, Zap } from "lucide-react";
+import {
+  CalendarClock,
+  ChevronDown,
+  Play,
+  Plus,
+  RotateCcw,
+  Zap,
+} from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
@@ -82,6 +89,7 @@ export function BotResponsibilityCard({
   onDelete,
   onRunResponsibility,
   onLaunch,
+  onLaunchNew,
 }: {
   bot: BotsPanelBot;
   history: BotsPanelHistoryEntry[];
@@ -89,6 +97,9 @@ export function BotResponsibilityCard({
   onDelete: () => void;
   onRunResponsibility: (responsibilityId: string) => void;
   onLaunch: () => void;
+  /** Gap 2: explicit "start a fresh session", shown only when the Bot has a
+   *  recorded session that "Open session" would otherwise resume. */
+  onLaunchNew?: () => void;
 }): React.JSX.Element {
   const botHistory = history.filter((entry) => entry.run.botId === bot.id);
   // Dashboard expansion (Carlos directive): collapsed is the fork-verbatim
@@ -136,6 +147,21 @@ export function BotResponsibilityCard({
               <Play />
               Open session
             </Button>
+            {bot.currentSession && onLaunchNew ? (
+              // Gap 2: a Bot is bound to one session, so the default click
+              // resumes. This small secondary control is the explicit way to
+              // start a fresh one without hiding that default.
+              <Button
+                className="mt-3 ml-2"
+                variant="ghost"
+                size="sm"
+                data-testid={`new-session-${bot.id}`}
+                onClick={onLaunchNew}
+              >
+                <RotateCcw />
+                New session
+              </Button>
+            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <Button
