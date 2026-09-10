@@ -289,9 +289,12 @@ pub fn launch_run(
 
     // The recipe argument the runtime loads: the immutable snapshot when
     // staged, else the caller-supplied path (the resume path and any
-    // legacy caller without staged bytes).
+    // legacy caller without staged bytes). The snapshot recipe path is
+    // deterministic (run id + recipe file name), so the exact argv is
+    // known before materialization and recorded in the manifest.
     let mut snapshot_dir: Option<PathBuf> = None;
     let mut recipe_arg: Option<PathBuf> = None;
+    let mut attest_resources: Vec<(String, String)> = Vec::new();
     if let Some(staged) = &snapshot {
         if staged.recipe_id != recipe_id {
             return Err(error::invalid_argument(
@@ -299,9 +302,25 @@ pub fn launch_run(
             ));
         }
         verify_staged_fresh(&workspace_root, staged)?;
-        let materialized = materialize_snapshot(&workspace_root, &internal_id, staged)?;
+        let snapshot_recipe_path = snapshot_root(&workspace_root)
+            .join(&internal_id)
+            .join(&staged.recipe_file_name);
+        let argv = vec![
+            runtime_path.to_string_lossy().into_owned(),
+            "run".to_string(),
+            snapshot_recipe_path.to_string_lossy().into_owned(),
+            "--workspace".to_string(),
+            workspace_root.to_string_lossy().into_owned(),
+        ];
+        let materialized = materialize_snapshot(&workspace_root, &internal_id, staged, &argv)?;
+        debug_assert_eq!(materialized.recipe_path, snapshot_recipe_path);
         snapshot_dir = Some(materialized.dir);
         recipe_arg = Some(materialized.recipe_path);
+        attest_resources = staged
+            .resources
+            .iter()
+            .map(|(resource, _)| (resource.path.clone(), resource.sha256.clone()))
+            .collect();
     }
 
     let mut command = Command::new(&runtime_path);
@@ -390,6 +409,7 @@ pub fn launch_run(
             before_run_ids,
             &stdout_buf,
             &stderr_buf,
+            attest_resources,
         );
     });
 
@@ -408,6 +428,7 @@ fn finish(
     before_run_ids: Option<std::collections::HashSet<String>>,
     stdout_buf: &Arc<Mutex<Vec<u8>>>,
     stderr_buf: &Arc<Mutex<Vec<u8>>>,
+    attest_resources: Vec<(String, String)>,
 ) {
     let ended_at = crate::now_rfc3339();
     if matches!(outcome, WaitOutcome::Cancelled) || was_cancelled {
@@ -465,7 +486,26 @@ fn finish(
             let steps = run_record::parse_steps(&run_json, &mentu_run_id);
             let status = run_record::overall_status(&run_json, &steps);
             let ended = run_record::ended_at(&run_json).unwrap_or_else(|| ended_at.clone());
-            let error_message = first_step_error(&steps, status);
+            // Post-run attestation: resources pinned at approval are
+            // re-hashed after the child exits. Drift means the run may
+            // have read unapproved bytes mid-flight — disclosed on the
+            // record, never silent. (A pre-spawn refusal already covers
+            // drift before launch; this covers drift during the run.)
+            let drift = attested_drift(workspace_root, &attest_resources);
+            let error_message = match (first_step_error(&steps, status), drift.is_empty()) {
+                (message, true) => message,
+                (message, false) => {
+                    let disclosure = format!(
+                        "Relative resource(s) changed during execution ({}); the recorded \
+                         result may reflect unapproved bytes — re-approve and retry.",
+                        drift.join(", ")
+                    );
+                    Some(match message {
+                        Some(previous) => format!("{previous}\n{disclosure}"),
+                        None => disclosure,
+                    })
+                }
+            };
             let conn = db.lock().unwrap();
             let _ = storage::finish_run(
                 &conn,
@@ -532,11 +572,15 @@ pub fn cancel(id: &str) -> bool {
 // selection and the pinned adapter/runtime identity) into a write-once
 // snapshot dir, re-verifies it immediately before spawn, and passes the
 // snapshot recipe path to the runtime. `--workspace` and the child cwd
-// stay the workspace root, so run records and evidence keep their
-// established locations. Relative resources (`prompt_file`) are mirrored
-// into the snapshot and hash-pinned in the manifest; drift between
-// approval and launch refuses the run with a reason instead of silently
-// executing different bytes.
+// stay the workspace root, so run records, evidence, and step-relative
+// resolution behave exactly as approved. Relative resources
+// (`prompt_file`) are mirrored into the snapshot at their
+// workspace-relative layout AND hash-pinned in the manifest: a runtime
+// resolving against the recipe directory reads pinned bytes, while
+// workspace-relative resolution meets bytes verified equal at spawn.
+// Drift before launch refuses the run; drift during the run is disclosed
+// on the run record by post-run attestation — B is never silently
+// executed under A's approval.
 //
 // All selection verdicts here consume the real C01 APIs
 // (`drogon_harness::{validate_selection, allowed efforts via
@@ -1010,6 +1054,10 @@ pub struct SnapshotManifest {
     pub recipe_path: String,
     pub workspace_root: String,
     pub runtime: SnapshotRuntime,
+    /// The exact argv the launch used: runtime, `run`, snapshot recipe
+    /// path, `--workspace`, workspace root — auditable proof of what the
+    /// pinned runtime was asked to load.
+    pub argv: Vec<String>,
     pub steps: Vec<ValidatedAgentStep>,
     pub resources: Vec<SnapshotResource>,
     pub skipped_resources: Vec<String>,
@@ -1155,6 +1203,19 @@ pub fn stage_approved_snapshot(
         .and_then(|name| name.to_str())
         .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?
         .to_string();
+    // A relative resource that would land on the snapshot's own files
+    // (the recipe copy or the manifest) is refused loudly: silently
+    // skipping it would leave the runtime reading the live file while
+    // the manifest claims a pinned copy.
+    for (resource, _) in &resources {
+        if resource.path == recipe_file_name || resource.path == "manifest.json" {
+            return Err(error::invalid_argument(format!(
+                "Relative resource '{}' collides with the execution snapshot layout; \
+                 rename it before approving.",
+                resource.path
+            )));
+        }
+    }
     Ok(StagedSnapshot {
         recipe_id: recipe_id.to_string(),
         content_hash: content_hash.to_string(),
@@ -1208,6 +1269,48 @@ pub fn verify_staged_fresh(workspace_root: &Path, staged: &StagedSnapshot) -> Re
     Ok(())
 }
 
+/// Reads one live resource for attestation with a bounded pull: at most
+/// one byte past the mirror cap. A file that grew past the cap reads as
+/// drifted without loading it fully into memory.
+fn read_live_resource_capped(path: &Path) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    let mut file = fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    // One past the cap is enough to prove "changed".
+    let cap = (SNAPSHOT_MAX_RESOURCE_BYTES + 1) as usize;
+    file.by_ref()
+        .take(cap as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    Some(bytes)
+}
+
+/// Post-run attestation over staged `(path, sha256)` pairs: returns the
+/// workspace-relative paths whose live bytes no longer match the
+/// approval-pinned hash (missing, escaped-containment, or
+/// content-drifted). Pure reads — the caller discloses, never rewrites.
+fn attested_drift(workspace_root: &Path, staged: &[(String, String)]) -> Vec<String> {
+    if staged.is_empty() {
+        return Vec::new();
+    }
+    let Ok(workspace_real) = fs::canonicalize(workspace_root) else {
+        return staged.iter().map(|(path, _)| path.clone()).collect();
+    };
+    let mut drifted = Vec::new();
+    for (rel, pinned) in staged {
+        let candidate = workspace_root.join(rel);
+        let matches = fs::canonicalize(&candidate)
+            .ok()
+            .filter(|real| real.starts_with(&workspace_real) && real.is_file())
+            .and_then(|real| read_live_resource_capped(&real))
+            .is_some_and(|bytes| sha256_hex(&bytes) == *pinned);
+        if !matches {
+            drifted.push(rel.clone());
+        }
+    }
+    drifted
+}
+
 /// Materialized (run-bound, write-once) snapshot paths.
 pub struct MaterializedSnapshot {
     pub dir: PathBuf,
@@ -1218,16 +1321,22 @@ pub struct MaterializedSnapshot {
 }
 
 /// Materializes `staged` under `.mentu/snapshots/<run_id>/`: the exact
-/// approved recipe bytes, the mirrored `resources/`, and `manifest.json`
-/// recording the effective selection plus the pinned adapter/runtime
-/// version with the run. Write-once: an existing dir is never overwritten.
+/// approved recipe bytes, the mirrored relative resources laid out at
+/// their workspace-relative paths (so a runtime resolving references
+/// against the recipe directory reads the pinned bytes, while
+/// workspace-relative resolution keeps working against bytes verified
+/// equal at spawn), and `manifest.json` recording the effective
+/// selection, the exact argv, and the pinned adapter/runtime version with
+/// the run. Write-once: an existing dir is never overwritten.
 /// `--workspace` and the child cwd intentionally stay the workspace root
-/// (run records and evidence keep their established locations); the
-/// manifest pins `cwd` so the intended working directory survives moves.
+/// (run records and evidence keep their established locations, and step
+/// `dir`/shell relatives resolve exactly as approved); the manifest pins
+/// `cwd` so the intended working directory survives moves.
 pub fn materialize_snapshot(
     workspace_root: &Path,
     run_id: &str,
     staged: &StagedSnapshot,
+    argv: &[String],
 ) -> Result<MaterializedSnapshot, RpcError> {
     if !valid_run_id(run_id) {
         return Err(error::invalid_argument("Invalid Mentu run identity."));
@@ -1251,7 +1360,11 @@ pub fn materialize_snapshot(
         return Err(error::io_error(e.to_string()));
     }
     for (resource, bytes) in &staged.resources {
-        let target = dir.join("resources").join(&resource.path);
+        // Workspace-relative layout: the mirror sits where the reference
+        // points. A resource colliding with the snapshot's own files is
+        // refused at stage time (see `stage_approved_snapshot`), so this
+        // target can never be the recipe or the manifest.
+        let target = dir.join(&resource.path);
         if let Some(parent) = target.parent()
             && fs::create_dir_all(parent).is_err()
         {
@@ -1282,6 +1395,7 @@ pub fn materialize_snapshot(
             version: MENTU_LOCK_VERSION.to_string(),
             revision: MENTU_LOCK_REVISION.to_string(),
         },
+        argv: argv.to_vec(),
         steps: staged.steps.clone(),
         resources: staged.resources.iter().map(|(r, _)| r.clone()).collect(),
         skipped_resources: staged.skipped_resources.clone(),
@@ -1456,7 +1570,20 @@ mod selection_snapshot_tests {
         assert_eq!(staged.resources[0].0.path, resource_rel);
         assert!(staged.skipped_resources.is_empty());
         verify_staged_fresh(dir.path(), &staged).unwrap();
-        let materialized = materialize_snapshot(dir.path(), "run-1", &staged).unwrap();
+        let snapshot_recipe_arg = dir
+            .path()
+            .join(".mentu/snapshots/run-1")
+            .join("team redo.json")
+            .to_string_lossy()
+            .into_owned();
+        let argv = vec![
+            "/runtime/mentu-recipes".to_string(),
+            "run".to_string(),
+            snapshot_recipe_arg,
+            "--workspace".to_string(),
+            dir.path().to_string_lossy().into_owned(),
+        ];
+        let materialized = materialize_snapshot(dir.path(), "run-1", &staged, &argv).unwrap();
         // The snapshot keeps the recipe's own file name.
         assert_eq!(
             materialized
@@ -1469,8 +1596,8 @@ mod selection_snapshot_tests {
             std::fs::read(&materialized.recipe_path).unwrap(),
             staged.recipe_bytes
         );
-        // Mirrored resource bytes are exact.
-        let mirrored = materialized.dir.join("resources").join(resource_rel);
+        // Mirrored resource bytes are exact, at the workspace-relative layout.
+        let mirrored = materialized.dir.join(resource_rel);
         assert_eq!(std::fs::read(&mirrored).unwrap(), b"paso uno\n");
         // Manifest records selection + pinned runtime + cwd + hashes.
         let manifest: serde_json::Value = serde_json::from_str(
@@ -1490,8 +1617,17 @@ mod selection_snapshot_tests {
             manifest["resources"][0]["path"],
             serde_json::Value::String(resource_rel.into())
         );
+        // The manifest records the exact argv the launch uses.
+        assert_eq!(manifest["argv"][1], serde_json::Value::String("run".into()));
+        assert!(
+            manifest["argv"][2]
+                .as_str()
+                .is_some_and(|p| p.contains(".mentu/snapshots/run-1/")),
+            "argv names the snapshot recipe: {}",
+            manifest["argv"]
+        );
         // Write-once: the same run id never overwrites.
-        assert!(materialize_snapshot(dir.path(), "run-1", &staged).is_err());
+        assert!(materialize_snapshot(dir.path(), "run-1", &staged, &argv).is_err());
         assert_eq!(
             std::fs::read(&materialized.recipe_path).unwrap(),
             staged.recipe_bytes
@@ -1528,6 +1664,52 @@ mod selection_snapshot_tests {
         std::fs::write(dir.path().join("docs/note.md"), "v2").unwrap();
         let err = verify_staged_fresh(dir.path(), &staged).unwrap_err();
         assert!(err.message.contains("docs/note.md"), "{}", err.message);
+    }
+
+    #[test]
+    fn attestation_reports_drift_missing_and_growth() {
+        let dir = workspace();
+        std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+        std::fs::write(dir.path().join("docs/a.md"), "v1").unwrap();
+        let pinned_a = ("docs/a.md".to_string(), sha256_hex(b"v1"));
+        let pinned_b = ("docs/b.md".to_string(), sha256_hex(b"v1"));
+        // Unchanged bytes attest clean.
+        assert!(attested_drift(dir.path(), std::slice::from_ref(&pinned_a)).is_empty());
+        // Content drift flags the file.
+        std::fs::write(dir.path().join("docs/a.md"), "v2").unwrap();
+        assert_eq!(
+            attested_drift(dir.path(), std::slice::from_ref(&pinned_a)),
+            vec!["docs/a.md".to_string()]
+        );
+        // A missing file flags it too.
+        assert_eq!(
+            attested_drift(dir.path(), &[pinned_b]),
+            vec!["docs/b.md".to_string()]
+        );
+        // Growth past the mirror cap reads as drifted without loading it all.
+        let big = vec![b'x'; (SNAPSHOT_MAX_RESOURCE_BYTES + 16) as usize];
+        std::fs::write(dir.path().join("docs/a.md"), &big).unwrap();
+        assert_eq!(
+            attested_drift(dir.path(), &[pinned_a]),
+            vec!["docs/a.md".to_string()]
+        );
+    }
+
+    #[test]
+    fn resource_colliding_with_snapshot_layout_is_refused() {
+        let dir = workspace();
+        // A `prompt_file` that would land on the snapshot's own manifest
+        // must refuse at stage: silently skipping it would leave the
+        // runtime reading the live file while the manifest claims pinned.
+        let colliding = SHELL_ONLY.replace(
+            r#""prompt": "make""#,
+            r#""prompt": "make", "prompt_file": "manifest.json""#,
+        );
+        std::fs::write(dir.path().join("manifest.json"), "live\n").unwrap();
+        write_workspace_recipe(dir.path(), "collide.json", &colliding);
+        let hash = content_hash(dir.path(), "collide");
+        let err = stage_approved_snapshot(dir.path(), "collide", &hash).unwrap_err();
+        assert!(err.message.contains("collides"), "{}", err.message);
     }
 
     #[test]

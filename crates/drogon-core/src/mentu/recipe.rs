@@ -330,11 +330,178 @@ fn validate_recipe_value(value: &Value) -> Result<(), RpcError> {
     Ok(())
 }
 
+/// How long a save lock may be held by a dead writer before a contender
+/// reaps it: writes hold the lock for milliseconds, so anything older is
+/// a crash leftover, never a live save.
+const SAVE_LOCK_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+/// How long a save waits for a live holder before refusing: contention is
+/// brief (one check plus one rename); a longer wait means the holder died
+/// without leaving a parseable lock, and failing beats piling up.
+const SAVE_LOCK_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+const SAVE_LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(5);
+
+/// A held per-recipe save lock. `Drop` removes the lock file only when it
+/// still carries our own content, so a holder never deletes a lock that a
+/// stale-reap already transferred to someone else.
+struct RecipeLock {
+    path: PathBuf,
+    content: Vec<u8>,
+}
+
+impl Drop for RecipeLock {
+    fn drop(&mut self) {
+        if fs::read(&self.path).is_ok_and(|bytes| bytes == self.content) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn save_lock_content() -> Vec<u8> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{} {stamp}", std::process::id()).into_bytes()
+}
+
+fn save_lock_is_stale(path: &Path) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        return false;
+    };
+    let mut parts = text.split_whitespace();
+    let nanos: Option<u128> = parts.next().and_then(|_| parts.next()?.parse().ok());
+    let Some(nanos) = nanos else {
+        return false;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(nanos);
+    now.saturating_sub(nanos) > SAVE_LOCK_STALE_AFTER.as_nanos()
+}
+
+/// Acquires the per-recipe save lock, serializing every writer (expected
+/// and legacy) across threads and processes. The lock is held across the
+/// hash check AND the rename, so two competing same-hash writers cannot
+/// both succeed: the loser blocks, then re-checks against the winner's
+/// bytes and receives the conflict. Uses only `create_new` exclusivity
+/// plus stale-reaping — no flock, so it behaves identically on every
+/// platform CI covers.
+fn acquire_recipe_lock(dir: &Path, file_name: &str) -> Result<RecipeLock, RpcError> {
+    use std::io::Write as _;
+    let path = dir.join(format!(".{file_name}.lock"));
+    let start = std::time::Instant::now();
+    loop {
+        let content = save_lock_content();
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                if file
+                    .write_all(&content)
+                    .and_then(|()| file.sync_all())
+                    .is_err()
+                {
+                    let _ = fs::remove_file(&path);
+                    return Err(error::io_error("cannot claim the recipe save lock."));
+                }
+                return Ok(RecipeLock { path, content });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if save_lock_is_stale(&path) {
+                    // A crash leftover: reap and immediately retry. A live
+                    // contender racing the same reap loses `create_new`
+                    // and loops, so at most one holder emerges.
+                    let _ = fs::remove_file(&path);
+                    continue;
+                }
+                if start.elapsed() > SAVE_LOCK_BUDGET {
+                    return Err(error::io_error(
+                        "timed out waiting for another recipe save to finish.",
+                    ));
+                }
+                std::thread::sleep(SAVE_LOCK_POLL);
+            }
+            Err(e) => return Err(error::io_error(e.to_string())),
+        }
+    }
+}
+
+/// The locked write half of every save: validates, lands the bytes
+/// through an exclusively-created temp file renamed over the recipe
+/// (readers never see torn bytes, and two writers never share a temp
+/// name). The caller must hold the recipe lock.
+fn write_recipe_locked(path: &Path, content: &str) -> Result<(), RpcError> {
+    let value: Value = serde_json::from_str(content)
+        .map_err(|e| error::invalid_argument(format!("Invalid JSON: {e}")))?;
+    validate_recipe_value(&value)?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| error::invalid_argument("Recipe reference is outside .mentu/recipes."))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?;
+    // Exclusive temp creation: `fs::write` would truncate a colliding
+    // name, silently merging two writers into one temp file.
+    let mut tmp = None;
+    for _ in 0..4 {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let candidate = dir.join(format!(".{file_name}.tmp-{}-{stamp}", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                use std::io::Write as _;
+                if file.write_all(content.as_bytes()).is_err() {
+                    let _ = fs::remove_file(&candidate);
+                    return Err(error::io_error("cannot write the recipe temp file."));
+                }
+                tmp = Some(candidate);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(error::io_error(e.to_string())),
+        }
+    }
+    let Some(tmp) = tmp else {
+        return Err(error::io_error("cannot claim a recipe temp file."));
+    };
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(error::io_error(e.to_string()));
+    }
+    Ok(())
+}
+
+fn recipe_dir_and_name(path: &Path) -> Result<(&Path, String), RpcError> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| error::invalid_argument("Recipe reference is outside .mentu/recipes."))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?
+        .to_string();
+    Ok((dir, file_name))
+}
+
 /// Writes `content` as the new source of an existing recipe and returns
-/// the reloaded detail (with the new content hash). The target resolves
-/// through [`resolve_recipe_path`]'s containment and symlink checks, then
-/// the write lands atomically: a temp file in the same directory renamed
-/// over the recipe, so a crash never leaves half a recipe behind.
+/// the reloaded detail (with the new content hash). Serialized against
+/// every other saver through the per-recipe lock (including legacy
+/// callers with no expected hash); the write itself lands atomically
+/// (exclusive temp file renamed over the recipe), so a crash never leaves
+/// half a recipe behind and readers never see torn bytes.
 pub fn save_recipe(
     workspace_root: &Path,
     recipe_id: &str,
@@ -346,25 +513,12 @@ pub fn save_recipe(
         ));
     }
     let path = resolve_recipe_path(workspace_root, recipe_id)?;
-    let value: Value = serde_json::from_str(content)
-        .map_err(|e| error::invalid_argument(format!("Invalid JSON: {e}")))?;
-    validate_recipe_value(&value)?;
-    let dir = path
-        .parent()
-        .ok_or_else(|| error::invalid_argument("Recipe reference is outside .mentu/recipes."))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = dir.join(format!(".{file_name}.tmp-{}-{stamp}", std::process::id()));
-    if let Err(e) = fs::write(&tmp, content).and_then(|()| fs::rename(&tmp, &path)) {
-        let _ = fs::remove_file(&tmp);
-        return Err(error::io_error(e.to_string()));
-    }
+    let (dir, file_name) = recipe_dir_and_name(&path)?;
+    // The lock serializes legacy writers against expected-hash writers:
+    // a legacy save can no longer slip between an expected check and its
+    // rename (the expected writer then conflicts instead of losing).
+    let _lock = acquire_recipe_lock(dir, &file_name)?;
+    write_recipe_locked(&path, content)?;
     load_recipe(workspace_root, recipe_id)
 }
 
@@ -383,16 +537,13 @@ fn valid_content_hash(value: &str) -> bool {
 
 /// Compare-and-save: writes `content` only when the recipe's exact
 /// current on-disk bytes still hash to `expected_hash` (the hash the
-/// caller saw at load time). On mismatch nothing is written and a
-/// [`RECIPE_CONFLICT_CODE`] error carries the current hash, so the caller
-/// keeps its draft and offers reload/review instead of silently
-/// overwriting another editor's save. The write itself is the same atomic
-/// temp-file rename [`save_recipe`] uses, so readers never see torn bytes.
-///
-/// Residual TOCTOU note: the check and the rename are two syscalls, so
-/// two writers racing inside the same instant can still serialize;
-/// what this removes is the everyday silent loss — every save that
-/// started from a stale view is refused with its draft intact.
+/// caller saw at load time). The per-recipe lock is held across the hash
+/// check AND the rename, so two competing same-hash writers cannot both
+/// succeed: the loser blocks on the lock, then re-checks against the
+/// winner's bytes and receives the conflict with its draft intact. On
+/// mismatch nothing is written and a [`RECIPE_CONFLICT_CODE`] error
+/// carries the current hash, so the caller keeps its draft and offers
+/// reload/review instead of silently overwriting another editor's save.
 pub fn save_recipe_expected(
     workspace_root: &Path,
     recipe_id: &str,
@@ -404,7 +555,19 @@ pub fn save_recipe_expected(
             "Invalid Mentu recipe content hash.",
         ));
     }
-    let current = current_content_hash(workspace_root, recipe_id)?;
+    if content.len() as u64 > MAX_RECIPE_SOURCE_BYTES {
+        return Err(error::invalid_argument(
+            "Updated recipe source exceeds the 1 MiB safety limit.",
+        ));
+    }
+    let path = resolve_recipe_path(workspace_root, recipe_id)?;
+    let (dir, file_name) = recipe_dir_and_name(&path)?;
+    let _lock = acquire_recipe_lock(dir, &file_name)?;
+    // The check runs INSIDE the lock: any writer that changed the bytes
+    // either finished before we locked (we see its hash) or blocks until
+    // we release (it sees ours). No interleaving survives.
+    let bytes = fs::read(&path).map_err(|e| error::io_error(e.to_string()))?;
+    let current = sha256_hex(&bytes);
     if current != expected_hash {
         return Err(RpcError::new(
             RECIPE_CONFLICT_CODE,
@@ -414,7 +577,8 @@ pub fn save_recipe_expected(
             ),
         ));
     }
-    save_recipe(workspace_root, recipe_id, content)
+    write_recipe_locked(&path, content)?;
+    load_recipe(workspace_root, recipe_id)
 }
 
 /// The execution settings C03 edits on one agent step: the executable
@@ -739,6 +903,110 @@ mod tests {
         // Saving from the fresh hash succeeds.
         let retry = save_recipe_expected(dir.path(), "hello", &ours, &landed.content_hash).unwrap();
         assert_eq!(retry.source, ours);
+    }
+
+    fn recipe_dir_entries(root: &Path) -> Vec<String> {
+        fs::read_dir(recipes_root(root))
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn competing_same_hash_writers_exactly_one_wins() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        let base = load_recipe(dir.path(), "hello").unwrap();
+        // Eight threads race from the same loaded hash. The per-recipe
+        // lock serializes check-and-rename: exactly one save lands, the
+        // other seven conflict against the winner's bytes.
+        let results: Vec<_> = (0..8)
+            .map(|i| {
+                let root = dir.path().to_path_buf();
+                let hash = base.content_hash.clone();
+                std::thread::spawn(move || {
+                    let content = VALID.replace("\"tiny\"", &format!("\"writer-{i}\""));
+                    save_recipe_expected(&root, "hello", &content, &hash)
+                        .map(|d| d.source)
+                        .map_err(|e| e.code)
+                })
+            })
+            .map(|h| h.join().unwrap())
+            .collect();
+        let wins = results.iter().filter(|r| r.is_ok()).count();
+        let conflicts = results
+            .iter()
+            .filter(|r| *r == &Err(RECIPE_CONFLICT_CODE.to_string()))
+            .count();
+        assert_eq!(wins, 1, "exactly one same-hash writer lands: {results:?}");
+        assert_eq!(conflicts, 7, "every loser conflicts: {results:?}");
+        // The winner's bytes are whole; no lock or temp files leak.
+        let on_disk = load_recipe(dir.path(), "hello").unwrap();
+        assert!(results.into_iter().any(|r| r == Ok(on_disk.source.clone())));
+        assert_eq!(
+            recipe_dir_entries(dir.path()),
+            vec!["hello.json".to_string()]
+        );
+    }
+
+    #[test]
+    fn legacy_and_expected_writers_serialize_without_torn_bytes() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        let base = load_recipe(dir.path(), "hello").unwrap();
+        let legacy_content = VALID.replace("\"tiny\"", "\"legacy\"");
+        let expected_content = VALID.replace("\"tiny\"", "\"expected\"");
+        // A legacy save (no hash) racing an expected save: both run under
+        // the same lock, so the bytes on disk are always exactly one of
+        // the two contents — never a mix. The expected writer either wins
+        // outright, conflicts against a legacy that landed first, or lands
+        // first and is then overwritten by the legacy save (legacy carries
+        // no base to conflict on — that path is why the hash exists).
+        // What the lock guarantees, and what is asserted: no torn bytes,
+        // no leftover files, and every result consistent with the disk.
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let root = dir.path().to_path_buf();
+        let hash = base.content_hash.clone();
+        let legacy = {
+            let root = root.clone();
+            let barrier = std::sync::Arc::clone(&barrier);
+            let content = legacy_content.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                save_recipe(&root, "hello", &content).map(|d| d.source)
+            })
+        };
+        let expected = std::thread::spawn(move || {
+            barrier.wait();
+            save_recipe_expected(&root, "hello", &expected_content, &hash)
+                .map(|d| d.source)
+                .map_err(|e| e.code)
+        });
+        let legacy = legacy.join().unwrap();
+        let expected = expected.join().unwrap();
+        assert!(legacy.is_ok(), "legacy save lands: {legacy:?}");
+        let on_disk = load_recipe(dir.path(), "hello").unwrap().source;
+        let expected_content = VALID.replace("\"tiny\"", "\"expected\"");
+        assert!(
+            on_disk == legacy_content || on_disk == expected_content,
+            "bytes are whole: {on_disk:?}"
+        );
+        match expected {
+            Ok(source) => assert!(
+                source == expected_content
+                    && (on_disk == expected_content || on_disk == legacy_content),
+                "an Ok expected save wrote exactly its content"
+            ),
+            Err(code) => {
+                assert_eq!(code, RECIPE_CONFLICT_CODE);
+                assert_eq!(on_disk, legacy_content);
+            }
+        }
+        assert_eq!(
+            recipe_dir_entries(dir.path()),
+            vec!["hello.json".to_string()]
+        );
     }
 
     #[test]

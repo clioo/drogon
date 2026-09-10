@@ -54,6 +54,16 @@ fn write_recipe(root: &Path, id: &str, contents: &str) {
     fs::write(path, contents).unwrap();
 }
 
+fn test_argv(workspace_root: &Path, recipe_arg: &str) -> Vec<String> {
+    vec![
+        "/runtime/mentu-recipes".to_string(),
+        "run".to_string(),
+        recipe_arg.to_string(),
+        "--workspace".to_string(),
+        workspace_root.to_string_lossy().into_owned(),
+    ]
+}
+
 fn two_step() -> String {
     serde_json::json!({
         "name": "two-step",
@@ -181,7 +191,18 @@ fn approved_snapshot_survives_a_later_edit_and_refuses_it() {
     write_recipe(dir.path(), "pair", &two_step());
     let staged =
         execution::stage_approved_snapshot(dir.path(), "pair", &approved.content_hash).unwrap();
-    let materialized = execution::materialize_snapshot(dir.path(), "run-aaa", &staged).unwrap();
+    let snapshot_arg = dir
+        .path()
+        .join(".mentu/snapshots/run-aaa/pair.json")
+        .to_string_lossy()
+        .into_owned();
+    let materialized = execution::materialize_snapshot(
+        dir.path(),
+        "run-aaa",
+        &staged,
+        &test_argv(dir.path(), &snapshot_arg),
+    )
+    .unwrap();
     write_recipe(dir.path(), "pair", &version_b);
     assert_eq!(
         fs::read(&materialized.recipe_path).unwrap(),
@@ -211,7 +232,18 @@ fn snapshot_keeps_unicode_paths_and_relative_resources() {
 
     let staged = execution::stage_approved_snapshot(dir.path(), id, &loaded.content_hash).unwrap();
     assert_eq!(staged.resources.len(), 1);
-    let materialized = execution::materialize_snapshot(dir.path(), "run-uni", &staged).unwrap();
+    let snapshot_arg = dir
+        .path()
+        .join(".mentu/snapshots/run-uni/pair.json")
+        .to_string_lossy()
+        .into_owned();
+    let materialized = execution::materialize_snapshot(
+        dir.path(),
+        "run-uni",
+        &staged,
+        &test_argv(dir.path(), &snapshot_arg),
+    )
+    .unwrap();
     let manifest: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(materialized.dir.join("manifest.json")).unwrap())
             .unwrap();
@@ -226,8 +258,9 @@ fn snapshot_keeps_unicode_paths_and_relative_resources() {
         manifest["cwd"],
         serde_json::Value::String(dir.path().to_string_lossy().into_owned())
     );
-    // The mirrored relative resource is byte-exact under a Unicode path.
-    let mirrored = materialized.dir.join("resources").join("recursos/guía.md");
+    // The mirrored relative resource is byte-exact under a Unicode path,
+    // at the workspace-relative layout.
+    let mirrored = materialized.dir.join("recursos/guía.md");
     assert_eq!(fs::read(&mirrored).unwrap(), b"contenido\n");
     execution::verify_staged_fresh(dir.path(), &staged).unwrap();
 }
