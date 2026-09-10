@@ -7,7 +7,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use drogon_core::mentu::execution;
 use drogon_core::mentu::recipe;
@@ -16,6 +16,26 @@ use drogon_core::mentu::recipe::AgentStepExecution;
 /// `PATH`-touching cases run under one serial lock: `PATH` is
 /// process-wide and the availability lookup reads it.
 static PATH_SERIAL: Mutex<()> = Mutex::new(());
+
+/// Locks `PATH_SERIAL` and points `PATH` at a fresh dir containing bare
+/// executable bits for `exe_names` (created, never spawned). Staged
+/// harness-backed selections (e.g. `codex`) then validate
+/// deterministically on every host: present bit → manual-unverified
+/// carry-through, never an ambient-PATH-dependent verdict. Returns guards
+/// that restore `PATH` and clean the dir on drop, in declaration order.
+fn isolate_path_with_executables(
+    exe_names: &[&str],
+) -> (MutexGuard<'static, ()>, tempfile::TempDir, PathOverride) {
+    let guard = PATH_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    for name in exe_names {
+        let path = dir.path().join(name);
+        fs::write(&path, "").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let overwrite = PathOverride::set_to(dir.path());
+    (guard, dir, overwrite)
+}
 /// The test that points `PATH` at an empty dir restores the previous value
 /// on drop, so no other binary (or later case) observes the override.
 struct PathOverride {
@@ -169,6 +189,9 @@ fn concurrent_saves_from_one_hash_exactly_one_wins() {
 /// instead of silently executing B.
 #[test]
 fn approved_snapshot_survives_a_later_edit_and_refuses_it() {
+    // The fixture's `codex` step validates against host PATH: isolate it
+    // so CI runners without the executable stage exactly like dev hosts.
+    let (_serial, _path_dir, _path) = isolate_path_with_executables(&["codex"]);
     let dir = workspace();
     write_recipe(dir.path(), "pair", &two_step());
     let approved = recipe::load_recipe(dir.path(), "pair").unwrap();
@@ -219,6 +242,7 @@ fn approved_snapshot_survives_a_later_edit_and_refuses_it() {
 /// the execution snapshot.
 #[test]
 fn snapshot_keeps_unicode_paths_and_relative_resources() {
+    let (_serial, _path_dir, _path) = isolate_path_with_executables(&["codex"]);
     let dir = workspace();
     let id = "equipo compuesto";
     fs::create_dir_all(dir.path().join("recursos")).unwrap();
@@ -269,6 +293,7 @@ fn snapshot_keeps_unicode_paths_and_relative_resources() {
 /// an unsupported one refuses without inference — and stages nothing.
 #[test]
 fn supported_selection_stages_exactly_unsupported_refuses_cleanly() {
+    let (_serial, _path_dir, _path) = isolate_path_with_executables(&["codex"]);
     let dir = workspace();
     write_recipe(dir.path(), "pair", &two_step());
     let loaded = recipe::load_recipe(dir.path(), "pair").unwrap();
@@ -302,7 +327,7 @@ fn supported_selection_stages_exactly_unsupported_refuses_cleanly() {
 /// nothing is ever spawned.
 #[test]
 fn host_verdicts_follow_executable_presence_without_probing() {
-    let _guard = PATH_SERIAL.lock().unwrap();
+    let _guard = PATH_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let bin_dir = workspace();
     let empty_dir = workspace();
     let codex = bin_dir.path().join("codex");
