@@ -181,6 +181,7 @@ fn forbidden_methods_are_unauthorized_before_any_scope_check() {
         "orchestration.workerStart",
         "orchestration.workerStop",
         "orchestration.workerRetain",
+        "orchestration.workerList",
         "unknown.method",
     ] {
         let err = authorize_worker(&conn, HOST, SECRET, method, &json!({})).unwrap_err();
@@ -199,6 +200,7 @@ fn admin_existing_methods_are_not_in_the_worker_allowlist() {
         "orchestration.check",
         "orchestration.ask",
         "orchestration.reply",
+        "orchestration.inbox",
         "orchestration.requestShow",
     ] {
         assert!(super::is_allowed_worker_method(method));

@@ -32,7 +32,7 @@ pub(crate) enum ResourceState {
 }
 
 impl ResourceState {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Retained => "retained",
             Self::ReleasePending => "release_pending",

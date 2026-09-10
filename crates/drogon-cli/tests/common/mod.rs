@@ -138,6 +138,13 @@ impl MockService {
             .next()
             .expect("mock saw a request")
     }
+
+    pub fn last_captured(&self) -> Value {
+        self.captured()
+            .into_iter()
+            .last()
+            .expect("mock saw a request")
+    }
 }
 
 impl Drop for MockService {

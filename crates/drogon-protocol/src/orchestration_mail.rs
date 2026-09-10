@@ -8,6 +8,7 @@ use crate::orchestration_common::{
     ActorScope, MAX_SUBJECT_TEXT_BYTES, OpaqueCursor, ReportOutcome, WaitPolicy,
     validate_opaque_token, validate_task_text,
 };
+use crate::orchestration_scope::HostScope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -26,6 +27,50 @@ pub enum MessageKind {
     FinalReport,
     Guidance,
     Escalation,
+    /// Source-only kinds carried as opaque mail with no lifecycle effect.
+    Dispatch,
+    MergeReady,
+    Handoff,
+    DecisionGate,
+}
+
+/// Source display priority (`MessagePriority`): urgent/high messages render
+/// `[URGENT]`/`[HIGH]` tags in human output. Absent on the wire means
+/// normal (pre-priority senders and stores).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MessagePriority {
+    #[default]
+    Normal,
+    High,
+    Urgent,
+}
+
+impl MessagePriority {
+    pub fn tag(self) -> &'static str {
+        match self {
+            MessagePriority::Normal => "",
+            MessagePriority::High => " [HIGH]",
+            MessagePriority::Urgent => " [URGENT]",
+        }
+    }
+
+    pub fn from_stored(value: &str) -> Option<Self> {
+        match value {
+            "normal" => Some(MessagePriority::Normal),
+            "high" => Some(MessagePriority::High),
+            "urgent" => Some(MessagePriority::Urgent),
+            _ => None,
+        }
+    }
+
+    pub fn as_stored(self) -> &'static str {
+        match self {
+            MessagePriority::Normal => "normal",
+            MessagePriority::High => "high",
+            MessagePriority::Urgent => "urgent",
+        }
+    }
 }
 
 /// Addressing. Lifecycle kinds may only target the run home (or omit the
@@ -84,6 +129,9 @@ pub struct SendParams {
     /// Structured message payload (task-authored data, source: `payload`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<Value>,
+    /// Display priority (source: `priority`); absent means normal.
+    #[serde(default)]
+    pub priority: MessagePriority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
     /// Required exactly when `kind` is `finalReport` (source: `--outcome`
@@ -308,6 +356,26 @@ impl<'de> Deserialize<'de> for CheckMode {
     }
 }
 
+impl MessageKind {
+    /// Human display name. Source `type` strings are the contract:
+    /// `worker_done` (not the wire `finalReport`), everything else 1:1.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            MessageKind::Status => "status",
+            MessageKind::Question => "question",
+            MessageKind::Answer => "answer",
+            MessageKind::Heartbeat => "heartbeat",
+            MessageKind::FinalReport => "worker_done",
+            MessageKind::Guidance => "guidance",
+            MessageKind::Escalation => "escalation",
+            MessageKind::Dispatch => "dispatch",
+            MessageKind::MergeReady => "merge_ready",
+            MessageKind::Handoff => "handoff",
+            MessageKind::DecisionGate => "decision_gate",
+        }
+    }
+}
+
 impl CheckMode {
     pub fn validate_shape(&self) -> Result<(), RpcError> {
         if let CheckMode::Unread {
@@ -348,6 +416,9 @@ pub struct CheckParams {
     /// Preamble/inject presentation flag (source: `inject`).
     #[serde(default)]
     pub inject: bool,
+    /// Expanded local-text rendering flag (source: `--format`).
+    #[serde(default)]
+    pub format: bool,
     /// Inspection-only pagination; consuming checks cannot split a FIFO delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<OpaqueCursor>,
@@ -397,6 +468,9 @@ pub struct MessageSummary {
     pub body: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<Value>,
+    /// Display priority; defaults to normal for pre-priority stores.
+    #[serde(default)]
+    pub priority: MessagePriority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
 }
@@ -460,6 +534,10 @@ pub struct CheckResult {
     pub acknowledged: Option<AckReceipt>,
     #[serde(default)]
     pub messages: Vec<MessageSummary>,
+    /// Server-side expanded rendering (source: `formatted`); the CLI prints
+    /// it verbatim for human output when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formatted: Option<String>,
     /// Continuation token for bounded inspection output (peek/all); a
     /// consuming read always returns the whole FIFO batch instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -550,4 +628,62 @@ pub struct ReplyResult {
     pub message: MessageReceipt,
     /// Echo of the answered question for review tooling.
     pub question_message_id: String,
+}
+
+/// Global newest-first mail sweep across the host's runs (source:
+/// `orchestration.inbox`). Read-only: no deliveries, no read pointers, no
+/// receipts. With `terminal`, only mail addressed to that dispatch; a
+/// stale/unknown handle reads as empty, never an error.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxParams {
+    pub scope: HostScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Dispatch the sweep is filtered to (source: `--terminal` handle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<String>,
+}
+
+/// Source defaults: whole-host sweep reads 20, a terminal-filtered sweep
+/// reads 100 (source `getInbox`/`getAllMessagesForHandle`).
+pub const INBOX_DEFAULT_LIMIT: u32 = 20;
+pub const INBOX_TERMINAL_DEFAULT_LIMIT: u32 = 100;
+
+impl InboxParams {
+    pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
+        self.scope.validate_target(execution_host_id)?;
+        crate::orchestration_common::validate_page_limit(self.limit)?;
+        if let Some(terminal) = &self.terminal {
+            validate_opaque_token(terminal, 128, "Invalid terminal handle.")?;
+        }
+        Ok(())
+    }
+
+    pub fn effective_limit(&self) -> u32 {
+        self.limit.unwrap_or(if self.terminal.is_some() {
+            INBOX_TERMINAL_DEFAULT_LIMIT
+        } else {
+            INBOX_DEFAULT_LIMIT
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxResult {
+    pub messages: Vec<MessageSummary>,
+    pub count: usize,
+}
+
+impl InboxResult {
+    pub fn validate_shape(&self) -> Result<(), RpcError> {
+        if self.count != self.messages.len() {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Inbox count does not match the returned messages.",
+            ));
+        }
+        Ok(())
+    }
 }

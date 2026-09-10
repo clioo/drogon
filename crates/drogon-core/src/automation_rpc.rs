@@ -503,6 +503,21 @@ impl crate::Engine {
         serde_json::to_value(&result).map_err(|e| internal_error(e.to_string()))
     }
 
+    /// `automation.show { id }`: one automation record, or `not_found`.
+    pub(crate) fn automation_show(&self, params: &Value) -> Result<Value, RpcError> {
+        let id = params
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid_argument("missing id"))?;
+        let id = require_id(id, "id")?;
+        let conn = self.db.lock().unwrap();
+        let automation = storage::get_automation(&conn, &id)
+            .map_err(|e| storage_error(format!("automation show failed: {e}")))?
+            .ok_or_else(|| not_found(format!("automation {id} not found")))?;
+        serde_json::to_value(summarize(&conn, &automation)?)
+            .map_err(|e| internal_error(e.to_string()))
+    }
+
     pub(crate) fn automation_update(&self, request: &Request) -> Result<Value, RpcError> {
         let params: AutomationUpdateParams = parse_params(&request.params, "automation.update")?;
         let id = require_id(&params.id, "id")?;

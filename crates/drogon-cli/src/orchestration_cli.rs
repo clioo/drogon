@@ -5,6 +5,7 @@
 //! environment hints); only pure grammar goes here.
 
 use clap::{Args, Subcommand, ValueEnum};
+use drogon_protocol::orchestration_mail::MessagePriority;
 
 /// Explicit execution-host override. Absent means: use the scoped
 /// `DROGON_HOST_ID` hint when present, else the connected runtime's own host
@@ -142,6 +143,13 @@ pub enum MessageKindArg {
     FinalReport,
     Guidance,
     Escalation,
+    /// Source-only mail kinds (opaque, no lifecycle effect)
+    Dispatch,
+    #[value(name = "merge_ready")]
+    MergeReady,
+    Handoff,
+    #[value(name = "decision_gate")]
+    DecisionGate,
 }
 
 impl MessageKindArg {
@@ -154,6 +162,27 @@ impl MessageKindArg {
             MessageKindArg::FinalReport => "finalReport",
             MessageKindArg::Guidance => "guidance",
             MessageKindArg::Escalation => "escalation",
+            MessageKindArg::Dispatch => "dispatch",
+            MessageKindArg::MergeReady => "merge_ready",
+            MessageKindArg::Handoff => "handoff",
+            MessageKindArg::DecisionGate => "decision_gate",
+        }
+    }
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PriorityArg {
+    Normal,
+    High,
+    Urgent,
+}
+
+impl PriorityArg {
+    pub fn as_wire(self) -> MessagePriority {
+        match self {
+            PriorityArg::Normal => MessagePriority::Normal,
+            PriorityArg::High => MessagePriority::High,
+            PriorityArg::Urgent => MessagePriority::Urgent,
         }
     }
 }
@@ -191,6 +220,32 @@ impl OutputSourceArg {
     }
 }
 
+/// `orchestration worker-list --terminal-state` filter: the six terminal
+/// resource states (source: `worker-terminal-ownership.ts`).
+#[derive(ValueEnum, Debug, Clone, Copy)]
+#[value(rename_all = "snake_case")]
+pub enum TerminalStateArg {
+    Active,
+    Reclaimable,
+    Retained,
+    ReleasePending,
+    ReleaseUnknown,
+    Released,
+}
+
+impl TerminalStateArg {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            TerminalStateArg::Active => "active",
+            TerminalStateArg::Reclaimable => "reclaimable",
+            TerminalStateArg::Retained => "retained",
+            TerminalStateArg::ReleasePending => "release_pending",
+            TerminalStateArg::ReleaseUnknown => "release_unknown",
+            TerminalStateArg::Released => "released",
+        }
+    }
+}
+
 #[derive(ValueEnum, Debug, Clone, Copy)]
 pub enum ReceiptScopeArg {
     Bootstrap,
@@ -210,6 +265,24 @@ impl ReceiptScopeArg {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum OrchestrationCommand {
+    /// Retired: reports the migration guidance without applying effects
+    #[command(visible_alias = "run")]
+    CoordinatorStart {
+        /// Guidance text accepted for grammar compatibility (ignored)
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        spec: Option<String>,
+        #[arg(long, value_name = "HANDLE")]
+        from: Option<String>,
+        #[arg(long, value_name = "N")]
+        poll_interval_ms: Option<u64>,
+        #[arg(long, value_name = "N")]
+        max_concurrent: Option<u32>,
+        #[arg(long, value_name = "SELECTOR")]
+        worktree: Option<String>,
+    },
+    /// Retired: reports the migration guidance without applying effects
+    #[command(visible_alias = "run-stop")]
+    CoordinatorStop,
     /// Create a run bound to a coordinator (initial generation is server-owned)
     RunCreate {
         /// Run objective (free text, forwarded literally)
@@ -465,6 +538,33 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+    /// List worker attempts on this host (all runs unless --run; read-only)
+    WorkerList {
+        /// Narrow to one run; without it all runs are listed (never a
+        /// current-run guess). Unknown runs read empty.
+        #[arg(long, value_name = "ID")]
+        run: Option<String>,
+        /// Filter to one terminal resource state
+        #[arg(long, value_enum, value_name = "STATE")]
+        terminal_state: Option<TerminalStateArg>,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// Reset orchestration domain state on this host (exactly one scope)
+    Reset {
+        /// Clear everything in the orchestration domain
+        #[arg(long, default_value_t = false, conflicts_with_all = ["tasks", "messages"])]
+        all: bool,
+        /// Clear tasks, gates, attempts, retention and run bindings; messages
+        /// survive and pending question threads are closed, not deleted
+        #[arg(long, default_value_t = false, conflicts_with_all = ["all", "messages"])]
+        tasks: bool,
+        /// Clear mail messages, deliveries and question threads only
+        #[arg(long, default_value_t = false, conflicts_with_all = ["all", "tasks"])]
+        messages: bool,
+        #[command(flatten)]
+        host: HostOpt,
+    },
     /// Send a scoped coordination message
     Send {
         /// Actor scope: coordinator binding or dispatch binding
@@ -484,6 +584,18 @@ pub enum OrchestrationCommand {
         payload: Option<String>,
         #[arg(long, value_name = "ID")]
         thread_id: Option<String>,
+        /// Structured payload field: comma-separated modified paths
+        #[arg(long, value_name = "CSV")]
+        files_modified: Option<String>,
+        /// Structured payload field: long-form artifact path
+        #[arg(long, value_name = "PATH")]
+        report_path: Option<String>,
+        /// Structured payload field: heartbeat phase text
+        #[arg(long, value_name = "TEXT")]
+        phase: Option<String>,
+        /// Display priority (source: urgent/high render [URGENT]/[HIGH] tags)
+        #[arg(long, value_enum, default_value_t = PriorityArg::Normal)]
+        priority: PriorityArg,
         /// Final-report outcome (required for --kind final-report)
         #[arg(long, value_enum)]
         outcome: Option<OutcomeArg>,
@@ -497,6 +609,9 @@ pub enum OrchestrationCommand {
     Check {
         #[command(flatten)]
         actor: ActorScopeArgs,
+        /// Explicit consuming read (the default mode)
+        #[arg(long, default_value_t = false)]
+        unread: bool,
         /// Non-consuming inspection of unread mail
         #[arg(long, default_value_t = false)]
         peek: bool,
@@ -517,12 +632,29 @@ pub enum OrchestrationCommand {
         kinds: Option<String>,
         #[arg(long, default_value_t = false)]
         inject: bool,
+        /// Expanded per-message rendering ([subject]/[body]/[payload] blocks)
+        #[arg(long, default_value_t = false)]
+        format: bool,
         /// Inspection-only continuation cursor (peek/all only)
         #[arg(long, value_name = "TOKEN")]
         cursor: Option<String>,
         /// Inspection-only page bound (peek/all only)
         #[arg(long, value_name = "N")]
         limit: Option<u32>,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// Read-only newest-first sweep across the host's runs (no deliveries, no ACK)
+    Inbox {
+        /// Newest-first page bound (default 20; 100 with --terminal)
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
+        /// Only mail addressed to this dispatch (stale/unknown reads as empty)
+        #[arg(long, value_name = "HANDLE")]
+        terminal: Option<String>,
+        /// Print bodies and payloads, not just the one-line sweep
+        #[arg(long, default_value_t = false)]
+        full: bool,
         #[command(flatten)]
         host: HostOpt,
     },
@@ -563,6 +695,42 @@ pub enum OrchestrationCommand {
         #[command(flatten)]
         host: HostOpt,
     },
+    /// Dispatch a ready task to a live terminal, optionally injecting the preamble
+    Dispatch {
+        /// Task id to dispatch
+        #[arg(long, value_name = "ID")]
+        task: String,
+        /// Target live session id (required unless --dry-run)
+        #[arg(long, value_name = "SESSION")]
+        to: Option<String>,
+        /// Write the preamble into the target session (requires a running agent there)
+        #[arg(long, default_value_t = false)]
+        inject: bool,
+        /// Preview the preamble without touching state
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Return the preamble in the response
+        #[arg(long, default_value_t = false)]
+        return_preamble: bool,
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[command(flatten)]
+        host: HostOpt,
+    },
+    /// The dispatcher for a task: its current dispatch (if any) plus a
+    /// deterministic preview preamble when requested
+    DispatchShow {
+        /// Task id to inspect
+        #[arg(long, value_name = "ID")]
+        task: String,
+        /// Regenerate the dispatch preamble from the current task spec
+        #[arg(long, default_value_t = false)]
+        preamble: bool,
+        #[command(flatten)]
+        scope: CoordinatorScopeArgs,
+        #[command(flatten)]
+        host: HostOpt,
+    },
     /// Recover a receipt by id from an explicit receipt scope
     RequestShow {
         /// Target receipt id (distinct from the --request-id envelope id)
@@ -598,7 +766,9 @@ impl OrchestrationCommand {
             | Self::WorkerStop { scope, .. }
             | Self::WorkerAbandon { scope, .. }
             | Self::WorkerRelease { scope, .. }
-            | Self::WorkerRetain { scope, .. } => Some(scope),
+            | Self::WorkerRetain { scope, .. }
+            | Self::Dispatch { scope, .. }
+            | Self::DispatchShow { scope, .. } => Some(scope),
             _ => None,
         }
     }
@@ -618,7 +788,9 @@ impl OrchestrationCommand {
             | Self::WorkerStop { scope, .. }
             | Self::WorkerAbandon { scope, .. }
             | Self::WorkerRelease { scope, .. }
-            | Self::WorkerRetain { scope, .. } => Some(scope),
+            | Self::WorkerRetain { scope, .. }
+            | Self::Dispatch { scope, .. }
+            | Self::DispatchShow { scope, .. } => Some(scope),
             _ => None,
         }
     }

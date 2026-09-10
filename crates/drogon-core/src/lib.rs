@@ -12,16 +12,24 @@ pub mod bots;
 pub mod claim_identity;
 mod coordination_access;
 mod coordination_attempts;
+mod coordination_dispatch;
 mod coordination_identity;
 mod coordination_launch;
 mod coordination_mail;
 mod coordination_mail_groups;
 mod coordination_mail_rpc;
 mod coordination_output;
+mod coordination_preamble;
 mod coordination_question_rpc;
 mod coordination_receipts;
+mod coordination_reset;
+#[path = "coordination_reset_tests.rs"]
+#[cfg(test)]
+mod coordination_reset_tests;
+
 mod coordination_runs;
 mod coordination_worker_control;
+mod coordination_worker_list;
 mod coordination_worker_retain;
 mod coordination_workers;
 mod desktop_relay_rpc;
@@ -89,6 +97,9 @@ use requests::RequestLedger;
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use session::SessionHandle;
+
+/// `session.show` preview tail budget: the last 4 KiB of ring output.
+const SHOW_PREVIEW_BYTES: usize = 4096;
 
 const CAPABILITIES: &[&str] = &[
     "automation.v1",
@@ -285,6 +296,14 @@ impl Engine {
         self.quiescent.load(Ordering::Acquire)
     }
 
+    /// Whether this process still tracks the session handle. Test-facing:
+    /// the automation reconcile treats a missing handle as stranded rather
+    /// than exited, so tests that force a row back to `dispatched` must know
+    /// which branch the tick will take.
+    pub fn session_is_tracked(&self, session_id: &str) -> bool {
+        self.sessions.lock().unwrap().contains_key(session_id)
+    }
+
     /// The data directory this instance opened. Used by `mentu_rpc` to
     /// resolve the pinned `mentu-recipes` runtime at
     /// `<data_dir>/mentu/runtime/bin/mentu-recipes`.
@@ -371,7 +390,7 @@ impl Engine {
             Ok(_)
                 if matches!(
                     request.method.as_str(),
-                    "orchestration.send" | "orchestration.check"
+                    "orchestration.send" | "orchestration.check" | "orchestration.inbox"
                 ) =>
             {
                 match self.dispatch_worker_mail(&binding, &request) {
@@ -411,12 +430,14 @@ impl Engine {
             "bot.delete" => self.bot_delete(request),
             "automation.create" => self.automation_create(request),
             "automation.list" => self.automation_list(&request.params),
+            "automation.show" => self.automation_show(&request.params),
             "automation.update" => self.automation_update(request),
             "automation.delete" => self.automation_delete(request),
             "automation.run_now" => self.automation_run_now(request),
             "automation.history" => self.automation_history(&request.params),
             "automation.runs_all" => self.automation_runs_all(&request.params),
             "automation.run" => self.automation_run(request),
+            "automation.preview" => self.automation_preview(&request.params),
             "bot.history" => self.bot_history(&request.params),
             "files.list" => self.do_files_list(&request.params),
             // R16-AM (coordinator-owned one-liner): read-only ignored-paths
@@ -457,6 +478,10 @@ impl Engine {
             "session.list" => self.do_session_list(&request.params),
             "session.read" => self.do_session_read(&request.params),
             "session.write" => self.mutating(request, Self::do_session_write),
+            "session.stop_workspace" => self.mutating(request, Self::do_session_stop_workspace),
+            "session.show" => self.do_session_show(&request.params),
+            "session.rename" => self.mutating(request, Self::do_session_rename),
+            "diagnostics.memory" => self.do_diagnostics_memory(&request.params),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
             // R16-AL2 (issue #228): the user-initiated close paths. `close`
@@ -497,9 +522,13 @@ impl Engine {
             "worktree.issueLinks" => self.do_worktree_issue_links(&request.params),
             "worktree.linkIssue" => self.mutating(request, Self::do_worktree_link_issue),
             "worktree.unlinkIssue" => self.mutating(request, Self::do_worktree_unlink_issue),
+            "worktree.get" => self.do_worktree_get(&request.params),
+            "worktree.current" => self.do_worktree_current(&request.params),
+            "worktree.ps" => self.do_worktree_ps(&request.params),
             "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
             "worktree.rename" => self.mutating(request, Self::do_worktree_rename),
             "worktree.update" => self.mutating(request, Self::do_worktree_update),
+            "repo.search_refs" => self.do_repo_search_refs(&request.params),
             "tasks.list" => self.do_tasks_list(&request.params),
             "tasks.show" => self.do_tasks_show(&request.params),
             "tasks.start" => self.mutating(request, Self::do_tasks_start),
@@ -556,13 +585,19 @@ impl Engine {
             | "orchestration.taskShow" => self.dispatch_run_task(request),
             "orchestration.workerStart"
             | "orchestration.workerShow"
+            | "orchestration.dispatch"
+            | "orchestration.dispatchShow"
             | "orchestration.workerRead"
             | "orchestration.workerStop"
             | "orchestration.workerAbandon"
             | "orchestration.workerRelease"
             | "orchestration.workerRetain" => self.dispatch_coordination_worker(request),
+            "orchestration.workerList" => self.list_coordination_workers(request),
             "orchestration.requestShow" => self.show_coordination_receipt(request, None),
-            "orchestration.send" | "orchestration.check" => self.dispatch_admin_mail(request),
+            "orchestration.reset" => self.reset_orchestration(request),
+            "orchestration.send" | "orchestration.check" | "orchestration.inbox" => {
+                self.dispatch_admin_mail(request)
+            }
             "orchestration.ask" | "orchestration.reply" => {
                 self.dispatch_coordination_question(request, None)
             }
@@ -787,7 +822,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id FROM sessions ORDER BY created_at",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, title FROM sessions ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
         let rows: Vec<_> = stmt
@@ -799,8 +834,12 @@ impl Engine {
         let mut sessions = Vec::new();
         for row in rows {
             let (id, mut value) = row.map_err(error::from_sqlite)?;
+            let row_title = value["title"].clone();
             if let Some(handle) = sessions_guard.get(&id) {
                 value = session::snapshot(handle);
+                // The snapshot is handle-derived and has no title; carry the
+                // durable rename across so a rename is visible on live rows.
+                value["title"] = row_title;
             }
             if workspace_filter.is_none_or(|w| value["workspaceId"] == w) {
                 sessions.push(value);
@@ -853,6 +892,145 @@ impl Engine {
         let cols = require_dimension(params, "cols", 80)?;
         let rows = require_dimension(params, "rows", 24)?;
         session::resize(&handle, cols, rows)
+    }
+
+    /// `session.show { sessionId }`: read-only metadata plus an output tail
+    /// preview. The durable row carries the identity; a live in-memory handle
+    /// refreshes the verdict and supplies the tail (bounded, base64 on the
+    /// wire like `session.read`). No incarnation is required: showing is not
+    /// acting, and a stale row reports its recorded verdict honestly.
+    fn do_session_show(&self, params: &Value) -> Result<Value, RpcError> {
+        let session_id = require_str(params, "sessionId")?;
+        let mut value = {
+            let conn = self.db.lock().unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, title FROM sessions WHERE id = ?1",
+                )
+                .map_err(error::from_sqlite)?;
+            let row = stmt
+                .query_row([session_id], row_to_session_json)
+                .optional()
+                .map_err(error::from_sqlite)?;
+            row.ok_or_else(|| error::not_found("session not found"))?.1
+        };
+        let handle = self.sessions.lock().unwrap().get(session_id).cloned();
+        let preview = if let Some(handle) = handle {
+            let row_title = value["title"].clone();
+            value = session::snapshot(&handle);
+            value["title"] = row_title;
+            let tail = session::read_tail(&handle);
+            let bytes = tail.bytes;
+            let start = bytes.len().saturating_sub(SHOW_PREVIEW_BYTES);
+            // Never split a UTF-8 sequence at the tail cut.
+            let mut boundary = start;
+            while boundary < bytes.len() && (bytes[boundary] & 0b1100_0000) == 0b1000_0000 {
+                boundary += 1;
+            }
+            Some(Value::String(session::base64_encode(&bytes[boundary..])))
+        } else {
+            None
+        };
+        value["previewBase64"] = preview.unwrap_or(Value::Null);
+        Ok(value)
+    }
+
+    /// `diagnostics.memory {}`: the daemon's own footprint, honestly scoped.
+    /// RSS comes from the OS (Linux /proc, macOS mach via libc); when the
+    /// platform cannot report it, the field is null rather than a guess.
+    fn do_diagnostics_memory(&self, _params: &Value) -> Result<Value, RpcError> {
+        let daemon_rss_bytes: Option<u64> = self_rss_bytes();
+        let live_sessions = self.sessions.lock().unwrap().len() as u64;
+        let total_sessions: i64 = {
+            let conn = self.db.lock().unwrap();
+            conn.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+                .map_err(error::from_sqlite)?
+        };
+        Ok(json!({
+            "process": "drogond",
+            "pid": std::process::id(),
+            "rssBytes": daemon_rss_bytes,
+            "liveSessions": live_sessions,
+            "totalSessions": total_sessions,
+        }))
+    }
+
+    /// `session.rename { sessionId, incarnation, title? }`: source
+    /// `terminal rename`. Sets or clears (absent/empty-after-trim) the
+    /// durable display title; the reply is the updated session record.
+    /// Incarnation-gated like every other session mutation.
+    fn do_session_rename(&self, params: &Value) -> Result<Value, RpcError> {
+        let (handle, session_id) = self.require_session_with_incarnation(params)?;
+        let title = params
+            .get("title")
+            .map(|value| {
+                value
+                    .as_str()
+                    .ok_or_else(|| error::invalid_argument("title must be a string or null"))
+            })
+            .transpose()?;
+        let stored: Option<String> = title
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if let Some(title) = &stored
+            && title.chars().count() > 256
+        {
+            return Err(error::invalid_argument(
+                "title must be at most 256 characters",
+            ));
+        }
+        {
+            let conn = self.db.lock().unwrap();
+            let changed = conn
+                .execute(
+                    "UPDATE sessions SET title = ?1 WHERE id = ?2",
+                    rusqlite::params![stored, session_id],
+                )
+                .map_err(error::from_sqlite)?;
+            if changed != 1 {
+                return Err(error::internal_error(
+                    "the rename wrote no row; refusing to acknowledge it",
+                ));
+            }
+        }
+        let mut value = session::snapshot(&handle);
+        value["title"] = stored.map(Value::String).unwrap_or(Value::Null);
+        Ok(value)
+    }
+
+    /// `session.stop_workspace { workspaceId }`: source `terminal.stop` —
+    /// best-effort sweep of every live session in one workspace. Each
+    /// session's own stop is isolated (a failure on one never aborts the
+    /// sweep); the reply counts sessions this process signalled. Exited
+    /// sessions keep their true verdict and are not counted.
+    fn do_session_stop_workspace(&self, params: &Value) -> Result<Value, RpcError> {
+        let workspace_id = require_str(params, "workspaceId")?;
+        let session_ids: Vec<String> = {
+            let conn = self.db.lock().unwrap();
+            let mut stmt = conn
+                .prepare("SELECT id FROM sessions WHERE workspace_id = ?1")
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([workspace_id], |r| r.get(0))
+                .map_err(error::from_sqlite)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(error::from_sqlite)?
+        };
+        let mut stopped = 0u64;
+        for session_id in session_ids {
+            let handle = self.sessions.lock().unwrap().get(&session_id).cloned();
+            let Some(handle) = handle else { continue };
+            // A confirmed-exited session is already stopped; counting it
+            // would overstate the sweep's effect.
+            if session::snapshot(&handle)["verdict"] == "exited" {
+                continue;
+            }
+            if session::stop(&handle).is_ok() {
+                stopped += 1;
+            }
+        }
+        Ok(json!({ "stopped": stopped }))
     }
 
     fn do_session_stop(&self, params: &Value) -> Result<Value, RpcError> {
@@ -925,7 +1103,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let row = conn
             .query_row(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id FROM sessions WHERE id = ?1",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, title FROM sessions WHERE id = ?1",
                 [session_id],
                 row_to_session_json,
             )
@@ -1015,6 +1193,7 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "cacheIdleAt": null,
             "harnessId": r.get::<_, Option<String>>(11)?,
             "parentSessionId": r.get::<_, Option<String>>(13)?,
+            "title": r.get::<_, Option<String>>(14)?,
         }),
     ))
 }
@@ -1079,4 +1258,26 @@ fn require_dimension(params: &Value, field: &str, default: u16) -> Result<u16, R
         return Err(error::invalid_argument(format!("{field} must be 1..=1000")));
     }
     Ok(n as u16)
+}
+
+/// This process's resident set size in bytes, honestly platform-scoped:
+/// Linux reads `/proc/self/status` VmRSS; other Unix platforms return None
+/// rather than guessing (a mach task-info port is a deliberate follow-up).
+#[cfg(target_os = "linux")]
+fn self_rss_bytes() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
+    let kb: u64 = line
+        .strip_prefix("VmRSS:")?
+        .trim()
+        .strip_suffix("kB")?
+        .trim()
+        .parse()
+        .ok()?;
+    Some(kb * 1024)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn self_rss_bytes() -> Option<u64> {
+    None
 }

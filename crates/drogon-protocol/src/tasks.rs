@@ -693,6 +693,7 @@ mod tests {
             title: None,
             note: None,
             parent_worktree_id: None,
+            linked_issue: None,
             created_at: "2026-09-06T12:00:00Z".into(),
             workspace_status: None,
             is_pinned: false,

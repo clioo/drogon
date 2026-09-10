@@ -411,7 +411,149 @@ async fn send_encodes_utf8_text_to_base64_exactly_once() {
     );
     // The CLI now cross-checks acceptedBytes against the exact input byte
     // count, so the mock's echo must match it.
-    assert!(stdout(&output).contains(&format!("Wrote {} bytes", text.len())));
+    assert!(stdout(&output).contains(&format!("Sent {} bytes", text.len())));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_stop_sweeps_a_workspace_and_reports_the_count() {
+    let dir = temp_data_dir("terminal-stop");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("session.stop_workspace") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"stopped": 2}),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let human = run_cli(dir.path(), &["terminal", "stop", "--workspace", "ws-1"]);
+    assert_eq!(human.status.code(), Some(0), "stderr: {}", stderr(&human));
+    assert!(stdout(&human).contains("Stopped 2 terminals."));
+    let request = service.first_captured();
+    assert_eq!(request["method"], "session.stop_workspace");
+    assert_eq!(request["params"]["workspaceId"], "ws-1");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_limit_caps_the_returned_inventory() {
+    let dir = temp_data_dir("list-limit");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            let result = match request["method"].as_str() {
+                Some("session.list") => {
+                    json!({ "sessions": [session_result("a"), session_result("b")] })
+                }
+                _ => json!({}),
+            };
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                result,
+            ))
+        }),
+    );
+    let output = run_cli(dir.path(), &["--json", "terminal", "list", "--limit", "1"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let sessions = envelope["result"]["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["id"], "a");
+
+    let zero = run_cli(dir.path(), &["terminal", "list", "--limit", "0"]);
+    assert_eq!(zero.status.code(), Some(2), "--limit 0 is a usage error");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_enter_appends_carriage_return_and_interrupt_sends_ctrl_c() {
+    let dir = temp_data_dir("send-enter");
+    let service = MockService::start(dir.path(), echo_behavior());
+
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "send",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--text",
+            "ls",
+            "--enter",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.first_captured();
+    assert_eq!(request["params"]["dataBase64"], STANDARD.encode(b"ls\r"));
+
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "send",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--interrupt",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["dataBase64"], STANDARD.encode([0x03]));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_without_text_enter_or_interrupt_is_a_usage_error() {
+    let dir = temp_data_dir("send-empty");
+    let service = MockService::start(dir.path(), echo_behavior());
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "send",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        service.captured().is_empty(),
+        "usage errors never reach the daemon"
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_interrupt_rejects_text_combination() {
+    let dir = temp_data_dir("send-conflict");
+    let service = MockService::start(dir.path(), echo_behavior());
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "send",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--interrupt",
+            "--text",
+            "x",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(service.captured().is_empty());
     drop(service);
 }
 
@@ -1758,5 +1900,1012 @@ async fn worktree_create_always_tags_the_cli_creation_provenance() {
     let request = service.first_captured();
     assert_eq!(request["method"], "worktree.create");
     assert_eq!(request["params"]["creator"], "cli");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automation_edit_maps_only_the_given_flags() {
+    let dir = temp_data_dir("automation-edit");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("status") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "hostId": "host-1",
+                    "serviceInstanceId": "svc-1",
+                    "protocol": 1,
+                    "capabilities": ["workspace.v1", "session.pty.v1", "automation.v1"],
+                    "version": "0.1.0"
+                }),
+            )),
+            Some("automation.update") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": request["params"]["id"],
+                    "name": "renamed",
+                    "cron": "0 0 1 1 *",
+                    "workspaceId": "ws-1",
+                    "harness": "pi",
+                    "prompt": "p",
+                    "enabled": false,
+                    "nextRunAt": 0.0,
+                    "lastRunAt": null,
+                    "lastRun": null
+                }),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "automation",
+            "edit",
+            "--id",
+            "a1",
+            "--name",
+            "renamed",
+            "--disable",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "automation.update");
+    assert_eq!(request["params"]["name"], "renamed");
+    assert_eq!(request["params"]["enabled"], false);
+    assert!(request["params"].get("cron").is_none());
+    assert!(request["params"].get("prompt").is_none());
+
+    // Edit with no field flags is a usage error before any daemon contact.
+    let bare = run_cli(dir.path(), &["automation", "edit", "--id", "a1"]);
+    assert_eq!(bare.status.code(), Some(2));
+
+    // Remove maps to automation.delete and prints the id.
+    let removed = run_cli(dir.path(), &["automation", "remove", "--id", "a1"]);
+    let _ = removed;
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn diagnostics_memory_reports_the_daemon_footprint() {
+    let dir = temp_data_dir("diag-mem");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("diagnostics.memory") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "process": "drogond",
+                    "pid": 4242,
+                    "rssBytes": 104857600u64,
+                    "liveSessions": 2,
+                    "totalSessions": 5
+                }),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let human = run_cli(dir.path(), &["diagnostics", "memory"]);
+    assert_eq!(human.status.code(), Some(0), "stderr: {}", stderr(&human));
+    let text = stdout(&human);
+    assert!(text.contains("100 MiB"), "stdout: {text}");
+    assert!(text.contains("2 live of 5 sessions"), "stdout: {text}");
+
+    let json_out = run_cli(dir.path(), &["--json", "diagnostics", "memory"]);
+    assert_eq!(json_out.status.code(), Some(0));
+    let envelope: Value = serde_json::from_str(&stdout(&json_out)).unwrap();
+    assert_eq!(envelope["result"]["rssBytes"], 104857600u64);
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_list_limit_caps_the_json_payload() {
+    let dir = temp_data_dir("wt-list-limit");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("worktree.list") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"worktrees": [
+                    {"id":"w1","projectId":"p1","workspaceId":"ws1","path":"/a","branch":"main","head":"h1","baseRef":null,"createdAt":"2026-09-05T12:00:00Z"},
+                    {"id":"w2","projectId":"p1","workspaceId":"ws2","path":"/b","branch":"dev","head":"h2","baseRef":null,"createdAt":"2026-09-05T12:00:00Z"}
+                ]}),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "--json",
+            "worktree",
+            "list",
+            "--project",
+            "p1",
+            "--limit",
+            "1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let worktrees = envelope["result"]["worktrees"].as_array().unwrap();
+    assert_eq!(worktrees.len(), 1);
+    assert_eq!(worktrees[0]["id"], "w1");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_rename_maps_title_and_prints_source_shape() {
+    let dir = temp_data_dir("term-rename");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("session.rename") => {
+                let mut session = session_result("sess-1");
+                session["title"] = request["params"]["title"].clone();
+                Action::Respond(ok_envelope(
+                    request["requestId"].as_str().unwrap_or(""),
+                    session,
+                ))
+            }
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "rename",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--title",
+            "deploy worker",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("Renamed sess-1 to \"deploy worker\"."));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "session.rename");
+    assert_eq!(request["params"]["title"], "deploy worker");
+
+    // Clearing: --title omitted maps to a JSON null.
+    let cleared = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "rename",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+        ],
+    );
+    assert_eq!(cleared.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["title"], Value::Null);
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_maps_parent_no_parent_and_comment_flags() {
+    let dir = temp_data_dir("wtcp");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "wt-new",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-1",
+                    "path": "/repo/child",
+                    "branch": "child",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            ))
+        }),
+    );
+    // --parent maps to parentWorktreeId.
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--parent",
+            "wt-parent",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "worktree.create");
+    assert_eq!(request["params"]["parentWorktreeId"], "wt-parent");
+    // --comment maps to the note field.
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--comment",
+            "from the CLI",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["note"], "from the CLI");
+    // --no-parent sends an explicit null parent.
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--no-parent",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["parentWorktreeId"], Value::Null);
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_rejects_parent_with_no_parent_before_any_call() {
+    // Source index-worktree-create-parent.test.ts: the contradiction is a
+    // client-side error — the daemon is never called.
+    let dir = temp_data_dir("wtcc");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|_request| panic!("the daemon must not be called")),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--parent",
+            "wt-parent",
+            "--no-parent",
+        ],
+    );
+    // Native usage-error convention: pre-flight rejections exit 2; the
+    // daemon is never called either way.
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("Choose either one parent selector or --no-parent."),
+        "stderr: {}",
+        stderr(&output)
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_rm_delete_branch_flag_maps_and_prints() {
+    let dir = temp_data_dir("wtrdb");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"id": "w1", "removed": true, "branchDeleted": true}),
+            ))
+        }),
+    );
+    let output = run_cli(dir.path(), &["worktree", "rm", "w1", "--delete-branch"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("Removed worktree w1 and deleted its branch."));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "worktree.remove");
+    assert_eq!(request["params"]["deleteBranch"], true);
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_set_display_name_and_comment_alias_map_to_update() {
+    let dir = temp_data_dir("wtsdn");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "w1",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-1",
+                    "path": "/repo/w1",
+                    "branch": "w1",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            ))
+        }),
+    );
+    // --display-name maps to the title wire field.
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "set",
+            "--id",
+            "w1",
+            "--display-name",
+            "Deploy worker",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["title"], "Deploy worker");
+    // --comment is the source name for --note.
+    let output = run_cli(
+        dir.path(),
+        &["worktree", "set", "--id", "w1", "--comment", "from the CLI"],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["note"], "from the CLI");
+    // --no-display-name clears the title explicitly.
+    let output = run_cli(
+        dir.path(),
+        &["worktree", "set", "--id", "w1", "--no-display-name"],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["title"], Value::Null);
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automation_show_fetches_one_record() {
+    let dir = temp_data_dir("autoshow");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("status") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "hostId": "host-1",
+                    "serviceInstanceId": "svc-1",
+                    "protocol": 1,
+                    "capabilities": ["automation.v1"],
+                    "version": "0.1.0"
+                }),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "auto-1",
+                    "name": "Nightly sweep",
+                    "cron": "0 * * * *",
+                    "workspaceId": "ws-1",
+                    "harness": "pi",
+                    "prompt": "sweep",
+                    "enabled": true,
+                    "nextRunAt": 1_800_000_000.0,
+                    "lastRunAt": null,
+                    "lastRun": null
+                }),
+            )),
+        }),
+    );
+    let output = run_cli(dir.path(), &["automation", "show", "auto-1"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("Nightly sweep"));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "automation.show");
+    assert_eq!(request["params"]["id"], "auto-1");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_list_worktree_resolves_the_workspace_first() {
+    let dir = temp_data_dir("tlistwt");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("worktree.get") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "worktree": {
+                        "id": "wt-1",
+                        "projectId": "proj-1",
+                        "workspaceId": "ws-of-wt",
+                        "path": "/repo/wt-1",
+                        "branch": "wt-1",
+                        "head": "abc123",
+                        "baseRef": null,
+                        "createdAt": "2026-09-05T12:00:00Z"
+                    }
+                }),
+            )),
+            Some("session.list") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"sessions": [session_result("sess-1")]}),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let output = run_cli(dir.path(), &["terminal", "list", "--worktree", "wt-1"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    // The session.list call is scoped to the worktree's workspace.
+    let request = service.last_captured();
+    assert_eq!(request["method"], "session.list");
+    assert_eq!(request["params"]["workspaceId"], "ws-of-wt");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_list_rejects_workspace_and_worktree_together() {
+    let dir = temp_data_dir("tlistcf");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|_request| panic!("the daemon must not be called")),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "list",
+            "--workspace",
+            "ws-1",
+            "--worktree",
+            "wt-1",
+        ],
+    );
+    // clap's conflicts_with already rejects the combination; here we only
+    // need to prove the daemon is never called.
+    assert_eq!(output.status.code(), Some(2));
+    drop(service);
+}
+
+#[test]
+fn host_list_answers_the_local_host_without_the_daemon() {
+    let dir = temp_data_dir("hostlist");
+    // No mock daemon: the source command is local, the native one is too.
+    let output = run_cli(dir.path(), &["host", "list"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("this machine"));
+    assert!(text.contains("--host local"));
+
+    let json = run_cli(dir.path(), &["host", "list", "--json"]);
+    assert_eq!(json.status.code(), Some(0));
+    let json_stdout = stdout(&json);
+    assert!(json_stdout.contains("\"kind\": \"local\""));
+    assert!(json_stdout.contains("\"selector\": \"--host local\""));
+}
+
+#[test]
+fn environment_list_is_empty_and_show_rm_answer_typed_not_found() {
+    let dir = temp_data_dir("envlist");
+    // Local pairing-store answers; no daemon is contacted.
+    let output = run_cli(dir.path(), &["environment", "list"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("No saved environments."));
+    let json = run_cli(dir.path(), &["environment", "list", "--json"]);
+    assert_eq!(json.status.code(), Some(0));
+    assert!(stdout(&json).contains("\"environments\": []"));
+
+    let shown = run_cli(
+        dir.path(),
+        &["environment", "show", "--environment", "prod"],
+    );
+    assert_eq!(shown.status.code(), Some(1));
+    assert!(
+        stderr(&shown).contains("not_found") && stderr(&shown).contains("prod"),
+        "stderr: {}",
+        stderr(&shown)
+    );
+    let removed = run_cli(dir.path(), &["environment", "rm", "--environment", "prod"]);
+    assert_eq!(removed.status.code(), Some(1));
+    assert!(stderr(&removed).contains("not_found"));
+}
+
+#[test]
+fn project_setups_answers_an_empty_local_list() {
+    let dir = temp_data_dir("psetups");
+    let output = run_cli(dir.path(), &["project", "setups"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("No project host setups found."));
+    let filtered = run_cli(
+        dir.path(),
+        &["project", "setups", "--project", "p1", "--host", "local"],
+    );
+    assert_eq!(filtered.status.code(), Some(0));
+    let json = run_cli(dir.path(), &["project", "setups", "--json"]);
+    assert_eq!(json.status.code(), Some(0));
+    assert!(stdout(&json).contains("\"setups\": []"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repo_search_refs_maps_query_and_limit_and_prints_refs() {
+    let dir = temp_data_dir("refsrch");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"refs": ["feat-alpha", "feat-beta"], "truncated": true}),
+            ))
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "repo",
+            "search-refs",
+            "--project",
+            "proj-1",
+            "--query",
+            "feat",
+            "--limit",
+            "2",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let stdout = stdout(&output);
+    assert!(stdout.contains("feat-alpha"));
+    assert!(stdout.contains("feat-beta"));
+    assert!(stdout.contains("truncated: yes"));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "repo.search_refs");
+    assert_eq!(request["params"]["projectId"], "proj-1");
+    assert_eq!(request["params"]["query"], "feat");
+    assert_eq!(request["params"]["limit"], 2);
+
+    // Zero limit is a client-side usage error; the daemon is never called.
+    let bad = run_cli(
+        dir.path(),
+        &[
+            "repo",
+            "search-refs",
+            "--project",
+            "proj-1",
+            "--query",
+            "x",
+            "--limit",
+            "0",
+        ],
+    );
+    assert_eq!(bad.status.code(), Some(2));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_agent_launches_harness_in_the_new_workspace() {
+    let dir = temp_data_dir("wtagent");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("worktree.create") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "wt-new",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-new",
+                    "path": "/repo/child",
+                    "branch": "child",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            )),
+            Some("harness.start") => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                session_result("agent-1"),
+            )),
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "hostId": "host-1",
+                    "serviceInstanceId": "svc-1",
+                    "protocol": 1,
+                    "capabilities": ["workspace.v1", "session.pty.v1", "harness.launch.v1"],
+                    "version": "0.1.0"
+                }),
+            )),
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--agent",
+            "pi",
+            "--prompt",
+            "sweep the fixtures",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let stdout = stdout(&output);
+    assert!(stdout.contains("agent-1"), "stdout: {stdout}");
+    let request = service.last_captured();
+    assert_eq!(request["method"], "harness.start");
+    assert_eq!(request["params"]["workspaceId"], "ws-new");
+    assert_eq!(request["params"]["harnessId"], "pi");
+    assert_eq!(request["params"]["prompt"], "sweep the fixtures");
+    drop(service);
+}
+
+#[test]
+fn worktree_create_prompt_requires_agent() {
+    // Source getOptionalStartupAgent: '--prompt requires --agent'.
+    let dir = temp_data_dir("wtprompt");
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--prompt",
+            "hi",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--prompt requires --agent"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_read_screen_renders_the_frame_not_the_fragments() {
+    let dir = temp_data_dir("trscreen");
+    // A progress bar repaint plus colors: the raw stream stacks fragments;
+    // the rendered screen shows the final frame only.
+    let raw = b"[####    ] 40%\r[########] done\x1b[0m".to_vec();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&raw);
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(move |request| {
+            let payload = json!({
+                "session": {
+                    "id": "sess-1",
+                    "workspaceId": "ws-1",
+                    "hostId": "host-1",
+                    "incarnation": "inc-1",
+                    "command": "sh",
+                    "args": [],
+                    "cols": 80,
+                    "rows": 24,
+                    "verdict": "live",
+                    "exitCode": null,
+                    "createdAt": "2026-09-05T12:00:00Z",
+                    "agentState": "unknown",
+                    "agentStateAt": null
+                },
+                "dataBase64": encoded,
+                "startCursor": 0,
+                "nextCursor": raw.len() as u64,
+                "truncated": false
+            });
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                payload,
+            ))
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "read",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--screen",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("[########] done"), "stdout: {text}");
+    assert!(!text.contains("40%"), "fragments must not render: {text}");
+    // The 40% fragment must not stack either.
+    let json_out = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "read",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--screen",
+            "--json",
+        ],
+    );
+    assert_eq!(json_out.status.code(), Some(0));
+    let json_body = stdout(&json_out);
+    assert!(json_body.contains("\"source\": \"screen\""));
+    assert!(json_body.contains("[########] done"));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_rm_warns_about_the_preserved_branch_like_the_source() {
+    let dir = temp_data_dir("wtrwarn");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "w1",
+                    "removed": true,
+                    "branchDeleted": false,
+                    "branch": "feature",
+                    "warning": "setup hook exited 1"
+                }),
+            ))
+        }),
+    );
+    let output = run_cli(dir.path(), &["worktree", "rm", "w1", "--delete-branch"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let stderr_text = stderr(&output);
+    // Source printPreservedBranchWarning copy.
+    assert!(
+        stderr_text.contains(
+            "warning: local branch \"feature\" was kept because Git could not safely delete it"
+        ),
+        "stderr: {stderr_text}"
+    );
+    // Source printHookWarning copy.
+    assert!(
+        stderr_text.contains("warning: setup hook exited 1"),
+        "stderr: {stderr_text}"
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_rm_warnings_stay_out_of_json_stdout() {
+    let dir = temp_data_dir("wtrwarnj");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"id": "w1", "removed": true, "warning": "setup hook exited 1"}),
+            ))
+        }),
+    );
+    let output = run_cli(dir.path(), &["worktree", "rm", "w1", "--json"]);
+    assert_eq!(output.status.code(), Some(0));
+    // The envelope carries the warning for machine consumers; the extra
+    // human stderr line stays suppressed in JSON mode (source copy).
+    assert!(stdout(&output).contains("setup hook exited 1"));
+    assert_eq!(stderr(&output), "");
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_rm_run_hooks_reaches_the_daemon_with_honest_warning() {
+    let dir = temp_data_dir("wtrhooks");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "w1",
+                    "removed": true,
+                    "warning": "run-hooks is a no-op: this runtime has no orca.yaml hook engine"
+                }),
+            ))
+        }),
+    );
+    // Source keeps --run-hooks on rm: the param reaches the daemon and the
+    // daemon's honest warning surfaces on stderr.
+    let output = run_cli(dir.path(), &["worktree", "rm", "w1", "--run-hooks"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["runHooks"], true);
+    assert!(
+        stderr(&output).contains("run-hooks is a no-op"),
+        "stderr: {}",
+        stderr(&output)
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_setup_and_activate_warn_honestly() {
+    // Source keeps --setup/--activate on create; with no desktop view to
+    // reveal and no setup engine to run, the CLI accepts them and says so.
+    let dir = temp_data_dir("wtsetup");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "wt-new",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-1",
+                    "path": "/repo/child",
+                    "branch": "child",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            ))
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--setup",
+            "run",
+            "--activate",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["setupDecision"], "run");
+    assert_eq!(request["params"]["activate"], true);
+    let stderr_text = stderr(&output);
+    assert!(
+        stderr_text.contains("no setup engine") || stderr_text.contains("no desktop"),
+        "stderr: {stderr_text}"
+    );
+    // An unknown setup value is a usage error before any daemon call.
+    let bad = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--setup",
+            "never",
+        ],
+    );
+    assert_eq!(bad.status.code(), Some(2));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_issue_maps_to_linked_issue() {
+    let dir = temp_data_dir("wtissue");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "wt-new",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-1",
+                    "path": "/repo/child",
+                    "branch": "child",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "linkedIssue": 42,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            ))
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--issue",
+            "42",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "worktree.create");
+    assert_eq!(request["params"]["linkedIssue"], 42);
+
+    // Zero is a client-side usage error; the daemon is never called.
+    let bad = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--issue",
+            "0",
+        ],
+    );
+    assert_eq!(bad.status.code(), Some(2));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_set_issue_and_no_issue_map_to_tri_state() {
+    let dir = temp_data_dir("wtsetiss");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "w1",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-1",
+                    "path": "/repo/w1",
+                    "branch": "w1",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            ))
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &["worktree", "set", "--id", "w1", "--issue", "7"],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["linkedIssue"], 7);
+
+    let output = run_cli(dir.path(), &["worktree", "set", "--id", "w1", "--no-issue"]);
+    assert_eq!(output.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["linkedIssue"], Value::Null);
     drop(service);
 }

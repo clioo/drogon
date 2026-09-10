@@ -91,6 +91,10 @@ pub struct Worktree {
     /// boundary on the display side).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linked_pr: Option<i64>,
+    /// Linked GitHub issue number (source `--issue` `linkedIssue`); `None`
+    /// when unlinked. Distinct from `linked_pr` (pull/merge request).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_issue: Option<i64>,
     /// Creation provenance (Hide "Automation-created" / "CLI-created").
     /// `None` on rows created before this column existed, or via the
     /// desktop app itself; `Some("cli")` when `drogon-cli worktree create`
@@ -116,6 +120,9 @@ pub struct WorktreeCreateParams {
     pub note: Option<String>,
     #[serde(default)]
     pub parent_worktree_id: Option<String>,
+    /// Linked GitHub issue number (source `--issue`); validated positive.
+    #[serde(default)]
+    pub linked_issue: Option<i64>,
     /// Sparse-checkout directories (cone mode); absent/empty checks the
     /// worktree out in full.
     #[serde(default)]
@@ -160,6 +167,13 @@ pub struct WorktreeUpdateParams {
     /// Linked pull/merge request number. Tri-state like `note`.
     #[serde(default, deserialize_with = "tri_state_i64")]
     pub linked_pr: Option<Option<i64>>,
+    /// Display title (CLI `--display-name`): absent preserves, null clears.
+    #[serde(default, deserialize_with = "tri_state_string")]
+    pub title: Option<Option<String>>,
+    /// Linked GitHub issue (CLI `--issue`/`--no-issue`): absent preserves,
+    /// null clears, a positive number sets.
+    #[serde(default, deserialize_with = "tri_state_i64")]
+    pub linked_issue: Option<Option<i64>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -230,6 +244,7 @@ mod tests {
             manual_order: None,
             last_activity_at: None,
             linked_pr: None,
+            linked_issue: None,
             creator: None,
         }
     }

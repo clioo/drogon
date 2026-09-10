@@ -189,7 +189,9 @@ fi
 
 "$DROGON_CLI_COMMAND" --data-dir "$DROGON_DATA_DIR" --json orchestration send \
   --type worker_done --subject "fixture $mode" --outcome "$outcome" \
-  --body "fixture worker report" > first-report.json 2> first-report.stderr
+  --body "fixture worker report" \
+  --task-id "${DROGON_TASK_ID:-}" --dispatch-id "${DROGON_DISPATCH_ID:-}" \
+  --files-modified "artifact.txt,done" --report-path "artifact.txt" > first-report.json 2> first-report.stderr
 first_status=$?
 
 if [ "$mode" != "fixture-fail" ]; then
@@ -869,6 +871,12 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
     assert_ok(code, &show1, &["orchestration", "worker-show"]);
     assert_eq!(text_field(&show1, "/result/assignmentState"), "failed");
     assert_eq!(text_field(&show1, "/result/outcome"), "failed");
+    // The exited fixture's wait observation is evaluated and empty: distinct
+    // from "never evaluated" (absent) and from an active wait.
+    assert!(
+        show1["result"]["observation"]["agentWait"].is_null(),
+        "exited worker has an evaluated empty wait observation: {show1:#}"
+    );
 
     let mut task_show_args: Vec<String> = vec!["orchestration".into(), "task-show".into()];
     scope_args(&mut task_show_args);
@@ -953,6 +961,22 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
         first_report_2_json["result"]["lifecycle"]["duplicate"],
         Value::Bool(false)
     );
+    // The structured payload flags built the worker_done payload object.
+    let report_message = first_report_2_json["result"]["message"]["messageId"]
+        .as_str()
+        .expect("report message id")
+        .to_string();
+    let (code, inbox) = coordinator_call(&data_dir, &["orchestration", "inbox", "--limit", "5"]);
+    assert_ok(code, &inbox, &["orchestration", "inbox"]);
+    let report_row = inbox["result"]["messages"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["messageId"] == report_message))
+        .expect("inbox must list the worker_done message");
+    assert_eq!(report_row["payload"]["taskId"], task_id);
+    assert_eq!(
+        report_row["payload"]["filesModified"],
+        serde_json::json!(["artifact.txt", "done"])
+    );
 
     // The core assertion: a late, conflicting final report from the exact
     // dispatch that already settled is REFUSED, not silently accepted or
@@ -1033,6 +1057,38 @@ fn native_daemon_and_cli_run_a_fixture_task_end_to_end() {
         let (code, retained_after) = coordinator_call(&data_dir, &retain_ref);
         assert_ok(code, &retained_after, &retain_ref);
         assert_eq!(retained_after["result"]["state"], "already_released");
+    }
+
+    for state in [
+        "active",
+        "reclaimable",
+        "retained",
+        "release_pending",
+        "release_unknown",
+        "released",
+    ] {
+        let args = [
+            "orchestration",
+            "worker-list",
+            "--run",
+            &run_id,
+            "--terminal-state",
+            state,
+        ];
+        let (code, listed) = coordinator_call(&data_dir, &args);
+        assert_ok(code, &listed, &args);
+        assert_eq!(
+            listed["result"]["counts"],
+            serde_json::json!({"released": 2})
+        );
+        let workers = listed["result"]["workers"].as_array().unwrap();
+        assert_eq!(workers.len(), if state == "released" { 2 } else { 0 });
+        if state == "released" {
+            assert_eq!(workers[0]["workerState"], "failed");
+            assert_eq!(workers[0]["dispatchStatus"], "failed");
+            assert_eq!(workers[1]["workerState"], "succeeded");
+            assert_eq!(workers[1]["dispatchStatus"], "completed");
+        }
     }
 
     // `daemon` and `scratch` drop here: the daemon process is signaled and
@@ -1772,6 +1828,7 @@ impl DispatchGuard {
         let stop_ref: Vec<&str> = stop_args.iter().map(String::as_str).collect();
         let (code, stop) = coordinator_call(&self.data_dir, &stop_ref);
         assert_eq!(code, 0, "worker-stop must be accepted: {stop:#}");
+        assert_eq!(text_field(&stop, "/result/assignmentState"), "stopped");
 
         let start = Instant::now();
         let last_show = loop {

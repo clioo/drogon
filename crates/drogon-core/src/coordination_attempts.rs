@@ -69,6 +69,40 @@ fn encode(attempt: &Attempt) -> Result<String, RpcError> {
     serde_json::to_string(attempt).map_err(|_| error::internal_error("Invalid attempt state."))
 }
 
+/// Host-scoped read of one attempt by dispatch id, resolving its run from
+/// the stored row. Used by host-scoped listings that must not guess a run.
+pub(crate) fn show_by_dispatch(
+    tx: &Transaction<'_>,
+    host_id: &str,
+    dispatch_id: &str,
+) -> Result<Attempt, RpcError> {
+    let run_id: Option<String> = tx
+        .query_row(
+            "SELECT run_id FROM orchestration_attempts WHERE dispatch_id=?1 AND host_id=?2",
+            params![dispatch_id, host_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(error::from_sqlite)?;
+    let run_id = run_id.ok_or_else(|| error::not_found("Attempt does not exist on this host."))?;
+    let value: String = tx
+        .query_row(
+            "SELECT state_json FROM orchestration_attempts WHERE dispatch_id=?1 AND host_id=?2 AND run_id=?3",
+            params![dispatch_id, host_id, run_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(error::from_sqlite)?
+        .ok_or_else(|| error::internal_error("Stored attempt identity is inconsistent."))?;
+    let attempt = decode(value)?;
+    if attempt.result.run_id != run_id || attempt.result.dispatch_id != dispatch_id {
+        return Err(error::internal_error(
+            "Stored attempt identity is inconsistent.",
+        ));
+    }
+    Ok(attempt)
+}
+
 pub(crate) fn show(
     tx: &Transaction<'_>,
     scope: &CoordinatorScope,
@@ -90,6 +124,18 @@ pub(crate) fn show(
         ));
     }
     Ok(attempt)
+}
+
+pub(crate) fn current_for_task(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    task_id: &str,
+) -> Result<Option<Attempt>, RpcError> {
+    let row: Option<String> = tx.query_row(
+        "SELECT state_json FROM orchestration_attempts WHERE host_id=?1 AND run_id=?2 AND task_id=?3 AND is_current=1",
+        params![scope.host.host_id,scope.run_id,task_id], |r| r.get(0),
+    ).optional().map_err(error::from_sqlite)?;
+    row.map(decode).transpose()
 }
 
 pub(crate) struct HistoryEntry {
@@ -146,6 +192,86 @@ pub(crate) fn history(
         });
     }
     Ok(history)
+}
+
+/// Dispatch admission for unsupervised dispatch contexts. Source parity note:
+/// the source dispatch-lock (`dispatch-row-writer.ts` claim SQL) refuses a
+/// new context while one is active (`pending`/`dispatched`) and accumulates a
+/// new row after settlement; the native unique-current index cannot hold two
+/// current rows, so a settled current attempt is fenced and replaced while an
+/// active one is refused with `attempt_active` — the same observable
+/// behavior through `current_for_task`.
+pub(crate) fn admit_dispatch(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    attempt: &Attempt,
+) -> Result<Option<String>, RpcError> {
+    if attempt.result.run_id != scope.run_id
+        || attempt.result.consumer_generation != scope.consumer_generation
+        || attempt.outcome.is_some()
+    {
+        return Err(error::invalid_argument("Invalid dispatch admission."));
+    }
+    let current: Option<(String, String)> = tx.query_row(
+        "SELECT dispatch_id,state_json FROM orchestration_attempts WHERE host_id=?1 AND run_id=?2 AND task_id=?3 AND is_current=1",
+        params![scope.host.host_id,scope.run_id,attempt.result.task_id], |r| Ok((r.get(0)?,r.get(1)?)),
+    ).optional().map_err(error::from_sqlite)?;
+    let replaced = match current {
+        None => None,
+        Some((id, state)) => {
+            let prior = decode(state)?;
+            let awaiting_report = matches!(
+                prior.result.assignment_state,
+                AssignmentState::Admitting | AssignmentState::Ready
+            ) || (prior.result.assignment_state == AssignmentState::Failed
+                && prior
+                    .result
+                    .failure
+                    .as_ref()
+                    .is_some_and(|failure| failure.code == "agent_prompt_stalled"));
+            if prior.outcome.is_none() && awaiting_report {
+                return Err(RpcError::new(
+                    "attempt_active",
+                    "The current dispatch is still active; stop or settle it first.",
+                ));
+            }
+            tx.execute(
+                "UPDATE orchestration_attempts SET is_current=0,fenced=1 WHERE dispatch_id=?1",
+                [&id],
+            )
+            .map_err(error::from_sqlite)?;
+            Some(id)
+        }
+    };
+    tx.execute(
+        "INSERT INTO orchestration_attempts(dispatch_id,host_id,run_id,task_id,is_current,fenced,state_json,retry_of) VALUES (?1,?2,?3,?4,1,0,?5,?6)",
+        params![attempt.result.dispatch_id,scope.host.host_id,scope.run_id,attempt.result.task_id,encode(attempt)?,replaced],
+    ).map_err(error::from_sqlite)?;
+    Ok(replaced)
+}
+
+/// Inject failure fences the dispatch without touching the target process
+/// (source `failDispatch` + throw): the attempt is failed with the write
+/// reason and stays current so `dispatch-show` reports it.
+pub(crate) fn mark_inject_failed(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    dispatch_id: &str,
+    reason: &str,
+) -> Result<Attempt, RpcError> {
+    require_current_unfenced(tx, scope, dispatch_id)?;
+    let mut attempt = show(tx, scope, dispatch_id)?;
+    if attempt.outcome.is_some() {
+        return Err(error::invalid_argument("Settled dispatch cannot fail."));
+    }
+    attempt.result.assignment_state = AssignmentState::Failed;
+    attempt.result.failure = Some(drogon_protocol::orchestration_common::AttemptFailure {
+        code: "agent_prompt_stalled".into(),
+        stage: "inject".into(),
+        message: reason.chars().take(512).collect(),
+    });
+    save(tx, scope, &attempt)?;
+    Ok(attempt)
 }
 
 /// Replacement preserves the old row and fences it in the admission transaction.

@@ -90,6 +90,9 @@ pub struct Session {
     pub created_at: String,
     pub agent_state: AgentState,
     pub agent_state_at: Option<String>,
+    /// Durable display title from `terminal rename`; absent on old daemons.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 /// A git repository or a plain folder that owns Worktrees.
@@ -121,7 +124,7 @@ pub struct ProjectList {
 /// that is the folder itself — `branch`/`head` are then empty strings, never
 /// null (the wire type keeps them non-nullable; `baseRef` is the nullable
 /// field).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Worktree {
     pub id: String,
@@ -143,9 +146,24 @@ pub struct WorktreeList {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorktreeEnvelope {
+    pub worktree: Worktree,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Removed {
     pub id: String,
     pub removed: bool,
+    /// `worktree rm --delete-branch`: whether the safe branch delete ran.
+    #[serde(default)]
+    pub branch_deleted: Option<bool>,
+    /// The worktree's branch (present so the CLI can name it in warnings).
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// Daemon-side hook warning (source `printHookWarning` contract).
+    #[serde(default)]
+    pub warning: Option<String>,
 }
 
 impl Workspace {
@@ -1035,6 +1053,7 @@ mod tests {
             created_at: "2026-09-05T12:00:00Z".into(),
             agent_state,
             agent_state_at: agent_state_at.map(str::to_string),
+            title: None,
         }
     }
 

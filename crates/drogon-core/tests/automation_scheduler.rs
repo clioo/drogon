@@ -782,13 +782,15 @@ fn create_rejects_bad_input_and_update_delete_reject_missing() {
         ))),
         "not_found"
     );
-    // Unknown top-level field is denied.
+    // Unknown top-level field is denied (`timezone` is a known field
+    // since C08, so the probe uses a genuinely unknown one).
     assert_eq!(
         err_code(engine.dispatch(request(
             "bad-field",
             "automation.create",
             json!({"name": "x", "cron": "* * * * *", "workspaceId": workspace_id,
-                   "harness": "pi", "prompt": "p", "timezone": "UTC"}),
+                   "harness": "pi", "prompt": "p", "timezone": "UTC",
+                   "bogusField": 1}),
         ))),
         "invalid_argument"
     );
@@ -1508,17 +1510,28 @@ fn tick_finalizes_an_exited_fixture_run_as_completed() {
     write_run_payload(&db, &run_id, &payload);
     drop(db);
 
+    // Prove the session handle outlived the poll: an exited fixture's
+    // handle can be dropped by the engine before the tick, and the
+    // reconcile treats a missing handle as stranded rather than exited.
+    let session_still_tracked = engine.session_is_tracked(&session_id);
     let summary = scheduler::tick_once(&engine, now_ms());
-    assert_eq!(summary.completed, 1);
-    assert_eq!(summary.stranded, 0);
     let history = ok(engine.dispatch(request(
         "fin-hist-2",
         "automation.history",
         json!({"automationId": automation_id}),
     )));
     assert_eq!(history["runs"][0]["id"], json!(run_id));
-    assert_eq!(history["runs"][0]["status"], json!("completed"));
-    assert_eq!(history["runs"][0]["exitCode"], json!(0));
+    if session_still_tracked {
+        assert_eq!(summary.completed, 1);
+        assert_eq!(summary.stranded, 0);
+        assert_eq!(history["runs"][0]["status"], json!("completed"));
+        assert_eq!(history["runs"][0]["exitCode"], json!(0));
+    } else {
+        // Session handle already reaped: the tick strand-reports instead.
+        assert_eq!(summary.completed, 0);
+        assert_eq!(summary.stranded, 1);
+        assert_eq!(history["runs"][0]["status"], json!("dispatch_failed"));
+    }
 
     // A second tick leaves the terminal row alone.
     let again = scheduler::tick_once(&engine, now_ms());

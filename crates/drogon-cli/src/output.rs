@@ -127,7 +127,10 @@ pub fn worktree_list(list: &WorktreeList) -> String {
 }
 
 pub fn worktree_removed(removed: &Removed) -> String {
-    format!("Removed worktree {}.", removed.id)
+    match removed.branch_deleted {
+        Some(true) => format!("Removed worktree {} and deleted its branch.", removed.id),
+        _ => format!("Removed worktree {}.", removed.id),
+    }
 }
 
 pub fn project_removed(removed: &Removed) -> String {
@@ -209,7 +212,8 @@ pub fn session_read(result: &ReadResult) -> String {
 }
 
 pub fn session_wrote(result: &WriteResult, session_hint: &str) -> String {
-    format!("Wrote {} bytes to {}.", result.accepted_bytes, session_hint)
+    // Source copy: `Sent N bytes to <handle>.` (terminal-format.ts).
+    format!("Sent {} bytes to {}.", result.accepted_bytes, session_hint)
 }
 
 pub fn session_resized(session: &Session) -> String {
@@ -302,6 +306,11 @@ fn automation_line(summary: &AutomationSummary) -> String {
 
 pub fn automation_created(summary: &AutomationSummary) -> String {
     format!("Created automation {}", automation_line(summary))
+}
+
+/// The shared one-line automation summary, public for update/run surfaces.
+pub fn automation_line_public(summary: &AutomationSummary) -> String {
+    automation_line(summary)
 }
 
 pub fn automation_list(list: &AutomationList) -> String {
@@ -605,7 +614,10 @@ mod tests {
         assert!(
             worktree_removed(&Removed {
                 id: "w1".into(),
-                removed: true
+                removed: true,
+                branch_deleted: None,
+                branch: None,
+                warning: None
             })
             .contains("w1")
         );

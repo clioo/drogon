@@ -13,8 +13,9 @@ use drogon_protocol::orchestration_common::{
 };
 use drogon_protocol::orchestration_mail::{
     AckReceipt, CheckMode, CheckParams, CheckResult, DuplicateReportReceipt, FinalReport,
-    LifecycleVerdict, MessageKind, MessageReceipt, MessageSummary, OutstandingDelivery,
-    ReplyParams, ReplyResult, SendBatchResult, SendParams, SendResult, SendTarget, SendWarning,
+    LifecycleVerdict, MessageKind, MessagePriority, MessageReceipt, MessageSummary,
+    OutstandingDelivery, ReplyParams, ReplyResult, SendBatchResult, SendParams, SendResult,
+    SendTarget, SendWarning,
 };
 use drogon_protocol::orchestration_question::{
     AnswerPayload, AskIntent, AskParams, AskResult, AskWaitOutcome, BootstrapScope, ReceiptScope,
@@ -213,7 +214,10 @@ fn task_methods_round_trip_with_decided_status_vocabulary() {
         spec: "Run the audit steps".into(),
         spec_truncated: false,
         title: Some("Audit".into()),
+        display_name: None,
         depends_on: Some(vec!["task-0".into()]),
+        assignee_handle: None,
+        dispatch_id: None,
     };
     assert_camel_case_round_trip(&summary, "specTruncated");
 
@@ -263,6 +267,8 @@ fn task_methods_round_trip_with_decided_status_vocabulary() {
             status: TaskStatus::Pending,
             depends_on: vec!["task-0".into()],
             result: None,
+            title: None,
+            display_name: None,
         },
     };
     assert_camel_case_round_trip(&created, "task");
@@ -370,6 +376,7 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
     assert_camel_case_round_trip(&result, "effects");
 
     let mut show = WorkerShowResult {
+        observation: None,
         dispatch_id: "dispatch-1".into(),
         task_id: "task-1".into(),
         assignment_state: AssignmentState::Ready,
@@ -429,6 +436,7 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
     assert_camel_case_round_trip(&read, "entries");
 
     let stop = WorkerStopResult {
+        state: None,
         dispatch_id: "dispatch-1".into(),
         assignment_state: AssignmentState::Stopped,
         process_action: ProcessAction::None,
@@ -455,6 +463,7 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
     let abandon = WorkerAbandonResult {
         dispatch_id: "dispatch-1".into(),
         assignment_state: AssignmentState::Abandoned,
+        warning: Some("The worker was abandoned without signalling its process.".into()),
         residual_resources: vec![ResidualResource {
             kind: ResourceKind::Session,
             resource_id: "session-1".into(),
@@ -499,6 +508,7 @@ fn prompt_stall_failure_and_late_first_report_serialize_without_resume_claims() 
     // failed-but-inspectable, readiness unverified, no reported outcome, and
     // the process verdict independent — explicit retry names this attempt.
     let stalled = WorkerShowResult {
+        observation: None,
         dispatch_id: "dispatch-9".into(),
         task_id: "task-1".into(),
         assignment_state: AssignmentState::Failed,
@@ -607,6 +617,7 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
         subject: "task complete".into(),
         body: Some("all checks passed".into()),
         payload: None,
+        priority: MessagePriority::Urgent,
         thread_id: None,
         final_report: Some(FinalReport {
             outcome: ReportOutcome::Succeeded,
@@ -661,6 +672,7 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
         wait: Some(WaitPolicy { timeout_ms: 1_000 }),
         kinds: vec![MessageKind::Guidance, MessageKind::Escalation],
         inject: false,
+        format: true,
         cursor: None,
         limit: None,
     };
@@ -697,9 +709,11 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
                 subject: "next steps".into(),
                 body: Some("do the thing".into()),
                 payload: None,
+                priority: MessagePriority::Normal,
                 thread_id: None,
             })
             .collect(),
+        formatted: None,
         next_cursor: None,
         timed_out: false,
         cancelled: false,
@@ -716,6 +730,7 @@ fn mail_methods_round_trip_with_ack_then_consume_and_modes() {
         wait: None,
         kinds: vec![],
         inject: false,
+        format: false,
         cursor: None,
         limit: None,
     };
@@ -905,6 +920,7 @@ fn additive_params_and_result_fields_are_ignored_not_identity() {
         wait: None,
         kinds: vec![],
         inject: false,
+        format: false,
         cursor: None,
         limit: None,
     })
@@ -952,6 +968,7 @@ fn scopes_are_required_and_refuse_wrong_host_or_version() {
         subject: "s".into(),
         body: None,
         payload: None,
+        priority: MessagePriority::Normal,
         thread_id: None,
         final_report: None,
     };
@@ -1089,6 +1106,7 @@ fn check_ack_reserved_on_inspection_and_ask_contradictions_fail_at_decode() {
         }),
         kinds: vec![],
         inject: false,
+        format: false,
         cursor: None,
         limit: None,
     };
@@ -1104,6 +1122,7 @@ fn check_ack_reserved_on_inspection_and_ask_contradictions_fail_at_decode() {
             }),
             kinds: vec![],
             inject: false,
+            format: false,
             cursor: None,
             limit: None,
         };
@@ -1167,6 +1186,7 @@ fn check_ack_reserved_on_inspection_and_ask_contradictions_fail_at_decode() {
             message_ids: vec!["msg-1".into()],
         }),
         messages: vec![],
+        formatted: None,
         next_cursor: None,
         timed_out: false,
         cancelled: false,
@@ -1208,6 +1228,7 @@ fn generic_send_reserves_answers_for_correlated_reply() {
             subject: "answer".into(),
             body: Some("forged".into()),
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: Some("question-thread".into()),
             final_report: None,
         };
@@ -1235,6 +1256,7 @@ fn lifecycle_kinds_target_only_run_home_and_reports_require_their_payload() {
                 subject: "s".into(),
                 body: None,
                 payload: None,
+                priority: MessagePriority::Normal,
                 thread_id: None,
                 final_report: None,
             };
@@ -1256,6 +1278,7 @@ fn lifecycle_kinds_target_only_run_home_and_reports_require_their_payload() {
             subject: "s".into(),
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             final_report,
         };
@@ -1274,6 +1297,7 @@ fn lifecycle_kinds_target_only_run_home_and_reports_require_their_payload() {
         subject: "s".into(),
         body: None,
         payload: None,
+        priority: MessagePriority::Normal,
         thread_id: None,
         final_report: None,
     };
@@ -1285,6 +1309,7 @@ fn lifecycle_kinds_target_only_run_home_and_reports_require_their_payload() {
         subject: "s".into(),
         body: None,
         payload: None,
+        priority: MessagePriority::Urgent,
         thread_id: None,
         final_report: Some(FinalReport {
             outcome: ReportOutcome::Failed,
@@ -1483,6 +1508,7 @@ fn no_params_or_results_serde_shape_carries_a_credential() {
             subject: "s".into(),
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             final_report: None,
         })
@@ -1515,4 +1541,62 @@ fn ensure_process_action_variants_round_trip() {
             serde_json::from_value(serde_json::to_value(action).unwrap()).unwrap();
         assert_eq!(round, action);
     }
+}
+
+#[test]
+fn task_record_and_summary_new_fields_are_optional_for_old_records() {
+    use drogon_protocol::orchestration_task::{TaskRecord, TaskStatus, TaskSummary};
+    // Old records predate title/display_name/assignee keys: they must decode
+    // with those fields absent, and must not serialize them when unset.
+    let old_record: TaskRecord = serde_json::from_value(serde_json::json!({
+        "taskId": "task-1", "runId": "run-1", "status": "pending",
+        "dependsOn": [],
+    }))
+    .unwrap();
+    assert_eq!(old_record.title, None);
+    assert_eq!(old_record.display_name, None);
+    let wire = serde_json::to_value(&old_record).unwrap();
+    assert!(!wire.as_object().unwrap().contains_key("title"));
+    assert!(!wire.as_object().unwrap().contains_key("displayName"));
+
+    let old_summary: TaskSummary = serde_json::from_value(serde_json::json!({
+        "taskId": "task-1", "status": "dispatched", "spec": "do it",
+        "specTruncated": false, "title": "Work",
+    }))
+    .unwrap();
+    assert_eq!(old_summary.display_name, None);
+    assert_eq!(old_summary.assignee_handle, None);
+    assert_eq!(old_summary.dispatch_id, None);
+
+    // New records round-trip with exact camelCase keys.
+    let record = TaskRecord {
+        task_id: "task-1".into(),
+        run_id: "run-1".into(),
+        status: TaskStatus::Ready,
+        depends_on: vec![],
+        result: None,
+        title: Some("Work".into()),
+        display_name: Some("Shown".into()),
+    };
+    let wire = serde_json::to_value(&record).unwrap();
+    assert_eq!(wire["title"], serde_json::json!("Work"));
+    assert_eq!(wire["displayName"], serde_json::json!("Shown"));
+    assert_eq!(record, serde_json::from_value(wire).unwrap());
+
+    let summary = TaskSummary {
+        task_id: "task-1".into(),
+        status: TaskStatus::Dispatched,
+        spec: "do it".into(),
+        spec_truncated: false,
+        title: Some("Work".into()),
+        display_name: Some("Shown".into()),
+        depends_on: None,
+        assignee_handle: Some("sess-1".into()),
+        dispatch_id: Some("dispatch-1".into()),
+    };
+    let wire = serde_json::to_value(&summary).unwrap();
+    assert_eq!(wire["displayName"], serde_json::json!("Shown"));
+    assert_eq!(wire["assigneeHandle"], serde_json::json!("sess-1"));
+    assert_eq!(wire["dispatchId"], serde_json::json!("dispatch-1"));
+    assert_eq!(summary, serde_json::from_value(wire).unwrap());
 }

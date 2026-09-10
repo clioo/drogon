@@ -310,6 +310,22 @@ pub(crate) async fn resolve(
                 caller: None,
             });
         }
+        // Host-scoped read-only listing: no coordinator binding, no
+        // current-run guess. `--run` narrows; without it all runs list.
+        OrchestrationCommand::WorkerList { .. } => {
+            return Ok(Resolved {
+                command,
+                caller: None,
+            });
+        }
+        // Host-scoped mutation: no coordinator binding, no current-run
+        // guess. The scope flags select the domain tables.
+        OrchestrationCommand::Reset { .. } => {
+            return Ok(Resolved {
+                command,
+                caller: None,
+            });
+        }
         _ => {}
     }
     if let Some(mut scope) = command.coordinator_scope().cloned() {
@@ -369,6 +385,8 @@ pub(crate) async fn resolve(
         return Ok(Resolved { command, caller });
     }
     if let Some(actor) = command.actor_scope_mut() {
+        // A fully explicit coordinator binding never needs terminal resolution.
+        // (Scoped worker credentials already returned above.)
         if actor.from.is_none()
             && actor.run.is_some()
             && actor.coordinator_id.is_some()

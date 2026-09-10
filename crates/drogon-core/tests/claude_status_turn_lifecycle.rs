@@ -286,7 +286,10 @@ fn settings_file_installs_the_full_claude_turn_lifecycle() {
         let command = entries[0]["hooks"][0]["command"].as_str().unwrap();
         assert!(command.contains("internal hook-event"), "{command}");
         assert!(command.contains(&format!("--event {event}")), "{command}");
-        assert!(command.contains(&format!("--session {session_id}")), "{command}");
+        assert!(
+            command.contains(&format!("--session {session_id}")),
+            "{command}"
+        );
         assert!(
             command.contains(&format!("--incarnation {incarnation}")),
             "{command}"

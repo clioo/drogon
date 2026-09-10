@@ -76,6 +76,19 @@ and ask a worker a direct question with
 `drogon-cli orchestration send --run <ID> --coordinator-id <ID> --consumer-generation 3 --kind question --subject <TEXT> --to dispatch:<ID>`.
 Targets are `run-home`, `dispatch:<ID>` or `group:<NAME>`.
 
+`drogon-cli orchestration dispatch --task <ID> --to <TERMINAL> --from <TERMINAL>`
+assigns a ready task to an existing terminal as an unsupervised dispatch context:
+the target's process is never signalled or owned, and `--inject` writes the
+preamble into a detected agent session and mints its scoped capability.
+`--dry-run` previews the preamble without any state change; `--return-preamble`
+returns the injected text. Inspect a task's current context with
+`drogon-cli orchestration dispatch-show --task <ID> --preamble`.
+
+Priorities `--priority high|urgent` render `[HIGH]`/`[URGENT]` tags in `check` and
+`inbox` output; `normal` is the default. Structured report fields use
+`--task-id`, `--dispatch-id`, `--files-modified <CSV>`, `--report-path <PATH>` and
+`--phase <TEXT>` instead of hand-quoting `--payload` JSON (never mix the two forms).
+
 ## Ask And Reply
 
 Ask blocks for an answer inside one bounded budget:
@@ -117,6 +130,21 @@ worker. An explicit `worker-release` clears that hold. Retain cannot undo a
 committed release; a pending release is distinct from an uncertain outcome.
 Retention never resurrects an exited process. Output archive parity is not yet implemented.
 
+`drogon-cli orchestration worker-list --run <ID> --terminal-state retained`
+lists worker attempts on this host without effects: without `--run` every run
+lists (never a current-run guess; an unknown run reads empty), and
+`--terminal-state` filters one of `active`, `reclaimable`, `retained`,
+`release_pending`, `release_unknown`, `released`. Counts cover the
+run-selected rows before the filter. Each row keeps assignment status,
+reported outcome, physical process verdict (`live`, `unverifiable` or
+`exited`; loss of contact never proves exit), and terminal resource state
+separate.
+
+`drogon-cli orchestration inbox --limit 20 --json`
+sweeps recent messages across this host's runs without consuming or acknowledging
+them. `--terminal <HANDLE>` narrows to one actor (a stale handle reads empty, never
+an error) and `--full` adds body and payload lines to the human output.
+
 ## Scope And Credentials
 
 Bound coordinator verbs (`run-use`, `task-create`, `task-update`, `task-list`,
@@ -139,6 +167,14 @@ terminal fills missing dispatch fields from scoped hints. Explicit worker
 fields must agree with those hints. Coordinator-only verbs refuse a worker credential
 outright. Take over a run explicitly with
 `drogon-cli orchestration run-use --run <ID> --coordinator-id <ID> --consumer-generation 3 --takeover`.
+`drogon-cli orchestration reset --tasks` clears
+orchestration domain state on this host only (exactly one of `--all`,
+`--tasks`, `--messages`): `--all` clears runs, tasks,
+gates, attempts, mail and retention; `--tasks` clears tasks, gates, attempts,
+retention and run bindings while closing (not deleting) pending question
+threads; `--messages` clears mail messages, deliveries and question threads.
+Reset needs no coordinator binding, keeps mutation receipts, and is refused
+while a live supervised worker attempt is active — stop it first.
 
 ## Liveness
 

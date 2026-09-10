@@ -201,6 +201,29 @@ pub struct WorkerShowResult {
     pub failure: Option<AttemptFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    /// Interactive-wait observation (source: `observation.agentWait`); absent
+    /// means the host never evaluated it, distinct from an evaluated None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<WorkerObservation>,
+}
+
+/// Whether the worker's terminal is parked on a prompt only a human can
+/// answer. A waiting worker is healthy, not failed.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerObservation {
+    /// `Some(wait)` waiting on a human; `None` evaluated with no wait found.
+    #[serde(default)]
+    pub agent_wait: Option<AgentWait>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWait {
+    /// Evidence source: hook, prompt-text, or title.
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 impl WorkerShowResult {
@@ -322,6 +345,10 @@ pub struct WorkerStopResult {
     /// Source: retained unsupervised terminal produces an explicit warning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    /// Source `stop_unknown`: the fence committed but the process outcome
+    /// was never proven; the CLI maps this to exit 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
 }
 
 /// Abandon releases coordinator attachment without ever signalling the
@@ -354,6 +381,9 @@ impl WorkerAbandonParams {
 pub struct WorkerAbandonResult {
     pub dispatch_id: String,
     pub assignment_state: AssignmentState,
+    /// Source `worker-abandon` always warns that no signal was sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
     #[serde(default)]
     pub residual_resources: Vec<ResidualResource>,
 }
@@ -397,6 +427,175 @@ pub struct WorkerReleaseResult {
     pub archive: Option<serde_json::Value>,
     #[serde(default)]
     pub residual_resources: Vec<ResidualResource>,
+}
+
+/// Terminal resource state exposed by `orchestration.workerList`; process
+/// accounting, never task/dispatch outcome. Source:
+/// `worker-terminal-ownership.ts` (`WorkerTerminalListState`).
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerTerminalListState {
+    Active,
+    Reclaimable,
+    Retained,
+    ReleasePending,
+    ReleaseUnknown,
+    Released,
+}
+
+impl WorkerTerminalListState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Reclaimable => "reclaimable",
+            Self::Retained => "retained",
+            Self::ReleasePending => "release_pending",
+            Self::ReleaseUnknown => "release_unknown",
+            Self::Released => "released",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "active" => Some(Self::Active),
+            "reclaimable" => Some(Self::Reclaimable),
+            "retained" => Some(Self::Retained),
+            "release_pending" => Some(Self::ReleasePending),
+            "release_unknown" => Some(Self::ReleaseUnknown),
+            "released" => Some(Self::Released),
+            _ => None,
+        }
+    }
+}
+
+/// Host-scoped read-only listing of worker attempts. Unlike the other worker
+/// verbs there is no coordinator binding: `run` optionally narrows to one
+/// run (without it all runs on the host are listed, never a current-run
+/// guess) and `terminal_state` optionally filters the six terminal states.
+/// Counts are computed over the run-selected rows before the terminal-state
+/// filter. No effects, no receipts.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerListParams {
+    #[serde(flatten)]
+    pub host: crate::orchestration_scope::HostScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_state: Option<WorkerTerminalListState>,
+}
+
+impl WorkerListParams {
+    pub fn validate_shape(&self, execution_host_id: &str) -> Result<(), RpcError> {
+        self.host.validate_target(execution_host_id)?;
+        if let Some(run) = &self.run {
+            validate_opaque_token(run, 128, "Invalid run id.")?;
+        }
+        Ok(())
+    }
+}
+
+/// Source-mapped per-row fields (`worker-terminal-listing.ts`
+/// `listWorkerTerminalResources`): `worker_state` (`WorkerDispatchState`,
+/// never `unsupervised` here since every row is a durable attempt),
+/// `dispatch_status` (`DispatchStatus`), and `agent_terminal_handle` (the
+/// attempt's proven session id, or `None` when the spawn never proved one).
+/// `terminal_state` is `None` only when the engine holds no terminal
+/// evidence at all (source `deriveWorkerTerminalListState` null case).
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerDispatchListState {
+    Starting,
+    Ready,
+    StartUnknown,
+    Failed,
+    Succeeded,
+    Stopping,
+    StopUnknown,
+    Stopped,
+    Abandoned,
+}
+
+impl WorkerDispatchListState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Ready => "ready",
+            Self::StartUnknown => "start_unknown",
+            Self::Failed => "failed",
+            Self::Succeeded => "succeeded",
+            Self::Stopping => "stopping",
+            Self::StopUnknown => "stop_unknown",
+            Self::Stopped => "stopped",
+            Self::Abandoned => "abandoned",
+        }
+    }
+}
+
+/// Source `DispatchStatus` for `orchestration.workerList` rows.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DispatchListStatus {
+    Pending,
+    Dispatched,
+    Completed,
+    Failed,
+    CircuitBroken,
+}
+
+impl DispatchListStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Dispatched => "dispatched",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::CircuitBroken => "circuit_broken",
+        }
+    }
+}
+
+/// One listed attempt: immutable attempt identity plus the three independent
+/// evidence axes (assignment lifecycle, reported outcome, physical process
+/// verdict) and the durable terminal resource state. `terminal_state` is
+/// `None` only when the engine holds no resource evidence at all.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerListEntry {
+    pub dispatch_id: String,
+    pub task_id: String,
+    pub run_id: String,
+    pub assignment_state: AssignmentState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<ReportOutcome>,
+    pub process_verdict: ProcessVerdict,
+    pub worker_state: WorkerDispatchListState,
+    pub dispatch_status: DispatchListStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_terminal_handle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_state: Option<WorkerTerminalListState>,
+    /// Source-compatible resource expose fields where provable: durable
+    /// retention state/reason only. No archives, no owned resources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<WorkerListResource>,
+}
+
+/// Durable retention slice of a listed attempt's resource.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerListResource {
+    pub state: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerListResult {
+    #[serde(default)]
+    pub workers: Vec<WorkerListEntry>,
+    #[serde(default)]
+    pub counts: std::collections::BTreeMap<String, u64>,
 }
 
 /// Retain records a durable user-requested hold on a supervised worker's

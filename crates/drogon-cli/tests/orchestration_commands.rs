@@ -161,6 +161,319 @@ fn coordinator_args() -> Vec<&'static str> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_list_human_output_matches_source_rows_and_cursor_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let _mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.runList",
+                json!({"runs":[
+                    {"runId":"run-1","objective":"first","coordinatorId":"c","consumerGeneration":1,"createdAtMs":1},
+                    {"runId":"run-2","objective":"second","coordinatorId":"c","consumerGeneration":1,"createdAtMs":2}
+                ],"nextCursor":"cursor-9"}),
+            )],
+        ),
+    );
+    let invocation = run_cli(dir.path(), &["orchestration", "run-list"], &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert_eq!(
+        invocation.stdout.trim_end(),
+        "run-1 first\nrun-2 second\nMore Runs: --cursor cursor-9"
+    );
+    let dir2 = tempfile::tempdir().unwrap();
+    let _mock2 = MockService::start(
+        dir2.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.runList",
+                json!({"runs":[],"nextCursor":null}),
+            )],
+        ),
+    );
+    let empty = run_cli(dir2.path(), &["orchestration", "run-list"], &[]);
+    assert_eq!(empty.exit_code, 0);
+    assert_eq!(empty.stdout.trim_end(), "No Runs found.");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_show_human_output_matches_source_two_line_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    // 2024-01-02T03:04:05Z = 1704164645000 ms.
+    let _mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.runShow",
+                json!({"run":{"runId":"run-1","objective":"Ship the release","coordinatorId":"coord-1","consumerGeneration":3,"createdAtMs":1_704_164_645_000_u64}}),
+            )],
+        ),
+    );
+    let invocation = run_cli(
+        dir.path(),
+        &["orchestration", "run-show", "--id", "run-1"],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert_eq!(
+        invocation.stdout.trim_end(),
+        "run-1 Ship the release\nconsumer generation 3; created 2024-01-02T03:04:05Z"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_done_without_lifecycle_verdict_is_operation_unknown() {
+    // Source requireWorkerDoneSettlement: an accepted worker_done whose host
+    // never returned a lifecycle verdict is an unknown operation (exit 1),
+    // never a quiet "Sent".
+    let dir = tempfile::tempdir().unwrap();
+    let _mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.send",
+                json!({"message":{"messageId":"msg-1","sequence":1,"runId":"run-1","kind":"finalReport"},"deliveries":1}),
+            )],
+        ),
+    );
+    let invocation = run_cli(
+        dir.path(),
+        &[
+            "--json",
+            "orchestration",
+            "send",
+            "--type",
+            "worker_done",
+            "--subject",
+            "done",
+            "--outcome",
+            "succeeded",
+            "--run",
+            "run-1",
+            "--coordinator-id",
+            "coord-1",
+            "--consumer-generation",
+            "3",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+    let value: Value = serde_json::from_str(&invocation.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "operation_unknown");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_to_run_id_and_at_group_use_source_target_spellings() {
+    for (to, expected) in [
+        ("run:run-1", json!({"kind": "runHome"})),
+        ("@all", json!({"kind":"group","name":"all"})),
+        (
+            "@worktree:ws-9",
+            json!({"kind":"group","name":"worktree:ws-9"}),
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mock = MockService::start(
+            dir.path(),
+            mock_behavior(
+                true,
+                vec![(
+                    "orchestration.send",
+                    json!({"message":{"messageId":"msg-1","sequence":1,"runId":"run-1","kind":"status"},"deliveries":1}),
+                )],
+            ),
+        );
+        let mut args = vec![
+            "--json",
+            "orchestration",
+            "send",
+            "--kind",
+            "status",
+            "--subject",
+            "hi",
+            "--to",
+            to,
+        ];
+        args.extend(coordinator_args());
+        let invocation = run_cli(dir.path(), &args, &[]);
+        assert_eq!(
+            invocation.exit_code, 0,
+            "{to}: {} {}",
+            invocation.stdout, invocation.stderr
+        );
+        let sent = mock
+            .captured()
+            .into_iter()
+            .find(|r| r["method"] == "orchestration.send")
+            .unwrap();
+        assert_eq!(sent["params"]["to"], expected, "{to}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn structured_payload_flags_build_the_source_payload_object() {
+    let dir = tempfile::tempdir().unwrap();
+    let mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.send",
+                json!({"message":{"messageId":"msg-9","sequence":3,"runId":"run-1","kind":"finalReport"},"deliveries":1,"lifecycle":{"action":"settled","outcome":"succeeded","duplicate":false}}),
+            )],
+        ),
+    );
+    let mut args: Vec<&str> = vec![
+        "--json",
+        "orchestration",
+        "send",
+        "--type",
+        "worker_done",
+        "--subject",
+        "done",
+        "--outcome",
+        "succeeded",
+        "--task-id",
+        "task-1",
+        "--dispatch-id",
+        "dispatch-1",
+        "--files-modified",
+        " a.rs , b.rs ",
+        "--report-path",
+        "report.md",
+    ];
+    args.extend(coordinator_args());
+    let invocation = run_cli(dir.path(), &args, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    let sent = mock
+        .captured()
+        .into_iter()
+        .find(|r| r["method"] == "orchestration.send")
+        .unwrap();
+    assert_eq!(
+        sent["params"]["payload"],
+        json!({"taskId":"task-1","dispatchId":"dispatch-1","outcome":"succeeded","filesModified":["a.rs","b.rs"],"reportPath":"report.md"})
+    );
+    // Mixing raw and structured payloads is the source usage error.
+    let dir2 = tempfile::tempdir().unwrap();
+    let _mock2 = MockService::start(dir2.path(), mock_behavior(true, vec![]));
+    let mixed = run_cli(
+        dir2.path(),
+        &[
+            "orchestration",
+            "send",
+            "--kind",
+            "status",
+            "--subject",
+            "x",
+            "--payload",
+            "{}",
+            "--phase",
+            "implementing",
+            "--run",
+            "run-1",
+            "--coordinator-id",
+            "coord-1",
+            "--consumer-generation",
+            "3",
+        ],
+        &[],
+    );
+    assert_eq!(mixed.exit_code, 2);
+    assert!(
+        mixed
+            .stderr
+            .contains("Use either --payload or structured payload flags")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn source_mail_kinds_round_trip_as_opaque_mail() {
+    for (kind, wire) in [
+        ("dispatch", "dispatch"),
+        ("merge_ready", "mergeReady"),
+        ("handoff", "handoff"),
+        ("decision_gate", "decisionGate"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mock = MockService::start(
+            dir.path(),
+            mock_behavior(
+                true,
+                vec![(
+                    "orchestration.send",
+                    json!({"message":{"messageId":"msg-1","sequence":7,"runId":"run-1","kind":wire},"deliveries":1}),
+                )],
+            ),
+        );
+        let mut args = vec![
+            "--json",
+            "orchestration",
+            "send",
+            "--kind",
+            kind,
+            "--subject",
+            "opaque",
+        ];
+        args.extend(coordinator_args());
+        let invocation = run_cli(dir.path(), &args, &[]);
+        assert_eq!(
+            invocation.exit_code, 0,
+            "{kind}: {} {}",
+            invocation.stdout, invocation.stderr
+        );
+        let sent = mock
+            .captured()
+            .into_iter()
+            .find(|r| r["method"] == "orchestration.send")
+            .unwrap();
+        assert_eq!(sent["params"]["kind"], json!(wire));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retired_coordinator_verbs_fail_before_any_runtime_contact_with_migration_data() {
+    for (verb, alias) in [
+        ("coordinator-start", "run"),
+        ("coordinator-stop", "run-stop"),
+    ] {
+        for path in [verb, alias] {
+            let dir = tempfile::tempdir().unwrap();
+            // No mock started: the socket is absent, so any runtime contact
+            // would fail transport — proving the retirement is client-side.
+            let invocation = run_cli(dir.path(), &["--json", "orchestration", path], &[]);
+            assert_eq!(invocation.exit_code, 1, "{path}: {}", invocation.stderr);
+            let value: Value = serde_json::from_str(&invocation.stdout).unwrap_or_else(|_| {
+                panic!("{path} must emit a JSON envelope: {}", invocation.stdout)
+            });
+            assert_eq!(value["ok"], json!(false));
+            assert_eq!(value["error"]["code"], "orchestration_migration_required");
+            assert!(
+                value["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("No effects were applied")
+            );
+            let data = &value["error"]["data"];
+            assert_eq!(data["reason"], "command_retired");
+            assert_eq!(data["effectsApplied"], json!(false));
+            assert_eq!(
+                data["nextCommandArgs"],
+                json!(["skills", "get", "orchestration", "--full"])
+            );
+            assert_eq!(
+                data["guide"],
+                json!({"topic": "orchestration", "full": true})
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retain_does_not_derive_mutation_authority_from_named_run_inspection() {
     let dir = tempfile::tempdir().unwrap();
     let mock = MockService::start(dir.path(), mock_behavior(true, vec![]));
@@ -371,7 +684,7 @@ async fn review_retained_release_never_claims_released() {
             vec![(
                 "orchestration.workerRelease",
                 json!({"dispatchId":"dispatch-1",
-        "disposition":"retained", "processVerdict":"live"}),
+        "disposition":"retained", "processVerdict":"live", "state":"retained","processAction":"none"}),
             )],
         ),
     );
@@ -2161,6 +2474,68 @@ async fn red_run_and_task_response_identity_is_enforced() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_stop_unknown_state_exits_1_with_source_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let _mock = MockService::start(
+        dir.path(),
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerStop",
+                json!({"dispatchId":"dispatch-1","assignmentState":"stopped",
+                    "processAction":"unverifiable","processVerdict":"unverifiable",
+                    "state":"stop_unknown","residualResources":[],
+                    "warning":"The stop outcome is unknown: the process may still be live."}),
+            )],
+        ),
+    );
+    let mut args = vec!["orchestration", "worker-stop", "--dispatch", "dispatch-1"];
+    args.extend(coordinator_args());
+    let invocation = run_cli(dir.path(), &args, &[]);
+    assert_eq!(invocation.exit_code, 1, "{}", invocation.stdout);
+    assert_eq!(
+        invocation.stdout.trim_end(),
+        "Worker dispatch-1 [stop_unknown] process=unverifiable\nWarning: The stop outcome is unknown: the process may still be live."
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_show_human_output_matches_source_head_and_wait_lines() {
+    for (observation, wait_line) in [
+        (None, "Interactive wait: unknown (not evaluated)"),
+        (Some(json!(null)), "Interactive wait: none"),
+        (
+            Some(json!({"source":"hook","reason":"waiting for human input since 12:00"})),
+            "Waiting on a human: waiting for human input since 12:00 (via hook)",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut result = json!({"dispatchId":"dispatch-1","taskId":"task-1",
+            "assignmentState":"ready","readiness":"notObserved",
+            "processVerdict":"live","residualResources":[]});
+        if let Some(wait) = observation {
+            result["observation"] = json!({"agentWait": wait});
+        }
+        let _mock = MockService::start(
+            dir.path(),
+            mock_behavior(true, vec![("orchestration.workerShow", result)]),
+        );
+        let mut args = vec!["orchestration", "worker-show", "--dispatch", "dispatch-1"];
+        args.extend(coordinator_args());
+        let invocation = run_cli(dir.path(), &args, &[]);
+        assert_eq!(
+            invocation.exit_code, 0,
+            "{} {}",
+            invocation.stdout, invocation.stderr
+        );
+        assert_eq!(
+            invocation.stdout.trim_end(),
+            format!("dispatch-1 task=task-1 [ready]\n{wait_line}")
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn red_worker_show_and_stop_dispatch_identity_is_enforced() {
     let dir = temp_dir("ra-wident");
     for (method, verb, result) in [
@@ -2980,5 +3355,973 @@ async fn worker_retain_refuses_worker_credential() {
         "refused credential never connects"
     );
     drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// worker-list: typed params, full render, credential refusal (mapping only;
+// engine parity is proved by native_worker_list in drogon-core).
+// ---------------------------------------------------------------------------
+
+fn list_result() -> Value {
+    json!({
+        "workers": [
+            {"dispatchId": "dispatch-1", "taskId": "task-1", "runId": "run-1",
+             "assignmentState": "ready", "outcome": null,
+             "processVerdict": "live", "workerState": "ready",
+             "dispatchStatus": "dispatched", "agentTerminalHandle": "sess-1",
+             "terminalState": "active",
+             "resource": {"state": "owned", "reason": "cleanup_owned"}},
+            {"dispatchId": "dispatch-2", "taskId": "task-2", "runId": "run-1",
+             "assignmentState": "stopped", "outcome": null,
+             "processVerdict": "exited", "workerState": "stopped",
+             "dispatchStatus": "completed", "agentTerminalHandle": "sess-2",
+             "terminalState": "retained",
+             "resource": {"state": "retained", "reason": "user_requested"}},
+        ],
+        "counts": {"active": 1, "retained": 1},
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_sends_host_scoped_params_without_coordinator_bindings() {
+    let dir = temp_dir("list-params");
+    let mut filtered = list_result();
+    filtered["workers"][0]["terminalState"] = json!("retained");
+    filtered["workers"][0]["resource"] = json!({"state": "retained", "reason": "user_requested"});
+    filtered["counts"] = json!({"retained": 2});
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.workerList", filtered)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "worker-list",
+            "--run",
+            "run-1",
+            "--terminal-state",
+            "retained",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    let captured = mock.captured();
+    let sent = captured
+        .iter()
+        .find(|r| r["method"] == "orchestration.workerList")
+        .expect("list sent");
+    assert_eq!(sent["params"]["run"], json!("run-1"));
+    assert_eq!(sent["params"]["terminalState"], json!("retained"));
+    assert_eq!(sent["params"]["hostId"], json!(HOST));
+    assert!(sent["params"].get("coordinatorId").is_none());
+    assert!(sent["params"].get("consumerGeneration").is_none());
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_human_output_renders_every_row_and_counts() {
+    let dir = temp_dir("list-human");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.workerList", list_result())]),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "worker-list"], &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("dispatch-1"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("dispatch-2"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("terminal=active"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("terminal=retained"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("active=1"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("retained=1"),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_empty_renders_no_workers_found() {
+    let dir = temp_dir("list-empty");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![(
+                "orchestration.workerList",
+                json!({"workers": [], "counts": {}}),
+            )],
+        ),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "worker-list"], &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("No workers found."),
+        "{}",
+        invocation.stdout
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_rejects_row_outside_requested_filter() {
+    let dir = temp_dir("list-mismatch");
+    let mut bad = list_result();
+    bad["workers"][0]["terminalState"] = json!("released");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.workerList", bad)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "worker-list",
+            "--terminal-state",
+            "retained",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 1, "{}", invocation.stderr);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_rejects_unknown_terminal_state() {
+    let dir = temp_dir("list-bad-state");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "worker-list",
+            "--terminal-state",
+            "bogus",
+            "--json",
+        ],
+        &[],
+    );
+    assert_ne!(invocation.exit_code, 0);
+    assert!(mock.captured().is_empty(), "invalid flag never connects");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_list_refuses_worker_credential() {
+    let dir = temp_dir("list-cred");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let capability = os(SCOPED_CREDENTIAL);
+    let env = [("DROGON_DISPATCH_CAPABILITY", &capability)];
+    let invocation = run_cli(&dir, &["orchestration", "worker-list", "--json"], &env);
+    assert_eq!(invocation.exit_code, 2);
+    assert!(
+        invocation
+            .stderr
+            .contains("refuses DROGON_DISPATCH_CAPABILITY"),
+        "{}",
+        invocation.stderr
+    );
+    assert!(
+        mock.captured().is_empty(),
+        "refused credential never connects"
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// reset: typed mapping per scope, credential refusal, exactly-one-scope.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reset_maps_each_scope_flag_to_the_typed_reset_method() {
+    for (flag, scope) in [
+        ("--all", "all"),
+        ("--tasks", "tasks"),
+        ("--messages", "messages"),
+    ] {
+        let dir = temp_dir("reset-scope");
+        let mock = MockService::start(
+            &dir,
+            mock_behavior(true, vec![("orchestration.reset", json!({"reset": scope}))]),
+        );
+        let invocation = run_cli(&dir, &["orchestration", "reset", flag, "--json"], &[]);
+        assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+        let envelope: Value = serde_json::from_str(&invocation.stdout).expect("JSON envelope");
+        assert_eq!(envelope["ok"], true);
+        assert_eq!(envelope["result"]["reset"], scope);
+        let seen = mock.captured();
+        let call = seen
+            .iter()
+            .find(|request| request["method"] == "orchestration.reset")
+            .expect("mock saw orchestration.reset");
+        assert_eq!(call["params"]["scope"], scope);
+        assert_eq!(call["params"]["hostId"], HOST);
+        drop(mock);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reset_human_mode_prints_reset_scope() {
+    let dir = temp_dir("reset-human");
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![("orchestration.reset", json!({"reset": "tasks"}))],
+        ),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "reset", "--tasks"], &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert_eq!(invocation.stdout.trim(), "Reset: tasks");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reset_refuses_worker_credential() {
+    let dir = temp_dir("reset-cred");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let capability = os(SCOPED_CREDENTIAL);
+    let env = [("DROGON_DISPATCH_CAPABILITY", &capability)];
+    let invocation = run_cli(&dir, &["orchestration", "reset", "--tasks", "--json"], &env);
+    assert_eq!(invocation.exit_code, 2);
+    assert!(
+        invocation
+            .stderr
+            .contains("refuses DROGON_DISPATCH_CAPABILITY"),
+        "{}",
+        invocation.stderr
+    );
+    assert!(
+        mock.captured().is_empty(),
+        "refused credential never connects"
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reset_requires_exactly_one_scope_flag() {
+    // No scope flag: usage error, never connects.
+    let dir = temp_dir("reset-noscope");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let invocation = run_cli(&dir, &["orchestration", "reset", "--json"], &[]);
+    assert_eq!(invocation.exit_code, 2, "{}", invocation.stderr);
+    assert!(
+        invocation.stderr.contains("exactly one reset scope"),
+        "{}",
+        invocation.stderr
+    );
+    assert!(mock.captured().is_empty(), "usage error never connects");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+    // Two scope flags: clap conflict, never connects.
+    let dir = temp_dir("reset-twoscope");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let invocation = run_cli(&dir, &["orchestration", "reset", "--all", "--tasks"], &[]);
+    assert_eq!(invocation.exit_code, 2, "{}", invocation.stderr);
+    assert!(
+        mock.captured().is_empty(),
+        "conflicting flags never connect"
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbox_maps_limit_and_terminal_and_renders_heads() {
+    let dir = temp_dir("inbox");
+    let result = json!({
+        "messages": [
+            {"messageId": "m2", "sequence": 2, "kind": "guidance",
+             "fromActor": "coordinator:coord-1", "toActor": "dispatch:dispatch-1",
+             "subject": "second"},
+            {"messageId": "m1", "sequence": 1, "kind": "status",
+             "fromActor": "dispatch:dispatch-1", "subject": "first",
+             "body": "hidden without --full", "payload": {"a": 1}},
+        ],
+        "count": 2,
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.inbox", result)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "inbox",
+            "--limit",
+            "10",
+            "--terminal",
+            "dispatch-1",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    let inbox = mock
+        .captured()
+        .into_iter()
+        .find(|r| r["method"] == "orchestration.inbox")
+        .expect("inbox sent");
+    assert_eq!(inbox["params"]["limit"], json!(10));
+    assert_eq!(inbox["params"]["terminal"], json!("dispatch-1"));
+    // Source head format: `<id>[tag] <from> -> <to ? ?>: "<subject>"`.
+    assert!(
+        invocation
+            .stdout
+            .contains("m2 coordinator:coord-1 -> dispatch:dispatch-1: \"second\""),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation
+            .stdout
+            .contains("m1 dispatch:dispatch-1 -> ?: \"first\""),
+        "{}",
+        invocation.stdout
+    );
+    // Default sweep omits bodies and payloads.
+    assert!(!invocation.stdout.contains("hidden without --full"));
+    assert!(!invocation.stdout.contains("[payload]"));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbox_full_expands_body_and_payload() {
+    let dir = temp_dir("inbox-full");
+    let result = json!({
+        "messages": [
+            {"messageId": "m1", "sequence": 1, "kind": "status",
+             "fromActor": "dispatch:dispatch-1", "subject": "first",
+             "body": "the body", "payload": {"a": 1}},
+        ],
+        "count": 1,
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.inbox", result)]),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "inbox", "--full"], &[]);
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("the body"),
+        "{}",
+        invocation.stdout
+    );
+    assert!(
+        invocation.stdout.contains("[payload]"),
+        "{}",
+        invocation.stdout
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbox_empty_reads_no_messages() {
+    let dir = temp_dir("inbox-empty");
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![("orchestration.inbox", json!({"messages": [], "count": 0}))],
+        ),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "inbox"], &[]);
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    assert!(
+        invocation.stdout.contains("No messages."),
+        "{}",
+        invocation.stdout
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbox_json_passes_the_envelope_through() {
+    let dir = temp_dir("inbox-json");
+    let result = json!({
+        "messages": [
+            {"messageId": "m1", "sequence": 1, "kind": "status",
+             "fromActor": "dispatch:dispatch-1", "subject": "first"},
+        ],
+        "count": 1,
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.inbox", result.clone())]),
+    );
+    let invocation = run_cli(&dir, &["orchestration", "inbox", "--json"], &[]);
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    let envelope: Value = serde_json::from_str(&invocation.stdout).expect("json stdout");
+    assert_eq!(envelope["result"], result);
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbox_zero_limit_is_usage_error() {
+    let dir = temp_dir("inbox-zero");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let invocation = run_cli(&dir, &["orchestration", "inbox", "--limit", "0"], &[]);
+    assert_eq!(invocation.exit_code, 2, "stderr: {}", invocation.stderr);
+    assert!(mock.captured().is_empty(), "usage error never connects");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dispatch_maps_flags_and_renders_human_text() {
+    let dir = temp_dir("dispatch-human");
+    let result = json!({
+        "dispatch": {"dispatchId": "dispatch-1", "taskId": "task-1",
+            "assignmentState": "ready", "readiness": "notObserved",
+            "processVerdict": "live",
+            "sessionIdentity": {"sessionId": "session-1", "incarnation": "i1"}},
+        "injected": true, "dryRun": false, "preamble": "PREAMBLE-TEXT",
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.dispatch", result)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "dispatch",
+            "--run",
+            "run-1",
+            "--coordinator-id",
+            "coord-1",
+            "--consumer-generation",
+            "3",
+            "--task",
+            "task-1",
+            "--to",
+            "session-1",
+            "--inject",
+            "--return-preamble",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    assert_eq!(
+        invocation.stdout.trim_end(),
+        "Dispatched task-1 -> dispatch-1 [ready]\n\n--- Preamble ---\nPREAMBLE-TEXT"
+    );
+    let calls = mock.captured();
+    let dispatch = calls
+        .iter()
+        .find(|r| r["method"] == "orchestration.dispatch")
+        .expect("dispatch called");
+    assert_eq!(dispatch["params"]["taskId"], "task-1");
+    assert_eq!(dispatch["params"]["to"], "session-1");
+    assert_eq!(dispatch["params"]["inject"], true);
+    assert_eq!(dispatch["params"]["dryRun"], false);
+    assert_eq!(dispatch["params"]["returnPreamble"], true);
+    assert_eq!(dispatch["params"]["runId"], "run-1");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dispatch_dry_run_prints_only_the_preamble() {
+    let dir = temp_dir("dispatch-dry");
+    let result = json!({
+        "dispatch": null, "injected": false, "dryRun": true,
+        "preamble": "PREVIEW-TEXT",
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.dispatch", result)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "dispatch",
+            "--run",
+            "run-1",
+            "--coordinator-id",
+            "coord-1",
+            "--consumer-generation",
+            "3",
+            "--task",
+            "task-1",
+            "--dry-run",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    assert_eq!(invocation.stdout.trim_end(), "PREVIEW-TEXT");
+    let calls = mock.captured();
+    let dispatch = calls
+        .iter()
+        .find(|r| r["method"] == "orchestration.dispatch")
+        .expect("dispatch called");
+    assert_eq!(dispatch["params"]["dryRun"], true);
+    assert!(dispatch["params"].get("to").is_none());
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dispatch_without_to_is_usage_error() {
+    let dir = temp_dir("dispatch-usage");
+    let mock = MockService::start(&dir, mock_behavior(true, vec![]));
+    let invocation = run_cli(
+        &dir,
+        &[
+            "orchestration",
+            "dispatch",
+            "--run",
+            "run-1",
+            "--coordinator-id",
+            "coord-1",
+            "--consumer-generation",
+            "3",
+            "--task",
+            "task-1",
+        ],
+        &[],
+    );
+    assert_eq!(invocation.exit_code, 2, "stderr: {}", invocation.stderr);
+    assert!(mock.captured().is_empty(), "usage error never connects");
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_human_wait_and_delivery_kind_priority_parity() {
+    let dir = temp_dir("check-human-parity");
+    let timed_out = json!({
+        "messages": [],
+        "timedOut": true, "cancelled": false, "connectionLost": false
+    });
+    let delivered = json!({
+        "delivery": {"deliveryId": "d1", "messageIds": ["m1", "m2"]},
+        "messages": [
+            {"messageId": "m1", "sequence": 1, "kind": "finalReport",
+             "fromActor": "dispatch:worker-1", "subject": "done work", "priority": "urgent"},
+            {"messageId": "m2", "sequence": 2, "kind": "status",
+             "fromActor": "dispatch:worker-1", "subject": "note", "priority": "high"}
+        ],
+        "timedOut": false, "cancelled": false, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                ("orchestration.check", timed_out),
+                ("orchestration.check", delivered),
+            ],
+        ),
+    );
+    let env = worker_mail_env_ref();
+    let timeout = run_cli(
+        &dir,
+        &["orchestration", "check", "--wait", "--timeout-ms", "1000"],
+        &env,
+    );
+    assert_eq!(
+        timeout.stdout, "Wait timed out; no messages were consumed.\n",
+        "{}",
+        timeout.stdout
+    );
+    assert!(
+        timeout
+            .stderr
+            .contains("warning: wait timed out; no messages were consumed"),
+        "{}",
+        timeout.stderr
+    );
+    let human = run_cli(&dir, &["orchestration", "check"], &env);
+    assert_eq!(human.exit_code, 0, "stderr: {}", human.stderr);
+    let expected = "Delivery d1\n\
+        m1 [URGENT] [worker_done] from=dispatch:worker-1 \"done work\"\n\
+        m2 [HIGH] [status] from=dispatch:worker-1 \"note\"\n";
+    assert_eq!(human.stdout, expected, "{}", human.stdout);
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_format_expands_blocks_and_passes_server_formatted_through() {
+    let dir = temp_dir("check-format");
+    let messages = json!([
+        {"messageId": "m1", "sequence": 1, "kind": "guidance",
+         "fromActor": "coordinator:owner", "subject": "orders",
+         "body": "do it", "payload": {"step": 1}, "priority": "normal"}
+    ]);
+    let unformatted = json!({
+        "messages": messages,
+        "timedOut": false, "cancelled": false, "connectionLost": false
+    });
+    let server = json!({
+        "messages": messages,
+        "formatted": "SERVER BLOCK",
+        "timedOut": false, "cancelled": false, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                ("orchestration.check", unformatted),
+                ("orchestration.check", server),
+            ],
+        ),
+    );
+    let env = worker_mail_env_ref();
+    let local = run_cli(&dir, &["orchestration", "check", "--format"], &env);
+    assert_eq!(local.exit_code, 0, "stderr: {}", local.stderr);
+    let out = local.stdout;
+    assert!(
+        out.contains("m1 [guidance] from=coordinator:owner"),
+        "{out}"
+    );
+    assert!(out.contains("[subject]\n  orders"), "{out}");
+    assert!(out.contains("[body]\n  do it"), "{out}");
+    assert!(out.contains("[payload]"), "{out}");
+    assert!(
+        out.contains("[Reply: drogon-cli orchestration reply --id m1 --body \"...\"]"),
+        "{out}"
+    );
+    let passthrough = run_cli(&dir, &["orchestration", "check", "--format"], &env);
+    assert_eq!(
+        passthrough.stdout, "SERVER BLOCK\n",
+        "{}",
+        passthrough.stdout
+    );
+    let captured = mock.captured();
+    let formats: Vec<&Value> = captured
+        .iter()
+        .filter(|r| r["method"] == "orchestration.check")
+        .collect();
+    assert_eq!(formats.len(), 2);
+    assert_eq!(formats[0]["params"]["format"], json!(true));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_unread_flag_is_explicit_consuming_read_with_source_exclusivity_text() {
+    let dir = temp_dir("check-unread");
+    let result = json!({
+        "delivery": {"deliveryId": "d1", "messageIds": ["m1"]},
+        "messages": [
+            {"messageId": "m1", "sequence": 1, "kind": "status",
+             "fromActor": "dispatch:worker-1", "subject": "s"}
+        ],
+        "timedOut": false, "cancelled": false, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.check", result)]),
+    );
+    let env = worker_mail_env_ref();
+    let explicit = run_cli(&dir, &["orchestration", "check", "--unread"], &env);
+    assert_eq!(explicit.exit_code, 0, "stderr: {}", explicit.stderr);
+    assert!(
+        explicit.stdout.starts_with("Delivery d1\n"),
+        "{}",
+        explicit.stdout
+    );
+    for conflicting in [
+        vec!["--unread", "--peek"],
+        vec!["--unread", "--all"],
+        vec!["--unread", "--peek", "--all"],
+    ] {
+        let mut args = vec!["orchestration", "check"];
+        args.extend(conflicting.iter().copied());
+        let invocation = run_cli(&dir, &args, &env);
+        assert_eq!(invocation.exit_code, 2, "args {conflicting:?}");
+        assert!(invocation.stdout.is_empty());
+        assert!(
+            invocation
+                .stderr
+                .contains("Choose at most one message read mode: --unread, --peek, or --all."),
+            "args {conflicting:?}: {}",
+            invocation.stderr
+        );
+    }
+    let captured = mock.captured();
+    assert_eq!(
+        captured
+            .iter()
+            .filter(|r| r["method"] == "orchestration.check")
+            .count(),
+        1,
+        "contradictory checks never reach the wire"
+    );
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_wait_keepalive_writes_compact_json_to_stderr_only() {
+    use std::sync::LazyLock;
+    static INTERVAL: LazyLock<OsString> = LazyLock::new(|| OsString::from("100"));
+    let dir = temp_dir("check-keepalive");
+    let result =
+        json!({"messages": [], "timedOut": false, "cancelled": false, "connectionLost": false});
+    let canned: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(vec![(
+        "orchestration.check".to_string(),
+        result,
+    )]));
+    let behavior: Behavior = Arc::new(move |request| {
+        let request_id = request["requestId"].as_str().unwrap_or("").to_string();
+        match request["method"].as_str() {
+            Some("status") => Action::Respond(ok_envelope(
+                &request_id,
+                json!({"hostId": HOST, "serviceInstanceId": "svc-1", "protocol": 1,
+                    "capabilities": ["workspace.v1", "orchestration.native.v1"],
+                    "version": "0.1.0"}),
+            )),
+            Some("orchestration.check") => {
+                std::thread::sleep(Duration::from_millis(650));
+                let mut queue = canned.lock().expect("canned lock");
+                let (_, result) = queue.remove(0);
+                Action::Respond(ok_envelope(&request_id, result))
+            }
+            _ => Action::Respond(error_envelope(
+                &request_id,
+                "method_not_found",
+                "mock lacks this method",
+            )),
+        }
+    });
+    let mock = MockService::start(&dir, behavior);
+    let mut env = worker_mail_env_ref();
+    env.push(("DROGON_KEEPALIVE_INTERVAL_MS", &INTERVAL));
+    let invocation = run_cli(
+        &dir,
+        &["orchestration", "check", "--wait", "--timeout-ms", "5000"],
+        &env,
+    );
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    assert_eq!(invocation.stdout, "No messages.\n", "{}", invocation.stdout);
+    assert!(
+        !invocation.stdout.contains("_keepalive"),
+        "{}",
+        invocation.stdout
+    );
+    let lines: Vec<&str> = invocation
+        .stderr
+        .lines()
+        .filter(|l| l.contains("_keepalive"))
+        .collect();
+    assert!(lines.len() >= 2, "stderr: {}", invocation.stderr);
+    for line in lines {
+        let value: Value = serde_json::from_str(line).expect("keepalive is compact JSON");
+        assert_eq!(value["_keepalive"], json!(true));
+        assert!(value["elapsedMs"].is_number(), "{line}");
+    }
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn check_json_envelope_passes_result_through() {
+    let dir = temp_dir("check-json");
+    let result = json!({
+        "delivery": {"deliveryId": "d9", "messageIds": ["m1"]},
+        "messages": [
+            {"messageId": "m1", "sequence": 7, "kind": "escalation",
+             "fromActor": "dispatch:worker-1", "subject": "help", "priority": "urgent"}
+        ],
+        "formatted": "SERVER BLOCK",
+        "timedOut": false, "cancelled": false, "connectionLost": false
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.check", result)]),
+    );
+    let invocation = run_cli(
+        &dir,
+        &["orchestration", "check", "--json"],
+        &worker_mail_env_ref(),
+    );
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    let envelope: Value = serde_json::from_str(&invocation.stdout).expect("JSON envelope");
+    assert_eq!(envelope["result"]["delivery"]["deliveryId"], json!("d9"));
+    assert_eq!(
+        envelope["result"]["messages"][0]["priority"],
+        json!("urgent")
+    );
+    assert_eq!(envelope["result"]["formatted"], json!("SERVER BLOCK"));
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_list_human_output_matches_source_label_rules() {
+    let dir = temp_dir("task-list-human");
+    let long_display: String = "d".repeat(70);
+    let long_spec: String = "界".repeat(100);
+    let result = json!({"tasks": [
+        {"taskId": "task-1", "status": "dispatched",
+         "spec": "ignored spec", "specTruncated": false,
+         "title": "Title One", "displayName": "Shown One",
+         "assigneeHandle": "sess-1", "dispatchId": "dispatch-1"},
+        {"taskId": "task-2", "status": "ready",
+         "spec": "ignored spec", "specTruncated": false,
+         "title": "Title Two"},
+        {"taskId": "task-3", "status": "pending",
+         "spec": "fallback spec", "specTruncated": false},
+        {"taskId": "task-4", "status": "pending",
+         "spec": "x", "specTruncated": true,
+         "displayName": long_display},
+        {"taskId": "task-5", "status": "pending",
+         "spec": long_spec, "specTruncated": true},
+    ]});
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.taskList", result)]),
+    );
+    let mut args = vec!["orchestration", "task-list"];
+    args.extend(coordinator_args());
+    let invocation = run_cli(&dir, &args, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    let lines: Vec<&str> = invocation.stdout.lines().collect();
+    // display_name wins over title and spec; dispatched rows carry the
+    // assignee suffix with the dispatch id.
+    assert!(
+        lines.contains(&"task-1 [dispatched] Shown One -> sess-1 (dispatch-1)"),
+        "dispatched line: {}",
+        invocation.stdout
+    );
+    // Title wins over spec when no display name is present.
+    assert!(
+        lines.contains(&"task-2 [ready] Title Two"),
+        "title line: {}",
+        invocation.stdout
+    );
+    // Spec is the fallback label.
+    assert!(
+        lines.contains(&"task-3 [pending] fallback spec"),
+        "spec line: {}",
+        invocation.stdout
+    );
+    // 60-character truncation, counted in characters, with no marker.
+    let display_line = lines
+        .iter()
+        .find(|line| line.starts_with("task-4 "))
+        .expect("task-4 line");
+    assert_eq!(
+        *display_line,
+        &format!("task-4 [pending] {}", "d".repeat(60)),
+        "display truncation: {display_line}",
+    );
+    let spec_line = lines
+        .iter()
+        .find(|line| line.starts_with("task-5 "))
+        .expect("task-5 line");
+    assert_eq!(
+        *spec_line,
+        &format!("task-5 [pending] {}", "界".repeat(60)),
+        "multibyte truncation: {spec_line}",
+    );
+    assert!(
+        !invocation.stdout.contains('…'),
+        "source human lines print no truncation marker: {}",
+        invocation.stdout
+    );
+    drop(_mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_list_human_output_empty_reports_no_tasks() {
+    let dir = temp_dir("task-list-empty");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.taskList", json!({"tasks": []}))]),
+    );
+    let mut args = vec!["orchestration", "task-list"];
+    args.extend(coordinator_args());
+    let invocation = run_cli(&dir, &args, &[]);
+    assert_eq!(invocation.exit_code, 0, "{}", invocation.stderr);
+    assert_eq!(invocation.stdout.trim(), "No tasks.");
+    drop(_mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_create_and_update_human_output_match_source_lines() {
+    let dir = temp_dir("task-created-updated");
+    let _mock = MockService::start(
+        &dir,
+        mock_behavior(
+            true,
+            vec![
+                (
+                    "orchestration.taskCreate",
+                    json!({"task": {"taskId": "task-1", "runId": "run-1",
+                                     "status": "pending", "dependsOn": []}}),
+                ),
+                (
+                    "orchestration.taskUpdate",
+                    json!({"task": {"taskId": "task-9", "runId": "run-1",
+                                     "status": "completed", "dependsOn": []}}),
+                ),
+            ],
+        ),
+    );
+    let mut create = vec![
+        "orchestration",
+        "task-create",
+        "--instructions",
+        "Do the work",
+    ];
+    create.extend(coordinator_args());
+    let created = run_cli(&dir, &create, &[]);
+    assert_eq!(created.exit_code, 0, "{}", created.stderr);
+    assert_eq!(created.stdout.trim(), "Created task-1 [pending]");
+    let mut update = vec![
+        "orchestration",
+        "task-update",
+        "--task",
+        "task-9",
+        "--status",
+        "completed",
+    ];
+    update.extend(coordinator_args());
+    let updated = run_cli(&dir, &update, &[]);
+    assert_eq!(updated.exit_code, 0, "{}", updated.stderr);
+    assert_eq!(updated.stdout.trim(), "Updated task-9 -> completed");
+    drop(_mock);
     let _ = std::fs::remove_dir_all(&dir);
 }

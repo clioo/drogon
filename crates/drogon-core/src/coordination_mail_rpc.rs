@@ -14,6 +14,10 @@ use rusqlite::Transaction;
 use serde_json::Value;
 use std::sync::atomic::Ordering;
 
+#[cfg(test)]
+#[path = "coordination_mail_inbox_tests.rs"]
+mod coordination_mail_inbox_tests;
+
 use crate::coordination_access::{self, WorkerBinding};
 use crate::coordination_attempts::{self as attempts, Settlement};
 use crate::coordination_mail::{
@@ -86,6 +90,11 @@ impl Engine {
                 };
                 self.dispatch_check_coordinator(request, scope, &params)
             }
+            "orchestration.inbox" => {
+                let params: InboxParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.commit_inbox(&params)
+            }
             other => Err(error::method_not_found(other)),
         }
     }
@@ -130,8 +139,51 @@ impl Engine {
                 params.validate_shape(&self.host_id)?;
                 self.dispatch_check_worker(request, binding, &params)
             }
+            "orchestration.inbox" => {
+                let params: InboxParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                // Fail-closed scope binding (existing agreement rule): a
+                // worker credential may sweep the host, but a --terminal
+                // naming another terminal is refused, never silently
+                // re-scoped.
+                if let Some(terminal) = &params.terminal
+                    && terminal != &binding.dispatch_id
+                {
+                    return Err(error::invalid_argument(
+                        "The worker credential may only sweep its own terminal.",
+                    ));
+                }
+                self.coordination_read(|tx| {
+                    coordination_access::recheck_in_tx(tx, binding, &request.method)?;
+                    self.commit_inbox_in_tx(tx, &params)
+                })
+            }
             other => Err(error::method_not_found(other)),
         }
+    }
+
+    /// Read-only host sweep: one snapshot read, no deliveries, no read
+    /// pointers, no receipts. Shared by both actors; the worker arm binds
+    /// scope before calling.
+    fn commit_inbox(&self, params: &InboxParams) -> Result<Value, RpcError> {
+        self.coordination_read(|tx| self.commit_inbox_in_tx(tx, params))
+    }
+
+    fn commit_inbox_in_tx(
+        &self,
+        tx: &Transaction<'_>,
+        params: &InboxParams,
+    ) -> Result<Value, RpcError> {
+        let messages = coordination_mail::inbox_in_tx(
+            tx,
+            &params.scope.host_id,
+            params.terminal.as_deref(),
+            params.effective_limit(),
+        )?;
+        encode(InboxResult {
+            count: messages.len(),
+            messages,
+        })
     }
 
     /// Appends the message and, for a final report, settles the attempt,
@@ -182,6 +234,7 @@ impl Engine {
                     subject: &params.subject,
                     body: params.body.as_deref(),
                     payload: params.payload.as_ref(),
+                    priority: params.priority,
                     thread_id: params.thread_id.as_deref(),
                     origin_request_id,
                     created_at: &crate::now_rfc3339(),
@@ -228,6 +281,21 @@ impl Engine {
         // settled outcome must classify against the original message, never
         // append a new one; a conflicting outcome must be refused with no effect.
         let existing_attempt = attempts::show(tx, scope, dispatch_id)?;
+        // Payload task identity must name the reporting dispatch's task: a
+        // late report carrying another task's id can never settle it (source:
+        // resolveLifecycleAuthority task_dispatch_mismatch).
+        if let Some(payload_task) = params
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.get("taskId"))
+            .and_then(|task| task.as_str())
+            && payload_task != existing_attempt.result.task_id
+        {
+            return Err(RpcError::new(
+                "task_dispatch_mismatch",
+                format!("Task {payload_task} does not belong to Dispatch {dispatch_id}."),
+            ));
+        }
         if let Some(prior_outcome) = existing_attempt.outcome {
             if prior_outcome != final_report.outcome {
                 return Err(RpcError::new(
@@ -280,6 +348,7 @@ impl Engine {
                 subject: &params.subject,
                 body: params.body.as_deref(),
                 payload: params.payload.as_ref(),
+                priority: params.priority,
                 thread_id: params.thread_id.as_deref(),
                 origin_request_id,
                 created_at: &crate::now_rfc3339(),
@@ -299,6 +368,10 @@ impl Engine {
             final_report.result.as_ref(),
         )? {
             Settlement::New(attempt) => {
+                // Source `suppressEarlierHeartbeats`: the report makes the
+                // dispatch's earlier unread heartbeats stale, so they are
+                // read+delivered and never arrive in a later check batch.
+                suppress_earlier_heartbeats_in_tx(tx, scope, summary.sequence as i64, dispatch_id)?;
                 let task_status = match final_report.outcome {
                     drogon_protocol::orchestration_common::ReportOutcome::Succeeded => {
                         TaskStatus::Completed
@@ -408,6 +481,7 @@ impl Engine {
                             delivery: None,
                             acknowledged: None,
                             messages: vec![],
+                            formatted: None,
                             next_cursor: None,
                             timed_out: false,
                             cancelled: true,
@@ -507,6 +581,7 @@ impl Engine {
                             delivery: None,
                             acknowledged: None,
                             messages: vec![],
+                            formatted: None,
                             next_cursor: None,
                             timed_out: false,
                             cancelled: true,
@@ -656,10 +731,14 @@ impl Engine {
                 WaitObservation::Found | WaitObservation::NotRequested => (false, false),
             }
         };
+        let formatted = params
+            .format
+            .then(|| coordination_mail::format_check_messages(&outcome.messages));
         encode(CheckResult {
             delivery: outcome.delivery,
             acknowledged: outcome.acknowledged,
             messages: outcome.messages,
+            formatted,
             next_cursor: None,
             timed_out,
             cancelled,
@@ -690,14 +769,92 @@ impl Engine {
             cursor,
             limit,
         )?;
+        let formatted = params
+            .format
+            .then(|| coordination_mail::format_check_messages(&messages));
         encode(CheckResult {
             delivery: None,
             acknowledged: None,
             messages,
+            formatted,
             next_cursor: next_cursor.map(OpaqueCursor),
             timed_out: false,
             cancelled: false,
             connection_lost: false,
         })
     }
+}
+
+/// Source `suppressEarlierHeartbeats`: the final report supersedes this
+/// dispatch's earlier unread heartbeats, so they are advanced past on the
+/// recipient mailbox and excluded from future consuming batches. Heartbeats
+/// from other dispatches and newer heartbeats stay.
+fn suppress_earlier_heartbeats_in_tx(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    report_sequence: i64,
+    dispatch_id: &str,
+) -> Result<(), RpcError> {
+    // Suppression keys on the dispatch's own heartbeats: the worker's
+    // payload dispatchId and the from_dispatch identity must agree before
+    // any pointer moves.
+    let mut statement = tx
+        .prepare(
+            "SELECT message_id, sequence, payload_json FROM orchestration_mail_messages
+              WHERE host_id=?1 AND run_id=?2 AND to_dispatch_id='' AND kind='heartbeat'
+                AND from_kind='dispatch' AND from_dispatch_id=?3
+                AND sequence < ?4",
+        )
+        .map_err(error::from_sqlite)?;
+    let rows = statement
+        .query_map(
+            rusqlite::params![
+                scope.host.host_id,
+                scope.run_id,
+                dispatch_id,
+                report_sequence
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .map_err(error::from_sqlite)?;
+    let mut max_suppressed: i64 = 0;
+    for row in rows {
+        let (_id, sequence, payload_json) = row.map_err(error::from_sqlite)?;
+        let payload: Option<serde_json::Value> = payload_json
+            .map(|json| serde_json::from_str(&json))
+            .transpose()
+            .map_err(|_| error::internal_error("Invalid stored heartbeat payload."))?;
+        let matches = payload
+            .as_ref()
+            .and_then(|payload| payload.get("dispatchId"))
+            .and_then(|dispatch| dispatch.as_str())
+            == Some(dispatch_id);
+        if matches {
+            max_suppressed = max_suppressed.max(sequence);
+        }
+    }
+    if max_suppressed > 0 {
+        // Advance the run-home read pointer past the suppressed heartbeats.
+        // Messages before the pointer with other kinds still surface only via
+        // peek/all, never via a consuming read.
+        let changed = tx.execute(
+            "INSERT INTO orchestration_mail_read_pointers (host_id, run_id, to_dispatch_id, read_through_sequence)
+              VALUES (?1, ?2, '', ?3)
+              ON CONFLICT(host_id, run_id, to_dispatch_id) DO UPDATE SET
+                read_through_sequence = MAX(read_through_sequence, excluded.read_through_sequence)",
+            rusqlite::params![scope.host.host_id, scope.run_id, max_suppressed],
+        ).map_err(error::from_sqlite)?;
+        if changed != 1 {
+            return Err(error::internal_error(
+                "Heartbeat suppression was not persisted.",
+            ));
+        }
+    }
+    Ok(())
 }

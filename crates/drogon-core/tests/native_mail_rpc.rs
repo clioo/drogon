@@ -363,6 +363,107 @@ fn same_id_replay_of_a_settled_report_is_idempotent() {
 }
 
 #[test]
+fn worker_report_suppresses_its_earlier_unread_heartbeats() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "i".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    let heartbeat = |_id: &str, dispatch: &str| {
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "kind":"heartbeat",
+            "subject":"alive", "payload": {"taskId": fx.task, "dispatchId": dispatch}})
+    };
+    let first = worker_call(
+        &engine,
+        "orchestration.send",
+        "hb-1",
+        &secret,
+        heartbeat("hb-1", "dispatch-1"),
+    );
+    assert!(first.ok, "{:?}", first.error);
+    // Another dispatch's heartbeat must survive suppression.
+    let other = worker_call(
+        &engine,
+        "orchestration.send",
+        "hb-2",
+        &secret,
+        heartbeat("hb-2", "dispatch-9"),
+    );
+    assert!(other.ok, "{:?}", other.error);
+    let report = worker_call(
+        &engine,
+        "orchestration.send",
+        "report",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "kind":"finalReport",
+            "subject":"done", "finalReport": {"outcome":"succeeded"},
+            "payload": {"taskId": fx.task.clone(), "dispatchId": "dispatch-1"}}),
+    );
+    assert!(report.ok, "{:?}", report.error);
+    // The run-home coordinator's consuming check sees the foreign heartbeat
+    // but not dispatch-1's suppressed one (source: suppressEarlierHeartbeats
+    // advances the mailbox past them, so they leave the unread batch).
+    let check = engine.dispatch(
+        serde_json::from_value(json!({
+            "protocol": drogon_protocol::PROTOCOL_VERSION, "requestId": "check",
+            "method": "orchestration.check",
+            "params": {"scope": {"actorKind":"coordinator","contractVersion":1,"hostId":fx.host,
+                "runId":fx.run,"coordinatorId":"owner","consumerGeneration":1},
+                "mode": "unread", "kinds": ["heartbeat"]},
+        }))
+        .unwrap(),
+    );
+    assert!(check.ok, "{:?}", check.error);
+    let check_result = check.result.unwrap();
+    let seen: Vec<&str> = check_result["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["kind"] == "heartbeat")
+        .filter_map(|m| m["payload"]["dispatchId"].as_str())
+        .collect();
+    assert_eq!(
+        seen,
+        vec!["dispatch-9"],
+        "full check result: {check_result:#}"
+    );
+}
+
+#[test]
+fn report_payload_naming_another_task_is_refused_without_effects() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "h".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    // The reporting dispatch's own task id settles fine; naming any other
+    // task id is a task_dispatch_mismatch before any write (source:
+    // resolveLifecycleAuthority).
+    let refused = worker_call(
+        &engine,
+        "orchestration.send",
+        "mismatch",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "kind":"finalReport",
+            "subject":"done", "finalReport": {"outcome":"succeeded"},
+            "payload": {"taskId": "some-other-task"}}),
+    );
+    assert!(!refused.ok);
+    assert_eq!(refused.error.unwrap().code, "task_dispatch_mismatch");
+    // Nothing settled and no message landed: the attempt still reports live.
+    let show = engine.dispatch(
+        serde_json::from_value(json!({
+            "protocol": drogon_protocol::PROTOCOL_VERSION, "requestId": "show",
+            "method": "orchestration.workerShow",
+            "params": dispatch_scope_admin(&fx, "dispatch-1"),
+        }))
+        .unwrap(),
+    );
+    assert!(show.ok);
+    assert!(show.result.unwrap()["outcome"].is_null());
+}
+
+#[test]
 fn conflicting_outcome_is_refused_and_original_status_is_preserved() {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();
@@ -1365,4 +1466,165 @@ fn invalid_or_corrupted_ack_is_rejected_before_wait_budget() {
             "{corruption} waited before rejecting"
         );
     }
+}
+
+#[test]
+fn check_priority_round_trips_and_peek_all_read_states() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "b".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    for (id, priority, subject) in [
+        ("send-normal", "normal", "plain"),
+        ("send-high", "high", "elevated"),
+        ("send-urgent", "urgent", "critical"),
+    ] {
+        ok(
+            &engine,
+            "orchestration.send",
+            id,
+            json!({"scope": coordinator_scope(&fx), "kind": "guidance",
+                "to": {"kind": "dispatch", "dispatchId": "dispatch-1"},
+                "subject": subject, "priority": priority}),
+        );
+    }
+    let check = |id: &str, extra: Value| {
+        let mut params = json!({"scope": dispatch_scope(&fx, "dispatch-1")});
+        for (k, v) in extra.as_object().unwrap() {
+            params[k] = v.clone();
+        }
+        let response = worker_call(&engine, "orchestration.check", id, &secret, params);
+        assert!(response.ok, "{:?}", response.error);
+        response.result.unwrap()
+    };
+    // Peek is non-consuming: all three unread rows with priorities intact.
+    let peeked = check("peek-1", json!({"mode": "peek"}));
+    assert_eq!(peeked["messages"].as_array().unwrap().len(), 3);
+    assert_eq!(peeked["messages"][0]["priority"], "normal");
+    assert_eq!(peeked["messages"][1]["priority"], "high");
+    assert_eq!(peeked["messages"][2]["priority"], "urgent");
+    assert!(peeked.get("delivery").is_none());
+    // Server-side kind filter applies to inspection output.
+    let peeked_guidance = check("peek-2", json!({"mode": "peek", "kinds": ["guidance"]}));
+    assert_eq!(peeked_guidance["messages"].as_array().unwrap().len(), 3);
+    let peeked_status = check("peek-3", json!({"mode": "peek", "kinds": ["status"]}));
+    assert_eq!(peeked_status["messages"].as_array().unwrap().len(), 0);
+    // Peek consumed nothing: the consuming read still gets the whole batch.
+    let consumed = check("unread-1", json!({"mode": "unread"}));
+    assert_eq!(consumed["messages"].as_array().unwrap().len(), 3);
+    let delivery_id = consumed["delivery"]["deliveryId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // An outstanding (unacked) delivery still reads as unread; only the ack
+    // advances the read pointer.
+    let peeked_outstanding = check("peek-4", json!({"mode": "peek"}));
+    assert_eq!(peeked_outstanding["messages"].as_array().unwrap().len(), 3);
+    let acked = check(
+        "unread-2",
+        json!({"mode": "unread", "acknowledge": delivery_id}),
+    );
+    assert_eq!(acked["acknowledged"]["alreadyAcknowledged"], false);
+    assert_eq!(acked["messages"].as_array().unwrap().len(), 0);
+    // After the ack, peek sees only unread (none); all includes read rows.
+    let peeked_after = check("peek-5", json!({"mode": "peek"}));
+    assert_eq!(peeked_after["messages"].as_array().unwrap().len(), 0);
+    let all = check("all-1", json!({"mode": "all"}));
+    assert_eq!(all["messages"].as_array().unwrap().len(), 3);
+    assert!(all.get("delivery").is_none());
+}
+
+#[test]
+fn check_format_flag_returns_server_side_expanded_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "c".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    ok(
+        &engine,
+        "orchestration.send",
+        "send-1",
+        json!({"scope": coordinator_scope(&fx), "kind": "guidance",
+            "to": {"kind": "dispatch", "dispatchId": "dispatch-1"},
+            "subject": "orders", "body": "do the thing",
+            "payload": {"step": 1}, "priority": "urgent"}),
+    );
+    let response = worker_call(
+        &engine,
+        "orchestration.check",
+        "check-1",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode": "peek", "format": true}),
+    );
+    assert!(response.ok, "{:?}", response.error);
+    let formatted = response.result.unwrap()["formatted"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(formatted.contains("[URGENT] [guidance]"), "{formatted}");
+    assert!(formatted.contains("[subject]"), "{formatted}");
+    assert!(formatted.contains("[body]"), "{formatted}");
+    assert!(formatted.contains("[payload]"), "{formatted}");
+    assert!(
+        formatted.contains("drogon-cli orchestration reply"),
+        "{formatted}"
+    );
+}
+
+#[test]
+fn check_consuming_kind_filter_is_wake_only_never_a_local_output_filter() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let fx = setup(&engine);
+    let secret = "d".repeat(64);
+    seed_worker(&engine, dir.path(), &fx, "dispatch-1", &secret);
+    ok(
+        &engine,
+        "orchestration.send",
+        "send-1",
+        json!({"scope": coordinator_scope(&fx), "kind": "status",
+            "to": {"kind": "dispatch", "dispatchId": "dispatch-1"}, "subject": "first"}),
+    );
+    ok(
+        &engine,
+        "orchestration.send",
+        "send-2",
+        json!({"scope": coordinator_scope(&fx), "kind": "question",
+            "to": {"kind": "dispatch", "dispatchId": "dispatch-1"}, "subject": "second"}),
+    );
+    // Run-mailbox parity: `kinds` wakes the waiter, but the delivered FIFO
+    // batch keeps its earlier non-matching messages.
+    let response = worker_call(
+        &engine,
+        "orchestration.check",
+        "check-1",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode": "unread",
+            "kinds": ["question"]}),
+    );
+    assert!(response.ok, "{:?}", response.error);
+    let result = response.result.unwrap();
+    let subjects: Vec<&str> = result["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["subject"].as_str().unwrap())
+        .collect();
+    assert_eq!(subjects, vec!["first", "second"]);
+    // With no matching kind anywhere, nothing is allocated yet.
+    let response = worker_call(
+        &engine,
+        "orchestration.check",
+        "check-2",
+        &secret,
+        json!({"scope": dispatch_scope(&fx, "dispatch-1"), "mode": "unread",
+            "acknowledge": result["delivery"]["deliveryId"].as_str().unwrap(),
+            "kinds": ["heartbeat"]}),
+    );
+    assert!(response.ok, "{:?}", response.error);
+    let result = response.result.unwrap();
+    assert_eq!(result["messages"].as_array().unwrap().len(), 0);
+    assert!(result.get("delivery").is_none());
 }

@@ -78,13 +78,16 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Brief rendering: collapse, then cap at `BRIEF_SPEC_CHARS` characters. The
+/// Brief rendering: collapse, then cap at `BRIEF_SPEC_CHARS` characters
+/// including the ellipsis. Source `abbreviateOrchestrationTasks` truncates to
+/// 159 chars + `…` (UTF-16 units there, Unicode scalar values here).
 fn brief_spec(text: &str) -> (String, bool) {
     let collapsed = collapse_whitespace(text);
     if collapsed.chars().count() <= BRIEF_SPEC_CHARS {
         return (collapsed, false);
     }
-    (collapsed.chars().take(BRIEF_SPEC_CHARS).collect(), true)
+    let truncated: String = collapsed.chars().take(BRIEF_SPEC_CHARS - 1).collect();
+    (format!("{}…", truncated.trim_end()), true)
 }
 
 fn encode_string_list(values: &[String]) -> Result<String, RpcError> {
@@ -155,6 +158,8 @@ impl TaskRow {
             status: self.status,
             depends_on: self.depends_on.clone(),
             result: self.result.clone(),
+            title: self.title.clone(),
+            display_name: self.display_name.clone(),
         }
     }
 
@@ -183,9 +188,49 @@ impl TaskRow {
             spec,
             spec_truncated,
             title: self.title.clone(),
+            display_name: self.display_name.clone(),
             depends_on: Some(self.depends_on.clone()),
+            assignee_handle: None,
+            dispatch_id: None,
         }
     }
+}
+
+/// Current attempt's assignee for one task: the attempt row's dispatch id plus
+/// the session id inside its stored worker result. `None` when no current
+/// attempt row exists (or the domain tables predate the attempts table).
+fn current_assignee(
+    tx: &Transaction<'_>,
+    host_id: &str,
+    run_id: &str,
+    task_id: &str,
+) -> Result<Option<(String, String)>, RpcError> {
+    let row = tx
+        .query_row(
+            "SELECT dispatch_id, state_json FROM orchestration_attempts \
+             WHERE host_id = ?1 AND run_id = ?2 AND task_id = ?3 AND is_current = 1",
+            params![host_id, run_id, task_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional();
+    let row = match row {
+        Ok(row) => row,
+        // The attempts table is owned by the engine migration; domain-only
+        // stores predate it and simply have no assignee to report.
+        Err(error) if error.to_string().contains("no such table") => return Ok(None),
+        Err(error) => return Err(store_error(error)),
+    };
+    let Some((dispatch_id, state_json)) = row else {
+        return Ok(None);
+    };
+    let value: Value = serde_json::from_str(&state_json)
+        .map_err(|_| store_error("a stored attempt field is malformed"))?;
+    let session = value
+        .get("result")
+        .and_then(|result| result.get("sessionIdentity"))
+        .and_then(|identity| identity.get("sessionId"))
+        .and_then(Value::as_str);
+    Ok(session.map(|handle| (handle.to_string(), dispatch_id)))
 }
 
 // Why this shape: rusqlite 0.40.2 cannot carry an RpcError out of a row closure,
@@ -346,6 +391,8 @@ pub fn create(
             status,
             depends_on,
             result: None,
+            title: params.spec.title.clone(),
+            display_name: params.spec.display_name.clone(),
         },
     })
 }
@@ -463,10 +510,21 @@ pub fn list(tx: &Transaction<'_>, params: &TaskListParams) -> Result<TaskListRes
         .map_err(unwrap_domain_error)?;
     let (rows, row_cap_reached) = split_page(probed, limit);
 
-    let summaries = rows
+    let mut summaries = rows
         .iter()
         .map(|row| row.summary(params.brief))
         .collect::<Vec<_>>();
+    for (row, summary) in rows.iter().zip(summaries.iter_mut()) {
+        if let Some((handle, dispatch_id)) = current_assignee(
+            tx,
+            &params.scope.host.host_id,
+            &params.scope.run_id,
+            &row.task_id,
+        )? {
+            summary.assignee_handle = Some(handle);
+            summary.dispatch_id = Some(dispatch_id);
+        }
+    }
     let (kept, budget_reached) = fit_page(summaries, PAGE_RESULT_BUDGET_BYTES)?;
     let next_cursor = match kept.last() {
         // Either a row cap or a size trim means more rows exist; minting from the

@@ -80,6 +80,21 @@ pub enum Command {
         override_usage = "drogon-cli agent-context\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
     )]
     AgentContext,
+    /// Daemon diagnostics (memory footprint and session counts)
+    Diagnostics {
+        #[command(subcommand)]
+        action: DiagnosticsAction,
+    },
+    /// Machines this host can target (the local daemon only)
+    Host {
+        #[command(subcommand)]
+        action: HostAction,
+    },
+    /// Paired Orca-server environments (the native runtime pairs none)
+    Environment {
+        #[command(subcommand)]
+        action: EnvironmentAction,
+    },
     /// Workspaces: registered directories that own terminal sessions
     Workspace {
         #[command(subcommand)]
@@ -89,6 +104,11 @@ pub enum Command {
     Project {
         #[command(subcommand)]
         action: ProjectAction,
+    },
+    /// Search refs within a registered git repository
+    Repo {
+        #[command(subcommand)]
+        action: RepoAction,
     },
     /// Worktrees of a git Project (or the implicit one of a folder Project)
     Worktree {
@@ -246,6 +266,12 @@ pub enum AutomationAction {
         override_usage = "drogon-cli automation list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
     )]
     List,
+    /// Show one automation by id
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation show <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    Show { id: String },
     /// Run an automation now (manual trigger, recorded in history)
     #[command(
         args_override_self = true,
@@ -265,6 +291,59 @@ pub enum AutomationAction {
         id: String,
         #[arg(long, value_name = "N")]
         limit: Option<u64>,
+    },
+    /// Update an automation's fields (only the given flags change)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation edit --id <ID> [--name <NAME>] [--cron <EXPR>] [--workspace <ID>] [--harness <ID>] [--prompt <TEXT>] [--enable|--disable] [--grace-minutes <N>] [--model <ID>] [--provider <ID>]\nValid flags: --cron, --data-dir, --disable, --enable, --grace-minutes, --harness, --help, --id, --json, --model, --name, --prompt, --provider, --request-id, --retry-request, --workspace"
+    )]
+    Edit {
+        #[arg(long, value_name = "ID")]
+        id: String,
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+        #[arg(long, value_name = "EXPR")]
+        cron: Option<String>,
+        #[arg(long, value_name = "ID")]
+        workspace: Option<String>,
+        #[arg(long, value_name = "ID")]
+        harness: Option<String>,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        prompt: Option<String>,
+        /// Enable the automation (conflicts with --disable)
+        #[arg(long, conflicts_with = "disable")]
+        enable: bool,
+        /// Disable the automation (conflicts with --enable)
+        #[arg(long)]
+        disable: bool,
+        #[arg(long, value_name = "N")]
+        grace_minutes: Option<f64>,
+        #[arg(long, value_name = "ID")]
+        model: Option<String>,
+        #[arg(long, value_name = "ID")]
+        provider: Option<String>,
+    },
+    /// Delete an automation and its run history
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation remove --id <ID>\nValid flags: --data-dir, --help, --id, --json, --request-id, --retry-request"
+    )]
+    Remove {
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+    /// List runs across every automation, newest scheduled first
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli automation runs [--status <STATUS>] [--page <N>] [--per-page <N>]\nValid flags: --data-dir, --help, --json, --page, --per-page, --request-id, --retry-request, --status"
+    )]
+    Runs {
+        #[arg(long, value_name = "STATUS")]
+        status: Option<String>,
+        #[arg(long, value_name = "N")]
+        page: Option<u64>,
+        #[arg(long, value_name = "N")]
+        per_page: Option<u64>,
     },
 }
 
@@ -287,6 +366,83 @@ pub enum InternalAction {
         incarnation: String,
         #[arg(long, value_name = "NAME")]
         event: String,
+    },
+}
+
+/// Source specs/environment.ts: paired Orca-server environments live in a
+/// local pairing store. The native runtime has no pairing store, so the
+/// honest answers are an empty list and typed `not_found` per selector.
+/// `environment add` needs live pairing-code verification against a running
+/// app and is therefore not offered rather than faked.
+#[derive(Subcommand, Debug)]
+pub enum EnvironmentAction {
+    /// List the saved remote Orca runtime environments
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli environment list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    List,
+    /// Show one saved environment
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli environment show --environment <SELECTOR>\nValid flags: --data-dir, --environment, --help, --json, --request-id, --retry-request"
+    )]
+    Show {
+        #[arg(long, value_name = "SELECTOR")]
+        environment: String,
+    },
+    /// Remove one saved environment
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli environment rm --environment <SELECTOR>\nValid flags: --data-dir, --environment, --help, --json, --request-id, --retry-request"
+    )]
+    Rm {
+        #[arg(long, value_name = "SELECTOR")]
+        environment: String,
+    },
+}
+
+/// Source specs/environment.ts `host list`: in the native runtime there is
+/// exactly one reachable machine — the daemon's own host. SSH targets and
+/// paired servers do not exist here, so the answer is honestly just `local`.
+#[derive(Subcommand, Debug)]
+pub enum HostAction {
+    /// List every machine this host can target, and how to name each one
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli host list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    List,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DiagnosticsAction {
+    /// Show the daemon's own memory footprint and session counts
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli diagnostics memory\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    Memory,
+}
+
+/// Source `repo search-refs`: branch/tag ref search inside one registered
+/// repo. The native registry is the Projects table, addressed by `--project`.
+#[derive(Subcommand, Debug)]
+pub enum RepoAction {
+    /// Search branch, remote, and tag refs within a git Project
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli repo search-refs --project <ID> --query <TEXT> [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --project, --query, --request-id, --retry-request"
+    )]
+    SearchRefs {
+        #[arg(long, value_name = "ID")]
+        project: String,
+        /// Case-insensitive substring to match against ref names
+        #[arg(long, value_name = "TEXT")]
+        query: String,
+        /// Page size (default 25, max 1000; source limits)
+        #[arg(long, value_name = "N")]
+        limit: Option<u64>,
     },
 }
 
@@ -330,6 +486,19 @@ pub enum ProjectAction {
         override_usage = "drogon-cli project list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
     )]
     List,
+    /// List project host setups (the native runtime records none)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli project setups [--project <ID>] [--host <HOST-ID>]\nValid flags: --data-dir, --help, --host, --json, --project, --request-id, --retry-request"
+    )]
+    Setups {
+        /// Filter by project id
+        #[arg(long, value_name = "ID")]
+        project: Option<String>,
+        /// Filter by host id (`local` is the only reachable host)
+        #[arg(long, value_name = "HOST-ID")]
+        host: Option<String>,
+    },
     /// Remove a Project registration; files on disk are untouched
     #[command(
         args_override_self = true,
@@ -343,10 +512,25 @@ pub enum ProjectAction {
 
 #[derive(Subcommand, Debug)]
 pub enum WorktreeAction {
+    /// Show one worktree by id (a folder Project's id addresses its implicit worktree)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree show --id <ID>\nValid flags: --data-dir, --help, --id, --json, --request-id, --retry-request"
+    )]
+    Show {
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+    /// Show the Orca-managed worktree enclosing the current directory
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree current\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    Current,
     /// Create a git worktree for a Project on branch NAME
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>]\nValid flags: --base, --base-branch, --data-dir, --help, --json, --name, --project, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent] [--comment <TEXT>] [--agent <ID> [--prompt <TEXT>]] [--setup run|skip|inherit] [--activate] [--issue <N>]\nValid flags: --activate, --agent, --base, --base-branch, --comment, --data-dir, --help, --issue, --json, --name, --no-parent, --parent, --project, --prompt, --request-id, --retry-request, --run-hooks, --setup"
     )]
     Create {
         #[arg(long, value_name = "ID")]
@@ -358,28 +542,117 @@ pub enum WorktreeAction {
         /// flag; both spellings map to the one `baseRef` param.
         #[arg(long, visible_alias = "base-branch", value_name = "REF")]
         base: Option<String>,
+        /// Sidebar-nesting parent worktree id (source `--parent-worktree`)
+        #[arg(long, value_name = "ID")]
+        parent: Option<String>,
+        /// Create explicitly parentless (source `--no-parent`)
+        #[arg(long)]
+        no_parent: bool,
+        /// Free-text note attached to the worktree (source `--comment`)
+        #[arg(long, value_name = "TEXT")]
+        comment: Option<String>,
+        /// Launch this harness in the worktree's first terminal
+        /// (source `--agent`; ids are the daemon's harness ids)
+        #[arg(long, value_name = "ID")]
+        agent: Option<String>,
+        /// Initial prompt for `--agent`; requires it
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        prompt: Option<String>,
+        /// Legacy alias: run the repo's setup hooks after creating
+        /// (honestly a no-op here — this runtime has no orca.yaml engine)
+        #[arg(long)]
+        run_hooks: bool,
+        /// Repo setup-hook decision (source `--setup`; honestly recorded
+        /// but unrunnable here — this runtime has no orca.yaml engine)
+        #[arg(long, value_name = "MODE")]
+        setup: Option<String>,
+        /// Reveal the new worktree in the app (honestly a no-op here —
+        /// there is no desktop view to reveal)
+        #[arg(long)]
+        activate: bool,
+        /// Linked GitHub issue number (source `--issue`)
+        #[arg(long, value_name = "N")]
+        issue: Option<u64>,
     },
     /// List a Project's worktrees
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree list --project <ID>\nValid flags: --data-dir, --help, --json, --project, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree list --project <ID> [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --project, --request-id, --retry-request"
     )]
     List {
         #[arg(long, value_name = "ID")]
         project: String,
+        /// Cap the number of worktrees returned
+        #[arg(long, value_name = "N")]
+        limit: Option<u64>,
+    },
+    /// Show a compact orchestration summary across worktrees
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree ps [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --request-id, --retry-request"
+    )]
+    Ps {
+        #[arg(long, value_name = "N")]
+        limit: Option<u64>,
+    },
+    /// Update Orca metadata for a worktree (note, parent)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli worktree set --id <ID> [--note <TEXT>|--no-note] [--parent <ID>|--no-parent] [--display-name <NAME>|--no-display-name] [--issue <N>|--no-issue]\nValid flags: --comment, --data-dir, --display-name, --help, --id, --issue, --json, --no-display-name, --no-issue, --no-note, --no-parent, --note, --parent, --request-id, --retry-request"
+    )]
+    Set {
+        #[arg(long, value_name = "ID")]
+        id: String,
+        /// Note text; empty after trimming clears the note. `--comment` is
+        /// the source CLI's name for the same field.
+        #[arg(
+            long,
+            visible_alias = "comment",
+            value_name = "TEXT",
+            conflicts_with = "no_note"
+        )]
+        note: Option<String>,
+        /// Clear the note explicitly
+        #[arg(long)]
+        no_note: bool,
+        /// Display title (source `--display-name`)
+        #[arg(long, value_name = "NAME", conflicts_with = "no_display_name")]
+        display_name: Option<String>,
+        /// Clear the display title explicitly
+        #[arg(long)]
+        no_display_name: bool,
+        /// Linked GitHub issue number (source `--issue`)
+        #[arg(long, value_name = "N", conflicts_with = "no_issue")]
+        issue: Option<u64>,
+        /// Clear the linked issue explicitly
+        #[arg(long)]
+        no_issue: bool,
+        /// Parent worktree id (same project only)
+        #[arg(long, value_name = "ID", conflicts_with = "no_parent")]
+        parent: Option<String>,
+        /// Clear the parent explicitly
+        #[arg(long)]
+        no_parent: bool,
     },
     /// Remove a worktree; refuses a dirty checkout unless --force
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree rm <ID> [--force]\nValid flags: --data-dir, --force, --help, --json, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree rm <ID> [--force] [--delete-branch] [--run-hooks]\nValid flags: --data-dir, --delete-branch, --force, --help, --json, --request-id, --retry-request, --run-hooks"
     )]
     Rm {
         id: String,
         #[arg(long)]
         force: bool,
+        /// Also delete the now-orphaned branch (safe `git branch -d`;
+        /// branches with unmerged commits survive)
+        #[arg(long)]
+        delete_branch: bool,
+        /// Legacy alias: run the repo's archive hooks before removing
+        /// (honestly a no-op here — this runtime has no orca.yaml engine)
+        #[arg(long)]
+        run_hooks: bool,
     },
 }
-
 #[derive(Subcommand, Debug)]
 pub enum TerminalAction {
     /// Start a PTY session running COMMAND with ARGS (after `--`)
@@ -398,16 +671,23 @@ pub enum TerminalAction {
     /// List sessions, optionally scoped to one workspace
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli terminal list [--workspace <ID>]\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+        override_usage = "drogon-cli terminal list [--workspace <ID>|--worktree <ID>] [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --request-id, --retry-request, --worktree, --workspace"
     )]
     List {
         #[arg(long, value_name = "ID")]
         workspace: Option<String>,
+        /// Scope to a worktree (resolved to its workspace; source
+        /// `--worktree <selector>`)
+        #[arg(long, value_name = "ID", conflicts_with = "workspace")]
+        worktree: Option<String>,
+        /// Cap the number of sessions returned (newest last, source order)
+        #[arg(long, value_name = "N")]
+        limit: Option<u64>,
     },
     /// Read bounded output from a session
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli terminal read --session <ID> --incarnation <TOKEN> [--cursor <N>] [--limit-bytes <BYTES>]\nValid flags: --cursor, --data-dir, --help, --incarnation, --json, --limit-bytes, --request-id, --retry-request, --session"
+        override_usage = "drogon-cli terminal read --session <ID> --incarnation <TOKEN> [--cursor <N>|--screen] [--limit-bytes <BYTES>]\nValid flags: --cursor, --data-dir, --help, --incarnation, --json, --limit-bytes, --request-id, --retry-request, --screen, --session"
     )]
     Read {
         #[arg(long, value_name = "ID")]
@@ -415,24 +695,36 @@ pub enum TerminalAction {
         #[arg(long, value_name = "TOKEN")]
         incarnation: String,
         /// Absolute byte offset to read from (protocol default 0)
-        #[arg(long, value_name = "N")]
+        #[arg(long, value_name = "N", conflicts_with = "screen")]
         cursor: Option<u64>,
         /// Maximum bytes to return (protocol default and maximum 65536)
         #[arg(long, value_name = "BYTES")]
         limit_bytes: Option<u64>,
+        /// Render what the terminal actually displays from the full
+        /// retained stream instead of returning accumulated bytes
+        /// (source `--screen`; mutually exclusive with --cursor)
+        #[arg(long)]
+        screen: bool,
     },
-    /// Write UTF-8 text to a session (encoded to base64 exactly once)
+    /// Send text to a session's PTY, optionally submitting or interrupting
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT>\nValid flags: --data-dir, --help, --incarnation, --json, --request-id, --retry-request, --session, --text"
+        override_usage = "drogon-cli terminal send --session <ID> --incarnation <TOKEN> [--text <TEXT>] [--enter] [--interrupt]\nValid flags: --data-dir, --enter, --help, --incarnation, --interrupt, --json, --request-id, --retry-request, --session, --text"
     )]
     Send {
         #[arg(long, value_name = "ID")]
         session: String,
         #[arg(long, value_name = "TOKEN")]
         incarnation: String,
+        /// Text to type. Optional when only --enter or --interrupt is sent.
         #[arg(long, value_name = "TEXT")]
-        text: String,
+        text: Option<String>,
+        /// Append a carriage return after the text (submit the line)
+        #[arg(long)]
+        enter: bool,
+        /// Send the interrupt byte (Ctrl-C, 0x03); incompatible with --text/--enter
+        #[arg(long, conflicts_with_all = ["enter", "text"])]
+        interrupt: bool,
     },
     /// Resize a session's PTY
     #[command(
@@ -448,6 +740,38 @@ pub enum TerminalAction {
         cols: u16,
         #[arg(long)]
         rows: u16,
+    },
+    /// Rename a session's display title (source `terminal rename`)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal rename --session <ID> --incarnation <TOKEN> [--title <TEXT>]\nValid flags: --data-dir, --help, --incarnation, --json, --request-id, --retry-request, --session, --title"
+    )]
+    Rename {
+        #[arg(long, value_name = "ID")]
+        session: String,
+        #[arg(long, value_name = "TOKEN")]
+        incarnation: String,
+        /// New title; omitted or blank-after-trim clears it
+        #[arg(long, value_name = "TEXT")]
+        title: Option<String>,
+    },
+    /// Show a session's metadata and output preview
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal show --session <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --session"
+    )]
+    Show {
+        #[arg(long, value_name = "ID")]
+        session: String,
+    },
+    /// Stop every live session in a workspace (source `terminal stop`)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal stop --workspace <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+    )]
+    Stop {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
     },
     /// Stop a session and wait for the observed exit
     #[command(
@@ -735,24 +1059,144 @@ impl Cli {
                     }
                 }
                 ProjectAction::List => {}
+                ProjectAction::Setups { project, host } => {
+                    if let Some(project) = project {
+                        require_nonempty("project", project)?;
+                    }
+                    if let Some(host) = host {
+                        require_nonempty("host", host)?;
+                    }
+                }
                 ProjectAction::Remove { id } => {
                     require_nonempty("id", id)?;
                 }
             },
+            Command::Repo {
+                action:
+                    RepoAction::SearchRefs {
+                        project,
+                        query,
+                        limit,
+                    },
+            } => {
+                require_nonempty("project", project)?;
+                require_nonempty("query", query)?;
+                if let Some(limit) = limit
+                    && *limit == 0
+                {
+                    return Err(CliError::Usage("--limit must be a positive integer".into()));
+                }
+            }
             Command::Worktree { action } => match action {
                 WorktreeAction::Create {
                     project,
                     name,
                     base,
+                    parent,
+                    no_parent,
+                    comment,
+                    agent,
+                    prompt,
+                    run_hooks: _,
+                    setup,
+                    activate: _,
+                    issue,
                 } => {
                     require_nonempty("project", project)?;
                     require_nonempty("name", name)?;
                     if let Some(base) = base {
                         require_nonempty("base", base)?;
                     }
+                    if let Some(parent) = parent {
+                        require_nonempty("parent", parent)?;
+                    }
+                    // Source `assertCreateParentFlagsCompatible` copy.
+                    if parent.is_some() && *no_parent {
+                        return Err(CliError::Usage(
+                            "Choose either one parent selector or --no-parent.".into(),
+                        ));
+                    }
+                    if let Some(comment) = comment {
+                        require_nonempty("comment", comment)?;
+                    }
+                    // Source `getOptionalStartupAgent` copy.
+                    if agent.is_none() && prompt.is_some() {
+                        return Err(CliError::Usage("--prompt requires --agent".into()));
+                    }
+                    if let Some(agent) = agent {
+                        require_nonempty("agent", agent)?;
+                    }
+                    // Source setup decision values; --run-hooks already
+                    // aliases `--setup run` (kept separate for the wire).
+                    if let Some(setup) = setup {
+                        require_nonempty("setup", setup)?;
+                        if !matches!(setup.as_str(), "run" | "skip" | "inherit") {
+                            return Err(CliError::Usage(
+                                "--setup must be one of run, skip, inherit".into(),
+                            ));
+                        }
+                    }
+                    // Source `--issue`: a positive GitHub issue number.
+                    if let Some(issue) = issue
+                        && *issue == 0
+                    {
+                        return Err(CliError::Usage("--issue must be a positive integer".into()));
+                    }
                 }
-                WorktreeAction::List { project } => {
+                WorktreeAction::Show { id } => {
+                    require_nonempty("id", id)?;
+                }
+                WorktreeAction::Current => {}
+                WorktreeAction::List { project, limit } => {
                     require_nonempty("project", project)?;
+                    if let Some(limit) = limit
+                        && *limit == 0
+                    {
+                        return Err(CliError::Usage("--limit must be a positive integer".into()));
+                    }
+                }
+                WorktreeAction::Ps { limit } => {
+                    if let Some(limit) = limit
+                        && *limit == 0
+                    {
+                        return Err(CliError::Usage("--limit must be a positive integer".into()));
+                    }
+                }
+                WorktreeAction::Set {
+                    id,
+                    note,
+                    no_note,
+                    display_name,
+                    no_display_name,
+                    issue,
+                    no_issue,
+                    parent,
+                    no_parent,
+                } => {
+                    require_nonempty("id", id)?;
+                    if let Some(note) = note {
+                        require_nonempty("note", note)?;
+                    }
+                    if let Some(display_name) = display_name {
+                        require_nonempty("display-name", display_name)?;
+                    }
+                    if let Some(parent) = parent {
+                        require_nonempty("parent", parent)?;
+                    }
+                    if note.is_none()
+                        && !no_note
+                        && display_name.is_none()
+                        && !no_display_name
+                        && issue.is_none()
+                        && !no_issue
+                        && parent.is_none()
+                        && !no_parent
+                    {
+                        return Err(CliError::Usage(
+                            "worktree set requires --note/--no-note, --display-name/--no-display-name, --issue/--no-issue, or --parent/--no-parent"
+                                .into(),
+                        ));
+                    }
                 }
                 WorktreeAction::Rm { id, .. } => {
                     require_nonempty("id", id)?;
@@ -776,9 +1220,21 @@ impl Cli {
                         }
                     }
                 }
-                TerminalAction::List { workspace } => {
+                TerminalAction::List {
+                    workspace,
+                    worktree,
+                    limit,
+                } => {
                     if let Some(workspace) = workspace {
                         require_nonempty("workspace", workspace)?;
+                    }
+                    if let Some(worktree) = worktree {
+                        require_nonempty("worktree", worktree)?;
+                    }
+                    if let Some(limit) = limit
+                        && *limit == 0
+                    {
+                        return Err(CliError::Usage("--limit must be a positive integer".into()));
                     }
                 }
                 TerminalAction::Read {
@@ -798,10 +1254,17 @@ impl Cli {
                 TerminalAction::Send {
                     session,
                     incarnation,
-                    ..
+                    text,
+                    enter,
+                    interrupt,
                 } => {
                     require_nonempty("session", session)?;
                     require_nonempty("incarnation", incarnation)?;
+                    if text.is_none() && !enter && !interrupt {
+                        return Err(CliError::Usage(
+                            "terminal send requires --text, --enter or --interrupt".into(),
+                        ));
+                    }
                 }
                 TerminalAction::Resize {
                     session,
@@ -813,6 +1276,27 @@ impl Cli {
                     require_nonempty("incarnation", incarnation)?;
                     validate_dimension("cols", *cols)?;
                     validate_dimension("rows", *rows)?;
+                }
+                TerminalAction::Rename {
+                    session,
+                    incarnation,
+                    title,
+                } => {
+                    require_nonempty("session", session)?;
+                    require_nonempty("incarnation", incarnation)?;
+                    if let Some(title) = title
+                        && title.chars().count() > 256
+                    {
+                        return Err(CliError::Usage(
+                            "--title must be at most 256 characters".into(),
+                        ));
+                    }
+                }
+                TerminalAction::Show { session } => {
+                    require_nonempty("session", session)?;
+                }
+                TerminalAction::Stop { workspace } => {
+                    require_nonempty("workspace", workspace)?;
                 }
                 TerminalAction::Close {
                     session,
@@ -919,6 +1403,9 @@ impl Cli {
                     }
                 }
                 AutomationAction::List => {}
+                AutomationAction::Show { id } => {
+                    require_nonempty("id", id)?;
+                }
                 AutomationAction::Run { id } => {
                     require_nonempty("id", id)?;
                 }
@@ -928,6 +1415,55 @@ impl Cli {
                         && (*limit == 0 || *limit > 200)
                     {
                         return Err(CliError::Usage("--limit must be within 1..=200".into()));
+                    }
+                }
+                AutomationAction::Edit {
+                    id,
+                    name,
+                    cron,
+                    workspace,
+                    harness,
+                    prompt,
+                    grace_minutes,
+                    model,
+                    provider,
+                    ..
+                } => {
+                    require_nonempty("id", id)?;
+                    for (flag, value) in [
+                        ("name", name.as_deref()),
+                        ("cron", cron.as_deref()),
+                        ("workspace", workspace.as_deref()),
+                        ("harness", harness.as_deref()),
+                        ("prompt", prompt.as_deref()),
+                        ("model", model.as_deref()),
+                        ("provider", provider.as_deref()),
+                    ] {
+                        if let Some(value) = value {
+                            require_nonempty(flag, value)?;
+                        }
+                    }
+                    if let Some(grace) = grace_minutes
+                        && *grace < 0.0
+                    {
+                        return Err(CliError::Usage(
+                            "--grace-minutes must not be negative".into(),
+                        ));
+                    }
+                }
+                AutomationAction::Remove { id } => {
+                    require_nonempty("id", id)?;
+                }
+                AutomationAction::Runs { page, per_page, .. } => {
+                    if let Some(page) = page
+                        && *page == 0
+                    {
+                        return Err(CliError::Usage("--page must be >= 1".into()));
+                    }
+                    if let Some(per_page) = per_page
+                        && (*per_page == 0 || *per_page > 200)
+                    {
+                        return Err(CliError::Usage("--per-page must be within 1..=200".into()));
                     }
                 }
             },
@@ -1010,6 +1546,19 @@ impl Cli {
             },
             Command::Status => {}
             Command::AgentContext => {}
+            Command::Host { action } => match action {
+                HostAction::List => {}
+            },
+            Command::Environment { action } => match action {
+                EnvironmentAction::List => {}
+                EnvironmentAction::Show { environment } => {
+                    require_nonempty("environment", environment)?;
+                }
+                EnvironmentAction::Rm { environment } => {
+                    require_nonempty("environment", environment)?;
+                }
+            },
+            Command::Diagnostics { .. } => {}
         }
         Ok(())
     }
@@ -1263,6 +1812,15 @@ mod tests {
                     project,
                     name,
                     base,
+                    parent,
+                    no_parent,
+                    comment,
+                    agent: _,
+                    prompt: _,
+                    run_hooks: _,
+                    setup: _,
+                    activate: _,
+                    issue: _,
                 },
         } = &cli.command
         else {
@@ -1271,6 +1829,9 @@ mod tests {
         assert_eq!(project, "p1");
         assert_eq!(name, "feature");
         assert_eq!(base.as_deref(), Some("main"));
+        assert_eq!(parent, &None);
+        assert!(!*no_parent);
+        assert_eq!(comment, &None);
         assert!(cli.validate().is_ok());
 
         let cli = parse(&["worktree", "list", "--project", "p1"]).unwrap();
@@ -1278,7 +1839,7 @@ mod tests {
 
         let cli = parse(&["worktree", "rm", "w1", "--force"]).unwrap();
         let Command::Worktree {
-            action: WorktreeAction::Rm { id, force },
+            action: WorktreeAction::Rm { id, force, .. },
         } = &cli.command
         else {
             panic!("wrong subcommand");
@@ -1319,6 +1880,7 @@ mod tests {
                         project,
                         name,
                         base,
+                        ..
                     },
             } = &cli.command
             else {

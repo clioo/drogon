@@ -79,6 +79,12 @@ pub struct TaskRecord {
     pub depends_on: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
+    /// Source label order is display_name ?? title ?? spec; the record carries
+    /// both so the CLI can build the label. Optional for old-record reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
 }
 
 /// Creates a task in an existing run. Source anchor: `taskCreate` carried
@@ -157,7 +163,15 @@ pub struct TaskSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub depends_on: Option<Vec<String>>,
+    /// Current attempt's assignee session id, when a current attempt exists.
+    /// The CLI renders it only for `dispatched` rows (source condition).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee_handle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

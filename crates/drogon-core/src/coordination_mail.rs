@@ -11,7 +11,7 @@
 
 use drogon_protocol::RpcError;
 use drogon_protocol::orchestration_common::validate_opaque_token;
-use drogon_protocol::orchestration_mail::{MessageKind, MessageSummary};
+use drogon_protocol::orchestration_mail::{MessageKind, MessagePriority, MessageSummary};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde_json::Value;
 
@@ -27,7 +27,7 @@ pub(crate) mod questions;
 mod coordination_mail_tests;
 
 pub(crate) const SCHEMA_COMPONENT: &str = "orchestration_mail";
-pub(crate) const SCHEMA_VERSION: i64 = 1;
+pub(crate) const SCHEMA_VERSION: i64 = 2;
 
 /// Single-message and page response budget (bytes); enforced before mutation
 /// or consumption, never a silent truncation.
@@ -142,6 +142,10 @@ pub(crate) fn message_kind_tag(kind: MessageKind) -> u8 {
         MessageKind::FinalReport => 4,
         MessageKind::Guidance => 5,
         MessageKind::Escalation => 6,
+        MessageKind::Dispatch => 7,
+        MessageKind::MergeReady => 8,
+        MessageKind::Handoff => 9,
+        MessageKind::DecisionGate => 10,
     }
 }
 
@@ -154,6 +158,10 @@ fn message_kind_str(kind: MessageKind) -> &'static str {
         MessageKind::FinalReport => "finalReport",
         MessageKind::Guidance => "guidance",
         MessageKind::Escalation => "escalation",
+        MessageKind::Dispatch => "dispatch",
+        MessageKind::MergeReady => "mergeReady",
+        MessageKind::Handoff => "handoff",
+        MessageKind::DecisionGate => "decisionGate",
     }
 }
 
@@ -166,6 +174,10 @@ fn message_kind_from_str(value: &str) -> Result<MessageKind, RpcError> {
         "finalReport" => MessageKind::FinalReport,
         "guidance" => MessageKind::Guidance,
         "escalation" => MessageKind::Escalation,
+        "dispatch" => MessageKind::Dispatch,
+        "mergeReady" | "merge_ready" => MessageKind::MergeReady,
+        "handoff" => MessageKind::Handoff,
+        "decisionGate" | "decision_gate" => MessageKind::DecisionGate,
         _ => return Err(error::internal_error("Invalid stored message kind.")),
     })
 }
@@ -189,14 +201,27 @@ pub(crate) fn migrate_in_tx(tx: &Transaction) -> Result<(), RpcError> {
         )
         .optional()
         .map_err(mail_storage_error)?;
-    // With exactly one released version, any recorded value other than
-    // precisely `SCHEMA_VERSION` -- future (too high) or corrupt (0,
-    // negative, or any other stray value) -- is refused explicitly rather
+    // Version 2 adds the display-priority column; a recorded version 1
+    // steps forward additively, anything else is refused explicitly rather
     // than silently stepped forward.
     // Uniform downgrade-refusal copy (R16-BP): names the component, the
     // found/supported versions and the "newer than" marker the desktop
     // bootstrap classifies on, like every other component's refusal.
     if let Some(found) = found {
+        if found == 1 {
+            tx.execute_batch(
+                "ALTER TABLE orchestration_mail_messages
+                    ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';",
+            )
+            .map_err(mail_storage_error)?;
+            tx.execute(
+                "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)
+                 ON CONFLICT(component) DO UPDATE SET version = excluded.version",
+                params![SCHEMA_COMPONENT, SCHEMA_VERSION],
+            )
+            .map_err(mail_storage_error)?;
+            return Ok(());
+        }
         if found != SCHEMA_VERSION {
             return Err(RpcError::new(
                 "unsupported_orchestration_contract",
@@ -221,6 +246,7 @@ pub(crate) fn migrate_in_tx(tx: &Transaction) -> Result<(), RpcError> {
             subject TEXT NOT NULL,
             body TEXT,
             payload_json TEXT,
+            priority TEXT NOT NULL DEFAULT 'normal',
             thread_id TEXT NOT NULL,
             origin_request_id TEXT NOT NULL,
             created_at TEXT NOT NULL
@@ -289,6 +315,7 @@ pub(crate) struct NewMessage<'a> {
     pub(crate) subject: &'a str,
     pub(crate) body: Option<&'a str>,
     pub(crate) payload: Option<&'a Value>,
+    pub(crate) priority: MessagePriority,
     /// When absent, the message starts its own thread (`thread_id ==
     /// message_id`) — a caller-supplied identity, not a minted one.
     pub(crate) thread_id: Option<&'a str>,
@@ -308,6 +335,7 @@ fn enforce_message_size(
     subject: &str,
     body: Option<&str>,
     payload: Option<&Value>,
+    priority: MessagePriority,
     thread_id: &str,
 ) -> Result<(), RpcError> {
     let probe = row_to_summary(
@@ -319,6 +347,7 @@ fn enforce_message_size(
         subject.to_string(),
         body.map(str::to_string),
         payload.cloned(),
+        priority,
         Some(thread_id.to_string()),
     );
     if message_wire_size(&probe)? > PACKING_BUDGET_BYTES {
@@ -353,6 +382,7 @@ pub(crate) fn append_message_in_tx(
         new.subject,
         new.body,
         new.payload,
+        new.priority,
         thread_id,
     )?;
     let payload_json = new
@@ -363,8 +393,8 @@ pub(crate) fn append_message_in_tx(
     tx.execute(
         "INSERT INTO orchestration_mail_messages
             (message_id, host_id, run_id, kind, from_kind, from_coordinator_id, from_dispatch_id,
-             to_dispatch_id, subject, body, payload_json, thread_id, origin_request_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+             to_dispatch_id, subject, body, payload_json, priority, thread_id, origin_request_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             new.message_id,
             new.host_id,
@@ -377,6 +407,7 @@ pub(crate) fn append_message_in_tx(
             new.subject,
             new.body,
             payload_json,
+            new.priority.as_stored(),
             thread_id,
             new.origin_request_id,
             new.created_at,
@@ -400,6 +431,7 @@ pub(crate) fn append_message_in_tx(
         new.subject.to_string(),
         new.body.map(str::to_string),
         new.payload.cloned(),
+        new.priority,
         Some(thread_id.to_string()),
     ))
 }
@@ -414,6 +446,7 @@ fn row_to_summary(
     subject: String,
     body: Option<String>,
     payload: Option<Value>,
+    priority: MessagePriority,
     thread_id: Option<String>,
 ) -> MessageSummary {
     let from_actor = match from {
@@ -433,6 +466,7 @@ fn row_to_summary(
         subject,
         body,
         payload,
+        priority,
         thread_id,
     }
 }
@@ -493,6 +527,9 @@ fn decode_row(row: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
         .transpose()
         .map_err(|_| corrupt_row(9, "invalid stored payload"))?;
     let kind = message_kind_from_str(&kind).map_err(|_| corrupt_row(2, "invalid stored kind"))?;
+    let priority: String = row.get(12)?;
+    let priority = MessagePriority::from_stored(&priority)
+        .ok_or_else(|| corrupt_row(12, "invalid stored priority"))?;
     Ok(StoredMessage {
         summary: row_to_summary(
             message_id,
@@ -503,6 +540,7 @@ fn decode_row(row: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
             subject,
             body,
             payload,
+            priority,
             Some(thread_id),
         ),
         to,
@@ -533,9 +571,108 @@ pub(crate) fn get_message_in_tx(
     .map_err(mail_storage_error)
 }
 
+/// Read-only newest-first sweep across the host's runs (source `getInbox`):
+/// every retained message regardless of read/delivered state, never flips a
+/// read bit. With `terminal`, only mail addressed to that dispatch (source
+/// `getAllMessagesForHandle`); a stale/unknown handle reads as empty.
+pub(crate) fn inbox_in_tx(
+    tx: &Transaction,
+    host_id: &str,
+    terminal: Option<&str>,
+    limit: u32,
+) -> Result<Vec<MessageSummary>, RpcError> {
+    let sql = match terminal {
+        Some(_) => format!(
+            "SELECT {} FROM orchestration_mail_messages
+              WHERE host_id = ?1 AND to_dispatch_id = ?2 ORDER BY sequence DESC LIMIT ?3",
+            message_columns()
+        ),
+        None => format!(
+            "SELECT {} FROM orchestration_mail_messages
+              WHERE host_id = ?1 ORDER BY sequence DESC LIMIT ?2",
+            message_columns()
+        ),
+    };
+    let mut stmt = tx.prepare(&sql).map_err(mail_storage_error)?;
+    let rows = match terminal {
+        Some(handle) => stmt
+            .query_map(params![host_id, handle, i64::from(limit)], decode_row)
+            .map_err(mail_storage_error)?,
+        None => stmt
+            .query_map(params![host_id, i64::from(limit)], decode_row)
+            .map_err(mail_storage_error)?,
+    };
+    let mut messages = Vec::new();
+    for row in rows {
+        messages.push(row.map_err(mail_storage_error)?.summary);
+    }
+    Ok(messages)
+}
+
+/// Escape terminal control characters the way the source's
+/// `escapeTerminalControlCharacters` does: printable ASCII, `\n` and
+/// non-control Unicode pass through, other codes become `\xNN`.
+fn escape_control(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        let code = ch as u32;
+        if ch == '\n' || (0x20..0x7f).contains(&code) || code > 0x9f {
+            out.push(ch);
+        } else {
+            out.push_str(&format!("\\x{code:02x}"));
+        }
+    }
+    out
+}
+
+fn quoted_block(label: &str, value: &str) -> String {
+    let indented: Vec<String> = escape_control(value)
+        .split('\n')
+        .map(|line| format!("  {line}"))
+        .collect();
+    format!("[{label}]\n{}", indented.join("\n"))
+}
+
+/// Server-side expanded rendering for `--format` (source
+/// `formatLegacyAwareCheckMessages` structure, native addressing): one
+/// `[subject]`/`[body]`/`[payload]` block per message plus a reply hint
+/// naming this CLI binary. Never writes to another terminal; the caller
+/// prints the returned string.
+pub(crate) fn format_check_messages(messages: &[MessageSummary]) -> String {
+    messages
+        .iter()
+        .map(|message| {
+            let mut lines = vec![
+                format!(
+                    "{}{} [{}] from={}",
+                    message.message_id,
+                    message.priority.tag(),
+                    message.kind.display_name(),
+                    message.from_actor,
+                ),
+                quoted_block("subject", &message.subject),
+            ];
+            if let Some(body) = &message.body {
+                lines.push(quoted_block("body", body));
+            }
+            if let Some(payload) = &message.payload {
+                let rendered =
+                    serde_json::to_string(payload).unwrap_or_else(|_| payload.to_string());
+                lines.push(quoted_block("payload", &rendered));
+            }
+            lines.push(format!(
+                "[Reply: drogon-cli orchestration reply --id {} --body \"...\"]",
+                message.message_id,
+            ));
+            lines.join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 pub(crate) fn message_columns() -> &'static str {
     "message_id, sequence, kind, from_kind, from_coordinator_id, from_dispatch_id,
-     to_dispatch_id, subject, body, payload_json, thread_id, origin_request_id"
+     to_dispatch_id, subject, body, payload_json, thread_id, origin_request_id, priority"
 }
 
 pub(crate) fn decode_message_row(row: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {

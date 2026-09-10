@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use drogon_orchestration::runs;
 use drogon_protocol::orchestration_common::ProcessVerdict;
+use drogon_protocol::orchestration_run::{DispatchParams, DispatchShowParams, DispatchShowResult};
 use drogon_protocol::orchestration_worker::*;
 use drogon_protocol::{Request, RpcError};
 use serde_json::Value;
@@ -58,6 +59,59 @@ impl Engine {
         request: &Request,
     ) -> Result<Value, RpcError> {
         match request.method.as_str() {
+            "orchestration.dispatchShow" => {
+                let params: DispatchShowParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                let snapshot = self.coordination_read(|tx| {
+                    runs::require_coordinator(tx, &params.scope)?;
+                    let attempt = attempts::current_for_task(tx, &params.scope, &params.task_id)?;
+                    Ok(attempt)
+                })?;
+                let dispatch = snapshot
+                    .as_ref()
+                    .map(|attempt| {
+                        let verdict = self.worker_verdict(attempt).unwrap_or(
+                            drogon_protocol::orchestration_common::ProcessVerdict::Unverifiable,
+                        );
+                        WorkerShowResult {
+                            dispatch_id: attempt.result.dispatch_id.clone(),
+                            task_id: attempt.result.task_id.clone(),
+                            assignment_state: attempt.result.assignment_state,
+                            readiness: attempt.result.readiness,
+                            process_verdict: verdict,
+                            outcome: attempt.outcome,
+                            report_result: attempt.report_result.clone(),
+                            session_identity: attempt.result.session_identity.clone(),
+                            launch: Some(attempt.launch.clone()),
+                            residual_resources: attempt.result.residual_resources.clone(),
+                            failure: attempt.result.failure.clone(),
+                            warning: attempt.result.warning.clone(),
+                            observation: self.agent_wait_observation(attempt),
+                        }
+                    })
+                    .inspect(|result| {
+                        // Fail closed on malformed derived identity rather
+                        // than serving an unverifiable dispatch row.
+                        if let Err(err) = result.validate_shape() {
+                            debug_assert!(false, "invalid dispatch row: {err}");
+                        }
+                    });
+                // The preamble is regenerated deterministically from the
+                // current task spec so a preview matches an actual dispatch.
+                let preamble = params.preamble.then(|| {
+                    crate::coordination_preamble::build_dispatch_preamble(
+                        &params.scope,
+                        &params.task_id,
+                        snapshot.as_ref().map(|a| a.result.dispatch_id.as_str()),
+                    )
+                });
+                encode(DispatchShowResult { dispatch, preamble })
+            }
+            "orchestration.dispatch" => {
+                let params: DispatchParams = decode(&request.params)?;
+                params.validate_shape(&self.host_id)?;
+                self.dispatch_coordination(request, params)
+            }
             "orchestration.workerShow" => {
                 let params: WorkerShowParams = decode(&request.params)?;
                 params.validate_shape(&self.host_id)?;
@@ -66,6 +120,7 @@ impl Engine {
                     attempts::show(tx, &params.scope, &params.dispatch_id)
                 })?;
                 let verdict = self.worker_verdict(&attempt)?;
+                let observation = self.agent_wait_observation(&attempt);
                 encode(WorkerShowResult {
                     dispatch_id: attempt.result.dispatch_id,
                     task_id: attempt.result.task_id,
@@ -79,6 +134,7 @@ impl Engine {
                     residual_resources: attempt.result.residual_resources,
                     failure: attempt.result.failure,
                     warning: attempt.result.warning,
+                    observation,
                 })
             }
             "orchestration.workerStart" => {
@@ -113,6 +169,44 @@ impl Engine {
             }
             other => Err(error::method_not_found(other)),
         }
+    }
+
+    /// A durable hook needs_input stamp is the `hook` evidence source; a
+    /// live handle answers from the same snapshot session.list publishes.
+    pub(crate) fn agent_wait_observation(&self, attempt: &Attempt) -> Option<WorkerObservation> {
+        let identity = attempt.result.session_identity.as_ref()?;
+        let handle = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&identity.session_id)
+            .cloned();
+        let snapshot = match handle {
+            Some(handle) => {
+                if handle.incarnation != identity.incarnation
+                    || handle.host_id != self.host_id
+                    || handle.workspace_id != attempt.result.workspace_id
+                {
+                    return None;
+                }
+                session::snapshot(&handle)
+            }
+            None => self
+                .session_row_as_value(&identity.session_id, &identity.incarnation)
+                .ok()?,
+        };
+        if snapshot["hostId"] != self.host_id
+            || snapshot["workspaceId"] != attempt.result.workspace_id
+        {
+            return None;
+        }
+        let wait = (snapshot["agentState"].as_str() == Some("needs_input")).then(|| AgentWait {
+            source: "hook".into(),
+            reason: snapshot["agentStateAt"]
+                .as_str()
+                .map(|stamp| format!("waiting for human input since {stamp}")),
+        });
+        Some(WorkerObservation { agent_wait: wait })
     }
 
     pub(crate) fn worker_verdict(&self, attempt: &Attempt) -> Result<ProcessVerdict, RpcError> {

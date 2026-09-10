@@ -110,7 +110,8 @@ fn run_cursor_advances_same_timestamp_rows_without_repeating_or_skipping() {
         },
     )
     .unwrap();
-    assert_eq!(first.runs[0].run_id, "run-a");
+    // Source order is newest-first; identical timestamps walk ids descending.
+    assert_eq!(first.runs[0].run_id, "run-c");
     let second = runs::list(
         &tx,
         &RunListParams {
@@ -130,7 +131,7 @@ fn run_cursor_advances_same_timestamp_rows_without_repeating_or_skipping() {
         },
     )
     .unwrap();
-    assert_eq!(third.runs[0].run_id, "run-c");
+    assert_eq!(third.runs[0].run_id, "run-a");
     assert!(third.next_cursor.is_none());
 }
 
@@ -144,7 +145,10 @@ fn task_cursor_advances_while_brief_and_full_specs_preserve_unicode() {
         tasks::create(&tx, &task_params("run-a", &text, vec![]), id, 42).unwrap();
     }
     let first = tasks::list(&tx, &task_list("run-a", None)).unwrap();
+    // Source abbreviation: 159 content chars plus the ellipsis; the ellipsis
+    // is the truncation marker, never a bare 160-char cut.
     assert_eq!(first.tasks[0].spec.chars().count(), 160);
+    assert!(first.tasks[0].spec.ends_with('…'));
     assert!(first.tasks[0].spec_truncated);
     assert!(first.tasks[0].spec.starts_with("hello "));
     let second = tasks::list(&tx, &task_list("run-a", first.next_cursor)).unwrap();
@@ -480,5 +484,93 @@ fn status_updates_are_host_scoped_and_rollback_with_the_report_transaction() {
         .task
         .status,
         TaskStatus::Ready
+    );
+}
+
+#[test]
+fn task_list_reports_label_fields_and_current_attempt_assignee() {
+    use drogon_protocol::orchestration_task::TaskStatus;
+    let mut conn = database();
+    let tx = conn.transaction().unwrap();
+    create_run(&tx, "run-a");
+    let created = tasks::create(
+        &tx,
+        &task_params("run-a", "do the work", vec![]),
+        "task-a",
+        42,
+    )
+    .unwrap();
+    assert_eq!(created.task.title.as_deref(), Some("title"));
+    assert_eq!(created.task.display_name.as_deref(), Some("display"));
+    let shown = tasks::show(
+        &tx,
+        &TaskShowParams {
+            scope: scope("run-a"),
+            task_id: "task-a".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(shown.task.title.as_deref(), Some("title"));
+    assert_eq!(shown.task.display_name.as_deref(), Some("display"));
+
+    let params = TaskListParams {
+        scope: scope("run-a"),
+        brief: false,
+        ready: false,
+        status: None,
+        limit: None,
+        cursor: None,
+    };
+    // No attempts table in a domain-only store: listing still works, with no
+    // assignee reported.
+    let plain = tasks::list(&tx, &params).unwrap();
+    assert_eq!(plain.tasks.len(), 1);
+    assert_eq!(plain.tasks[0].title.as_deref(), Some("title"));
+    assert_eq!(plain.tasks[0].display_name.as_deref(), Some("display"));
+    assert_eq!(plain.tasks[0].assignee_handle, None);
+    assert_eq!(plain.tasks[0].dispatch_id, None);
+
+    // A current attempt row exposes its session identity as the assignee.
+    tx.execute_batch(
+        "CREATE TABLE orchestration_attempts (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            dispatch_id TEXT NOT NULL UNIQUE,
+            host_id TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            is_current INTEGER NOT NULL,
+            fenced INTEGER NOT NULL,
+            retry_of TEXT,
+            state_json TEXT NOT NULL
+        );",
+    )
+    .unwrap();
+    let state = serde_json::json!({
+        "result": {"runId": "run-a", "taskId": "task-a", "dispatchId": "dispatch-1",
+            "consumerGeneration": 1, "workspaceId": "folder",
+            "assignmentState": "ready", "readiness": "notObserved",
+            "processVerdict": "live",
+            "sessionIdentity": {"sessionId": "sess-9", "incarnation": "1"},
+            "effects": [], "residualResources": []},
+        "launch": {"harnessId": "claude", "permissionMode": "inherit"},
+        "outcome": null, "cleanup_owned": true,
+    });
+    tx.execute(
+        "INSERT INTO orchestration_attempts
+         (dispatch_id, host_id, run_id, task_id, is_current, fenced, retry_of, state_json)
+         VALUES (?1, ?2, ?3, ?4, 1, 0, NULL, ?5)",
+        rusqlite::params!["dispatch-1", "host-a", "run-a", "task-a", state.to_string()],
+    )
+    .unwrap();
+    tasks::set_status_in_tx(&tx, "host-a", "run-a", "task-a", TaskStatus::Dispatched).unwrap();
+    let dispatched = tasks::list(&tx, &params).unwrap();
+    assert_eq!(dispatched.tasks[0].status, TaskStatus::Dispatched);
+    assert_eq!(
+        dispatched.tasks[0].assignee_handle.as_deref(),
+        Some("sess-9")
+    );
+    assert_eq!(
+        dispatched.tasks[0].dispatch_id.as_deref(),
+        Some("dispatch-1")
     );
 }

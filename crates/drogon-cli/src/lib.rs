@@ -48,6 +48,7 @@ mod orchestration_task_dependencies;
 mod orchestration_timeout;
 pub mod output;
 pub mod paths;
+pub mod screen;
 pub mod skill_metadata;
 pub mod skills;
 pub mod skills_agents;

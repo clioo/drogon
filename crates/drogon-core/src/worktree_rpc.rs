@@ -336,6 +336,7 @@ struct WorktreeMetaRow<'a> {
     manual_order: Option<i64>,
     last_activity_at: Option<&'a str>,
     linked_pr: Option<i64>,
+    linked_issue: Option<i64>,
     creator: Option<&'a str>,
 }
 
@@ -359,6 +360,7 @@ fn worktree_json(fields: WorktreeMetaRow) -> Value {
         "manualOrder": fields.manual_order,
         "lastActivityAt": fields.last_activity_at,
         "linkedPr": fields.linked_pr,
+        "linkedIssue": fields.linked_issue,
         "creator": fields.creator,
     })
 }
@@ -387,6 +389,7 @@ struct StoredWorktreeRow {
     manual_order: Option<i64>,
     last_activity_at: Option<String>,
     linked_pr: Option<i64>,
+    linked_issue: Option<i64>,
     creator: Option<String>,
 }
 
@@ -411,6 +414,7 @@ impl StoredWorktreeRow {
             manual_order: self.manual_order,
             last_activity_at: self.last_activity_at.as_deref(),
             linked_pr: self.linked_pr,
+            linked_issue: self.linked_issue,
             creator: self.creator.as_deref(),
         })
     }
@@ -419,10 +423,10 @@ impl StoredWorktreeRow {
 fn fetch_worktree_row(
     conn: &rusqlite::Connection,
     worktree_id: &str,
-) -> Result<StoredWorktreeRow, RpcError> {
+) -> Result<Option<StoredWorktreeRow>, RpcError> {
     conn.query_row(
         "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at, \
-         workspace_status, is_pinned, is_archived, sort_order, manual_order, last_activity_at, linked_pr, creator \
+         workspace_status, is_pinned, is_archived, sort_order, manual_order, last_activity_at, linked_pr, linked_issue, creator \
          FROM worktrees WHERE id = ?1",
         [worktree_id],
         |r| {
@@ -445,10 +449,12 @@ fn fetch_worktree_row(
                 manual_order: r.get(15)?,
                 last_activity_at: r.get(16)?,
                 linked_pr: r.get(17)?,
-                creator: r.get(18)?,
+                linked_issue: r.get(18)?,
+                creator: r.get(19)?,
             })
         },
     )
+    .optional()
     .map_err(error::from_sqlite)
 }
 
@@ -523,6 +529,7 @@ fn folder_implicit_worktree_json(
         manual_order: meta.manual_order,
         last_activity_at: meta.last_activity_at.as_deref(),
         linked_pr: None,
+        linked_issue: None,
         creator: None,
     }))
 }
@@ -619,6 +626,19 @@ impl Engine {
         let reuse_branch = optional_bool(params, "reuseBranch", false)?;
         let note = optional_trimmed_str(params, "note")?;
         let parent_worktree_id = optional_trimmed_str(params, "parentWorktreeId")?;
+        let linked_issue: Option<i64> = match params.get("linkedIssue") {
+            None | Some(Value::Null) => None,
+            Some(value) => {
+                let number = value.as_i64().filter(|n| *n > 0).ok_or_else(|| {
+                    error::invalid_argument("linkedIssue must be a positive issue number")
+                })?;
+                Some(number)
+            }
+        };
+        // Source `runHooks` contract: accepted as a legacy alias for setup
+        // hooks; the native runtime has no orca.yaml hook engine, so the
+        // run is honestly a no-op with a warning, never silent pretense.
+        let run_hooks = optional_bool(params, "runHooks", false)?;
         let sparse = normalize_sparse_directories(params)?;
         // Creation provenance (Workspace Options "Hide: Automation-created"
         // / "CLI-created"): absent means the desktop app's own create path.
@@ -834,9 +854,9 @@ impl Engine {
             )
             .map_err(error::from_sqlite)?;
         conn.execute(
-            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, note, parent_worktree_id, created_at, sort_order, last_activity_at, creator) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-            rusqlite::params![id, project_id, workspace_id, canonical_target_str, branch_name, head, base_ref, note, parent_worktree_id, created_at, sort_order, created_at, creator],
+            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, note, parent_worktree_id, created_at, sort_order, last_activity_at, creator, linked_issue) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+            rusqlite::params![id, project_id, workspace_id, canonical_target_str, branch_name, head, base_ref, note, parent_worktree_id, created_at, sort_order, created_at, creator, linked_issue],
         )
         .map_err(error::from_sqlite)?;
 
@@ -859,8 +879,19 @@ impl Engine {
             manual_order: None,
             last_activity_at: Some(&created_at),
             linked_pr: None,
+            linked_issue,
             creator: creator.as_deref(),
         }))
+        .map(|mut created| {
+            // Source `runHooks` contract: accepted as a legacy alias for
+            // setup hooks; the native runtime has no orca.yaml hook
+            // engine, so the run is honestly a no-op with a warning.
+            if run_hooks {
+                created["warning"] =
+                    json!("run-hooks is a no-op: this runtime has no orca.yaml hook engine");
+            }
+            created
+        })
     }
 
     /// The fork's smart-name-field branch source (`repo-base-ref-search`):
@@ -946,7 +977,7 @@ impl Engine {
         let mut stmt = conn
             .prepare(
                 "SELECT id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at, \
-                 workspace_status, is_pinned, is_archived, sort_order, manual_order, last_activity_at, linked_pr, creator \
+                 workspace_status, is_pinned, is_archived, sort_order, manual_order, last_activity_at, linked_pr, linked_issue, creator \
                  FROM worktrees WHERE project_id = ?1 ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
@@ -968,6 +999,7 @@ impl Engine {
             manual_order: Option<i64>,
             last_activity_at: Option<String>,
             linked_pr: Option<i64>,
+            linked_issue: Option<i64>,
             creator: Option<String>,
         }
         let rows: Vec<Row> = stmt
@@ -990,7 +1022,8 @@ impl Engine {
                     manual_order: r.get(14)?,
                     last_activity_at: r.get(15)?,
                     linked_pr: r.get(16)?,
-                    creator: r.get(17)?,
+                    linked_issue: r.get(17)?,
+                    creator: r.get(18)?,
                 })
             })
             .map_err(error::from_sqlite)?
@@ -1046,6 +1079,7 @@ impl Engine {
                     manual_order: row.manual_order,
                     last_activity_at: row.last_activity_at.as_deref(),
                     linked_pr: row.linked_pr,
+                    linked_issue: row.linked_issue,
                     creator: row.creator.as_deref(),
                 })
             })
@@ -1054,16 +1088,241 @@ impl Engine {
         Ok(json!({ "worktrees": worktrees }))
     }
 
+    /// `worktree.get { id }`: one worktree row by id. The folder-project
+    /// implicit worktree is addressable by the project id, matching
+    /// `worktree.list`'s synthetic row.
+    pub(super) fn do_worktree_get(&self, params: &Value) -> Result<Value, RpcError> {
+        let id = require_str(params, "id")?.to_string();
+        let conn = self.db.lock().unwrap();
+        if let Some(project) = crate::project::get(&conn, &id).ok()
+            && project.kind == "folder"
+        {
+            let worktree = folder_implicit_worktree_json(&conn, &project)?;
+            return Ok(json!({ "worktree": worktree }));
+        }
+        let worktree = fetch_worktree_row(&conn, &id)?
+            .ok_or_else(|| error::not_found("worktree not found"))?;
+        Ok(json!({ "worktree": worktree.as_json() }))
+    }
+
+    /// `worktree.current { path }`: resolve a shell cwd to the enclosing
+    /// Orca-managed worktree by longest canonical path-prefix match across
+    /// worktree rows and folder projects. No guesses: nothing enclosing the
+    /// path is a typed `not_found`, never a nearest/first worktree.
+    pub(super) fn do_worktree_current(&self, params: &Value) -> Result<Value, RpcError> {
+        let path = require_str(params, "path")?;
+        let cwd = canonical_or_raw(path);
+        let conn = self.db.lock().unwrap();
+        let mut candidates: Vec<Value> = Vec::new();
+        {
+            let mut stmt = conn
+                .prepare("SELECT id FROM worktrees")
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    let id: String = r.get(0)?;
+                    Ok(id)
+                })
+                .map_err(error::from_sqlite)?;
+            for row in rows {
+                let id = row.map_err(error::from_sqlite)?;
+                let Some(stored) = fetch_worktree_row(&conn, &id)? else {
+                    return Err(error::internal_error(
+                        "worktree row vanished during listing",
+                    ));
+                };
+                candidates.push(stored.as_json());
+            }
+        }
+        {
+            let mut stmt = conn
+                .prepare("SELECT id, path, created_at FROM projects WHERE kind = 'folder'")
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(error::from_sqlite)?;
+            for row in rows {
+                let (id, path, _created_at) = row.map_err(error::from_sqlite)?;
+                let workspace_id: Option<String> = conn
+                    .query_row("SELECT id FROM workspaces WHERE path = ?1", [&path], |r| {
+                        r.get(0)
+                    })
+                    .optional()
+                    .map_err(error::from_sqlite)?;
+                if workspace_id.is_some()
+                    && let Some(project) = crate::project::get(&conn, &id).ok()
+                    && project.kind == "folder"
+                {
+                    candidates.push(folder_implicit_worktree_json(&conn, &project)?);
+                }
+            }
+        }
+        let mut best: Option<Value> = None;
+        for candidate in candidates {
+            let candidate_path = canonical_or_raw(candidate["path"].as_str().unwrap_or(""));
+            let encloses = cwd == candidate_path
+                || (cwd.len() > candidate_path.len()
+                    && cwd.starts_with(&candidate_path)
+                    && cwd.as_bytes()[candidate_path.len()] == b'/');
+            if !encloses {
+                continue;
+            }
+            let is_longer = match &best {
+                Some(current) => {
+                    candidate_path.len()
+                        > canonical_or_raw(current["path"].as_str().unwrap_or("")).len()
+                }
+                None => true,
+            };
+            if is_longer {
+                best = Some(candidate);
+            }
+        }
+        let worktree = best.ok_or_else(|| {
+            error::not_found("no Orca-managed worktree encloses the current directory")
+        })?;
+        Ok(json!({ "worktree": worktree }))
+    }
+
+    /// `worktree.ps { limit? }`: compact cross-worktree summary (source
+    /// `worktree ps`). Each entry carries the worktree identity plus the
+    /// honest live-session count for its workspace; no sidebar/activity
+    /// concepts are invented. `limit` caps entries after ordering by
+    /// creation; `totalCount`/`truncated` report the pre-cap inventory.
+    pub(super) fn do_worktree_ps(&self, params: &Value) -> Result<Value, RpcError> {
+        let limit: Option<u64> = params
+            .get("limit")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .filter(|n| *n >= 1)
+                    .ok_or_else(|| error::invalid_argument("limit must be a positive integer"))
+            })
+            .transpose()?;
+        let conn = self.db.lock().unwrap();
+        let mut entries: Vec<Value> = Vec::new();
+        {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT w.id, w.project_id, w.workspace_id, w.path, w.branch, w.title, w.created_at, w.parent_worktree_id,
+                            (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.workspace_id AND s.verdict = 'live') AS live_sessions
+                     FROM worktrees w ORDER BY w.created_at",
+                )
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(json!({
+                        "worktreeId": r.get::<_, String>(0)?,
+                        "projectId": r.get::<_, String>(1)?,
+                        "workspaceId": r.get::<_, String>(2)?,
+                        "path": r.get::<_, String>(3)?,
+                        "branch": r.get::<_, String>(4)?,
+                        "displayName": r.get::<_, Option<String>>(5)?,
+                        "createdAt": r.get::<_, String>(6)?,
+                        "parentWorktreeId": r.get::<_, Option<String>>(7)?,
+                        "liveSessions": r.get::<_, i64>(8)?,
+                    }))
+                })
+                .map_err(error::from_sqlite)?;
+            for row in rows {
+                entries.push(row.map_err(error::from_sqlite)?);
+            }
+        }
+        // Folder projects contribute their implicit worktree row, matching
+        // worktree.list's synthetic row.
+        {
+            let mut stmt = conn
+                .prepare("SELECT id, path, created_at FROM projects WHERE kind = 'folder'")
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(error::from_sqlite)?;
+            for row in rows {
+                let (id, path, created_at) = row.map_err(error::from_sqlite)?;
+                let workspace: Option<(String, i64)> = conn
+                    .query_row(
+                        "SELECT id, (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = workspaces.id AND s.verdict = 'live') FROM workspaces WHERE path = ?1",
+                        [&path],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()
+                    .map_err(error::from_sqlite)?;
+                if let Some((workspace_id, live_sessions)) = workspace {
+                    entries.push(json!({
+                        "worktreeId": id,
+                        "projectId": id,
+                        "workspaceId": workspace_id,
+                        "path": path,
+                        "branch": "",
+                        "displayName": Value::Null,
+                        "createdAt": created_at,
+                        "parentWorktreeId": Value::Null,
+                        "liveSessions": live_sessions,
+                    }));
+                }
+            }
+        }
+        entries.sort_by(|a, b| {
+            a["createdAt"]
+                .as_str()
+                .cmp(&b["createdAt"].as_str())
+                .then_with(|| a["worktreeId"].as_str().cmp(&b["worktreeId"].as_str()))
+        });
+        let total = entries.len() as u64;
+        let truncated = limit.is_some_and(|cap| total > cap);
+        let entries = match limit {
+            Some(cap) => entries
+                .into_iter()
+                .take(cap.min(usize::MAX as u64) as usize)
+                .collect::<Vec<_>>(),
+            None => entries,
+        };
+        Ok(json!({
+            "worktrees": entries,
+            "totalCount": total,
+            "truncated": truncated,
+        }))
+    }
+
     pub(super) fn do_worktree_remove(&self, params: &Value) -> Result<Value, RpcError> {
         let id = require_str(params, "id")?.to_string();
         let force = optional_bool(params, "force", false)?;
+        // Source `worktree rm --delete-branch`: after the checkout is gone,
+        // drop the now-orphaned branch with the *safe* `git branch -d`
+        // (never `-D`): branches carrying unmerged commits survive
+        // (worktree-remove-branch-deletion.test.ts).
+        let delete_branch = optional_bool(params, "deleteBranch", false)?;
+        // Source contract: `runHooks` is a legacy alias for running the
+        // repo's archive hooks. The native runtime has no orca.yaml hook
+        // engine, so the run itself is honestly a no-op — but the reply
+        // carries the warning so callers never assume hooks ran.
+        let run_hooks = optional_bool(params, "runHooks", false)?;
 
-        let (project_path, worktree_path, workspace_id) = {
+        let (project_path, worktree_path, workspace_id, branch) = {
             let conn = self.db.lock().unwrap();
             conn.query_row(
-                "SELECT p.path, w.path, w.workspace_id FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE w.id = ?1",
+                "SELECT p.path, w.path, w.workspace_id, w.branch FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE w.id = ?1",
                 [&id],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                    ))
+                },
             )
             .optional()
             .map_err(error::from_sqlite)?
@@ -1079,12 +1338,29 @@ impl Engine {
         // never re-implements that check.
         run_git(Path::new(&project_path), &argv)?;
 
+        let mut branch_deleted = false;
+        if delete_branch && !branch.is_empty() {
+            // Best-effort safe delete: a refusal (unmerged work) leaves the
+            // branch and is not a removal failure — the worktree is already
+            // gone, which is what the caller asked for first.
+            let output = std::process::Command::new("git")
+                .args(["-C", &project_path, "branch", "-d", &branch])
+                .output();
+            branch_deleted = output.map(|o| o.status.success()).unwrap_or(false);
+        }
+
         let conn = self.db.lock().unwrap();
         conn.execute("DELETE FROM worktrees WHERE id = ?1", [&id])
             .map_err(error::from_sqlite)?;
         conn.execute("DELETE FROM workspaces WHERE id = ?1", [&workspace_id])
             .map_err(error::from_sqlite)?;
-        Ok(json!({ "id": id, "removed": true }))
+        let mut reply =
+            json!({ "id": id, "removed": true, "branchDeleted": branch_deleted, "branch": branch });
+        if run_hooks {
+            reply["warning"] =
+                json!("run-hooks is a no-op: this runtime has no orca.yaml hook engine");
+        }
+        Ok(reply)
     }
 
     /// Display-title rename (`worktree.rename { worktreeId, name }`).
@@ -1112,7 +1388,9 @@ impl Engine {
         if changed == 0 {
             return Err(error::not_found("worktree not found"));
         }
-        Ok(fetch_worktree_row(&conn, &decoded.worktree_id)?.as_json())
+        Ok(fetch_worktree_row(&conn, &decoded.worktree_id)?
+            .map(|row| row.as_json())
+            .unwrap_or(Value::Null))
     }
 
     /// Worktree-meta update (`worktree.update`): the note (the composer's
@@ -1210,6 +1488,30 @@ impl Engine {
             .map_err(error::from_sqlite)?;
             mutated = true;
         }
+        if let Some(title) = &decoded.title {
+            let trimmed = title.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            conn.execute(
+                "UPDATE worktrees SET title = ?1 WHERE id = ?2",
+                rusqlite::params![trimmed, decoded.worktree_id],
+            )
+            .map_err(error::from_sqlite)?;
+            mutated = true;
+        }
+        if let Some(linked_issue) = &decoded.linked_issue {
+            if let Some(number) = linked_issue
+                && *number <= 0
+            {
+                return Err(error::invalid_argument(
+                    "linkedIssue must be a positive issue number",
+                ));
+            }
+            conn.execute(
+                "UPDATE worktrees SET linked_issue = ?1 WHERE id = ?2",
+                rusqlite::params![linked_issue, decoded.worktree_id],
+            )
+            .map_err(error::from_sqlite)?;
+            mutated = true;
+        }
         if mutated {
             conn.execute(
                 "UPDATE worktrees SET last_activity_at = ?1 WHERE id = ?2",
@@ -1217,7 +1519,61 @@ impl Engine {
             )
             .map_err(error::from_sqlite)?;
         }
-        Ok(fetch_worktree_row(&conn, &decoded.worktree_id)?.as_json())
+        Ok(fetch_worktree_row(&conn, &decoded.worktree_id)?
+            .map(|row| row.as_json())
+            .unwrap_or(Value::Null))
+    }
+}
+
+impl Engine {
+    /// `repo.search_refs { projectId, query, limit? }`: substring ref
+    /// search over a git project's branches, remotes, and tags. The page
+    /// defaults to 25 (the source `REPO_SEARCH_REFS_DEFAULT_LIMIT`) and
+    /// caps at 1000; `truncated` is set whenever more refs matched than
+    /// the page carried.
+    pub(super) fn do_repo_search_refs(&self, params: &Value) -> Result<Value, RpcError> {
+        const DEFAULT_LIMIT: usize = 25;
+        const MAX_LIMIT: usize = 1_000;
+        let project_id = require_str(params, "projectId")?.to_string();
+        let query = require_str(params, "query")?.trim().to_string();
+        let limit = match params.get("limit") {
+            None | Some(Value::Null) => DEFAULT_LIMIT,
+            Some(value) => {
+                let requested = value
+                    .as_u64()
+                    .filter(|n| *n > 0)
+                    .ok_or_else(|| error::invalid_argument("limit must be a positive integer"))?;
+                usize::try_from(requested)
+                    .map_err(|_| error::invalid_argument("limit is out of range"))?
+                    .min(MAX_LIMIT)
+            }
+        };
+
+        let project_path = {
+            let conn = self.db.lock().unwrap();
+            crate::project::get(&conn, &project_id)?.path
+        };
+        let output = run_git(
+            Path::new(&project_path),
+            &[
+                "for-each-ref".to_string(),
+                "--format=%(refname:short)".to_string(),
+                "refs/heads".to_string(),
+                "refs/remotes".to_string(),
+                "refs/tags".to_string(),
+            ],
+        )?;
+        let query_lower = query.to_lowercase();
+        let matched: Vec<String> = output
+            .lines()
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+            .filter(|r| r.to_lowercase().contains(&query_lower))
+            .map(str::to_string)
+            .collect();
+        let truncated = matched.len() > limit;
+        let refs: Vec<String> = matched.into_iter().take(limit).collect();
+        Ok(json!({ "refs": refs, "truncated": truncated }))
     }
 }
 

@@ -15,17 +15,17 @@ use drogon_protocol::orchestration_common::{
     SessionIdentity, WaitPolicy,
 };
 use drogon_protocol::orchestration_mail::{
-    CheckMode, CheckParams, CheckResult, FinalReport, LifecycleVerdict, MessageKind, ReplyParams,
-    ReplyResult, SendParams, SendResult, SendTarget,
+    CheckMode, CheckParams, CheckResult, FinalReport, InboxParams, InboxResult, LifecycleVerdict,
+    MessageKind, ReplyParams, ReplyResult, SendParams, SendResult, SendTarget,
 };
 use drogon_protocol::orchestration_question::{
     AskIntent, AskParams, AskResult, AskWaitOutcome, BootstrapScope, ReceiptScope,
     RequestLedgerState, RequestShowParams, RequestShowResult,
 };
 use drogon_protocol::orchestration_run::{
-    RunBindParams, RunCreateParams, RunCreateResult, RunCurrentParams, RunCurrentResult,
-    RunListParams, RunListResult, RunShowParams, RunShowResult, RunSummary, RunUseParams,
-    RunUseResult,
+    ResetParams, ResetResult, ResetScope, RunBindParams, RunCreateParams, RunCreateResult,
+    RunCurrentParams, RunCurrentResult, RunListParams, RunListResult, RunShowParams, RunShowResult,
+    RunSummary, RunUseParams, RunUseResult,
 };
 use drogon_protocol::orchestration_scope::{CoordinatorScope, HostScope};
 use drogon_protocol::orchestration_task::{
@@ -34,11 +34,12 @@ use drogon_protocol::orchestration_task::{
 };
 use drogon_protocol::orchestration_worker::{
     OutputSource, ProcessAction, WorkerAbandonParams, WorkerAbandonResult, WorkerExecution,
-    WorkerPlacement, WorkerReadParams, WorkerReadResult, WorkerReleaseParams, WorkerReleaseResult,
-    WorkerRetainParams, WorkerRetainResult, WorkerShowParams, WorkerShowResult, WorkerStartParams,
-    WorkerStartResult, WorkerStopParams, WorkerStopResult,
+    WorkerListParams, WorkerListResult, WorkerPlacement, WorkerReadParams, WorkerReadResult,
+    WorkerReleaseParams, WorkerReleaseResult, WorkerRetainParams, WorkerRetainResult,
+    WorkerShowParams, WorkerShowResult, WorkerStartParams, WorkerStartResult, WorkerStopParams,
+    WorkerStopResult,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::cli::PermissionModeArg;
@@ -49,6 +50,7 @@ use crate::error::{CliError, internal_error, method_not_found};
 use crate::orchestration_cli::{
     ActorScopeArgs, CoordinatorScopeArgs, MessageKindArg, OptionalCoordinatorScope,
     OrchestrationCommand, OutcomeArg, OutputSourceArg, ReceiptScopeArg, StatusArg,
+    TerminalStateArg,
 };
 use crate::transport::DEFAULT_TIMEOUT;
 
@@ -73,6 +75,34 @@ fn usage(message: impl Into<String>) -> CliError {
 /// only the dispatch receipt scope; and reuse execution refuses fresh launch
 /// preferences.
 pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliError> {
+    // Dispatch needs a live target terminal unless it only previews the
+    // preamble: a purely local flag contradiction, refused before contact.
+    if let OrchestrationCommand::Dispatch { to, dry_run, .. } = command
+        && to.is_none()
+        && !dry_run
+    {
+        return Err(usage(
+            "Missing --to: pass a live target terminal or --dry-run for a preamble preview.",
+        ));
+    }
+    // Reset takes exactly one scope flag (source: reset-handler usage check).
+    if let OrchestrationCommand::Reset {
+        all,
+        tasks,
+        messages,
+        ..
+    } = command
+    {
+        let scopes = [*all, *tasks, *messages]
+            .iter()
+            .filter(|flag| **flag)
+            .count();
+        if scopes != 1 {
+            return Err(usage(
+                "Choose exactly one reset scope: --all, --tasks, or --messages.",
+            ));
+        }
+    }
     let worker_credential = credential::dispatch_credential_present();
     // Scoped hints are local inputs: present-but-empty or non-UTF-8 values
     // fail closed before anything connects.
@@ -115,6 +145,10 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             | OrchestrationCommand::WorkerAbandon { .. }
             | OrchestrationCommand::WorkerRelease { .. }
             | OrchestrationCommand::WorkerRetain { .. }
+            | OrchestrationCommand::Dispatch { .. }
+            | OrchestrationCommand::DispatchShow { .. }
+            | OrchestrationCommand::WorkerList { .. }
+            | OrchestrationCommand::Reset { .. }
     );
     if coordinator_only {
         if worker_credential {
@@ -187,13 +221,17 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
     | OrchestrationCommand::Reply { actor, .. }
     | OrchestrationCommand::Ask { actor, .. } = command
     {
+        // --task-id/--dispatch-id are payload fields on send (source:
+        // getOptionalStructuredMessagePayload); only reply/ask treat them as
+        // worker bindings.
+        let payload_fields = matches!(command, OrchestrationCommand::Send { .. });
         if worker_credential {
             if actor.coordinator_id.is_some() || actor.consumer_generation.is_some() {
                 return Err(usage(
                     "worker credential set: --coordinator-id/--consumer-generation are                      coordinator bindings and would be discarded",
                 ));
             }
-        } else if actor.task.is_some() || actor.dispatch.is_some() {
+        } else if !payload_fields && (actor.task.is_some() || actor.dispatch.is_some()) {
             return Err(usage(
                 "coordinator actor: --task/--dispatch are worker bindings and would be discarded",
             ));
@@ -243,6 +281,17 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             {
                 return Err(usage("--limit is outside the supported range"));
             }
+        }
+        return Ok(());
+    }
+    // Mailbox observation needs no dispatch scope, so both actors may sweep;
+    // only the page bound is validated locally (fail-closed terminal binding
+    // is enforced by the engine against the worker credential).
+    if let OrchestrationCommand::Inbox { limit, .. } = command {
+        if let Some(limit) = limit
+            && (*limit == 0 || *limit > drogon_protocol::orchestration_common::MAX_PAGE_LIMIT)
+        {
+            return Err(usage("--limit is outside the supported range"));
         }
         return Ok(());
     }
@@ -422,8 +471,68 @@ fn mail_scope(host_id: &str, actor: &ActorScopeArgs) -> Result<ActorScope, CliEr
     }
 }
 
+/// Structured send payload assembled from the PowerShell-safe flags
+/// (source: `getOptionalStructuredMessagePayload` — either --payload or the
+/// structured flags, never both).
+pub(crate) fn structured_send_payload(
+    payload: &Option<String>,
+    task_id: &Option<String>,
+    dispatch_id: &Option<String>,
+    outcome: Option<&str>,
+    files_modified: &Option<String>,
+    report_path: &Option<String>,
+    phase: &Option<String>,
+) -> Result<Option<Value>, CliError> {
+    let structured = task_id.is_some()
+        || dispatch_id.is_some()
+        || outcome.is_some()
+        || files_modified.is_some()
+        || report_path.is_some()
+        || phase.is_some();
+    if !structured {
+        return parse_json_object("payload", payload);
+    }
+    if payload.is_some() {
+        return Err(usage(
+            "Use either --payload or structured payload flags, not both.",
+        ));
+    }
+    let mut object = serde_json::Map::new();
+    if let Some(task_id) = task_id {
+        object.insert("taskId".into(), json!(task_id));
+    }
+    if let Some(dispatch_id) = dispatch_id {
+        object.insert("dispatchId".into(), json!(dispatch_id));
+    }
+    if let Some(outcome) = outcome {
+        object.insert("outcome".into(), json!(outcome));
+    }
+    if let Some(files) = files_modified {
+        let list: Vec<_> = files
+            .split(',')
+            .map(|file| file.trim())
+            .filter(|file| !file.is_empty())
+            .collect();
+        object.insert("filesModified".into(), json!(list));
+    }
+    if let Some(path) = report_path {
+        object.insert("reportPath".into(), json!(path));
+    }
+    if let Some(phase) = phase {
+        object.insert("phase".into(), json!(phase));
+    }
+    Ok(Some(Value::Object(object)))
+}
+
 fn parse_target(value: &str) -> Result<SendTarget, CliError> {
     if value == "run-home" {
+        return Ok(SendTarget::RunHome);
+    }
+    if let Some(id) = value.strip_prefix("run:") {
+        // Source spelling `--to run:<id>` names the run's home mailbox.
+        if id.is_empty() {
+            return Err(usage("--to run:<ID> requires a run id"));
+        }
         return Ok(SendTarget::RunHome);
     }
     if let Some(id) = value.strip_prefix("dispatch:") {
@@ -431,13 +540,18 @@ fn parse_target(value: &str) -> Result<SendTarget, CliError> {
             dispatch_id: id.to_string(),
         });
     }
-    if let Some(name) = value.strip_prefix("group:") {
+    // Source group addresses start with @ (`@all`, `@idle`, `@<agent>`,
+    // `@worktree:<id>`); the native `group:<NAME>` spelling stays accepted.
+    let name = value
+        .strip_prefix("@")
+        .or_else(|| value.strip_prefix("group:"));
+    if let Some(name) = name {
         return Ok(SendTarget::Group {
             name: name.to_string(),
         });
     }
     Err(usage(
-        "--to must be run-home, dispatch:<ID> or group:<NAME>",
+        "--to must be run-home, run:<ID>, dispatch:<ID>, @<GROUP> or group:<NAME>",
     ))
 }
 
@@ -450,6 +564,10 @@ fn parse_message_kind(name: &str) -> Option<MessageKind> {
         "final-report" | "finalReport" | "worker_done" => Some(MessageKind::FinalReport),
         "guidance" => Some(MessageKind::Guidance),
         "escalation" => Some(MessageKind::Escalation),
+        "dispatch" => Some(MessageKind::Dispatch),
+        "merge_ready" => Some(MessageKind::MergeReady),
+        "handoff" => Some(MessageKind::Handoff),
+        "decision_gate" => Some(MessageKind::DecisionGate),
         _ => None,
     }
 }
@@ -485,6 +603,78 @@ fn wait_policy(timeout_ms: Option<u32>) -> Result<WaitPolicy, CliError> {
         .validate()
         .map_err(|err| usage(format!("--timeout-ms: {}", err.message)))?;
     Ok(policy)
+}
+
+/// Source `startCheckKeepalive`: while a `--wait` check holds the RPC open,
+/// a compact JSON keepalive line goes to stderr every 15 s (never stdout,
+/// never interleaved into the result). The interval honors
+/// `DROGON_KEEPALIVE_INTERVAL_MS` so subprocess tests can use a short
+/// window; bogus values fall back to the default.
+fn keepalive_interval_ms() -> u64 {
+    // Source `resolveKeepaliveIntervalMs`: test-only hatch honoring the
+    // source variable name first, then the legacy alias; bogus values fall
+    // back to the 15 s default.
+    for key in [
+        "ORCA_KEEPALIVE_INTERVAL_MS",
+        "DROGON_KEEPALIVE_INTERVAL_MS",
+        "ORCA_HEARTBEAT_INTERVAL_MS",
+    ] {
+        if let Ok(raw) = std::env::var(key)
+            && let Ok(parsed) = raw.parse::<u64>()
+            && parsed > 0
+        {
+            return parsed;
+        }
+    }
+    15_000
+}
+
+struct CheckKeepalive {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for CheckKeepalive {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn start_check_keepalive(timeout_ms: Option<u32>) -> CheckKeepalive {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let worker_stop = std::sync::Arc::clone(&stop);
+    let interval = keepalive_interval_ms();
+    let started = std::time::Instant::now();
+    let handle = std::thread::spawn(move || {
+        // Why short slices: the stop flag must win within ~50 ms of the
+        // RPC resolving, not one full keepalive interval later.
+        let slice = std::time::Duration::from_millis(50);
+        let mut next_at = interval;
+        loop {
+            std::thread::sleep(slice);
+            if worker_stop.load(Ordering::Acquire) {
+                break;
+            }
+            if started.elapsed().as_millis() >= u128::from(next_at) {
+                let payload = serde_json::json!({
+                    "_keepalive": true,
+                    "_heartbeat": true,
+                    "elapsedMs": started.elapsed().as_millis() as u64,
+                    "deadlineMs": timeout_ms,
+                });
+                eprintln!("{payload}");
+                next_at += interval;
+            }
+        }
+    });
+    CheckKeepalive {
+        stop,
+        handle: Some(handle),
+    }
 }
 
 /// Transport timeout: the configured wait budget plus a small bounded margin
@@ -593,6 +783,41 @@ fn check_dispatch_id(dispatch_id: &str) -> Result<(), String> {
     drogon_protocol::orchestration_common::validate_short_label(dispatch_id).map_err(|e| e.message)
 }
 
+/// The retired coordinator verbs report the migration guidance without any
+/// runtime contact (source: `coordinator-start`/`coordinator-stop` handlers
+/// throw before touching the client).
+pub fn retired_coordinator_result(request_id: &str, _json: bool) -> Result<RunOutcome, CliError> {
+    let error = drogon_protocol::RpcError {
+        code: "orchestration_migration_required".into(),
+        message: "The legacy automatic coordinator command is retired. No effects were applied."
+            .into(),
+        retryable: false,
+    };
+    let mut value = serde_json::to_value(drogon_protocol::Response::failure(
+        request_id.to_string(),
+        error,
+    ))
+    .map_err(|_| CliError::Usage("cannot build retirement envelope".into()))?;
+    // Source `orchestrationMigrationData('command_retired')`.
+    value["error"]["data"] = serde_json::json!({
+        "effectsApplied": false,
+        "guide": {"topic": "orchestration", "full": true},
+        "nextCommandArgs": ["skills", "get", "orchestration", "--full"],
+        "nextSteps": [
+            "Using this same Drogon CLI executable, run: skills get orchestration --full",
+            "Read the returned guide completely and do not retry the previous command unchanged."
+        ],
+        "reason": "command_retired",
+        "requiredContractVersion": drogon_protocol::orchestration_scope::COORDINATION_CONTRACT_VERSION
+    });
+    Err(CliError::Server {
+        error: serde_json::from_value(value["error"].clone()).unwrap_or_else(|_| {
+            drogon_protocol::RpcError::new("orchestration_migration_required", "retired")
+        }),
+        raw: value,
+    })
+}
+
 /// Entry point dispatched from `commands::run`.
 pub async fn run(
     client: &Client,
@@ -600,6 +825,12 @@ pub async fn run(
     json: bool,
     command: &OrchestrationCommand,
 ) -> Result<RunOutcome, CliError> {
+    if matches!(
+        command,
+        OrchestrationCommand::CoordinatorStart { .. } | OrchestrationCommand::CoordinatorStop
+    ) {
+        return retired_coordinator_result(request_id, json);
+    }
     let status = capability_preflight(client, request_id).await?;
     let explicit_host = match command {
         OrchestrationCommand::RunCreate { host, .. }
@@ -621,11 +852,19 @@ pub async fn run(
         | OrchestrationCommand::WorkerAbandon { host, .. }
         | OrchestrationCommand::WorkerRelease { host, .. }
         | OrchestrationCommand::WorkerRetain { host, .. }
+        | OrchestrationCommand::Dispatch { host, .. }
+        | OrchestrationCommand::DispatchShow { host, .. }
+        | OrchestrationCommand::WorkerList { host, .. }
+        | OrchestrationCommand::Reset { host, .. }
         | OrchestrationCommand::Send { host, .. }
         | OrchestrationCommand::Check { host, .. }
+        | OrchestrationCommand::Inbox { host, .. }
         | OrchestrationCommand::Reply { host, .. }
         | OrchestrationCommand::Ask { host, .. }
         | OrchestrationCommand::RequestShow { host, .. } => host.host.as_deref(),
+        OrchestrationCommand::CoordinatorStart { .. } | OrchestrationCommand::CoordinatorStop => {
+            None
+        }
     };
     let host_id = resolve_host(explicit_host, &status.host_id, request_id)?;
     let resolved =
@@ -634,6 +873,9 @@ pub async fn run(
     let command = &resolved.command;
 
     match command {
+        OrchestrationCommand::CoordinatorStart { .. } | OrchestrationCommand::CoordinatorStop => {
+            unreachable!("retired coordinator verbs return before capability preflight")
+        }
         OrchestrationCommand::RunCreate {
             objective,
             coordinator_id,
@@ -681,11 +923,10 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    // Source run-create: `Run <id> created and bound: <objective>`.
                     format!(
-                        "Run {} bound to coordinator {} (generation {})",
-                        result.run.run_id,
-                        result.run.coordinator_id,
-                        result.run.consumer_generation
+                        "Run {} created and bound: {}",
+                        result.run.run_id, result.run.objective
                     )
                 },
                 0,
@@ -715,17 +956,15 @@ pub async fn run(
                 json,
                 || {
                     if result.runs.is_empty() {
-                        return "No runs.".to_string();
+                        // Source run-list empty text.
+                        return "No Runs found.".to_string();
                     }
                     let mut lines = Vec::new();
                     for run in &result.runs {
-                        lines.push(format!(
-                            "{} {} (coordinator {}, generation {})",
-                            run.run_id, run.objective, run.coordinator_id, run.consumer_generation
-                        ));
+                        lines.push(format!("{} {}", run.run_id, run.objective));
                     }
                     if let Some(cursor) = &result.next_cursor {
-                        lines.push(format!("More runs: --cursor {}", cursor.0));
+                        lines.push(format!("More Runs: --cursor {}", cursor.0));
                     }
                     lines.join("\n")
                 },
@@ -756,12 +995,27 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    // Source run-show: `<id> <objective>` then the
+                    // generation/creation line; native ids use camelCase and
+                    // epoch-ms creation, rendered RFC3339 like the source's
+                    // `created_at` string.
+                    let secs = result.run.created_at_ms / 1000;
+                    let days = secs / 86_400;
+                    let rem = secs % 86_400;
+                    let (h, m, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+                    let z = days as i64 + 719_468;
+                    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+                    let doe = (z - era * 146_097) as u64;
+                    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+                    let y = yoe as i64 + era * 400;
+                    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                    let mp = (5 * doy + 2) / 153;
+                    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+                    let mo = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+                    let year = if mo <= 2 { y + 1 } else { y };
                     format!(
-                        "Run {} {} (coordinator {}, generation {})",
-                        result.run.run_id,
-                        result.run.objective,
-                        result.run.coordinator_id,
-                        result.run.consumer_generation
+                        "{} {}\nconsumer generation {}; created {year:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z",
+                        result.run.run_id, result.run.objective, result.run.consumer_generation,
                     )
                 },
                 0,
@@ -869,12 +1123,8 @@ pub async fn run(
                 call,
                 json,
                 || {
-                    format!(
-                        "Bound to run {} as coordinator {} (generation {})",
-                        result.run.run_id,
-                        result.run.coordinator_id,
-                        result.run.consumer_generation
-                    )
+                    // Source run-use: `Using Run <id>: <objective>`.
+                    format!("Using Run {}: {}", result.run.run_id, result.run.objective)
                 },
                 0,
             )
@@ -932,7 +1182,7 @@ pub async fn run(
                 json,
                 || {
                     format!(
-                        "Task {} ({})",
+                        "Created {} [{}]",
                         result.task.task_id,
                         wire_task_status(result.task.status)
                     )
@@ -1039,15 +1289,34 @@ pub async fn run(
                     }
                     let mut lines = Vec::new();
                     for task in &result.tasks {
-                        let title = task.title.clone().unwrap_or_else(|| task.spec.clone());
-                        let truncated = if task.spec_truncated { "…" } else { "" };
-                        lines.push(format!(
-                            "{} [{}] {}{}",
+                        // Source label order: display_name ?? task_title ?? spec,
+                        // sliced to 60 characters (JS string slice counts UTF-16
+                        // units; chars are the native equivalent). No truncation
+                        // marker: the source human line prints none.
+                        let label = task
+                            .display_name
+                            .clone()
+                            .or_else(|| task.title.clone())
+                            .unwrap_or_else(|| task.spec.clone());
+                        let head: String = label.chars().take(60).collect();
+                        let head = format!(
+                            "{} [{}] {}",
                             task.task_id,
                             wire_task_status(task.status),
-                            title,
-                            truncated
-                        ));
+                            head
+                        );
+                        if task.status == TaskStatus::Dispatched
+                            && let Some(handle) = &task.assignee_handle
+                        {
+                            lines.push(format!(
+                                "{} -> {} ({})",
+                                head,
+                                handle,
+                                task.dispatch_id.as_deref().unwrap_or("?")
+                            ));
+                        } else {
+                            lines.push(head);
+                        }
                     }
                     if let Some(cursor) = &result.next_cursor {
                         lines.push(format!("More tasks: --cursor {}", cursor.0));
@@ -1226,19 +1495,16 @@ pub async fn run(
                 },
             )?;
             let human = || {
+                // Source worker-start: `Worker <dispatch> [<state>] for <task>`
+                // plus a failure stage line or warning.
                 let mut text = format!(
-                    "Dispatch {} for task {} ({}; readiness {}; process {})",
+                    "Worker {} [{}] for {}",
                     result.dispatch_id,
-                    result.task_id,
                     wire_assignment(result.assignment_state),
-                    wire_readiness(result.readiness),
-                    wire_verdict(result.process_verdict)
+                    result.task_id,
                 );
                 if let Some(failure) = &result.failure {
-                    text.push_str(&format!(
-                        "\nfailure: {} at {}: {}",
-                        failure.code, failure.stage, failure.message
-                    ));
+                    text.push_str(&format!("\n{}: {}", failure.stage, failure.message));
                 }
                 text.push_str(&human_extras(&result.warning, &result.residual_resources));
                 text
@@ -1288,21 +1554,24 @@ pub async fn run(
                 call,
                 json,
                 || {
-                    let outcome = result
-                        .outcome
-                        .map(|o| match o {
-                            ReportOutcome::Succeeded => "succeeded",
-                            ReportOutcome::Failed => "failed",
-                        })
-                        .unwrap_or("none");
-                    let mut text = format!(
-                        "Dispatch {} ({}; readiness {}; process {}; outcome {})",
+                    // Source worker-show head plus the interactive-wait line.
+                    let base = format!(
+                        "{} task={} [{}]",
                         result.dispatch_id,
+                        result.task_id,
                         wire_assignment(result.assignment_state),
-                        wire_readiness(result.readiness),
-                        wire_verdict(result.process_verdict),
-                        outcome
                     );
+                    let mut text = match &result.observation {
+                        None => format!("{base}\nInteractive wait: unknown (not evaluated)"),
+                        Some(observation) => match &observation.agent_wait {
+                            Some(wait) => format!(
+                                "{base}\nWaiting on a human: {} (via {})",
+                                wait.reason.as_deref().unwrap_or("interactive prompt"),
+                                wait.source,
+                            ),
+                            None => format!("{base}\nInteractive wait: none"),
+                        },
+                    };
                     if let Some(failure) = &result.failure {
                         text.push_str(&format!(
                             "\nfailure: {} at {}: {}",
@@ -1416,21 +1685,33 @@ pub async fn run(
                     Ok(())
                 },
             )?;
-            // An unverifiable process action is an honestly uncertain
-            // operation, never a claimed success.
-            let exit_code = u8::from(result.process_action == ProcessAction::Unverifiable);
+            // Source worker-stop: `stop_unknown` is exit 1; so is any
+            // unproven process action on older hosts without the field.
+            let exit_code = u8::from(
+                result.state.as_deref() == Some("stop_unknown")
+                    || (result.state.is_none()
+                        && result.process_action == ProcessAction::Unverifiable),
+            );
             emit(
                 call,
                 json,
                 || {
+                    // Source worker-stop: `Worker <id> [stopped] process=<action>`
+                    // plus the optional warning line.
+                    let state = result
+                        .state
+                        .as_deref()
+                        .unwrap_or_else(|| wire_assignment(result.assignment_state));
                     let mut text = format!(
-                        "Dispatch {}: assignment {}; process action {} (verdict {})",
+                        "Worker {} [{}] process={}",
                         result.dispatch_id,
-                        wire_assignment(result.assignment_state),
+                        state,
                         wire_process_action(result.process_action),
-                        wire_verdict(result.process_verdict)
                     );
-                    text.push_str(&human_extras(&result.warning, &result.residual_resources));
+                    if let Some(warning) = &result.warning {
+                        text.push_str(&format!("\nWarning: {warning}"));
+                    }
+                    text.push_str(&human_extras(&None, &result.residual_resources));
                     text
                 },
                 exit_code,
@@ -1473,11 +1754,15 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    // Source worker-abandon: state line plus its warning.
                     let mut text = format!(
-                        "Dispatch {} abandoned (no signal; {})",
+                        "Worker {} [{}]",
                         result.dispatch_id,
                         wire_assignment(result.assignment_state)
                     );
+                    if let Some(warning) = &result.warning {
+                        text.push_str(&format!("\nWarning: {warning}"));
+                    }
                     text.push_str(&human_extras(&None, &result.residual_resources));
                     text
                 },
@@ -1523,11 +1808,13 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    // Source formatWorkerRelease: head carries state and the
+                    // process action; reason/archive are absent on this host.
                     let mut text = format!(
-                        "Dispatch {}: {} (process {})",
+                        "Worker {} terminal [{}] process={}",
                         result.dispatch_id,
-                        wire_disposition(result.disposition),
-                        wire_verdict(result.process_verdict)
+                        result.state,
+                        wire_process_action(result.process_action),
                     );
                     text.push_str(&human_extras(&None, &result.residual_resources));
                     text
@@ -1604,18 +1891,298 @@ pub async fn run(
                 call,
                 json,
                 || {
+                    let reason = if result.reason.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" reason={}", result.reason)
+                    };
                     let mut text = format!(
-                        "Dispatch {}: {} ({}) (process {})",
+                        "Worker {} terminal [{}]{} process={}",
                         result.dispatch_id,
-                        wire_disposition(result.disposition),
-                        result.reason,
-                        wire_verdict(result.process_verdict)
+                        result.state,
+                        reason,
+                        wire_process_action(result.process_action),
                     );
                     text.push_str(&human_extras(&None, &result.residual_resources));
                     text
                 },
                 exit_code,
             )
+        }
+        OrchestrationCommand::Dispatch {
+            scope,
+            task,
+            to,
+            inject,
+            dry_run,
+            return_preamble,
+            ..
+        } => {
+            // Re-checked after binding resolution: the RPC re-enforces, but
+            // the CLI fails fast with a usage error (also enforced
+            // pre-contact in validate_actor_flags).
+            if to.is_none() && !dry_run {
+                return Err(usage(
+                    "Missing --to: pass a live target terminal or --dry-run for a preamble preview.",
+                ));
+            }
+            let params = drogon_protocol::orchestration_run::DispatchParams {
+                scope: coordinator_scope(&host_id, scope),
+                task_id: task.clone(),
+                to: to.clone(),
+                inject: *inject,
+                dry_run: *dry_run,
+                return_preamble: *return_preamble,
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call("orchestration.dispatch", value, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let result: drogon_protocol::orchestration_run::DispatchResult =
+                Client::decode_checked(
+                    &call,
+                    "orchestration.dispatch",
+                    |r: &drogon_protocol::orchestration_run::DispatchResult| {
+                        if r.dry_run != *dry_run {
+                            return Err("dispatch response disagrees about dry-run".into());
+                        }
+                        match (&r.dispatch, &r.preamble) {
+                            (Some(dispatch), _) => {
+                                if dispatch.task_id != *task {
+                                    return Err("dispatch response names a different task".into());
+                                }
+                                check_dispatch_id(&dispatch.dispatch_id)?;
+                                Ok(())
+                            }
+                            (None, Some(_)) if *dry_run => Ok(()),
+                            (None, _) if *dry_run => Err("dry-run returned no preamble".into()),
+                            (None, _) => Err("dispatch returned no dispatch row".into()),
+                        }
+                    },
+                )?;
+            let want_dry = *dry_run;
+            emit(
+                call,
+                json,
+                || {
+                    if want_dry {
+                        return result.preamble.clone().unwrap_or_default();
+                    }
+                    let dispatch = result.dispatch.as_ref().expect("validated dispatch row");
+                    let base = format!(
+                        "Dispatched {} -> {} [{}]",
+                        dispatch.task_id,
+                        dispatch.dispatch_id,
+                        wire_assignment(dispatch.assignment_state),
+                    );
+                    match &result.preamble {
+                        Some(text) => format!("{base}\n\n--- Preamble ---\n{text}"),
+                        None => base,
+                    }
+                },
+                0,
+            )
+        }
+        OrchestrationCommand::DispatchShow {
+            scope,
+            task,
+            preamble,
+            ..
+        } => {
+            let params = drogon_protocol::orchestration_run::DispatchShowParams {
+                scope: coordinator_scope(&host_id, scope),
+                task_id: task.clone(),
+                preamble: *preamble,
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call(
+                    "orchestration.dispatchShow",
+                    value,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result: drogon_protocol::orchestration_run::DispatchShowResult =
+                Client::decode_checked(
+                    &call,
+                    "orchestration.dispatchShow",
+                    |r: &drogon_protocol::orchestration_run::DispatchShowResult| {
+                        if let Some(dispatch) = &r.dispatch {
+                            if dispatch.task_id != *task {
+                                return Err("dispatch-show response names a different task".into());
+                            }
+                            check_dispatch_id(&dispatch.dispatch_id)?;
+                        }
+                        if *preamble && r.preamble.is_none() {
+                            return Err("dispatch-show --preamble returned no preamble".into());
+                        }
+                        Ok(())
+                    },
+                )?;
+            let want_preamble = *preamble;
+            emit(
+                call,
+                json,
+                || match (&result.dispatch, &result.preamble) {
+                    (Some(dispatch), Some(text)) if want_preamble => {
+                        format!(
+                            "{} task={} [{}]\n\n--- Preamble ---\n{text}",
+                            dispatch.dispatch_id,
+                            dispatch.task_id,
+                            wire_assignment(dispatch.assignment_state),
+                        )
+                    }
+                    (Some(dispatch), _) => format!(
+                        "{} task={} [{}]",
+                        dispatch.dispatch_id,
+                        dispatch.task_id,
+                        wire_assignment(dispatch.assignment_state),
+                    ),
+                    (None, Some(text)) if want_preamble => text.clone(),
+                    (None, _) => format!("No dispatch context found for task {task}."),
+                },
+                0,
+            )
+        }
+        OrchestrationCommand::WorkerList {
+            run,
+            terminal_state,
+            ..
+        } => {
+            let params = WorkerListParams {
+                host: host_scope(&host_id),
+                run: run.clone(),
+                terminal_state: terminal_state.map(|state| match state {
+                    TerminalStateArg::Active => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::Active
+                    }
+                    TerminalStateArg::Reclaimable => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::Reclaimable
+                    }
+                    TerminalStateArg::Retained => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::Retained
+                    }
+                    TerminalStateArg::ReleasePending => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::ReleasePending
+                    }
+                    TerminalStateArg::ReleaseUnknown => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::ReleaseUnknown
+                    }
+                    TerminalStateArg::Released => {
+                        drogon_protocol::orchestration_worker::WorkerTerminalListState::Released
+                    }
+                }),
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call(
+                    "orchestration.workerList",
+                    value,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            // Full result, never silently truncated: every listed worker
+            // renders. Unknown runs read empty, never an error.
+            let result: WorkerListResult = Client::decode_checked(
+                &call,
+                "orchestration.workerList",
+                |r: &WorkerListResult| {
+                    for worker in &r.workers {
+                        check_dispatch_id(&worker.dispatch_id)?;
+                        if terminal_state.is_some()
+                            && worker.terminal_state.map(|s| s.as_str())
+                                != terminal_state.map(TerminalStateArg::as_wire)
+                        {
+                            return Err(
+                                "worker list returned a row outside the requested filter".into()
+                            );
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
+            emit(
+                call,
+                json,
+                || {
+                    if result.workers.is_empty() {
+                        return "No workers found.".to_string();
+                    }
+                    let mut text = String::new();
+                    for worker in &result.workers {
+                        use std::fmt::Write as _;
+                        let outcome = worker
+                            .outcome
+                            .map(|o| match o {
+                                drogon_protocol::orchestration_common::ReportOutcome::Succeeded => {
+                                    "succeeded"
+                                }
+                                drogon_protocol::orchestration_common::ReportOutcome::Failed => {
+                                    "failed"
+                                }
+                            })
+                            .unwrap_or("none");
+                        let _ = writeln!(
+                            text,
+                            "Dispatch {} run={} task={} [{}] outcome={} process={} terminal={}",
+                            worker.dispatch_id,
+                            worker.run_id,
+                            worker.task_id,
+                            wire_assignment(worker.assignment_state),
+                            outcome,
+                            wire_verdict(worker.process_verdict),
+                            worker.terminal_state.map(|s| s.as_str()).unwrap_or("none"),
+                        );
+                    }
+                    if !result.counts.is_empty() {
+                        text.push_str("Terminals:");
+                        for (state, count) in &result.counts {
+                            use std::fmt::Write as _;
+                            let _ = write!(text, " {state}={count}");
+                        }
+                    }
+                    text.trim_end().to_string()
+                },
+                0,
+            )
+        }
+        OrchestrationCommand::Reset {
+            all,
+            tasks,
+            messages,
+            ..
+        } => {
+            // Exactly-one-scope is enforced in `validate_actor_flags` before
+            // any connection; clap conflicts reject multi-scope invocations.
+            let scope = if *all {
+                ResetScope::All
+            } else if *tasks {
+                ResetScope::Tasks
+            } else if *messages {
+                ResetScope::Messages
+            } else {
+                return Err(usage(
+                    "Choose exactly one reset scope: --all, --tasks, or --messages.",
+                ));
+            };
+            let params = ResetParams {
+                host: host_scope(&host_id),
+                scope,
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call("orchestration.reset", value, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let result: ResetResult =
+                Client::decode_checked(&call, "orchestration.reset", |r: &ResetResult| {
+                    if r.reset != params.scope_name() {
+                        return Err("reset response names a different scope".into());
+                    }
+                    Ok(())
+                })?;
+            emit(call, json, || format!("Reset: {}", result.reset), 0)
         }
         OrchestrationCommand::Send {
             actor,
@@ -1625,6 +2192,10 @@ pub async fn run(
             body,
             payload,
             thread_id,
+            files_modified,
+            report_path,
+            phase,
+            priority,
             outcome,
             result: result_meta,
             ..
@@ -1660,6 +2231,10 @@ pub async fn run(
                 MessageKindArg::FinalReport => MessageKind::FinalReport,
                 MessageKindArg::Guidance => MessageKind::Guidance,
                 MessageKindArg::Escalation => MessageKind::Escalation,
+                MessageKindArg::Dispatch => MessageKind::Dispatch,
+                MessageKindArg::MergeReady => MessageKind::MergeReady,
+                MessageKindArg::Handoff => MessageKind::Handoff,
+                MessageKindArg::DecisionGate => MessageKind::DecisionGate,
             };
             // Client-side lifecycle addressing refusal (usage error, exit 2).
             if matches!(
@@ -1675,13 +2250,26 @@ pub async fn run(
                     }
                 }
             }
+            let outcome_wire = final_report.as_ref().map(|report| match report.outcome {
+                ReportOutcome::Succeeded => "succeeded",
+                ReportOutcome::Failed => "failed",
+            });
             let params = SendParams {
                 scope: mail_scope(&host_id, actor)?,
                 kind: kind_value,
                 to: target,
                 subject: subject.clone(),
                 body: body.clone(),
-                payload: parse_json_object("payload", payload)?,
+                payload: structured_send_payload(
+                    payload,
+                    &actor.task,
+                    &actor.dispatch,
+                    outcome_wire,
+                    files_modified,
+                    report_path,
+                    phase,
+                )?,
+                priority: priority.as_wire(),
                 thread_id: thread_id.clone(),
                 final_report,
             };
@@ -1693,29 +2281,47 @@ pub async fn run(
                 Client::decode_checked(&call, "orchestration.send", |r: &SendResult| {
                     r.validate_shape().map_err(|e| e.message)
                 })?;
-            // A negative lifecycle verdict is a failed invocation: the
-            // envelope still prints, but the caller must see exit 1.
+            // Source `requireWorkerDoneSettlement`: a worker_done whose host
+            // could not prove the lifecycle outcome is an unknown operation.
             let exit_code = match &result.lifecycle {
                 Some(LifecycleVerdict::Rejected { .. }) | Some(LifecycleVerdict::Failed) => 1,
+                None if kind_value == MessageKind::FinalReport => {
+                    return Err(CliError::local(
+                        RpcError::new(
+                            "operation_unknown",
+                            "The runtime accepted worker_done but did not confirm that the exact report settled its Task and Dispatch. Retry from the assigned worker after verifying its active Dispatch.",
+                        ),
+                        request_id,
+                    ));
+                }
                 _ => 0,
             };
             emit(
                 call,
                 json,
-                || match (&result.message, &result.batch) {
-                    (Some(message), _) => format!("Sent {}", message.message_id),
-                    (_, Some(batch)) => format!(
-                        "Sent {} message(s) to {} recipient(s)",
-                        batch.messages.len(),
-                        batch.recipients
-                    ),
-                    _ => "Sent".to_string(),
+                || {
+                    let line = match (&result.message, &result.batch) {
+                        (Some(message), _) => format!("Sent {}", message.message_id),
+                        (_, Some(batch)) => format!(
+                            "Sent {} message(s) to {} recipient(s)",
+                            batch.messages.len(),
+                            batch.recipients
+                        ),
+                        _ => "Sent".to_string(),
+                    };
+                    // Source `withWarnings`: warnings join the output after
+                    // the sent line.
+                    result.warnings.iter().fold(line, |mut text, warning| {
+                        text.push_str(&format!("\nWarning: {}", warning.message));
+                        text
+                    })
                 },
                 exit_code,
             )
         }
         OrchestrationCommand::Check {
             actor,
+            unread,
             peek,
             all,
             ack,
@@ -1723,10 +2329,18 @@ pub async fn run(
             timeout_ms,
             kinds,
             inject,
+            format,
             cursor,
             limit,
             ..
         } => {
+            // Why: older runtimes strip unknown peek and run --unread --peek
+            // as destructive mark-read; the source refuses any pair outright.
+            if [*unread, *peek, *all].iter().filter(|v| **v).count() > 1 {
+                return Err(usage(
+                    "Choose at most one message read mode: --unread, --peek, or --all.",
+                ));
+            }
             let mode = match (peek, all, ack) {
                 (false, false, None) => CheckMode::Unread { acknowledge: None },
                 (false, false, Some(delivery_id)) => CheckMode::Unread {
@@ -1736,7 +2350,7 @@ pub async fn run(
                 (false, true, None) => CheckMode::All,
                 _ => {
                     return Err(usage(
-                        "--peek, --all and --ack are mutually exclusive read modes",
+                        "Choose at most one message read mode: --unread, --peek, or --all.",
                     ));
                 }
             };
@@ -1771,12 +2385,21 @@ pub async fn run(
                     None => Vec::new(),
                 },
                 inject: *inject,
+                format: *format,
             };
             let value = validate_params(
                 &params,
                 |p: &CheckParams| p.validate_shape(&host_id),
                 request_id,
             )?;
+            // Why: a bounded server-side wait holds the RPC open; a compact
+            // JSON keepalive line on stderr (never stdout) keeps shells and
+            // harnesses from treating the silence as a hang.
+            let _keepalive = if *wait {
+                Some(start_check_keepalive(*timeout_ms))
+            } else {
+                None
+            };
             let call = client
                 .call(
                     "orchestration.check",
@@ -1785,6 +2408,7 @@ pub async fn run(
                     call_timeout(policy.as_ref()),
                 )
                 .await?;
+            drop(_keepalive);
             let result: CheckResult =
                 Client::decode_checked(&call, "orchestration.check", |r: &CheckResult| {
                     r.validate_shape().map_err(|e| e.message)?;
@@ -1806,61 +2430,49 @@ pub async fn run(
                     }
                     Ok(())
                 })?;
+            let format_requested = *format;
             let mut outcome = emit(
                 call,
                 json,
-                || {
-                    let mut lines = Vec::new();
-                    if let Some(acknowledged) = &result.acknowledged {
-                        lines.push(format!(
-                            "Acknowledged delivery {} ({} message(s))",
-                            acknowledged.delivery_id,
-                            acknowledged.message_ids.len()
-                        ));
-                    }
-                    if result.timed_out {
-                        lines.push("No messages within the wait budget.".to_string());
-                    }
-                    if let Some(delivery) = &result.delivery {
-                        lines.push(format!(
-                            "Delivery {} holds {} message(s); ack with --ack {}",
-                            delivery.delivery_id,
-                            delivery.message_ids.len(),
-                            delivery.delivery_id
-                        ));
-                    }
-                    for message in &result.messages {
-                        lines.push(format!(
-                            "{} [{}] {}: {}",
-                            message.message_id,
-                            wire_message_kind(message.kind),
-                            message.from_actor,
-                            message.subject
-                        ));
-                        if let Some(body) = &message.body {
-                            lines.push(body.clone());
-                        }
-                    }
-                    if let Some(cursor) = &result.next_cursor {
-                        lines.push(format!("More: --cursor {}", cursor.0));
-                    }
-                    if lines.is_empty() {
-                        lines.push("No messages.".to_string());
-                    }
-                    lines.join("\n")
-                },
+                || crate::orchestration_output::format_check(&result, format_requested),
                 // Why: a waiting read that ended without a delivery is an
                 // honestly unfinished observation, never a success.
                 u8::from(*wait && (result.timed_out || result.cancelled)),
             )?;
             if !json && *wait && (result.timed_out || result.cancelled) {
                 outcome.stderr_note = Some(if result.cancelled {
-                    "warning: check wait was interrupted (cancelled)".to_string()
+                    "warning: wait cancelled; no messages were consumed".to_string()
                 } else {
-                    "warning: no messages within the wait budget".to_string()
+                    "warning: wait timed out; no messages were consumed".to_string()
                 });
             }
             Ok(outcome)
+        }
+        OrchestrationCommand::Inbox {
+            limit,
+            terminal,
+            full,
+            ..
+        } => {
+            let params = InboxParams {
+                scope: host_scope(&host_id),
+                limit: *limit,
+                terminal: terminal.clone(),
+            };
+            let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
+            let call = client
+                .call("orchestration.inbox", value, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let result: InboxResult =
+                Client::decode_checked(&call, "orchestration.inbox", |r: &InboxResult| {
+                    r.validate_shape().map_err(|e| e.message)
+                })?;
+            emit(
+                call,
+                json,
+                || crate::orchestration_output::format_inbox(&result, *full),
+                0,
+            )
         }
         OrchestrationCommand::Reply {
             actor,
@@ -2006,7 +2618,6 @@ pub async fn run(
                     fields.remove("questionMessageId");
                     fields.remove("effectiveTimeoutMs");
                     fields.remove("wait");
-                    fields.remove("answerMessageId");
                 }
                 source["answer"] = serde_json::json!(result.answer.as_ref().map(|a| &a.body));
                 source["messageId"] = serde_json::json!(result.question_message_id);
@@ -2102,17 +2713,39 @@ pub async fn run(
                 call,
                 json,
                 || {
-                    let state = match result.state {
-                        RequestLedgerState::Pending => "pending",
-                        RequestLedgerState::Committed => "committed",
-                        RequestLedgerState::Failed => "failed",
-                        RequestLedgerState::Absent => {
-                            "absent (no record; absence is not proof of no effects)"
-                        }
+                    // Source states are completed/pending/absent; the
+                    // committed ledger state maps to `completed` and a failed
+                    // mutation still answers honestly rather than absent.
+                    let (state, detail) = match result.state {
+                        RequestLedgerState::Committed => (
+                            "completed",
+                            result
+                                .method
+                                .clone()
+                                .map(|m| format!(" {m}"))
+                                .unwrap_or_default(),
+                        ),
+                        RequestLedgerState::Pending => (
+                            "pending",
+                            result
+                                .method
+                                .clone()
+                                .map(|m| format!(" {m}"))
+                                .unwrap_or_default(),
+                        ),
+                        RequestLedgerState::Failed => (
+                            "failed",
+                            result
+                                .method
+                                .clone()
+                                .map(|m| format!(" {m}"))
+                                .unwrap_or_default(),
+                        ),
+                        RequestLedgerState::Absent => ("absent", String::new()),
                     };
                     format!(
-                        "{} [{}] {}",
-                        result.request_id, state, result.interpretation
+                        "{} [{}]{}\n{}",
+                        result.request_id, state, detail, result.interpretation
                     )
                 },
                 0,
@@ -2147,18 +2780,6 @@ fn wire_task_status(status: TaskStatus) -> &'static str {
     }
 }
 
-fn wire_message_kind(kind: MessageKind) -> &'static str {
-    match kind {
-        MessageKind::Status => "status",
-        MessageKind::Question => "question",
-        MessageKind::Answer => "answer",
-        MessageKind::Heartbeat => "heartbeat",
-        MessageKind::FinalReport => "final-report",
-        MessageKind::Guidance => "guidance",
-        MessageKind::Escalation => "escalation",
-    }
-}
-
 fn wire_assignment(state: drogon_protocol::orchestration_common::AssignmentState) -> &'static str {
     use drogon_protocol::orchestration_common::AssignmentState::*;
     match state {
@@ -2168,17 +2789,6 @@ fn wire_assignment(state: drogon_protocol::orchestration_common::AssignmentState
         Failed => "failed",
         Stopped => "stopped",
         Abandoned => "abandoned",
-    }
-}
-
-fn wire_readiness(
-    readiness: drogon_protocol::orchestration_common::ReadinessObservation,
-) -> &'static str {
-    use drogon_protocol::orchestration_common::ReadinessObservation::*;
-    match readiness {
-        NotObserved => "not observed",
-        PromptObserved => "prompt observed",
-        WorkerObserved => "worker observed",
     }
 }
 

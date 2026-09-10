@@ -47,6 +47,10 @@ impl Engine {
                 encode(WorkerAbandonResult {
                     dispatch_id: params.dispatch_id.clone(),
                     assignment_state: attempt.result.assignment_state,
+                    // Source: the warning is unconditional — no signal was sent.
+                    warning: Some(
+                        "The worker was abandoned without signalling its process.".into(),
+                    ),
                     residual_resources: attempt.result.residual_resources,
                 })
             },
@@ -97,15 +101,28 @@ impl Engine {
             |(attempt, already_fenced)| {
                 let (process_action, process_verdict) =
                     self.control_worker_process(&attempt, !already_fenced);
+                // Source `stop_unknown`: a stop whose outcome the host could
+                // not prove (no signal reached a verifiable exit) is exit 1
+                // for the CLI, distinct from a fence-only answer.
+                let unknown = !already_fenced
+                    && attempt.cleanup_owned
+                    && (process_action == ProcessAction::Unverifiable
+                        || (process_action == ProcessAction::Signalled
+                            && process_verdict != ProcessVerdict::Exited));
                 encode(WorkerStopResult {
                     dispatch_id: params.dispatch_id.clone(),
                     assignment_state: attempt.result.assignment_state,
                     process_action,
                     process_verdict,
                     residual_resources: worker_residuals(&attempt, process_verdict),
-                    warning: (!attempt.cleanup_owned).then(|| {
-                        "The existing session is not cleanup-owned by this attempt.".into()
-                    }),
+                    warning: (!attempt.cleanup_owned)
+                        .then(|| {
+                            "The existing session is not cleanup-owned by this attempt.".into()
+                        })
+                        .or(unknown.then(|| {
+                            "The stop outcome is unknown: the process may still be live.".into()
+                        })),
+                    state: unknown.then(|| "stop_unknown".to_string()),
                 })
             },
             |_, _| Ok(()),

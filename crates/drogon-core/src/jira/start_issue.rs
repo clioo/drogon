@@ -416,7 +416,7 @@ impl Engine {
         }
         let worktree_row = conn
             .query_row(
-                "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at FROM worktrees WHERE id = ?1",
+                "SELECT id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, linked_issue, created_at FROM worktrees WHERE id = ?1",
                 [&worktree_id],
                 |row| {
                     Ok(drogon_protocol::worktree::Worktree {
@@ -430,7 +430,8 @@ impl Engine {
                         title: row.get(7)?,
                         note: row.get(8)?,
                         parent_worktree_id: row.get(9)?,
-                        created_at: row.get(10)?,
+                        linked_issue: row.get(10)?,
+                        created_at: row.get(11)?,
                         // This response only needs `path` (the new
                         // worktree's checkout location); it never round
                         // trips through `worktree.list`, so Workspace

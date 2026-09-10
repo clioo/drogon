@@ -4,7 +4,7 @@ use rusqlite::Connection;
 use serde_json::json;
 
 use super::{Actor, NewMessage, Recipient, append_message_in_tx, get_message_in_tx, migrate_in_tx};
-use drogon_protocol::orchestration_mail::MessageKind;
+use drogon_protocol::orchestration_mail::{MessageKind, MessagePriority};
 
 fn migrated_conn() -> Connection {
     let mut conn = Connection::open_in_memory().expect("in-memory fixture db");
@@ -88,6 +88,7 @@ fn append_and_read_exact_message_round_trips_every_immutable_field() {
             subject: "hello",
             body: Some("body text"),
             payload: Some(&json!({"k": "v"})),
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "req-1",
             created_at: "2026-09-07T00:00:00Z",
@@ -127,6 +128,7 @@ fn message_without_explicit_thread_starts_its_own_thread() {
             subject: "status",
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "req-2",
             created_at: "2026-09-07T00:00:00Z",
@@ -154,6 +156,7 @@ fn duplicate_message_id_is_refused() {
             subject: "s",
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "r1",
             created_at: "t",
@@ -174,6 +177,7 @@ fn duplicate_message_id_is_refused() {
             subject: "s2",
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "r2",
             created_at: "t",
@@ -201,6 +205,7 @@ fn oversized_body_is_refused_before_any_mutation() {
             subject: "s",
             body: Some(&huge),
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "r1",
             created_at: "t",
@@ -238,6 +243,7 @@ fn genuine_commit_persists_across_reopen() {
                 subject: "s",
                 body: None,
                 payload: None,
+                priority: MessagePriority::Normal,
                 thread_id: None,
                 origin_request_id: "r1",
                 created_at: "t",
@@ -318,6 +324,7 @@ fn sentinel_trigger_proves_no_raw_driver_text_echo() {
             subject: SENTINEL,
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "r1",
             created_at: "t",
@@ -353,6 +360,7 @@ fn high_escape_body_is_measured_by_actual_serialized_size_not_raw_length() {
             subject: "s",
             body: Some(&escaped),
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "r1",
             created_at: "t",
@@ -379,6 +387,7 @@ fn origin_request_id_and_typed_sender_survive_a_real_read() {
             subject: "s",
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "origin-req-77",
             created_at: "t",

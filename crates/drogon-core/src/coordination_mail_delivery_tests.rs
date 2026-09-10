@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::{Consumer, check_unread_in_tx, inspect_in_tx};
 use crate::coordination_mail::{Actor, NewMessage, Recipient, append_message_in_tx, migrate_in_tx};
-use drogon_protocol::orchestration_mail::MessageKind;
+use drogon_protocol::orchestration_mail::{MessageKind, MessagePriority};
 
 const HOST: &str = "host-1";
 const RUN: &str = "run-1";
@@ -35,6 +35,7 @@ fn seed_messages(conn: &mut Connection, to: &Recipient, count: usize, kind: Mess
                 subject: &format!("s{i}"),
                 body: None,
                 payload: None,
+                priority: MessagePriority::Normal,
                 thread_id: None,
                 origin_request_id: &format!("r{i}"),
                 created_at: "t",
@@ -365,6 +366,7 @@ fn kind_filter_never_skips_earlier_nonmatching_messages() {
             subject: "g",
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "rg",
             created_at: "t",
@@ -627,6 +629,7 @@ fn response_budget_stops_a_page_without_omitting_the_boundary_message() {
                 subject: "s",
                 body: Some(&big_body),
                 payload: None,
+                priority: MessagePriority::Normal,
                 thread_id: None,
                 origin_request_id: &format!("r{i}"),
                 created_at: "t",
@@ -713,6 +716,7 @@ fn inspect_kind_filter_does_not_lose_matching_rows_beyond_the_probe_window() {
             subject: "g",
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "rg",
             created_at: "t",
@@ -762,6 +766,7 @@ fn wake_kind_beyond_first_fifty_candidates_still_wakes_and_delivers_oldest_prefi
             subject: "g",
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "rg",
             created_at: "t",
@@ -814,6 +819,7 @@ fn check_delivery_batch_respects_the_response_byte_budget_and_freezes_on_replay(
                 subject: "s",
                 body: Some(&big),
                 payload: None,
+                priority: MessagePriority::Normal,
                 thread_id: None,
                 origin_request_id: &format!("r{i}"),
                 created_at: "t",
@@ -980,6 +986,7 @@ fn seed_and_ack_with_ids(conn: &mut Connection, ids: &[String]) -> String {
                 subject: "s",
                 body: None,
                 payload: None,
+                priority: MessagePriority::Normal,
                 thread_id: None,
                 origin_request_id: "r",
                 created_at: "t",
@@ -1049,6 +1056,7 @@ fn oversized_combined_response_is_never_silently_allowed() {
             delivery: outcome.delivery,
             acknowledged: outcome.acknowledged,
             messages: outcome.messages,
+            formatted: None,
             next_cursor: None,
             timed_out: false,
             cancelled: false,
@@ -1094,6 +1102,7 @@ fn near_budget_message_with_full_ack_still_fits_the_wire_budget() {
             subject: "s",
             body: Some(&body),
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "r",
             created_at: "t",
@@ -1123,6 +1132,7 @@ fn near_budget_message_with_full_ack_still_fits_the_wire_budget() {
         delivery: outcome.delivery,
         acknowledged: outcome.acknowledged,
         messages: outcome.messages,
+        formatted: None,
         next_cursor: None,
         timed_out: false,
         cancelled: false,
@@ -1181,6 +1191,7 @@ fn replay_refuses_a_delivery_batch_tampered_to_a_foreign_recipient_message() {
             subject: "s",
             body: None,
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "r",
             created_at: "t",
@@ -1316,6 +1327,7 @@ fn probe_wire_size(body_len: usize) -> usize {
         subject: "s".to_string(),
         body: Some("a".repeat(body_len)),
         payload: None,
+        priority: MessagePriority::Normal,
         thread_id: Some("near-limit".to_string()),
     };
     super::super::message_wire_size(&summary).unwrap()
@@ -1340,6 +1352,7 @@ fn a_message_accepted_at_append_is_never_permanently_undeliverable() {
             subject: "s",
             body: Some(&body),
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "r",
             created_at: "t",
@@ -1399,6 +1412,7 @@ fn near_packing_budget_message_is_accepted_and_delivered() {
             subject: "s",
             body: Some(&body),
             payload: None,
+            priority: MessagePriority::Normal,
             thread_id: None,
             origin_request_id: "r",
             created_at: "t",

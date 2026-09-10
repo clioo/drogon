@@ -10,18 +10,20 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    AutomationAction, BrowserAction, Cli, Command, HarnessAction, InternalAction, ProjectAction,
-    TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
+    AutomationAction, BrowserAction, Cli, Command, DiagnosticsAction, EnvironmentAction,
+    HarnessAction, HostAction, InternalAction, ProjectAction, RepoAction, TerminalAction, WaitFor,
+    WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
     BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, Project,
     ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Verdict, Workspace,
-    WorkspaceList, Worktree, WorktreeList, WriteResult, check_automation, check_automation_history,
-    check_automation_list, check_automation_run_now, check_browser_snapshot, check_browser_tab,
-    check_browser_tabs, check_harness_catalog, check_project, check_project_list, check_read,
-    check_removed, check_session, check_status, check_workspace, check_workspace_list,
-    check_worktree, check_worktree_list, check_write, partition_session_list,
+    WorkspaceList, Worktree, WorktreeEnvelope, WorktreeList, WriteResult, check_automation,
+    check_automation_history, check_automation_list, check_automation_run_now,
+    check_browser_snapshot, check_browser_tab, check_browser_tabs, check_harness_catalog,
+    check_project, check_project_list, check_read, check_removed, check_session, check_status,
+    check_workspace, check_workspace_list, check_worktree, check_worktree_list, check_write,
+    partition_session_list,
 };
 use crate::error::{CliError, method_not_found, timeout};
 use crate::output;
@@ -60,9 +62,102 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
     if let Command::AgentContext = &cli.command {
         return crate::agent_context::run(&request_id, json);
     }
+    // Source `host list` is a local answer (pairing store + this machine);
+    // the native runtime has exactly one reachable host and needs no daemon.
+    if let Command::Host {
+        action: HostAction::List,
+    } = &cli.command
+    {
+        let hosts = json!({ "hosts": [{
+            "kind": "local",
+            "name": "this machine",
+            "id": "local",
+            "selector": "--host local"
+        }]});
+        let call = CallOk {
+            request_id,
+            raw: json!({"ok": true, "result": hosts}),
+            result: hosts.clone(),
+        };
+        return emit(
+            call,
+            json,
+            || {
+                // Source formatHostList copy: kind padded to 11, name,
+                // arrow, selector.
+                "local       this machine  ->  --host local".to_string()
+            },
+            0,
+            None,
+        );
+    }
+    // Source `environment` verbs read a local pairing store; the native
+    // runtime has none, so list is empty and show/rm answer typed not_found
+    // without contacting a daemon.
+    // Source `project setups` reads a local setup store; the native runtime
+    // records none, so the honest answer is an empty list without a daemon.
+    if let Command::Project {
+        action: ProjectAction::Setups { project, host },
+    } = &cli.command
+    {
+        if let Some(project) = project {
+            require_nonempty(project)?;
+        }
+        if let Some(host) = host {
+            require_nonempty(host)?;
+        }
+        let setups = json!({ "setups": [] });
+        let call = CallOk {
+            request_id,
+            raw: json!({"ok": true, "result": setups}),
+            result: setups.clone(),
+        };
+        return emit(
+            call,
+            json,
+            || "No project host setups found.".to_string(),
+            0,
+            None,
+        );
+    }
+    if let Command::Environment { action } = &cli.command {
+        let local_error = |selector: &str| CliError::Local {
+            error: drogon_protocol::RpcError::new(
+                "not_found",
+                format!("environment {selector:?} not found"),
+            ),
+            request_id: request_id.clone(),
+        };
+        return match action {
+            EnvironmentAction::List => {
+                let environments = json!({ "environments": [] });
+                let call = CallOk {
+                    request_id,
+                    raw: json!({"ok": true, "result": environments}),
+                    result: environments.clone(),
+                };
+                emit(call, json, || "No saved environments.".to_string(), 0, None)
+            }
+            EnvironmentAction::Show { environment } => Err(local_error(environment)),
+            EnvironmentAction::Rm { environment } => Err(local_error(environment)),
+        };
+    }
+    // The retired coordinator verbs never contact the runtime: they report
+    // the migration guidance locally even when no daemon is listening. This
+    // must run before Client::open, which fails hard on a missing runtime.
+    if let Command::Orchestration { command } = &cli.command
+        && matches!(
+            &**command,
+            crate::orchestration_cli::OrchestrationCommand::CoordinatorStart { .. }
+                | crate::orchestration_cli::OrchestrationCommand::CoordinatorStop
+        )
+    {
+        return crate::orchestration_commands::retired_coordinator_result(&request_id, json);
+    }
     let client = Client::open(&data_dir, &request_id)?;
 
     match &cli.command {
+        Command::Environment { .. } => unreachable!("handled locally before Client::open"),
         Command::Status => {
             let call = client
                 .call("status", json!({}), &request_id, DEFAULT_TIMEOUT)
@@ -94,6 +189,50 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
             }
         },
         Command::Project { action } => project(&client, &request_id, json, action).await,
+        Command::Repo {
+            action:
+                RepoAction::SearchRefs {
+                    project,
+                    query,
+                    limit,
+                },
+        } => {
+            let mut params = json!({ "projectId": project, "query": query });
+            if let Some(limit) = limit {
+                params["limit"] = json!(limit);
+            }
+            let call = client
+                .call("repo.search_refs", params, &request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let refs: Vec<String> = call.result["refs"]
+                .as_array()
+                .ok_or_else(|| CliError::Local {
+                    error: crate::error::internal_error("repo.search_refs result is missing refs"),
+                    request_id: request_id.clone(),
+                })?
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect();
+            let truncated = call.result["truncated"].as_bool().unwrap_or(false);
+            let joined = refs.join("\n");
+            emit(
+                call,
+                json,
+                || {
+                    if refs.is_empty() {
+                        return "No refs found.".to_string();
+                    }
+                    if truncated {
+                        format!("{joined}\n\ntruncated: yes")
+                    } else {
+                        joined
+                    }
+                },
+                0,
+                None,
+            )
+        }
         Command::Worktree { action } => worktree(&client, &request_id, json, action).await,
         Command::Terminal { action } => terminal(&client, &request_id, json, action).await,
         Command::Browser { action } => browser(&client, &request_id, json, action).await,
@@ -111,6 +250,55 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
             unreachable!("agent-context is served locally before the client opens")
         }
         Command::Internal { action } => internal(&client, &request_id, json, action).await,
+        Command::Host { action } => match action {
+            HostAction::List => {
+                // Local answer: the native runtime has one reachable host.
+                // The source shape is kept exactly (kind/name/id/selector).
+                let hosts = json!({ "hosts": [{
+                    "kind": "local",
+                    "name": "this machine",
+                    "id": "local",
+                    "selector": "--host local"
+                }]});
+                let call = CallOk {
+                    request_id,
+                    raw: json!({"ok": true, "result": hosts}),
+                    result: hosts.clone(),
+                };
+                emit(call, json, || "local".to_string(), 0, None)
+            }
+        },
+        Command::Diagnostics { action } => match action {
+            DiagnosticsAction::Memory => {
+                let call = client
+                    .call(
+                        "diagnostics.memory",
+                        json!({}),
+                        &request_id,
+                        DEFAULT_TIMEOUT,
+                    )
+                    .await?;
+                let rss = call.result["rssBytes"].as_u64();
+                let live = call.result["liveSessions"].as_u64().unwrap_or(0);
+                let total = call.result["totalSessions"].as_u64().unwrap_or(0);
+                emit(
+                    call,
+                    json,
+                    || match rss {
+                        Some(bytes) => format!(
+                            "drogond pid {} rss {} MiB, {live} live of {total} sessions",
+                            std::process::id(),
+                            bytes / (1024 * 1024),
+                        ),
+                        None => format!(
+                            "drogond rss unknown on this platform, {live} live of {total} sessions"
+                        ),
+                    },
+                    0,
+                    None,
+                )
+            }
+        },
         Command::Rpc { method, params } => {
             let params: Value = match params {
                 Some(text) => serde_json::from_str(text)
@@ -158,7 +346,35 @@ async fn terminal(
             let session: Session = Client::decode_checked(&call, "session.start", check_session)?;
             emit(call, json, || output::session_started(&session), 0, None)
         }
-        TerminalAction::List { workspace } => {
+        TerminalAction::List {
+            workspace,
+            worktree,
+            limit,
+        } => {
+            // `--worktree` resolves to the worktree's workspace first; a
+            // folder Project's implicit worktree is addressable too.
+            let workspace = match workspace {
+                Some(id) => Some(id.clone()),
+                None => match worktree {
+                    Some(wt) => {
+                        let call = client
+                            .call(
+                                "worktree.get",
+                                json!({ "id": wt }),
+                                request_id,
+                                DEFAULT_TIMEOUT,
+                            )
+                            .await?;
+                        let found: WorktreeEnvelope = Client::decode_checked(
+                            &call,
+                            "worktree.get",
+                            |env: &WorktreeEnvelope| check_worktree(&env.worktree),
+                        )?;
+                        Some(found.worktree.workspace_id)
+                    }
+                    None => None,
+                },
+            };
             let params = match workspace {
                 Some(id) => json!({ "workspaceId": id }),
                 None => json!({}),
@@ -173,13 +389,23 @@ async fn terminal(
             // rejected ones.
             let list: SessionList = Client::decode(&call, "session.list")?;
             let (sessions, warnings) = partition_session_list(list);
+            // Source `--limit` caps the returned inventory after filtering.
+            let sessions = match limit {
+                Some(cap) => sessions
+                    .into_iter()
+                    .take((*cap).min(usize::MAX as u64) as usize)
+                    .collect(),
+                None => sessions,
+            };
             let list = SessionList { sessions };
             let stderr_note = if warnings.is_empty() {
                 None
             } else {
                 Some(warnings.join("\n"))
             };
-            if json && stderr_note.is_some() {
+            // --limit changes the payload, so JSON output must be rebuilt
+            // from the capped list even when there were no warnings.
+            if json && (stderr_note.is_some() || limit.is_some()) {
                 let mut filtered = call.raw.clone();
                 filtered["result"]["sessions"] =
                     serde_json::to_value(&list.sessions).map_err(|err| {
@@ -203,6 +429,7 @@ async fn terminal(
             incarnation,
             cursor,
             limit_bytes,
+            screen,
         } => {
             let mut params = json!({
                 "sessionId": session,
@@ -211,6 +438,65 @@ async fn terminal(
             });
             if let Some(limit) = limit_bytes {
                 params["limitBytes"] = json!(limit);
+            }
+            if *screen {
+                // A screen read replays the full retained stream once and
+                // renders the current frame — no cursor to page from.
+                let mut stream = Vec::new();
+                let mut cursor_pos = 0u64;
+                let (cols, rows, verdict_str) = loop {
+                    let call = client
+                        .call(
+                            "session.read",
+                            {
+                                let mut p = params.clone();
+                                p["cursor"] = json!(cursor_pos);
+                                p
+                            },
+                            request_id,
+                            DEFAULT_TIMEOUT,
+                        )
+                        .await?;
+                    let read: ReadResult =
+                        Client::decode_checked(&call, "session.read", check_read)?;
+                    let (c, r) = (read.session.cols, read.session.rows);
+                    let verdict = read.session.verdict_str().to_string();
+                    use base64::Engine as _;
+                    let chunk = base64::engine::general_purpose::STANDARD
+                        .decode(read.data_base64.as_bytes())
+                        .map_err(|_| CliError::Local {
+                            error: crate::error::internal_error(
+                                "session.read returned malformed base64",
+                            ),
+                            request_id: request_id.to_string(),
+                        })?;
+                    stream.extend_from_slice(&chunk);
+                    if !read.truncated {
+                        break (c, r, verdict);
+                    }
+                    cursor_pos = read.next_cursor;
+                };
+                let rendered = crate::screen::render_screen(&stream, cols as usize, rows as usize);
+                let tail: Vec<Value> = rendered
+                    .lines
+                    .iter()
+                    .map(|l| Value::String(l.clone()))
+                    .collect();
+                let result = json!({
+                    "source": "screen",
+                    "tail": tail,
+                    "truncated": false,
+                    "undecodedBytes": rendered.undecoded_bytes,
+                    "sessionId": session,
+                    "agentVerdict": verdict_str,
+                });
+                let call = CallOk {
+                    request_id: request_id.to_string(),
+                    raw: json!({"ok": true, "result": result}),
+                    result: result.clone(),
+                };
+                let lines = rendered.lines.clone();
+                return emit(call, json, || lines.join("\n"), 0, None);
             }
             let call = client
                 .call("session.read", params, request_id, DEFAULT_TIMEOUT)
@@ -222,13 +508,25 @@ async fn terminal(
             session,
             incarnation,
             text,
+            enter,
+            interrupt,
         } => {
-            let sent_bytes = text.len() as u64;
+            // Source `terminal send` composes the exact byte stream: typed
+            // text, then a carriage return when --enter, or just the
+            // interrupt byte (Ctrl-C, 0x03) when --interrupt. No shell
+            // interpolation anywhere; UTF-8 encoded once.
+            let mut bytes = text.clone().unwrap_or_default().into_bytes();
+            if *enter {
+                bytes.push(b'\r');
+            }
+            if *interrupt {
+                bytes.push(0x03);
+            }
+            let sent_bytes = bytes.len() as u64;
             let params = json!({
                 "sessionId": session,
                 "incarnation": incarnation,
-                // UTF-8 encoded once, here; never shell-interpolated anywhere.
-                "dataBase64": STANDARD.encode(text.as_bytes()),
+                "dataBase64": STANDARD.encode(&bytes),
             });
             let call = client
                 .call("session.write", params, request_id, DEFAULT_TIMEOUT)
@@ -286,6 +584,116 @@ async fn terminal(
                 *timeout_ms,
             )
             .await
+        }
+        TerminalAction::Rename {
+            session,
+            incarnation,
+            title,
+        } => {
+            let call = client
+                .call(
+                    "session.rename",
+                    json!({
+                        "sessionId": session,
+                        "incarnation": incarnation,
+                        "title": title,
+                    }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let renamed: Session = Client::decode_checked(&call, "session.rename", check_session)?;
+            let session_id = session.clone();
+            emit(
+                call,
+                json,
+                || match &renamed.title {
+                    Some(title) => format!("Renamed {session_id} to {title:?}."),
+                    None => format!("Cleared the title on {session_id}."),
+                },
+                0,
+                None,
+            )
+        }
+        TerminalAction::Show { session } => {
+            let call = client
+                .call(
+                    "session.show",
+                    json!({ "sessionId": session }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            // The reply is the session record plus an optional preview tail.
+            let mut value = call.result.clone();
+            let preview = value
+                .as_object_mut()
+                .and_then(|obj| obj.remove("previewBase64"))
+                .and_then(|v| v.as_str().map(str::to_string));
+            let session_value: Session = serde_json::from_value(value).map_err(|_| {
+                CliError::local(
+                    crate::error::internal_error(
+                        "service returned a malformed session.show result; refusing to guess",
+                    ),
+                    &call.request_id,
+                )
+            })?;
+            check_session(&session_value).map_err(|violation| {
+                CliError::local(
+                    crate::error::internal_error(format!(
+                        "session.show violates protocol invariants: {violation}"
+                    )),
+                    &call.request_id,
+                )
+            })?;
+            let preview_text = preview
+                .map(|b64| {
+                    STANDARD
+                        .decode(b64.as_bytes())
+                        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+            emit(
+                call,
+                json,
+                || {
+                    let mut line = output::session_started(&session_value);
+                    if !preview_text.is_empty() {
+                        line.push('\n');
+                        line.push_str(&preview_text);
+                    }
+                    line
+                },
+                0,
+                None,
+            )
+        }
+        TerminalAction::Stop { workspace } => {
+            let call = client
+                .call(
+                    "session.stop_workspace",
+                    json!({ "workspaceId": workspace }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let stopped = call.result["stopped"].as_u64().ok_or_else(|| {
+                CliError::local(
+                    crate::error::internal_error(
+                        "session.stop_workspace reply is missing a numeric `stopped` count",
+                    ),
+                    &call.request_id,
+                )
+            })?;
+            // Source copy: `Stopped N terminals.` (terminal.ts handler).
+            emit(
+                call,
+                json,
+                || format!("Stopped {stopped} terminals."),
+                0,
+                None,
+            )
         }
         TerminalAction::Close {
             session,
@@ -428,6 +836,7 @@ async fn project(
     action: &ProjectAction,
 ) -> Result<RunOutcome, CliError> {
     match action {
+        ProjectAction::Setups { .. } => unreachable!("handled locally before Client::open"),
         ProjectAction::Add { path, name } => {
             let resolved = resolve_path_argument(path)?;
             let mut params = json!({ "path": resolved });
@@ -469,10 +878,75 @@ async fn worktree(
     action: &WorktreeAction,
 ) -> Result<RunOutcome, CliError> {
     match action {
+        WorktreeAction::Show { id } => {
+            let call = client
+                .call(
+                    "worktree.get",
+                    json!({ "id": id }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let envelope: WorktreeEnvelope =
+                Client::decode_checked(&call, "worktree.get", |env: &WorktreeEnvelope| {
+                    check_worktree(&env.worktree)
+                })?;
+            emit(
+                call,
+                json,
+                || output::worktree_created(&envelope.worktree),
+                0,
+                None,
+            )
+        }
+        WorktreeAction::Current => {
+            let cwd = std::env::current_dir().map_err(|err| {
+                CliError::local(
+                    crate::error::internal_error(format!(
+                        "cannot read the current directory: {err}"
+                    )),
+                    request_id,
+                )
+            })?;
+            let path = cwd.to_str().ok_or_else(|| {
+                CliError::local(
+                    crate::error::invalid_argument("current directory is not valid UTF-8"),
+                    request_id,
+                )
+            })?;
+            let call = client
+                .call(
+                    "worktree.current",
+                    json!({ "path": path }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let envelope: WorktreeEnvelope =
+                Client::decode_checked(&call, "worktree.current", |env: &WorktreeEnvelope| {
+                    check_worktree(&env.worktree)
+                })?;
+            emit(
+                call,
+                json,
+                || output::worktree_created(&envelope.worktree),
+                0,
+                None,
+            )
+        }
         WorktreeAction::Create {
             project,
             name,
             base,
+            parent,
+            no_parent,
+            comment,
+            agent,
+            prompt,
+            run_hooks,
+            setup,
+            activate,
+            issue,
         } => {
             // Real, durable creation provenance (Workspace Options "Hide:
             // CLI-created"): every worktree this command creates really was
@@ -483,24 +957,234 @@ async fn worktree(
             if let Some(base) = base {
                 params["baseRef"] = json!(base);
             }
+            // Source `setupDecision` + `activate` wire fields. No desktop
+            // view or setup engine exists here; the daemon records the
+            // decision and the CLI says so instead of pretending.
+            // `--no-parent` is an explicit null; `--parent` addresses the
+            // parent row by id; neither means the daemon's default.
+            if *no_parent || parent.is_some() {
+                params["parentWorktreeId"] = match parent {
+                    Some(parent) => json!(parent),
+                    None => Value::Null,
+                };
+            }
+            if let Some(comment) = comment {
+                params["note"] = json!(comment);
+            }
+            if *run_hooks {
+                params["runHooks"] = json!(true);
+            }
+            let effective_setup = if *run_hooks {
+                // Source: --run-hooks is a legacy alias for --setup run.
+                Some("run".to_string())
+            } else {
+                setup.clone()
+            };
+            let mut local_warnings = Vec::new();
+            if let Some(issue) = issue
+                && *issue > 0
+            {
+                params["linkedIssue"] = json!(issue);
+            }
+            if let Some(setup) = &effective_setup {
+                params["setupDecision"] = json!(setup);
+                if setup == "run" {
+                    local_warnings.push(
+                        "warning: --setup run is a no-op: this runtime has no orca.yaml setup engine"
+                            .to_string(),
+                    );
+                }
+            }
+            if *activate {
+                params["activate"] = json!(true);
+                local_warnings.push(
+                    "warning: --activate is a no-op: there is no desktop view to reveal"
+                        .to_string(),
+                );
+            }
             let call = client
                 .call("worktree.create", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
             let worktree: Worktree =
                 Client::decode_checked(&call, "worktree.create", check_worktree)?;
-            emit(call, json, || output::worktree_created(&worktree), 0, None)
+            // The daemon answers runHooks with an honest no-op warning
+            // (never a silent pretense that hooks ran).
+            let hook_warning = call
+                .result
+                .get("warning")
+                .and_then(Value::as_str)
+                .map(|w| format!("warning: {w}"));
+            let mut warnings = local_warnings;
+            warnings.extend(hook_warning);
+            let stderr_note = if json || warnings.is_empty() {
+                None
+            } else {
+                Some(warnings.join("\n"))
+            };
+            // Source `--agent`: launch the harness in the new worktree's
+            // first terminal (its workspace) and surface the agent handle.
+            if let Some(agent) = agent {
+                let mut launch = json!({
+                    "workspaceId": worktree.workspace_id,
+                    "harnessId": agent,
+                });
+                launch["prompt"] = json!(prompt.clone().unwrap_or_default());
+                let launch_call = client
+                    .call("harness.start", launch, request_id, DEFAULT_TIMEOUT)
+                    .await?;
+                let session: Session =
+                    Client::decode_checked(&launch_call, "harness.start", check_session)?;
+                let handle = session.id.clone();
+                return emit(
+                    launch_call,
+                    json,
+                    || {
+                        format!(
+                            "{}\nAgent terminal {} ready.",
+                            output::worktree_created(&worktree),
+                            handle
+                        )
+                    },
+                    0,
+                    stderr_note,
+                );
+            }
+            emit(
+                call,
+                json,
+                || output::worktree_created(&worktree),
+                0,
+                stderr_note,
+            )
         }
-        WorktreeAction::List { project } => {
+        WorktreeAction::List { project, limit } => {
             let params = json!({ "projectId": project });
             let call = client
                 .call("worktree.list", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
             let list: WorktreeList =
                 Client::decode_checked(&call, "worktree.list", check_worktree_list)?;
-            emit(call, json, || output::worktree_list(&list), 0, None)
+            // Source `--limit` caps the listing client-side after ordering.
+            let list = match limit {
+                Some(cap) => WorktreeList {
+                    worktrees: list
+                        .worktrees
+                        .into_iter()
+                        .take((*cap).min(usize::MAX as u64) as usize)
+                        .collect(),
+                },
+                None => list,
+            };
+            if json {
+                // The cap changes the payload; rebuild the JSON from the
+                // capped list rather than echoing the daemon's full array.
+                let mut raw = call.raw.clone();
+                raw["result"]["worktrees"] =
+                    serde_json::to_value(&list.worktrees).map_err(|err| {
+                        CliError::local(
+                            crate::error::internal_error(format!("cannot encode response: {err}")),
+                            &call.request_id,
+                        )
+                    })?;
+                let call = CallOk {
+                    request_id: call.request_id,
+                    raw,
+                    result: call.result,
+                };
+                emit(call, json, || output::worktree_list(&list), 0, None)
+            } else {
+                emit(call, json, || output::worktree_list(&list), 0, None)
+            }
         }
-        WorktreeAction::Rm { id, force } => {
-            let params = json!({ "id": id, "force": force });
+        WorktreeAction::Ps { limit } => {
+            let params = match limit {
+                Some(cap) => json!({ "limit": cap }),
+                None => json!({}),
+            };
+            let call = client
+                .call("worktree.ps", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let human_lines = {
+                let entries = call
+                    .result
+                    .get("worktrees")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                if entries.is_empty() {
+                    "No worktrees.".to_string()
+                } else {
+                    entries
+                        .iter()
+                        .map(|entry| {
+                            format!(
+                                "{} {} [{}] live-sessions={}",
+                                entry["worktreeId"].as_str().unwrap_or(""),
+                                entry["path"].as_str().unwrap_or(""),
+                                entry["branch"].as_str().unwrap_or(""),
+                                entry["liveSessions"].as_i64().unwrap_or(0),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            };
+            emit(call, json, || human_lines, 0, None)
+        }
+        WorktreeAction::Set {
+            id,
+            note,
+            no_note,
+            display_name,
+            no_display_name,
+            issue,
+            no_issue,
+            parent,
+            no_parent,
+        } => {
+            // Tri-state wire fields: absent leaves the stored value, explicit
+            // null clears it. `--note ""` trims to a clear daemon-side.
+            let mut params = json!({ "worktreeId": id });
+            if *no_note {
+                params["note"] = Value::Null;
+            } else if let Some(note) = note {
+                params["note"] = json!(note);
+            }
+            if *no_display_name {
+                params["title"] = Value::Null;
+            } else if let Some(display_name) = display_name {
+                params["title"] = json!(display_name);
+            }
+            if *no_issue {
+                params["linkedIssue"] = Value::Null;
+            } else if let Some(issue) = issue {
+                params["linkedIssue"] = json!(issue);
+            }
+            if *no_parent {
+                params["parentWorktreeId"] = Value::Null;
+            } else if let Some(parent) = parent {
+                params["parentWorktreeId"] = json!(parent);
+            }
+            let call = client
+                .call("worktree.update", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            // `worktree.update` returns the worktree record directly.
+            let worktree: Worktree =
+                Client::decode_checked(&call, "worktree.update", check_worktree)?;
+            emit(call, json, || output::worktree_created(&worktree), 0, None)
+        }
+        WorktreeAction::Rm {
+            id,
+            force,
+            delete_branch,
+            run_hooks,
+        } => {
+            let params = json!({
+                "id": id,
+                "force": force,
+                "deleteBranch": delete_branch,
+                "runHooks": run_hooks
+            });
             let call = client
                 .call("worktree.remove", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
@@ -508,7 +1192,32 @@ async fn worktree(
             let removed: Removed = Client::decode_checked(&call, "worktree.remove", |removed| {
                 check_removed(removed, &requested_id)
             })?;
-            emit(call, json, || output::worktree_removed(&removed), 0, None)
+            // Source `printPreservedBranchWarning` + `printHookWarning`
+            // copies: stderr-only human warnings, never in JSON stdout.
+            let mut warnings = Vec::new();
+            if *delete_branch
+                && removed.branch_deleted == Some(false)
+                && let Some(branch) = &removed.branch
+            {
+                warnings.push(format!(
+                    "warning: local branch {branch:?} was kept because Git could not safely delete it"
+                ));
+            }
+            if let Some(warning) = &removed.warning {
+                warnings.push(format!("warning: {warning}"));
+            }
+            let stderr_note = if !json && !warnings.is_empty() {
+                Some(warnings.join("\n"))
+            } else {
+                None
+            };
+            emit(
+                call,
+                json,
+                || output::worktree_removed(&removed),
+                0,
+                stderr_note,
+            )
         }
     }
 }
@@ -674,6 +1383,25 @@ async fn automation(
                 Client::decode_checked(&call, "automation.list", check_automation_list)?;
             emit(call, json, || output::automation_list(&list), 0, None)
         }
+        AutomationAction::Show { id } => {
+            let call = client
+                .call(
+                    "automation.show",
+                    json!({ "id": id }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let summary: AutomationSummary =
+                Client::decode_checked(&call, "automation.show", check_automation)?;
+            emit(
+                call,
+                json,
+                || output::automation_line_public(&summary),
+                0,
+                None,
+            )
+        }
         AutomationAction::Run { id } => {
             let call = client
                 .call(
@@ -702,6 +1430,119 @@ async fn automation(
                 call,
                 json,
                 || output::automation_history(&history, &automation_id),
+                0,
+                None,
+            )
+        }
+        AutomationAction::Edit {
+            id,
+            name,
+            cron,
+            workspace,
+            harness,
+            prompt,
+            enable,
+            disable,
+            grace_minutes,
+            model,
+            provider,
+        } => {
+            let mut params = json!({ "id": id });
+            if let Some(name) = name {
+                params["name"] = json!(name);
+            }
+            if let Some(cron) = cron {
+                params["cron"] = json!(cron);
+            }
+            if let Some(workspace) = workspace {
+                params["workspaceId"] = json!(workspace);
+            }
+            if let Some(harness) = harness {
+                params["harness"] = json!(harness);
+            }
+            if let Some(prompt) = prompt {
+                params["prompt"] = json!(prompt);
+            }
+            if *enable {
+                params["enabled"] = json!(true);
+            }
+            if *disable {
+                params["enabled"] = json!(false);
+            }
+            if let Some(grace) = grace_minutes {
+                params["graceMinutes"] = json!(grace);
+            }
+            if let Some(model) = model {
+                params["model"] = json!(model);
+            }
+            if let Some(provider) = provider {
+                params["provider"] = json!(provider);
+            }
+            if params.as_object().map(|o| o.len() <= 1).unwrap_or(true) {
+                return Err(CliError::Usage(
+                    "automation edit requires at least one field flag".into(),
+                ));
+            }
+            let call = client
+                .call("automation.update", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let automation: AutomationSummary =
+                Client::decode_checked(&call, "automation.update", check_automation)?;
+            emit(
+                call,
+                json,
+                || {
+                    format!(
+                        "Updated automation {}",
+                        crate::output::automation_line_public(&automation)
+                    )
+                },
+                0,
+                None,
+            )
+        }
+        AutomationAction::Remove { id } => {
+            let call = client
+                .call(
+                    "automation.delete",
+                    json!({ "id": id }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let removed_id = call.result["id"].as_str().unwrap_or(id).to_string();
+            emit(
+                call,
+                json,
+                || format!("Removed automation {removed_id}."),
+                0,
+                None,
+            )
+        }
+        AutomationAction::Runs {
+            status,
+            page,
+            per_page,
+        } => {
+            let mut params = json!({});
+            if let Some(status) = status {
+                params["status"] = json!(status);
+            }
+            if let Some(page) = page {
+                params["page"] = json!(page);
+            }
+            if let Some(per_page) = per_page {
+                params["perPage"] = json!(per_page);
+            }
+            let call = client
+                .call("automation.runs_all", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let total = call.result["total"].as_u64().unwrap_or(0);
+            let runs = call.result["runs"].as_array().map(Vec::len).unwrap_or(0);
+            emit(
+                call,
+                json,
+                || format!("{runs} runs on this page, {total} total."),
                 0,
                 None,
             )
@@ -929,6 +1770,15 @@ fn emit_raw(call: CallOk) -> Result<RunOutcome, CliError> {
         exit_code: 0,
         stderr_note: None,
     })
+}
+
+/// A blank filter value is a usage error, matching the source's
+/// required-flag rules.
+fn require_nonempty(value: &str) -> Result<(), CliError> {
+    if value.trim().is_empty() {
+        return Err(CliError::Usage("filter values must be non-empty".into()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
