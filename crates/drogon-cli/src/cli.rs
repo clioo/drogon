@@ -122,9 +122,9 @@ pub enum Command {
     },
     /// Scoped Bot self-management: a Bot lists/creates/edits/enables/
     /// disables/deletes/tests its OWN automations and monitors (requires
-    /// the service capability bot.self.v1; every mutation records actor
-    /// bot:<id> and denies cross-Bot scope, stale revisions and scope
-    /// escape)
+    /// the service capability bot.self.v1; every mutation records the
+    /// acting Bot's id as audit actor and denies cross-Bot scope, stale
+    /// revisions and scope escape)
     Bot {
         #[command(subcommand)]
         action: BotAction,

@@ -32,8 +32,9 @@
 //!   `bot.self_*` method writes a `bot_audit` row
 //!   `(request_id, method, actor_bot_id, target_bot_id, at)` in the SAME
 //!   ledger transaction as the mutation itself, so the actor is committed
-//!   atomically with the effect it describes. The actor is always
-//!   `bot:<bot_id>`; host/UI mutations write no row here.
+//!   atomically with the effect it describes. The actor is the acting
+//!   Bot's raw id (column `actor_bot_id` carries the namespacing, not the
+//!   value); host/UI mutations write no row here.
 //! - **P4 — scoped Bot CLI/API over its OWN automations/monitors.**
 //!   `bot.self_list/create/update/enable/disable/delete/test` cover both
 //!   entity types. Every call asserts `actorBotId == botId` (cross-Bot is
@@ -156,10 +157,15 @@ fn monitor_storage_error(e: monitor_storage::StorageError) -> RpcError {
 // P1: handles, home directories, profiles
 // ---------------------------------------------------------------------------
 
-/// Validates a Bot handle for use as a directory name: trimmed, one
+/// Validates a Bot handle into its canonical directory form: trimmed, one
 /// leading `@` stripped (exactly like `records::normalize_bot`), then
 /// `1..=64` chars of `[A-Za-z0-9_-]` — no separators, no traversal, no
-/// empty segments, ever.
+/// empty segments, ever — and finally lowercased. The lowercase canonical
+/// form is what makes handles safe on case-insensitive filesystems: two
+/// bots whose handles differ only by case (`Watcher` vs `watcher`) claim
+/// the SAME directory, so the second claim collides instead of aliasing
+/// the first bot's home (see `claim_home_in_tx`). Callers must use the
+/// RETURNED form for paths, never the raw input.
 pub fn validate_bot_handle(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     let stripped = trimmed.strip_prefix('@').unwrap_or(trimmed);
@@ -179,12 +185,13 @@ pub fn validate_bot_handle(raw: &str) -> Result<String, String> {
             "bot handle must match [A-Za-z0-9_-]+ (no spaces, no path separators)".to_string(),
         );
     }
-    Ok(stripped.to_string())
+    Ok(stripped.to_ascii_lowercase())
 }
 
-/// Derives the directory handle for a Bot: its validated stored handle,
-/// else `bot-<first 8 alphanumeric chars of its id>`. The fallback keeps
-/// provisioning total (a Bot without a path-safe handle still gets a
+/// Derives the directory handle for a Bot: its validated stored handle
+/// (canonical lowercase — see `validate_bot_handle`), else
+/// `bot-<first 8 alphanumeric chars of its id, lowercased>`. The fallback
+/// keeps provisioning total (a Bot without a path-safe handle still gets a
 /// home) while keeping the preferred `<handle>` shape whenever it is safe.
 pub fn dir_handle_for_bot(bot: &Bot) -> Result<String, String> {
     if let Some(handle) = bot.display_identity.handle.as_deref()
@@ -197,7 +204,8 @@ pub fn dir_handle_for_bot(bot: &Bot) -> Result<String, String> {
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .take(8)
-        .collect();
+        .collect::<String>()
+        .to_ascii_lowercase();
     if alnum.is_empty() {
         return Err("bot id carries no alphanumeric characters for a fallback handle".to_string());
     }
@@ -432,7 +440,11 @@ fn self_storage_error(e: SelfStorageError) -> RpcError {
 /// Pins the home profile: INSERTs, or — when this Bot already has a home —
 /// returns the pinned row unchanged (handle pinned at first provision;
 /// idempotent re-provision). A handle owned by a DIFFERENT Bot is
-/// `HandleCollision`, never an overwrite.
+/// `HandleCollision`, never an overwrite. Handles are canonical lowercase
+/// at provisioning (see `validate_bot_handle`), and the collision probe is
+/// additionally case-insensitive (`COLLATE NOCASE`) so a pre-normalization
+/// row (`Watcher`) still blocks its alias (`watcher`) from claiming the
+/// same directory on a case-insensitive filesystem.
 pub fn claim_home_in_tx(
     tx: &Transaction,
     profile: &BotHomeProfile,
@@ -477,7 +489,7 @@ pub fn claim_home_in_tx(
             }
             let owner: Option<String> = tx
                 .query_row(
-                    "SELECT bot_id FROM bot_homes WHERE handle = ?1",
+                    "SELECT bot_id FROM bot_homes WHERE handle = ?1 COLLATE NOCASE",
                     params![profile.handle],
                     |r| r.get(0),
                 )
@@ -503,8 +515,12 @@ pub fn home_for_bot(tx: &Transaction, bot_id: &str) -> SelfResult<Option<BotHome
 }
 
 /// P3: records the Bot-origin actor atomically with the mutation it
-/// describes. `INSERT OR IGNORE` keeps a ledger replay (same request_id,
-/// same params) from double-logging if work ever re-ran.
+/// describes. The stored actor is the acting Bot's RAW id (no `bot:`
+/// prefix — the `bot:` namespacing lives in the API field and column
+/// names, `actorBotId`/`actor_bot_id`, not the value, so rows join
+/// directly against `bot_id`/`target_bot_id`). `INSERT OR IGNORE` keeps a
+/// ledger replay (same request_id, same params) from double-logging if
+/// work ever re-ran.
 pub fn record_audit_in_tx(
     tx: &Transaction,
     request_id: &str,
@@ -702,9 +718,24 @@ pub fn monitors_for_bot(
         .collect())
 }
 
-/// Bounded, scope-contained file read OUTSIDE any DB lock. Maps IO shapes
-/// to honest error kinds; oversize is detected with one byte of lookahead
-/// rather than by loading the whole file.
+/// Bounded, scope-contained file read OUTSIDE any DB lock. Two fences,
+/// in order: the lexical containment check (`resolve_scoped_path`, which
+/// rejects absolute paths and `..` escapes without touching the
+/// filesystem), then canonicalize-and-compare (which resolves every
+/// symlink — including a `link.md -> /outside` planted in the home AFTER
+/// admission — and verifies the real location still lies under the real
+/// home root before a single byte is read). A symlink redirecting outside
+/// is an honest `Forbidden` error check-in: cursor retained, nothing
+/// emitted, never a silent no-change.
+///
+/// Both sides are canonicalized because the stored root itself may alias
+/// (macOS `/tmp` → `/private/tmp`): comparing a canonical file against a
+/// non-canonical root would false-positive on every read.
+///
+/// Residual TOCTOU, stated not hidden: a path swapped between the
+/// canonicalize and the open still races. Closing the plant-before-tick
+/// class (the proven break) is what this fence is for; pinning open file
+/// descriptors is follow-up work, not claimed here.
 enum ScopedBytes {
     Bytes(Vec<u8>),
     TooLarge(u64),
@@ -716,8 +747,55 @@ fn read_scoped_file(project_root: &str, resource: &str, max_bytes: u64) -> Scope
         Ok(path) => path,
         Err(reason) => return ScopedBytes::Failure(MonitorErrorKind::Malformed, reason),
     };
+    let canonical_root = match std::fs::canonicalize(project_root) {
+        Ok(root) => root,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return ScopedBytes::Failure(
+                MonitorErrorKind::NotFound,
+                "monitor workspace root is absent".to_string(),
+            );
+        }
+        Err(e) => {
+            return ScopedBytes::Failure(
+                MonitorErrorKind::IoError,
+                format!("monitor workspace root unreadable: {e}"),
+            );
+        }
+    };
+    // Canonicalize resolves every symlink component (including a planted
+    // final-segment link) or fails for absent paths — mapped to the same
+    // honest shapes the direct open used to produce.
+    let canonical_file = match std::fs::canonicalize(&joined) {
+        Ok(path) => path,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return ScopedBytes::Failure(
+                MonitorErrorKind::NotFound,
+                format!("monitored file is absent: {resource}"),
+            );
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            return ScopedBytes::Failure(
+                MonitorErrorKind::Forbidden,
+                format!("monitored file is not readable: {resource}"),
+            );
+        }
+        Err(e) => {
+            return ScopedBytes::Failure(
+                MonitorErrorKind::IoError,
+                format!("monitored file read failed: {e}"),
+            );
+        }
+    };
+    if !canonical_file.starts_with(&canonical_root) {
+        return ScopedBytes::Failure(
+            MonitorErrorKind::Forbidden,
+            format!("monitored file escapes the Bot home: {resource}"),
+        );
+    }
     let bound = max_bytes.min(MAX_FILE_BYTES);
-    let file = match std::fs::File::open(&joined) {
+    // Open the canonical path, not the lexical join: the containment
+    // verdict above applies to exactly this location.
+    let file = match std::fs::File::open(&canonical_file) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return ScopedBytes::Failure(
