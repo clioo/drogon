@@ -130,7 +130,11 @@ await writeFixtureGh(fixtureBin, [
   { number: 1, title: "Acceptance issue one" },
   { number: 2, title: "Acceptance issue two" },
 ]);
-if (withAgents || withSessions) await writeAgentSettingsFixtures(fixtureBin);
+// Packaged journeys launch the default harness from the new-session
+// composer too. Keep every packaged launch on the shell fixture; otherwise
+// the isolated fixture PATH hides Pi/Claude and the composer truthfully
+// renders only whichever host binaries happen to leak through.
+if (packaged || withAgents || withSessions) await writeAgentSettingsFixtures(fixtureBin);
 const output = path.join(
   root,
   ".preflight",
