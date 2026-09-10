@@ -68,8 +68,8 @@ fn install_echoing_claude_fixture() {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let mut paths =
-            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect::<Vec<_>>();
+        let mut paths = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .collect::<Vec<_>>();
         paths.insert(0, bin.path().to_path_buf());
         unsafe { std::env::set_var("PATH", std::env::join_paths(&paths).unwrap()) };
         std::mem::forget(bin);
@@ -472,7 +472,9 @@ fn restart_keeps_a_hook_reported_turn_working() {
         "a hook-reported turn must survive a restart as working"
     );
     assert!(
-        row["agentStateAt"].as_str().is_some_and(|at| !at.is_empty()),
+        row["agentStateAt"]
+            .as_str()
+            .is_some_and(|at| !at.is_empty()),
         "the restored working state must carry its original stamp"
     );
 }

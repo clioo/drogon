@@ -542,9 +542,7 @@ fn migrate_sessions_turn_fact(tx: &Transaction<'_>) -> rusqlite::Result<()> {
             )
             .map(|count| count > 0)?;
         if !has_column {
-            tx.execute_batch(&format!(
-                "ALTER TABLE sessions ADD COLUMN {column} TEXT;"
-            ))?;
+            tx.execute_batch(&format!("ALTER TABLE sessions ADD COLUMN {column} TEXT;"))?;
         }
     }
     Ok(())
