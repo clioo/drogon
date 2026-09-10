@@ -1,8 +1,18 @@
 /* MIT Copyright (c) 2026 Lovecast Inc.
  * Source: terminal-shortcut-policy.ts's Shift+Enter branch and the direct
  * modified-Enter release guard in terminal-keyboard-runtime.ts. No global
- * shortcuts or protocol advertisements: only this xterm's input is claimed. */
-export function createTerminalShiftEnterHandler(getKittyFlags: () => number, sendInput: (data: string) => void) {
+ * shortcuts or protocol advertisements: only this xterm's input is claimed.
+ *
+ * Pi (0.85.1, verified in @earendil-works/pi-coding-agent bundle): its
+ * NATIVE_SHIFT_ENTER_SEQUENCE is CSI-u (`ESC[13;2u`), accepted as
+ * shift+enter whether or not kitty negotiated (parseKitty checked first).
+ * When kitty is inactive, legacy `ESC CR` parses as alt+enter (queue
+ * follow-up, not newline) and bare LF parses as submit — so a Pi pane
+ * whose tracker lost its push (snapshot reset / truncated replay / boot
+ * race) must still send CSI-u. Shell keeps source parity (negotiated
+ * CSI-u, else Alt-Enter fallback) because plain shells do not accept CSI-u. */
+export function createTerminalShiftEnterHandler(getKittyFlags: () => number, sendInput: (data: string) => void, options?: { forceCsiU?: boolean }) {
+  const forceCsiU = options?.forceCsiU === true;
   let claimedCode: string | null = null;
   return (event: KeyboardEvent): boolean => {
     const code = event.code || "Enter";
@@ -17,8 +27,10 @@ export function createTerminalShiftEnterHandler(getKittyFlags: () => number, sen
     claimedCode = code;
     event.preventDefault();
     event.stopPropagation();
-    // Never infer protocol support from the UI platform or the harness name.
-    sendInput(getKittyFlags() > 0 ? "\x1b[13;2u" : "\x1b\r");
+    // Pi always takes CSI-u (its native sequence, valid with or without
+    // negotiated kitty). Shell preserves source negotiation (CSI-u only
+    // when the PTY proved kitty, else the Alt-Enter fallback).
+    sendInput(forceCsiU || getKittyFlags() > 0 ? "\x1b[13;2u" : "\x1b\r");
     return true;
   };
 }
