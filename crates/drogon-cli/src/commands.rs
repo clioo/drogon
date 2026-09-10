@@ -1121,7 +1121,32 @@ async fn worktree(
             let removed: Removed = Client::decode_checked(&call, "worktree.remove", |removed| {
                 check_removed(removed, &requested_id)
             })?;
-            emit(call, json, || output::worktree_removed(&removed), 0, None)
+            // Source `printPreservedBranchWarning` + `printHookWarning`
+            // copies: stderr-only human warnings, never in JSON stdout.
+            let mut warnings = Vec::new();
+            if *delete_branch
+                && removed.branch_deleted == Some(false)
+                && let Some(branch) = &removed.branch
+            {
+                warnings.push(format!(
+                    "warning: local branch {branch:?} was kept because Git could not safely delete it"
+                ));
+            }
+            if let Some(warning) = &removed.warning {
+                warnings.push(format!("warning: {warning}"));
+            }
+            let stderr_note = if !json && !warnings.is_empty() {
+                Some(warnings.join("\n"))
+            } else {
+                None
+            };
+            emit(
+                call,
+                json,
+                || output::worktree_removed(&removed),
+                0,
+                stderr_note,
+            )
         }
     }
 }

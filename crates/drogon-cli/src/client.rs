@@ -158,6 +158,12 @@ pub struct Removed {
     /// `worktree rm --delete-branch`: whether the safe branch delete ran.
     #[serde(default)]
     pub branch_deleted: Option<bool>,
+    /// The worktree's branch (present so the CLI can name it in warnings).
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// Daemon-side hook warning (source `printHookWarning` contract).
+    #[serde(default)]
+    pub warning: Option<String>,
 }
 
 impl Workspace {

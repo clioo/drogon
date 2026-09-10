@@ -1428,3 +1428,41 @@ fn repo_search_refs_filters_branches_and_reports_truncation() {
         "invalid_argument"
     );
 }
+
+/// Source `printPreservedBranchWarning`: when the safe branch delete is
+/// asked for but refuses (unmerged work), the removal still succeeds and
+/// the reply names the preserved branch so the CLI can warn.
+#[test]
+fn worktree_remove_names_the_preserved_branch_for_the_warning() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let project = ok(
+        &engine,
+        "project.add",
+        "pb1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let created = ok(
+        &engine,
+        "worktree.create",
+        "pb2",
+        json!({"projectId": project["id"], "name": "preserved"}),
+    );
+    let path = created["path"].as_str().unwrap().to_string();
+    std::fs::write(format!("{path}/work.txt"), "unmerged\n").unwrap();
+    git(std::path::Path::new(&path), &["add", "work.txt"]);
+    git(
+        std::path::Path::new(&path),
+        &["commit", "-q", "-m", "unmerged"],
+    );
+    let removed = ok(
+        &engine,
+        "worktree.remove",
+        "pb3",
+        json!({"id": created["id"], "deleteBranch": true}),
+    );
+    assert_eq!(removed["branchDeleted"], json!(false));
+    assert_eq!(removed["branch"], json!("preserved"));
+}

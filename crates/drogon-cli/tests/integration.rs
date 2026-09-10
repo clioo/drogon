@@ -2664,3 +2664,60 @@ async fn terminal_read_screen_renders_the_frame_not_the_fragments() {
     assert!(json_body.contains("[########] done"));
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_rm_warns_about_the_preserved_branch_like_the_source() {
+    let dir = temp_data_dir("wtrwarn");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "w1",
+                    "removed": true,
+                    "branchDeleted": false,
+                    "branch": "feature",
+                    "warning": "setup hook exited 1"
+                }),
+            ))
+        }),
+    );
+    let output = run_cli(dir.path(), &["worktree", "rm", "w1", "--delete-branch"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let stderr_text = stderr(&output);
+    // Source printPreservedBranchWarning copy.
+    assert!(
+        stderr_text.contains(
+            "warning: local branch \"feature\" was kept because Git could not safely delete it"
+        ),
+        "stderr: {stderr_text}"
+    );
+    // Source printHookWarning copy.
+    assert!(
+        stderr_text.contains("warning: setup hook exited 1"),
+        "stderr: {stderr_text}"
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_rm_warnings_stay_out_of_json_stdout() {
+    let dir = temp_data_dir("wtrwarnj");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"id": "w1", "removed": true, "warning": "setup hook exited 1"}),
+            ))
+        }),
+    );
+    let output = run_cli(dir.path(), &["worktree", "rm", "w1", "--json"]);
+    assert_eq!(output.status.code(), Some(0));
+    // The envelope carries the warning for machine consumers; the extra
+    // human stderr line stays suppressed in JSON mode (source copy).
+    assert!(stdout(&output).contains("setup hook exited 1"));
+    assert_eq!(stderr(&output), "");
+    drop(service);
+}

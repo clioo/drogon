@@ -615,7 +615,9 @@ mod tests {
             worktree_removed(&Removed {
                 id: "w1".into(),
                 removed: true,
-                branch_deleted: None
+                branch_deleted: None,
+                branch: None,
+                warning: None
             })
             .contains("w1")
         );

@@ -628,7 +628,6 @@ pub enum WorktreeAction {
         delete_branch: bool,
     },
 }
-
 #[derive(Subcommand, Debug)]
 pub enum TerminalAction {
     /// Start a PTY session running COMMAND with ARGS (after `--`)
