@@ -132,6 +132,106 @@ describe("harness.start result validation", () => {
   });
 });
 
+describe("harness.models result validation", () => {
+  const enumerated = {
+    hostId: "h1",
+    catalog: {
+      harness: "pi",
+      availability: "available",
+      executable: "/usr/local/bin/pi",
+      provenance: {
+        executable: "/usr/local/bin/pi",
+        argv: ["--list-models"],
+        version: "0.85.1",
+        probedAtEpochMs: 1_800_000_000_000,
+        configScope: "private-isolated-root (credential-free)",
+      },
+      entries: [
+        {
+          provider: "kimi-coding",
+          id: "kimi-for-coding",
+          context: "262.1K",
+          maxOutput: "32.8K",
+          thinking: true,
+          images: true,
+        },
+      ],
+      status: "enumerated",
+      note: "auth-gated enumeration",
+      retainedRoots: [],
+    },
+  };
+  test("accepts an enumerated catalog with provenance and entries", () => {
+    expect(resultSchemas["harness.models"].safeParse(enumerated).success).toBe(
+      true,
+    );
+  });
+  test("accepts every honest non-enumerated status without entries", () => {
+    for (const status of [
+      "not_installed",
+      "unsupported_surface",
+      "unsupported_platform",
+      "parse_failed",
+      "timed_out",
+      "probe_failed",
+      "isolation_failed",
+    ]) {
+      expect(
+        resultSchemas["harness.models"].safeParse({
+          hostId: "h1",
+          catalog: {
+            harness: "claude",
+            availability: "available",
+            executable: "/usr/local/bin/claude",
+            provenance: null,
+            entries: [],
+            status,
+            note: "evidence",
+            retainedRoots: [],
+          },
+        }).success,
+      ).toBe(true);
+    }
+  });
+  test("rejects an invented status, an unknown harness, or a fabricated count type", () => {
+    expect(
+      resultSchemas["harness.models"].safeParse({
+        ...enumerated,
+        catalog: { ...enumerated.catalog, status: "synced" },
+      }).success,
+    ).toBe(false);
+    expect(
+      resultSchemas["harness.models"].safeParse({
+        ...enumerated,
+        catalog: { ...enumerated.catalog, harness: "terminator" },
+      }).success,
+    ).toBe(false);
+    expect(
+      resultSchemas["harness.models"].safeParse({
+        ...enumerated,
+        catalog: { ...enumerated.catalog, entries: "3 models" },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("harnessModels bridge input validation (renderer -> main trust boundary)", () => {
+  test("accepts each registered harness id", () => {
+    for (const harnessId of ["claude", "pi", "opencode", "antigravity", "codex"]) {
+      expect(bridgeSchemas.harnessModels.safeParse({ harnessId }).success).toBe(
+        true,
+      );
+    }
+  });
+  test("rejects an unknown harness id and a missing one", () => {
+    expect(
+      bridgeSchemas.harnessModels.safeParse({ harnessId: "not-a-harness" })
+        .success,
+    ).toBe(false);
+    expect(bridgeSchemas.harnessModels.safeParse({}).success).toBe(false);
+  });
+});
+
 describe("startHarness bridge input validation (renderer -> main trust boundary)", () => {
   const base = {
     workspaceId: "w1",

@@ -279,6 +279,14 @@ export function identityMismatch(
         );
       return null;
     }
+    case "harness.models": {
+      const models = result as { hostId?: unknown };
+      if (knownHostId && models.hostId !== knownHostId)
+        return malformed(
+          "The service returned a model catalog for a different execution host than the one this client is connected to.",
+        );
+      return null;
+    }
     default:
       return null;
   }

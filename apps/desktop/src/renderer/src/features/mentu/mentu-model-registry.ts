@@ -1,45 +1,57 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// Honest model catalog for the Mentu inspector's Model field. Drogon's
-// daemon exposes no live per-harness model-enumeration RPC reachable from
-// the renderer today: `drogon_harness::probe_host_catalog` (the real C01-A
-// enumeration probe) is wired only into execution-time selection
-// validation (`crates/drogon-core/src/mentu/execution.rs`), and
-// `crates/drogon-core/src/harness/selection_gate.rs` documents the gap
-// explicitly as a "held seam" — an Engine-owned catalog store needs a
-// dispatch entry in the coordinator-owned `crates/drogon-core/src/lib.rs`,
-// which this feature is not granted to edit. Rather than fabricate a
-// live-looking catalog (a fake "synced" claim, invented model ids, or a
-// count nobody queried), this module offers two honestly-sourced option
-// groups instead:
-//   - a tiny, defensible set of model ids Drogon itself ships knowledge of
-//     (never claimed host-confirmed — see `KNOWN_MODELS`);
-//   - the model ids the CURRENTLY LOADED recipe's own other steps already
-//     carry for the same harness (real data, scanned from the document
-//     actually open, not hardcoded).
-// Both stay carried "manual-unverified" by the existing verdict system
-// (`mentu-approved-selection.ts`); this module never upgrades that.
+// Real model-catalog projection for the Mentu inspector's Model field.
+// The daemon's `harness.models` RPC (see `mentu-model-catalog.ts`) probes
+// the harness's own enumeration command under credential-free isolation;
+// this module turns that answer into what the combobox offers and what
+// the status/provenance rows say — with the C01 honesty contract intact:
+//
+//   - Only ids the host actually enumerated are offered as host-verified.
+//   - Model ids the CURRENTLY LOADED recipe's other steps already carry
+//     for the same harness stay offered, marked "from this recipe" and
+//     NOT host-verified (real data from the open document, never
+//     upgraded).
+//   - An empty, stale, failed, or unavailable catalog says exactly that.
+//     The status line reports counts actually computed and provenance
+//     actually received — never a fabricated "synced" claim.
+//   - A manually typed id is never silently confirmed: if it is not in
+//     the host enumeration it rides unverified (and even a listed
+//     absence is not proof — the enumeration is auth-gated for pi).
+//
+// The RECOMMENDED marker renders only where Drogon has a defensible
+// recommendation AND the host enumerated the id; the static list alone
+// never renders anything.
 
+import type {
+  HarnessModelsCatalog,
+  HarnessModelsStatus,
+} from "../../../../shared/session-contract";
 import type { MentuRecipeDefinition } from "./recipe-validation/mentu-recipe-document";
 
-export type KnownModelEntry = {
+/** How long after its probe a catalog is labelled stale in the UI. The
+ *  count stays real either way — staleness is rendered, never hidden. */
+export const MODEL_CATALOG_STALE_MS = 10 * 60 * 1000;
+
+/** Model ids Drogon itself recommends per harness, from evidence in this
+ *  repository (the native dogfood journey's claude id; the canonical
+ *  enumerated pi entry used across the C01 contract suite). Applied ONLY
+ *  as a marker on ids the host enumerated this run — never rendered from
+ *  the static list alone. */
+const KNOWN_RECOMMENDED: Record<string, string[]> = {
+  claude: ["claude-sonnet-5"],
+  pi: ["kimi-for-coding"],
+};
+
+export type ModelOption = {
   id: string;
-  note: string;
+  /** Where the option came from: the host catalog or the open recipe. */
+  group: "catalog" | "observed";
+  /** True only when the HOST enumerated this id. */
+  verified: boolean;
+  /** Drogon-recommended AND host-enumerated. */
+  recommended: boolean;
+  /** Real per-model notes (reported capability facts, recipe origin). */
+  notes: string[];
 };
-
-/** Harness ids this static registry has an opinion about, keyed like
- *  `drogon_harness::HarnessId`'s wire spelling (lowercase). Empty/absent
- *  for a harness Drogon has no defensible known-model id for — never
- *  guessed. `claude-sonnet-5` is the one id already established elsewhere
- *  in this codebase's own fixtures (`crates/drogon-cli/tests/
- *  native_dogfood.rs`'s `REAL_MODEL_JOURNEY_MODEL_ID`), so it is not a
- *  fabrication introduced here. */
-const KNOWN_MODELS: Record<string, KnownModelEntry[]> = {
-  claude: [{ id: "claude-sonnet-5", note: "recommended" }],
-};
-
-export function knownModelsForHarness(harness: string): KnownModelEntry[] {
-  return KNOWN_MODELS[harness.trim().toLowerCase()] ?? [];
-}
 
 /** Model ids the recipe's OTHER steps already carry for this harness,
  *  first-seen order, excluding the step currently being edited and any
@@ -67,24 +79,235 @@ export function recipeObservedModels(
   return models;
 }
 
-/** Honest provenance/status line for the Model option list: real counts
- *  from what this module actually holds or scanned, never a fabricated
- *  "synced" claim — say so plainly when there is nothing to offer. */
-export function modelCatalogStatusLine(
-  harness: string,
-  known: KnownModelEntry[],
-  observed: string[],
-): string {
-  const total = known.length + observed.length;
-  if (total === 0) {
-    return `No known or recipe-observed model ids for ${harness} yet — enter an exact id manually (not host-verified).`;
+/** Combobox options: host-enumerated entries first (verified), then
+ *  recipe-observed ids not in the catalog (unverified, "from this
+ *  recipe"). Notes are the harness's own reported facts, uninterpreted;
+ *  the recommended marker requires both lists to agree. */
+export function modelOptionsFromCatalog(input: {
+  catalog: HarnessModelsCatalog | null;
+  recipe: MentuRecipeDefinition | null;
+  harness: string;
+  excludeStepLabel: string | null;
+}): ModelOption[] {
+  const options: ModelOption[] = [];
+  const enumerated = new Set<string>();
+  if (input.catalog) {
+    const recommended = new Set(
+      KNOWN_RECOMMENDED[input.harness.trim().toLowerCase()] ?? [],
+    );
+    for (const entry of input.catalog.entries) {
+      if (enumerated.has(entry.id)) continue;
+      enumerated.add(entry.id);
+      const notes: string[] = [];
+      if (entry.provider) notes.push(entry.provider);
+      if (entry.context) notes.push(`ctx ${entry.context}`);
+      if (entry.maxOutput) {
+        notes.push(`max out ${entry.maxOutput}`);
+      }
+      if (entry.thinking) notes.push("thinking");
+      if (entry.images) notes.push("images");
+      options.push({
+        id: entry.id,
+        group: "catalog",
+        verified: true,
+        recommended: recommended.has(entry.id),
+        notes,
+      });
+    }
   }
-  const parts: string[] = [];
-  if (known.length > 0) {
-    parts.push(`${known.length} known`);
+  for (const id of recipeObservedModels(
+    input.recipe,
+    input.harness,
+    input.excludeStepLabel,
+  )) {
+    if (enumerated.has(id)) continue;
+    options.push({
+      id,
+      group: "observed",
+      verified: false,
+      recommended: false,
+      notes: ["from this recipe"],
+    });
   }
-  if (observed.length > 0) {
-    parts.push(`${observed.length} from this recipe`);
+  return options;
+}
+
+/** Honest age text for a probe timestamp; `null` when the answer carries
+ *  no usable freshness (which the status line then says instead). */
+export function modelCatalogAge(
+  catalog: HarnessModelsCatalog | null,
+  now: number,
+): string | null {
+  const probedAt = catalog?.provenance?.probedAtEpochMs;
+  if (!catalog || !probedAt) return null;
+  const ageMs = Math.max(0, now - probedAt);
+  if (ageMs < 60_000) return "just now";
+  const minutes = Math.floor(ageMs / 60_000);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} d ago`;
+}
+
+export function isModelCatalogStale(
+  catalog: HarnessModelsCatalog | null,
+  now: number,
+): boolean {
+  const probedAt = catalog?.provenance?.probedAtEpochMs;
+  if (!probedAt) return false;
+  return now - probedAt > MODEL_CATALOG_STALE_MS;
+}
+
+function versionText(catalog: HarnessModelsCatalog): string {
+  return catalog.provenance?.version ?? "unknown version";
+}
+
+/// The label for status lines: the harness's own wire id plus the version
+/// its `--version` probe reported. (Not the executable basename — a
+/// version-pinned install like `.../claude/versions/2.1.267` would render
+/// a bare version number there.) The full executable path rides in the
+/// provenance row instead.
+function baseLabel(catalog: HarnessModelsCatalog): string {
+  return `${catalog.harness} ${versionText(catalog)}`;
+}
+
+const STATUS_TEXT: Record<HarnessModelsStatus, string> = {
+  enumerated: "enumerated",
+  not_installed: "not installed",
+  unsupported_surface: "no model enumeration surface",
+  unsupported_platform: "host enumeration unavailable on this platform",
+  parse_failed: "enumeration output could not be parsed",
+  timed_out: "enumeration timed out",
+  probe_failed: "enumeration failed",
+  isolation_failed: "probe isolation failed",
+};
+
+export type ModelCatalogReadout = {
+  /** The one-line status under the Model field (count + provenance or an
+   *  honest statement of what is missing). Always present. */
+  statusLine: string;
+  /** The provenance row (source, version, scope, age, daemon note);
+   *  null when there is no real probe record to show. */
+  provenanceLine: string | null;
+  /** The daemon's own honesty note (auth-gating, failure evidence),
+   *  bounded for rendering; null when the daemon sent none. */
+  noteLine: string | null;
+  /** True when the catalog is real, enumerated, and EMPTY — the honest
+   *  "no models discovered" state. */
+  empty: boolean;
+  stale: boolean;
+  /** Ids the host enumerated this run (for the typed-id unverified note). */
+  enumeratedIds: Set<string>;
+};
+
+/** The status/provenance readout for the Model field. Every branch
+ *  reports what the daemon actually answered — a count only exists when
+ *  entries were received; failures, empty answers and unsupported
+ *  surfaces each get their own honest sentence. */
+export function modelCatalogReadout(input: {
+  catalog: HarnessModelsCatalog | null;
+  loading: boolean;
+  error: string | null;
+  harness: string;
+  /** Whether the backend names a Drogon-registered harness at all. */
+  registered: boolean;
+  now: number;
+  /** The draft's typed model id, for the never-silently-confirmed note. */
+  selectedModel?: string;
+}): ModelCatalogReadout {
+  const harness = input.harness.trim() || "this harness";
+  const emptySet = new Set<string>();
+  if (!input.registered) {
+    return {
+      statusLine: `'${harness}' is a runtime-owned backend; the daemon has no model catalog for it — enter an exact id manually (unverified).`,
+      provenanceLine: null,
+      noteLine: null,
+      empty: false,
+      stale: false,
+      enumeratedIds: emptySet,
+    };
   }
-  return `${total} model id${total === 1 ? "" : "s"} available (${parts.join(" · ")}) · not host-confirmed`;
+  if (input.error) {
+    return {
+      statusLine: `Model catalog unavailable: ${input.error}`,
+      provenanceLine: null,
+      noteLine: null,
+      empty: false,
+      stale: false,
+      enumeratedIds: emptySet,
+    };
+  }
+  if (input.loading || !input.catalog) {
+    return {
+      statusLine: `Probing the host model catalog for ${harness}…`,
+      provenanceLine: null,
+      noteLine: null,
+      empty: false,
+      stale: false,
+      enumeratedIds: emptySet,
+    };
+  }
+  const catalog = input.catalog;
+  const age = modelCatalogAge(catalog, input.now);
+  const stale = isModelCatalogStale(catalog, input.now);
+  const ageText = age ? ` · probed ${age}` : "";
+  const staleText = stale ? "STALE — " : "";
+  const base = baseLabel(catalog);
+  const scope = catalog.provenance?.configScope;
+  const provenanceParts = [
+    catalog.executable ? `exe: ${catalog.executable}` : null,
+    catalog.provenance?.argv.length
+      ? `via ${catalog.provenance.argv.join(" ")}`
+      : null,
+    scope ? `scope: ${scope}` : null,
+    age ? `probed ${age}` : "probe time unknown",
+  ].filter(Boolean);
+  const provenanceLine = `${staleText}${provenanceParts.join(" · ")}`;
+  const noteLine = catalog.note
+    ? catalog.note.length > 220
+      ? `${catalog.note.slice(0, 217)}…`
+      : catalog.note
+    : null;
+  const enumeratedIds = new Set(catalog.entries.map((entry) => entry.id));
+
+  if (catalog.status !== "enumerated") {
+    const reason = STATUS_TEXT[catalog.status];
+    const statusLine =
+      catalog.status === "not_installed"
+        ? `${harness} is not installed on this host; no model catalog exists.`
+        : catalog.status === "unsupported_surface"
+          ? `${harness} exposes no model enumeration surface on this host (version ${versionText(catalog)}); enter an exact id manually — it rides unverified.`
+          : `${staleText}Host model catalog for ${harness}: ${reason}; no models are offered. Refresh to retry.`;
+    return {
+      statusLine,
+      provenanceLine: catalog.provenance ? provenanceLine : null,
+      noteLine,
+      empty: false,
+      stale,
+      enumeratedIds,
+    };
+  }
+  if (catalog.entries.length === 0) {
+    return {
+      statusLine: `No models discovered for ${harness} under ${scope ?? "the probe scope"}${ageText}; enter an exact id manually — it rides unverified.`,
+      provenanceLine: provenanceLine,
+      noteLine,
+      empty: true,
+      stale,
+      enumeratedIds,
+    };
+  }
+  let statusLine = `${staleText}${catalog.entries.length} model${catalog.entries.length === 1 ? "" : "s"} enumerated by ${base}${scope ? ` · ${scope}` : ""}${ageText}`;
+  const typed = input.selectedModel?.trim();
+  if (typed && !enumeratedIds.has(typed)) {
+    statusLine += ` — typed id '${typed}' is not in this enumeration; carried unverified.`;
+  }
+  return {
+    statusLine,
+    provenanceLine,
+    noteLine,
+    empty: false,
+    stale,
+    enumeratedIds,
+  };
 }

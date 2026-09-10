@@ -9,7 +9,9 @@
 // from `harness.list` — see `harnessCatalog` below); the Model field stays
 // on the reference's read-only branch for shell steps, while agent steps
 // mount `MentuAgentStepEditor` (editable exact model id, Pi-only provider
-// binding, selection verdict, honest known/observed model quick-pick),
+// binding, selection verdict, live model catalog quick-pick driven by the
+// daemon's real `harness.models` probe — host-enumerated entries only are
+// verified; recipe-observed ids stay marked "from this recipe"),
 // agent-gated like the daemon (`updateRecipeStepDocument` refuses a model
 // on a shell-effective step); and the draft gains an editable Verify
 // commands field (one command per line) because this repo's daemon
@@ -40,7 +42,7 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
-import type { Harness } from "../../../../shared/session-contract";
+import type { Harness, HarnessModelsCatalog } from "../../../../shared/session-contract";
 import type {
   MentuRecipeDefinition,
   MentuRecipeStep,
@@ -49,10 +51,10 @@ import type { RecipeGraphNode } from "./recipe-graph";
 import { draftForRecipeStep, type RecipeStepDraft } from "./recipe-pane-editor";
 import { MentuAgentStepEditor } from "./MentuAgentStepEditor";
 import {
-  knownModelsForHarness,
-  modelCatalogStatusLine,
-  recipeObservedModels,
+  modelCatalogReadout,
+  modelOptionsFromCatalog,
 } from "./mentu-model-registry";
+import { isRegisteredHarness, useMentuModelCatalog } from "./mentu-model-catalog";
 import {
   classifySelection,
   conflictMessage,
@@ -117,6 +119,10 @@ export function SelectedNodeInspector({
   harnessCatalogLoading = false,
   harnessCatalogError = null,
   onRefreshHarnessCatalog,
+  modelCatalog,
+  modelCatalogLoading = false,
+  modelCatalogError = null,
+  onRefreshModelCatalog,
   recipeDefinition = null,
 }: {
   node: RecipeGraphNode | null;
@@ -147,6 +153,15 @@ export function SelectedNodeInspector({
   harnessCatalogLoading?: boolean;
   harnessCatalogError?: string | null;
   onRefreshHarnessCatalog?: () => void;
+  /** Override for the live per-harness model catalog (`harness.models`):
+   *  when provided (even as null), it replaces the inspector's own fetch
+   *  for the status/quick-pick (tests, preloaded answers). Omitted, the
+   *  inspector probes the live catalog itself, keyed on the effective
+   *  backend the draft would actually run with. */
+  modelCatalog?: HarnessModelsCatalog | null;
+  modelCatalogLoading?: boolean;
+  modelCatalogError?: string | null;
+  onRefreshModelCatalog?: () => void;
   /** The loaded/edited recipe document, for the honest "observed in this
    *  recipe" model quick-pick. Null renders no observed models. */
   recipeDefinition?: MentuRecipeDefinition | null;
@@ -197,19 +212,48 @@ export function SelectedNodeInspector({
   const selectedHarness = registeredHarnesses.find(
     (harness) => harness.harnessId === effectiveBackend.toLowerCase(),
   );
-  const knownModels = useMemo(
-    () => knownModelsForHarness(effectiveBackend),
-    [effectiveBackend],
-  );
-  const observedModels = useMemo(
+  // Live model catalog projection: combobox options from the daemon's
+  // real enumeration plus the recipe's own observed ids, and the honest
+  // status/provenance readout (real counts, real provenance, honest
+  // empty/failure/stale states). The fetch lives here — keyed on the
+  // draft-effective backend, so a harness switch re-probes exactly the
+  // harness the step would run with. An explicit `modelCatalog` prop
+  // (tests, preloaded answers) replaces it whole.
+  const backendRegistered = isRegisteredHarness(effectiveBackend);
+  const liveModelCatalog = useMentuModelCatalog(backendRegistered ? effectiveBackend : "");
+  const catalogOverride = modelCatalog !== undefined;
+  const resolvedModelCatalog = catalogOverride
+    ? (modelCatalog ?? null)
+    : liveModelCatalog.catalog;
+  const resolvedCatalogLoading =
+    modelCatalogLoading || (!catalogOverride && liveModelCatalog.loading);
+  const resolvedCatalogError = catalogOverride
+    ? modelCatalogError
+    : liveModelCatalog.error;
+  const resolvedRefreshCatalog = onRefreshModelCatalog ??
+    (!catalogOverride ? liveModelCatalog.refresh : undefined);
+  const modelOptions = useMemo(
     () =>
-      recipeObservedModels(recipeDefinition, effectiveBackend, node?.label ?? null),
-    [recipeDefinition, effectiveBackend, node?.label],
+      modelOptionsFromCatalog({
+        catalog: resolvedModelCatalog,
+        recipe: recipeDefinition,
+        harness: effectiveBackend,
+        excludeStepLabel: node?.label ?? null,
+      }),
+    [resolvedModelCatalog, recipeDefinition, effectiveBackend, node?.label],
   );
-  const catalogStatusLine = modelCatalogStatusLine(
-    effectiveBackend,
-    knownModels,
-    observedModels,
+  const catalogReadout = useMemo(
+    () =>
+      modelCatalogReadout({
+        catalog: resolvedModelCatalog,
+        loading: resolvedCatalogLoading,
+        error: resolvedCatalogError,
+        harness: effectiveBackend,
+        registered: backendRegistered,
+        now: Date.now(),
+        selectedModel: draft.model,
+      }),
+    [resolvedModelCatalog, resolvedCatalogLoading, resolvedCatalogError, backendRegistered, effectiveBackend, draft.model],
   );
   // Real save-state chip: "Saving…" while the save is in flight, "Unsaved
   // edits" while the in-progress draft differs from the step's last saved
@@ -373,10 +417,9 @@ export function SelectedNodeInspector({
                 onChangeModel={(model) =>
                   setDraft((current) => ({ ...current, model }))
                 }
-                knownModels={knownModels}
-                observedModels={observedModels}
-                catalogStatusLine={catalogStatusLine}
-                onRefreshCatalog={onRefreshHarnessCatalog}
+                modelOptions={modelOptions}
+                catalogReadout={catalogReadout}
+                onRefreshCatalog={resolvedRefreshCatalog}
               />
             ) : (
               <div className="space-y-1.5">

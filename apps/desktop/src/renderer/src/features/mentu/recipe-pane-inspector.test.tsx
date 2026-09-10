@@ -7,7 +7,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
-import type { Harness } from "../../../../shared/session-contract";
+import type {
+  Harness,
+  HarnessModelsCatalog,
+} from "../../../../shared/session-contract";
 import type {
   MentuRecipeDefinition,
   MentuRecipeStep,
@@ -318,7 +321,31 @@ describe("SelectedNodeInspector real harness catalog", () => {
   });
 });
 
-describe("SelectedNodeInspector honest model quick-pick", () => {
+const NOW = Date.now();
+
+function modelCatalogFixture(
+  overrides: Partial<HarnessModelsCatalog> = {},
+): HarnessModelsCatalog {
+  return {
+    harness: "claude",
+    availability: "available",
+    executable: "/usr/local/bin/claude",
+    provenance: {
+      executable: "/usr/local/bin/claude",
+      argv: ["--list-models"],
+      version: "2.1.0",
+      probedAtEpochMs: NOW - 4_000,
+      configScope: "private-isolated-root (credential-free)",
+    },
+    entries: [],
+    status: "enumerated",
+    note: null,
+    retainedRoots: [],
+    ...overrides,
+  };
+}
+
+describe("SelectedNodeInspector live model catalog", () => {
   const agentStep: MentuRecipeStep = {
     label: "build-and-test",
     backend: "claude",
@@ -332,15 +359,10 @@ describe("SelectedNodeInspector honest model quick-pick", () => {
     depth: 0,
   };
 
-  it("offers the recipe-observed model from a sibling step, not a fabricated live count", async () => {
-    const recipe: MentuRecipeDefinition = {
-      name: "demo",
-      steps: [
-        { label: "other", backend: "claude", model: "claude-opus-5" },
-        agentStep,
-      ],
-    };
-    render(
+  function renderAgentInspector(
+    overrides: Partial<Parameters<typeof SelectedNodeInspector>[0]> = {},
+  ) {
+    return render(
       <SelectedNodeInspector
         node={agentNode}
         editStep={agentStep}
@@ -350,32 +372,164 @@ describe("SelectedNodeInspector honest model quick-pick", () => {
         disabled={false}
         saving={false}
         onSave={vi.fn()}
-        recipeDefinition={recipe}
+        {...overrides}
       />,
     );
+  }
+
+  it("offers the host-enumerated models with their real count and provenance", async () => {
+    const recipe: MentuRecipeDefinition = {
+      name: "demo",
+      steps: [
+        { label: "other", backend: "claude", model: "claude-opus-5" },
+        agentStep,
+      ],
+    };
+    renderAgentInspector({
+      recipeDefinition: recipe,
+      modelCatalog: modelCatalogFixture({
+        entries: [
+          {
+            provider: null,
+            id: "claude-sonnet-5",
+            context: null,
+            maxOutput: null,
+            thinking: null,
+            images: null,
+          },
+        ],
+      }),
+    });
+    const status = screen.getByTestId("model-catalog-status");
+    expect(status.textContent).toContain("1 model enumerated by claude 2.1.0");
+    expect(status.textContent).toContain("probed just now");
     expect(
-      screen.getByText(/model ids available/).textContent,
-    ).toContain("from this recipe");
+      screen.getByTestId("model-catalog-provenance").textContent,
+    ).toContain("via --list-models");
     fireEvent.keyDown(screen.getByLabelText("Model quick pick"), { key: "Enter" });
     await flushDeferredFocus();
-    expect(screen.getByText("claude-opus-5")).toBeTruthy();
+    expect(screen.getByText("claude-sonnet-5")).toBeTruthy();
   });
 
-  it("says plainly when nothing is known or observed for the backend", () => {
+  it("renders the honest empty state for an enumerated-but-empty catalog, never a fabricated count", () => {
+    renderAgentInspector({
+      modelCatalog: modelCatalogFixture({ entries: [] }),
+      recipeDefinition: { name: "demo", steps: [] },
+    });
+    const status = screen.getByTestId("model-catalog-status");
+    expect(status.textContent).toContain("No models discovered for claude");
+    expect(status.textContent).toContain("unverified");
+    expect(status.textContent).not.toMatch(/\d+ model/);
+    // Nothing enumerated means nothing to offer in the combobox.
+    expect(screen.queryByLabelText("Model quick pick")).toBeNull();
+  });
+
+  it("labels a stale catalog as stale in the status and provenance rows", () => {
+    renderAgentInspector({
+      modelCatalog: modelCatalogFixture({
+        entries: [
+          {
+            provider: null,
+            id: "claude-sonnet-5",
+            context: null,
+            maxOutput: null,
+            thinking: null,
+            images: null,
+          },
+        ],
+        provenance: {
+          executable: "/usr/local/bin/claude",
+          argv: ["--list-models"],
+          version: "2.1.0",
+          probedAtEpochMs: NOW - 30 * 60_000,
+          configScope: "private-isolated-root (credential-free)",
+        },
+      }),
+    });
+    expect(screen.getByTestId("model-catalog-status").textContent).toContain("STALE");
+    expect(screen.getByTestId("model-catalog-provenance").textContent).toContain("STALE");
+  });
+
+  it("says the harness exposes no enumeration surface instead of offering guesses", () => {
+    renderAgentInspector({
+      modelCatalog: modelCatalogFixture({
+        status: "unsupported_surface",
+        entries: [],
+        note: "no enumeration command captured",
+      }),
+    });
+    const status = screen.getByTestId("model-catalog-status");
+    expect(status.textContent).toContain("no model enumeration surface");
+    expect(screen.queryByLabelText("Model quick pick")).toBeNull();
+  });
+
+  it("surfaces a failed model-catalog load as an explicit status", () => {
+    renderAgentInspector({
+      modelCatalog: null,
+      modelCatalogError: "daemon unreachable",
+    });
+    expect(screen.getByTestId("model-catalog-status").textContent).toBe(
+      "Model catalog unavailable: daemon unreachable",
+    );
+  });
+
+  it("wires the model-catalog refresh affordance to the caller's real refresh call", () => {
+    const onRefreshModelCatalog = vi.fn();
+    renderAgentInspector({
+      modelCatalog: modelCatalogFixture({ entries: [] }),
+      onRefreshModelCatalog,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh model catalog" }));
+    expect(onRefreshModelCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a manually typed unlisted id and marks it unverified in the status", () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    renderAgentInspector({
+      modelCatalog: modelCatalogFixture({
+        entries: [
+          {
+            provider: null,
+            id: "claude-sonnet-5",
+            context: null,
+            maxOutput: null,
+            thinking: null,
+            images: null,
+          },
+        ],
+      }),
+      onSave,
+    });
+    const model = screen.getByLabelText("Model") as HTMLInputElement;
+    fireEvent.change(model, { target: { value: "claude-sonnet-4-5" } });
+    expect(
+      screen.getByTestId("model-catalog-status").textContent,
+    ).toContain("'claude-sonnet-4-5'");
+    expect(screen.getByTestId("model-catalog-status").textContent).toContain(
+      "unverified",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Save to Mentu JSON/ }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0][0]).toMatchObject({ model: "claude-sonnet-4-5" });
+  });
+
+  it("keeps the shell Model read-only with no catalog affordance", () => {
     render(
       <SelectedNodeInspector
-        node={agentNode}
-        editStep={{ ...agentStep, backend: "opencode" }}
-        backends={["shell", "opencode"]}
+        node={node}
+        editStep={step}
+        backends={["shell"]}
         inheritBackendLabel="shell"
         editable
         disabled={false}
         saving={false}
         onSave={vi.fn()}
-        recipeDefinition={{ name: "demo", steps: [] }}
+        modelCatalog={modelCatalogFixture()}
       />,
     );
-    expect(screen.getByText(/enter an exact id manually/)).toBeTruthy();
+    expect(screen.getByLabelText("Model")).toBeTruthy();
+    expect(screen.queryByTestId("model-catalog-status")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Refresh model catalog" })).toBeNull();
   });
 });
 

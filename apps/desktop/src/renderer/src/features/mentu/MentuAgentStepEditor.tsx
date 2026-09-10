@@ -12,13 +12,13 @@
 // agent steps. Shell steps keep the reference's read-only branch in the
 // inspector and never mount this editor.
 //
-// Target-design addition: a "known models" quick-pick sits beside the
-// free-text Input (which stays the single source of truth — every
-// existing keyboard/typing/aria-describedby behavior is unchanged). The
-// quick-pick and its status line are populated ONLY from
-// `mentu-model-registry.ts`'s honestly-sourced lists (a tiny defensible
-// static registry plus model ids observed in the loaded recipe); when
-// the caller supplies neither, the quick-pick renders nothing extra.
+// Live catalog edition: the quick-pick combobox, its status line, the
+// provenance row and the per-model notes are driven by the daemon's real
+// `harness.models` answer (projected by `mentu-model-registry.ts`) —
+// host-enumerated entries (the only verified ones), then recipe-observed
+// ids ("from this recipe", unverified). The free-text Input stays the
+// single source of truth for the model id itself; a typed id that the
+// host did not enumerate is never silently confirmed.
 
 import { Cpu, RefreshCw } from "lucide-react";
 import { Button } from "../../components/ui/button";
@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import type { ApprovedSelectionVerdict } from "./mentu-approved-selection";
-import type { KnownModelEntry } from "./mentu-model-registry";
+import type { ModelCatalogReadout, ModelOption } from "./mentu-model-registry";
 
 const VERDICT_TONE: Record<ApprovedSelectionVerdict["kind"], string> = {
   unavailable: "text-destructive",
@@ -56,9 +56,8 @@ export function MentuAgentStepEditor({
   disabled,
   onChangeProvider,
   onChangeModel,
-  knownModels = [],
-  observedModels = [],
-  catalogStatusLine,
+  modelOptions = [],
+  catalogReadout = null,
   onRefreshCatalog,
 }: {
   /** Effective backend the step executes with (draft, step, root, shell). */
@@ -73,20 +72,16 @@ export function MentuAgentStepEditor({
   disabled: boolean;
   onChangeProvider: (provider: string) => void;
   onChangeModel: (model: string) => void;
-  /** Drogon's honestly-sourced known model ids for this backend; empty
-   *  when the registry has no defensible entry (never guessed). */
-  knownModels?: KnownModelEntry[];
-  /** Model ids the loaded recipe's other steps already carry for this
-   *  backend — real data scanned from the open document. */
-  observedModels?: string[];
-  /** Honest provenance/count line for the quick-pick; omitted (not a
-   *  fabricated default) when the caller has nothing to report. */
-  catalogStatusLine?: string;
+  /** Combobox options projected from the real daemon catalog (verified
+   *  host-enumerated ids) plus the open recipe's own observed ids;
+   *  empty when neither source has anything to offer. */
+  modelOptions?: ModelOption[];
+  /** The honest status/provenance readout for the current catalog state;
+   *  omitted (never a fabricated default) when the caller has nothing. */
+  catalogReadout?: ModelCatalogReadout | null;
   onRefreshCatalog?: () => void;
 }): React.JSX.Element {
-  const knownIds = new Set(knownModels.map((entry) => entry.id));
-  const observedOnly = observedModels.filter((id) => !knownIds.has(id));
-  const hasQuickPicks = knownModels.length > 0 || observedOnly.length > 0;
+  const hasQuickPicks = modelOptions.length > 0;
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
@@ -120,27 +115,26 @@ export function MentuAgentStepEditor({
                 className="h-8 w-auto shrink-0 text-[11px]"
                 aria-label="Model quick pick"
               >
-                <SelectValue placeholder="Quick pick" />
+                <SelectValue placeholder="Models" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={MODEL_DEFAULT_VALUE}>
                   default <span className="ml-2 text-muted-foreground">harness default</span>
                 </SelectItem>
-                {knownModels.map((entry) => (
-                  <SelectItem key={`known:${entry.id}`} value={entry.id}>
-                    {entry.id}
-                    {entry.id === model ? " ✓" : ""}{" "}
-                    <span className="ml-2 text-[10px] uppercase text-muted-foreground">
-                      {entry.note}
-                    </span>
-                  </SelectItem>
-                ))}
-                {observedOnly.map((id) => (
-                  <SelectItem key={`observed:${id}`} value={id}>
-                    {id}
-                    {id === model ? " ✓" : ""}{" "}
-                    <span className="ml-2 text-[10px] text-muted-foreground">
-                      from this recipe
+                {modelOptions.map((option) => (
+                  <SelectItem key={`${option.group}:${option.id}`} value={option.id}>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate">{option.id}</span>
+                      {option.id === model ? " ✓" : ""}
+                      {option.recommended ? (
+                        <span className="shrink-0 text-[10px] font-medium uppercase text-emerald-600 dark:text-emerald-400">
+                          recommended
+                        </span>
+                      ) : null}
+                      <span className="truncate text-[10px] text-muted-foreground">
+                        {option.notes.join(" · ")}
+                        {option.group === "observed" ? " · unverified" : ""}
+                      </span>
                     </span>
                   </SelectItem>
                 ))}
@@ -163,9 +157,25 @@ export function MentuAgentStepEditor({
         <p className="text-[11px] text-muted-foreground">
           Exact model id for the {backend} step. Empty uses the harness default; never substituted.
         </p>
-        {catalogStatusLine ? (
-          <p className="text-[11px] text-muted-foreground" data-testid="model-catalog-status">
-            {catalogStatusLine}
+        {catalogReadout ? (
+          <p
+            className={`text-[11px] ${catalogReadout.stale ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+            data-testid="model-catalog-status"
+          >
+            {catalogReadout.statusLine}
+          </p>
+        ) : null}
+        {catalogReadout?.provenanceLine ? (
+          <p
+            className="text-[11px] text-muted-foreground"
+            data-testid="model-catalog-provenance"
+          >
+            {catalogReadout.provenanceLine}
+          </p>
+        ) : null}
+        {catalogReadout?.noteLine ? (
+          <p className="text-[11px] italic text-muted-foreground" data-testid="model-catalog-note">
+            {catalogReadout.noteLine}
           </p>
         ) : null}
       </div>
