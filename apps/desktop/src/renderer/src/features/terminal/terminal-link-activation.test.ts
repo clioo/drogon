@@ -26,22 +26,42 @@ afterEach(() => {
 });
 
 describe("terminal link gestures", () => {
-  it("requires ⌘ on macOS and Ctrl elsewhere", () => {
-    macUserAgent();
-    expect(
-      isTerminalLinkDirectActivation({ button: 0, metaKey: true, ctrlKey: false }),
-    ).toBe(true);
-    expect(
-      isTerminalLinkDirectActivation({ button: 0, metaKey: false, ctrlKey: true }),
-    ).toBe(false);
-
-    linuxUserAgent();
-    expect(
-      isTerminalLinkDirectActivation({ button: 0, metaKey: false, ctrlKey: true }),
-    ).toBe(true);
-    expect(
-      isTerminalLinkDirectActivation({ button: 0, metaKey: true, ctrlKey: false }),
-    ).toBe(false);
+  it("activates on any unmodified left click, on every platform", () => {
+    for (const platform of [macUserAgent, linuxUserAgent]) {
+      platform();
+      // The owner's rule: a bare click opens (default browser) and
+      // Shift+click opens in Drogon — both are activations, not popovers.
+      expect(
+        isTerminalLinkDirectActivation({
+          button: 0,
+          metaKey: false,
+          ctrlKey: false,
+        }),
+      ).toBe(true);
+      expect(
+        isTerminalLinkDirectActivation({
+          button: 0,
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: true,
+        }),
+      ).toBe(true);
+      // ⌘/Ctrl+click keeps activating for existing muscle memory.
+      expect(
+        isTerminalLinkDirectActivation({
+          button: 0,
+          metaKey: true,
+          ctrlKey: false,
+        }),
+      ).toBe(true);
+      expect(
+        isTerminalLinkDirectActivation({
+          button: 0,
+          metaKey: false,
+          ctrlKey: true,
+        }),
+      ).toBe(true);
+    }
   });
 
   it("rejects non-left buttons and Alt-modified gestures", () => {
