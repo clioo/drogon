@@ -250,7 +250,7 @@ pub fn bot_home_dir(base: &std::path::Path, handle: &str) -> Result<std::path::P
     Ok(path)
 }
 
-fn ensure_home_dir(path: &std::path::Path) -> Result<(), RpcError> {
+pub(crate) fn ensure_home_dir(path: &std::path::Path) -> Result<(), RpcError> {
     std::fs::create_dir_all(path)
         .map_err(|e| storage_error(format!("cannot create bot home directory: {e}")))?;
     #[cfg(unix)]
@@ -428,7 +428,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> SelfResult<()> {
     Ok(())
 }
 
-fn self_storage_error(e: SelfStorageError) -> RpcError {
+pub(crate) fn self_storage_error(e: SelfStorageError) -> RpcError {
     match e {
         SelfStorageError::HandleCollision { handle, owner } => invalid_argument(format!(
             "bot handle {handle:?} is already owned by bot {owner:?}"
@@ -512,6 +512,60 @@ pub fn home_for_bot(tx: &Transaction, bot_id: &str) -> SelfResult<Option<BotHome
     .optional()?
     .map(|json| Ok(serde_json::from_str(&json)?))
     .transpose()
+}
+
+/// Get-or-create the Bot's provisioned home (P1): reuses the pinned
+/// [`BotHomeProfile`] when one already exists (idempotent -- a Bot only
+/// ever gets ONE home, however many times a session against it opens),
+/// else claims `<base>/<handle>/`, registers it as a real workspace and
+/// pins a fresh profile row. The same steps `Engine::bot_self_provision`'s
+/// effect phase performs, extracted so a host/UI-origin caller (never a
+/// `bot.self_*` actor, so this writes no `bot_audit` row -- P3 audit is for
+/// Bot-origin actions only, see this module's doc) can provision on demand
+/// too: opening an interactive Bot session (`bot_run_rpc`'s
+/// `RunTurn::Chat::interactive`) must run in the Bot's OWN home, never
+/// wherever its record happens to be stored (that folder is whatever
+/// project workspace was selected at `bot.create` time -- the caller's
+/// workspace, not the Bot's).
+pub(crate) fn ensure_home_for_bot(
+    tx: &Transaction,
+    data_dir: &std::path::Path,
+    host_id: &str,
+    bot: &Bot,
+    origin_workspace_id: &str,
+) -> Result<BotHomeProfile, RpcError> {
+    if let Some(existing) = home_for_bot(tx, &bot.id).map_err(self_storage_error)? {
+        return Ok(existing);
+    }
+    let handle = dir_handle_for_bot(bot).map_err(|e| invalid_argument(e.to_string()))?;
+    let base = bot_home_base(data_dir);
+    let home_path = bot_home_dir(&base, &handle).map_err(|e| invalid_argument(e.to_string()))?;
+    ensure_home_dir(&home_path)?;
+    let home_path_str = home_path.to_string_lossy().to_string();
+    let label = format!("Bot {handle}");
+    let registered = workspace::register(tx, host_id, &home_path_str, Some(label.as_str()))
+        .map_err(|e| storage_error(format!("home workspace registration failed: {}", e.message)))?;
+    let home_workspace_id = registered
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| storage_error("home workspace registration unreadable"))?
+        .to_string();
+    let now_ms = crate::now_unix_ms() as f64;
+    let profile = BotHomeProfile {
+        bot_id: bot.id.clone(),
+        handle,
+        path: home_path_str,
+        home_workspace_id: home_workspace_id.clone(),
+        origin_workspace_id: origin_workspace_id.to_string(),
+        workspaces: vec![home_workspace_id],
+        allow_scripts: false,
+        max_automations: MAX_SELF_AUTOMATIONS,
+        max_monitors: MAX_SELF_MONITORS,
+        created_at: now_ms,
+        updated_at: now_ms,
+    };
+    let (pinned, _provisioned) = claim_home_in_tx(tx, &profile).map_err(self_storage_error)?;
+    Ok(pinned)
 }
 
 /// P3: records the Bot-origin actor atomically with the mutation it

@@ -231,6 +231,19 @@ pub enum RunTurn {
     },
     Chat {
         prompt: String,
+        /// Open-session request (bug-bot-a836b4ebf8be65505): a live,
+        /// user-facing tab instead of a headless one-shot daemon run --
+        /// `claude`/`pi`/etc.'s own interactive TUI entrypoint stays
+        /// running so the caller can converse with it, matching the
+        /// primitive `startHarness` already uses for every other
+        /// user-facing tab. Absent/false keeps the original one-shot
+        /// `bot.run` chat-turn contract byte-for-byte (every existing
+        /// caller and test). [`Engine::bot_run`]'s ROOT adapter -- never
+        /// [`authorized_prepare`] itself -- is what actually strips
+        /// `headless` and retargets the session at the Bot's own sandbox
+        /// workspace; this field only carries the caller's intent through
+        /// to [`ChatPlan::interactive`].
+        interactive: bool,
     },
 }
 
@@ -262,6 +275,9 @@ pub struct ChatPlan {
     pub params: Value,
     pub prompt: String,
     pub attempt_at: f64,
+    /// Carried verbatim from [`RunTurn::Chat::interactive`]; see that
+    /// field's doc. `false` for every pre-existing caller/test.
+    pub interactive: bool,
 }
 
 /// Bound on the raw chat message: generous enough for a real conversational
@@ -381,6 +397,7 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         "reason",
         "eventIdentity",
         "prompt",
+        "interactive",
         "harness",
         "locale",
     ];
@@ -407,8 +424,19 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         if prompt.chars().count() > MAX_CHAT_PROMPT_CHARS {
             return Err(invalid_argument("field prompt exceeds the maximum length"));
         }
-        RunTurn::Chat { prompt }
+        let interactive = match object.get("interactive") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(invalid_argument("field interactive must be a boolean")),
+        };
+        RunTurn::Chat { prompt, interactive }
     } else {
+        if object.contains_key("interactive") {
+            return Err(invalid_argument(
+                "field interactive must not be set alongside a responsibility invocation (only \
+                 a chat turn can open a live session)",
+            ));
+        }
         RunTurn::Responsibility {
             responsibility_id: required_string(params, "responsibilityId")?,
             reason: Reason::parse(object.get("reason").unwrap_or(&Value::Null))?,
@@ -856,7 +884,7 @@ pub fn authorized_prepare(
                 Err(e) => Err(internal_error(format!("failed to load bot run state: {e}"))),
             }
         }
-        RunTurn::Chat { prompt } => {
+        RunTurn::Chat { prompt, interactive } => {
             let Some(bot) = bots_storage::get_bot(conn, derived_host_id, &folder, &request.bot_id)
                 .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
             else {
@@ -877,6 +905,7 @@ pub fn authorized_prepare(
                     params,
                     prompt: prompt.clone(),
                     attempt_at,
+                    interactive: *interactive,
                 },
                 workspace_id,
             })
@@ -1001,6 +1030,97 @@ pub fn record_chat(
         .map_err(|e| internal_error(format!("failed to record bot message: {e}")))
 }
 
+/// Get-or-create the Bot's OWN isolated home workspace -- the real fix
+/// behind "isolation is real, not cosmetic": an interactive Bot session's
+/// `harness.start` `workspaceId` (its cwd) must be THIS, never the folder
+/// the Bot's record happens to be stored under (that folder is whatever
+/// project workspace was selected at `bot.create` time -- the caller's own
+/// workspace, not the Bot's). Delegates to `bot_self_mgmt::ensure_home_for_bot`
+/// -- the SAME provisioned-home primitive `bot.self_provision` (P1) already
+/// builds (a registered workspace at `<DROGON_BOTS_DIR or data_dir/bots>/
+/// <handle>`, `~/Drogon/bots/<handle>` in a real install), just never wired
+/// to Open Session before now, so opening a session for a Bot that was
+/// already explicitly provisioned reuses its existing home unchanged.
+fn ensure_bot_home_workspace(
+    tx: &rusqlite::Transaction,
+    data_dir: &std::path::Path,
+    host_id: &str,
+    bot_id: &str,
+    origin_workspace_id: &str,
+) -> Result<(String, String), RpcError> {
+    let folder = bots_storage::folder_for_bot_id(tx, host_id, bot_id)
+        .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
+        .ok_or_else(|| not_found_bot(bot_id))?;
+    let bot = bots_storage::get_bot(tx, host_id, &folder, bot_id)
+        .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
+        .ok_or_else(|| not_found_bot(bot_id))?;
+    let home =
+        crate::bot_self_mgmt::ensure_home_for_bot(tx, data_dir, host_id, &bot, origin_workspace_id)?;
+    Ok((home.home_workspace_id, home.path))
+}
+
+fn not_found_bot(bot_id: &str) -> RpcError {
+    RpcError::new("not_found", format!("bot {bot_id} not found"))
+}
+
+/// Persists the open-session side effect [`record_chat`] does not cover:
+/// rotates the Bot's `current_session` to the just-opened one (so
+/// `bot.snapshot` reflects the live session immediately), when the dispatch
+/// actually produced one (never on [`RunnerOutcome::DispatchFailed`], which
+/// carries no session identity at all). Connection-bound, meant to run
+/// alongside [`record_chat`] inside the delegated ledger's own `finalize`
+/// transaction. `harnessId`/`model` are read back off `plan.params` (the
+/// exact values `harness.start` was actually called with) rather than
+/// re-derived, so the persisted `BotSession` can never drift from reality.
+fn record_opened_session(
+    conn: &Connection,
+    host_id: &str,
+    plan: &ChatPlan,
+    outcome: &RunnerOutcome,
+    observed_at: f64,
+) -> Result<(), RpcError> {
+    let session_id = match outcome {
+        RunnerOutcome::Observed { session_id, .. } => session_id.clone(),
+        RunnerOutcome::ObservationFailed { session_id, .. } => session_id.clone(),
+        RunnerOutcome::DispatchFailed(_) => return Ok(()),
+    };
+    let Some(folder) = bots_storage::folder_for_bot_id(conn, host_id, &plan.bot_id)
+        .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
+    else {
+        // The Bot vanished between `authorized_prepare` and `finalize`
+        // (concurrent delete): the live session it opened is real and
+        // stays running, but there is no Bot record left to point at it.
+        return Ok(());
+    };
+    let harness = plan
+        .params
+        .get("harnessId")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let model = plan
+        .params
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    bots_storage::rotate_session(
+        conn,
+        host_id,
+        &folder,
+        &plan.bot_id,
+        Some(crate::bots::records::BotSession {
+            session_id,
+            harness,
+            model,
+            started_at: plan.attempt_at,
+            rotated_at: Some(observed_at),
+        }),
+        observed_at,
+    )
+    .map_err(|e| internal_error(format!("failed to record the opened Bot session: {e}")))?;
+    Ok(())
+}
+
 /// Phase 2: no `Connection` -- the caller MUST have released its DB guard
 /// before calling. Named pass-through onto
 /// `automations::runner::dispatch_run_plan` so this module's own staged-API
@@ -1040,6 +1160,12 @@ impl crate::Engine {
         let request_id = request.request_id.clone();
         let method = request.method.clone();
         let params = request.params.clone();
+        // Cloned up front (not `self.data_dir()` inside a `prepare` closure
+        // below): `self.ledger.run_staged(&self.db, ...)` already borrows
+        // `self` disjointly by field, which a `self.data_dir()` *method*
+        // call inside a captured closure cannot join without borrowing all
+        // of `self`.
+        let data_dir = self.data_dir().to_path_buf();
         let seam = EngineDispatchSeam::new(self);
         let outcome_slot: Cell<Option<PreparedOutcome>> = Cell::new(None);
         self.ledger.run_staged(
@@ -1060,10 +1186,39 @@ impl crate::Engine {
                 // the prepared tuple so `effect` never needs its own admission
                 // clock.
                 let attempt_at = crate::now_unix_ms() as f64;
-                Ok((
-                    attempt_at,
-                    authorized_prepare(tx, &derived_host_id, &request_id, &parsed, attempt_at)?,
-                ))
+                let mut prepared =
+                    authorized_prepare(tx, &derived_host_id, &request_id, &parsed, attempt_at)?;
+                // Open-session retarget (bug-bot-a836b4ebf8be65505): an
+                // interactive chat turn is a live user-facing tab, not a
+                // headless daemon run, so it must (a) drop `headless` from
+                // the built `harness.start` params -- the interactive TUI
+                // entrypoint stays running instead of exiting on completion
+                // -- and (b) run against the Bot's OWN isolated sandbox
+                // workspace instead of the folder its record happens to be
+                // stored under (which is whatever project workspace was
+                // selected at `bot.create` time, never the caller's to
+                // isolate from). `authorized_prepare` stays unaware of any
+                // of this -- it is applied here, in the ROOT adapter, so the
+                // staged primitive keeps its original one-shot contract
+                // (and every existing direct-call test) untouched.
+                if let BotRunPrepare::ReadyChat { plan, workspace_id } = &mut prepared
+                    && plan.interactive
+                {
+                    plan.params
+                        .as_object_mut()
+                        .expect("chat harness.start params is always a JSON object")
+                        .remove("headless");
+                    let (home_workspace_id, _home_path) = ensure_bot_home_workspace(
+                        tx,
+                        &data_dir,
+                        &derived_host_id,
+                        &parsed.bot_id,
+                        workspace_id,
+                    )?;
+                    plan.params["workspaceId"] = json!(home_workspace_id);
+                    *workspace_id = home_workspace_id;
+                }
+                Ok((attempt_at, prepared))
             },
             |(attempt_at, prepared)| match prepared {
                 BotRunPrepare::Refused {
@@ -1248,6 +1403,9 @@ impl crate::Engine {
                     }
                     Some(PreparedOutcome::Chat(plan, outcome, observed_at, message_id)) => {
                         record_chat(tx, &plan, &outcome, observed_at, message_id)?;
+                        if plan.interactive {
+                            record_opened_session(tx, &derived_host_id, &plan, &outcome, observed_at)?;
+                        }
                     }
                     None => {}
                 }

@@ -117,6 +117,11 @@ describe("bot open session", () => {
       model: "qwen3.8-flash-next-nvidia-nvfp4",
       permissionMode: "unattended",
     });
+    // bug-bot-a836b4ebf8be65505: Open Session must request a live,
+    // interactive session (native's own TUI entrypoint), never the headless
+    // one-shot daemon run that made a Bot "session" print one reply and
+    // exit immediately.
+    expect(input.interactive).toBe(true);
     // The post-dispatch reload is what lands the new session state.
     await waitFor(() => expect(fake.snapshots()).toBeGreaterThanOrEqual(2));
     expect(screen.queryByRole("alert")).toBeNull();
@@ -236,6 +241,9 @@ describe("bot open session", () => {
       harness: { harnessId: "claude", explicitModel: null },
       workspaceId: scope.workspaceId,
       hostId: scope.hostId,
+      displayName: "Jon Snow",
+      handle: null,
+      title: null,
     });
     expect(screen.queryByRole("alert")).toBeNull();
   });
