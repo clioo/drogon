@@ -16,6 +16,19 @@ import { botSnapshotResultSchema } from "../../shared/bot-validation";
 
 export type BotsLoadScope = BotSnapshotInput;
 
+/** App-global Bots scope (#348/R17-E): the Bots page always lists
+ *  app-globally like the fork's `window.api.bots.list()` — never narrowed
+ *  to the selected workspace's folder (which rendered 'No Bots yet' for
+ *  bots owned elsewhere). Takes no workspace id by construction, so the
+ *  scope cannot narrow. Null while the service status (hostId) is unknown. */
+export function resolveBotsScope(
+  status: { hostId: string } | null,
+  locale: string,
+): BotsLoadScope | null {
+  if (!status) return null;
+  return { hostId: status.hostId, workspaceId: "", locale };
+}
+
 /** Minimal structural bridge: exactly the one method the loader needs. */
 export type BotsSnapshotBridge = {
   botSnapshot(

@@ -6,6 +6,12 @@ const id = z
   .max(128)
   .regex(/^[^\x00-\x1f\x7f]+$/u);
 const scope = z.object({ hostId: id, workspaceId: id });
+// #348/R17-E follow-up: reads are app-global and mutations ride the same
+// live scope, so inputs admit the "" host-global sentinel structurally
+// (same shape as botSnapshotInputSchema's override below); native resolves
+// the bot's owning folder for existing-bot calls and echoes it back — the
+// main echo-gates verify that resolution. Transport validation only, as
+// everywhere in this file: native owns folder/scope authority.
 const timestamp = z.number().finite();
 const recipe = z.object({
   recipeRef: z.string(),
@@ -99,8 +105,14 @@ export const botSnapshotResultSchema = scope
     history: z.array(history),
   });
 
+const globalWorkspaceId = z
+  .string()
+  .max(128)
+  .regex(/^[^\x00-\x1f\x7f]*$/u);
+const globalScope = z.object({ hostId: id, workspaceId: globalWorkspaceId });
+
 // Structural transport validation only; native owns preset, harness and text policy.
-export const botCreateInputSchema = scope
+export const botCreateInputSchema = globalScope
   .extend({
     requestId: id,
     botId: id.nullable().optional(),
@@ -141,7 +153,7 @@ const harnessOverrides = z
   })
   .strict();
 
-const responsibilityTurn = scope
+const responsibilityTurn = globalScope
   .extend({
     requestId: id,
     botId: id,
@@ -153,7 +165,7 @@ const responsibilityTurn = scope
   })
   .strict();
 
-const chatTurn = scope
+const chatTurn = globalScope
   .extend({
     requestId: id,
     botId: id,
@@ -215,7 +227,7 @@ export const botHistoryResultSchema = scope.extend({
 // below: native's params deny it.
 const scopeLocale = { locale: z.string().nullable().optional() };
 
-export const botResponsibilityCreateInputSchema = scope
+export const botResponsibilityCreateInputSchema = globalScope
   .extend({
     requestId: id,
     botId: id,
@@ -232,7 +244,7 @@ export const botResponsibilityCreateResultSchema = scope.extend({
   automationId: z.string(),
 });
 
-export const botResponsibilityDeleteInputSchema = scope
+export const botResponsibilityDeleteInputSchema = globalScope
   .extend({
     requestId: id,
     botId: id,
@@ -241,7 +253,13 @@ export const botResponsibilityDeleteInputSchema = scope
   })
   .strict();
 
-export const botResponsibilityDeleteResultSchema = scope.extend({
+// The delete receipts echo the REQUESTED workspace id verbatim (native
+// resolves the owning folder for the mutation itself but does not project
+// it into these receipts), so an app-global '' request echoes '' back.
+// Admitted structurally here; the main echo-gates treat ''-for-'' as
+// applied-under-global-scope (native authorized it) while scoped requests
+// still demand the exact id.
+export const botResponsibilityDeleteResultSchema = globalScope.extend({
   botId: z.string(),
   responsibilityId: z.string(),
   removed: z.boolean(),
@@ -250,7 +268,7 @@ export const botResponsibilityDeleteResultSchema = scope.extend({
 
 // R9-C: bot-level delete. Structural transport validation only -- native
 // owns scope authority and the atomic Bot/automation removal.
-export const botDeleteInputSchema = scope
+export const botDeleteInputSchema = globalScope
   .extend({
     requestId: id,
     botId: id,
@@ -258,7 +276,7 @@ export const botDeleteInputSchema = scope
   })
   .strict();
 
-export const botDeleteResultSchema = scope.extend({
+export const botDeleteResultSchema = globalScope.extend({
   botId: z.string(),
   removed: z.boolean(),
   automationIds: z.array(z.string()),

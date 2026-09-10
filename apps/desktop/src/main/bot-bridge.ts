@@ -55,6 +55,25 @@ type NativeCall = (
   requestId?: string,
 ) => Promise<Result<unknown>>;
 
+/** Echo-gate for mutations riding the app-global scope (#348/R17-E
+ *  follow-up): native resolves an "" request to the bot's owning workspace
+ *  and echoes THAT id back, so an "" request accepts any non-empty echo
+ *  while a workspace-scoped request still demands the exact id
+ *  (replay/scope safety for non-global callers). The delete receipts are
+ *  the exception — native echoes the REQUESTED id verbatim there — so
+ *  their callsites pass `echoesRequest: true` to also accept an "" echo
+ *  for an applied app-global delete. */
+function scopeEchoMatches(
+  requestedWorkspaceId: string,
+  echoedWorkspaceId: string,
+  echoesRequest = false,
+): boolean {
+  if (requestedWorkspaceId === "") {
+    return echoesRequest || echoedWorkspaceId !== "";
+  }
+  return echoedWorkspaceId === requestedWorkspaceId;
+}
+
 export async function dispatchBotSnapshot(
   input: unknown,
   call: NativeCall = callNative,
@@ -107,7 +126,11 @@ export async function dispatchBotRun(
   const result = await call("bot.run", params, requestId);
   if (!result.ok) return result;
   const checked = botRunResultSchema.safeParse(result.result);
-  if (!checked.success || checked.data.workspaceId !== params.workspaceId)
+  if (
+    !checked.success ||
+    checked.data.hostId !== params.hostId ||
+    !scopeEchoMatches(params.workspaceId, checked.data.workspaceId)
+  )
     return {
       ok: false,
       error: {
@@ -179,7 +202,7 @@ export async function dispatchBotResponsibilityCreate(
   if (
     !checked.success ||
     checked.data.hostId !== params.hostId ||
-    checked.data.workspaceId !== params.workspaceId ||
+    !scopeEchoMatches(params.workspaceId, checked.data.workspaceId) ||
     checked.data.botId !== params.botId
   )
     return {
@@ -216,7 +239,7 @@ export async function dispatchBotResponsibilityDelete(
   if (
     !checked.success ||
     checked.data.hostId !== params.hostId ||
-    checked.data.workspaceId !== params.workspaceId ||
+    !scopeEchoMatches(params.workspaceId, checked.data.workspaceId, true) ||
     checked.data.botId !== params.botId ||
     checked.data.responsibilityId !== params.responsibilityId
   )
@@ -266,7 +289,7 @@ export async function dispatchBotDelete(
   if (
     !checked.success ||
     checked.data.hostId !== params.hostId ||
-    checked.data.workspaceId !== params.workspaceId ||
+    !scopeEchoMatches(params.workspaceId, checked.data.workspaceId, true) ||
     checked.data.botId !== params.botId
   )
     return {

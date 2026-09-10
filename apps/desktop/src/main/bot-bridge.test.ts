@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { dispatchBotSnapshot } from "./bot-bridge";
+import { dispatchBotRun, dispatchBotSnapshot } from "./bot-bridge";
 
 const input = { hostId: "host", workspaceId: "workspace", locale: "en-US" };
 const snapshot = {
@@ -91,5 +91,110 @@ describe("Bot snapshot bridge", () => {
     expect(
       await dispatchBotSnapshot(input, async () => ({ ok: false, error })),
     ).toEqual({ ok: false, error });
+  });
+});
+
+const runInput = {
+  hostId: "host",
+  workspaceId: "workspace",
+  requestId: "req-run-1",
+  botId: "bot-1",
+  prompt: "Hi!",
+  harness: { harnessId: "pi" },
+};
+const runReceipt = {
+  requestId: "bot-chat:req-run-1",
+  hostId: "host",
+  workspaceId: "workspace",
+  automationRunId: null,
+  responsibilityRunId: null,
+  messageId: "msg-1",
+  session: { sessionId: "sess-1", incarnation: "inc-1" },
+  outcome: "dispatched",
+  refusal: null,
+  reason: null,
+  error: null,
+  observedAt: null,
+  recordedAt: 1,
+};
+describe("Bot run bridge", () => {
+  it("passes a workspace-scoped turn through and demands the exact echo", async () => {
+    const call = vi.fn(async () => ({ ok: true as const, result: runReceipt }));
+    expect(await dispatchBotRun(runInput, call)).toEqual({
+      ok: true,
+      result: runReceipt,
+    });
+    const { requestId, ...params } = runInput;
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      "bot.run",
+      params,
+      requestId,
+    );
+  });
+  it("admits the app-global '' scope and accepts native's owning-workspace echo (#348/R17-E)", async () => {
+    // Reads are app-global and mutations ride the same live scope: '' must
+    // reach native (which resolves the bot's owning folder), and the
+    // receipt echoes THAT workspace — never '' — so the gate accepts the
+    // resolved id instead of demanding an exact '' echo.
+    const resolved = { ...runReceipt, workspaceId: "owning-workspace" };
+    const call = vi.fn(async () => ({ ok: true as const, result: resolved }));
+    expect(
+      await dispatchBotRun({ ...runInput, workspaceId: "" }, call),
+    ).toEqual({ ok: true, result: resolved });
+    const { requestId, ...rest } = runInput;
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      "bot.run",
+      { ...rest, workspaceId: "" },
+      requestId,
+    );
+  });
+  it("rejects an empty echo for an app-global request and a mismatched echo for a scoped one", async () => {
+    await expect(
+      dispatchBotRun({ ...runInput, workspaceId: "" }, async () => ({
+        ok: true as const,
+        result: { ...runReceipt, workspaceId: "" },
+      })),
+    ).resolves.toMatchObject({ ok: false, error: { code: "internal_error" } });
+    await expect(
+      dispatchBotRun(runInput, async () => ({
+        ok: true as const,
+        result: { ...runReceipt, workspaceId: "other" },
+      })),
+    ).resolves.toMatchObject({ ok: false, error: { code: "internal_error" } });
+  });
+  it("rejects a foreign-host receipt for scoped and app-global requests (cross-host replay)", async () => {
+    // Sibling dispatchers bind hostId exactly; the run gate did not, so a
+    // receipt stamped with a foreign host plus a plausible workspace was
+    // accepted. Native authorizes asserted==derived on success, so an
+    // exact host match is correct for both scopes.
+    const foreign = { ...runReceipt, hostId: "foreign-host" };
+    await expect(
+      dispatchBotRun(runInput, async () => ({
+        ok: true as const,
+        result: foreign,
+      })),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal_error" },
+    });
+    await expect(
+      dispatchBotRun({ ...runInput, workspaceId: "" }, async () => ({
+        ok: true as const,
+        result: { ...foreign, workspaceId: "owning-workspace" },
+      })),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal_error" },
+    });
+  });
+  it("still rejects malformed turns before IPC, even app-global ones", async () => {
+    const call = vi.fn();
+    expect(
+      await dispatchBotRun(
+        { ...runInput, workspaceId: "", botId: "" },
+        call,
+      ),
+    ).toMatchObject({ ok: false, error: { code: "invalid_argument" } });
+    expect(call).not.toHaveBeenCalled();
   });
 });

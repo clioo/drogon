@@ -4,7 +4,7 @@ import type {
   BotSnapshotInput,
   BotsPanelSnapshot,
 } from "../../shared/bot-contract";
-import { loadBotSnapshot } from "./bots-loader";
+import { loadBotSnapshot, resolveBotsScope } from "./bots-loader";
 import type { BotsLoadScope } from "./bots-loader";
 
 const scopeA: BotsLoadScope = {
@@ -152,6 +152,18 @@ describe("loadBotSnapshot", () => {
     expect(result.status).toBe("loaded");
     expect(bridge.calls).toHaveLength(1);
     expect(bridge.calls[0].workspaceId).toBe("");
+  });
+
+  it("always resolves the app-global scope, never the selected workspace (#348/R17-E)", () => {
+    // Track2: App must always pass workspaceId "" while the service is
+    // live — narrowing to current.id rendered 'No Bots yet' for bots owned
+    // by another folder. The helper takes no workspace id by construction.
+    expect(resolveBotsScope({ hostId: "local" }, "en")).toEqual({
+      hostId: "local",
+      workspaceId: "",
+      locale: "en",
+    });
+    expect(resolveBotsScope(null, "en")).toBeNull();
   });
 
   it("treats retry as a fresh call: error then success succeeds", async () => {
