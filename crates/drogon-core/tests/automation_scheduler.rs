@@ -782,13 +782,15 @@ fn create_rejects_bad_input_and_update_delete_reject_missing() {
         ))),
         "not_found"
     );
-    // Unknown top-level field is denied.
+    // Unknown top-level field is denied (`timezone` is a known field
+    // since C08, so the probe uses a genuinely unknown one).
     assert_eq!(
         err_code(engine.dispatch(request(
             "bad-field",
             "automation.create",
             json!({"name": "x", "cron": "* * * * *", "workspaceId": workspace_id,
-                   "harness": "pi", "prompt": "p", "timezone": "UTC"}),
+                   "harness": "pi", "prompt": "p", "timezone": "UTC",
+                   "bogusField": 1}),
         ))),
         "invalid_argument"
     );
