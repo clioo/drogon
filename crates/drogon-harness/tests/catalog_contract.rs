@@ -2563,12 +2563,7 @@ fn settle_probe(
 /// (default path, absorbs first-exec latency) versus cold preparation
 /// (every registering run countable — required when the plan counts
 /// exact identities and a warm-up handshake would add a second one).
-fn child_probe_and_report(
-    harness: HarnessId,
-    pi_script: &str,
-    budget: Duration,
-    warm: bool,
-) {
+fn child_probe_and_report(harness: HarnessId, pi_script: &str, budget: Duration, warm: bool) {
     // Settle probe custody through reporting: the wrapper is retained
     // (never `.catalog`-and-discard) and pending handles are reaped
     // boundedly before the report is written.
