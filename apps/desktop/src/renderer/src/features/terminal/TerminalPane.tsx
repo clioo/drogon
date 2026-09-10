@@ -961,6 +961,12 @@ export function TerminalPane({
       paste,
       isMac:
         typeof navigator !== "undefined" && navigator.userAgent.includes("Mac"),
+      // The native Edit > Paste accelerator is consumed in main and arrives
+      // over IPC; without this the terminal never saw the standard paste
+      // chord (image paste included).
+      subscribeAppMenuPaste: window.drogon.appMenu?.onPaste?.bind(
+        window.drogon.appMenu,
+      ),
     });
     // The gesture + action context back the file-link popover: a plain click
     // (no drag, no selection) on a link raises the popover; PTY mouse-report

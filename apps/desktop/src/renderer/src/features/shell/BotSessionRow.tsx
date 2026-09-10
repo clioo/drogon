@@ -58,10 +58,13 @@ export function BotSessionRow({
       title={row.title}
     >
       <AgentStateIcon state={row.state} size={13} />
+      {/* Carlos: "haz un poco más visible el avatar, sólo un poco más
+          grande". One step up the scale (16px -> 20px); the 24px row keeps
+          its height, alignment and truncation. */}
       <DrogonBotAvatar
         preset={row.characterPreset as DrogonBotCharacterPreset}
         alt={`${row.displayName} avatar`}
-        className="size-4"
+        className="size-5"
       />
       {/* The harness glyph keeps its original slot ahead of the text (the
           agent-row structure); the `· <Harness>` suffix below stays too, so

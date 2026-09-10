@@ -108,13 +108,29 @@ describe("resolveBotSession", () => {
     ).toEqual({ kind: "reopen", sessionId: "sess-1", harnessId: "pi" });
   });
 
-  test("unverifiable is not an exit: it focuses, like every other surface", () => {
-    const resolution = resolveBotSession({
-      bot: bot(record({ verdict: "unverifiable", workspaceId: "ws-home", incarnation: "inc-1" })),
-      observed: null,
-      hostId: "host-1",
-    });
-    expect(resolution.kind).toBe("focus");
+  test("an unverifiable recorded session is not focusable: the daemon holds no child for it", () => {
+    // Regression (P0/P1): a session recovered after a daemon restart or an
+    // app upgrade lists as `unverifiable`. That verdict positively means
+    // THIS daemon instance has no running child for the id -- a held child
+    // is always `live` -- so focusing it produced the owner's blank
+    // terminal (no output, and Stop had nothing to kill). The honest
+    // response is to reopen it with the harness's resume mechanism.
+    expect(
+      resolveBotSession({
+        bot: bot(record({ verdict: "unverifiable", workspaceId: "ws-home", incarnation: "inc-1" })),
+        observed: null,
+        hostId: "host-1",
+      }),
+    ).toEqual({ kind: "reopen", sessionId: "sess-1", harnessId: "claude" });
+
+    // Same when the host-wide session list still carries the recovered stub.
+    expect(
+      resolveBotSession({
+        bot: bot(record({ verdict: "unverifiable", workspaceId: "ws-home", incarnation: "inc-1" })),
+        observed: observedSession({ verdict: "unverifiable", harnessId: "pi" }),
+        hostId: "host-1",
+      }),
+    ).toEqual({ kind: "reopen", sessionId: "sess-1", harnessId: "pi" });
   });
 
   test("a recorded session with no projected verdict is UNKNOWN, never a fresh dispatch", () => {

@@ -17,6 +17,7 @@ mod headless_env;
 mod known_tui_agents;
 mod launch;
 mod mentu_contract;
+mod resume_store;
 mod selection;
 
 pub use catalog::{
@@ -36,6 +37,9 @@ pub use mentu_contract::{
     AdapterEvidence, CONTRACT_DERIVED_FROM_REVISION, CONTRACT_DERIVED_FROM_VERSION,
     MentuProviderConfig, MentuRuntimeIdentity, MentuStepPlan, MentuTranslation, PiProviderBinding,
     parse_adapters_json, translate_selection,
+};
+pub use resume_store::{
+    claude_conversation_exists, claude_project_dir_name, resumable_conversation_exists,
 };
 pub use selection::{
     HarnessSelection, SelectionRecord, SelectionVerdict, allowed_efforts, validate_selection,

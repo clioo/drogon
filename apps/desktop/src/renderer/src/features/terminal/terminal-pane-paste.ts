@@ -59,6 +59,35 @@ export async function readClipboardTextWithinMaxBytes(
   return text
 }
 
+/**
+ * Ctrl+V as a terminal receives it: byte `0x16`. The harness's own
+ * clipboard-image reader listens for this keystroke (Claude Code's hint:
+ * "Image in clipboard · ctrl+v to paste"), so the pane hands the image to
+ * the harness instead of dropping an image-only paste.
+ */
+export const IMAGE_PASTE_KEYSTROKE = '\u0016'
+
+/**
+ * Whether the clipboard holds an image, via the async Clipboard API's item
+ * list. `readText()` cannot answer this -- an image-only clipboard reads as
+ * an empty string -- so this is the only honest signal that a paste would
+ * otherwise be dropped rather than empty. Returns false when the API is
+ * unavailable or the read is denied.
+ */
+export async function readClipboardHasImage(): Promise<boolean> {
+  if (
+    typeof navigator === 'undefined' ||
+    !navigator.clipboard ||
+    typeof navigator.clipboard.read !== 'function'
+  ) {
+    return false
+  }
+  const items = await navigator.clipboard.read()
+  return items.some((item) =>
+    item.types.some((type) => type.toLowerCase().startsWith('image/')),
+  )
+}
+
 export function createTerminalPanePaste(deps: TerminalPanePasteDeps) {
   const target: TerminalPasteTarget = {
     kind: 'terminal',
@@ -113,15 +142,43 @@ export function createTerminalPanePaste(deps: TerminalPanePasteDeps) {
   const pasteFromClipboard = (
     source: TerminalPasteSource,
     readClipboardText: typeof readClipboardTextWithinMaxBytes = readClipboardTextWithinMaxBytes,
+    readClipboardImage: () => Promise<boolean> = readClipboardHasImage,
   ): void => {
     void pasteTerminalClipboard({
       readClipboardText,
+      readClipboardHasImage: readClipboardImage,
       pasteText: (text, options) => executePanePasteText(source, text, options),
+      onImageClipboard: () => {
+        // An image-only clipboard is the harness's to consume: deliver the
+        // Ctrl+V keystroke its own clipboard-image reader listens on, exactly
+        // like a normal terminal, instead of silently dropping the paste.
+        void deps.writePty(IMAGE_PASTE_KEYSTROKE).then((accepted) => {
+          if (!accepted) {
+            deps.report(
+              'Image paste failed: the session is not accepting input.',
+            )
+          }
+        })
+      },
       onTextPasteError: () =>
         deps.report(
           'Paste failed: clipboard text is too large for a safe terminal paste.',
         ),
-    }).catch(() => deps.report('Paste failed.'))
+    })
+      .then((result) => {
+        if (
+          result.status === 'skipped' &&
+          result.reason === 'image-unavailable'
+        ) {
+          // Honest failure: the clipboard held no text and this window cannot
+          // inspect clipboard images, so the paste really did not reach the
+          // harness. Never report success for a dropped image.
+          deps.report(
+            'Paste failed: the clipboard holds no text and this window cannot read clipboard images.',
+          )
+        }
+      })
+      .catch(() => deps.report('Paste failed.'))
   }
 
   return { bindTerminal, pasteFromClipboard, executePanePasteText }
@@ -132,18 +189,30 @@ export type PasteTerminalLike = Parameters<typeof pasteTerminalText>[0]
 
 /**
  * Registers the source's paste-event policy listeners on the terminal
- * container: the keyboard paste chord and the DOM paste event are captured,
- * the native xterm paste is suppressed, and the payload goes through the
- * plan/execute pipeline. Returns the cleanup.
+ * container: the keyboard paste chord, the DOM paste event and the native
+ * Edit > Paste menu command are captured, the native xterm paste is
+ * suppressed, and the payload goes through the plan/execute pipeline.
+ *
+ * The menu path matters on macOS: the app menu registers
+ * `CmdOrCtrl+V`, so Electron consumes the key in main and forwards
+ * `ui:appMenuPaste` to the renderer instead of delivering a DOM paste event.
+ * Without a subscriber here the standard paste chord did nothing in a
+ * terminal at all -- text included -- and an image-only clipboard was
+ * silently dropped. Only the pane that actually owns focus acts, so a split
+ * layout or a hidden tab never pastes twice. Returns the cleanup.
  */
 export function registerTerminalPanePasteListeners({
   container,
   paste,
   isMac,
+  subscribeAppMenuPaste,
 }: {
   container: HTMLElement
   paste: TerminalPanePaste
   isMac: boolean
+  /** `window.drogon.appMenu.onPaste`, injected so the pure listener wiring
+   *  stays testable without a preload bridge. */
+  subscribeAppMenuPaste?: (listener: () => void) => () => void
 }): () => void {
   let suppressNextNativePaste = false
   let pasteSuppressionTimerId: number | null = null
@@ -191,9 +260,16 @@ export function registerTerminalPanePasteListeners({
   }
   container.addEventListener('keydown', onKeyPaste, { capture: true })
   container.addEventListener('paste', onPaste, { capture: true })
+  const offAppMenuPaste = subscribeAppMenuPaste?.(() => {
+    const active = document.activeElement
+    if (!(active instanceof Element) || !container.contains(active)) return
+    if (active.closest('[data-terminal-search-root]')) return
+    paste.pasteFromClipboard('app-menu')
+  })
   return () => {
     if (pasteSuppressionTimerId !== null) window.clearTimeout(pasteSuppressionTimerId)
     container.removeEventListener('keydown', onKeyPaste, { capture: true })
     container.removeEventListener('paste', onPaste, { capture: true })
+    offAppMenuPaste?.()
   }
 }
