@@ -10,6 +10,13 @@
    Delete + Add responsibility render unconditionally with the fork's copy
    ("No session yet"). `data-testid` hooks stay: the packaged probe and
    contract tests address the card through them.
+   Additive dashboard (Carlos directive, collapsed by default so the above
+   surface is byte-identical until expanded): a Details toggle revealing
+   AUTOMATIONS (scheduled responsibilities with scheduler status and last
+   run evidence from the mounted history, Run now over the existing
+   handler, Add automation over the existing form) and MONITORS (honest
+   empty note — monitor rules have no service backing, so no rows and no
+   dead actions are rendered).
    Adapters for this repo (data layer, declared): getAgentLabel is the
    local botHarnessLabel; history evidence is the fork's
    `status · id` shape with the run NUMBER standing in for the raw id
@@ -20,7 +27,8 @@
    avatar boundary — native owns preset validation and an unknown preset
    falls to the Bot glyph exactly like the fork's `none`. */
 
-import { CalendarClock, Play, Plus, Zap } from "lucide-react";
+import { useState } from "react";
+import { CalendarClock, ChevronDown, Play, Plus, Zap } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
@@ -83,6 +91,13 @@ export function BotResponsibilityCard({
   onLaunch: () => void;
 }): React.JSX.Element {
   const botHistory = history.filter((entry) => entry.run.botId === bot.id);
+  // Dashboard expansion (Carlos directive): collapsed is the fork-verbatim
+  // surface above; expanded adds AUTOMATIONS + MONITORS sections built only
+  // from the mounted snapshot/history — no invented rows, no dead actions.
+  const [expanded, setExpanded] = useState(false);
+  const automations = bot.responsibilities.filter(
+    (responsibility) => responsibility.kind === "scheduled",
+  );
   return (
     <Card data-testid={`bot-${bot.id}`}>
       <CardHeader className="border-b">
@@ -122,14 +137,30 @@ export function BotResponsibilityCard({
               Open session
             </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            data-testid={`delete-bot-${bot.id}`}
-            onClick={onDelete}
-          >
-            Delete
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid={`bot-details-${bot.id}`}
+              aria-expanded={expanded}
+              aria-label={`${expanded ? "Hide" : "Show"} ${bot.displayIdentity.displayName} details`}
+              onClick={() => setExpanded((value) => !value)}
+            >
+              Details
+              <ChevronDown
+                className={`size-3.5 transition-transform ${expanded ? "rotate-180" : ""}`}
+                aria-hidden
+              />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid={`delete-bot-${bot.id}`}
+              onClick={onDelete}
+            >
+              Delete
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-5 pt-6">
@@ -201,6 +232,91 @@ export function BotResponsibilityCard({
             Add responsibility
           </Button>
         </div>
+        {expanded ? (
+          <div className="space-y-5 border-t border-border pt-4">
+            <div data-testid={`bot-automations-${bot.id}`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium">Automations</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Scheduled responsibilities running on the daemon
+                    scheduler.
+                  </p>
+                </div>
+                <Badge variant="secondary">{automations.length}</Badge>
+              </div>
+              {automations.length ? (
+                <div className="mt-3 space-y-2">
+                  {automations.map((automation) => {
+                    const automationId =
+                      automation.trigger.kind === "scheduled"
+                        ? automation.trigger.automationId
+                        : null;
+                    const lastRun = automationId
+                      ? botHistory.find(
+                          (entry) =>
+                            entry.run.automationId === automationId,
+                        )
+                      : undefined;
+                    return (
+                      <div
+                        key={automation.id}
+                        data-testid={`bot-automation-${automation.id}`}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs"
+                      >
+                        <span className="min-w-0">
+                          <span className="font-medium">
+                            {automation.name}
+                          </span>{" "}
+                          <span className="text-muted-foreground">
+                            {automation.enabled ? "Active" : "Paused"} ·{" "}
+                            {lastRun
+                              ? historyDetail(lastRun)
+                              : "No runs yet"}
+                          </span>
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Run automation ${automation.name}`}
+                          disabled={!automation.enabled}
+                          onClick={() =>
+                            onRunResponsibility(automation.id)
+                          }
+                        >
+                          <Play />
+                          Run now
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  No automations yet — add a scheduled responsibility to
+                  create one.
+                </p>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                data-testid={`add-automation-${bot.id}`}
+                onClick={onAddResponsibility}
+              >
+                <Plus />
+                Add automation
+              </Button>
+            </div>
+            <div data-testid={`bot-monitors-${bot.id}`}>
+              <p className="text-xs font-medium">Monitors</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                No monitors yet — monitor rules have no service backing in
+                this build, so none are listed and none are claimed.
+              </p>
+            </div>
+          </div>
+        ) : null}
         {botHistory.length ? (
           <div className="border-t border-border pt-4">
             <div className="flex items-center justify-between gap-3">

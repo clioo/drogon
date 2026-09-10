@@ -65,6 +65,8 @@ export type BotsPageControllerDeps = {
     sessionId: string;
     incarnation: string;
     harness: BotRunHarnessSource;
+    workspaceId: string;
+    hostId: string;
   }) => void | Promise<void>;
 };
 
@@ -422,6 +424,8 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
               harnessId: live.harnessPolicy.defaultHarness,
               explicitModel: live.harnessPolicy.explicitModel,
             },
+            workspaceId: response.result.workspaceId,
+            hostId: response.result.hostId,
           });
         }
         await load();

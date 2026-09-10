@@ -234,6 +234,8 @@ describe("bot open session", () => {
       sessionId: "sess-1",
       incarnation: "inc-1",
       harness: { harnessId: "claude", explicitModel: null },
+      workspaceId: scope.workspaceId,
+      hostId: scope.hostId,
     });
     expect(screen.queryByRole("alert")).toBeNull();
   });

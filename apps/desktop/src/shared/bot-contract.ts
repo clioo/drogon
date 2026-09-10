@@ -328,6 +328,10 @@ export type BotsPanelProps = {
     sessionId: string;
     incarnation: string;
     harness: BotRunHarnessSource;
+    /** Owning workspace native resolved the turn into (receipt echo): the
+     *  host selects it before focusing the tab. */
+    workspaceId: string;
+    hostId: string;
   }) => void | Promise<void>;
   /** Caller-observed liveness verdicts (live | unverifiable | exited), one per
    *  bot, from a real observation source. The panel renders them verbatim and

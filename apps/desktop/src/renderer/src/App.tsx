@@ -223,6 +223,7 @@ import {
   shouldGateLaunchOnAgentSettingsReadiness,
 } from "./daemon-capabilities";
 import { BOTS_PAGE_HOST_TESTID } from "./features/bots";
+import type { BotsPanelProps } from "../../shared/bot-contract";
 import {
   planBrowserRehydrate,
   windowBrowserBridge,
@@ -1022,6 +1023,18 @@ export function App() {
   // Bots header Back closes the page like the fork: it rides a ref because
   // the view-history handler is defined further down this component.
   const botsCloseRef = useRef<() => void>(() => {});
+  // Bot open-session focus (Carlos directive on task_0436fdf3aa91): the
+  // Bots panel hands back the REAL session native opened for the bot.
+  // Recorded here and activated when the session list delivers it (effect
+  // below) — in-app tab state only, never OS activation. Rides refs
+  // because closePageRoute is defined further down, same as botsCloseRef.
+  const pendingBotSessionRef = useRef<{
+    workspaceId: string;
+    sessionId: string;
+  } | null>(null);
+  const openBotSessionRef = useRef<
+    NonNullable<BotsPanelProps["onOpenSession"]>
+  >(() => {});
   // #270: same pattern for the Tasks page's Close/Esc — the registered
   // descriptor (the workspace-scoped mount) needs a stable onClose that
   // resolves to the view-history handler defined further down.
@@ -1057,6 +1070,10 @@ export function App() {
         // Reads ride the app-global scope, but bot.create needs a real
         // placement folder: the selected workspace, if any.
         createWorkspaceId: current?.id,
+        // Real-session handoff: the panel reports native's opened session;
+        // the ref below selects its workspace, leaves the page and focuses
+        // the tab once the list delivers it.
+        onOpenSession: (input) => openBotSessionRef.current(input),
       });
     return filesBaseRegistry;
   }, [
@@ -1974,6 +1991,31 @@ export function App() {
     goBackViewHistory();
   };
   botsCloseRef.current = () => closePageRoute(BOTS_ROUTE_ID);
+  openBotSessionRef.current = (input) => {
+    pendingBotSessionRef.current = {
+      workspaceId: input.workspaceId,
+      sessionId: input.sessionId,
+    };
+    setSelected(input.workspaceId);
+    if (route === BOTS_ROUTE_ID) closePageRoute(BOTS_ROUTE_ID);
+  };
+  // Activates a Bot-opened session the moment the polled list delivers
+  // it (the open call returns before the tab exists). Runs after the
+  // refresh's own active-fallback in the same commit cycle, so the pending
+  // id wins. selectSessionTab parity, inline: route reset, tab activate,
+  // other panes cleared — in-app state only.
+  useEffect(() => {
+    const pending = pendingBotSessionRef.current;
+    if (!pending) return;
+    if (sessions.some((item) => item.id === pending.sessionId)) {
+      pendingBotSessionRef.current = null;
+      setSelected(pending.workspaceId);
+      setRoute(null);
+      setActive(pending.sessionId);
+      setActiveBrowserTabId(null);
+      setActiveEditorTabId(null);
+    }
+  }, [sessions]);
   tasksCloseRef.current = () => closePageRoute(TASKS_ROUTE_ID);
   automationsCloseRef.current = () => closePageRoute(AUTOMATIONS_ROUTE_ID);
   const goForwardViewHistory = () => {
