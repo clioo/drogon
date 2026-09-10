@@ -52,10 +52,12 @@ describe("resolveProvisionalJiraTaskIdentity", () => {
       "https://acme.atlassian.net",
     );
     expect(identity?.instance.kind).toBe("provisional");
-    expect(identity?.instance.endpointUrl).toBe("https://acme.atlassian.net");
-    const endpointId =
-      identity?.instance.kind === "provisional" ? identity.instance.endpointId : null;
-    expect(jiraInstanceKey(identity!.instance)).toBe(`provisional:${endpointId}`);
+    const provisionalFields =
+      identity?.instance.kind === "provisional" ? identity.instance : null;
+    expect(provisionalFields?.endpointUrl).toBe("https://acme.atlassian.net");
+    expect(jiraInstanceKey(identity!.instance)).toBe(
+      `provisional:${provisionalFields?.endpointId}`,
+    );
     expect(jiraTaskLinkId(identity!)).toBe(`${jiraInstanceKey(identity!.instance)}:10001`);
   });
 
