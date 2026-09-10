@@ -37,9 +37,12 @@ import type { ProjectGroup } from "./project-adapter";
 import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import type { TabStripState } from "./tab-order";
 import { WorktreeCard } from "./WorktreeCard";
+import { BotSessionRow } from "./BotSessionRow";
+import type { SidebarBotSession } from "./sidebar-bot-sessions";
 
 export function ChatsList({
   groups,
+  botSessions = [],
   workspaces,
   sessions,
   selectedWorkspaceId,
@@ -48,12 +51,16 @@ export function ChatsList({
   disabled,
   onSelectWorkspace,
   onSelectSession,
+  onOpenBotSession,
   onSubmitRemove,
   onCreate,
 }: {
   /** Every quick-session group, unfiltered by the caller's own criteria —
    *  Sidebar passes `groups.filter((g) => g.project.quickSession)`. */
   groups: ProjectGroup[];
+  /** Bots with a session (Gap 3): rendered at the top of the section, next
+   *  to the quick-session cards. Empty/absent renders nothing. */
+  botSessions?: SidebarBotSession[];
   workspaces: Workspace[];
   sessions: Session[];
   selectedWorkspaceId: string | null;
@@ -62,6 +69,10 @@ export function ChatsList({
   disabled: boolean;
   onSelectWorkspace: (workspaceId: string) => void;
   onSelectSession?: (sessionId: string) => void;
+  /** Opens (resumes) a Bot's session from its sidebar row. Absent hides the
+   *  Bot rows entirely, so callers that never supply Bots keep the exact
+   *  pre-Gap-3 section. */
+  onOpenBotSession?: (botId: string) => void;
   /** Same daemon call as ProjectList's regular project removal
    *  (project.remove); the daemon itself decides the file-deletion
    *  semantics per project kind (see project.rs's cleanup_quick_session_scratch). */
@@ -94,7 +105,24 @@ export function ChatsList({
           </button>
         )}
       </div>
-      {groups.length === 0 && (
+      {botSessions.length > 0 && onOpenBotSession ? (
+        <div
+          className="shell-chat-bot-sessions"
+          role="group"
+          aria-label="Bot sessions"
+        >
+          {botSessions.map((row) => (
+            <BotSessionRow
+              key={row.botId}
+              row={row}
+              active={row.sessionId === activeSessionId}
+              disabled={disabled}
+              onSelect={onOpenBotSession}
+            />
+          ))}
+        </div>
+      ) : null}
+      {groups.length === 0 && botSessions.length === 0 && (
         <p className="px-4 py-2 text-[11px] text-muted-foreground">
           No chats yet
         </p>

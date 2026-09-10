@@ -166,3 +166,79 @@ describe("ChatsList deletion", () => {
     expect(screen.getAllByText("Delete Chat").length).toBe(1);
   });
 });
+
+/** Gap 3 (task_926fddc5e769): a Bot with a session appears in the Chats
+ *  section, named like its tab, with its truthful daemon state, and opens
+ *  that Bot's session on click. */
+describe("ChatsList Bot sessions", () => {
+  const botSessions = [
+    {
+      botId: "bot-1",
+      sessionId: "sess-1",
+      displayName: "Arya Stark",
+      harnessId: "claude" as const,
+      state: "working" as const,
+      workspaceId: "ws-home",
+      title: "Arya Stark · Claude",
+    },
+    {
+      botId: "bot-2",
+      sessionId: "sess-2",
+      displayName: "Tyrion",
+      harnessId: "pi" as const,
+      state: "exited" as const,
+      workspaceId: "ws-home-2",
+      title: "Tyrion · Pi",
+    },
+  ];
+
+  function mountWithBots(onOpenBotSession: (botId: string) => void) {
+    (window as unknown as { drogon?: unknown }).drogon ??= {};
+    return render(
+      <TooltipProvider>
+        <ChatsList
+          groups={[]}
+          botSessions={botSessions}
+          workspaces={workspaces}
+          sessions={[]}
+          selectedWorkspaceId={null}
+          activeSessionId="sess-1"
+          tabStrip={EMPTY_TAB_STRIP_STATE}
+          disabled={false}
+          onSelectWorkspace={() => {}}
+          onOpenBotSession={onOpenBotSession}
+          onSubmitRemove={async () => null}
+          onCreate={null}
+        />
+      </TooltipProvider>,
+    );
+  }
+
+  test("lists each Bot session with its title and daemon state", () => {
+    mountWithBots(() => {});
+    expect(screen.getByTestId("sidebar-chats-section")).toBeTruthy();
+    expect(screen.getByText("Arya Stark")).toBeTruthy();
+    expect(screen.getByText("Tyrion")).toBeTruthy();
+    expect(screen.getByText("Exited")).toBeTruthy();
+    // Bot rows exist, so the empty state must not claim there are none.
+    expect(screen.queryByText("No chats yet")).toBeNull();
+    expect(
+      screen.getByRole("group", { name: "Bot sessions" }),
+    ).toBeTruthy();
+  });
+
+  test("clicking a Bot row opens that Bot's session", () => {
+    const onOpenBotSession = vi.fn();
+    mountWithBots(onOpenBotSession);
+    fireEvent.click(screen.getByRole("button", { name: "Arya Stark · Claude" }));
+    expect(onOpenBotSession).toHaveBeenCalledWith("bot-1");
+  });
+
+  test("marks the focused Bot row with aria-current", () => {
+    mountWithBots(() => {});
+    const active = screen.getByRole("button", { name: "Arya Stark · Claude" });
+    expect(active.getAttribute("aria-current")).toBe("true");
+    const inactive = screen.getByRole("button", { name: "Tyrion · Pi" });
+    expect(inactive.getAttribute("aria-current")).toBeNull();
+  });
+});

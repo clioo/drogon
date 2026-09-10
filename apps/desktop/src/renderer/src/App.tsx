@@ -225,12 +225,17 @@ import {
 } from "./daemon-capabilities";
 import { BOTS_PAGE_HOST_TESTID } from "./features/bots";
 import type { BotsPanelProps } from "../../shared/bot-contract";
+import { dispatchOpenBotSession } from "./features/bots/bot-session-open";
 import { BotSessionHeader } from "./features/bots/BotSessionHeader";
 import { BotSessionInspector } from "./features/bots/BotSessionInspector";
 import {
   botSessionTitle,
   type BotSessionMeta,
 } from "./features/bots/bot-session-chrome";
+import {
+  buildSidebarBotSessions,
+  type SidebarBotSession,
+} from "./features/shell/sidebar-bot-sessions";
 import {
   planBrowserRehydrate,
   windowBrowserBridge,
@@ -954,10 +959,11 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     async function run() {
-      if (route !== BOTS_ROUTE_ID || !botsAvailable || !botsScope) return;
-      // Clear the previous result first: the UI shows in-progress instead
-      // of a stale error while the fresh request is pending.
-      setBotsLoad(null);
+      // Loaded app-wide (not only on the Bots route): the sidebar's Chats
+      // section lists Bots with a session, so the snapshot has to exist
+      // wherever the user is. The previous result is kept while the fresh
+      // read is in flight (never a stale error, never an empty flash).
+      if (!botsAvailable || !botsScope) return;
       const result = await loadBotSnapshot(botsGatedBridge, botsScope);
       if (!cancelled) setBotsLoad(result);
     }
@@ -966,13 +972,17 @@ export function App() {
       cancelled = true;
     };
   }, [
-    route,
     botsAvailable,
     botsScopeHost,
     botsScopeWorkspace,
     botsScopeLocale,
     botsReload,
   ]);
+  // Entering the Bots page still forces a fresh read; the sidebar keeps the
+  // last snapshot live in between, so this is a refresh, not the first load.
+  useEffect(() => {
+    if (route === BOTS_ROUTE_ID) setBotsReload((value) => value + 1);
+  }, [route]);
   // Stable files base: Bots snapshot refreshes must never reset the Files
   // descriptor identity (mounted editor drafts/attempts). The bots layer
   // rebuilds on snapshot change; the files base below never does.
@@ -1043,6 +1053,12 @@ export function App() {
   const openBotSessionRef = useRef<
     NonNullable<BotsPanelProps["onOpenSession"]>
   >(() => {});
+  // Gap 2 liveness lookup, supplied by the host and read through a ref for
+  // the same reason as openBotSessionRef: the panel registry memo must not
+  // rebuild on every session poll.
+  const resolveBotSessionRef = useRef<
+    NonNullable<BotsPanelProps["resolveBotSession"]>
+  >(() => null);
   // Bot-scoped chrome (bug-bot-a836b4ebf8be65505): identity/harness/home
   // facts the dispatched open-session turn echoed, keyed by the real
   // session id it opened — never invented, never re-derived by guessing.
@@ -1102,6 +1118,9 @@ export function App() {
         // the ref below selects its workspace, leaves the page and focuses
         // the tab once the list delivers it.
         onOpenSession: (input) => openBotSessionRef.current(input),
+        // Gap 2: the default Open-session click resumes a session the host
+        // has positively observed is live instead of spawning a second one.
+        resolveBotSession: (input) => resolveBotSessionRef.current(input),
       });
     return filesBaseRegistry;
   }, [
@@ -2019,7 +2038,13 @@ export function App() {
     goBackViewHistory();
   };
   botsCloseRef.current = () => closePageRoute(BOTS_ROUTE_ID);
-  openBotSessionRef.current = (input) => {
+  // One focus path for every way a Bot session can be opened (the Bots
+  // page's Open/New session and the sidebar row): record the REAL session
+  // native returned, select its workspace, leave the page and set the
+  // pending id the list-delivery effect below activates.
+  const recordBotSession = (
+    input: Parameters<NonNullable<BotsPanelProps["onOpenSession"]>>[0],
+  ) => {
     pendingBotSessionRef.current = {
       workspaceId: input.workspaceId,
       sessionId: input.sessionId,
@@ -2044,6 +2069,7 @@ export function App() {
     void reloadWorkspaces();
     if (route === BOTS_ROUTE_ID) closePageRoute(BOTS_ROUTE_ID);
   };
+  openBotSessionRef.current = recordBotSession;
   // Activates a Bot-opened session the moment the polled list delivers
   // it (the open call returns before the tab exists). Runs after the
   // refresh's own active-fallback in the same commit cycle, so the pending
@@ -2074,6 +2100,91 @@ export function App() {
       );
     }
   }, [sessions]);
+  // Gap 2: the host owns liveness. A Bot's recorded session is resumable
+  // only when the daemon-owned session list still shows it AND has not
+  // positively confirmed it exited — reattaching to a dead session, or
+  // silently opening a second one for a live Bot, are both refused here.
+  resolveBotSessionRef.current = (input) => {
+    const recorded = input.bot.currentSession;
+    if (!recorded) return null;
+    const session = sessions.find((item) => item.id === recorded.sessionId);
+    if (!session) return null;
+    if (session.verdict === "exited") return null;
+    return {
+      sessionId: session.id,
+      incarnation: session.incarnation,
+      workspaceId: session.workspaceId,
+      hostId: session.hostId,
+      harnessId: session.harnessId ?? (recorded.harness || null),
+    };
+  };
+  // Gap 3: the sidebar's Chats section lists Bots with a session. Built from
+  // the same daemon facts every other surface uses (the Bot snapshot's
+  // currentSession link + the live session list), and the click handler
+  // resumes the live session or opens a fresh one through the exact same
+  // dispatch the Bots page uses.
+  const loadedBots =
+    botsLoad?.status === "loaded" && botsScopeEquals(botsLoad.scope)
+      ? botsLoad.snapshot.bots
+      : [];
+  const sidebarBotSessions: SidebarBotSession[] = buildSidebarBotSessions(
+    loadedBots,
+    sessions,
+  );
+  const openSidebarBotSession = (botId: string) => {
+    const bot = loadedBots.find((candidate) => candidate.id === botId);
+    if (!bot) return;
+    const resumable = resolveBotSessionRef.current({ bot });
+    if (resumable) {
+      recordBotSession({
+        botId: bot.id,
+        sessionId: resumable.sessionId,
+        incarnation: resumable.incarnation,
+        harness: {
+          harnessId: resumable.harnessId ?? bot.harnessPolicy.defaultHarness,
+          explicitModel: bot.harnessPolicy.explicitModel,
+        },
+        workspaceId: resumable.workspaceId,
+        hostId: resumable.hostId,
+        displayName: bot.displayIdentity.displayName,
+        handle: bot.displayIdentity.handle,
+        title: bot.displayIdentity.title,
+      });
+      return;
+    }
+    if (!botsScope) return;
+    // The recorded session is gone or exited: dispatch a fresh one with the
+    // same open-session shape (no model turn) and focus it when it lands.
+    void (async () => {
+      const response = await dispatchOpenBotSession({
+        bridge: botsGatedBridge,
+        scope: botsScope,
+        bot,
+        requestId:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `bot-open-session-${Date.now()}`,
+      });
+      if (!response || !response.ok) return;
+      if (response.result.outcome !== "dispatched") return;
+      const opened = response.result.session;
+      if (!opened) return;
+      recordBotSession({
+        botId: bot.id,
+        sessionId: opened.sessionId,
+        incarnation: opened.incarnation,
+        harness: {
+          harnessId: bot.harnessPolicy.defaultHarness,
+          explicitModel: bot.harnessPolicy.explicitModel,
+        },
+        workspaceId: response.result.workspaceId,
+        hostId: response.result.hostId,
+        displayName: bot.displayIdentity.displayName,
+        handle: bot.displayIdentity.handle,
+        title: bot.displayIdentity.title,
+      });
+    })();
+  };
   // Bot session inspector (bug-bot-a836b4ebf8be65505): identity is known
   // synchronously from `botSessions` (recorded above), but the pid is a
   // live daemon-side fact that has to be fetched — `bot.snapshot`'s own
@@ -3991,6 +4102,8 @@ export function App() {
             activeSessionId={activeRootId}
             tabStrip={tabStrip}
             onSelectSession={selectSessionTab}
+            botSessions={sidebarBotSessions}
+            onOpenBotSession={openSidebarBotSession}
             workspaceDisabled={busy}
             addDisabled={!status || busy}
             onSelectWorkspace={selectWorkspaceId}

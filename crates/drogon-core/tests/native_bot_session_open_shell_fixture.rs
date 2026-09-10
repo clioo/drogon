@@ -98,7 +98,7 @@ fn write_pi_fixture_staying_alive(bin: &std::path::Path) {
     let script = bin.join("pi");
     std::fs::write(
         &script,
-        "#!/bin/sh\necho CWD=$(pwd)\nfor arg in \"$@\"; do echo \"ARG:$arg\"; done\ntrap 'exit 0' TERM INT\nwhile IFS= read -r line; do echo \"you said: $line\"; done\n",
+        "#!/bin/sh\necho CWD=$(pwd)\nfor arg in \"$@\"; do echo \"ARG:$arg\"; done\necho '---AGENTS---'\ncat AGENTS.md 2>/dev/null\necho '---CLAUDE---'\ncat CLAUDE.md 2>/dev/null\ntrap 'exit 0' TERM INT\nwhile IFS= read -r line; do echo \"you said: $line\"; done\n",
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
@@ -117,13 +117,19 @@ fn base64_decode(text: &str) -> Vec<u8> {
 /// `read_until_exited` (which loops until exit and panics on timeout), a
 /// still-`live` verdict at the deadline is the expected, asserted-on outcome
 /// here.
-fn read_for(
+/// Reads until `ready(text)` holds, the session exits, or `timeout`
+/// expires, returning the accumulated output and the LAST observed
+/// verdict. Returning the moment the expected bytes arrive keeps tests fast
+/// while a generous timeout keeps them robust when the whole suite runs in
+/// parallel and a PTY spawn is slow.
+fn read_until(
     engine: &Engine,
     session_id: &str,
     incarnation: &str,
-    duration: Duration,
+    ready: impl Fn(&str) -> bool,
+    timeout: Duration,
 ) -> (String, String) {
-    let deadline = Instant::now() + duration;
+    let deadline = Instant::now() + timeout;
     let mut cursor = 0u64;
     let mut text = String::new();
     let mut verdict = "live".to_string();
@@ -138,12 +144,24 @@ fn read_for(
         text.push_str(&String::from_utf8_lossy(&bytes));
         cursor = read["nextCursor"].as_u64().unwrap();
         verdict = read["session"]["verdict"].as_str().unwrap().to_string();
-        if verdict == "exited" {
+        if verdict == "exited" || ready(&text) {
             break;
         }
         std::thread::sleep(Duration::from_millis(20));
     }
     (text, verdict)
+}
+
+/// Reads for a fixed duration regardless of content (used after a
+/// `read_until` when a test must positively observe that nothing else
+/// arrives).
+fn read_for(
+    engine: &Engine,
+    session_id: &str,
+    incarnation: &str,
+    duration: Duration,
+) -> (String, String) {
+    read_until(engine, session_id, incarnation, |_| false, duration)
 }
 
 struct Fixture {
@@ -215,6 +233,28 @@ impl Fixture {
             "harness": { "harnessId": "pi" },
         })
     }
+
+    /// Edits the Bot's stored identity/instructions/memories directly (the
+    /// only mutation path this repo exposes today: identity editing has no
+    /// RPC yet), so a test can prove the context files follow the record.
+    fn edit_bot(&self, name: &str, instructions: &str, memories: &[&str]) {
+        let conn =
+            rusqlite::Connection::open(self._root.path().join("data").join(DB_FILE_NAME)).unwrap();
+        bstorage::update_bot(
+            &conn,
+            &self.host,
+            &self.record_folder,
+            "bot-1",
+            42.0,
+            |bot| {
+                bot.display_identity.display_name = name.to_string();
+                bot.display_identity.title = Some("Scout".to_string());
+                bot.instructions = instructions.to_string();
+                bot.memories = memories.iter().map(|m| m.to_string()).collect();
+            },
+        )
+        .unwrap();
+    }
 }
 
 /// The core regression proof: opening an interactive Bot session must NOT
@@ -245,11 +285,12 @@ fn interactive_open_session_stays_live_instead_of_exiting_like_a_headless_run() 
         .unwrap()
         .to_string();
 
-    let (output, verdict) = read_for(
+    let (output, verdict) = read_until(
         &fx.engine,
         &session_id,
         &incarnation,
-        Duration::from_millis(800),
+        |text| text.contains("CWD="),
+        Duration::from_secs(20),
     );
     assert_eq!(
         verdict, "live",
@@ -308,11 +349,12 @@ fn interactive_open_session_runs_in_the_bots_own_home_not_the_record_folder() {
         .unwrap()
         .to_string();
 
-    let (output, _verdict) = read_for(
+    let (output, _verdict) = read_until(
         &fx.engine,
         &session_id,
         &incarnation,
-        Duration::from_millis(300),
+        |text| text.contains("CWD="),
+        Duration::from_secs(20),
     );
     assert!(
         !output.contains(&format!("CWD={}", fx.record_folder)),
@@ -456,12 +498,22 @@ fn open_session_delivers_no_prompt_turn_to_the_harness() {
         .unwrap()
         .to_string();
 
-    let (output, verdict) = read_for(
+    let (mut output, verdict) = read_until(
         &fx.engine,
         &session_id,
         &incarnation,
-        Duration::from_millis(800),
+        |text| text.contains("CWD="),
+        Duration::from_secs(20),
     );
+    // Observe a short settle window after startup: a prompt, if the daemon
+    // had dispatch one, would be echoed here by the fixture's stdin loop.
+    let (settled, _) = read_for(
+        &fx.engine,
+        &session_id,
+        &incarnation,
+        Duration::from_millis(400),
+    );
+    output.push_str(&settled);
     assert_eq!(
         verdict, "live",
         "the session must still be live with nothing to consume; output: {output:?}"
@@ -528,4 +580,169 @@ fn interactive_open_session_rejects_a_prompt_at_the_parse_seam() {
     let error = parse_bot_run_request(&params)
         .expect_err("interactive:false without a prompt must be rejected");
     assert_eq!(error.code, "invalid_argument");
+}
+
+/// Gap 1 (task_926fddc5e769): the Bot's identity, role, standing
+/// instructions and memories must reach the HARNESS when the session
+/// opens. The fixture is a real shell process started by the daemon in the
+/// Bot's home; it `cat`s `AGENTS.md`/`CLAUDE.md` from its own working
+/// directory, which is exactly what a context-file-reading harness does.
+/// Asserting the files exist is not enough -- this asserts the bytes a real
+/// harness process reads out of its cwd.
+#[test]
+fn open_session_materializes_the_identity_files_the_harness_reads() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let fx = Fixture::new();
+    fx.edit_bot(
+        "Arya Stark",
+        "Always answer first as Arya Stark.",
+        &["The owner is Carlos."],
+    );
+    let bin = tempfile::tempdir().unwrap();
+    write_pi_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+
+    let receipt = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-session",
+        fx.open_session_params(),
+    );
+    assert_eq!(receipt["outcome"], "dispatched", "{receipt:?}");
+    let session_id = receipt["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let incarnation = receipt["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (output, _verdict) = read_until(
+        &fx.engine,
+        &session_id,
+        &incarnation,
+        |text| text.contains("---CLAUDE---"),
+        Duration::from_secs(20),
+    );
+    assert!(
+        output.contains("---AGENTS---") && output.contains("---CLAUDE---"),
+        "the fixture must have read both identity files from its cwd: {output:?}"
+    );
+    assert!(
+        output.contains("# Arya Stark"),
+        "the harness must receive the Bot's display name: {output:?}"
+    );
+    assert!(
+        output.contains("- Handle: @arya-stark") && output.contains("- Role:"),
+        "the harness must receive the Bot's handle and role when present: {output:?}"
+    );
+    assert!(
+        output.contains("Always answer first as Arya Stark."),
+        "the harness must receive the Bot's standing instructions: {output:?}"
+    );
+    assert!(
+        output.contains("- The owner is Carlos."),
+        "the harness must receive the Bot's memories: {output:?}"
+    );
+    assert!(
+        output.contains("Your identity, role, standing instructions and memories"),
+        "CLAUDE.md must point the harness at AGENTS.md: {output:?}"
+    );
+
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop",
+        json!({"sessionId": session_id, "incarnation": incarnation}),
+    );
+}
+
+/// Gap 1's second half: an edit to the Bot's display name, instructions or
+/// memories must be reflected in the NEXT session's context files, with the
+/// stale identity gone -- never two contradictory files on disk.
+#[test]
+fn editing_the_bot_identity_refreshes_the_files_the_next_session_reads() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let fx = Fixture::new();
+    fx.edit_bot("Arya Stark", "First instructions.", &["First memory."]);
+    let bin = tempfile::tempdir().unwrap();
+    write_pi_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+
+    let first = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-session-1",
+        fx.open_session_params(),
+    );
+    let first_id = first["session"]["sessionId"].as_str().unwrap().to_string();
+    let first_inc = first["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (first_output, _) = read_until(
+        &fx.engine,
+        &first_id,
+        &first_inc,
+        |text| text.contains("First instructions."),
+        Duration::from_secs(20),
+    );
+    assert!(first_output.contains("First instructions."));
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-1",
+        json!({"sessionId": first_id, "incarnation": first_inc}),
+    );
+
+    // The owner edits the Bot's identity, instructions and memories.
+    fx.edit_bot(
+        "Arya of House Stark",
+        "Second instructions.",
+        &["Second memory."],
+    );
+
+    let second = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-session-2",
+        fx.open_session_params(),
+    );
+    assert_eq!(second["outcome"], "dispatched", "{second:?}");
+    let second_id = second["session"]["sessionId"].as_str().unwrap().to_string();
+    let second_inc = second["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (second_output, _) = read_until(
+        &fx.engine,
+        &second_id,
+        &second_inc,
+        |text| text.contains("Second memory."),
+        Duration::from_secs(20),
+    );
+    assert!(
+        second_output.contains("Arya of House Stark"),
+        "the next session must read the edited display name: {second_output:?}"
+    );
+    assert!(
+        second_output.contains("Second instructions.")
+            && second_output.contains("- Second memory."),
+        "the next session must read the edited instructions and memories: {second_output:?}"
+    );
+    assert!(
+        !second_output.contains("First instructions.")
+            && !second_output.contains("- First memory."),
+        "the stale identity must be gone, never left beside the fresh one: {second_output:?}"
+    );
+
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-2",
+        json!({"sessionId": second_id, "incarnation": second_inc}),
+    );
 }

@@ -217,6 +217,21 @@ export type BotDeleteResult = BotScope & {
 
 export type BotsPanelHostObservation = "live" | "unverifiable" | "exited";
 
+/** A Bot's recorded session that the HOST has confirmed live right now.
+ *  Returned by `BotsPanelProps.resolveBotSession`: the daemon verdict —
+ *  never a hook-derived guess — already said the session is not exited, so
+ *  "Open session" must FOCUS this real session instead of spawning a
+ *  second one. `harnessId` is the session's own admitted harness (the
+ *  live `Session` projection), which can differ from the Bot's current
+ *  stored policy if the policy changed after the session opened. */
+export type BotLiveSession = {
+  sessionId: string;
+  incarnation: string;
+  workspaceId: string;
+  hostId: string;
+  harnessId: string | null;
+};
+
 export type BotsPanelTrigger =
   | { kind: "reactive"; event: string | null }
   | { kind: "scheduled"; automationId: string };
@@ -368,6 +383,15 @@ export type BotsPanelProps = {
     handle: string | null;
     title: string | null;
   }) => void | Promise<void>;
+  /** Host-owned liveness lookup for the DEFAULT "Open session" click (Gap 2):
+   *  given the Bot the panel is showing, return its recorded session ONLY
+   *  when the host has positively observed it is not exited, else null.
+   *  The controller then focuses that session through `onOpenSession`
+   *  instead of dispatching a duplicate. Absent/returning null means
+   *  "no resumable session", so the click dispatches a fresh one — the
+   *  path used when the recorded session genuinely exited or never
+   *  existed. */
+  resolveBotSession?: (input: { bot: BotsPanelBot }) => BotLiveSession | null;
   /** Caller-observed liveness verdicts (live | unverifiable | exited), one per
    *  bot, from a real observation source. The panel renders them verbatim and
    *  never derives a verdict from the persisted record: a stored session is a
