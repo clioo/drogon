@@ -32,6 +32,7 @@ import {
   emptyBotCreateForm,
   emptyResponsibilityForm,
   harnessSupportsConversationResume,
+  isBotUnconfigured,
 } from "./bots-page-model";
 import type {
   BotCreateFormValues,
@@ -630,14 +631,26 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     ],
   );
 
-  // Explicit expand/collapse of a bot card. The argument is the bot's id;
-  // the resulting value always reflects the user's last toggle.
-  const toggleExpanded = useCallback((botId: string): void => {
-    setExpandedOverrides((current) => ({
-      ...current,
-      [botId]: !(current[botId] ?? false),
-    }));
-  }, []);
+  // Explicit expand/collapse of a bot card. The flip is over the card's
+  // EFFECTIVE state (the design default — configured bots expanded,
+  // unconfigured bots collapsed — or the user's last toggle), so the
+  // first click on a default-expanded card collapses it.
+  const toggleExpanded = useCallback(
+    (botId: string): void => {
+      const bot = (localSnapshot ?? snapshot).bots.find(
+        (candidate) => candidate.id === botId,
+      );
+      const monitorCount = monitorsByBotId?.[botId]?.length ?? 0;
+      const defaultExpanded = bot
+        ? !isBotUnconfigured(bot, monitorCount)
+        : true;
+      setExpandedOverrides((current) => ({
+        ...current,
+        [botId]: !(current[botId] ?? defaultExpanded),
+      }));
+    },
+    [localSnapshot, snapshot, monitorsByBotId],
+  );
 
   return {
     effective,

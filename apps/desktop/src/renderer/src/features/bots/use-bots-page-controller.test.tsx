@@ -645,3 +645,48 @@ describe("use-bots-page-controller: design column side reads", () => {
     expect(screen.getByText("No runs yet")).toBeTruthy();
   });
 });
+
+describe("use-bots-page-controller: expand/collapse toggles", () => {
+  it("collapses a default-expanded card on the first click, then restores it", async () => {
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [bot({ responsibilities: [responsibility()] })],
+          history: [],
+        }}
+      />,
+    );
+    const card = screen.getByTestId("bot-bot-1");
+    expect(within(card).getByTestId("open-session-bot-1")).toBeTruthy();
+    // First click collapses the default-expanded card.
+    fireEvent.click(screen.getByTestId("bot-expand-bot-1"));
+    await waitFor(() => {
+      expect(
+        within(screen.getByTestId("bot-bot-1")).queryByTestId(
+          "open-session-bot-1",
+        ),
+      ).toBeNull();
+    });
+    // The compact row shows what is configured — never a false "nothing".
+    expect(screen.getByText(/1 automation/)).toBeTruthy();
+    // Second click restores the full card.
+    fireEvent.click(screen.getByTestId("bot-expand-bot-1"));
+    await waitFor(() => {
+      expect(screen.getByTestId("open-session-bot-1")).toBeTruthy();
+    });
+  });
+
+  it("expands a collapsed (unconfigured) card and shows the honest empty columns", async () => {
+    render(
+      <BotsPanel snapshot={{ bots: [bot({ responsibilities: [] })], history: [] }} />,
+    );
+    expect(screen.getByText("No automations or monitors yet")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("bot-expand-bot-1"));
+    await waitFor(() => {
+      expect(screen.getByTestId("open-session-bot-1")).toBeTruthy();
+    });
+    // No monitor source in this test: the column says so, never an
+    // invented empty watch.
+    expect(screen.getByText(/Monitor details are unavailable/)).toBeTruthy();
+  });
+});
