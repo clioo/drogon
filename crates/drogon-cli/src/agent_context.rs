@@ -249,8 +249,9 @@ pub fn all_commands() -> Vec<AgentCommand> {
             "worktree create",
             &["worktree", "create"],
             "Create a git worktree for a Project on branch NAME",
-            "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent] [--comment <TEXT>] [--agent <ID> [--prompt <TEXT>]]",
+            "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent] [--comment <TEXT>] [--agent <ID> [--prompt <TEXT>]] [--setup run|skip|inherit] [--activate]",
             &[
+                "activate",
                 "agent",
                 "base",
                 "base-branch",
@@ -260,6 +261,8 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "parent",
                 "project",
                 "prompt",
+                "run-hooks",
+                "setup",
             ],
             &[],
             &[
@@ -270,6 +273,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[
                 "--base-branch is an alias of --base: the new branch starts at that ref, otherwise at the project's HEAD.",
                 "--agent launches that harness in the new worktree's first terminal; --prompt requires --agent.",
+                "--run-hooks aliases --setup run; both are honest no-ops here (no orca.yaml engine) and warn. --activate is an honest no-op too (no desktop view).",
                 "Refuses when a worktree with NAME already exists.",
                 "Requires a git project; a folder project has one implicit worktree.",
             ],

@@ -2751,3 +2751,67 @@ async fn worktree_rm_run_hooks_reaches_the_daemon_with_honest_warning() {
     );
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_setup_and_activate_warn_honestly() {
+    // Source keeps --setup/--activate on create; with no desktop view to
+    // reveal and no setup engine to run, the CLI accepts them and says so.
+    let dir = temp_data_dir("wtsetup");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "wt-new",
+                    "projectId": "proj-1",
+                    "workspaceId": "ws-1",
+                    "path": "/repo/child",
+                    "branch": "child",
+                    "head": "abc123",
+                    "baseRef": null,
+                    "createdAt": "2026-09-05T12:00:00Z"
+                }),
+            ))
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--setup",
+            "run",
+            "--activate",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["setupDecision"], "run");
+    assert_eq!(request["params"]["activate"], true);
+    let stderr_text = stderr(&output);
+    assert!(
+        stderr_text.contains("no setup engine") || stderr_text.contains("no desktop"),
+        "stderr: {stderr_text}"
+    );
+    // An unknown setup value is a usage error before any daemon call.
+    let bad = run_cli(
+        dir.path(),
+        &[
+            "worktree",
+            "create",
+            "--project",
+            "proj-1",
+            "--name",
+            "child",
+            "--setup",
+            "never",
+        ],
+    );
+    assert_eq!(bad.status.code(), Some(2));
+    drop(service);
+}

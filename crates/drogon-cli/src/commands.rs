@@ -944,6 +944,8 @@ async fn worktree(
             agent,
             prompt,
             run_hooks,
+            setup,
+            activate,
         } => {
             // Real, durable creation provenance (Workspace Options "Hide:
             // CLI-created"): every worktree this command creates really was
@@ -954,6 +956,9 @@ async fn worktree(
             if let Some(base) = base {
                 params["baseRef"] = json!(base);
             }
+            // Source `setupDecision` + `activate` wire fields. No desktop
+            // view or setup engine exists here; the daemon records the
+            // decision and the CLI says so instead of pretending.
             // `--no-parent` is an explicit null; `--parent` addresses the
             // parent row by id; neither means the daemon's default.
             if *no_parent || parent.is_some() {
@@ -968,6 +973,29 @@ async fn worktree(
             if *run_hooks {
                 params["runHooks"] = json!(true);
             }
+            let effective_setup = if *run_hooks {
+                // Source: --run-hooks is a legacy alias for --setup run.
+                Some("run".to_string())
+            } else {
+                setup.clone()
+            };
+            let mut local_warnings = Vec::new();
+            if let Some(setup) = &effective_setup {
+                params["setupDecision"] = json!(setup);
+                if setup == "run" {
+                    local_warnings.push(
+                        "warning: --setup run is a no-op: this runtime has no orca.yaml setup engine"
+                            .to_string(),
+                    );
+                }
+            }
+            if *activate {
+                params["activate"] = json!(true);
+                local_warnings.push(
+                    "warning: --activate is a no-op: there is no desktop view to reveal"
+                        .to_string(),
+                );
+            }
             let call = client
                 .call("worktree.create", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
@@ -980,7 +1008,13 @@ async fn worktree(
                 .get("warning")
                 .and_then(Value::as_str)
                 .map(|w| format!("warning: {w}"));
-            let stderr_note = if json { None } else { hook_warning };
+            let mut warnings = local_warnings;
+            warnings.extend(hook_warning);
+            let stderr_note = if json || warnings.is_empty() {
+                None
+            } else {
+                Some(warnings.join("\n"))
+            };
             // Source `--agent`: launch the harness in the new worktree's
             // first terminal (its workspace) and surface the agent handle.
             if let Some(agent) = agent {

@@ -530,7 +530,7 @@ pub enum WorktreeAction {
     /// Create a git worktree for a Project on branch NAME
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent] [--comment <TEXT>]\nValid flags: --base, --base-branch, --comment, --data-dir, --help, --json, --name, --no-parent, --parent, --project, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent] [--comment <TEXT>] [--agent <ID> [--prompt <TEXT>]] [--setup run|skip|inherit] [--activate]\nValid flags: --activate, --agent, --base, --base-branch, --comment, --data-dir, --help, --json, --name, --no-parent, --parent, --project, --prompt, --request-id, --retry-request, --run-hooks, --setup"
     )]
     Create {
         #[arg(long, value_name = "ID")]
@@ -562,6 +562,14 @@ pub enum WorktreeAction {
         /// (honestly a no-op here — this runtime has no orca.yaml engine)
         #[arg(long)]
         run_hooks: bool,
+        /// Repo setup-hook decision (source `--setup`; honestly recorded
+        /// but unrunnable here — this runtime has no orca.yaml engine)
+        #[arg(long, value_name = "MODE")]
+        setup: Option<String>,
+        /// Reveal the new worktree in the app (honestly a no-op here —
+        /// there is no desktop view to reveal)
+        #[arg(long)]
+        activate: bool,
     },
     /// List a Project's worktrees
     #[command(
@@ -1081,6 +1089,8 @@ impl Cli {
                     agent,
                     prompt,
                     run_hooks: _,
+                    setup,
+                    activate: _,
                 } => {
                     require_nonempty("project", project)?;
                     require_nonempty("name", name)?;
@@ -1105,6 +1115,16 @@ impl Cli {
                     }
                     if let Some(agent) = agent {
                         require_nonempty("agent", agent)?;
+                    }
+                    // Source setup decision values; --run-hooks already
+                    // aliases `--setup run` (kept separate for the wire).
+                    if let Some(setup) = setup {
+                        require_nonempty("setup", setup)?;
+                        if !matches!(setup.as_str(), "run" | "skip" | "inherit") {
+                            return Err(CliError::Usage(
+                                "--setup must be one of run, skip, inherit".into(),
+                            ));
+                        }
                     }
                 }
                 WorktreeAction::Show { id } => {
@@ -1778,6 +1798,8 @@ mod tests {
                     agent: _,
                     prompt: _,
                     run_hooks: _,
+                    setup: _,
+                    activate: _,
                 },
         } = &cli.command
         else {
