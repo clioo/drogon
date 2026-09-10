@@ -1365,3 +1365,66 @@ fn worktree_update_title_roundtrip() {
     );
     assert_eq!(cleared["title"], Value::Null);
 }
+
+/// Source repo.searchRefs: substring ref search over branches/remotes/tags
+/// with a default page of 25 (max 1000) and an honest truncated flag.
+#[test]
+fn repo_search_refs_filters_branches_and_reports_truncation() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    git(repo.path(), &["branch", "feat-alpha"]);
+    git(repo.path(), &["branch", "feat-beta"]);
+    git(repo.path(), &["branch", "chore-x"]);
+    git(repo.path(), &["tag", "feat-v1"]);
+    let project = ok(
+        &engine,
+        "project.add",
+        "sr1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+
+    let result = ok(
+        &engine,
+        "repo.search_refs",
+        "sr2",
+        json!({"projectId": project["id"], "query": "feat"}),
+    );
+    let refs = result["refs"].as_array().unwrap();
+    assert!(refs.contains(&json!("feat-alpha")), "refs: {refs:?}");
+    assert!(refs.contains(&json!("feat-beta")));
+    assert!(refs.contains(&json!("feat-v1")));
+    assert!(!refs.contains(&json!("chore-x")));
+    assert_eq!(result["truncated"], json!(false));
+
+    // --limit caps the page and sets truncated when more refs matched.
+    let result = ok(
+        &engine,
+        "repo.search_refs",
+        "sr3",
+        json!({"projectId": project["id"], "query": "feat", "limit": 2}),
+    );
+    assert_eq!(result["refs"].as_array().unwrap().len(), 2);
+    assert_eq!(result["truncated"], json!(true));
+
+    // Unknown project is typed not_found; zero limit is invalid.
+    assert_eq!(
+        err_code(
+            &engine,
+            "repo.search_refs",
+            "sr4",
+            json!({"projectId": "proj-nope", "query": "x"}),
+        ),
+        "not_found"
+    );
+    assert_eq!(
+        err_code(
+            &engine,
+            "repo.search_refs",
+            "sr5",
+            json!({"projectId": project["id"], "query": "x", "limit": 0}),
+        ),
+        "invalid_argument"
+    );
+}

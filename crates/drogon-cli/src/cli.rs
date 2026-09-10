@@ -105,6 +105,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ProjectAction,
     },
+    /// Search refs within a registered git repository
+    Repo {
+        #[command(subcommand)]
+        action: RepoAction,
+    },
     /// Worktrees of a git Project (or the implicit one of a folder Project)
     Worktree {
         #[command(subcommand)]
@@ -418,6 +423,27 @@ pub enum DiagnosticsAction {
         override_usage = "drogon-cli diagnostics memory\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
     )]
     Memory,
+}
+
+/// Source `repo search-refs`: branch/tag ref search inside one registered
+/// repo. The native registry is the Projects table, addressed by `--project`.
+#[derive(Subcommand, Debug)]
+pub enum RepoAction {
+    /// Search branch, remote, and tag refs within a git Project
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli repo search-refs --project <ID> --query <TEXT> [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --project, --query, --request-id, --retry-request"
+    )]
+    SearchRefs {
+        #[arg(long, value_name = "ID")]
+        project: String,
+        /// Case-insensitive substring to match against ref names
+        #[arg(long, value_name = "TEXT")]
+        query: String,
+        /// Page size (default 25, max 1000; source limits)
+        #[arg(long, value_name = "N")]
+        limit: Option<u64>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1009,6 +1035,22 @@ impl Cli {
                     require_nonempty("id", id)?;
                 }
             },
+            Command::Repo {
+                action:
+                    RepoAction::SearchRefs {
+                        project,
+                        query,
+                        limit,
+                    },
+            } => {
+                require_nonempty("project", project)?;
+                require_nonempty("query", query)?;
+                if let Some(limit) = limit
+                    && *limit == 0
+                {
+                    return Err(CliError::Usage("--limit must be a positive integer".into()));
+                }
+            }
             Command::Worktree { action } => match action {
                 WorktreeAction::Create {
                     project,

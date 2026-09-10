@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::{
     AutomationAction, BrowserAction, Cli, Command, DiagnosticsAction, EnvironmentAction,
-    HarnessAction, HostAction, InternalAction, ProjectAction, TerminalAction, WaitFor,
+    HarnessAction, HostAction, InternalAction, ProjectAction, RepoAction, TerminalAction, WaitFor,
     WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
@@ -189,6 +189,50 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
             }
         },
         Command::Project { action } => project(&client, &request_id, json, action).await,
+        Command::Repo {
+            action:
+                RepoAction::SearchRefs {
+                    project,
+                    query,
+                    limit,
+                },
+        } => {
+            let mut params = json!({ "projectId": project, "query": query });
+            if let Some(limit) = limit {
+                params["limit"] = json!(limit);
+            }
+            let call = client
+                .call("repo.search_refs", params, &request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let refs: Vec<String> = call.result["refs"]
+                .as_array()
+                .ok_or_else(|| CliError::Local {
+                    error: crate::error::internal_error("repo.search_refs result is missing refs"),
+                    request_id: request_id.clone(),
+                })?
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect();
+            let truncated = call.result["truncated"].as_bool().unwrap_or(false);
+            let joined = refs.join("\n");
+            emit(
+                call,
+                json,
+                || {
+                    if refs.is_empty() {
+                        return "No refs found.".to_string();
+                    }
+                    if truncated {
+                        format!("{joined}\n\ntruncated: yes")
+                    } else {
+                        joined
+                    }
+                },
+                0,
+                None,
+            )
+        }
         Command::Worktree { action } => worktree(&client, &request_id, json, action).await,
         Command::Terminal { action } => terminal(&client, &request_id, json, action).await,
         Command::Browser { action } => browser(&client, &request_id, json, action).await,

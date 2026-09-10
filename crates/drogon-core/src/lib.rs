@@ -527,6 +527,7 @@ impl Engine {
             "worktree.remove" => self.mutating(request, Self::do_worktree_remove),
             "worktree.rename" => self.mutating(request, Self::do_worktree_rename),
             "worktree.update" => self.mutating(request, Self::do_worktree_update),
+            "repo.search_refs" => self.do_repo_search_refs(&request.params),
             "tasks.list" => self.do_tasks_list(&request.params),
             "tasks.show" => self.do_tasks_show(&request.params),
             "tasks.start" => self.mutating(request, Self::do_tasks_start),

@@ -2450,3 +2450,57 @@ fn project_setups_answers_an_empty_local_list() {
     assert_eq!(json.status.code(), Some(0));
     assert!(stdout(&json).contains("\"setups\": []"));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repo_search_refs_maps_query_and_limit_and_prints_refs() {
+    let dir = temp_data_dir("refsrch");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({"refs": ["feat-alpha", "feat-beta"], "truncated": true}),
+            ))
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "repo",
+            "search-refs",
+            "--project",
+            "proj-1",
+            "--query",
+            "feat",
+            "--limit",
+            "2",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let stdout = stdout(&output);
+    assert!(stdout.contains("feat-alpha"));
+    assert!(stdout.contains("feat-beta"));
+    assert!(stdout.contains("truncated: yes"));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "repo.search_refs");
+    assert_eq!(request["params"]["projectId"], "proj-1");
+    assert_eq!(request["params"]["query"], "feat");
+    assert_eq!(request["params"]["limit"], 2);
+
+    // Zero limit is a client-side usage error; the daemon is never called.
+    let bad = run_cli(
+        dir.path(),
+        &[
+            "repo",
+            "search-refs",
+            "--project",
+            "proj-1",
+            "--query",
+            "x",
+            "--limit",
+            "0",
+        ],
+    );
+    assert_eq!(bad.status.code(), Some(2));
+    drop(service);
+}

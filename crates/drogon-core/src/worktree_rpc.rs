@@ -1511,6 +1511,58 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// `repo.search_refs { projectId, query, limit? }`: substring ref
+    /// search over a git project's branches, remotes, and tags. The page
+    /// defaults to 25 (the source `REPO_SEARCH_REFS_DEFAULT_LIMIT`) and
+    /// caps at 1000; `truncated` is set whenever more refs matched than
+    /// the page carried.
+    pub(super) fn do_repo_search_refs(&self, params: &Value) -> Result<Value, RpcError> {
+        const DEFAULT_LIMIT: usize = 25;
+        const MAX_LIMIT: usize = 1_000;
+        let project_id = require_str(params, "projectId")?.to_string();
+        let query = require_str(params, "query")?.trim().to_string();
+        let limit = match params.get("limit") {
+            None | Some(Value::Null) => DEFAULT_LIMIT,
+            Some(value) => {
+                let requested = value
+                    .as_u64()
+                    .filter(|n| *n > 0)
+                    .ok_or_else(|| error::invalid_argument("limit must be a positive integer"))?;
+                usize::try_from(requested)
+                    .map_err(|_| error::invalid_argument("limit is out of range"))?
+                    .min(MAX_LIMIT)
+            }
+        };
+
+        let project_path = {
+            let conn = self.db.lock().unwrap();
+            crate::project::get(&conn, &project_id)?.path
+        };
+        let output = run_git(
+            Path::new(&project_path),
+            &[
+                "for-each-ref".to_string(),
+                "--format=%(refname:short)".to_string(),
+                "refs/heads".to_string(),
+                "refs/remotes".to_string(),
+                "refs/tags".to_string(),
+            ],
+        )?;
+        let query_lower = query.to_lowercase();
+        let matched: Vec<String> = output
+            .lines()
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+            .filter(|r| r.to_lowercase().contains(&query_lower))
+            .map(str::to_string)
+            .collect();
+        let truncated = matched.len() > limit;
+        let refs: Vec<String> = matched.into_iter().take(limit).collect();
+        Ok(json!({ "refs": refs, "truncated": truncated }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

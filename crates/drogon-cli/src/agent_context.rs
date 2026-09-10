@@ -179,6 +179,18 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["The native runtime records no setups, so the list is empty."],
         ),
         entry(
+            "repo search-refs",
+            &["repo", "search-refs"],
+            "Search branch, remote, and tag refs within a git Project",
+            "drogon-cli repo search-refs --project <ID> --query <TEXT> [--limit <N>]",
+            &["limit", "project", "query"],
+            &[],
+            &["drogon-cli repo search-refs --project proj-1 --query feat --json"],
+            &[
+                "Case-insensitive substring match; pages default to 25 refs (max 1000) and set truncated when more refs matched.",
+            ],
+        ),
+        entry(
             "workspace add",
             &["workspace", "add"],
             "Register an existing directory as a workspace",
