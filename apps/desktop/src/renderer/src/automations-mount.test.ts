@@ -26,6 +26,7 @@ const fakeBridge: AutomationBridge = {
   history: () => Promise.reject(new Error("must be gated")),
   runsAll: () => Promise.reject(new Error("must be gated")),
   run: () => Promise.reject(new Error("must be gated")),
+  preview: () => Promise.reject(new Error("must be gated")),
 };
 
 const loaders = {

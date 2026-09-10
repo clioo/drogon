@@ -25,6 +25,7 @@ const NATIVE_METHOD: Record<AutomationOp, keyof typeof automationResultSchemas> 
   history: "automation.history",
   runsAll: "automation.runs_all",
   run: "automation.run",
+  preview: "automation.preview",
 };
 
 const invalid = (): Result<never> => ({

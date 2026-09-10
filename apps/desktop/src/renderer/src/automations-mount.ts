@@ -66,6 +66,7 @@ export function createGatedAutomationBridge(
     history: gate("history"),
     runsAll: gate("runsAll"),
     run: gate("run"),
+    preview: gate("preview"),
   };
 }
 

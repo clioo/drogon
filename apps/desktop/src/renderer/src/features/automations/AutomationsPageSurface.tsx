@@ -87,6 +87,7 @@ function draftFromAutomation(
     preset: "custom",
     time: "09:00",
     dayOfWeek: "1",
+    timezone: automation.timezone ?? "",
     customSchedule: automation.cron,
     enabled: automation.enabled,
     graceMinutes: "15",

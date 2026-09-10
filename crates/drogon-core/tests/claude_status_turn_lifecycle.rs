@@ -1,6 +1,6 @@
 //! Claude session status must be hook-driven, never keystroke-driven (bug:
 //! typing `wadasdasdda` at an idle Claude prompt flipped the project card to
-//! "working"). The reference (`/Users/carlos/Documents/Drogon-orca`) derives
+//! "working"). The Orca reference derives
 //! the sidebar status purely from harness hooks — `UserPromptSubmit` /
 //! `PreToolUse` / `PostToolUse` mean working, `Stop` means done,
 //! `PermissionRequest` means waiting, `SessionStart` lands an idle boundary —
@@ -286,7 +286,10 @@ fn settings_file_installs_the_full_claude_turn_lifecycle() {
         let command = entries[0]["hooks"][0]["command"].as_str().unwrap();
         assert!(command.contains("internal hook-event"), "{command}");
         assert!(command.contains(&format!("--event {event}")), "{command}");
-        assert!(command.contains(&format!("--session {session_id}")), "{command}");
+        assert!(
+            command.contains(&format!("--session {session_id}")),
+            "{command}"
+        );
         assert!(
             command.contains(&format!("--incarnation {incarnation}")),
             "{command}"

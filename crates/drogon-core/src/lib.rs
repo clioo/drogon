@@ -415,6 +415,7 @@ impl Engine {
             "automation.delete" => self.automation_delete(request),
             "automation.run_now" => self.automation_run_now(request),
             "automation.history" => self.automation_history(&request.params),
+            "automation.preview" => self.automation_preview(&request.params),
             "automation.runs_all" => self.automation_runs_all(&request.params),
             "automation.run" => self.automation_run(request),
             "bot.history" => self.bot_history(&request.params),

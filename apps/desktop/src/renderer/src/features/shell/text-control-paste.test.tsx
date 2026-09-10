@@ -173,10 +173,10 @@ describe("Add Project dialog paste (manual-equivalent)", () => {
     ) as HTMLInputElement;
     pathInput.focus();
     const result = await handleTextControlAppMenuPaste({
-      readClipboardText: async () => "/Users/carlos/repos/drogon",
+      readClipboardText: async () => "/tmp/drogon",
     });
     expect(result.status).toBe("pasted");
-    expect(pathInput.value).toBe("/Users/carlos/repos/drogon");
+    expect(pathInput.value).toBe("/tmp/drogon");
     // The React state follows the DOM edit, so submit enables.
     expect(
       (screen.getByRole("button", { name: "Add Project" }) as HTMLButtonElement)
