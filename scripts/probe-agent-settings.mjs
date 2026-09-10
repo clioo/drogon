@@ -1,24 +1,60 @@
 import assert from "node:assert/strict";
-import { chmod, readFile, realpath, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import {
+  access,
+  chmod,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 
-export async function writeAgentSettingsFixtures(bin) {
+export const AGENT_SETTINGS_FIXTURE_NAMES = [
+  "claude",
+  "codex",
+  "pi",
+  "opencode",
+  "agy",
+  "custom-pi",
+];
+
+/** `skip` leaves a harness unstubbed so a journey can drive its real TUI. */
+export async function writeAgentSettingsFixtures(bin, { skip = [] } = {}) {
   const body =
     '#!/bin/sh\nprintf "agent-settings-fixture\\n"\nprintf "ARG=%s\\n" "$@"\nprintf "ENV=%s\\n" "$AGENT_FIXTURE_VALUE"\nwhile IFS= read -r line; do printf "fixture-input=%s\\n" "$line"; done\n';
-  for (const name of [
-    "claude",
-    "codex",
-    "pi",
-    "opencode",
-    "agy",
-    "custom-pi",
-  ]) {
+  for (const name of AGENT_SETTINGS_FIXTURE_NAMES) {
+    if (skip.includes(name)) continue;
     const target = path.join(bin, name);
     await writeFile(target, body);
     await chmod(target, 0o755);
   }
+}
+
+/**
+ * Links a host binary into the isolated fixture PATH. The packaged Pi
+ * journeys assert the real TUI banner and its agent-state transitions, so
+ * `pi` must stay the genuine binary even while the rest of the harnesses
+ * are stubbed. Returns false when the host has no such binary.
+ */
+export async function linkHostBinaryIntoFixtureBin(bin, name, hostPath) {
+  const dirs = (hostPath ?? "").split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    const candidate = path.join(dir, name);
+    try {
+      await access(candidate, fsConstants.X_OK);
+    } catch {
+      continue;
+    }
+    const target = path.join(bin, name);
+    await rm(target, { force: true });
+    await symlink(candidate, target);
+    return true;
+  }
+  return false;
 }
 export async function probeAgentSettingsNarrow({ page, output }) {
   await page.keyboard.press(

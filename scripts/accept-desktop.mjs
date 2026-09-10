@@ -26,7 +26,7 @@ import {
   verifyForegroundObservation,
 } from "./acceptance-foreground.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
-import { probeAgentSettings, probeAgentSettingsNarrow, writeAgentSettingsFixtures } from "./probe-agent-settings.mjs";
+import { linkHostBinaryIntoFixtureBin, probeAgentSettings, probeAgentSettingsNarrow, writeAgentSettingsFixtures } from "./probe-agent-settings.mjs";
 import { probeRenderedSessionRestart } from "./probe-rendered-session-restart.mjs";
 import { probeRenderedExitedStubs } from "./probe-rendered-exited-stubs.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
@@ -134,7 +134,19 @@ await writeFixtureGh(fixtureBin, [
 // composer too. Keep every packaged launch on the shell fixture; otherwise
 // the isolated fixture PATH hides Pi/Claude and the composer truthfully
 // renders only whichever host binaries happen to leak through.
-if (packaged || withAgents || withSessions) await writeAgentSettingsFixtures(fixtureBin);
+// Exception: the packaged Pi journeys assert the real TUI banner and its
+// working->idle agent-state transitions, which a shell stub can never
+// produce. Link the host's own pi into the fixture PATH so the composer
+// still sees the harness while those journeys drive the genuine binary.
+if (packaged || withAgents || withSessions) {
+  const stubEveryHarness = withAgents || withSessions;
+  await writeAgentSettingsFixtures(fixtureBin, {
+    skip: stubEveryHarness ? [] : ["pi"],
+  });
+  if (!stubEveryHarness) {
+    await linkHostBinaryIntoFixtureBin(fixtureBin, "pi", process.env.PATH);
+  }
+}
 const output = path.join(
   root,
   ".preflight",
