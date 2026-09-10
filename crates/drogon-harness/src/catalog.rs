@@ -697,14 +697,10 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
         unverifiable.push(format!("version probe cleanup: {note}"));
     }
     cleanup_verified &= v_verified;
-    // Version gate is refusal-backed: enumeration starts ONLY on a
-    // completed version probe with resolved custody. A failed or
-    // unverified version never yields a version-qualified Enumerated:
-    // version-pinned adapters cannot be declared supported from an
-    // ignored failed version check. (The root cause of the a3656b7
-    // output-cap failure stays honestly unknown; this restores the
-    // evidence-backed policy without claiming a cure.)
-    let version_refused = !(matches!(v_run, ProbeRun::Completed { .. }) && cleanup_verified);
+    // Version gate is refusal-backed: enumeration starts ONLY when the
+    // shared policy below allows it. Anything else fails closed without
+    // starting enumeration in — or removing — this root.
+    let version_refused = !version_gate_open(&v_run, cleanup_verified, v_unreaped.is_some());
     if let Some(child) = v_unreaped {
         unverifiable.push(format!(
             "version probe leader pid={} unreaped; enumeration not started",
@@ -736,13 +732,17 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
                      root: {stderr_tail}"
                 ),
             ),
-            ProbeRun::SpawnFailed(message) => (
-                EnumerationStatus::NotInstalled,
-                format!(
-                    "version probe spawn failed ({message}); enumeration not started; \
-                     executable treated as not installed"
-                ),
-            ),
+            ProbeRun::SpawnFailed(message) => {
+                let (status, note) = classify_spawn_failure(
+                    "version probe",
+                    executable_presence(executable),
+                    &message,
+                );
+                (
+                    status,
+                    format!("{note}; enumeration not started in this root"),
+                )
+            }
             ProbeRun::HelperFailed { stream, error } => (
                 EnumerationStatus::ProbeFailed,
                 format!(
@@ -879,12 +879,19 @@ fn probe_pi(executable: &Path, budget: Duration) -> CatalogProbe {
             Vec::new(),
             Some(format!("probe exceeded its wall-clock budget; {evidence}")),
         ),
-        ProbeRun::SpawnFailed(message) => (
-            probe_provenance(executable, argv.clone(), version),
-            EnumerationStatus::NotInstalled,
-            Vec::new(),
-            Some(message),
-        ),
+        ProbeRun::SpawnFailed(message) => {
+            let (status, note) = classify_spawn_failure(
+                "enumeration probe",
+                executable_presence(executable),
+                &message,
+            );
+            (
+                probe_provenance(executable, argv.clone(), version),
+                status,
+                Vec::new(),
+                Some(note),
+            )
+        }
         ProbeRun::HelperFailed { stream, error } => (
             probe_provenance(executable, argv.clone(), version),
             EnumerationStatus::ProbeFailed,
@@ -970,14 +977,10 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
         unverifiable.push(format!("version probe cleanup: {note}"));
     }
     cleanup_verified &= v_verified;
-    // Version gate is refusal-backed: enumeration starts ONLY on a
-    // completed version probe with resolved custody. A failed or
-    // unverified version never yields a version-qualified Enumerated:
-    // version-pinned adapters cannot be declared supported from an
-    // ignored failed version check. (The root cause of the a3656b7
-    // output-cap failure stays honestly unknown; this restores the
-    // evidence-backed policy without claiming a cure.)
-    let version_refused = !(matches!(v_run, ProbeRun::Completed { .. }) && cleanup_verified);
+    // Version gate is refusal-backed: enumeration starts ONLY when the
+    // shared policy below allows it. Anything else fails closed without
+    // starting enumeration in — or removing — this root.
+    let version_refused = !version_gate_open(&v_run, cleanup_verified, v_unreaped.is_some());
     if let Some(child) = v_unreaped {
         unverifiable.push(format!(
             "version probe leader pid={} unreaped; enumeration not started",
@@ -1009,13 +1012,17 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
                      root: {stderr_tail}"
                 ),
             ),
-            ProbeRun::SpawnFailed(message) => (
-                EnumerationStatus::NotInstalled,
-                format!(
-                    "version probe spawn failed ({message}); enumeration not started; \
-                     executable treated as not installed"
-                ),
-            ),
+            ProbeRun::SpawnFailed(message) => {
+                let (status, note) = classify_spawn_failure(
+                    "version probe",
+                    executable_presence(executable),
+                    &message,
+                );
+                (
+                    status,
+                    format!("{note}; enumeration not started in this root"),
+                )
+            }
             ProbeRun::HelperFailed { stream, error } => (
                 EnumerationStatus::ProbeFailed,
                 format!(
@@ -1144,12 +1151,19 @@ fn probe_opencode(executable: &Path, budget: Duration) -> CatalogProbe {
             Vec::new(),
             Some(format!("probe exceeded its wall-clock budget; {evidence}")),
         ),
-        ProbeRun::SpawnFailed(message) => (
-            probe_provenance(executable, argv.clone(), version),
-            EnumerationStatus::NotInstalled,
-            Vec::new(),
-            Some(message),
-        ),
+        ProbeRun::SpawnFailed(message) => {
+            let (status, note) = classify_spawn_failure(
+                "enumeration probe",
+                executable_presence(executable),
+                &message,
+            );
+            (
+                probe_provenance(executable, argv.clone(), version),
+                status,
+                Vec::new(),
+                Some(note),
+            )
+        }
         ProbeRun::HelperFailed { stream, error } => (
             probe_provenance(executable, argv.clone(), version),
             EnumerationStatus::ProbeFailed,
@@ -1252,7 +1266,14 @@ fn probe_version_only(harness: HarnessId, executable: &Path, budget: Duration) -
             EnumerationStatus::ProbeFailed,
             Some(format!("version probe exited {exit_code}: {stderr_tail}")),
         ),
-        ProbeRun::SpawnFailed(message) => (EnumerationStatus::NotInstalled, Some(message)),
+        ProbeRun::SpawnFailed(message) => {
+            let (status, note) = classify_spawn_failure(
+                "version probe",
+                executable_presence(executable),
+                &message,
+            );
+            (status, Some(note))
+        }
         ProbeRun::HelperFailed { stream, error } => (
             EnumerationStatus::ProbeFailed,
             Some(format!(
@@ -2044,6 +2065,75 @@ mod run {
 #[cfg(unix)]
 use run::run_probe;
 
+/// Version-gate policy, pure over the outcome kind, the verified flag
+/// and unreaped-leader presence so BOTH Pi/OpenCode callers share one
+/// tested decision: enumeration starts ONLY on a completed version
+/// probe with verified custody and no retained leader. Anything else —
+/// failed, timed-out, unreadable or unreaped — refuses without starting
+/// enumeration in the root.
+#[cfg(unix)]
+fn version_gate_open(run: &ProbeRun, verified: bool, unreaped: bool) -> bool {
+    matches!(run, ProbeRun::Completed { .. }) && verified && !unreaped
+}
+
+/// Filesystem evidence observed at a spawn failure instant: only a
+/// typed absence proves a missing executable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(unix)]
+enum SpawnEvidence {
+    /// Path positively absent (typed NotFound).
+    Absent,
+    /// Path present (executable or not): the failure cause is unknown.
+    Present,
+    /// The stat itself failed otherwise: unknown, never absence.
+    Unknown,
+}
+
+/// Observe executable presence at a spawn failure instant. Uses
+/// symlink_metadata (no follow, no exec) so the check itself spawns
+/// nothing.
+#[cfg(unix)]
+fn executable_presence(executable: &Path) -> SpawnEvidence {
+    match std::fs::symlink_metadata(executable) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => SpawnEvidence::Absent,
+        Err(_) => SpawnEvidence::Unknown,
+        Ok(_) => SpawnEvidence::Present,
+    }
+}
+
+/// Honest spawn-failure status for one probe phase: only positively
+/// absent paths stay NotInstalled (outer discovery already handles the
+/// absent-executable case); anything else is an explicit unknown-cause
+/// ProbeFailed carrying phase plus error. Never a transient claim,
+/// never a missing claim without evidence.
+#[cfg(unix)]
+fn classify_spawn_failure(
+    phase: &'static str,
+    evidence: SpawnEvidence,
+    error: &str,
+) -> (EnumerationStatus, String) {
+    match evidence {
+        SpawnEvidence::Absent => (
+            EnumerationStatus::NotInstalled,
+            format!("{phase} spawn failed ({error}); executable absent at probe time"),
+        ),
+        SpawnEvidence::Present => (
+            EnumerationStatus::ProbeFailed,
+            format!(
+                "{phase} spawn failed ({error}); executable present at probe time, \
+                 cause unknown — not a missing install"
+            ),
+        ),
+        SpawnEvidence::Unknown => (
+            EnumerationStatus::ProbeFailed,
+            format!(
+                "{phase} spawn failed ({error}); executable state inconclusive, \
+                 cause unknown"
+            ),
+        ),
+    }
+}
+
 #[cfg(unix)]
 enum ParseOutcome {
     Entries(Vec<CatalogEntry>),
@@ -2162,6 +2252,69 @@ mod tests {
         assert!(catalog.pending.is_empty());
         assert!(catalog.retained_roots.is_empty());
         assert!(catalog.cleanup_verified);
+    }
+
+    #[test]
+    fn version_gate_opens_only_on_completed_verified_unreaped_absent() {
+        // Literally in-memory truth table over the shared policy both
+        // Pi/OpenCode callers use: outcome kind x verified x unreaped.
+        // No processes, no filesystem.
+        use super::ProbeRun;
+        let completed = ProbeRun::Completed {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        assert!(super::version_gate_open(&completed, true, false));
+        assert!(!super::version_gate_open(&completed, false, false));
+        assert!(!super::version_gate_open(&completed, true, true));
+        assert!(!super::version_gate_open(&completed, false, true));
+        for run in [
+            ProbeRun::TimedOut {
+                evidence: String::new(),
+            },
+            ProbeRun::FailedExit {
+                stderr_tail: String::new(),
+                exit_code: "1".to_string(),
+            },
+            ProbeRun::SpawnFailed(String::new()),
+            ProbeRun::HelperFailed {
+                stream: "stdout",
+                error: String::new(),
+            },
+        ] {
+            for verified in [true, false] {
+                for unreaped in [true, false] {
+                    assert!(
+                        !super::version_gate_open(&run, verified, unreaped),
+                        "non-completed run must refuse"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn spawn_failure_status_needs_absent_path_for_not_installed() {
+        // Literally in-memory: pre-observed evidence enum plus error
+        // strings in, status plus note out. No filesystem reads here;
+        // executable_presence (the single stat call) stays untested by
+        // unit by design.
+        let (status, note) = super::classify_spawn_failure(
+            "enumeration probe",
+            super::SpawnEvidence::Absent,
+            "No such file or directory",
+        );
+        assert_eq!(status, EnumerationStatus::NotInstalled);
+        assert!(note.contains("absent"), "{note}");
+        for evidence in [super::SpawnEvidence::Present, super::SpawnEvidence::Unknown] {
+            let (status, note) =
+                super::classify_spawn_failure("enumeration probe", evidence, "e");
+            assert_eq!(status, EnumerationStatus::ProbeFailed);
+            assert!(note.contains("unknown"), "{note}");
+        }
+        let (_, note) =
+            super::classify_spawn_failure("version probe", super::SpawnEvidence::Present, "e");
+        assert!(note.contains("version probe"), "{note}");
     }
 
     #[test]
