@@ -30,32 +30,39 @@
 //! and is superseded here by the versioned [`conversation_id`] encoding
 //! below, which covers the full triple and round-trips arbitrary id text.
 //!
-//! C08 renewal-marker contract (proposal — NOT implemented here, owned by
-//! `bots::storage` when the root handover lands):
+//! C08 renewal-marker contract, revised (proposal — NOT implemented here,
+//! owned by `bots::storage` when the root handover lands). Marker scope is
+//! the Bot/project/host triple; consumption is per conversation:
 //! ```sql
 //! CREATE TABLE bot_conversation_markers (
-//!     conversation_id TEXT PRIMARY KEY, -- per-conversation, never per-Bot
-//!     boundary_seq INTEGER NOT NULL,    -- monotonically increasing
-//!     boundary_date TEXT NOT NULL,      -- local YYYY-MM-DD for the seq
+//!     bot_id TEXT NOT NULL,
+//!     project_id TEXT NOT NULL,
+//!     host_id TEXT NOT NULL,
+//!     boundary_seq INTEGER NOT NULL, -- highest consumed; monotonic per scope
+//!     zone TEXT NOT NULL,            -- IANA zone the boundary date used
+//!     policy_version INTEGER NOT NULL, -- renewal policy shape version
+//!     boundary_date TEXT NOT NULL,   -- local YYYY-MM-DD of boundary_seq
 //!     created_at REAL NOT NULL,
-//!     applied_to_session TEXT           -- nullable native ref, or NULL
+//!     PRIMARY KEY (bot_id, project_id, host_id)
 //! );
 //! ```
-//! - Scope is per `conversation_id`: two project conversations of one Bot
-//!   renew independently. A single per-Bot `applied_to_session` pointer is
+//! - Scope is `(bot_id, project_id, host_id)` with per-conversation
+//!   consumption: two project conversations of one Bot renew
+//!   independently. A single per-Bot `applied_to_session` pointer is
 //!   rejected — it cannot address two conversations at once.
-//! - Admission is atomic: one transaction reads the marker row, the queue
-//!   head and the active turn; the next-eligible message is admitted only
-//!   when no turn is active, and the marker advance (`boundary_seq + 1`)
-//!   commits in that same transaction.
-//! - A marker write performs zero session/harness I/O and no inference:
-//!   renewal takes effect on the next admitted message's dispatch, never
-//!   mid-active-turn (switching the native link while `active_turn` is
-//!   `Some` is refused).
-//! - No catch-up storm: when several dates elapsed, exactly one boundary
-//!   advances per admission (`boundary_seq + 1`); the writer never
-//!   synthesizes N sessions or replays N days at once, and a bare marker
-//!   never spawns an empty session or inference by itself.
+//! - Coalescing consumption, not increment-by-one catch-up: when several
+//!   boundaries are pending, the admission transaction consumes the
+//!   HIGHEST pending seq and coalesces (supersedes) the older ones in the
+//!   same transaction — never N sequential advances, never N sessions.
+//! - Atomicity: one transaction reads the marker row, the pending
+//!   boundaries and the queue head plus the active turn; the
+//!   next-eligible message is admitted only when no turn is active, and
+//!   the marker write commits in that same transaction.
+//! - Active turns retain their native session and frozen context: renewal
+//!   takes effect on the next admitted message's dispatch, never
+//!   mid-active-turn. A marker write is a pure row write — it creates no
+//!   session and runs no inference, and a bare marker never spawns an
+//!   empty session by itself.
 
 use serde::{Deserialize, Serialize};
 
