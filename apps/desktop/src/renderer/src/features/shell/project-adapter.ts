@@ -90,10 +90,24 @@ export interface ProjectRpcBridge {
     name: string;
     baseRef?: string;
     branch?: string;
+    /** The fork's "Reuse branch": check out the existing branch instead of
+     *  branching off it (requires `branch`). */
+    reuseBranch?: boolean;
     note?: string;
     parentWorktreeId?: string;
     sparse?: string[];
   }) => Promise<Result<Worktree>>;
+  /** The fork's smart-field branch source: local + remote refs, most
+   *  recently committed first. */
+  worktreeBranchSearch?: (input: {
+    projectId: string;
+    query?: string;
+    limit?: number;
+  }) => Promise<
+    Result<{
+      branches: Array<{ refName: string; localBranchName: string }>;
+    }>
+  >;
   worktreeRemove?: (input: {
     id: string;
     force?: boolean;

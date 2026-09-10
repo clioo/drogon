@@ -26,6 +26,7 @@ import type {
   Project,
   Workspace,
 } from "../../../../shared/session-contract";
+import type { TasksBridge } from "../../../../shared/tasks-contract";
 import type { SparsePresetResult } from "../../../../shared/project-contract";
 import type { HarnessAgentDefault } from "../../settings-store";
 import { cn } from "../../lib/utils";
@@ -52,6 +53,14 @@ import { NewWorkspaceComposerAgentSection } from "./composer-agent-section";
 import { NewWorkspaceComposerAdvancedSection } from "./composer-advanced-section";
 import { NewWorkspaceComposerFooter } from "./composer-footer";
 import { resolveComposerQuickAgent } from "./composer-quick-agent";
+import { resolveComposerBranchPick } from "./composer-branch-pick";
+import { getSuggestedCreatureName, shouldApplySuggestedName } from "./worktree-name-suggestion";
+import {
+  slugifyForWorkspaceName,
+  type SmartNameMode,
+  type SmartWorkspaceNameSelection,
+  type GitHubWorkItem,
+} from "./smart-workspace-composer";
 
 /**
  * New-workspace composer card: the fork's Create-worktree composer over
@@ -113,6 +122,8 @@ export function NewWorkspaceComposer({
     name: string;
     baseRef?: string;
     branch?: string;
+    /** The fork's "Reuse branch": check out the existing branch. */
+    reuseBranch?: boolean;
     note?: string;
     parentWorktreeId?: string;
     sparse?: string[];
@@ -146,6 +157,16 @@ export function NewWorkspaceComposer({
   const [name, setName] = useState("");
   const [baseRef, setBaseRef] = useState(project?.defaultBaseRef ?? "");
   const [branchName, setBranchName] = useState("");
+  // The fork's smart-source state (derived-composer-state + source actions):
+  // the selected source pill, the auto-name watermark and the branch-reuse
+  // eligibility behind the "Reuse branch" checkbox.
+  const [smartNameSelection, setSmartNameSelection] =
+    useState<SmartWorkspaceNameSelection | null>(null);
+  const [reuseEligibleBranch, setReuseEligibleBranch] = useState<
+    string | null
+  >(null);
+  const [reuseSelectedBranch, setReuseSelectedBranch] = useState(false);
+  const lastAutoNameRef = useRef("");
   const [parentWorktreeId, setParentWorktreeId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [runSetup, setRunSetup] = useState(
@@ -214,9 +235,103 @@ export function NewWorkspaceComposer({
     null;
   const createDisabled = disabled || sending || project === null;
 
+  // The composer's data bridges for the smart name field (the fork wires
+  // these through its app store; here they are the daemon's tasks and
+  // worktree RPC namespaces).
+  const tasksBridge = useMemo(() => {
+    if (typeof window === "undefined" || !window.drogon) return null;
+    const host = window.drogon as unknown as {
+      tasks?: Pick<TasksBridge, "tasksList" | "tasksShow" | "tasksRemotes">;
+    };
+    return host.tasks ?? null;
+  }, []);
+  const branchSearchBridge = useMemo(() => {
+    if (typeof window === "undefined" || !window.drogon) return null;
+    const bridge = windowProjectBridge(window.drogon);
+    return bridge.worktreeBranchSearch ?? null;
+  }, []);
+  const [repoSlug, setRepoSlug] = useState<{
+    owner: string;
+    repo: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!project || !isGit || !tasksBridge?.tasksRemotes) {
+      setRepoSlug(null);
+      return;
+    }
+    let cancelled = false;
+    tasksBridge
+      .tasksRemotes({ projectId: project.id })
+      .then((result) => {
+        if (cancelled) return;
+        // The daemon serializes `owner/repo`; the smart field's URL
+        // matching needs the split.
+        const origin = result.ok ? result.result.origin : null;
+        const [owner, repo] = origin?.split("/") ?? [];
+        setRepoSlug(owner && repo ? { owner, repo } : null);
+      })
+      .catch(() => {
+        if (!cancelled) setRepoSlug(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isGit, project?.id, tasksBridge]);
+
+  // The fork's handleSmartBranchSelect (work-item-source-actions over
+  // resolveComposerBranchPick): base = the picked ref, the worktree name
+  // auto-derives from the local branch, and a local branch not already
+  // checked out elsewhere is reuse-eligible (reuse defaults ON when the
+  // selection produced the name).
+  const handleSmartBranchSelect = useCallback(
+    (refName: string, localBranchName: string) => {
+      const pick = resolveComposerBranchPick({
+        refName,
+        localBranchName,
+        currentName: name,
+        lastAutoName: lastAutoNameRef.current,
+        worktreeBranches: (selectedGroup?.worktrees ?? []).map(
+          (worktree) => worktree.branch,
+        ),
+      });
+      setBaseRef(pick.baseBranch);
+      setBranchName(pick.branchNameOverride ?? "");
+      if (pick.name !== undefined && pick.lastAutoName !== undefined) {
+        setName(pick.name);
+        lastAutoNameRef.current = pick.lastAutoName;
+      }
+      setReuseEligibleBranch(pick.reuseEligibleBranch);
+      setReuseSelectedBranch(pick.defaultReuse);
+      setSmartNameSelection({ kind: "branch", label: refName });
+    },
+    [name, selectedGroup],
+  );
+
+  // The fork's handleSmartGitHubItemSelect (github-provider-selection):
+  // the pill carries `#N title`; the name auto-derives from the title slug
+  // unless the user typed a custom name first.
+  const handleSmartGitHubItemSelect = useCallback(
+    (item: GitHubWorkItem) => {
+      setSmartNameSelection({
+        kind: item.type === "pr" ? "github-pr" : "github-issue",
+        label: `#${item.number} ${item.title}`,
+        url: item.url,
+      });
+      const nextName = slugifyForWorkspaceName(item.title);
+      if (
+        nextName &&
+        shouldApplySuggestedName(name, lastAutoNameRef.current)
+      ) {
+        setName(nextName);
+        lastAutoNameRef.current = nextName;
+      }
+    },
+    [name],
+  );
+
   // A newly picked project brings its own default base ref and local run
   // target; the typed name survives the switch (the source preserves the
-  // name field too).
+  // name field too) but the smart-source state belongs to the old project.
   const prevProjectId = useRef(project?.id ?? "");
   useEffect(() => {
     const nextId = project?.id ?? "";
@@ -231,6 +346,10 @@ export function NewWorkspaceComposer({
       setSparsePresets([]);
       setSelectedSparsePresetId(null);
       setError(null);
+      setSmartNameSelection(null);
+      setReuseEligibleBranch(null);
+      setReuseSelectedBranch(false);
+      lastAutoNameRef.current = "";
     }
   });
 
@@ -325,9 +444,19 @@ export function NewWorkspaceComposer({
       model: "",
       provider: "",
     };
+    // The fork's blank-name fallback (getWorkspaceSeedName →
+    // getSuggestedCreatureName): an [Optional] name never blocks creation —
+    // a globally-unique creature name seeds the worktree instead.
+    const submitName =
+      name.trim() ||
+      (project?.kind === "git"
+        ? getSuggestedCreatureName(
+            groups.flatMap((group) => group.worktrees),
+          )
+        : "");
     const resolved = resolveComposerSubmit(groups, workspaces, {
       projectId,
-      name,
+      name: submitName,
       baseRef,
       agent,
     });
@@ -362,8 +491,17 @@ export function NewWorkspaceComposer({
       const failure = await onSubmitWorktree({
         projectId: resolved.target.project.id,
         name: resolved.target.name,
-        baseRef: resolved.target.baseRef,
-        ...(branchName.trim() ? { branch: branchName.trim() } : {}),
+        // Reuse (the fork's #5181) checks the existing branch out itself,
+        // so the base ref is dropped with it (the daemon refuses both).
+        ...(reuseSelectedBranch && reuseEligibleBranch
+          ? {
+              branch: reuseEligibleBranch,
+              reuseBranch: true,
+            }
+          : {
+              ...(baseRef.trim() ? { baseRef: baseRef.trim() } : {}),
+              ...(branchName.trim() ? { branch: branchName.trim() } : {}),
+            }),
         ...(note.trim() ? { note: note.trim() } : {}),
         ...(parentWorktreeId ? { parentWorktreeId } : {}),
         ...(selectedSparsePreset
@@ -449,6 +587,18 @@ export function NewWorkspaceComposer({
           onNameValueChange={setName}
           selectedRepoIsGit={isGit}
           onNamePlainEnter={handleNamePlainEnter}
+          projectId={project?.id ?? null}
+          repoSlug={repoSlug}
+          tasks={tasksBridge ?? null}
+          branchSearch={branchSearchBridge}
+          smartNameSelection={smartNameSelection}
+          onClearSmartNameSelection={() => setSmartNameSelection(null)}
+          onSmartGitHubItemSelect={handleSmartGitHubItemSelect}
+          onSmartBranchSelect={handleSmartBranchSelect}
+          branchesEnabled
+          canReuseSelectedBranch={reuseEligibleBranch !== null}
+          reuseSelectedBranch={reuseSelectedBranch}
+          onReuseSelectedBranchChange={setReuseSelectedBranch}
         />
         <NewWorkspaceComposerAgentSection
           quickAgent={quickAgent}
