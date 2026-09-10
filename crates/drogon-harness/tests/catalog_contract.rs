@@ -1261,6 +1261,9 @@ struct ChildReport {
     /// pids the probe still owned after its bounded settle (empty on a
     /// healthy run; any entry makes the run unverifiable).
     probe_pending_pids: Vec<u32>,
+    /// Isolation roots the probe retained (paths under the parent-owned
+    /// fixture dir); the parent preserves them with the directory.
+    probe_retained_roots: Vec<String>,
     /// Whether the probe verified all descendant cleanup.
     probe_cleanup_verified: bool,
 }
@@ -1922,10 +1925,15 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
         let verified = value
             .get("probe_cleanup_verified")
             .and_then(serde_json::Value::as_bool);
+        let roots = value
+            .get("probe_retained_roots")
+            .and_then(serde_json::Value::as_array)
+            .map(|roots| roots.len());
         match (pending, verified) {
             (Some(pids), Some(true)) if pids.is_empty() => {}
             (Some(pids), verified) => unverifiable.push(format!(
-                "probe left {} unreaped descendant(s): {:?} (cleanup verified={verified:?})",
+                "probe left {} unreaped descendant(s): {:?} (cleanup verified={verified:?}, \
+                 retained roots={roots:?})",
                 pids.len(),
                 pids.iter().map(|pid| pid.to_string()).collect::<Vec<_>>()
             )),
@@ -2360,45 +2368,91 @@ fn fixture_handshake_sh(pid: &str) -> String {
 /// pids cross as evidence — the parent fails closed on them — instead
 /// of dropped handles.
 #[cfg(unix)]
+/// Settle a probe result the child owns: TERM-first, grace, KILL and
+/// reap for every pending handle (the child's own children), with all
+/// signal/wait errors preserved as evidence. The deadline derives from
+/// the supervise envelope the parent enforces — never a fresh allowance
+/// minted after probing. Retained roots cross as paths (they live under
+/// the parent-owned fixture dir); surviving pids cross as evidence for
+/// the parent to fail closed on. A dropped handle after this point is a
+/// recorded, evidenced outcome — never silent.
+#[cfg(unix)]
 fn settle_probe(
     probe: drogon_harness::CatalogProbe,
     deadline: Instant,
-) -> (drogon_harness::HostCatalog, Vec<u32>, bool, Vec<String>) {
+) -> (
+    drogon_harness::HostCatalog,
+    Vec<u32>,
+    Vec<String>,
+    bool,
+    Vec<String>,
+) {
     let drogon_harness::CatalogProbe {
         catalog,
         pending,
-        retained_roots: _,
+        retained_roots,
         cleanup_verified,
         unverifiable,
     } = probe;
-    // Retained roots live under the parent-owned fixture dir; the parent
-    // sees them itself, so only pids and flags cross in the report.
+    let mut notes = unverifiable;
+    let retained: Vec<String> = retained_roots
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect();
     let mut pending_pids = Vec::new();
     for mut held in pending {
         let pid = held.child.id();
-        // Our own child: reap if exited, else TERM/KILL boundedly.
-        let reaped = match held.child.try_wait() {
-            Ok(Some(_)) => true,
+        // Our own child: reap if exited, else TERM first, grace, KILL,
+        // reap — every signal and wait error preserved.
+        let outcome = match held.child.try_wait() {
+            Ok(Some(_)) => None,
             Ok(None) => {
-                let _ = held.child.kill();
-                while held.child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
-                    sleep_capped(deadline, Duration::from_millis(2));
+                let term = signal_pid(pid, libc::SIGTERM);
+                let term_at = Instant::now();
+                let grace = std::cmp::min(term_at + Duration::from_millis(500), deadline);
+                while held.child.try_wait().ok().flatten().is_none() && Instant::now() < grace {
+                    sleep_capped(deadline, Duration::from_millis(5));
                 }
-                held.child.try_wait().ok().flatten().is_some()
+                if held.child.try_wait().ok().flatten().is_none() {
+                    let kill = held.child.kill();
+                    while held.child.try_wait().ok().flatten().is_none()
+                        && Instant::now() < deadline
+                    {
+                        sleep_capped(deadline, Duration::from_millis(2));
+                    }
+                    match held.child.try_wait() {
+                        Ok(Some(_)) => None,
+                        Ok(None) => Some(format!(
+                            "probe child pid={pid} unreaped after settle \
+                             (term={term:?}, kill={kill:?})"
+                        )),
+                        Err(err) => Some(format!(
+                            "probe child pid={pid} final wait failed \
+                             (term={term:?}, kill={kill:?}, wait={err})"
+                        )),
+                    }
+                } else {
+                    None
+                }
             }
-            Err(_) => false,
+            Err(err) => Some(format!("probe child pid={pid} wait failed: {err}")),
         };
-        if !reaped {
-            pending_pids.push(pid);
+        match outcome {
+            None => {}
+            Some(note) => {
+                pending_pids.push(pid);
+                notes.push(note);
+            }
         }
     }
-    (catalog, pending_pids, cleanup_verified, unverifiable)
+    (catalog, pending_pids, retained, cleanup_verified, notes)
 }
 
 fn child_probe_and_report(pi_script: &str, budget: Duration) {
     // Settle probe custody through reporting: the wrapper is retained
     // (never `.catalog`-and-discard) and pending handles are reaped
     // boundedly before the report is written.
+    let child_start = Instant::now();
     let dir = fixture_dir_from_env();
     let mut registration_failures: Vec<String> = Vec::new();
     // The handshake is READ here, not assumed: when the parent is not
@@ -2427,6 +2481,7 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
                 registration_failures: vec![reason],
                 // Refused before probing: no probe custody exists.
                 probe_pending_pids: Vec::new(),
+                probe_retained_roots: Vec::new(),
                 probe_cleanup_verified: true,
             },
         );
@@ -2434,13 +2489,14 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
     }
     let pi = add_fixture(&dir, "pi", pi_script);
     let probe = probe_host_catalog_with_budget(HarnessId::Pi, Some(&pi), budget);
-    // Settle within a small absolute bound: the probe normally owns
-    // nothing by now (its leader reaped itself); anything left is
-    // failure evidence for the report, never a dropped handle.
-    let settle_deadline = Instant::now() + Duration::from_secs(2);
-    let (catalog, probe_pending_pids, probe_cleanup_verified, probe_unverifiable) =
+    // Settle bound derives from the same supervise envelope the parent
+    // enforces (child start approximates parent launch): the report and
+    // child exit keep a margin before the parent's kill deadline — never
+    // a fresh allowance minted after probing.
+    let settle_deadline = child_start + SUPERVISE_OVERALL - Duration::from_secs(5);
+    let (catalog, probe_pending_pids, probe_retained_roots, probe_cleanup_verified, probe_notes) =
         settle_probe(probe, settle_deadline);
-    registration_failures.extend(probe_unverifiable);
+    registration_failures.extend(probe_notes);
     let (entries, _) = read_ledger(&dir);
     // Independent evidence: declared comes from the fixtures' OWN
     // declaration channel (one pid per spawned fixture), registered
@@ -2462,6 +2518,7 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
             registered_children: entries.len(),
             registration_failures,
             probe_pending_pids,
+            probe_retained_roots,
             probe_cleanup_verified,
         },
     );
@@ -3534,6 +3591,7 @@ fn supervisor_delayed_registration_is_collected_during_teardown() {
                 registration_failures: ledger.failures,
                 // No probe runs here: custody evidence is trivially clean.
                 probe_pending_pids: Vec::new(),
+                probe_retained_roots: Vec::new(),
                 probe_cleanup_verified: true,
             },
         );
@@ -3588,6 +3646,7 @@ fn supervisor_term_resistant_child_is_forced_after_recheck() {
                 registration_failures: ledger.failures,
                 // No probe runs here: custody evidence is trivially clean.
                 probe_pending_pids: Vec::new(),
+                probe_retained_roots: Vec::new(),
                 probe_cleanup_verified: true,
             },
         );
@@ -3660,6 +3719,7 @@ fn supervisor_missing_registration_is_unverifiable_not_pass() {
                 registration_failures: ledger.failures,
                 // No probe runs here: custody evidence is trivially clean.
                 probe_pending_pids: Vec::new(),
+                probe_retained_roots: Vec::new(),
                 probe_cleanup_verified: true,
             },
         );
@@ -3732,6 +3792,7 @@ fn supervisor_distinguishes_product_cleanup_from_rescue() {
                 registration_failures: ledger.failures,
                 // No probe runs here: custody evidence is trivially clean.
                 probe_pending_pids: Vec::new(),
+                probe_retained_roots: Vec::new(),
                 probe_cleanup_verified: true,
             },
         );
@@ -3815,6 +3876,7 @@ fn supervisor_stale_identity_is_resolved_without_signaling() {
                 registration_failures: ledger.failures,
                 // No probe runs here: custody evidence is trivially clean.
                 probe_pending_pids: Vec::new(),
+                probe_retained_roots: Vec::new(),
                 probe_cleanup_verified: true,
             },
         );

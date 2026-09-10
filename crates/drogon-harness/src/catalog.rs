@@ -299,8 +299,10 @@ pub struct CatalogProbe {
     /// this probe created). The caller deletes them explicitly once it
     /// has verified containment itself — never a broad delete.
     pub retained_roots: Vec<PathBuf>,
-    /// Whether every descendant's exit was proven (group-empty via
-    /// ESRCH) at every step. False retains the roots above.
+    /// Whether the group was provably empty (ESRCH) at every check:
+    /// group-absence evidence, not broader descendant verification (a
+    /// setsid-detached descendant escapes killpg visibility). False
+    /// retains the roots above; it never deletes anything by itself.
     pub cleanup_verified: bool,
     /// Wastebasket-free evidence of what could not be proven (EPERM /
     /// killpg errors, hard stops, surviving members). Empty on a clean
@@ -1473,15 +1475,26 @@ mod run {
     /// Poll group membership until it is provably Empty or the deadline
     /// passes. `child` is reaped while polling: a leader that has exited
     /// but not been waited still counts as a group member, which would
-    /// otherwise exhaust every grace as a false "survivor". Non-Empty
-    /// statuses are ridden out rather than sampled once: macOS returns
-    /// EPERM transiently while a group tears down (observed: errno 1 on
-    /// the poll right after SIGTERM, ESRCH one tick later), so a single
-    /// check would report unverifiable exactly when cleanup was working.
-    fn wait_group_empty(pgid: u32, child: &mut Child, deadline: Instant) -> GroupStatus {
+    /// otherwise exhaust every grace as a false "survivor". Wait errors
+    /// are preserved as evidence (first one), not swallowed — though a
+    /// failed wait alone never proves anything about the group.
+    fn wait_group_empty(
+        pgid: u32,
+        child: &mut Child,
+        deadline: Instant,
+        evidence: &mut Vec<String>,
+    ) -> GroupStatus {
         let mut last = group_status(pgid);
+        let mut wait_error_noted = false;
         while last != GroupStatus::Empty && Instant::now() < deadline {
-            let _ = child.try_wait();
+            match child.try_wait() {
+                Ok(_) => {}
+                Err(err) if !wait_error_noted => {
+                    evidence.push(format!("reap wait failed during group poll: {err}"));
+                    wait_error_noted = true;
+                }
+                Err(_) => {}
+            }
             std::thread::sleep(Duration::from_millis(10));
             last = group_status(pgid);
         }
@@ -1505,7 +1518,7 @@ mod run {
     ) -> bool {
         signal_group(pgid, libc::SIGTERM, evidence);
         let term_deadline = std::cmp::min(Instant::now() + SIGNAL_GRACE, total);
-        match wait_group_empty(pgid, child, term_deadline) {
+        match wait_group_empty(pgid, child, term_deadline, evidence) {
             GroupStatus::Empty => {
                 evidence.push("group-empty after SIGTERM".to_string());
                 true
@@ -1529,7 +1542,7 @@ mod run {
                 }
                 signal_group(pgid, libc::SIGKILL, evidence);
                 let kill_deadline = std::cmp::min(Instant::now() + SIGNAL_GRACE, total);
-                let final_status = wait_group_empty(pgid, child, kill_deadline);
+                let final_status = wait_group_empty(pgid, child, kill_deadline, evidence);
                 evidence.push(format!(
                     "group after SIGKILL: {}",
                     describe_group(final_status)
@@ -1680,13 +1693,26 @@ mod run {
             escalate_group(pgid, &mut child, &mut evidence, total);
             let _ = child.kill();
             let reap_end = std::cmp::min(Instant::now() + REAP_GRACE, total);
-            while child.try_wait().ok().flatten().is_none() && Instant::now() < reap_end {
-                std::thread::sleep(Duration::from_millis(2));
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) if Instant::now() < reap_end => {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    Ok(None) => break,
+                    Err(err) => {
+                        evidence.push(format!("setup-failure reap wait failed: {err}"));
+                        break;
+                    }
+                }
             }
-            let unreaped = if child.try_wait().ok().flatten().is_some() {
-                None
-            } else {
-                Some(child)
+            let unreaped = match child.try_wait() {
+                Ok(Some(_)) => None,
+                Ok(None) => Some(child),
+                Err(err) => {
+                    evidence.push(format!("setup-failure final wait failed: {err}"));
+                    Some(child)
+                }
             };
             return ProbeOutcome {
                 run: ProbeRun::TimedOut {
@@ -1725,6 +1751,9 @@ mod run {
         let mut exit_deadline: Option<Instant> = None;
         let mut escalated = false;
         let mut budget_expired = false;
+        // A stream read error routes through the owned TERM-first
+        // escalation below — never a direct kill here.
+        let mut force_escalate = false;
 
         loop {
             // Leader exit is cheap to check every iteration; it does NOT
@@ -1748,9 +1777,14 @@ mod run {
                 escalate_group(pgid, &mut child, &mut evidence, total);
                 break;
             }
-            if !escalated && (now >= deadline || exit_deadline.is_some_and(|d| now >= d)) {
+            if !escalated
+                && (now >= deadline || exit_deadline.is_some_and(|d| now >= d) || force_escalate)
+            {
                 escalated = true;
-                if now >= deadline && leader_exited.is_none() {
+                if force_escalate {
+                    evidence
+                        .push("helper stream failed; escalating the group TERM-first".to_string());
+                } else if now >= deadline && leader_exited.is_none() {
                     budget_expired = true;
                     evidence.push("leader still running after its work window".to_string());
                 } else {
@@ -1816,7 +1850,6 @@ mod run {
                 continue;
             }
             if ready > 0 {
-                let mut stop = false;
                 for poll_fd in &poll_fds {
                     let Some(pipe) = pipes.iter_mut().find(|p| p.raw == poll_fd.fd) else {
                         continue;
@@ -1835,14 +1868,10 @@ mod run {
                         Drain::Progress => {}
                         Drain::Failed(err) => {
                             helper_error = Some((stream, format!("{err}")));
-                            let _ = child.kill();
-                            stop = true;
-                            break;
+                            pipe.open = false;
+                            force_escalate = true;
                         }
                     }
-                }
-                if stop {
-                    break;
                 }
             }
         }
@@ -1864,7 +1893,17 @@ mod run {
         }
         if leader_exited.is_none() {
             evidence.push("leader closed its pipes but did not exit; escalating".to_string());
-            if !escalate_group(pgid, &mut child, &mut evidence, total) {
+            // No escalation past the total: a second escalation after
+            // expiry would send KILL with no grace and no timeline to
+            // verify it. Record instead of overrunning.
+            if Instant::now() >= total {
+                evidence.push(
+                    "total expired with pipes closed but leader unreaped; no further \
+                     escalation past the total"
+                        .to_string(),
+                );
+                cleanup_verified = false;
+            } else if !escalate_group(pgid, &mut child, &mut evidence, total) {
                 cleanup_verified = false;
             }
             let kill_deadline = std::cmp::min(Instant::now() + SIGNAL_GRACE, total);
@@ -1889,6 +1928,7 @@ mod run {
                 pgid,
                 &mut child,
                 std::cmp::min(Instant::now() + POST_EOF_GROUP_GRACE, total),
+                &mut evidence,
             ) {
                 GroupStatus::Empty => {}
                 GroupStatus::Present => {
@@ -1921,7 +1961,6 @@ mod run {
                 Stream::Stderr => stderr_bytes = pipe.bytes,
             }
         }
-        let post_exit_cleanup = escalated.then(|| evidence.join("; "));
         // Custody on return: a leader that never became reapable crosses
         // the boundary in `unreaped` instead of being dropped — even
         // after every bounded escalation and reap attempt above.
@@ -1934,6 +1973,9 @@ mod run {
                 Some(child)
             }
         };
+        // Final cleanup evidence is assembled AFTER the final wait, so
+        // late wait errors reach the record instead of landing past it.
+        let post_exit_cleanup = escalated.then(|| evidence.join("; "));
         let run = match helper_error {
             // A stream read error fails the probe outright: output
             // assembled around it is not evidence.
