@@ -42,6 +42,19 @@ export function draftForRecipeStep(step: MentuRecipeStep): RecipeStepDraft {
   };
 }
 
+/** Field-by-field equality of two step drafts, for the autosave "is there
+ *  anything to write?" check and the JSON-synced chip. */
+export function stepDraftsEqual(a: RecipeStepDraft, b: RecipeStepDraft): boolean {
+  return (
+    a.backend === b.backend &&
+    a.model === b.model &&
+    a.dependencies === b.dependencies &&
+    a.timeout === b.timeout &&
+    a.retries === b.retries &&
+    a.verifyCommands === b.verifyCommands
+  );
+}
+
 function optionalInteger(value: string, label: string): number | undefined | string {
   const trimmed = value.trim();
   if (!trimmed) {

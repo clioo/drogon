@@ -12,27 +12,24 @@
 // agent steps. Shell steps keep the reference's read-only branch in the
 // inspector and never mount this editor.
 //
-// Live catalog edition: the quick-pick combobox, its status line, the
+// Live catalog edition: the searchable picker, its status line, the
 // provenance row and the per-model notes are driven by the daemon's real
 // `harness.models` answer (projected by `mentu-model-registry.ts`) —
-// host-enumerated entries (the only verified ones), then recipe-observed
-// ids ("from this recipe", unverified). The free-text Input stays the
-// single source of truth for the model id itself; a typed id that the
-// host did not enumerate is never silently confirmed.
+// host-enumerated entries (the only verified ones), the curated known
+// catalog (marked unverified), then recipe-observed ids ("from this
+// recipe", unverified). The picker is always available for an agent step
+// even when the list is empty, so its empty state can explain WHY and the
+// user can still type an exact id. The free-text Input stays the single
+// source of truth for the model id itself; a typed id that the host did
+// not enumerate is never silently confirmed.
 
 import { Cpu, RefreshCw } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../components/ui/select";
 import type { ApprovedSelectionVerdict } from "./mentu-approved-selection";
 import type { ModelCatalogReadout, ModelOption } from "./mentu-model-registry";
+import { MentuModelPicker } from "./MentuModelPicker";
 
 const VERDICT_TONE: Record<ApprovedSelectionVerdict["kind"], string> = {
   unavailable: "text-destructive",
@@ -40,12 +37,6 @@ const VERDICT_TONE: Record<ApprovedSelectionVerdict["kind"], string> = {
   unsupported: "text-destructive",
   unverified: "text-muted-foreground",
 };
-
-const MODEL_DEFAULT_VALUE = "__harness_default__";
-/** No `SelectItem` ever carries this value, so the trigger always falls
- *  back to its placeholder text: this select is a one-shot quick-pick
- *  menu, not a persistent value display (the Input beside it is that). */
-const QUICK_PICK_TRIGGER_VALUE = "__quick_pick_trigger__";
 
 export function MentuAgentStepEditor({
   backend,
@@ -81,7 +72,6 @@ export function MentuAgentStepEditor({
   catalogReadout?: ModelCatalogReadout | null;
   onRefreshCatalog?: () => void;
 }): React.JSX.Element {
-  const hasQuickPicks = modelOptions.length > 0;
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
@@ -102,45 +92,13 @@ export function MentuAgentStepEditor({
             className="h-8 text-xs"
             aria-describedby="recipe-step-selection-verdict"
           />
-          {hasQuickPicks ? (
-            <Select
-              value={QUICK_PICK_TRIGGER_VALUE}
-              onValueChange={(value) =>
-                onChangeModel(value === MODEL_DEFAULT_VALUE ? "" : value)
-              }
-              disabled={disabled}
-            >
-              <SelectTrigger
-                size="sm"
-                className="h-8 w-auto shrink-0 text-[11px]"
-                aria-label="Model quick pick"
-              >
-                <SelectValue placeholder="Models" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={MODEL_DEFAULT_VALUE}>
-                  default <span className="ml-2 text-muted-foreground">harness default</span>
-                </SelectItem>
-                {modelOptions.map((option) => (
-                  <SelectItem key={`${option.group}:${option.id}`} value={option.id}>
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate">{option.id}</span>
-                      {option.id === model ? " ✓" : ""}
-                      {option.recommended ? (
-                        <span className="shrink-0 text-[10px] font-medium uppercase text-emerald-600 dark:text-emerald-400">
-                          recommended
-                        </span>
-                      ) : null}
-                      <span className="truncate text-[10px] text-muted-foreground">
-                        {option.notes.join(" · ")}
-                        {option.group === "observed" ? " · unverified" : ""}
-                      </span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : null}
+          <MentuModelPicker
+            options={modelOptions}
+            selected={model}
+            disabled={disabled}
+            emptyReason={catalogReadout?.statusLine ?? null}
+            onSelect={onChangeModel}
+          />
           {onRefreshCatalog ? (
             <Button
               type="button"

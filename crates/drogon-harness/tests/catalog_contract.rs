@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use drogon_harness::{
     CatalogEntry, EnumerationStatus, HarnessId, HostCatalog, PROBE_OUTPUT_CAP,
-    PROBE_RESERVED_CLEANUP, ProbeProvenance, freshness_token, probe_host_catalog,
-    probe_host_catalog_with_budget,
+    PROBE_RESERVED_CLEANUP, ProbeConfigSources, ProbeProvenance, freshness_token,
+    probe_host_catalog, probe_host_catalog_with_budget, probe_host_catalog_with_config,
 };
 
 // ---------------------------------------------------------------------
@@ -2264,13 +2264,15 @@ fn pi_probe_enumerates_entries_with_provenance() {
     assert_eq!(provenance.argv, ["--list-models"]);
     assert!(
         provenance.config_scope.contains("credential-free"),
-        "scope must record the isolated credential-free probe: {provenance:?}"
+        "no config source means the isolated credential-free probe: {provenance:?}"
     );
     assert!(
         catalog
             .note
             .as_deref()
-            .is_some_and(|note| note.contains("auth-gated"))
+            .is_some_and(|note| note.contains("provenance") || note.contains("not proof")),
+        "the note points at the recorded scope: {:?}",
+        catalog.note
     );
 }
 
@@ -4790,4 +4792,207 @@ mod ps_classification {
             Identity::Unverifiable
         );
     }
+}
+
+// ---------------------------------------------------------------------
+// Config-scope probes (option (a)): the daemon may hand the probe the
+// user's own config roots, which are linked READ-ONLY so the harness
+// binary resolves the providers the user configured. These tests prove
+// the link actually reaches the child, that nothing is written back, and
+// that the honest credential-free scope is preserved when no config
+// source is supplied.
+// ---------------------------------------------------------------------
+
+/// Pi fixture that enumerates ONLY when the probe's private agent dir
+/// holds a linked `auth.json`, so a non-empty table proves the user's
+/// config reached the child.
+const PI_REQUIRES_AUTH: &str = "\
+#!/bin/sh
+case \"$1\" in
+  --version) echo '0.85.1'; exit 0 ;;
+  --list-models)
+    if [ -e \"$PI_CODING_AGENT_DIR/auth.json\" ]; then
+      printf 'provider      model                context  max-out  thinking  images\\n';
+      printf 'kimi-coding   kimi-for-coding      262.1K   32.8K    yes       yes\\n';
+    else
+      echo 'No models available. Use /login to log into a provider via OAuth or API key.';
+    fi
+    exit 0 ;;
+  *) exit 2 ;;
+esac
+";
+
+/// OpenCode fixture that enumerates a user provider ONLY when both the
+/// linked `opencode.json` and the linked `auth.json` are present.
+const OPENCODE_REQUIRES_CONFIG: &str = "\
+#!/bin/sh
+case \"$1\" in
+  --version) echo '1.18.30'; exit 0 ;;
+  models)
+    if [ -e \"$OPENCODE_CONFIG_DIR/opencode.json\" ] && [ -e \"$XDG_DATA_HOME/auth.json\" ]; then
+      echo 'anthropic/claude-sonnet-4-5';
+    else
+      echo 'opencode/big-pickle';
+    fi
+    exit 0 ;;
+  *) exit 2 ;;
+esac
+";
+
+fn sorted_dir_names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .expect("read dir")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn pi_probe_with_config_links_user_files_read_only() {
+    let bin = FixtureBin::new();
+    let pi = bin.add("pi", PI_REQUIRES_AUTH);
+    let agent = tempfile::tempdir().unwrap();
+    for (name, body) in [
+        ("models.json", "{\"providers\":{}}"),
+        ("models-store.json", "{}"),
+        ("auth.json", "{\"kimi-coding\":{\"apiKey\":\"fixture\"}}"),
+        // These must NEVER be linked into a probe (skills/extension config
+        // can execute code); only the provider definitions are.
+        ("settings.json", "{\"packages\":[\"npm:fixture\"]}"),
+    ] {
+        std::fs::write(agent.path().join(name), body).unwrap();
+    }
+    std::fs::create_dir(agent.path().join("skills")).unwrap();
+    std::fs::create_dir(agent.path().join("extensions")).unwrap();
+    let before = sorted_dir_names(agent.path());
+    let config = ProbeConfigSources {
+        pi_agent_dir: Some(agent.path().to_path_buf()),
+        ..ProbeConfigSources::default()
+    };
+    let probe =
+        probe_host_catalog_with_config(HarnessId::Pi, Some(&pi), &config, Duration::from_secs(20));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(
+        probe.cleanup_verified,
+        "unverifiable: {:?}",
+        probe.unverifiable
+    );
+    let catalog = &probe.catalog;
+    assert_eq!(catalog.status, EnumerationStatus::Enumerated);
+    assert_eq!(catalog.entries.len(), 1, "{catalog:?}");
+    assert_eq!(catalog.entries[0].id, "kimi-for-coding");
+    let scope = catalog
+        .provenance
+        .as_ref()
+        .expect("provenance")
+        .config_scope
+        .clone();
+    assert!(scope.contains("user config linked read-only"), "{scope}");
+    assert!(
+        scope.contains("auth.json"),
+        "scope names linked files: {scope}"
+    );
+    assert!(
+        scope.contains("models.json"),
+        "scope names linked files: {scope}"
+    );
+    assert!(
+        !scope.contains("settings.json") && !scope.contains("skills"),
+        "skills/extension configs are never linked: {scope}"
+    );
+    // Nothing was written back to the user's config dir.
+    assert_eq!(sorted_dir_names(agent.path()), before);
+    assert_eq!(
+        std::fs::read_to_string(agent.path().join("auth.json")).unwrap(),
+        "{\"kimi-coding\":{\"apiKey\":\"fixture\"}}"
+    );
+}
+
+#[test]
+fn pi_probe_without_config_source_is_credential_free_and_honest() {
+    let bin = FixtureBin::new();
+    let pi = bin.add("pi", PI_REQUIRES_AUTH);
+    let probe = probe_host_catalog(HarnessId::Pi, Some(&pi));
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(probe.cleanup_verified);
+    let catalog = &probe.catalog;
+    // The fixture refuses to enumerate without auth.json: the default
+    // probe never links one, so the answer is the honest empty one.
+    assert_eq!(catalog.status, EnumerationStatus::Enumerated);
+    assert!(catalog.entries.is_empty());
+    let scope = &catalog
+        .provenance
+        .as_ref()
+        .expect("provenance")
+        .config_scope;
+    assert!(scope.contains("credential-free"), "{scope}");
+    assert!(
+        catalog
+            .note
+            .as_deref()
+            .is_some_and(|note| note.contains("unverified")),
+        "an empty auth-less answer is manual-unverified: {:?}",
+        catalog.note
+    );
+}
+
+#[test]
+fn opencode_probe_with_config_links_config_and_data_dirs() {
+    let bin = FixtureBin::new();
+    let opencode = bin.add("opencode", OPENCODE_REQUIRES_CONFIG);
+    let config_dir = tempfile::tempdir().unwrap();
+    std::fs::write(config_dir.path().join("opencode.json"), "{\"provider\":{}}").unwrap();
+    let data_dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(data_dir.path().join("opencode")).unwrap();
+    std::fs::write(
+        data_dir.path().join("opencode").join("auth.json"),
+        "{\"anthropic\":{\"key\":\"fixture\"}}",
+    )
+    .unwrap();
+    let before_config = sorted_dir_names(config_dir.path());
+    let before_data = sorted_dir_names(&data_dir.path().join("opencode"));
+    let config = ProbeConfigSources {
+        opencode_config_dir: Some(config_dir.path().to_path_buf()),
+        opencode_data_dir: Some(data_dir.path().join("opencode")),
+        ..ProbeConfigSources::default()
+    };
+    let probe = probe_host_catalog_with_config(
+        HarnessId::Opencode,
+        Some(&opencode),
+        &config,
+        Duration::from_secs(20),
+    );
+    assert!(
+        probe.pending.is_empty(),
+        "pending custody: {:?}",
+        probe.pending
+    );
+    assert!(probe.cleanup_verified);
+    let catalog = &probe.catalog;
+    assert_eq!(catalog.status, EnumerationStatus::Enumerated);
+    assert_eq!(catalog.entries.len(), 1, "{catalog:?}");
+    assert_eq!(catalog.entries[0].id, "claude-sonnet-4-5");
+    let scope = &catalog
+        .provenance
+        .as_ref()
+        .expect("provenance")
+        .config_scope;
+    assert!(scope.contains("user config linked read-only"), "{scope}");
+    assert!(scope.contains("opencode.json"), "{scope}");
+    assert!(scope.contains("auth.json"), "{scope}");
+    // Neither user dir was written to.
+    assert_eq!(sorted_dir_names(config_dir.path()), before_config);
+    assert_eq!(
+        sorted_dir_names(&data_dir.path().join("opencode")),
+        before_data
+    );
 }

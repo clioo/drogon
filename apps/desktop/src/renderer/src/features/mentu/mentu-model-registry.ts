@@ -26,6 +26,7 @@ import type {
   HarnessModelsStatus,
 } from "../../../../shared/session-contract";
 import type { MentuRecipeDefinition } from "./recipe-validation/mentu-recipe-document";
+import { KNOWN_MODEL_CATALOG_VERSION, knownModelsFor } from "./mentu-known-models";
 
 /** How long after its probe a catalog is labelled stale in the UI. The
  *  count stays real either way — staleness is rendered, never hidden. */
@@ -43,8 +44,9 @@ const KNOWN_RECOMMENDED: Record<string, string[]> = {
 
 export type ModelOption = {
   id: string;
-  /** Where the option came from: the host catalog or the open recipe. */
-  group: "catalog" | "observed";
+  /** Where the option came from: the host catalog, the curated known
+   *  catalog, or the open recipe. */
+  group: "catalog" | "known" | "observed";
   /** True only when the HOST enumerated this id. */
   verified: boolean;
   /** Drogon-recommended AND host-enumerated. */
@@ -52,6 +54,22 @@ export type ModelOption = {
   /** Real per-model notes (reported capability facts, recipe origin). */
   notes: string[];
 };
+
+/** Case-insensitive substring filter over a model option: matches the id,
+ *  the provider/family (carried in `notes`) and any other reported note.
+ *  This is the search behind the picker's small search box. */
+export function filterModelOptions(
+  options: ModelOption[],
+  query: string,
+): ModelOption[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return options;
+  return options.filter(
+    (option) =>
+      option.id.toLowerCase().includes(needle) ||
+      option.notes.some((note) => note.toLowerCase().includes(needle)),
+  );
+}
 
 /** Model ids the recipe's OTHER steps already carry for this harness,
  *  first-seen order, excluding the step currently being edited and any
@@ -79,8 +97,9 @@ export function recipeObservedModels(
   return models;
 }
 
-/** Combobox options: host-enumerated entries first (verified), then
- *  recipe-observed ids not in the catalog (unverified, "from this
+/** Combobox options: host-enumerated entries first (verified), then the
+ *  curated known catalog for ids the host did not enumerate (unverified,
+ *  explicitly labelled), then recipe-observed ids (unverified, "from this
  *  recipe"). Notes are the harness's own reported facts, uninterpreted;
  *  the recommended marker requires both lists to agree. */
 export function modelOptionsFromCatalog(input: {
@@ -114,6 +133,19 @@ export function modelOptionsFromCatalog(input: {
         notes,
       });
     }
+  }
+  // Curated known catalog (option (b)): never host-verified, always marked
+  // with its provenance, deduped against ids the host already enumerated.
+  for (const seed of knownModelsFor(input.harness)) {
+    if (enumerated.has(seed.id)) continue;
+    enumerated.add(seed.id);
+    options.push({
+      id: seed.id,
+      group: "known",
+      verified: false,
+      recommended: false,
+      notes: [seed.note],
+    });
   }
   for (const id of recipeObservedModels(
     input.recipe,
@@ -214,8 +246,17 @@ export function modelCatalogReadout(input: {
   now: number;
   /** The draft's typed model id, for the never-silently-confirmed note. */
   selectedModel?: string;
+  /** How many curated known-catalog ids are offered for this harness (not
+   *  host-enumerated). Reported separately so the status never mixes the
+   *  two provenances. */
+  knownCount?: number;
 }): ModelCatalogReadout {
   const harness = input.harness.trim() || "this harness";
+  const knownCount = input.knownCount ?? 0;
+  const knownSuffix =
+    knownCount > 0
+      ? ` The curated known catalog (v${KNOWN_MODEL_CATALOG_VERSION}) offers ${knownCount} id${knownCount === 1 ? "" : "s"} below, unverified on this host.`
+      : "";
   const emptySet = new Set<string>();
   if (!input.registered) {
     return {
@@ -274,10 +315,10 @@ export function modelCatalogReadout(input: {
     const reason = STATUS_TEXT[catalog.status];
     const statusLine =
       catalog.status === "not_installed"
-        ? `${harness} is not installed on this host; no model catalog exists.`
+        ? `${harness} is not installed on this host; no host model catalog exists.${knownSuffix}`
         : catalog.status === "unsupported_surface"
-          ? `${harness} exposes no model enumeration surface on this host (version ${versionText(catalog)}); enter an exact id manually — it rides unverified.`
-          : `${staleText}Host model catalog for ${harness}: ${reason}; no models are offered. Refresh to retry.`;
+          ? `${harness} exposes no model enumeration surface on this host (version ${versionText(catalog)}); enter an exact id manually — it rides unverified.${knownSuffix}`
+          : `${staleText}Host model catalog for ${harness}: ${reason}; no host-enumerated models are offered. Refresh to retry.${knownSuffix}`;
     return {
       statusLine,
       provenanceLine: catalog.provenance ? provenanceLine : null,
@@ -289,15 +330,18 @@ export function modelCatalogReadout(input: {
   }
   if (catalog.entries.length === 0) {
     return {
-      statusLine: `No models discovered for ${harness} under ${scope ?? "the probe scope"}${ageText}; enter an exact id manually — it rides unverified.`,
+      statusLine: `No models discovered for ${harness} under ${scope ?? "the probe scope"}${ageText}; enter an exact id manually — it rides unverified.${knownSuffix}`,
       provenanceLine: provenanceLine,
       noteLine,
-      empty: true,
+      empty: knownCount === 0,
       stale,
       enumeratedIds,
     };
   }
   let statusLine = `${staleText}${catalog.entries.length} model${catalog.entries.length === 1 ? "" : "s"} enumerated by ${base}${scope ? ` · ${scope}` : ""}${ageText}`;
+  if (knownCount > 0) {
+    statusLine += ` · plus ${knownCount} known-catalog id${knownCount === 1 ? "" : "s"} (unverified on this host)`;
+  }
   const typed = input.selectedModel?.trim();
   if (typed && !enumeratedIds.has(typed)) {
     statusLine += ` — typed id '${typed}' is not in this enumeration; carried unverified.`;

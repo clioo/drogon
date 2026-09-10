@@ -45,6 +45,11 @@ const enumeratedReadout: ModelCatalogReadout = {
   enumeratedIds: new Set(["kimi-for-coding"]),
 };
 
+const flushDeferredFocus = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
 function renderEditor(overrides: Partial<Parameters<typeof MentuAgentStepEditor>[0]> = {}) {
   const onChangeModel = vi.fn();
   const onChangeProvider = vi.fn();
@@ -115,20 +120,22 @@ describe("MentuAgentStepEditor", () => {
     expect((screen.getByLabelText("Provider binding") as HTMLInputElement).disabled).toBe(true);
   });
 
-  it("renders no quick-pick affordance when neither source has anything to offer", () => {
-    renderEditor({ modelOptions: [] });
-    expect(screen.queryByLabelText("Model quick pick")).toBeNull();
+  it("always offers the picker for an agent step, explaining an empty list", async () => {
+    renderEditor({ modelOptions: [], catalogReadout: enumeratedReadout });
+    fireEvent.click(screen.getByRole("button", { name: "Browse models" }));
+    await flushDeferredFocus();
+    expect(screen.getByTestId("model-picker-empty").textContent).toContain(
+      enumeratedReadout.statusLine,
+    );
   });
 
   it("picking a host-enumerated model writes the exact id, never a substitution", async () => {
     const { onChangeModel } = renderEditor({
       modelOptions: [enumeratedOption],
     });
-    fireEvent.keyDown(screen.getByLabelText("Model quick pick"), { key: "Enter" });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    fireEvent.click(screen.getAllByText("kimi-for-coding")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Browse models" }));
+    await flushDeferredFocus();
+    fireEvent.click(screen.getByText("kimi-for-coding"));
     expect(onChangeModel).toHaveBeenCalledWith("kimi-for-coding");
   });
 
@@ -137,25 +144,20 @@ describe("MentuAgentStepEditor", () => {
       modelOptions: [enumeratedOption, observedOption],
       catalogReadout: enumeratedReadout,
     });
-    fireEvent.keyDown(screen.getByLabelText("Model quick pick"), { key: "Enter" });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Browse models" }));
+    await flushDeferredFocus();
     expect(screen.getByText("recommended")).toBeTruthy();
     // The recipe-observed id carries its origin note, never a verified claim.
-    const observed = screen.getAllByText(/from this recipe · unverified/);
-    expect(observed.length).toBeGreaterThan(0);
+    expect(screen.getByText(/from this recipe · unverified/)).toBeTruthy();
   });
 
   it("picking the default entry clears the model instead of writing a sentinel", async () => {
     const { onChangeModel } = renderEditor({
       modelOptions: [enumeratedOption],
     });
-    fireEvent.keyDown(screen.getByLabelText("Model quick pick"), { key: "Enter" });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    fireEvent.click(screen.getByText("harness default"));
+    fireEvent.click(screen.getByRole("button", { name: "Browse models" }));
+    await flushDeferredFocus();
+    fireEvent.click(screen.getByText("Harness default"));
     expect(onChangeModel).toHaveBeenCalledWith("");
   });
 

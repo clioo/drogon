@@ -86,9 +86,13 @@ export function RecipePaneContent({
                 // needed an `available` capability), `mentu.recipe_save`
                 // is daemon-local validation plus an atomic file write.
                 // Execution (Review/Approve&run below) stays runtime-gated.
-                disabled={controller.busy || controller.saving}
+                // `saving` is deliberately NOT part of `disabled`: autosave
+                // must keep the inputs editable mid-write.
+                disabled={controller.busy}
                 saving={controller.saving}
-                onSave={(draft) => controller.saveSelectedStep(draft)}
+                onCommit={(draft, stepLabel) =>
+                  controller.saveSelectedStep(draft, stepLabel)
+                }
                 harnessCatalog={controller.harnessCatalog}
                 harnessCatalogLoading={controller.harnessCatalogLoading}
                 harnessCatalogError={controller.harnessCatalogError}
