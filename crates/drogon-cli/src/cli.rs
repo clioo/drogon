@@ -663,7 +663,7 @@ pub enum TerminalAction {
     /// Read bounded output from a session
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli terminal read --session <ID> --incarnation <TOKEN> [--cursor <N>] [--limit-bytes <BYTES>]\nValid flags: --cursor, --data-dir, --help, --incarnation, --json, --limit-bytes, --request-id, --retry-request, --session"
+        override_usage = "drogon-cli terminal read --session <ID> --incarnation <TOKEN> [--cursor <N>|--screen] [--limit-bytes <BYTES>]\nValid flags: --cursor, --data-dir, --help, --incarnation, --json, --limit-bytes, --request-id, --retry-request, --screen, --session"
     )]
     Read {
         #[arg(long, value_name = "ID")]
@@ -671,11 +671,16 @@ pub enum TerminalAction {
         #[arg(long, value_name = "TOKEN")]
         incarnation: String,
         /// Absolute byte offset to read from (protocol default 0)
-        #[arg(long, value_name = "N")]
+        #[arg(long, value_name = "N", conflicts_with = "screen")]
         cursor: Option<u64>,
         /// Maximum bytes to return (protocol default and maximum 65536)
         #[arg(long, value_name = "BYTES")]
         limit_bytes: Option<u64>,
+        /// Render what the terminal actually displays from the full
+        /// retained stream instead of returning accumulated bytes
+        /// (source `--screen`; mutually exclusive with --cursor)
+        #[arg(long)]
+        screen: bool,
     },
     /// Send text to a session's PTY, optionally submitting or interrupting
     #[command(

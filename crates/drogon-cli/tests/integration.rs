@@ -2590,3 +2590,77 @@ fn worktree_create_prompt_requires_agent() {
         stderr(&output)
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_read_screen_renders_the_frame_not_the_fragments() {
+    let dir = temp_data_dir("trscreen");
+    // A progress bar repaint plus colors: the raw stream stacks fragments;
+    // the rendered screen shows the final frame only.
+    let raw = b"[####    ] 40%\r[########] done\x1b[0m".to_vec();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&raw);
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(move |request| {
+            let payload = json!({
+                "session": {
+                    "id": "sess-1",
+                    "workspaceId": "ws-1",
+                    "hostId": "host-1",
+                    "incarnation": "inc-1",
+                    "command": "sh",
+                    "args": [],
+                    "cols": 80,
+                    "rows": 24,
+                    "verdict": "live",
+                    "exitCode": null,
+                    "createdAt": "2026-09-05T12:00:00Z",
+                    "agentState": "unknown",
+                    "agentStateAt": null
+                },
+                "dataBase64": encoded,
+                "startCursor": 0,
+                "nextCursor": raw.len() as u64,
+                "truncated": false
+            });
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                payload,
+            ))
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "read",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--screen",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("[########] done"), "stdout: {text}");
+    assert!(!text.contains("40%"), "fragments must not render: {text}");
+    // The 40% fragment must not stack either.
+    let json_out = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "read",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--screen",
+            "--json",
+        ],
+    );
+    assert_eq!(json_out.status.code(), Some(0));
+    let json_body = stdout(&json_out);
+    assert!(json_body.contains("\"source\": \"screen\""));
+    assert!(json_body.contains("[########] done"));
+    drop(service);
+}

@@ -429,13 +429,16 @@ pub fn all_commands() -> Vec<AgentCommand> {
             "terminal read",
             &["terminal", "read"],
             "Read bounded output from a session",
-            "drogon-cli terminal read --session <ID> --incarnation <TOKEN> [--cursor <N>] [--limit-bytes <BYTES>]",
-            &["cursor", "incarnation", "limit-bytes", "session"],
+            "drogon-cli terminal read --session <ID> --incarnation <TOKEN> [--cursor <N>|--screen] [--limit-bytes <BYTES>]",
+            &["cursor", "incarnation", "limit-bytes", "screen", "session"],
             &[],
             &[
                 "drogon-cli terminal read --session sess-1 --incarnation tok --cursor 0 --limit-bytes 4096 --json",
+                "drogon-cli terminal read --session sess-1 --incarnation tok --screen",
             ],
             &[
+                "--screen replays the whole retained stream through a VT renderer: progress bars and TUI repaints show one final frame, not stacked fragments.",
+                "--screen and --cursor are mutually exclusive: a screen read is the current frame and has no history to page.",
                 "Human output decodes the bytes for display; --json preserves the wire dataBase64/cursor fields untouched.",
                 "Keep paging with the returned nextCursor while truncated is true.",
             ],

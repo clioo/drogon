@@ -429,6 +429,7 @@ async fn terminal(
             incarnation,
             cursor,
             limit_bytes,
+            screen,
         } => {
             let mut params = json!({
                 "sessionId": session,
@@ -437,6 +438,65 @@ async fn terminal(
             });
             if let Some(limit) = limit_bytes {
                 params["limitBytes"] = json!(limit);
+            }
+            if *screen {
+                // A screen read replays the full retained stream once and
+                // renders the current frame — no cursor to page from.
+                let mut stream = Vec::new();
+                let mut cursor_pos = 0u64;
+                let (cols, rows, verdict_str) = loop {
+                    let call = client
+                        .call(
+                            "session.read",
+                            {
+                                let mut p = params.clone();
+                                p["cursor"] = json!(cursor_pos);
+                                p
+                            },
+                            request_id,
+                            DEFAULT_TIMEOUT,
+                        )
+                        .await?;
+                    let read: ReadResult =
+                        Client::decode_checked(&call, "session.read", check_read)?;
+                    let (c, r) = (read.session.cols, read.session.rows);
+                    let verdict = read.session.verdict_str().to_string();
+                    use base64::Engine as _;
+                    let chunk = base64::engine::general_purpose::STANDARD
+                        .decode(read.data_base64.as_bytes())
+                        .map_err(|_| CliError::Local {
+                            error: crate::error::internal_error(
+                                "session.read returned malformed base64",
+                            ),
+                            request_id: request_id.to_string(),
+                        })?;
+                    stream.extend_from_slice(&chunk);
+                    if !read.truncated {
+                        break (c, r, verdict);
+                    }
+                    cursor_pos = read.next_cursor;
+                };
+                let rendered = crate::screen::render_screen(&stream, cols as usize, rows as usize);
+                let tail: Vec<Value> = rendered
+                    .lines
+                    .iter()
+                    .map(|l| Value::String(l.clone()))
+                    .collect();
+                let result = json!({
+                    "source": "screen",
+                    "tail": tail,
+                    "truncated": false,
+                    "undecodedBytes": rendered.undecoded_bytes,
+                    "sessionId": session,
+                    "agentVerdict": verdict_str,
+                });
+                let call = CallOk {
+                    request_id: request_id.to_string(),
+                    raw: json!({"ok": true, "result": result}),
+                    result: result.clone(),
+                };
+                let lines = rendered.lines.clone();
+                return emit(call, json, || lines.join("\n"), 0, None);
             }
             let call = client
                 .call("session.read", params, request_id, DEFAULT_TIMEOUT)
