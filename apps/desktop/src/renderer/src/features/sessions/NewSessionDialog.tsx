@@ -77,6 +77,9 @@ export function NewSessionDialog({
               value={name}
               maxLength={128}
               disabled={busy}
+              // Why: the dialog's primary input — keyboard-first users
+              // type the name immediately without an extra Tab stop.
+              autoFocus
               onChange={(event) => setName(event.target.value)}
             />
           </label>

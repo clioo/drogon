@@ -113,6 +113,10 @@ export function AddProjectDialog({
                 onChange={(event) => setPath(event.target.value)}
                 disabled={busy}
                 placeholder="/path/to/repo"
+                // Why: paths are identifiers, not prose — spellcheck
+                // underlines (and spelling suggestions) are noise here,
+                // same as the source's location/rename fields.
+                spellCheck={false}
               />
             </div>
             <div className="composer-section">
@@ -128,6 +132,8 @@ export function AddProjectDialog({
                 onChange={(event) => setName(event.target.value)}
                 disabled={busy}
                 placeholder="Derived from the folder when blank"
+                // Why: project names are identifiers like the path above.
+                spellCheck={false}
               />
             </div>
             {error && (
