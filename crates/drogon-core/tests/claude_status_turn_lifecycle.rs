@@ -52,28 +52,48 @@ fn base64_decode(text: &str) -> Vec<u8> {
         .unwrap()
 }
 
-/// Installs the echoing `claude` fixture on PATH exactly once per test
-/// process. The install mutates process-global PATH, so parallel tests must
-/// not race it: the adversarial pass caught a 1-in-4 parallel flake when
-/// every test re-installed and restored (an echo read timed out mid-race).
-/// The leaked tempdir is bounded and dies with the process; test binaries
-/// are separate processes, so nothing leaks across suites.
-fn install_echoing_claude_fixture() {
-    static INSTALL: std::sync::Once = std::sync::Once::new();
-    INSTALL.call_once(|| {
-        let bin = tempfile::tempdir().unwrap();
-        let script = bin.path().join("claude");
-        std::fs::write(&script, "#!/bin/sh\ncat\n").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        let mut paths = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-            .collect::<Vec<_>>();
-        paths.insert(0, bin.path().to_path_buf());
-        unsafe { std::env::set_var("PATH", std::env::join_paths(&paths).unwrap()) };
-        std::mem::forget(bin);
-    });
+/// Installs the echoing `claude` fixture under the test's own directory and
+/// points the product's `agentCmdOverrides` at its absolute path, so
+/// `harness.start` resolves the fixture through the settings override
+/// without touching process-global PATH at all. The earlier per-test PATH
+/// install/restore raced between parallel tests on ubuntu CI (a restore
+/// wiped another test's fixture mid-launch: not_found "Harness is not
+/// installed on this execution host"), and even a once-only install still
+/// races `set_var` against sibling tests' PATH reads — the override has no
+/// env interaction, so the suite is hermetic under any scheduling.
+/// `hooks_enabled: false` is the launch-time-disabled variant (the file
+/// then carries no managed hook commands and no `--settings` argv).
+fn install_echoing_claude_fixture(dir: &tempfile::TempDir, hooks_enabled: bool) {
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let script = bin.join("claude");
+    std::fs::write(&script, "#!/bin/sh\ncat\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::write(
+        dir.path().join("agent-settings.json"),
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "settings": {
+                "defaultTuiAgent": null,
+                "disabledTuiAgents": [],
+                "agentCmdOverrides": {
+                    "claude": script.to_string_lossy(),
+                },
+                "agentDefaultArgs": {},
+                "agentDefaultEnv": {},
+                "agentStatusHooksEnabled": hooks_enabled,
+                "tabAutoGenerateTitle": false,
+                "promptCacheTimerEnabled": false,
+                "promptCacheTtlMs": 300000,
+                "codexSessionSourceHome": ""
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 }
 
 fn register_workspace(engine: &Engine) -> String {
@@ -152,8 +172,8 @@ fn write_and_wait_for_echo(engine: &Engine, session: &Value, text: &str) {
 /// just now" while nothing ran. Keystroke echo must leave the session idle.
 #[test]
 fn typing_at_a_fresh_claude_session_never_reads_working() {
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -174,8 +194,8 @@ fn typing_at_a_fresh_claude_session_never_reads_working() {
 /// Notification parks it on needs_input, and a resumption clears the wait.
 #[test]
 fn claude_turn_lifecycle_reads_working_only_for_real_turns() {
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -237,8 +257,8 @@ fn claude_turn_lifecycle_reads_working_only_for_real_turns() {
 /// wait surface.
 #[test]
 fn settings_file_installs_the_full_claude_turn_lifecycle() {
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -287,28 +307,8 @@ fn settings_file_installs_the_full_claude_turn_lifecycle() {
 /// commands.
 #[test]
 fn hooks_disabled_claude_keeps_the_activity_policy() {
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("agent-settings.json"),
-        serde_json::to_vec(&json!({
-            "version": 1,
-            "settings": {
-                "defaultTuiAgent": null,
-                "disabledTuiAgents": [],
-                "agentCmdOverrides": {},
-                "agentDefaultArgs": {},
-                "agentDefaultEnv": {},
-                "agentStatusHooksEnabled": false,
-                "tabAutoGenerateTitle": false,
-                "promptCacheTimerEnabled": false,
-                "promptCacheTtlMs": 300000,
-                "codexSessionSourceHome": ""
-            }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
+    install_echoing_claude_fixture(&dir, false);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -357,8 +357,8 @@ fn set_status_hooks(engine: &Engine, enabled: bool) {
 /// stranding `working` with no hook able to conclude it.
 #[test]
 fn disabling_status_hooks_mid_turn_drops_the_hook_lifecycle() {
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -390,8 +390,8 @@ fn disabling_status_hooks_mid_turn_drops_the_hook_lifecycle() {
 /// activity-fallback state must not survive it as `working`.
 #[test]
 fn stop_while_disabled_reads_idle() {
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -412,8 +412,8 @@ fn stop_while_disabled_reads_idle() {
 /// next real hook event re-establishes authority.
 #[test]
 fn disable_then_reenable_forces_reobservation() {
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -447,9 +447,9 @@ fn disable_then_reenable_forces_reobservation() {
 /// never proves exit, and nobody observed the turn concluding.
 #[test]
 fn restart_keeps_a_hook_reported_turn_working() {
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
     let data_dir = dir.path().to_path_buf();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(&data_dir).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -484,8 +484,8 @@ fn restart_keeps_a_hook_reported_turn_working() {
 /// claude session used to manufacture a phantom `working`.
 #[test]
 fn foreign_harness_event_names_are_refused() {
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
