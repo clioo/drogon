@@ -2721,3 +2721,33 @@ async fn worktree_rm_warnings_stay_out_of_json_stdout() {
     assert_eq!(stderr(&output), "");
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_rm_run_hooks_reaches_the_daemon_with_honest_warning() {
+    let dir = temp_data_dir("wtrhooks");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| {
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({
+                    "id": "w1",
+                    "removed": true,
+                    "warning": "run-hooks is a no-op: this runtime has no orca.yaml hook engine"
+                }),
+            ))
+        }),
+    );
+    // Source keeps --run-hooks on rm: the param reaches the daemon and the
+    // daemon's honest warning surfaces on stderr.
+    let output = run_cli(dir.path(), &["worktree", "rm", "w1", "--run-hooks"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["runHooks"], true);
+    assert!(
+        stderr(&output).contains("run-hooks is a no-op"),
+        "stderr: {}",
+        stderr(&output)
+    );
+    drop(service);
+}

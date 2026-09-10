@@ -558,6 +558,10 @@ pub enum WorktreeAction {
         /// Initial prompt for `--agent`; requires it
         #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
         prompt: Option<String>,
+        /// Legacy alias: run the repo's setup hooks after creating
+        /// (honestly a no-op here — this runtime has no orca.yaml engine)
+        #[arg(long)]
+        run_hooks: bool,
     },
     /// List a Project's worktrees
     #[command(
@@ -616,7 +620,7 @@ pub enum WorktreeAction {
     /// Remove a worktree; refuses a dirty checkout unless --force
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree rm <ID> [--force] [--delete-branch]\nValid flags: --data-dir, --delete-branch, --force, --help, --json, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree rm <ID> [--force] [--delete-branch] [--run-hooks]\nValid flags: --data-dir, --delete-branch, --force, --help, --json, --request-id, --retry-request, --run-hooks"
     )]
     Rm {
         id: String,
@@ -626,6 +630,10 @@ pub enum WorktreeAction {
         /// branches with unmerged commits survive)
         #[arg(long)]
         delete_branch: bool,
+        /// Legacy alias: run the repo's archive hooks before removing
+        /// (honestly a no-op here — this runtime has no orca.yaml engine)
+        #[arg(long)]
+        run_hooks: bool,
     },
 }
 #[derive(Subcommand, Debug)]
@@ -1072,6 +1080,7 @@ impl Cli {
                     comment,
                     agent,
                     prompt,
+                    run_hooks: _,
                 } => {
                     require_nonempty("project", project)?;
                     require_nonempty("name", name)?;
@@ -1768,6 +1777,7 @@ mod tests {
                     comment,
                     agent: _,
                     prompt: _,
+                    run_hooks: _,
                 },
         } = &cli.command
         else {

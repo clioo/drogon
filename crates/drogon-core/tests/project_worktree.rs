@@ -1466,3 +1466,76 @@ fn worktree_remove_names_the_preserved_branch_for_the_warning() {
     assert_eq!(removed["branchDeleted"], json!(false));
     assert_eq!(removed["branch"], json!("preserved"));
 }
+
+/// `runHooks` is accepted (source contract) but honestly a no-op: the
+/// native runtime has no orca.yaml hook engine, so the reply carries a
+/// warning the CLI surfaces instead of silently pretending to run hooks.
+#[test]
+fn worktree_remove_run_hooks_warns_instead_of_pretending() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let project = ok(
+        &engine,
+        "project.add",
+        "rh1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let created = ok(
+        &engine,
+        "worktree.create",
+        "rh2",
+        json!({"projectId": project["id"], "name": "hooked"}),
+    );
+    let plain = ok(
+        &engine,
+        "worktree.remove",
+        "rh3",
+        json!({"id": created["id"]}),
+    );
+    assert!(plain.get("warning").is_none());
+
+    let created = ok(
+        &engine,
+        "worktree.create",
+        "rh4",
+        json!({"projectId": project["id"], "name": "hooked2"}),
+    );
+    let warned = ok(
+        &engine,
+        "worktree.remove",
+        "rh5",
+        json!({"id": created["id"], "runHooks": true}),
+    );
+    assert_eq!(warned["removed"], json!(true));
+    assert_eq!(
+        warned["warning"],
+        json!("run-hooks is a no-op: this runtime has no orca.yaml hook engine")
+    );
+}
+
+#[test]
+fn worktree_create_run_hooks_warns_instead_of_pretending() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let project = ok(
+        &engine,
+        "project.add",
+        "ch1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let warned = ok(
+        &engine,
+        "worktree.create",
+        "ch2",
+        json!({"projectId": project["id"], "name": "hooked", "runHooks": true}),
+    );
+    assert!(warned["id"].is_string());
+    assert_eq!(
+        warned["warning"],
+        json!("run-hooks is a no-op: this runtime has no orca.yaml hook engine")
+    );
+}

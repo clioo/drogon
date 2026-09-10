@@ -943,6 +943,7 @@ async fn worktree(
             comment,
             agent,
             prompt,
+            run_hooks,
         } => {
             // Real, durable creation provenance (Workspace Options "Hide:
             // CLI-created"): every worktree this command creates really was
@@ -964,11 +965,22 @@ async fn worktree(
             if let Some(comment) = comment {
                 params["note"] = json!(comment);
             }
+            if *run_hooks {
+                params["runHooks"] = json!(true);
+            }
             let call = client
                 .call("worktree.create", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
             let worktree: Worktree =
                 Client::decode_checked(&call, "worktree.create", check_worktree)?;
+            // The daemon answers runHooks with an honest no-op warning
+            // (never a silent pretense that hooks ran).
+            let hook_warning = call
+                .result
+                .get("warning")
+                .and_then(Value::as_str)
+                .map(|w| format!("warning: {w}"));
+            let stderr_note = if json { None } else { hook_warning };
             // Source `--agent`: launch the harness in the new worktree's
             // first terminal (its workspace) and surface the agent handle.
             if let Some(agent) = agent {
@@ -994,10 +1006,16 @@ async fn worktree(
                         )
                     },
                     0,
-                    None,
+                    stderr_note,
                 );
             }
-            emit(call, json, || output::worktree_created(&worktree), 0, None)
+            emit(
+                call,
+                json,
+                || output::worktree_created(&worktree),
+                0,
+                stderr_note,
+            )
         }
         WorktreeAction::List { project, limit } => {
             let params = json!({ "projectId": project });
@@ -1112,8 +1130,14 @@ async fn worktree(
             id,
             force,
             delete_branch,
+            run_hooks,
         } => {
-            let params = json!({ "id": id, "force": force, "deleteBranch": delete_branch });
+            let params = json!({
+                "id": id,
+                "force": force,
+                "deleteBranch": delete_branch,
+                "runHooks": run_hooks
+            });
             let call = client
                 .call("worktree.remove", params, request_id, DEFAULT_TIMEOUT)
                 .await?;

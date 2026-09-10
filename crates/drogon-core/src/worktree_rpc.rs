@@ -635,6 +635,10 @@ impl Engine {
                 Some(number)
             }
         };
+        // Source `runHooks` contract: accepted as a legacy alias for setup
+        // hooks; the native runtime has no orca.yaml hook engine, so the
+        // run is honestly a no-op with a warning, never silent pretense.
+        let run_hooks = optional_bool(params, "runHooks", false)?;
         let sparse = normalize_sparse_directories(params)?;
         // Creation provenance (Workspace Options "Hide: Automation-created"
         // / "CLI-created"): absent means the desktop app's own create path.
@@ -878,6 +882,16 @@ impl Engine {
             linked_issue,
             creator: creator.as_deref(),
         }))
+        .map(|mut created| {
+            // Source `runHooks` contract: accepted as a legacy alias for
+            // setup hooks; the native runtime has no orca.yaml hook
+            // engine, so the run is honestly a no-op with a warning.
+            if run_hooks {
+                created["warning"] =
+                    json!("run-hooks is a no-op: this runtime has no orca.yaml hook engine");
+            }
+            created
+        })
     }
 
     /// The fork's smart-name-field branch source (`repo-base-ref-search`):
@@ -1134,7 +1148,7 @@ impl Engine {
                 })
                 .map_err(error::from_sqlite)?;
             for row in rows {
-                let (id, path, created_at) = row.map_err(error::from_sqlite)?;
+                let (id, path, _created_at) = row.map_err(error::from_sqlite)?;
                 let workspace_id: Option<String> = conn
                     .query_row("SELECT id FROM workspaces WHERE path = ?1", [&path], |r| {
                         r.get(0)
