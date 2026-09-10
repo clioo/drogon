@@ -162,6 +162,31 @@ describe("Bot run bridge", () => {
       })),
     ).resolves.toMatchObject({ ok: false, error: { code: "internal_error" } });
   });
+  it("rejects a foreign-host receipt for scoped and app-global requests (cross-host replay)", async () => {
+    // Sibling dispatchers bind hostId exactly; the run gate did not, so a
+    // receipt stamped with a foreign host plus a plausible workspace was
+    // accepted. Native authorizes asserted==derived on success, so an
+    // exact host match is correct for both scopes.
+    const foreign = { ...runReceipt, hostId: "foreign-host" };
+    await expect(
+      dispatchBotRun(runInput, async () => ({
+        ok: true as const,
+        result: foreign,
+      })),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal_error" },
+    });
+    await expect(
+      dispatchBotRun({ ...runInput, workspaceId: "" }, async () => ({
+        ok: true as const,
+        result: { ...foreign, workspaceId: "owning-workspace" },
+      })),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal_error" },
+    });
+  });
   it("still rejects malformed turns before IPC, even app-global ones", async () => {
     const call = vi.fn();
     expect(

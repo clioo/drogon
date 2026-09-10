@@ -128,6 +128,7 @@ export async function dispatchBotRun(
   const checked = botRunResultSchema.safeParse(result.result);
   if (
     !checked.success ||
+    checked.data.hostId !== params.hostId ||
     !scopeEchoMatches(params.workspaceId, checked.data.workspaceId)
   )
     return {
