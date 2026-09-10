@@ -2640,7 +2640,7 @@ fn child_probe_and_report(harness: HarnessId, pi_script: &str, budget: Duration,
     // struct moves registration_failures, so every failure push must
     // happen up front. Uses try_exists (not exists) so read errors stay
     // errors instead of melting into false.
-    let version_entered = match std::fs::try_exists(dir.join(VERSION_MARKER_FILE)) {
+    let version_entered = match dir.join(VERSION_MARKER_FILE).try_exists() {
         // A version marker that cannot be read fails closed as
         // not-observed (the test requires it present).
         Ok(present) => present,
@@ -2649,7 +2649,7 @@ fn child_probe_and_report(harness: HarnessId, pi_script: &str, budget: Duration,
             false
         }
     };
-    let enumeration_entered = match std::fs::try_exists(dir.join(ENUMERATION_MARKER_FILE)) {
+    let enumeration_entered = match dir.join(ENUMERATION_MARKER_FILE).try_exists() {
         // An unreadable enumeration marker must NEVER read as absence:
         // fail it as present so the run fails closed instead of passing
         // on a lie.
