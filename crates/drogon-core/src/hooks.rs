@@ -170,6 +170,15 @@ impl Engine {
             ));
         };
         let (handle, _) = self.require_session_with_incarnation(params)?;
+        if !crate::agent_state::event_belongs_to_harness(event, handle.harness_id.as_deref()) {
+            // The flat classification namespace is safe only because each
+            // harness's own plumbing names its own events; a foreign
+            // harness's name arriving over the socket is a caller bug or an
+            // injection, and must be refused, never mapped.
+            return Err(error::invalid_argument(
+                "event is not a recognized harness hook signal",
+            ));
+        }
         if handle.is_exited() {
             return Err(error::unverifiable(
                 "session already exited; hook event is moot",
@@ -179,7 +188,16 @@ impl Engine {
             .read_agent_settings()?
             .is_some_and(|settings| !settings.agent_status_hooks_enabled)
         {
-            handle.clear_hook_event();
+            // Status hooks are disabled: the hook files are neutered, so
+            // the activity clock owns the row. An in-flight event must
+            // never OPEN a turn (nobody's hooks can conclude it — that
+            // strands `working`); a turn-end signal still concludes
+            // honestly (the reference maps every Stop to done), and every
+            // other signal is spent without touching the turn fact.
+            match signal {
+                HookSignal::TurnEnd => handle.end_hook_event(),
+                HookSignal::TurnStart | HookSignal::Wait => handle.discard_hook_signal(),
+            }
             return Ok(session::snapshot(&handle));
         }
         if let Some(prompt) = params.get("promptPreview").and_then(Value::as_str) {

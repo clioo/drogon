@@ -166,6 +166,64 @@ const TURN_END_EVENTS: &[&str] = &[
     codex_events::STOP,
 ];
 
+/// The hook event names each harness's own managed install reports (the
+/// per-harness `settings_json`/plugin/extension/hooks.json surfaces — see
+/// `hooks.rs` and `harness_hooks::{opencode,pi,codex}`). A session may only
+/// receive its own harness's names: the flat classification namespace is
+/// safe because each harness's plumbing names its own events, and a
+/// foreign name arriving over the socket must be refused, never mapped —
+/// an injected pi `AgentStart` on an idle claude session used to
+/// manufacture a phantom `working`.
+pub(crate) fn event_belongs_to_harness(event: &str, harness_id: Option<&str>) -> bool {
+    match harness_id {
+        Some("claude") => matches!(
+            event,
+            "UserPromptSubmit"
+                | claude_events::NOTIFICATION
+                | claude_events::STOP
+                | "PreToolUse"
+                | "PostToolUse"
+                | "PermissionRequest"
+        ),
+        Some("opencode") => matches!(
+            event,
+            opencode_events::SESSION_IDLE
+                | opencode_events::PERMISSION_REQUEST
+                | opencode_events::ASK_USER_QUESTION
+                | opencode_events::PERMISSION_REPLIED
+                | opencode_events::QUESTION_REPLIED
+                | opencode_events::NEW_TURN
+                | opencode_events::TOOL_START
+        ),
+        Some("pi") => matches!(
+            event,
+            pi_events::AGENT_START
+                | pi_events::TOOL_START
+                | pi_events::TOOL_APPROVAL_REQUESTED
+                | pi_events::TOOL_APPROVAL_RESOLVED
+                | pi_events::AGENT_END
+        ),
+        Some("codex") => matches!(
+            event,
+            codex_events::SESSION_START
+                | codex_events::USER_PROMPT_SUBMIT
+                | codex_events::PRE_TOOL_USE
+                | codex_events::PERMISSION_REQUEST
+                | codex_events::POST_TOOL_USE
+                | codex_events::SUBAGENT_START
+                | codex_events::SUBAGENT_STOP
+                | codex_events::STOP
+        ),
+        // Harness-less sessions (plain `session.start`) have no managed
+        // install; they keep the historical open namespace. Their
+        // hook-driven states are activity-derived, so no event name can
+        // manufacture `working` there.
+        None => true,
+        // Any other harness (antigravity) has no hook plumbing at all.
+        Some(_) => false,
+    }
+}
+
 /// What a `session.hook_event` name means: park the session on a genuine
 /// user wait, report turn activity, or conclude the turn. `None` (an
 /// unrecognized name) is refused by the caller before this is reached —

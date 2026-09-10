@@ -127,7 +127,9 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
             created_at TEXT NOT NULL,
             harness_id TEXT,
             needs_input_at TEXT,
-            parent_session_id TEXT
+            parent_session_id TEXT,
+            turn_fact TEXT,
+            turn_fact_at TEXT
         );
         CREATE TABLE IF NOT EXISTS requests (
             request_id TEXT PRIMARY KEY,
@@ -267,7 +269,12 @@ fn pending_forward_migrations(conn: &Connection) -> rusqlite::Result<Vec<Pending
     // lacks them; a fresh or current one already has all three.
     if let Ok(Some((_, cols))) = table_columns(conn, "sessions") {
         let has = |name: &str| cols.iter().any(|c| c == name);
-        if !(has("harness_id") && has("needs_input_at") && has("parent_session_id")) {
+        if !(has("harness_id")
+            && has("needs_input_at")
+            && has("parent_session_id")
+            && has("turn_fact")
+            && has("turn_fact_at"))
+        {
             pending.push(PendingMigration {
                 component: "sessions (main schema columns)".to_string(),
                 recorded: 1,
@@ -448,6 +455,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     migrate_sessions_harness_id(&tx)?;
     migrate_sessions_needs_input(&tx)?;
     migrate_sessions_parent_session_id(&tx)?;
+    migrate_sessions_turn_fact(&tx)?;
     recover_from_prior_instance(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
     tx.commit()?;
@@ -511,6 +519,33 @@ fn migrate_sessions_parent_session_id(tx: &Transaction<'_>) -> rusqlite::Result<
         .map(|count| count > 0)?;
     if !has_column {
         tx.execute_batch("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;")?;
+    }
+    Ok(())
+}
+
+/// Additive migration for the durable hook turn fact: `turn_fact`
+/// (`active`/`ended`, `NULL` = no known turn) and its `turn_fact_at` stamp
+/// mirror the in-memory lifecycle so a daemon restart reports a turn
+/// reported by hooks as still-`working` (with its original stamp) instead
+/// of hiding it as `unknown` — loss of contact never proves exit, and
+/// nobody observed the turn concluding. Idempotent: fresh databases
+/// already created the columns in [`create_tables`].
+fn migrate_sessions_turn_fact(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    for column in ["turn_fact", "turn_fact_at"] {
+        let has_column: bool = tx
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = '{column}'"
+                ),
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)?;
+        if !has_column {
+            tx.execute_batch(&format!(
+                "ALTER TABLE sessions ADD COLUMN {column} TEXT;"
+            ))?;
+        }
     }
     Ok(())
 }
