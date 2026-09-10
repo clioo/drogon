@@ -1601,12 +1601,3 @@ mod tests {
         );
     }
 }
-
-/// A blank filter value is a usage error, matching the source's
-/// required-flag rules.
-fn require_nonempty(value: &str) -> Result<(), CliError> {
-    if value.trim().is_empty() {
-        return Err(CliError::Usage("filter values must be non-empty".into()));
-    }
-    Ok(())
-}
