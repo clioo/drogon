@@ -44,6 +44,7 @@ impl Engine {
         let mut bots_json = serde_json::to_value(&bots)
             .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?;
         project_bots_trigger_automation_id(&mut bots_json);
+        self.project_bots_current_session_pid(&mut bots_json);
         let result = json!({"hostId":self.host_id,"workspaceId":scope.workspace_id,"bots":bots_json,"history":history});
         if serde_json::to_vec(&result)
             .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?
@@ -119,6 +120,57 @@ impl Engine {
                 .total_cmp(&a["run"]["startedAt"].as_f64().unwrap_or(0.0))
         });
         Ok((bots_json, history))
+    }
+
+    /// Live-pid projection (Bot session inspector, bug-bot-a836b4ebf8be65505):
+    /// for each Bot whose `currentSession` names a session id this service
+    /// instance still holds a live handle for, adds `processId` to the
+    /// serialized `currentSession` object -- read straight off the daemon's
+    /// own in-memory session registry, never persisted (a pid outlives
+    /// neither the process it names nor this daemon run, so it is not a
+    /// storage-layer fact). A session this instance no longer tracks (daemon
+    /// restart, already exited) is left without the field, same as
+    /// `project_bots_trigger_automation_id`'s in-place JSON patching pattern.
+    fn project_bots_current_session_pid(&self, bots_json: &mut Value) {
+        let Some(bots) = bots_json.as_array_mut() else {
+            return;
+        };
+        for bot in bots {
+            let Some(session_id) = bot
+                .get("currentSession")
+                .and_then(|session| session.get("sessionId"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let Some(pid) = self.session_process_id(&session_id) else {
+                continue;
+            };
+            if let Some(session_obj) = bot
+                .get_mut("currentSession")
+                .and_then(Value::as_object_mut)
+            {
+                session_obj.insert("processId".to_string(), json!(pid));
+            }
+        }
+    }
+
+    /// Live OS pid of a still-RUNNING tracked session's PTY child. `None`
+    /// when this service instance holds no handle for it (never tracked, or
+    /// already forgotten), the platform exposes no pid, or -- the case a
+    /// naive lookup would get wrong -- the handle's own child has already
+    /// been confirmed exited: session handles are deliberately RETAINED in
+    /// `self.sessions` after exit (so a closed tab can still be read back),
+    /// so `child_process_id()` alone answers "what pid did this process
+    /// have", not "is it still running". A Process ID row must gate on
+    /// `is_exited()` too, or it would keep reporting a defunct pid forever.
+    fn session_process_id(&self, session_id: &str) -> Option<u32> {
+        let handle = self.sessions.lock().unwrap().get(session_id).cloned()?;
+        if handle.is_exited() {
+            return None;
+        }
+        handle.child_process_id()
     }
 }
 

@@ -55,6 +55,10 @@ const bot = z.object({
       model: z.string().nullable(),
       startedAt: timestamp,
       rotatedAt: timestamp.nullable(),
+      // Live pid projection (bug-bot-a836b4ebf8be65505's Bot session
+      // inspector): absent on an older daemon build, null once the
+      // session is no longer live/tracked by this service instance.
+      processId: z.number().int().nullable().optional(),
     })
     .nullable(),
   createdAt: timestamp,
@@ -172,6 +176,9 @@ const chatTurn = globalScope
     prompt: z.string().min(1).max(20_000),
     harness: harnessOverrides.nullable().optional(),
     locale: z.string().nullable().optional(),
+    // Open-session request (bug-bot-a836b4ebf8be65505): see
+    // BotRunTurnInput's doc in bot-contract.ts.
+    interactive: z.boolean().optional(),
   })
   .strict();
 

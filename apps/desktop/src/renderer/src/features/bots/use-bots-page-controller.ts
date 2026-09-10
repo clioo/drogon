@@ -67,6 +67,9 @@ export type BotsPageControllerDeps = {
     harness: BotRunHarnessSource;
     workspaceId: string;
     hostId: string;
+    displayName: string;
+    handle: string | null;
+    title: string | null;
   }) => void | Promise<void>;
 };
 
@@ -397,6 +400,12 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
           requestId: mintRequestId("bot-open-session"),
           botId: bot.id,
           prompt: BOT_OPEN_SESSION_PROMPT,
+          // bug-bot-a836b4ebf8be65505: a live, user-facing tab (native's own
+          // interactive TUI entrypoint, run against the Bot's own
+          // provisioned home) instead of the headless one-shot daemon run
+          // this dispatch used before — which is what made a Bot "session"
+          // print one reply and exit immediately.
+          interactive: true,
           harness: buildBotRunHarness(
             live.harnessPolicy.defaultHarness,
             live.harnessPolicy.explicitModel,
@@ -426,6 +435,9 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
             },
             workspaceId: response.result.workspaceId,
             hostId: response.result.hostId,
+            displayName: live.displayIdentity.displayName,
+            handle: live.displayIdentity.handle,
+            title: live.displayIdentity.title,
           });
         }
         await load();

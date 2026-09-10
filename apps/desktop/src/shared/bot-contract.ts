@@ -67,12 +67,20 @@ export type BotRunTurnInput = BotScope & {
         reason: "scheduledDue" | "manual" | "reactiveEvent";
         eventIdentity: string;
         prompt?: never;
+        interactive?: never;
       }
     | {
         prompt: string;
         responsibilityId?: never;
         reason?: never;
         eventIdentity?: never;
+        /** Open-session request (bug-bot-a836b4ebf8be65505): native runs the
+         *  harness's own interactive entrypoint (no `-p`/`--print`) instead
+         *  of the headless one-shot daemon-run seam automations use, and
+         *  retargets the session at the Bot's own provisioned home
+         *  workspace instead of wherever its record happens to be stored.
+         *  Absent/false keeps the original one-shot chat-turn contract. */
+        interactive?: boolean;
       }
   );
 
@@ -228,6 +236,12 @@ export type BotsPanelSession = {
   model: string | null;
   startedAt: number;
   rotatedAt: number | null;
+  /** Live OS pid of the session's PTY child, projected onto the snapshot
+   *  from the daemon's own in-memory session registry (never persisted --
+   *  a pid is only ever meaningful for a currently-live process). `null`
+   *  when the session is no longer live/tracked by this service instance;
+   *  absent on a daemon build that predates this projection. */
+  processId?: number | null;
 };
 
 export type BotsPanelBot = {
@@ -328,10 +342,20 @@ export type BotsPanelProps = {
     sessionId: string;
     incarnation: string;
     harness: BotRunHarnessSource;
-    /** Owning workspace native resolved the turn into (receipt echo): the
-     *  host selects it before focusing the tab. */
+    /** Owning workspace native resolved the turn into (receipt echo): now
+     *  the Bot's OWN provisioned home workspace for an interactive open
+     *  (bug-bot-a836b4ebf8be65505), never the folder its record happens to
+     *  be stored under. The host selects it before focusing the tab. */
     workspaceId: string;
     hostId: string;
+    /** Bot identity echoed from the panel's own live snapshot (the same
+     *  `live.displayIdentity` the dispatch itself used), so the host can
+     *  render bot-scoped chrome (breadcrumb, tab title, the Bot session
+     *  inspector) without a second round trip. Never invented: these are
+     *  the exact fields the dispatched turn read off the Bot record. */
+    displayName: string;
+    handle: string | null;
+    title: string | null;
   }) => void | Promise<void>;
   /** Caller-observed liveness verdicts (live | unverifiable | exited), one per
    *  bot, from a real observation source. The panel renders them verbatim and
