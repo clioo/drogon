@@ -88,6 +88,19 @@ fn map_existing_branch_error(error: RpcError, branch: &str) -> RpcError {
     error
 }
 
+/// The fork's reuse flow (#5181): git allows a branch in only one worktree at
+/// a time, so checking out an existing branch can fail with "is already used
+/// by worktree". Surface that as the composer's actionable message instead of
+/// a raw git stderr dump.
+fn map_branch_in_use_error(error: RpcError, branch: &str) -> RpcError {
+    if error.code == "io_error" && error.message.contains("already used by worktree") {
+        return error::invalid_argument(format!(
+            "branch '{branch}' is already checked out in another worktree"
+        ));
+    }
+    error
+}
+
 /// A Project's `name` becomes a directory segment under
 /// `<data-dir>/workspaces/`; this keeps that join safe even for a
 /// user-overridden name containing a path separator, without rejecting the
@@ -115,6 +128,24 @@ fn short_branch(full_ref: &str) -> String {
         .unwrap_or(full_ref)
         .to_string()
 }
+
+/// `refs/remotes/<remote>/<branch>` strips its remote prefix (the fork's
+/// `resolveLocalBranchName`): `origin/feature-x` names the local branch
+/// `feature-x`, while a local ref keeps its short name verbatim.
+fn short_branch_local_name(full_ref: &str, short_ref: &str) -> String {
+    let Some(remote_branch) = full_ref.strip_prefix("refs/remotes/") else {
+        return short_ref.to_string();
+    };
+    match remote_branch.split_once('/') {
+        Some((_, branch)) if !branch.is_empty() => branch.to_string(),
+        _ => short_ref.to_string(),
+    }
+}
+
+/// The fork's `REPO_SEARCH_REFS_DEFAULT_LIMIT` and a bounded maximum so a
+/// huge ref list can never stream unbounded into the renderer.
+const BRANCH_SEARCH_DEFAULT_LIMIT: usize = 25;
+const BRANCH_SEARCH_MAX_LIMIT: usize = 200;
 
 fn optional_bool(params: &Value, field: &str, default: bool) -> Result<bool, RpcError> {
     match params.get(field) {
@@ -581,6 +612,11 @@ impl Engine {
         // free-text note, a sidebar-nesting parent, and sparse-checkout
         // directories.
         let branch_override = optional_trimmed_str(params, "branch")?;
+        // The fork's "Reuse branch" checkbox (#5181): check out the existing
+        // branch in the new worktree instead of creating a fresh branch from
+        // it. The renderer gates eligibility (local branch, not checked out
+        // elsewhere); the daemon still fails honestly when git refuses.
+        let reuse_branch = optional_bool(params, "reuseBranch", false)?;
         let note = optional_trimmed_str(params, "note")?;
         let parent_worktree_id = optional_trimmed_str(params, "parentWorktreeId")?;
         let sparse = normalize_sparse_directories(params)?;
@@ -600,6 +636,16 @@ impl Engine {
                 "creator must be \"cli\" or \"automation\" when provided",
             ));
         }
+        if reuse_branch && branch_override.is_none() {
+            return Err(error::invalid_argument(
+                "reuseBranch requires an explicit branch to check out",
+            ));
+        }
+        if reuse_branch && base_ref.is_some() {
+            return Err(error::invalid_argument(
+                "reuseBranch checks out the branch itself; drop baseRef",
+            ));
+        }
 
         let project = {
             let conn = self.db.lock().unwrap();
@@ -616,6 +662,25 @@ impl Engine {
         }
 
         let branch_name = branch_override.clone().unwrap_or_else(|| name.clone());
+        if reuse_branch {
+            // Reuse is a local-branch operation: a remote-tracking ref would
+            // silently produce a detached worktree, and a typo would fail
+            // later with git's own message.
+            let local_ref = run_git(
+                Path::new(&project.path),
+                &[
+                    "show-ref".to_string(),
+                    "--verify".to_string(),
+                    "--quiet".to_string(),
+                    format!("refs/heads/{branch_name}"),
+                ],
+            );
+            if local_ref.is_err() {
+                return Err(error::invalid_argument(format!(
+                    "branch '{branch_name}' is not a local branch; pick it from the Branch tab",
+                )));
+            }
+        }
         // The fork validates an explicit override with git itself
         // (`resolveCreateBranchName`): a leading "-" is rejected outright
         // (option injection), then `git check-ref-format --branch` is the
@@ -662,13 +727,26 @@ impl Engine {
             argv.push("--no-checkout".to_string());
         }
         argv.push(target_str.clone());
-        argv.push("-b".to_string());
-        argv.push(branch_name.clone());
-        if let Some(base) = &base_ref {
-            argv.push(base.clone());
+        if reuse_branch {
+            // Reuse: check out the existing branch (never `-b`, never a base
+            // ref — the branch itself is the start point).
+            argv.push(branch_name.clone());
+        } else {
+            argv.push("-b".to_string());
+            argv.push(branch_name.clone());
+            if let Some(base) = &base_ref {
+                argv.push(base.clone());
+            }
         }
-        run_git(Path::new(&project.path), &argv)
-            .map_err(|failure| map_existing_branch_error(failure, &name))?;
+        let failure = run_git(Path::new(&project.path), &argv).err();
+        if let Some(failure) = failure {
+            let mapped = if reuse_branch {
+                map_branch_in_use_error(failure, &branch_name)
+            } else {
+                map_existing_branch_error(failure, &name)
+            };
+            return Err(mapped);
+        }
         if !sparse.is_empty() {
             let target_path = Path::new(&target_str);
             let sparse_result = (|| {
@@ -783,6 +861,77 @@ impl Engine {
             linked_pr: None,
             creator: creator.as_deref(),
         }))
+    }
+
+    /// The fork's smart-name-field branch source (`repo-base-ref-search`):
+    /// local heads plus remote refs, most recently committed first, with the
+    /// symbolic `<remote>/HEAD` entries dropped. Rows carry the fork's
+    /// `BaseRefSearchResult` shape — `refName` (the short ref to start from)
+    /// and `localBranchName` (the local branch a reuse/create would name).
+    pub(super) fn do_worktree_branch_search(&self, params: &Value) -> Result<Value, RpcError> {
+        let project_id = require_str(params, "projectId")?.to_string();
+        let query = optional_trimmed_str(params, "query")?
+            .map(|value| value.to_lowercase())
+            .unwrap_or_default();
+        let limit = match params.get("limit") {
+            None => BRANCH_SEARCH_DEFAULT_LIMIT,
+            Some(value) => value
+                .as_u64()
+                .ok_or_else(|| error::invalid_argument("limit must be a positive integer"))?
+                .clamp(1, BRANCH_SEARCH_MAX_LIMIT as u64) as usize,
+        };
+        let conn = self.db.lock().unwrap();
+        let project = crate::project::get(&conn, &project_id)?;
+        drop(conn);
+        if project.kind != "git" {
+            return Err(error::invalid_argument(
+                "worktree.branch_search requires a git project",
+            ));
+        }
+        let stdout = run_git(
+            Path::new(&project.path),
+            &[
+                "for-each-ref".to_string(),
+                "--format=%(refname)%00%(refname:short)%00%(committerdate:unix)".to_string(),
+                "--sort=-committerdate".to_string(),
+                "refs/heads".to_string(),
+                "refs/remotes".to_string(),
+            ],
+        )?;
+        let query = query.trim().to_lowercase();
+        let mut branches = Vec::new();
+        for line in stdout.lines() {
+            let mut parts = line.split('\0');
+            let (Some(full), Some(short)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            // A symbolic `<remote>/HEAD` slot is a pointer, not a branch.
+            if let Some(remote_branch) = full.strip_prefix("refs/remotes/")
+                && remote_branch.ends_with("/HEAD")
+            {
+                continue;
+            }
+            let ref_name = short.to_string();
+            let local_branch_name = short_branch_local_name(full, short);
+            // Substring match over the short ref, mirroring the fork's
+            // token globs (`*query*` plus segment matches) closely enough
+            // that the composer's rows agree; the scan itself stays bounded
+            // by the repo's ref count.
+            if !query.is_empty()
+                && !ref_name.to_lowercase().contains(&query)
+                && !local_branch_name.to_lowercase().contains(&query)
+            {
+                continue;
+            }
+            branches.push(json!({
+                "refName": ref_name,
+                "localBranchName": local_branch_name,
+            }));
+            if branches.len() >= limit {
+                break;
+            }
+        }
+        Ok(json!({ "branches": branches }))
     }
 
     pub(super) fn do_worktree_list(&self, params: &Value) -> Result<Value, RpcError> {

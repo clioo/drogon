@@ -16,6 +16,8 @@ export const project: ProjectBridge = {
   saveSparsePreset: (value) =>
     ipcRenderer.invoke("drogon:saveSparsePreset", value),
   worktreeCreate: (value) => ipcRenderer.invoke("drogon:worktreeCreate", value),
+  worktreeBranchSearch: (value) =>
+    ipcRenderer.invoke("drogon:worktreeBranchSearch", value),
   worktreeList: (value) => ipcRenderer.invoke("drogon:worktreeList", value),
   worktreeRemove: (value) => ipcRenderer.invoke("drogon:worktreeRemove", value),
   worktreeRename: (value) => ipcRenderer.invoke("drogon:worktreeRename", value),

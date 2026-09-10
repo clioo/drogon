@@ -43,6 +43,10 @@ export type ProjectBridge = {
     name: string;
     baseRef?: string;
     branch?: string;
+    /** The fork's "Reuse branch" checkbox: check out the existing branch
+     *  in the new worktree instead of creating a fresh branch (requires
+     *  `branch`). */
+    reuseBranch?: boolean;
     note?: string;
     parentWorktreeId?: string;
     sparse?: string[];
@@ -50,6 +54,16 @@ export type ProjectBridge = {
      *  desktop app itself never sends this (absent = its own default). */
     creator?: "cli" | "automation";
   }): Promise<Result<WorktreeResult>>;
+  /** The fork's smart-name-field branch source (`repo-base-ref-search`):
+   *  local heads plus remote refs, most recently committed first, symbolic
+   *  `<remote>/HEAD` entries dropped. */
+  worktreeBranchSearch(input: {
+    projectId: string;
+    query?: string;
+    limit?: number;
+  }): Promise<Result<{
+    branches: WorktreeBranchSearchResult[];
+  }>>;
   worktreeList(input: {
     projectId: string;
   }): Promise<Result<{ worktrees: WorktreeResult[] }>>;
@@ -93,6 +107,15 @@ export type ProjectBridge = {
 /** Opaque registry revision from the daemon's `project.changes`. */
 export type ProjectChangesResult = {
   revision: string;
+};
+
+/** One branch row of `worktree.branch_search` (the fork's
+ *  `BaseRefSearchResult`): the short ref to start from, and the local
+ *  branch name a create/reuse would use (remote refs strip their
+ *  `<remote>/` prefix). */
+export type WorktreeBranchSearchResult = {
+  refName: string;
+  localBranchName: string;
 };
 
 export type ProjectResult = {
@@ -203,6 +226,9 @@ export const projectBridgeSchemas = {
     name: branchName,
     baseRef: branchName.optional(),
     branch: branchName.optional(),
+    // The fork's "Reuse branch" checkbox (#5181): check out the existing
+    // branch instead of creating a fresh one from it.
+    reuseBranch: z.boolean().optional(),
     note: z
       .string()
       .max(65_536)
@@ -222,6 +248,11 @@ export const projectBridgeSchemas = {
     creator: z.enum(["cli", "automation"]).optional(),
   }),
   worktreeList: z.object({ projectId: id }),
+  worktreeBranchSearch: z.object({
+    projectId: id,
+    query: z.string().max(1024).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+  }),
   worktreeRemove: z.object({ id, force: z.boolean().optional() }),
   worktreeRename: z.object({
     worktreeId: id,
@@ -321,6 +352,16 @@ export const projectResultSchemas = {
   "project.sparsePresets": z.object({ presets: z.array(sparsePresetResult) }),
   "project.saveSparsePreset": sparsePresetResult,
   "worktree.create": worktreeResult,
+  "worktree.branch_search": z.object({
+    branches: z
+      .array(
+        z.object({
+          refName: z.string().min(1).max(1024),
+          localBranchName: z.string().min(1).max(1024),
+        }),
+      )
+      .max(200),
+  }),
   "worktree.list": z.object({ worktrees: z.array(worktreeResult) }),
   "worktree.remove": z.object({ id: z.string(), removed: z.boolean() }),
   "worktree.rename": worktreeResult,

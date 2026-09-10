@@ -133,7 +133,9 @@ function mount(
 
 function fillName(value: string): void {
   fireEvent.change(
-    screen.getByPlaceholderText("e.g. feature/my-worktree"),
+    screen.getByPlaceholderText(
+      "Type a name, #1234, branch, GitHub, GitLab, or Jira URL",
+    ),
     { target: { value } },
   );
 }
@@ -156,14 +158,18 @@ describe("NewWorkspaceComposer chrome (#316 fork anatomy)", () => {
     // The fork's local-host label ("Local Mac" on macOS, "Local computer"
     // elsewhere — jsdom's UA carries no platform token).
     expect(document.body.textContent).toMatch(/Local (Mac|Windows|computer)/);
-    // Git worktrees always create a new branch; an existing branch is chosen
-    // separately through Advanced → Base ref.
-    expect(document.body.textContent).toContain("New branch name");
+    // The fork's smart name field: "Name or 'Create From' [Optional]" over
+    // the Smart/GitHub/Branch/Name mode tabs (the sources this repo can
+    // back); the git placeholder invites names, `#1234`, branches and URLs.
+    expect(document.body.textContent).toContain("Name or 'Create From'");
     expect(document.body.textContent).toContain("[Optional]");
-    expect(document.body.textContent).toContain(
-      "To start from an existing branch, enter it in Advanced → Base ref.",
+    expect(screen.getByText("Smart")).toBeTruthy();
+    expect(screen.getByText("GitHub")).toBeTruthy();
+    expect(screen.getByText("Branch")).toBeTruthy();
+    expect(screen.getByText("Name")).toBeTruthy();
+    const nameInput = screen.getByPlaceholderText(
+      "Type a name, #1234, branch, GitHub, GitLab, or Jira URL",
     );
-    const nameInput = screen.getByPlaceholderText("e.g. feature/my-worktree");
     expect(nameInput).toBeTruthy();
     // Agent + Advanced + the footer primary action.
     expect(document.body.textContent).toContain("Agent");
@@ -496,7 +502,7 @@ describe("NewWorkspaceComposer submit (#316 unchanged daemon payload)", () => {
       expect(
         (
           screen.getByPlaceholderText(
-            "e.g. feature/my-worktree",
+            "Type a name, #1234, branch, GitHub, GitLab, or Jira URL",
           ) as HTMLInputElement
         ).value,
       ).toBe("");
@@ -508,12 +514,43 @@ describe("NewWorkspaceComposer submit (#316 unchanged daemon payload)", () => {
   test("plain Enter in the name field moves focus to the agent combobox", () => {
     const onSubmitWorktree = vi.fn(async () => null);
     mount({ onSubmitWorktree, harnesses: [piHarness()] });
-    const nameInput = screen.getByPlaceholderText("e.g. feature/my-worktree");
+    const nameInput = screen.getByPlaceholderText(
+      "Type a name, #1234, branch, GitHub, GitLab, or Jira URL",
+    );
     fireEvent.keyDown(nameInput, { key: "Enter" });
     const agentTrigger = document.querySelector(
       '[data-agent-combobox-root="true"][role="combobox"]',
     );
     expect(document.activeElement).toBe(agentTrigger);
     expect(onSubmitWorktree).not.toHaveBeenCalled();
+  });
+});
+
+describe("NewWorkspaceComposer smart sources (fork name-field parity)", () => {
+  test("blank submit falls back to a generated creature name instead of erroring", async () => {
+    const onSubmitWorktree = vi.fn(async (_input: unknown) => null);
+    mount({ onSubmitWorktree, harnesses: [piHarness()] });
+    const create = screen.getByRole("button", { name: /Create worktree/ });
+    fireEvent.click(create);
+    await vi.waitFor(() => expect(onSubmitWorktree).toHaveBeenCalledTimes(1));
+    const input = onSubmitWorktree.mock.calls[0]?.[0] as { name: string };
+    // The fork's marine-creature fallback: a non-empty, readable seed.
+    expect(input.name).toMatch(/^[a-z0-9-]+$/);
+    expect(input.name.length).toBeGreaterThan(2);
+  });
+
+  test("blank submit never suggests a name a visible worktree already owns", async () => {
+    // The dedupe key is the on-disk basename (the source's
+    // collectUsedNames): a worktree living at .../nautilus spends that name.
+    const onSubmitWorktree = vi.fn(async (_input: unknown) => null);
+    const group = configuredGitGroup();
+    group.worktrees = [
+      { ...group.worktrees[0], path: "/tmp/repo-parent/nautilus" },
+    ];
+    mount({ groups: [group], projectId: "git:1", onSubmitWorktree, harnesses: [piHarness()] });
+    fireEvent.click(screen.getByRole("button", { name: /Create worktree/ }));
+    await vi.waitFor(() => expect(onSubmitWorktree).toHaveBeenCalledTimes(1));
+    const input = onSubmitWorktree.mock.calls[0]?.[0] as { name: string };
+    expect(input.name).not.toBe("nautilus");
   });
 });

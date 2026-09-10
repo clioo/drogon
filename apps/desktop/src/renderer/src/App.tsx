@@ -60,6 +60,11 @@ import {
   composerAgentLaunchInput,
   type ComposerAgentSelection,
 } from "./features/new-workspace/composer-submit";
+import {
+  CLIENT_WORKTREE_CREATE_MAX_ATTEMPTS,
+  getClientWorktreeCreateCandidate,
+  isRetryableWorktreeCreateConflict,
+} from "./features/new-workspace/worktree-create-retry";
 // R16-AO (#231): every launch path resolves the Settings → Agents default
 // permission mode (yolo/unattended for Claude Code, like the fork) instead
 // of hardcoding one.
@@ -2077,6 +2082,7 @@ export function App() {
     name: string;
     baseRef?: string;
     branch?: string;
+    reuseBranch?: boolean;
     note?: string;
     parentWorktreeId?: string;
     sparse?: string[];
@@ -2090,11 +2096,27 @@ export function App() {
     const { setupScript, waitForSetup, agent, ...createInput } = input;
     let created: Worktree;
     try {
-      const result = await bridge.worktreeCreate(createInput);
-      if (!result.ok) return result.error.message;
-      created = result.result;
-    } catch {
-      return "Could not create the worktree. Retry the connection.";
+      // The fork's client-side suffix retry (worktree-create-retry-policy):
+      // a branch/folder collision suffixed the candidate instead of failing
+      // the create, so picking a busy branch still lands a workspace.
+      created = await (async () => {
+        let lastFailure: string | null = null;
+        for (let attempt = 0; attempt < CLIENT_WORKTREE_CREATE_MAX_ATTEMPTS; attempt += 1) {
+          const name = getClientWorktreeCreateCandidate(createInput.name, attempt);
+          const result = await bridge.worktreeCreate!({
+            ...createInput,
+            name,
+          });
+          if (result.ok) return result.result;
+          lastFailure = result.error.message;
+          if (!isRetryableWorktreeCreateConflict(lastFailure)) break;
+        }
+        return Promise.reject(new Error(lastFailure ?? "worktree.create failed"));
+      })();
+    } catch (error) {
+      return error instanceof Error && error.message
+        ? error.message
+        : "Could not create the worktree. Retry the connection.";
     }
     const workspaceId = created.workspaceId;
     selectWorkspaceId(workspaceId);
