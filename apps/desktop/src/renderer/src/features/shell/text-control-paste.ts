@@ -1,5 +1,4 @@
-// MIT Copyright (c) 2026 Lovecast Inc. Ported from the Orca reference
-// (read-only /Users/carlos/Documents/Drogon-orca):
+// MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 //   src/renderer/src/lib/app-menu-paste.ts (request shape: owned terminal
 //     event first, then focused text control, then native fallback),
 //   src/renderer/src/lib/text-control-paste.ts (setRangeText insertion with

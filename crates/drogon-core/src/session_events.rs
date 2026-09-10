@@ -345,6 +345,40 @@ mod tests {
         #[test]
         fn hook_wait_clear_and_exit_flow_as_push_events() {
             let dir = tempfile::tempdir().unwrap();
+            // The wait/clear signals belong to a managed hook install: the
+            // fixture pi carries the pi hook namespace (hook events on
+            // harness-less sessions are refused as forgeries), resolved via
+            // the product's absolute-path overrides so PATH stays untouched.
+            let bin = dir.path().join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let pi_fixture = bin.join("pi");
+            std::fs::write(&pi_fixture, "#!/bin/sh\nexec sleep 30\n").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&pi_fixture, std::fs::Permissions::from_mode(0o755))
+                    .unwrap();
+            }
+            std::fs::write(
+                dir.path().join("agent-settings.json"),
+                serde_json::to_vec(&json!({
+                    "version": 1,
+                    "settings": {
+                        "defaultTuiAgent": null,
+                        "disabledTuiAgents": [],
+                        "agentCmdOverrides": { "pi": pi_fixture.to_string_lossy() },
+                        "agentDefaultArgs": {},
+                        "agentDefaultEnv": {},
+                        "agentStatusHooksEnabled": true,
+                        "tabAutoGenerateTitle": false,
+                        "promptCacheTimerEnabled": false,
+                        "promptCacheTtlMs": 300000,
+                        "codexSessionSourceHome": ""
+                    }
+                }))
+                .unwrap(),
+            )
+            .unwrap();
             let engine = Engine::open(dir.path()).unwrap();
             let base = current_seq();
             let workspace = invoke(
@@ -356,11 +390,11 @@ mod tests {
             let session = invoke(
                 &engine,
                 "start",
-                "session.start",
+                "harness.start",
                 json!({
                     "workspaceId": workspace["id"],
-                    "command": "/bin/sh",
-                    "args": ["-c", "exec sleep 30"],
+                    "harnessId": "pi",
+                    "permissionMode": "inherit",
                 }),
             );
             let id = session["id"].as_str().unwrap();
@@ -416,26 +450,22 @@ mod tests {
             );
             assert!(redrain["nextSeq"].as_u64().unwrap() >= cursor);
 
-            // PTY output on a waiting session clears the wait and pushes the
-            // cleared state in the same step. Regression cover: the record
-            // used to snapshot before the clear ran, so the push carried the
-            // stale `needs_input` (a no-change no-op) and the cleared state
-            // never pushed at all.
+            // Keystroke echo is PTY output, but it must NOT spend the
+            // hook-authoritative wait: the pi session clears only through
+            // its own resumption hook. The transition-guarded log pushes
+            // nothing for the echo (needs_input → needs_input is a no-op).
             invoke(
                 &engine,
                 "write",
                 "session.write",
                 json!({"sessionId": id, "incarnation": incarnation, "dataBase64": "eA=="}),
             );
-            // The reader thread records the clear asynchronously, so drain
-            // until OUR event lands: a blocking poll can wake early on a
-            // foreign test's event and return without it.
-            let (active_event, cursor) = wait_for_event(&engine, id, cursor);
-            assert_eq!(active_event["agentState"], "working");
 
-            // The resumption signal clears back out of `needs_input`. The
-            // session already works again from the echo above, so this may
-            // legitimately push nothing new — but never a `needs_input`.
+            // The resumption signal clears out of `needs_input` and pushes
+            // the opened turn. Regression cover: the record used to
+            // snapshot before the clear ran, so the push carried the stale
+            // `needs_input` (a no-change no-op) and the cleared state never
+            // pushed at all.
             let cleared = invoke(
                 &engine,
                 "hook-clear",

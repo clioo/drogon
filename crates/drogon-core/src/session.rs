@@ -38,6 +38,10 @@ const STOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const TURN_INACTIVE: u8 = 0;
 const TURN_ACTIVE: u8 = 1;
 const TURN_ENDED: u8 = 2;
+/// Wire spellings of the durable turn fact (`sessions.turn_fact`); `NULL`
+/// means INACTIVE — no known turn.
+pub(crate) const TURN_ACTIVE_WIRE: &str = "active";
+pub(crate) const TURN_ENDED_WIRE: &str = "ended";
 
 pub(crate) struct SessionHandle {
     pub(crate) session_id: String,
@@ -117,13 +121,13 @@ pub(crate) struct SessionHandle {
     /// In-memory turn fact for `explicit_wait_clear` sessions, one of
     /// `TURN_INACTIVE`/`TURN_ACTIVE`/`TURN_ENDED`: opened by resumption
     /// hooks (`clear_hook_event`), closed by wait hooks (`note_hook_event`)
-    /// and concluded by turn-end hooks (`end_hook_event`). Backs
-    /// [`agent_state::HookTurn`] so a hook-reported turn reads `working`
-    /// for its whole duration — never flickering idle during silent
-    /// thinking, never spun up by the user's own echo at an idle prompt
-    /// (#358 fork parity: Orca's row status is hook-driven) — and a
-    /// concluded turn reads `idle` instead of hanging `needs_input`
-    /// (#360 fork parity).
+    /// and concluded by turn-end hooks (`end_hook_event`). Backed by the
+    /// durable `sessions.turn_fact`/`turn_fact_at` columns so a daemon
+    /// restart keeps reporting a hook-reported turn as `working` (with its
+    /// original stamp) instead of hiding it as `unknown` — loss of contact
+    /// never proves exit, and nobody observed the turn concluding.
+    /// [`Self::reset_hook_lifecycle`] drops both copies when the status
+    /// hooks lose their authority.
     turn_fact: AtomicU8,
     /// Daemon-run mode (bot/automation headless launches: `pi -p`,
     /// `claude -p`, `opencode run`, `codex exec`, `agy -p`). Set once by
@@ -190,6 +194,14 @@ impl SessionHandle {
         if self.is_exited() {
             return Ok(());
         }
+        // Whatever the direction, hook authority is re-established only by
+        // the next real hook event: drop any lifecycle fact observed under
+        // the previous policy UNCONDITIONALLY, so nothing deposited in a
+        // disabled window (a Stop that raced the files' neutered state,
+        // for one) can outlive it and hide later activity (round-2
+        // RACE-1/RACE-2). The dropped fact is durable too — see
+        // [`Self::reset_hook_lifecycle`].
+        self.reset_hook_lifecycle();
         let mut saved = self.suspended_hook_files.lock().unwrap();
         if enabled {
             for (path, bytes) in saved.iter() {
@@ -200,13 +212,11 @@ impl SessionHandle {
             }
             saved.clear();
         } else if saved.is_empty() {
-            // The hook lifecycle loses its authority with the files: drop
-            // the turn fact so the session falls back to the activity clock
-            // (the documented `HookTurn::Inactive` policy) instead of
-            // stranding its last hook-reported state forever — a turn
-            // disabled mid-run would otherwise read `working` with no hook
-            // ever able to conclude it.
-            self.turn_fact.store(TURN_INACTIVE, Ordering::Release);
+            // The hook lifecycle loses its authority with the files: the
+            // session falls back to the activity clock (the documented
+            // `HookTurn::Inactive` policy) — a turn disabled mid-run must
+            // never keep reading `working` with no hook ever able to
+            // conclude it.
             let paths = self.hook_cleanup_paths.lock().unwrap().clone();
             for root in paths {
                 let path = match self.harness_id.as_deref() {
@@ -257,8 +267,7 @@ impl SessionHandle {
                     .map_err(|_| error::io_error("Cannot remove managed agent hook"))?;
                 saved.push((path, bytes));
             }
-            self.clear_hook_event();
-            *self.cache_idle_at.lock().unwrap() = None;
+            self.cache_idle_at.lock().unwrap().take();
         }
         Ok(())
     }
@@ -294,6 +303,7 @@ impl SessionHandle {
         let stamp = crate::now_rfc3339();
         *self.needs_input_at.lock().unwrap() = Some(stamp.clone());
         persist_wait_signal(self, Some(&stamp));
+        persist_turn_fact(self, None, None);
     }
 
     /// Explicit turn-start signal from a harness hook's own resumption
@@ -310,7 +320,9 @@ impl SessionHandle {
         persist_wait_signal(self, None);
         // The turn start is the freshness origin for a hook-reported turn
         // whose harness has not emitted output yet.
-        *self.hook_transition_at.lock().unwrap() = Some((Instant::now(), crate::now_rfc3339()));
+        let stamp = (Instant::now(), crate::now_rfc3339());
+        *self.hook_transition_at.lock().unwrap() = Some(stamp.clone());
+        persist_turn_fact(self, Some(TURN_ACTIVE_WIRE), Some(&stamp.1));
     }
 
     /// Turn-end signal (`agent_state`'s `HookSignal::TurnEnd` names:
@@ -327,7 +339,37 @@ impl SessionHandle {
         // idle boundary — including a session with no PTY output at all yet
         // (fresh claude launch), which the client contract requires to
         // carry a non-null `agentStateAt`.
-        *self.hook_transition_at.lock().unwrap() = Some((Instant::now(), crate::now_rfc3339()));
+        let stamp = (Instant::now(), crate::now_rfc3339());
+        *self.hook_transition_at.lock().unwrap() = Some(stamp.clone());
+        persist_turn_fact(self, Some(TURN_ENDED_WIRE), Some(&stamp.1));
+    }
+
+    /// Spends an in-flight hook signal without ever manufacturing a turn
+    /// fact: the wait stamp is dropped, but the turn fact and its
+    /// transition stamp stay exactly as they were. The policy for events
+    /// that arrive while status hooks are globally disabled — the hook
+    /// files are neutered, so no event may open a turn nobody's hooks can
+    /// conclude (that strands `working`); a genuine turn-end still
+    /// concludes via [`Self::end_hook_event`].
+    pub(crate) fn discard_hook_signal(&self) {
+        *self.needs_input_at.lock().unwrap() = None;
+        persist_wait_signal(self, None);
+    }
+
+    /// Drops the whole hook lifecycle without opening a turn: the turn
+    /// fact returns to INACTIVE (the activity-clock fallback), any wait
+    /// signal is discarded, and the transition stamp is cleared — durably
+    /// too, so a restart cannot resurrect a lifecycle the disabled policy
+    /// already dropped. The disable/re-enable policy for status hooks: the
+    /// files lose or regain authority, so the session honestly re-observes
+    /// from the activity clock instead of stranding its last
+    /// hook-reported state (`working` with no activity ever).
+    pub(crate) fn reset_hook_lifecycle(&self) {
+        self.turn_fact.store(TURN_INACTIVE, Ordering::Release);
+        *self.needs_input_at.lock().unwrap() = None;
+        persist_wait_signal(self, None);
+        *self.hook_transition_at.lock().unwrap() = None;
+        persist_turn_fact(self, None, None);
     }
 
     /// Opts this session out of the reader thread's generic activity-based
@@ -980,6 +1022,19 @@ fn persist_wait_signal(handle: &SessionHandle, stamp: Option<&str>) {
     let _ = conn.execute(
         "UPDATE sessions SET needs_input_at = ?2 WHERE id = ?1",
         rusqlite::params![handle.session_id, stamp],
+    );
+}
+
+/// Mirrors the in-memory turn fact into the durable `sessions` row so a
+/// hook-reported turn (and its freshness stamp) survives a daemon restart:
+/// the restored row re-reports `working`/`idle` from the hook's own
+/// authority instead of hiding it as `unknown`. `None` facts park or drop
+/// the lifecycle. Best-effort like [`persist_wait_signal`].
+fn persist_turn_fact(handle: &SessionHandle, fact: Option<&str>, at: Option<&str>) {
+    let conn = handle.db.lock().unwrap();
+    let _ = conn.execute(
+        "UPDATE sessions SET turn_fact = ?2, turn_fact_at = ?3 WHERE id = ?1",
+        rusqlite::params![handle.session_id, fact, at],
     );
 }
 

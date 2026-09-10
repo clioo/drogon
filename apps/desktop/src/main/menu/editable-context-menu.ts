@@ -1,5 +1,4 @@
-// MIT Copyright (c) 2026 Lovecast Inc. Ported from the Orca reference
-// (read-only /Users/carlos/Documents/Drogon-orca):
+// MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
 //   src/main/window/editable-context-menu.ts (buildEditableContextMenuTemplate,
 //     editableContextPasteItem sharing renderer ownership with keyboard and
 //     app-menu paste).

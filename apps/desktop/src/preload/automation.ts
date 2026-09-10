@@ -24,4 +24,10 @@ export const automationBridge: AutomationBridge = {
   runsAll: (input: { page: number; perPage: number; status?: string }) =>
     invoke("runsAll", input as object),
   run: (input: { runId: string }) => invoke("run", input as object),
+  preview: (input: {
+    cron: string;
+    timezone?: string;
+    fromMs?: number;
+    count?: number;
+  }) => invoke("preview", input as object),
 };

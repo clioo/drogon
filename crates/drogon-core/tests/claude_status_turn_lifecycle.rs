@@ -1,6 +1,6 @@
 //! Claude session status must be hook-driven, never keystroke-driven (bug:
 //! typing `wadasdasdda` at an idle Claude prompt flipped the project card to
-//! "working"). The reference (`/Users/carlos/Documents/Drogon-orca`) derives
+//! "working"). The Orca reference derives
 //! the sidebar status purely from harness hooks — `UserPromptSubmit` /
 //! `PreToolUse` / `PostToolUse` mean working, `Stop` means done,
 //! `PermissionRequest` means waiting, `SessionStart` lands an idle boundary —
@@ -52,42 +52,48 @@ fn base64_decode(text: &str) -> Vec<u8> {
         .unwrap()
 }
 
-/// Restores PATH on drop so the fixture harness never leaks into another test.
-struct SavedPath(Option<std::ffi::OsString>);
-
-impl SavedPath {
-    fn capture() -> Self {
-        Self(std::env::var_os("PATH"))
-    }
-}
-
-impl Drop for SavedPath {
-    fn drop(&mut self) {
-        if let Some(path) = self.0.take() {
-            unsafe { std::env::set_var("PATH", path) };
-        } else {
-            unsafe { std::env::remove_var("PATH") };
-        }
-    }
-}
-
-/// Installs a fixture `claude` on PATH that echoes every written byte back —
-/// the TUI-composer behavior whose local echo must never read as harness
-/// activity.
-fn install_echoing_claude_fixture() {
-    let bin = tempfile::tempdir().unwrap();
-    let script = bin.path().join("claude");
+/// Installs the echoing `claude` fixture under the test's own directory and
+/// points the product's `agentCmdOverrides` at its absolute path, so
+/// `harness.start` resolves the fixture through the settings override
+/// without touching process-global PATH at all. The earlier per-test PATH
+/// install/restore raced between parallel tests on ubuntu CI (a restore
+/// wiped another test's fixture mid-launch: not_found "Harness is not
+/// installed on this execution host"), and even a once-only install still
+/// races `set_var` against sibling tests' PATH reads — the override has no
+/// env interaction, so the suite is hermetic under any scheduling.
+/// `hooks_enabled: false` is the launch-time-disabled variant (the file
+/// then carries no managed hook commands and no `--settings` argv).
+fn install_echoing_claude_fixture(dir: &tempfile::TempDir, hooks_enabled: bool) {
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let script = bin.join("claude");
     std::fs::write(&script, "#!/bin/sh\ncat\n").unwrap();
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let mut paths =
-        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect::<Vec<_>>();
-    paths.insert(0, bin.path().to_path_buf());
-    unsafe { std::env::set_var("PATH", std::env::join_paths(&paths).unwrap()) };
-    // The tempdir must outlive the test: forget it (test-local, bounded).
-    std::mem::forget(bin);
+    std::fs::write(
+        dir.path().join("agent-settings.json"),
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "settings": {
+                "defaultTuiAgent": null,
+                "disabledTuiAgents": [],
+                "agentCmdOverrides": {
+                    "claude": script.to_string_lossy(),
+                },
+                "agentDefaultArgs": {},
+                "agentDefaultEnv": {},
+                "agentStatusHooksEnabled": hooks_enabled,
+                "tabAutoGenerateTitle": false,
+                "promptCacheTimerEnabled": false,
+                "promptCacheTtlMs": 300000,
+                "codexSessionSourceHome": ""
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 }
 
 fn register_workspace(engine: &Engine) -> String {
@@ -166,9 +172,8 @@ fn write_and_wait_for_echo(engine: &Engine, session: &Value, text: &str) {
 /// just now" while nothing ran. Keystroke echo must leave the session idle.
 #[test]
 fn typing_at_a_fresh_claude_session_never_reads_working() {
-    let _saved_path = SavedPath::capture();
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -189,9 +194,8 @@ fn typing_at_a_fresh_claude_session_never_reads_working() {
 /// Notification parks it on needs_input, and a resumption clears the wait.
 #[test]
 fn claude_turn_lifecycle_reads_working_only_for_real_turns() {
-    let _saved_path = SavedPath::capture();
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -253,9 +257,8 @@ fn claude_turn_lifecycle_reads_working_only_for_real_turns() {
 /// wait surface.
 #[test]
 fn settings_file_installs_the_full_claude_turn_lifecycle() {
-    let _saved_path = SavedPath::capture();
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -286,7 +289,10 @@ fn settings_file_installs_the_full_claude_turn_lifecycle() {
         let command = entries[0]["hooks"][0]["command"].as_str().unwrap();
         assert!(command.contains("internal hook-event"), "{command}");
         assert!(command.contains(&format!("--event {event}")), "{command}");
-        assert!(command.contains(&format!("--session {session_id}")), "{command}");
+        assert!(
+            command.contains(&format!("--session {session_id}")),
+            "{command}"
+        );
         assert!(
             command.contains(&format!("--incarnation {incarnation}")),
             "{command}"
@@ -301,29 +307,8 @@ fn settings_file_installs_the_full_claude_turn_lifecycle() {
 /// commands.
 #[test]
 fn hooks_disabled_claude_keeps_the_activity_policy() {
-    let _saved_path = SavedPath::capture();
-    install_echoing_claude_fixture();
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("agent-settings.json"),
-        serde_json::to_vec(&json!({
-            "version": 1,
-            "settings": {
-                "defaultTuiAgent": null,
-                "disabledTuiAgents": [],
-                "agentCmdOverrides": {},
-                "agentDefaultArgs": {},
-                "agentDefaultEnv": {},
-                "agentStatusHooksEnabled": false,
-                "tabAutoGenerateTitle": false,
-                "promptCacheTimerEnabled": false,
-                "promptCacheTtlMs": 300000,
-                "codexSessionSourceHome": ""
-            }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
+    install_echoing_claude_fixture(&dir, false);
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine);
     let session = launch_claude(&engine, &workspace_id);
@@ -344,5 +329,213 @@ fn hooks_disabled_claude_keeps_the_activity_policy() {
         listed_state(&engine, session["id"].as_str().unwrap()),
         "working",
         "hook-less sessions keep the activity-clock policy"
+    );
+}
+
+fn err_code(engine: &Engine, method: &str, params: Value) -> String {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let response = engine.dispatch(req(method, &request_id, params));
+    assert!(
+        !response.ok,
+        "expected error for {method}, got {:?}",
+        response.result
+    );
+    response.error.unwrap().code
+}
+
+fn set_status_hooks(engine: &Engine, enabled: bool) {
+    ok(
+        engine,
+        "agent.settings_update",
+        json!({ "updates": { "agentStatusHooksEnabled": enabled } }),
+    );
+}
+
+/// Adversarial F1: disabling status hooks mid-turn must drop the hook
+/// lifecycle wholesale — a turn that was hook-reported `working` falls
+/// back to the activity clock (here: `unknown`, no output ever) instead of
+/// stranding `working` with no hook able to conclude it.
+#[test]
+fn disabling_status_hooks_mid_turn_drops_the_hook_lifecycle() {
+    let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
+    assert_eq!(listed_state(&engine, &session_id), "working");
+
+    set_status_hooks(&engine, false);
+    let state = listed_state(&engine, &session_id);
+    assert_ne!(
+        state, "working",
+        "a disabled lifecycle must never keep reading working"
+    );
+
+    // A late in-flight turn-start while disabled must not reopen it either.
+    hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
+    assert_ne!(
+        listed_state(&engine, &session_id),
+        "working",
+        "hook events while disabled must not manufacture a turn"
+    );
+}
+
+/// Round-2 RACE-1/RACE-2: a Stop that arrives while status hooks are
+/// globally disabled must be SPENT, never concluded — concluding it
+/// durably parked ENDED hook authority over the live session, which hid
+/// later typing as `idle` and survived re-enable against the
+/// re-observation promise. The disabled row is pure activity clock; the
+/// re-enable resets unconditionally, so typing reads `working` again
+/// until the next real hook event re-establishes authority.
+#[test]
+fn stop_while_disabled_is_spent_and_reenable_reobserves() {
+    let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    set_status_hooks(&engine, false);
+    hook_event(&engine, &session_id, &incarnation, "Stop");
+    assert_eq!(
+        listed_state(&engine, &session_id),
+        "unknown",
+        "a spent Stop must deposit no authority: the activity clock owns the row"
+    );
+
+    // RACE-1's exact repro: typing while still disabled follows the
+    // activity clock — the spent Stop must not hide it as idle.
+    write_and_wait_for_echo(&engine, &session, "typed while disabled\n");
+    assert_eq!(listed_state(&engine, &session_id), "working");
+
+    set_status_hooks(&engine, true);
+    write_and_wait_for_echo(&engine, &session, "typed after re-enable\n");
+    assert_eq!(
+        listed_state(&engine, &session_id),
+        "working",
+        "typing after the disabled window must not be hidden as idle"
+    );
+
+    // The next real hook event re-establishes full authority.
+    hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
+    assert_eq!(listed_state(&engine, &session_id), "working");
+    hook_event(&engine, &session_id, &incarnation, "Stop");
+    assert_eq!(listed_state(&engine, &session_id), "idle");
+}
+
+/// Adversarial F3: re-enabling status hooks after a mid-turn disable
+/// forces re-observation — the stranded state does not survive, and the
+/// next real hook event re-establishes authority.
+#[test]
+fn disable_then_reenable_forces_reobservation() {
+    let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
+    assert_eq!(listed_state(&engine, &session_id), "working");
+    set_status_hooks(&engine, false);
+    assert_ne!(listed_state(&engine, &session_id), "working");
+
+    set_status_hooks(&engine, true);
+    assert_ne!(
+        listed_state(&engine, &session_id),
+        "working",
+        "re-enabling must reset the lifecycle, not resurrect the stale turn"
+    );
+
+    // The next real hook event re-establishes the hook authority.
+    hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
+    assert_eq!(
+        listed_state(&engine, &session_id),
+        "working",
+        "after re-enable, real hook events drive the state again"
+    );
+}
+
+/// Adversarial F4: the hook turn fact is durable — a daemon restart
+/// re-reports a turn that was hook-reported `working` as `working` with
+/// its original stamp, instead of hiding it as `unknown`. Loss of contact
+/// never proves exit, and nobody observed the turn concluding.
+#[test]
+fn restart_keeps_a_hook_reported_turn_working() {
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().to_path_buf();
+    install_echoing_claude_fixture(&dir, true);
+    let engine = Engine::open(&data_dir).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+    hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
+    assert_eq!(listed_state(&engine, &session_id), "working");
+    drop(engine);
+
+    let reopened = Engine::open(&data_dir).unwrap();
+    let listed = ok(&reopened, "session.list", json!({}));
+    let row = listed["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == session_id)
+        .expect("session must survive the restart");
+    assert_eq!(
+        row["agentState"], "working",
+        "a hook-reported turn must survive a restart as working"
+    );
+    assert!(
+        row["agentStateAt"]
+            .as_str()
+            .is_some_and(|at| !at.is_empty()),
+        "the restored working state must carry its original stamp"
+    );
+}
+
+/// Adversarial F5: a foreign harness's hook name arriving over the socket
+/// must be refused, never mapped — an injected pi `AgentStart` on an idle
+/// claude session used to manufacture a phantom `working`.
+#[test]
+fn foreign_harness_event_names_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    for foreign in [
+        "AgentStart",
+        "AgentEnd",
+        "SessionIdle",
+        "NewTurn",
+        "ToolApprovalRequested",
+        "SubagentStart",
+        "SessionStart",
+    ] {
+        assert_eq!(
+            err_code(
+                &engine,
+                "session.hook_event",
+                json!({ "sessionId": session_id, "incarnation": incarnation, "event": foreign }),
+            ),
+            "invalid_argument",
+            "foreign event {foreign} must be refused for a claude session"
+        );
+    }
+    assert_eq!(
+        listed_state(&engine, &session_id),
+        "idle",
+        "refused foreign events must not move the row"
     );
 }
