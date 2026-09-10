@@ -2408,3 +2408,29 @@ fn host_list_answers_the_local_host_without_the_daemon() {
     assert!(json_stdout.contains("\"kind\": \"local\""));
     assert!(json_stdout.contains("\"selector\": \"--host local\""));
 }
+
+#[test]
+fn environment_list_is_empty_and_show_rm_answer_typed_not_found() {
+    let dir = temp_data_dir("envlist");
+    // Local pairing-store answers; no daemon is contacted.
+    let output = run_cli(dir.path(), &["environment", "list"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("No saved environments."));
+    let json = run_cli(dir.path(), &["environment", "list", "--json"]);
+    assert_eq!(json.status.code(), Some(0));
+    assert!(stdout(&json).contains("\"environments\": []"));
+
+    let shown = run_cli(
+        dir.path(),
+        &["environment", "show", "--environment", "prod"],
+    );
+    assert_eq!(shown.status.code(), Some(1));
+    assert!(
+        stderr(&shown).contains("not_found") && stderr(&shown).contains("prod"),
+        "stderr: {}",
+        stderr(&shown)
+    );
+    let removed = run_cli(dir.path(), &["environment", "rm", "--environment", "prod"]);
+    assert_eq!(removed.status.code(), Some(1));
+    assert!(stderr(&removed).contains("not_found"));
+}

@@ -10,8 +10,9 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    AutomationAction, BrowserAction, Cli, Command, DiagnosticsAction, HarnessAction, HostAction,
-    InternalAction, ProjectAction, TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
+    AutomationAction, BrowserAction, Cli, Command, DiagnosticsAction, EnvironmentAction,
+    HarnessAction, HostAction, InternalAction, ProjectAction, TerminalAction, WaitFor,
+    WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
@@ -90,6 +91,31 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
             None,
         );
     }
+    // Source `environment` verbs read a local pairing store; the native
+    // runtime has none, so list is empty and show/rm answer typed not_found
+    // without contacting a daemon.
+    if let Command::Environment { action } = &cli.command {
+        let local_error = |selector: &str| CliError::Local {
+            error: drogon_protocol::RpcError::new(
+                "not_found",
+                format!("environment {selector:?} not found"),
+            ),
+            request_id: request_id.clone(),
+        };
+        return match action {
+            EnvironmentAction::List => {
+                let environments = json!({ "environments": [] });
+                let call = CallOk {
+                    request_id,
+                    raw: json!({"ok": true, "result": environments}),
+                    result: environments.clone(),
+                };
+                emit(call, json, || "No saved environments.".to_string(), 0, None)
+            }
+            EnvironmentAction::Show { environment } => Err(local_error(environment)),
+            EnvironmentAction::Rm { environment } => Err(local_error(environment)),
+        };
+    }
     // The retired coordinator verbs never contact the runtime: they report
     // the migration guidance locally even when no daemon is listening. This
     // must run before Client::open, which fails hard on a missing runtime.
@@ -105,6 +131,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
     let client = Client::open(&data_dir, &request_id)?;
 
     match &cli.command {
+        Command::Environment { .. } => unreachable!("handled locally before Client::open"),
         Command::Status => {
             let call = client
                 .call("status", json!({}), &request_id, DEFAULT_TIMEOUT)

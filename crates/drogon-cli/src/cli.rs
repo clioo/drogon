@@ -90,6 +90,11 @@ pub enum Command {
         #[command(subcommand)]
         action: HostAction,
     },
+    /// Paired Orca-server environments (the native runtime pairs none)
+    Environment {
+        #[command(subcommand)]
+        action: EnvironmentAction,
+    },
     /// Workspaces: registered directories that own terminal sessions
     Workspace {
         #[command(subcommand)]
@@ -356,6 +361,39 @@ pub enum InternalAction {
         incarnation: String,
         #[arg(long, value_name = "NAME")]
         event: String,
+    },
+}
+
+/// Source specs/environment.ts: paired Orca-server environments live in a
+/// local pairing store. The native runtime has no pairing store, so the
+/// honest answers are an empty list and typed `not_found` per selector.
+/// `environment add` needs live pairing-code verification against a running
+/// app and is therefore not offered rather than faked.
+#[derive(Subcommand, Debug)]
+pub enum EnvironmentAction {
+    /// List the saved remote Orca runtime environments
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli environment list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    List,
+    /// Show one saved environment
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli environment show --environment <SELECTOR>\nValid flags: --data-dir, --environment, --help, --json, --request-id, --retry-request"
+    )]
+    Show {
+        #[arg(long, value_name = "SELECTOR")]
+        environment: String,
+    },
+    /// Remove one saved environment
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli environment rm --environment <SELECTOR>\nValid flags: --data-dir, --environment, --help, --json, --request-id, --retry-request"
+    )]
+    Rm {
+        #[arg(long, value_name = "SELECTOR")]
+        environment: String,
     },
 }
 
@@ -1378,6 +1416,15 @@ impl Cli {
             Command::AgentContext => {}
             Command::Host { action } => match action {
                 HostAction::List => {}
+            },
+            Command::Environment { action } => match action {
+                EnvironmentAction::List => {}
+                EnvironmentAction::Show { environment } => {
+                    require_nonempty("environment", environment)?;
+                }
+                EnvironmentAction::Rm { environment } => {
+                    require_nonempty("environment", environment)?;
+                }
             },
             Command::Diagnostics { .. } => {}
         }
