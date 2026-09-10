@@ -2779,14 +2779,18 @@ PIEOF\n\
     );
     // Correct owner of TERM evidence is the PRODUCT catalog note above
     // (group-empty after SIGTERM) plus assert_clean_product's zero-
-    // rescue proof: when the product reaps the grandchild first, the
-    // supervisor must observe Gone and stay silent. Demanding a
-    // supervisor SIGTERM here contradicts assert_clean_product and races
-    // the product's own bounded group cleanup (CI proved both orders
-    // occur). A supervisor signal is only correct for an identity
-    // verified alive at resolve time. What this test does require of
-    // the supervisor: verified every observed identity (an ACK exists)
-    // and resolved it gone without signaling.
+    // rescue proof. Precise limits, not overclaims: the product group
+    // probe establishes group absence via killpg — NOT wait/reaping of
+    // a non-child (only the spawning parent can waitpid) — and the
+    // captured CI failure proves the gone-before-resolve order, not
+    // both timing orders. When the product's group is already empty,
+    // the supervisor must observe Gone and stay silent; demanding a
+    // supervisor SIGTERM here contradicts assert_clean_product and
+    // races the product's own bounded group cleanup. A supervisor
+    // signal is only correct for an identity verified alive at resolve
+    // time. What this test does require of the supervisor: verified
+    // every observed identity (an ACK exists) and resolved it gone
+    // without signaling.
     assert!(
         run.cleanup
             .actions
