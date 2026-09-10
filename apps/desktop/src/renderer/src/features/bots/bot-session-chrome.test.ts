@@ -2,11 +2,30 @@ import { describe, expect, it } from "vitest";
 import {
   botHandleLabel,
   botInitials,
+  botSessionState,
   botSessionTitle,
   formatBotSessionStarted,
   formatElapsedClock,
   harnessProviderLabel,
 } from "./bot-session-chrome";
+import type { Session } from "../../../../shared/session-contract";
+
+function session(overrides: Partial<Session> = {}): Session {
+  return {
+    id: "sess-1",
+    workspaceId: "ws-1",
+    hostId: "host-1",
+    incarnation: "inc-1",
+    command: "pi",
+    args: [],
+    cols: 80,
+    rows: 24,
+    verdict: "live",
+    exitCode: null,
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
 
 describe("bot-session-chrome", () => {
   it("labels the harness with its real vendor", () => {
@@ -47,5 +66,21 @@ describe("bot-session-chrome", () => {
     expect(
       formatBotSessionStarted(started, started + 2 * 3_600_000 + 60_000),
     ).toBe("2h ago (02:01:00)");
+  });
+
+  it("reads the real hook-derived agent state while the session is live", () => {
+    expect(botSessionState(session({ agentState: "working" }))).toBe("working");
+    expect(botSessionState(session({ agentState: undefined }))).toBe("unknown");
+  });
+
+  it("reports exited once the daemon confirms it, even with a stale agentState", () => {
+    // A shell-fixture (or any harness with no hook integration) never
+    // emits the agent-state transition a real hook-driven CLI would on
+    // exit, so agentState can lag "working" after Stop -- observed live
+    // against the real app (bug-bot-a836b4ebf8be65505 acceptance probe).
+    // The daemon's own confirmed verdict must always win.
+    expect(
+      botSessionState(session({ verdict: "exited", agentState: "working" })),
+    ).toBe("exited");
   });
 });

@@ -5,8 +5,22 @@
 // here -- every value is derived from data the caller already has (a real
 // Session and/or the identity the dispatched open-session turn echoed),
 // never invented.
-import type { HarnessId } from "../../../../shared/session-contract";
+import type { AgentState, HarnessId, Session } from "../../../../shared/session-contract";
 import { formatRowHarnessLabel } from "../shell/worktree-agent-rows";
+import { agentStateOf } from "../shell/agent-state";
+
+/** The status pill's real state: `session.agentState` (hook-derived
+ *  working/idle/needs_input/unknown) UNLESS the daemon has positively
+ *  confirmed the process exited (`verdict === "exited"`), which always
+ *  wins -- a shell fixture (or any harness with no hook integration) never
+ *  emits the agent-state transition a real hook-driven CLI would on exit,
+ *  so `agentState` can lag behind the daemon's own confirmed verdict. The
+ *  pill must never claim "Working" for a session the daemon already knows
+ *  is dead. */
+export function botSessionState(session: Session): AgentState {
+  if (session.verdict === "exited") return "exited";
+  return agentStateOf(session);
+}
 
 /** Real vendor names for the admitted harness catalog -- factual, static
  *  labels (never per-session data), matching the inspector's "Harness"

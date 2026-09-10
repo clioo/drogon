@@ -12,9 +12,10 @@
 import { Square } from "lucide-react";
 import type { Session } from "../../../../shared/session-contract";
 import { Button } from "../../components/ui/button";
-import { agentIconKind, agentStateLabel, agentStateOf } from "../shell/agent-state";
+import { agentIconKind, agentStateLabel } from "../shell/agent-state";
 import {
   botHandleLabel,
+  botSessionState,
   botSessionTitle,
   type BotSessionMeta,
 } from "./bot-session-chrome";
@@ -44,7 +45,7 @@ export function BotSessionHeader({
   stopping: boolean;
   onOpenBots: () => void;
 }): React.JSX.Element {
-  const state = agentStateOf(session);
+  const state = botSessionState(session);
   const dotKind = agentIconKind(state);
   const handle = botHandleLabel(meta.handle);
   const canStop = session.verdict !== "exited";

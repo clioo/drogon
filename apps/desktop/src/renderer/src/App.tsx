@@ -28,6 +28,7 @@ import { AGENT_CATALOG } from "./features/settings/agent-catalog";
 import type {
   AgentState,
   Harness,
+  HarnessId,
   HarnessLaunchInput,
   Project,
   Result,
@@ -224,6 +225,12 @@ import {
 } from "./daemon-capabilities";
 import { BOTS_PAGE_HOST_TESTID } from "./features/bots";
 import type { BotsPanelProps } from "../../shared/bot-contract";
+import { BotSessionHeader } from "./features/bots/BotSessionHeader";
+import { BotSessionInspector } from "./features/bots/BotSessionInspector";
+import {
+  botSessionTitle,
+  type BotSessionMeta,
+} from "./features/bots/bot-session-chrome";
 import {
   planBrowserRehydrate,
   windowBrowserBridge,
@@ -1031,10 +1038,31 @@ export function App() {
   const pendingBotSessionRef = useRef<{
     workspaceId: string;
     sessionId: string;
+    meta: BotSessionMeta;
   } | null>(null);
   const openBotSessionRef = useRef<
     NonNullable<BotsPanelProps["onOpenSession"]>
   >(() => {});
+  // Bot-scoped chrome (bug-bot-a836b4ebf8be65505): identity/harness/home
+  // facts the dispatched open-session turn echoed, keyed by the real
+  // session id it opened — never invented, never re-derived by guessing.
+  // Liveness/timing (verdict, agentState, createdAt) still comes from the
+  // live `sessions` list; this map is identity only.
+  const [botSessions, setBotSessions] = useState<Map<string, BotSessionMeta>>(
+    () => new Map(),
+  );
+  // Live pid for the currently-focused Bot session, refreshed by the
+  // polling effect below (bot.snapshot's projected `currentSession.processId`).
+  // Keyed by session id so a stale read for a since-switched-away session
+  // can never paint over the pid of whichever Bot session is active now.
+  const [botSessionPid, setBotSessionPid] = useState<{
+    sessionId: string;
+    processId: number | null;
+  } | null>(null);
+  // Live-ticking clock for the inspector's Started row; ticks only while a
+  // Bot session tab is actually focused (effect below), never in the
+  // background.
+  const [botSessionClockMs, setBotSessionClockMs] = useState(() => Date.now());
   // #270: same pattern for the Tasks page's Close/Esc — the registered
   // descriptor (the workspace-scoped mount) needs a stable onClose that
   // resolves to the view-history handler defined further down.
@@ -1995,8 +2023,25 @@ export function App() {
     pendingBotSessionRef.current = {
       workspaceId: input.workspaceId,
       sessionId: input.sessionId,
+      meta: {
+        botId: input.botId,
+        incarnation: input.incarnation,
+        displayName: input.displayName,
+        handle: input.handle,
+        title: input.title,
+        harnessId: input.harness.harnessId as HarnessId,
+        model: input.harness.explicitModel,
+        workspaceId: input.workspaceId,
+        hostId: input.hostId,
+      },
     };
     setSelected(input.workspaceId);
+    // The Bot's own home workspace was just registered natively (or
+    // already existed): `workspaces` will not know about it yet, and the
+    // header/inspector's workspace-path chip needs the real path, not a
+    // guess — same primitive the app already uses for out-of-band registry
+    // moves.
+    void reloadWorkspaces();
     if (route === BOTS_ROUTE_ID) closePageRoute(BOTS_ROUTE_ID);
   };
   // Activates a Bot-opened session the moment the polled list delivers
@@ -2014,8 +2059,87 @@ export function App() {
       setActive(pending.sessionId);
       setActiveBrowserTabId(null);
       setActiveEditorTabId(null);
+      setBotSessions((current) => {
+        const next = new Map(current);
+        next.set(pending.sessionId, pending.meta);
+        return next;
+      });
+      // Bot-scoped tab title ("<Bot name> · <Harness>"), through the SAME
+      // custom-title store a manual rename uses — a later manual rename
+      // still wins (commitTabTitle overwrites in place), same as any other
+      // tab.
+      commitTabTitle(
+        pending.sessionId,
+        botSessionTitle(pending.meta.displayName, pending.meta.harnessId),
+      );
     }
   }, [sessions]);
+  // Bot session inspector (bug-bot-a836b4ebf8be65505): identity is known
+  // synchronously from `botSessions` (recorded above), but the pid is a
+  // live daemon-side fact that has to be fetched — `bot.snapshot`'s own
+  // projection, polled only while a Bot session tab is actually focused.
+  // The `sessionId` guard on the state write means a stale in-flight read
+  // for a since-switched-away session can never paint over the currently
+  // focused one's pid.
+  const activeBotMeta = terminal ? (botSessions.get(terminal.id) ?? null) : null;
+  useEffect(() => {
+    if (!activeBotMeta || !status?.hostId || !terminal) {
+      setBotSessionPid(null);
+      return;
+    }
+    const sessionId = terminal.id;
+    const hostId = status.hostId;
+    let cancelled = false;
+    const poll = async () => {
+      const result = await window.drogon.botSnapshot({
+        hostId,
+        workspaceId: "",
+        locale: settings.get("locale"),
+      });
+      if (cancelled || !result.ok) return;
+      const bot = result.result.bots.find(
+        (candidate) => candidate.id === activeBotMeta.botId,
+      );
+      const pid =
+        bot?.currentSession?.sessionId === sessionId
+          ? (bot.currentSession.processId ?? null)
+          : null;
+      setBotSessionPid({ sessionId, processId: pid });
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeBotMeta, status?.hostId, terminal?.id]);
+  // Live-ticking clock for the inspector's Started row — only while a Bot
+  // session is actually focused, never a background timer.
+  useEffect(() => {
+    if (!activeBotMeta) return;
+    const timer = window.setInterval(() => setBotSessionClockMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeBotMeta]);
+  const [stoppingBotSession, setStoppingBotSession] = useState(false);
+  // Bot session Stop (bug-bot-a836b4ebf8be65505's working red Stop
+  // button): the SAME generic `session.stop` every other session uses —
+  // real termination, not a UI-only dismissal. `updateSessionProjection`
+  // folds the returned verdict into `sessions` the same way the terminal
+  // split host's own `onSession` callback already does.
+  const stopActiveBotSession = async () => {
+    if (!terminal) return;
+    setStoppingBotSession(true);
+    try {
+      const result = await window.drogon.stop({
+        sessionId: terminal.id,
+        incarnation: terminal.incarnation,
+      });
+      if (result.ok)
+        setSessions((items) => updateSessionProjection(items, result.result));
+    } finally {
+      setStoppingBotSession(false);
+    }
+  };
   tasksCloseRef.current = () => closePageRoute(TASKS_ROUTE_ID);
   automationsCloseRef.current = () => closePageRoute(AUTOMATIONS_ROUTE_ID);
   const goForwardViewHistory = () => {
@@ -4122,6 +4246,19 @@ export function App() {
                 onOpenAgentSettings={() => openSettings("agents")}
                 onNewMarkdown={() => void createNewMarkdownTab()}
               />
+              {activeBotMeta && terminal && !activeBrowserTab && !activeEditorTab ? (
+                <BotSessionHeader
+                  meta={activeBotMeta}
+                  session={terminal}
+                  workspacePath={
+                    workspaces.find((item) => item.id === activeBotMeta.workspaceId)
+                      ?.path ?? null
+                  }
+                  onStop={() => void stopActiveBotSession()}
+                  stopping={stoppingBotSession}
+                  onOpenBots={() => setRoute(BOTS_ROUTE_ID)}
+                />
+              ) : null}
               <div
                 id="active-session-panel"
                 role="tabpanel"
@@ -4553,7 +4690,25 @@ export function App() {
                     tabIndex={-1}
                     className="right-sidebar-panel"
                   >
-                    <SessionDetailsPanel terminal={terminal ?? null} />
+                    {activeBotMeta && terminal ? (
+                      <BotSessionInspector
+                        meta={activeBotMeta}
+                        session={terminal}
+                        workspacePath={
+                          workspaces.find(
+                            (item) => item.id === activeBotMeta.workspaceId,
+                          )?.path ?? null
+                        }
+                        processId={
+                          botSessionPid?.sessionId === terminal.id
+                            ? botSessionPid.processId
+                            : null
+                        }
+                        nowMs={botSessionClockMs}
+                      />
+                    ) : (
+                      <SessionDetailsPanel terminal={terminal ?? null} />
+                    )}
                   </section>
                 ),
               }}
