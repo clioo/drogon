@@ -145,8 +145,30 @@ impl Engine {
     pub(super) fn do_harness_start(&self, params: &Value) -> Result<Value, RpcError> {
         let _workspace_admission = self.workspace_lifecycle_gate.read().unwrap();
         let workspace_id = require_str(params, "workspaceId")?;
-        let request: HarnessLaunchRequest = serde_json::from_value(params.clone())
+        let mut request: HarnessLaunchRequest = serde_json::from_value(params.clone())
             .map_err(|_| error::invalid_argument("Invalid harness launch preferences"))?;
+        // Resume degrade (Defect 2 safety): a reopen asks the harness to
+        // continue its most recent conversation in this session's cwd. When
+        // the harness's own store positively holds no conversation there --
+        // a Bot home provisioned moments ago, or one whose earlier sessions
+        // never persisted a transcript -- `claude --continue` refuses to
+        // start and exits instead of opening a fresh interactive session.
+        // Degrade to a normal start rather than boot nothing; an unmodeled
+        // harness layout returns `None` and keeps the caller's request.
+        if request.resume && !request.headless {
+            let cwd = {
+                let conn = self.db.lock().unwrap();
+                crate::workspace::get_path(&conn, workspace_id)?
+            };
+            if drogon_harness::resumable_conversation_exists(
+                request.harness_id,
+                std::path::Path::new(&cwd),
+                None,
+            ) == Some(false)
+            {
+                request.resume = false;
+            }
+        }
         // C01 consumer (C01-QA-1): the explicit selection is validated
         // with the real selection vocabulary before any planning. No
         // Engine-owned catalog exists yet (held lib.rs seam), so this

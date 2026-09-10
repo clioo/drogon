@@ -237,6 +237,12 @@ describe("ChatsList Bot sessions", () => {
     const image = avatar.querySelector("img");
     expect(image).not.toBeNull();
     expect(image!.getAttribute("src")).toContain("arya");
+    // P3: the owner asked for a slightly larger avatar (16px -> 20px) so the
+    // character reads at a glance. The row height stays h-6.
+    expect(avatar.className).toContain("size-5");
+    expect(screen.getByRole("button", { name: "Arya Stark · Claude" }).className).toContain(
+      "h-6",
+    );
     // The harness stays identifiable by its suffix even with the avatar in
     // the row.
     expect(screen.getByText(/· Claude/)).toBeTruthy();

@@ -105,6 +105,15 @@ fn write_pi_fixture_staying_alive(bin: &std::path::Path) {
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// The same staying-alive script under the `claude` name, so a test can drive
+/// the Claude Code resume path (whose on-disk transcript store the daemon now
+/// inspects) without a real installed Claude Code.
+fn write_claude_fixture_staying_alive(bin: &std::path::Path) {
+    write_pi_fixture_staying_alive(bin);
+    let pi = bin.join("pi");
+    std::fs::copy(&pi, bin.join("claude")).unwrap();
+}
+
 fn base64_decode(text: &str) -> Vec<u8> {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD
@@ -223,6 +232,13 @@ impl Fixture {
     }
 
     fn open_session_params(&self) -> Value {
+        self.open_session_params_for("pi")
+    }
+
+    /// Same open-session shape for a specific harness, so the resume-degrade
+    /// tests can exercise the Claude Code store without changing the rest of
+    /// the fixture's Pi-based coverage.
+    fn open_session_params_for(&self, harness: &str) -> Value {
         // task_e7c183ebc637: the Open Session dispatch carries NO prompt.
         // `interactive: true` without a prompt is the whole contract.
         json!({
@@ -230,7 +246,7 @@ impl Fixture {
             "hostId": self.host,
             "botId": "bot-1",
             "interactive": true,
-            "harness": { "harnessId": "pi" },
+            "harness": { "harnessId": harness },
         })
     }
 
@@ -623,7 +639,10 @@ fn open_session_materializes_the_identity_files_the_harness_reads() {
         &fx.engine,
         &session_id,
         &incarnation,
-        |text| text.contains("---CLAUDE---"),
+        // Wait for the CLAUDE.md CONTENT, not the marker that precedes
+        // `cat CLAUDE.md`: stopping at the marker raced the `cat` output and
+        // flaked under a loaded workspace test run.
+        |text| text.contains("Your identity, role, standing instructions and memories"),
         Duration::from_secs(20),
     );
     assert!(
@@ -836,6 +855,158 @@ fn reopened_bot_session_resumes_the_harness_conversation() {
         &fx.engine,
         "session.stop",
         "req-stop-2",
+        json!({"sessionId": second_id, "incarnation": second_inc}),
+    );
+}
+
+/// The resume-degrade safety: a reopen asks `claude` to continue its most
+/// recent conversation in the Bot home, but when the Bot's Claude Code store
+/// holds NO transcript for that directory the real CLI refuses to start and
+/// exits. The daemon must degrade to a normal start so the session still
+/// boots. The fixture is the proof: it prints every argv entry, so
+/// `ARG:--continue` present/absent is exactly the launch the daemon built.
+///
+/// This FAILS on unmodified main (the resume flag was passed unconditionally)
+/// and passes once the harness's own store decides.
+#[test]
+fn resume_degrades_to_a_normal_start_when_the_harness_has_no_conversation() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let _saved_claude_dir = SavedEnv::capture("CLAUDE_CONFIG_DIR");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_claude_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+    // An empty Claude Code config root: no `projects/<home>` transcript.
+    let claude_root = tempfile::tempdir().unwrap();
+    unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", claude_root.path()) };
+
+    let mut params = fx.open_session_params_for("claude");
+    params["resume"] = json!(true);
+    let opened = ok(&fx.engine, "bot.run", "req-open-degrade", params);
+    assert_eq!(opened["outcome"], "dispatched", "{opened:?}");
+    let session_id = opened["session"]["sessionId"].as_str().unwrap().to_string();
+    let incarnation = opened["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (output, verdict) = read_until(
+        &fx.engine,
+        &session_id,
+        &incarnation,
+        |text| text.contains("CHILD_SESSION="),
+        Duration::from_secs(20),
+    );
+    assert_eq!(
+        verdict, "live",
+        "the session must boot fresh instead of exiting on a resume with \
+         nothing to resume: {output:?}"
+    );
+    assert!(
+        output.contains("CWD="),
+        "the harness must actually have started: {output:?}"
+    );
+    assert!(
+        !output.contains("ARG:--continue"),
+        "with no transcript in the harness's store the continue flag must be \
+         dropped, never passed to a CLI that would refuse to start: {output:?}"
+    );
+
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-degrade",
+        json!({"sessionId": session_id, "incarnation": incarnation}),
+    );
+}
+
+/// The other half: when the harness's store DOES hold a transcript for the
+/// Bot home, the requested resume is honored -- the degrade must not throw
+/// away a real conversation.
+#[test]
+fn resume_is_kept_when_the_harness_conversation_exists() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let _saved_claude_dir = SavedEnv::capture("CLAUDE_CONFIG_DIR");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_claude_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+    let claude_root = tempfile::tempdir().unwrap();
+    unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", claude_root.path()) };
+
+    // Learn the Bot's real home from a first (fresh) session, then plant the
+    // transcript the CLI would have written there.
+    let first = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-keep-1",
+        fx.open_session_params_for("claude"),
+    );
+    let first_id = first["session"]["sessionId"].as_str().unwrap().to_string();
+    let first_inc = first["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (first_output, _) = read_until(
+        &fx.engine,
+        &first_id,
+        &first_inc,
+        |text| text.contains("CWD="),
+        Duration::from_secs(20),
+    );
+    let home = first_output
+        .lines()
+        .find_map(|line| line.strip_prefix("CWD="))
+        .expect("the fixture prints its cwd")
+        .trim()
+        .to_string();
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-keep-1",
+        json!({"sessionId": first_id, "incarnation": first_inc}),
+    );
+
+    let project =
+        claude_root
+            .path()
+            .join("projects")
+            .join(drogon_harness::claude_project_dir_name(
+                std::path::Path::new(&home),
+            ));
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("11111111-2222-3333-4444-555555555555.jsonl"),
+        "{}\n",
+    )
+    .unwrap();
+
+    let mut params = fx.open_session_params_for("claude");
+    params["resume"] = json!(true);
+    let second = ok(&fx.engine, "bot.run", "req-open-keep-2", params);
+    let second_id = second["session"]["sessionId"].as_str().unwrap().to_string();
+    let second_inc = second["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (second_output, verdict) = read_until(
+        &fx.engine,
+        &second_id,
+        &second_inc,
+        |text| text.contains("CHILD_SESSION="),
+        Duration::from_secs(20),
+    );
+    assert_eq!(verdict, "live", "{second_output:?}");
+    assert!(
+        second_output.contains("ARG:--continue"),
+        "a real transcript in the store must keep the requested resume: {second_output:?}"
+    );
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-keep-2",
         json!({"sessionId": second_id, "incarnation": second_inc}),
     );
 }

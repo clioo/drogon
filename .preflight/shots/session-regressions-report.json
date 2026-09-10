@@ -1,0 +1,47 @@
+{
+  "kind": "bot-session-restart-cdp",
+  "output": "/Users/carlos/orca/workspaces/Drogon/drogon-session-regressions/.preflight/acceptance/bot-session-restart-1789082830711",
+  "checks": [
+    "bot-created-from-the-real-page",
+    "p0-first-open-boots-live-harness",
+    "p0-session-accepts-input",
+    "p1-stop-exits-the-real-process",
+    "p2-text-paste-through-the-real-chord",
+    "p2-image-paste-delivers-ctrl-v",
+    "p3-chats-avatar-is-larger",
+    "no-horizontal-overflow-light-1440",
+    "no-horizontal-overflow-light-1100",
+    "no-horizontal-overflow-light-900",
+    "no-horizontal-overflow-light-760",
+    "no-horizontal-overflow-dark-1440",
+    "no-horizontal-overflow-dark-1100",
+    "no-horizontal-overflow-dark-900",
+    "no-horizontal-overflow-dark-760",
+    "relaunch-teardown-clean",
+    "p0-session-boots-after-app-restart",
+    "p1-stop-works-after-restart"
+  ],
+  "screenshots": [
+    "chats-light-1440.png",
+    "chats-light-1100.png",
+    "chats-light-900.png",
+    "chats-light-760.png",
+    "chats-dark-1440.png",
+    "chats-dark-1100.png",
+    "chats-dark-900.png",
+    "chats-dark-760.png",
+    "after-restart-bot-session-boots.png"
+  ],
+  "processes": {
+    "desktop": "exited",
+    "daemon": "exited",
+    "survivors": []
+  },
+  "firstSession": "c9d8d80c-0012-48f5-8ff0-279c9f3d9978",
+  "imageClipboardWrite": "written",
+  "clipboardTypes": [
+    "image/png"
+  ],
+  "recoveredVerdict": "unverifiable",
+  "status": "PASSED"
+}
