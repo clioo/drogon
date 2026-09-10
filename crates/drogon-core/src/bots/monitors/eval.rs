@@ -94,7 +94,22 @@ pub fn evaluate_bytes(
             observed_at_ms,
         );
     }
-    let bound = record.rule.local_file().max_bytes as usize;
+    let Some(file_rule) = record.rule.local_file() else {
+        // The file evaluator is only defined for `local_file_digest.v1`.
+        // Other kinds are admitted (P1) but their execution arrives with the
+        // bounded runner (P2); refusing here is honest, never a no-change.
+        return MonitorCheckResult::error(
+            &record.id,
+            record.version,
+            MonitorErrorKind::Malformed,
+            format!(
+                "rule kind {} has no file evaluator in this build",
+                record.rule.kind_str()
+            ),
+            observed_at_ms,
+        );
+    };
+    let bound = file_rule.max_bytes as usize;
     if file_bytes.len() > bound {
         return MonitorCheckResult::error(
             &record.id,
@@ -217,5 +232,61 @@ mod tests {
         assert!(resolve_scoped_path("/proj", "notes/a.md").is_ok());
         assert!(resolve_scoped_path("/proj", "../etc/passwd").is_err());
         assert!(resolve_scoped_path("/proj", "/abs").is_err());
+    }
+
+    #[test]
+    fn non_file_kind_is_an_honest_error_not_a_no_change() {
+        let rule = MonitorRule::ScriptCommand(super::super::rule::ScriptRule {
+            host_id: "h".to_string(),
+            project_id: "p".to_string(),
+            script_path: "scripts/watch.sh".to_string(),
+            script_hash: "ab".repeat(32),
+            interpreter: super::super::rule::ScriptInterpreter::GhApi,
+            argv: vec!["repos/clioo/drogon/pulls".to_string()],
+            timeout_ms: 30_000,
+            max_output_bytes: 65_536,
+            secret_refs: vec![],
+        });
+        let hash = rule.approval_hash();
+        let rec = new_monitor(
+            "mon-script".into(),
+            Some("bot-1".into()),
+            rule,
+            MonitorTrigger::Manual,
+            hash,
+            1.0,
+        )
+        .unwrap();
+        let result = evaluate_bytes(&rec, b"anything", 5.0);
+        assert!(result.is_error());
+        assert!(result.cursor().is_none());
+    }
+
+    #[test]
+    fn re_approval_after_an_edit_re_keys_event_identity() {
+        // The event id mixes the APPROVED rule hash, so an observation after
+        // an edit can never dedupe against a pre-edit event even when the
+        // bytes are identical.
+        let before = record(None);
+        let first = evaluate_bytes(&before, b"same bytes", 10.0);
+        let first_id = first.event_id().unwrap().to_string();
+
+        let edited = super::super::record::staged_rule_edit(
+            before,
+            MonitorRule::LocalFileDigest(LocalFileRule {
+                host_id: "h".to_string(),
+                project_id: "p".to_string(),
+                resource: "notes/other.md".to_string(),
+                max_bytes: 1024,
+            }),
+            20.0,
+        )
+        .unwrap();
+        assert!(!edited.is_approved(), "an edit re-parks the monitor");
+        let re_approved = super::super::record::approve_rule(edited, 30.0);
+        assert!(re_approved.is_approved());
+        let second = evaluate_bytes(&re_approved, b"same bytes", 40.0);
+        let second_id = second.event_id().unwrap().to_string();
+        assert_ne!(first_id, second_id, "post-edit events re-key");
     }
 }

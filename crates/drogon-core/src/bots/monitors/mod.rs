@@ -1,12 +1,15 @@
 //! C10 bots monitors: bounded deterministic checks with durable change events.
 //!
-//! ## Frozen rule set (checkpoint 1)
+//! ## Rule set (schema v2)
 //!
-//! Exactly one rule type exists: [`rule::RULE_KIND_LOCAL_FILE_DIGEST`] — an
-//! approved scoped local-file content digest with bounded bytes and an
-//! explicit `(host_id, project_id, resource)` scope. No shell, no
-//! interpreter, no network, no generic plugin or supervisor. New rule
-//! types require a new checkpoint and a schema version bump.
+//! `local_file_digest.v1` is the v1 file-content digest. v2 additively
+//! admits `script_command.v1` (hash-pinned script file, allowlisted
+//! interpreter, structured argv, secret references) and `http_poll.v1`
+//! (GET-only read-only URL poll by URL hash). Every approval-relevant
+//! field is a rule field, so the approval hash covers all kinds by
+//! construction; the v1 canonical bytes are frozen, so already-approved
+//! records stay approved across the bump. No shell, no free-string
+//! interpreter, no caller-supplied cwd, no HTTP method.
 //!
 //! ## Versioned result semantics
 //!
@@ -84,6 +87,12 @@ pub use eval::{cursor_for_digest, digest_bytes, evaluate_bytes, event_id_for, re
 pub use policy::MonitorInferencePolicy;
 pub use record::{MonitorRecord, MonitorTrigger, approve_rule, new_monitor, staged_rule_edit};
 pub use result::{MonitorCheckResult, MonitorErrorKind, MonitorOutcome, RESULT_SCHEMA_VERSION};
-pub use rule::{MAX_FILE_BYTES, MonitorRule, RULE_KIND_LOCAL_FILE_DIGEST, RULE_SCHEMA_VERSION};
+pub use rule::{
+    DEFAULT_HTTP_BODY_BYTES, DEFAULT_HTTP_TIMEOUT_MS, DEFAULT_SCRIPT_OUTPUT_BYTES,
+    DEFAULT_SCRIPT_TIMEOUT_MS, HttpCursorSpec, HttpPollRule, LocalFileRule, MAX_FILE_BYTES,
+    MAX_SCRIPT_ARG_BYTES, MAX_SCRIPT_ARGV_ARGS, MonitorRule, RULE_KIND_HTTP_POLL,
+    RULE_KIND_LOCAL_FILE_DIGEST, RULE_KIND_SCRIPT_COMMAND, RULE_SCHEMA_VERSION, ScriptInterpreter,
+    ScriptRule, validate_rule, validate_secret_ref,
+};
 pub use storage::{CommitTxError, commit_advance_in_tx};
 pub use storage::{DeliveryState, StoredCheck};

@@ -6,6 +6,7 @@ import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import {
+  monitorActionsEnabled,
   monitorOutcomeLabel,
   monitorStatusLabel,
   visibleMonitorChecks,
@@ -59,12 +60,13 @@ export function MonitorCard({
   onRunCheck: () => void;
   onDelete: () => void;
 }) {
+  const supported = monitorActionsEnabled(monitor);
   return (
     <Card data-testid={`monitor-${monitor.id}`}>
       <CardHeader className="border-b">
         <div className="flex items-start justify-between gap-3">
           <CardTitle className="text-sm">
-            {monitor.resource}
+            {supported ? monitor.resource : monitor.ruleKind}
             <span className="ml-2 font-normal text-muted-foreground">
               v{monitor.version}
             </span>
@@ -73,11 +75,17 @@ export function MonitorCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4 pt-4">
+        {!supported ? (
+          <p className="text-xs text-muted-foreground" role="status">
+            Unsupported rule kind — this build cannot approve or run it. Update
+            Drogon to manage this monitor.
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            disabled={busy}
+            disabled={busy || !supported}
             data-testid={`monitor-run-${monitor.id}`}
             onClick={onRunCheck}
           >
@@ -86,7 +94,7 @@ export function MonitorCard({
           <Button
             variant="outline"
             size="sm"
-            disabled={busy}
+            disabled={busy || !supported}
             data-testid={`monitor-toggle-${monitor.id}`}
             onClick={onToggleEnabled}
           >

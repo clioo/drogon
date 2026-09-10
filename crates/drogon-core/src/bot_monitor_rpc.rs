@@ -362,10 +362,11 @@ pub(crate) fn approve_monitor_in_tx(
         return Err(not_found(format!("monitor {monitor_id} not found")));
     }
     // The approval pins this rule text: refuse to arm a monitor whose rule
-    // no longer watches this bot's own tree.
+    // no longer watches this bot's own project. Scope is common to every
+    // kind, so match on the enum rather than assuming the file variant.
     let project_id = workspace_id.clone();
-    let rule = record.rule.local_file();
-    if rule.host_id != derived_host_id || rule.project_id != project_id {
+    let (rule_host_id, rule_project_id) = record.rule.scope();
+    if rule_host_id != derived_host_id || rule_project_id != project_id {
         return Err(invalid_argument(
             "monitor no longer watches this bot's project; re-create it instead of approving",
         ));
@@ -395,12 +396,12 @@ fn monitor_list_in_conn(
     let items: Vec<Value> = monitors
         .iter()
         .map(|record| {
-            let rule = record.rule.local_file();
-            json!({
+            let (_, project_id) = record.rule.scope();
+            let mut view = json!({
                 "monitorId": record.id,
                 "version": record.version,
-                "resource": rule.resource,
-                "projectId": rule.project_id,
+                "ruleKind": record.rule.kind_str(),
+                "projectId": project_id,
                 "enabled": record.enabled,
                 "approved": record.is_approved(),
                 "responsibilityId": match &record.inference_policy {
@@ -418,7 +419,15 @@ fn monitor_list_in_conn(
                     "used": used,
                     "max": crate::bots::delegation::MAX_DELEGATIONS_PER_BOT_PER_DAY,
                 },
-            })
+            });
+            if let (Some(view), Some(rule_fields)) =
+                (view.as_object_mut(), record.rule.summary_json().as_object())
+            {
+                for (key, value) in rule_fields {
+                    view.insert(key.clone(), value.clone());
+                }
+            }
+            view
         })
         .collect();
     Ok(json!({ "monitors": items }))

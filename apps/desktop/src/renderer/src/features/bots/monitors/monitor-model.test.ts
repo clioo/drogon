@@ -2,8 +2,12 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  MONITOR_RULE_KIND_HTTP_POLL,
+  MONITOR_RULE_KIND_SCRIPT,
   emptyMonitorForm,
   isMonitorFormReady,
+  monitorActionsEnabled,
+  monitorRuleKindSupported,
   monitorStatusLabel,
   validateMonitorCron,
   validateMonitorResource,
@@ -97,5 +101,22 @@ describe("monitor-model", () => {
       2,
     );
     expect(visible.map((c) => c.id)).toEqual(["b", "c"]);
+  });
+
+  it("fails closed on an unknown rule kind", () => {
+    const unknown = record({ ruleKind: "future_rule_kind.v9", approved: false });
+    expect(monitorRuleKindSupported(unknown.ruleKind)).toBe(false);
+    expect(monitorActionsEnabled(unknown)).toBe(false);
+    // Approval must never be implied by a kind this UI cannot describe.
+    expect(monitorStatusLabel(unknown)).toBe("Unsupported rule kind");
+  });
+
+  it("keeps the v2 script/http kinds fail-closed until the approval UI ships", () => {
+    for (const ruleKind of [MONITOR_RULE_KIND_SCRIPT, MONITOR_RULE_KIND_HTTP_POLL]) {
+      const v2 = record({ ruleKind });
+      expect(monitorRuleKindSupported(v2.ruleKind)).toBe(false);
+      expect(monitorActionsEnabled(v2)).toBe(false);
+      expect(monitorStatusLabel(v2)).toBe("Unsupported rule kind");
+    }
   });
 });

@@ -20,8 +20,12 @@ use super::rule::{MonitorRule, validate_rule};
 pub const MAX_ID_BYTES: usize = 256;
 /// Longest admitted trigger/cron expression in bytes.
 pub const MAX_TRIGGER_BYTES: usize = 256;
-/// How many secret references a single monitor may carry.
-pub const MAX_SECRET_REFS: usize = 16;
+/// How many secret references a single monitor may carry (re-export of the
+/// rule-level bound so callers keep one source of truth).
+pub use super::rule::MAX_SECRET_REFS;
+/// Bare-name secret-reference validator, re-exported at the record path so
+/// the secret-grant surface (P0) and the record share one implementation.
+pub(crate) use super::rule::validate_secret_ref;
 
 /// How this monitor fires. The existing automation scheduler owns actual
 /// firing (C08); this is only the monitor's declared intent.
@@ -114,25 +118,6 @@ fn is_bad_id(value: &str, field: &str) -> Option<String> {
     None
 }
 
-pub(crate) fn validate_secret_ref(value: &str) -> Result<(), String> {
-    if value.is_empty() || value.len() > 128 {
-        return Err("secret reference must be 1..=128 bytes".to_string());
-    }
-    if value.bytes().any(|b| b == 0 || b.is_ascii_control()) {
-        return Err("secret reference must not contain NUL or control characters".to_string());
-    }
-    if value.contains('=') || value.contains(':') || value.contains('\n') {
-        return Err("secret reference must be a bare name, never a KEY=value pair".to_string());
-    }
-    if !value
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.')
-    {
-        return Err("secret reference must match [A-Za-z0-9_.-]+".to_string());
-    }
-    Ok(())
-}
-
 impl MonitorRecord {
     /// Validate every bound without touching storage, FS, or network.
     pub fn validate(&self) -> Result<(), String> {
@@ -148,22 +133,36 @@ impl MonitorRecord {
             return Err("version must start at 1".to_string());
         }
         validate_rule(&self.rule)?;
-        // v1 freeze: no interpreter, no argv, no secrets — the digest rule
-        // needs none of them, and anything else is arbitrary execution.
-        if self.interpreter.is_some() {
-            return Err("interpreter is not admitted for local_file_digest.v1".to_string());
+        // Kind-consistent mirror: interpreter/argv/secretRefs must equal
+        // what the rule kind derives. The rule is the approval authority;
+        // these record-level fields are a denormalized mirror that can
+        // never diverge into a second, unhashed authority. The file kind
+        // derives all three absent (v1 freeze preserved verbatim); the
+        // script kind derives an allowlisted interpreter + argv + refs;
+        // the http kind derives refs only.
+        let (mirror_interpreter, mirror_argv, mirror_secret_refs) = self.rule.record_mirror();
+        if self.interpreter != mirror_interpreter {
+            return Err(format!(
+                "interpreter is not consistent with rule kind {}",
+                self.rule.kind_str()
+            ));
         }
-        if !self.argv.is_empty() {
-            return Err("argv is not admitted for local_file_digest.v1".to_string());
+        if self.argv != mirror_argv {
+            return Err(format!(
+                "argv is not consistent with rule kind {}",
+                self.rule.kind_str()
+            ));
         }
-        if self.secret_refs.len() > MAX_SECRET_REFS {
-            return Err(format!("at most {MAX_SECRET_REFS} secret references"));
+        if self.secret_refs != mirror_secret_refs {
+            return Err(format!(
+                "secret references are not consistent with rule kind {}",
+                self.rule.kind_str()
+            ));
         }
+        // Defense in depth: re-validate the mirror's ref shapes so a
+        // hand-edited payload can never smuggle a `KEY=value` past validate.
         for secret_ref in &self.secret_refs {
             validate_secret_ref(secret_ref)?;
-        }
-        if !self.secret_refs.is_empty() {
-            return Err("secret references are not admitted for local_file_digest.v1".to_string());
         }
         self.inference_policy.validate()?;
         self.trigger.validate()?;
@@ -206,14 +205,15 @@ pub fn new_monitor(
     approved_rule_hash: String,
     created_at_ms: f64,
 ) -> Result<MonitorRecord, String> {
+    let (interpreter, argv, secret_refs) = rule.record_mirror();
     let record = MonitorRecord {
         id,
         bot_id,
         version: 1,
         rule,
-        interpreter: None,
-        argv: Vec::new(),
-        secret_refs: Vec::new(),
+        interpreter,
+        argv,
+        secret_refs,
         trigger,
         cursor: None,
         enabled: true,
@@ -244,7 +244,11 @@ pub fn staged_rule_edit(
     updated_at_ms: f64,
 ) -> Result<MonitorRecord, String> {
     validate_rule(&new_rule)?;
+    let (interpreter, argv, secret_refs) = new_rule.record_mirror();
     record.rule = new_rule;
+    record.interpreter = interpreter;
+    record.argv = argv;
+    record.secret_refs = secret_refs;
     record.version = record.version.saturating_add(1).max(1);
     record.updated_at_ms = updated_at_ms;
     record.validate_shape_after_edit()?;
@@ -269,14 +273,15 @@ pub fn new_unapproved_monitor(
     trigger: MonitorTrigger,
     created_at_ms: f64,
 ) -> Result<MonitorRecord, String> {
+    let (interpreter, argv, secret_refs) = rule.record_mirror();
     let record = MonitorRecord {
         id,
         bot_id,
         version: 1,
         rule,
-        interpreter: None,
-        argv: Vec::new(),
-        secret_refs: Vec::new(),
+        interpreter,
+        argv,
+        secret_refs,
         trigger,
         cursor: None,
         enabled: true,
@@ -336,6 +341,18 @@ impl EditShape for MonitorRecord {
             return Err(reason);
         }
         validate_rule(&self.rule)?;
+        // An edit re-derives the mirror in `staged_rule_edit`; refuse any
+        // record whose mirror still disagrees with its rule.
+        let (mirror_interpreter, mirror_argv, mirror_secret_refs) = self.rule.record_mirror();
+        if self.interpreter != mirror_interpreter
+            || self.argv != mirror_argv
+            || self.secret_refs != mirror_secret_refs
+        {
+            return Err(format!(
+                "interpreter/argv/secretRefs are not consistent with rule kind {}",
+                self.rule.kind_str()
+            ));
+        }
         self.trigger.validate()?;
         if self.approved_rule_hash.is_empty() {
             return Err("approvedRuleHash must not be empty".to_string());

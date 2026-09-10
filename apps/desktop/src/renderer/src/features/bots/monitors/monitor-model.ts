@@ -4,9 +4,23 @@
  * changes default to a local notification/event. */
 
 export const MONITOR_RULE_KIND = "local_file_digest.v1" as const;
+export const MONITOR_RULE_KIND_SCRIPT = "script_command.v1" as const;
+export const MONITOR_RULE_KIND_HTTP_POLL = "http_poll.v1" as const;
 export const MONITOR_RESULT_SCHEMA_VERSION = 1;
 export const MAX_MONITOR_FILE_BYTES = 256 * 1024;
 export const MAX_MONITOR_PATH_BYTES = 1024;
+
+/**
+ * Rule kinds this renderer understands. New kinds are admitted by the
+ * daemon before the UI that renders them ships, so anything outside this
+ * set must fail CLOSED: it is never approved or run blindly from an old
+ * UI. Widening this set is an explicit UI change, not a silent fallback.
+ */
+export const SUPPORTED_MONITOR_RULE_KINDS: readonly string[] = [MONITOR_RULE_KIND];
+
+export function monitorRuleKindSupported(ruleKind: string): boolean {
+  return SUPPORTED_MONITOR_RULE_KINDS.includes(ruleKind);
+}
 
 export type MonitorTriggerInput =
   | { kind: "manual" }
@@ -24,7 +38,7 @@ export type MonitorRecordView = {
   id: string;
   botId: string | null;
   version: number;
-  ruleKind: typeof MONITOR_RULE_KIND;
+  ruleKind: string;
   hostId: string;
   projectId: string;
   resource: string;
@@ -109,11 +123,22 @@ export function isMonitorFormReady(form: MonitorFormValues): boolean {
 }
 
 export function monitorStatusLabel(record: MonitorRecordView): string {
+  if (!monitorRuleKindSupported(record.ruleKind)) return "Unsupported rule kind";
   if (!record.enabled) return "Disabled";
   if (!record.approved) return "Needs approval";
   if (record.lastError) return "Error";
   if (record.cursor) return "Watching";
   return "New";
+}
+
+/**
+ * Actions (approve, enable, run check) are gated on a rule kind this
+ * renderer can actually describe. An unknown kind stays visible and
+ * deletable, but it can never be approved or run from a UI that does not
+ * understand its fields.
+ */
+export function monitorActionsEnabled(record: MonitorRecordView): boolean {
+  return monitorRuleKindSupported(record.ruleKind);
 }
 
 export function monitorOutcomeLabel(check: MonitorCheckView): string {
