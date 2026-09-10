@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    AutomationAction, BrowserAction, Cli, Command, DiagnosticsAction, HarnessAction,
+    AutomationAction, BrowserAction, Cli, Command, DiagnosticsAction, HarnessAction, HostAction,
     InternalAction, ProjectAction, TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
@@ -60,6 +60,35 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
     }
     if let Command::AgentContext = &cli.command {
         return crate::agent_context::run(&request_id, json);
+    }
+    // Source `host list` is a local answer (pairing store + this machine);
+    // the native runtime has exactly one reachable host and needs no daemon.
+    if let Command::Host {
+        action: HostAction::List,
+    } = &cli.command
+    {
+        let hosts = json!({ "hosts": [{
+            "kind": "local",
+            "name": "this machine",
+            "id": "local",
+            "selector": "--host local"
+        }]});
+        let call = CallOk {
+            request_id,
+            raw: json!({"ok": true, "result": hosts}),
+            result: hosts.clone(),
+        };
+        return emit(
+            call,
+            json,
+            || {
+                // Source formatHostList copy: kind padded to 11, name,
+                // arrow, selector.
+                "local       this machine  ->  --host local".to_string()
+            },
+            0,
+            None,
+        );
     }
     // The retired coordinator verbs never contact the runtime: they report
     // the migration guidance locally even when no daemon is listening. This
@@ -124,6 +153,24 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
             unreachable!("agent-context is served locally before the client opens")
         }
         Command::Internal { action } => internal(&client, &request_id, json, action).await,
+        Command::Host { action } => match action {
+            HostAction::List => {
+                // Local answer: the native runtime has one reachable host.
+                // The source shape is kept exactly (kind/name/id/selector).
+                let hosts = json!({ "hosts": [{
+                    "kind": "local",
+                    "name": "this machine",
+                    "id": "local",
+                    "selector": "--host local"
+                }]});
+                let call = CallOk {
+                    request_id,
+                    raw: json!({"ok": true, "result": hosts}),
+                    result: hosts.clone(),
+                };
+                emit(call, json, || "local".to_string(), 0, None)
+            }
+        },
         Command::Diagnostics { action } => match action {
             DiagnosticsAction::Memory => {
                 let call = client

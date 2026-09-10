@@ -127,6 +127,18 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
         ),
         entry(
+            "host list",
+            &["host", "list"],
+            "List every machine this host can target, and how to name each one",
+            "drogon-cli host list",
+            &[],
+            &[],
+            &["drogon-cli host list --json"],
+            &[
+                "Local answer: the native runtime has exactly one reachable host (this machine). SSH targets and paired servers do not exist here.",
+            ],
+        ),
+        entry(
             "workspace add",
             &["workspace", "add"],
             "Register an existing directory as a workspace",

@@ -85,6 +85,11 @@ pub enum Command {
         #[command(subcommand)]
         action: DiagnosticsAction,
     },
+    /// Machines this host can target (the local daemon only)
+    Host {
+        #[command(subcommand)]
+        action: HostAction,
+    },
     /// Workspaces: registered directories that own terminal sessions
     Workspace {
         #[command(subcommand)]
@@ -352,6 +357,19 @@ pub enum InternalAction {
         #[arg(long, value_name = "NAME")]
         event: String,
     },
+}
+
+/// Source specs/environment.ts `host list`: in the native runtime there is
+/// exactly one reachable machine — the daemon's own host. SSH targets and
+/// paired servers do not exist here, so the answer is honestly just `local`.
+#[derive(Subcommand, Debug)]
+pub enum HostAction {
+    /// List every machine this host can target, and how to name each one
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli host list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    List,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1358,6 +1376,9 @@ impl Cli {
             },
             Command::Status => {}
             Command::AgentContext => {}
+            Command::Host { action } => match action {
+                HostAction::List => {}
+            },
             Command::Diagnostics { .. } => {}
         }
         Ok(())

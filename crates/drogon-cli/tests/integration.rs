@@ -2391,3 +2391,20 @@ async fn terminal_list_rejects_workspace_and_worktree_together() {
     assert_eq!(output.status.code(), Some(2));
     drop(service);
 }
+
+#[test]
+fn host_list_answers_the_local_host_without_the_daemon() {
+    let dir = temp_data_dir("hostlist");
+    // No mock daemon: the source command is local, the native one is too.
+    let output = run_cli(dir.path(), &["host", "list"]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("this machine"));
+    assert!(text.contains("--host local"));
+
+    let json = run_cli(dir.path(), &["host", "list", "--json"]);
+    assert_eq!(json.status.code(), Some(0));
+    let json_stdout = stdout(&json);
+    assert!(json_stdout.contains("\"kind\": \"local\""));
+    assert!(json_stdout.contains("\"selector\": \"--host local\""));
+}
