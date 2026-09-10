@@ -80,6 +80,14 @@ impl Engine {
             workspace::get_path(&conn, &parsed.workspace_id)?
         };
         let workspace_root = PathBuf::from(workspace_path);
+        // C03 note: compare-and-save (`recipe::save_recipe_expected`,
+        // `mentu_recipe_conflict`) is implemented and unit-covered but
+        // not yet wired here: `MentuRecipeSaveParams` (coordinator-owned
+        // protocol) carries no expected-hash field, and this layer reads
+        // only declared params. The inspector already renders the
+        // conflict panel (draft preserved, reload/review choices) once
+        // the controller supplies it; until the additive field lands, a
+        // stale-base save still overwrites across the shrinking window.
         let detail = recipe::save_recipe(&workspace_root, &parsed.recipe_id, &parsed.content)?;
         {
             let conn = self.db.lock().unwrap();
@@ -137,7 +145,6 @@ impl Engine {
             workspace::get_path(&conn, &parsed.workspace_id)?
         };
         let workspace_root = PathBuf::from(workspace_path);
-        let recipe_path = recipe::resolve_recipe_path(&workspace_root, &parsed.recipe_id)?;
         let runtime_path = runtime::require_verified_runtime(self.data_dir())?;
         let current_hash = recipe::current_content_hash(&workspace_root, &parsed.recipe_id)?;
         let stored_hash = {
@@ -154,6 +161,21 @@ impl Engine {
                 "Recipe content changed since approval; re-approve before running.",
             ));
         }
+        // C03: stage the exact approved bytes (plus the validated agent
+        // selections and mirrored relative resources) and run from the
+        // immutable snapshot, never the mutable recipe path. Staging
+        // re-checks the approval hash and refuses statically-unsupported
+        // agent backends with the exact combination and its evidence;
+        // `launch_run` re-verifies freshness immediately before spawn and
+        // materializes per run (selection + pinned runtime recorded in
+        // the snapshot manifest with the run id).
+        let staged =
+            execution::stage_approved_snapshot(&workspace_root, &parsed.recipe_id, &stored_hash)?;
+        // The invocation path is superseded by the snapshot path inside
+        // `launch_run`; it still resolves through the containment checks
+        // so a recipe that vanished between staging and spawn refuses
+        // here rather than deeper in the spawn path.
+        let recipe_path = recipe::resolve_recipe_path(&workspace_root, &parsed.recipe_id)?;
         let run = execution::launch_run(
             self.db_handle(),
             runtime_path,
@@ -165,6 +187,7 @@ impl Engine {
             execution::Invocation::Run {
                 recipe_path: &recipe_path,
             },
+            Some(staged),
         )?;
         to_value(MentuRunResult { run })
     }
@@ -251,6 +274,9 @@ impl Engine {
             execution::Invocation::Resume {
                 mentu_run_id: &mentu_run_id,
             },
+            // A retry re-enters runtime-side state; approved bytes ride
+            // the original run's snapshot, not a new staging.
+            None,
         )?;
         to_value(MentuRunResult { run })
     }

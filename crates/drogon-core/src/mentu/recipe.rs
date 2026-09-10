@@ -368,6 +368,202 @@ pub fn save_recipe(
     load_recipe(workspace_root, recipe_id)
 }
 
+/// Wire error code for a stale expected-hash save: another editor
+/// changed the recipe after the caller loaded it, so the write is
+/// refused and the caller's draft is preserved (never last-write-wins).
+/// Constructed inline (the `mentu_approval_consumed` precedent in
+/// `storage.rs`) until the protocol registry grants a shared constructor.
+/// The message carries the current on-disk hash so the caller can offer
+/// reload/review choices without a second round trip.
+pub const RECIPE_CONFLICT_CODE: &str = "mentu_recipe_conflict";
+
+fn valid_content_hash(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Compare-and-save: writes `content` only when the recipe's exact
+/// current on-disk bytes still hash to `expected_hash` (the hash the
+/// caller saw at load time). On mismatch nothing is written and a
+/// [`RECIPE_CONFLICT_CODE`] error carries the current hash, so the caller
+/// keeps its draft and offers reload/review instead of silently
+/// overwriting another editor's save. The write itself is the same atomic
+/// temp-file rename [`save_recipe`] uses, so readers never see torn bytes.
+///
+/// Residual TOCTOU note: the check and the rename are two syscalls, so
+/// two writers racing inside the same instant can still serialize;
+/// what this removes is the everyday silent loss — every save that
+/// started from a stale view is refused with its draft intact.
+pub fn save_recipe_expected(
+    workspace_root: &Path,
+    recipe_id: &str,
+    content: &str,
+    expected_hash: &str,
+) -> Result<MentuRecipeDetail, RpcError> {
+    if !valid_content_hash(expected_hash) {
+        return Err(error::invalid_argument(
+            "Invalid Mentu recipe content hash.",
+        ));
+    }
+    let current = current_content_hash(workspace_root, recipe_id)?;
+    if current != expected_hash {
+        return Err(RpcError::new(
+            RECIPE_CONFLICT_CODE,
+            format!(
+                "Recipe changed since it was loaded (current {current}); \
+                 reload and reapply your edits — your draft was not written."
+            ),
+        ));
+    }
+    save_recipe(workspace_root, recipe_id, content)
+}
+
+/// The execution settings C03 edits on one agent step: the executable
+/// harness backend plus the exact model id. `None` leaves the field as
+/// the recipe carries it; `Some("")` removes the field (back to the
+/// recipe-root inherit). Provider identity and credentials are NOT recipe
+/// fields (a Pi binding lives in the root `providers` map owned by the
+/// caller's credential resolution) and are never invented here.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentStepExecution {
+    pub backend: Option<String>,
+    pub model: Option<String>,
+}
+
+/// One agent step's effective execution identity, as the approved
+/// snapshot records it: exactly what the recipe carries, never a
+/// substituted default.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentStepIdentity {
+    pub label: String,
+    pub backend: String,
+    pub model: Option<String>,
+}
+
+/// True for backends that execute through an agent harness rather than
+/// the local shell. `shell` (explicit or inherited default) is the only
+/// non-agent backend: every other backend name — registered harness or
+/// runtime-owned (`openai`, `deepseek`, `ollama`, custom) — may carry
+/// agent execution fields, and executability itself is decided by the
+/// pinned-runtime translation check in `execution`, never here.
+pub fn is_agent_backend(backend: &str) -> bool {
+    !backend.eq_ignore_ascii_case("shell")
+}
+
+/// The backend a step actually executes with: its own `backend`, else the
+/// recipe root `backend`, else the runtime `shell` default.
+pub fn effective_step_backend(step: &Value, root_backend: Option<&str>) -> String {
+    step.get("backend")
+        .and_then(Value::as_str)
+        .or(root_backend)
+        .unwrap_or("shell")
+        .to_string()
+}
+
+/// Lists every agent step's execution identity in document order.
+/// Non-agent (`shell`) steps are omitted, never annotated: they must not
+/// gain fake agent fields. Operates on parsed recipe JSON so unknown
+/// fields are irrelevant — nothing is rewritten here.
+pub fn list_agent_steps(recipe: &Value) -> Result<Vec<AgentStepIdentity>, RpcError> {
+    let root = recipe
+        .as_object()
+        .ok_or_else(|| error::invalid_argument("Recipe must be a JSON object."))?;
+    let root_backend = root.get("backend").and_then(Value::as_str);
+    let steps = root
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| error::invalid_argument("Recipe has no \"steps\" array."))?;
+    let mut out = Vec::new();
+    for step in steps {
+        let Some(label) = step.get("label").and_then(Value::as_str) else {
+            continue;
+        };
+        let backend = effective_step_backend(step, root_backend);
+        if !is_agent_backend(&backend) {
+            continue;
+        }
+        out.push(AgentStepIdentity {
+            label: label.to_string(),
+            backend,
+            model: step
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        });
+    }
+    Ok(out)
+}
+
+/// Rewrites only one agent step's execution settings inside `content` and
+/// returns the new source text (2-space pretty plus trailing newline, the
+/// renderer's own convention). Every other step, every dependency, every
+/// unknown JSON field and every relative-resource reference (`prompt_file`,
+/// `dir`) is preserved byte-for-meaning: the edit touches only the
+/// addressed step object's `backend`/`model` keys over the parsed `Value`
+/// (serde_json preserves document key order), then re-validates with the
+/// same rules the load path enforces.
+///
+/// Refusals (nothing rewritten): unknown step label; a `model` for a step
+/// whose effective backend is `shell` (non-agent steps must not gain fake
+/// agent fields — pick an agent backend first); content that is not a
+/// valid recipe.
+pub fn update_agent_step_execution(
+    content: &str,
+    step_label: &str,
+    execution: &AgentStepExecution,
+) -> Result<String, RpcError> {
+    let mut value: Value = serde_json::from_str(content)
+        .map_err(|e| error::invalid_argument(format!("Invalid JSON: {e}")))?;
+    validate_recipe_value(&value)?;
+    let root_backend = value
+        .get("backend")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let steps = value
+        .get_mut("steps")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| error::invalid_argument("Recipe has no \"steps\" array."))?;
+    let step = steps
+        .iter_mut()
+        .find(|step| step.get("label").and_then(Value::as_str) == Some(step_label))
+        .ok_or_else(|| {
+            error::invalid_argument(format!("Recipe step {step_label} is no longer available."))
+        })?;
+    if let Some(backend) = &execution.backend {
+        if backend.is_empty() {
+            step.as_object_mut()
+                .ok_or_else(|| error::invalid_argument("Recipe step must be an object."))?
+                .remove("backend");
+        } else {
+            step["backend"] = Value::String(backend.clone());
+        }
+    }
+    let effective = effective_step_backend(step, root_backend.as_deref());
+    if let Some(model) = &execution.model {
+        if !model.is_empty() && !is_agent_backend(&effective) {
+            return Err(error::invalid_argument(format!(
+                "Step '{step_label}' uses the shell backend and carries no model selection; \
+                 choose an agent backend before setting a model."
+            )));
+        }
+        let object = step
+            .as_object_mut()
+            .ok_or_else(|| error::invalid_argument("Recipe step must be an object."))?;
+        if model.is_empty() {
+            object.remove("model");
+        } else {
+            object.insert("model".to_string(), Value::String(model.clone()));
+        }
+    }
+    // `reasoning`/`thinking` overrides ride the step untouched: Pi refuses
+    // them at translation time (execution), so inventing or stripping them
+    // here would pre-empt the honest refusal.
+    let updated = format!("{:#}\n", value);
+    let revalidated: Value = serde_json::from_str(&updated)
+        .map_err(|e| error::invalid_argument(format!("Invalid JSON: {e}")))?;
+    validate_recipe_value(&revalidated)?;
+    Ok(updated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,5 +704,207 @@ mod tests {
         );
         // The refused writes left the recipe untouched.
         assert_eq!(load_recipe(dir.path(), "hello").unwrap().source, VALID);
+    }
+
+    #[test]
+    fn expected_save_writes_only_from_the_loaded_hash() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        let loaded = load_recipe(dir.path(), "hello").unwrap();
+        let next = VALID.replace("\"tiny\"", "\"edited\"");
+        let saved = save_recipe_expected(dir.path(), "hello", &next, &loaded.content_hash).unwrap();
+        assert_eq!(saved.source, next);
+        assert_ne!(saved.content_hash, loaded.content_hash);
+    }
+
+    #[test]
+    fn expected_save_refuses_a_stale_hash_and_keeps_both_contents() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        let stale = load_recipe(dir.path(), "hello").unwrap();
+        // Another editor lands first.
+        let other = VALID.replace("\"tiny\"", "\"other\"");
+        let landed = save_recipe(dir.path(), "hello", &other).unwrap();
+        // Our save from the stale hash is refused; nothing is written.
+        let ours = VALID.replace("\"tiny\"", "\"ours\"");
+        let err =
+            save_recipe_expected(dir.path(), "hello", &ours, &stale.content_hash).unwrap_err();
+        assert_eq!(err.code, RECIPE_CONFLICT_CODE);
+        assert!(
+            err.message.contains(&landed.content_hash),
+            "conflict carries the current hash for reload/review: {}",
+            err.message
+        );
+        assert_eq!(load_recipe(dir.path(), "hello").unwrap().source, other);
+        // Saving from the fresh hash succeeds.
+        let retry = save_recipe_expected(dir.path(), "hello", &ours, &landed.content_hash).unwrap();
+        assert_eq!(retry.source, ours);
+    }
+
+    #[test]
+    fn expected_save_rejects_a_malformed_hash_before_any_io() {
+        let dir = workspace();
+        write_recipe(dir.path(), "hello", VALID);
+        for bad in ["", "abc", &"z".repeat(64)] {
+            let err = save_recipe_expected(dir.path(), "hello", VALID, bad).unwrap_err();
+            assert_eq!(err.code, "invalid_argument");
+        }
+        assert_eq!(load_recipe(dir.path(), "hello").unwrap().source, VALID);
+    }
+
+    const AGENT_RECIPE: &str = r#"{
+        "name": "two-step",
+        "backend": "shell",
+        "customRoot": {"keep": true},
+        "steps": [
+            {"label": "build", "prompt": "make", "prompt_file": "docs/build.md", "depends_on": [], "customStep": 1},
+            {"label": "review", "backend": "codex", "prompt": "review", "depends_on": ["build"]}
+        ]
+    }"#;
+
+    #[test]
+    fn agent_step_edit_sets_backend_and_model_and_preserves_everything_else() {
+        let updated = update_agent_step_execution(
+            AGENT_RECIPE,
+            "review",
+            &AgentStepExecution {
+                backend: None,
+                model: Some("gpt-5.6-luna".to_string()),
+            },
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&updated).unwrap();
+        let steps = value.get("steps").and_then(Value::as_array).unwrap();
+        // Edited step carries the model; untouched fields survive.
+        assert_eq!(
+            steps[1].get("model").and_then(Value::as_str),
+            Some("gpt-5.6-luna")
+        );
+        assert_eq!(
+            steps[1].get("backend").and_then(Value::as_str),
+            Some("codex")
+        );
+        assert_eq!(
+            steps[1].get("prompt").and_then(Value::as_str),
+            Some("review")
+        );
+        assert_eq!(
+            steps[1]
+                .get("depends_on")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+        // The other step is byte-for-meaning identical, resources included.
+        assert_eq!(steps[0].get("backend"), None);
+        assert_eq!(
+            steps[0].get("prompt_file").and_then(Value::as_str),
+            Some("docs/build.md")
+        );
+        assert_eq!(steps[0].get("customStep").and_then(Value::as_i64), Some(1));
+        assert!(steps[0].get("model").is_none(), "shell step gains no model");
+        // Unknown root fields round-trip.
+        assert_eq!(
+            value
+                .get("customRoot")
+                .and_then(|r| r.get("keep"))
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn agent_step_edit_can_move_a_step_between_backends() {
+        let updated = update_agent_step_execution(
+            AGENT_RECIPE,
+            "build",
+            &AgentStepExecution {
+                backend: Some("claude".to_string()),
+                model: Some("sonnet".to_string()),
+            },
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&updated).unwrap();
+        let steps = value.get("steps").and_then(Value::as_array).unwrap();
+        assert_eq!(
+            steps[0].get("backend").and_then(Value::as_str),
+            Some("claude")
+        );
+        assert_eq!(
+            steps[0].get("model").and_then(Value::as_str),
+            Some("sonnet")
+        );
+        // Prompt, resources and custom fields survive the backend move.
+        assert_eq!(steps[0].get("prompt").and_then(Value::as_str), Some("make"));
+        assert_eq!(
+            steps[0].get("prompt_file").and_then(Value::as_str),
+            Some("docs/build.md")
+        );
+    }
+
+    #[test]
+    fn agent_step_edit_refuses_a_model_on_a_shell_step() {
+        let err = update_agent_step_execution(
+            AGENT_RECIPE,
+            "build",
+            &AgentStepExecution {
+                backend: None,
+                model: Some("gpt-5.6-luna".to_string()),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "invalid_argument");
+        assert!(
+            err.message.contains("shell"),
+            "unexpected message: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn agent_step_edit_refuses_unknown_steps_and_invalid_recipes() {
+        assert!(
+            update_agent_step_execution(
+                AGENT_RECIPE,
+                "missing",
+                &AgentStepExecution {
+                    backend: None,
+                    model: None
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            update_agent_step_execution(
+                "{not json",
+                "build",
+                &AgentStepExecution {
+                    backend: None,
+                    model: None
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            update_agent_step_execution(
+                r#"{"name": "x"}"#,
+                "build",
+                &AgentStepExecution {
+                    backend: None,
+                    model: None
+                },
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn list_agent_steps_skips_shell_and_reports_models() {
+        let value: Value = serde_json::from_str(AGENT_RECIPE).unwrap();
+        let agents = list_agent_steps(&value).unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].label, "review");
+        assert_eq!(agents[0].backend, "codex");
+        assert_eq!(agents[0].model, None);
     }
 }

@@ -4,10 +4,13 @@
 // draft projection (`draftForRecipeStep`) and its validated document
 // update (`updateRecipeStepDocument`). Two data-layer adaptations:
 // `deterministicAdapterModels` is omitted (this repo's daemon exposes no
-// adapter catalog, so the inspector's Model field stays read-only), and
-// the draft gains a `verifyCommands` field (one command per line) because
-// this repo's daemon surfaces `verify.commands` per step and the task
-// requires editing them — the fork has no such affordance.
+// adapter catalog, so the inspector's Model field edits the step's own
+// `model` id directly — carried manual-unverified until catalog wiring
+// lands), and the draft gains a `verifyCommands` field (one command per
+// line) because this repo's daemon surfaces `verify.commands` per step
+// and the task requires editing them — the fork has no such affordance.
+// The model write is agent-gated like the daemon (`recipe.rs`): a model
+// on a shell-effective step is refused, never stored as a fake field.
 
 import type { MentuRecipeDocument, MentuRecipeStep } from "./recipe-validation/mentu-recipe-document";
 import { parseMentuRecipeJson } from "./recipe-validation/mentu-recipe-validation";
@@ -15,6 +18,7 @@ import { serializeMentuRecipeDocument } from "./recipe-validation/mentu-recipe-s
 
 export type RecipeStepDraft = {
   backend: string;
+  /** Exact model id for an agent step; empty clears it. Refused on shell steps. */
   model: string;
   dependencies: string;
   timeout: string;
@@ -71,6 +75,23 @@ export function updateRecipeStepDocument(
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean);
+  // The backend the step executes with after this edit: the draft value,
+  // else the step's own, else the recipe root default, else `shell` — the
+  // same inherit chain the daemon's snapshot records. Only a non-shell
+  // (agent) backend may carry a model id; shell steps must not gain fake
+  // agent fields.
+  const editedBackend = draft.backend.trim();
+  const currentStep = document.recipe.steps?.find((step) => step.label === stepLabel);
+  const effectiveBackend =
+    editedBackend || currentStep?.backend || document.recipe.backend || "shell";
+  const editedModel = draft.model.trim();
+  if (editedModel && effectiveBackend.toLowerCase() === "shell") {
+    return {
+      ok: false,
+      message:
+        `Step '${stepLabel}' uses the shell backend and carries no model selection; choose an agent backend before setting a model.`,
+    };
+  }
   const steps = document.recipe.steps?.map((step) => {
     if (step.label !== stepLabel) {
       return step;
@@ -85,7 +106,7 @@ export function updateRecipeStepDocument(
     return {
       ...step,
       backend: draft.backend.trim() || undefined,
-      model: draft.model.trim() || undefined,
+      model: editedModel || undefined,
       depends_on: dependencies.length > 0 ? dependencies : undefined,
       timeout,
       max_retries: retries,
