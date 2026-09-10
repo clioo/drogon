@@ -70,7 +70,12 @@ export type TasksListResult = {
   /** Total matching issues, only when the upstream exposes one. */
   total?: number;
 };
-export type TasksShowResult = { issue: TaskIssue };
+export type TasksShowResult = {
+  issue: TaskIssue;
+  /** Pull request for the additive `mode: "pulls"` lookup; absent on the
+   *  issue path. */
+  pull?: TaskPullRequest;
+};
 /** `tasks.remotes` result: GitHub `owner/repo` slug per remote name; a key
  *  is absent (never null) when that remote is missing or non-GitHub. */
 export type TasksRemotesResult = { origin?: string; upstream?: string };
@@ -112,6 +117,9 @@ export interface TasksBridge {
     projectId: string;
     number: number;
     source?: TasksRemoteSource;
+    /** Additive composer source (the fork's GitHub smart field): "pulls"
+     *  looks a PR up by number; the default stays "issues". */
+    mode?: TasksListMode;
   }): Promise<Result<TasksShowResult>>;
   tasksStart(input: {
     projectId: string;
@@ -183,7 +191,13 @@ export const tasksBridgeSchemas = {
     mode: z.enum(["issues", "pulls"]).optional(),
     source,
   }),
-  tasksShow: projectId.extend({ number: z.number().int().positive(), source }),
+  tasksShow: projectId.extend({
+    number: z.number().int().positive(),
+    source,
+    // Additive composer source (the fork's GitHub smart field): "pulls"
+    // looks a PR up by number via `gh pr view`.
+    mode: z.enum(["issues", "pulls"]).optional(),
+  }),
   tasksStart: projectId.extend({
     number: z.number().int().positive(),
     mode: z.enum(["issues", "pulls"]).optional(),
@@ -288,7 +302,18 @@ export const tasksResultSchemas = {
     hasNextPage: z.boolean(),
     total: z.number().int().min(0).optional(),
   }),
-  "tasks.show": z.object({ issue }),
+  "tasks.show": z
+    .object({
+      // Exactly one of the two is present: the daemon returns `{ issue }`
+      // for the default mode and `{ pull }` for the additive composer
+      // lookup (`mode: "pulls"`). Both stay nullish-tolerant so older
+      // or newer daemons never fail the whole envelope on the other key.
+      issue: issue.nullish(),
+      pull: pull.nullish(),
+    })
+    .refine((value) => value.issue != null || value.pull != null, {
+      message: "tasks.show returned neither an issue nor a pull request",
+    }),
   "tasks.start": z.object({
     issueNumber: z.number().int().positive(),
     worktree,
