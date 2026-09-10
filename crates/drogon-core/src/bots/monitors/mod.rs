@@ -41,7 +41,11 @@
 //!
 //! Scheduling/firing reuses the existing automation scheduler and runner
 //! (C08 owns admission and renewal); delivery reuses C05. This module
-//! defines no timer, runner, outbox, or launcher.
+//! defines no timer, runner, outbox, or launcher. The same-transaction
+//! cursor-CAS + C05-enqueue shape is proposed in
+//! [`storage::commit_advance_in_tx`] (UNADOPTED: the reviewed C05 API pin
+//! is still pending, so the enqueue side stays a caller closure and the
+//! monitor migration stays unadopted for production data).
 //!
 //! ## Approval, secrets, and policy
 //!
@@ -76,9 +80,10 @@ pub use commit::{
     BASE_BACKOFF_MS, CommitDecision, CommitInput, MAX_BACKOFF_MS, MonitorEventIntent, RetainReason,
     StoredMonitorState, backoff_ms, decide_commit, should_admit,
 };
-pub use eval::{cursor_for_digest, digest_bytes, event_id_for, evaluate_bytes, read_failure};
+pub use eval::{cursor_for_digest, digest_bytes, evaluate_bytes, event_id_for, read_failure};
 pub use policy::MonitorInferencePolicy;
 pub use record::{MonitorRecord, MonitorTrigger, approve_rule, new_monitor, staged_rule_edit};
 pub use result::{MonitorCheckResult, MonitorErrorKind, MonitorOutcome, RESULT_SCHEMA_VERSION};
-pub use rule::{MAX_FILE_BYTES, RULE_KIND_LOCAL_FILE_DIGEST, RULE_SCHEMA_VERSION, MonitorRule};
+pub use rule::{MAX_FILE_BYTES, MonitorRule, RULE_KIND_LOCAL_FILE_DIGEST, RULE_SCHEMA_VERSION};
+pub use storage::{CommitTxError, commit_advance_in_tx};
 pub use storage::{DeliveryState, StoredCheck};

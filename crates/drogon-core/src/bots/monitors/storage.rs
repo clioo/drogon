@@ -144,6 +144,10 @@ pub fn check_schema_not_ahead(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Proposed aggregate-startup shape for the migration owner's handover:
+/// UNADOPTED for production — never call this (or [`migrate`]) on
+/// production data before the handover. Tests exercise it on controlled
+/// databases only.
 pub fn apply_pending_steps_in_tx(tx: &Transaction) -> Result<()> {
     check_schema_not_ahead(tx)?;
     let existing: Option<i64> = tx
@@ -163,6 +167,9 @@ pub fn apply_pending_steps_in_tx(tx: &Transaction) -> Result<()> {
     Ok(())
 }
 
+/// Standalone migration entry, same handover status as
+/// [`apply_pending_steps_in_tx`]: UNADOPTED for production data.
+/// Tests call this on controlled temporary/in-memory databases only.
 pub fn migrate(conn: &Connection) -> Result<()> {
     check_schema_not_ahead(conn)?;
     let existing: Option<i64> = conn
@@ -295,6 +302,108 @@ pub fn list_monitors_for_project(
     rows.into_iter().map(row_to_record).collect()
 }
 
+/// Same-transaction cursor advance + delivery-enqueue shape (C10/C05
+/// integration proposal — PROPOSED and UNADOPTED until the reviewed C05
+/// API pin lands and the migration owner hands over).
+///
+/// The caller supplies `enqueue` (its own C05 `enqueue_in_tx` closure),
+/// so this module never imports C05 and never owns an outbox: the intent
+/// is handed to the caller, never stored here. The monitor CAS, the
+/// check-history row, and the caller enqueue share the caller's
+/// transaction; any error rolls everything back on transaction drop:
+/// neither a lost notification nor a falsely advanced cursor. Network
+/// work stays outside the transaction — `enqueue` must only write rows.
+#[derive(Debug)]
+pub enum CommitTxError {
+    Storage(StorageError),
+    /// The caller's enqueue closure refused; the caller must roll back
+    /// (cursor and history unchanged).
+    Enqueue(String),
+}
+
+impl From<StorageError> for CommitTxError {
+    fn from(value: StorageError) -> Self {
+        Self::Storage(value)
+    }
+}
+
+impl From<rusqlite::Error> for CommitTxError {
+    fn from(value: rusqlite::Error) -> Self {
+        Self::Storage(StorageError::Sqlite(value))
+    }
+}
+
+impl From<serde_json::Error> for CommitTxError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Storage(StorageError::Json(value))
+    }
+}
+
+impl std::fmt::Display for CommitTxError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Storage(e) => write!(f, "{e}"),
+            Self::Enqueue(message) => write!(f, "delivery enqueue refused: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for CommitTxError {}
+
+pub fn commit_advance_in_tx(
+    tx: &Transaction,
+    record: &MonitorRecord,
+    expected_rev: i64,
+    check: &StoredCheck,
+    enqueue: impl FnOnce(&Transaction) -> std::result::Result<(), String>,
+) -> std::result::Result<(), CommitTxError> {
+    record.validate().map_err(StorageError::Validation)?;
+    let payload = serde_json::to_string(record)?;
+    let (host_id, project_id, bot_id) = scope_of(record);
+    let affected = tx.execute(
+        "UPDATE bot_monitors SET host_id = ?1, project_id = ?2, bot_id = ?3,
+         updated_at = ?4, rev = rev + 1, payload_json = ?5
+         WHERE id = ?6 AND rev = ?7",
+        params![
+            host_id,
+            project_id,
+            bot_id,
+            record.updated_at_ms,
+            payload,
+            record.id,
+            expected_rev
+        ],
+    )?;
+    if affected == 0 {
+        let still_exists: Option<i64> = tx
+            .query_row(
+                "SELECT 1 FROM bot_monitors WHERE id = ?1",
+                params![record.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        return Err(if still_exists.is_some() {
+            StorageError::StaleUpdate
+        } else {
+            StorageError::NotFound("monitor")
+        }
+        .into());
+    }
+    let check_payload = serde_json::to_string(check)?;
+    tx.execute(
+        "INSERT INTO bot_monitor_checks (id, monitor_id, started_at, payload_json)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![
+            check.id,
+            check.monitor_id,
+            check.started_at_ms,
+            check_payload
+        ],
+    )?;
+    enqueue(tx).map_err(CommitTxError::Enqueue)?;
+    Ok(())
+}
+
 /// Append one check row (every evaluation — no-change, changed, and error
 /// alike — so history, last success/error, and delivery uncertainty are
 /// never erased by a later tick).
@@ -377,5 +486,70 @@ mod tests {
         assert!(get_monitor(&conn, "mon-1").unwrap().is_none());
         // History survives the delete.
         assert_eq!(list_checks_for_monitor(&conn, "mon-1").unwrap().len(), 1);
+    }
+
+    fn check(id: &str, at: f64) -> StoredCheck {
+        StoredCheck {
+            id: id.into(),
+            monitor_id: "mon-1".into(),
+            monitor_version: 1,
+            started_at_ms: at,
+            result: MonitorCheckResult::error("mon-1", 1, MonitorErrorKind::NotFound, "gone", at),
+            delivery: DeliveryState::Uncertain,
+        }
+    }
+
+    #[test]
+    fn commit_advance_applies_cursor_check_and_enqueue_atomically() {
+        let conn = memory_db();
+        let rec = record("mon-1");
+        create_monitor(&conn, &rec).unwrap();
+        let (_, rev) = get_monitor(&conn, "mon-1").unwrap().unwrap();
+        let mut advanced = rec.clone();
+        advanced.cursor = Some("v1:".to_string() + &"bb".repeat(32));
+        advanced.updated_at_ms = 2.0;
+        let tx = conn.unchecked_transaction().unwrap();
+        commit_advance_in_tx(&tx, &advanced, rev, &check("chk-1", 2.0), |_| Ok(())).unwrap();
+        tx.commit().unwrap();
+        let (reloaded, _) = get_monitor(&conn, "mon-1").unwrap().unwrap();
+        assert_eq!(reloaded.cursor, advanced.cursor);
+        assert_eq!(list_checks_for_monitor(&conn, "mon-1").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn commit_advance_rolls_back_cursor_and_history_when_enqueue_fails() {
+        let conn = memory_db();
+        let rec = record("mon-1");
+        create_monitor(&conn, &rec).unwrap();
+        let (_, rev) = get_monitor(&conn, "mon-1").unwrap().unwrap();
+        let mut advanced = rec.clone();
+        advanced.cursor = Some("v1:".to_string() + &"bb".repeat(32));
+        advanced.updated_at_ms = 2.0;
+        {
+            let tx = conn.unchecked_transaction().unwrap();
+            let outcome = commit_advance_in_tx(&tx, &advanced, rev, &check("chk-1", 2.0), |_| {
+                Err("delivery outbox unavailable".to_string())
+            });
+            assert!(matches!(outcome, Err(CommitTxError::Enqueue(_))));
+            // Drop without commit: real SQLite rollback of the CAS and
+            // the history row alike — neither a lost notification nor a
+            // falsely advanced cursor.
+        }
+        let (reloaded, _) = get_monitor(&conn, "mon-1").unwrap().unwrap();
+        assert_eq!(reloaded.cursor, None);
+        assert!(list_checks_for_monitor(&conn, "mon-1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn commit_advance_refuses_a_stale_rev_without_writing() {
+        let conn = memory_db();
+        let rec = record("mon-1");
+        create_monitor(&conn, &rec).unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        let outcome = commit_advance_in_tx(&tx, &rec, 41, &check("chk-1", 2.0), |_| Ok(()));
+        assert!(matches!(
+            outcome,
+            Err(CommitTxError::Storage(StorageError::StaleUpdate))
+        ));
     }
 }

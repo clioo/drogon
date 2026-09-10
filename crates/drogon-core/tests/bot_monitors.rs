@@ -1,37 +1,19 @@
 //! C10 integration proof: bounded digest monitors with durable change events.
 //!
-//! The modules mirror the `bots::monitors` hierarchy so `super::` paths
-//! resolve exactly as they do under `src/`. This runs before the
-//! `bots::monitors` export seam lands; the units under test are pure
-//! computation plus controlled-filesystem SQLite (`tempfile`), never
-//! Engine construction, sessions, daemons, CLI, servers, or native
-//! children.
+//! Imports the real `drogon_core::bots::monitors` tree (export seam
+//! granted); the units under test are pure computation plus
+//! controlled-filesystem SQLite (`tempfile`), never Engine construction,
+//! sessions, daemons, CLI, servers, or native children.
 
-#[path = "../src/bots/monitors"]
-mod monitors {
-    #[path = "commit.rs"]
-    pub mod commit;
-    #[path = "eval.rs"]
-    pub mod eval;
-    #[path = "policy.rs"]
-    pub mod policy;
-    #[path = "record.rs"]
-    pub mod record;
-    #[path = "result.rs"]
-    pub mod result;
-    #[path = "rule.rs"]
-    pub mod rule;
-    #[path = "storage.rs"]
-    pub mod storage;
-}
-
-use monitors::commit::{self, CommitDecision, CommitInput, RetainReason, StoredMonitorState};
-use monitors::eval;
-use monitors::policy;
-use monitors::record::{self, MonitorTrigger, new_monitor};
-use monitors::result::{MonitorErrorKind, MonitorOutcome};
-use monitors::rule::{LocalFileRule, MonitorRule};
-use monitors::storage;
+use drogon_core::bots::monitors::commit::{
+    self, CommitDecision, CommitInput, RetainReason, StoredMonitorState,
+};
+use drogon_core::bots::monitors::eval;
+use drogon_core::bots::monitors::policy;
+use drogon_core::bots::monitors::record::{self, MonitorTrigger, new_monitor};
+use drogon_core::bots::monitors::result::{MonitorErrorKind, MonitorOutcome};
+use drogon_core::bots::monitors::rule::{LocalFileRule, MonitorRule};
+use drogon_core::bots::monitors::storage;
 
 fn test_rule() -> MonitorRule {
     MonitorRule::LocalFileDigest(LocalFileRule {
@@ -114,7 +96,9 @@ fn unchanged_repeats_and_restarts_emit_nothing() {
             reason: RetainReason::NoChange
         }
     );
-    // Unchanged polls never owe the model anything.
+    // Unchanged polls never owe the model anything at this layer; this is
+    // policy/unit evidence only, not an observed zero through a mounted
+    // runtime (that handover is still routed to root).
     assert_eq!(
         policy::MonitorInferencePolicy::model_calls_for_unchanged_poll(),
         0
@@ -268,6 +252,8 @@ fn stale_duplicate_limited_and_disabled_work_never_admits() {
 fn storage_cas_and_history_survive_delete_and_reopen() {
     // The aggregate-startup shape (one caller-owned transaction, as
     // `Engine::open` would supply) migrates a fresh database identically.
+    // Proposed/unadopted for production until the migration-owner
+    // handover; exercised here on a controlled in-memory database only.
     let startup_conn = rusqlite::Connection::open_in_memory().expect("controlled db");
     {
         let tx = startup_conn.unchecked_transaction().expect("begin");
