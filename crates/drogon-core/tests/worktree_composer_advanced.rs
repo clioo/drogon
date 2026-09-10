@@ -467,6 +467,65 @@ fn quick_session_create_registers_a_scratch_folder_project_and_remove_deletes_it
     assert!(Path::new(&named_path).is_dir());
 }
 
+// User-feature-closure item 3: standalone quick sessions ("Chats") must be
+// durable across reload/restart -- an ordinary `projects` row, no special
+// on-shutdown cleanup exists anywhere in this crate (verified by grep), but
+// nothing previously proved it survives a real `Engine` close/reopen cycle,
+// nor that reopening never disturbs an unrelated project's own scratch.
+#[test]
+fn quick_session_survives_a_daemon_restart_without_disturbing_other_projects() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let other_dir = tempfile::tempdir().unwrap();
+    let (chat_id, chat_path, other_project_id) = {
+        let engine = Engine::open(data_dir.path()).unwrap();
+        let created = ok(
+            &engine,
+            "project.quickSessionCreate",
+            json!({"name": "Chat"}),
+        );
+        let chat_id = created["project"]["id"].as_str().unwrap().to_string();
+        let chat_path = created["project"]["path"].as_str().unwrap().to_string();
+        let other = ok(
+            &engine,
+            "project.add",
+            json!({"path": other_dir.path().to_str().unwrap()}),
+        );
+        (
+            chat_id,
+            chat_path,
+            other["id"].as_str().unwrap().to_string(),
+        )
+    }; // engine dropped here -- simulates the daemon exiting.
+
+    // Reopen: the "restart" the requirement names.
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let listed = ok(&engine, "project.list", json!({}));
+    let projects = listed["projects"].as_array().unwrap();
+    let chat = projects
+        .iter()
+        .find(|p| p["id"] == chat_id)
+        .unwrap_or_else(|| panic!("quick session project lost across restart: {projects:?}"));
+    assert_eq!(chat["name"], "Chat");
+    assert_eq!(chat["quickSession"], true);
+    assert!(
+        Path::new(&chat_path).is_dir(),
+        "the scratch folder itself must survive the restart, not just the row"
+    );
+    assert!(
+        projects.iter().any(|p| p["id"] == other_project_id),
+        "an unrelated project must never be disturbed by reopening"
+    );
+
+    // Deleting the Chat post-restart must still only touch its own scratch.
+    ok(&engine, "project.remove", json!({"id": chat_id}));
+    assert!(!Path::new(&chat_path).exists());
+    let other_dir_untouched = other_dir.path().is_dir();
+    assert!(
+        other_dir_untouched,
+        "deleting a Chat must never delete an unrelated project's files"
+    );
+}
+
 #[test]
 fn sparse_presets_save_list_edit_and_reject_collisions() {
     let data_dir = tempfile::tempdir().unwrap();

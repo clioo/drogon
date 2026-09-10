@@ -694,6 +694,14 @@ mod tests {
             note: None,
             parent_worktree_id: None,
             created_at: "2026-09-06T12:00:00Z".into(),
+            workspace_status: None,
+            is_pinned: false,
+            is_archived: false,
+            sort_order: 0,
+            manual_order: None,
+            last_activity_at: None,
+            linked_pr: None,
+            creator: None,
         };
         let result = TasksStartResult {
             issue_number: 7,

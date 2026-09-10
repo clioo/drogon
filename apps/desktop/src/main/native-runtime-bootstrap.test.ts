@@ -77,9 +77,32 @@ describe("native runtime bootstrap", () => {
     const outcome = await bootstrapNativeRuntime(
       baseDeps({ spawnDaemon, checkStatus }),
     );
-    expect(outcome).toEqual({ kind: "already-healthy" });
+    expect(outcome).toEqual({ kind: "already-healthy", capabilities: [] });
     expect(spawnDaemon).not.toHaveBeenCalled();
     expect(checkStatus).toHaveBeenCalledTimes(1);
+  });
+
+  // User-feature-closure item 7: a mixed-version old daemon (missing
+  // capabilities this build assumes) still answers `ok: true` — bootstrap
+  // must keep attaching to it exactly like any other already-healthy
+  // service, never re-classify it as unhealthy and never spawn a second
+  // daemon over a live incumbent. The capability gap itself is a renderer
+  // concern (daemon-capabilities.ts); this only proves the outcome carries
+  // the live capabilities through unmodified for that gate to read.
+  test("a mixed-version already-healthy service (missing capabilities) is still attached to, never spawned over", async () => {
+    const spawnDaemon = vi.fn(async () => undefined);
+    const oldDaemonStatus: Status = { ...status, capabilities: ["workspace.v1"] };
+    const outcome = await bootstrapNativeRuntime(
+      baseDeps({
+        spawnDaemon,
+        checkStatus: async () => ({ ok: true, result: oldDaemonStatus }),
+      }),
+    );
+    expect(outcome).toEqual({
+      kind: "already-healthy",
+      capabilities: ["workspace.v1"],
+    });
+    expect(spawnDaemon).not.toHaveBeenCalled();
   });
 
   test("a positively absent endpoint (fresh install) is spawned exactly once", async () => {

@@ -34,7 +34,7 @@ export function RemoveProjectDialog({
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const busy = disabled || sending;
-  const copy = getRemoveProjectDialogCopy(project.name);
+  const copy = getRemoveProjectDialogCopy(project.name, project.quickSession);
 
   const submit = async () => {
     setSending(true);

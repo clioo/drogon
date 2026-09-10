@@ -46,6 +46,19 @@ export type Worktree = {
   /** Composer Advanced → Parent worktree nesting edge. */
   parentWorktreeId?: string | null;
   createdAt: string;
+  /**
+   * Workspace Options metadata (Group by/Sort by/Pin/Archive/PR-link);
+   * see `crates/drogon-protocol/src/worktree.rs`'s `Worktree` for the wire
+   * contract each of these mirrors.
+   */
+  workspaceStatus?: string | null;
+  isPinned?: boolean;
+  isArchived?: boolean;
+  sortOrder?: number;
+  manualOrder?: number | null;
+  lastActivityAt?: string | null;
+  linkedPr?: number | null;
+  creator?: "cli" | "automation" | null;
 };
 export type AgentState =
   "working" | "idle" | "needs_input" | "exited" | "unknown";

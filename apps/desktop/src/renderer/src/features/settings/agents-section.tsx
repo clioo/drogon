@@ -13,6 +13,7 @@ import {
 } from "../../components/ui/tooltip";
 import { Button } from "../../components/ui/button";
 import { SettingsSection } from "./SettingsSection";
+import { ServiceCapabilityNotice } from "../shell/ServiceCapabilityNotice";
 import {
   SettingsSegmentedControl,
   SettingsSubsectionHeader,
@@ -61,6 +62,14 @@ export function AgentsSection(props: {
   onDefaultHarnessChange: (id: string) => void;
   harnessDefaults: Record<string, HarnessAgentDefault>;
   onHarnessDefaultChange: (id: string, value: HarnessAgentDefault) => void;
+  /** User-feature-closure item 7: whether the attached daemon advertises
+   *  agent.settings.v1 (App.tsx wires isAgentSettingsAvailable over the
+   *  live status capabilities). Omitted (or true) renders unchanged --
+   *  only an explicit false, meaning a mixed-version old daemon is
+   *  attached, shows the notice below. The panel keeps rendering either
+   *  way: a capability gap is surfaced, never a reason to hide settings
+   *  or restart anything automatically. */
+  capabilityAvailable?: boolean;
 }) {
   const { settings, ready, saving, error } = useAgentSettings();
   const [detected, setDetected] = useState<Harness[] | null>(
@@ -90,8 +99,8 @@ export function AgentsSection(props: {
     };
   }, [refreshKey, settings.agentCmdOverrides]);
   useEffect(() => {
-    if (!ready) void agentSettingsState.load();
-  }, [ready]);
+    if (!ready && props.capabilityAvailable !== false) void agentSettingsState.load();
+  }, [ready, props.capabilityAvailable]);
   const detectedIds =
     detected === null
       ? null
@@ -113,7 +122,12 @@ export function AgentsSection(props: {
       title="Agents"
       description="Manage AI agents, set a default, and customize commands."
     >
-      {error && (
+      {props.capabilityAvailable === false && (
+        <div className="mb-4 rounded-md border border-border bg-muted px-3 py-2">
+          <ServiceCapabilityNotice feature="Agent settings" />
+        </div>
+      )}
+      {error && props.capabilityAvailable !== false && (
         <div
           role="alert"
           className="mb-4 flex items-center justify-between gap-3 text-xs text-destructive"
@@ -129,7 +143,7 @@ export function AgentsSection(props: {
         </div>
       )}
       <fieldset
-        disabled={!ready}
+        disabled={!ready || props.capabilityAvailable === false}
         className="min-w-0 space-y-8"
         aria-busy={saving || !ready}
       >
