@@ -177,7 +177,7 @@ export function CompactAgentSummaryButton({
                   key={group.state}
                   className="inline-flex min-w-0 shrink-0 items-center gap-0.5 rounded-sm bg-worktree-sidebar/70 px-1 py-0.5"
                 >
-                  <AgentStateIcon state={group.state} size={10} />
+                  <AgentStateIcon state={group.state} size={10} variant="row" />
                   {/* Why: same-state session identities read as one status cluster;
                       overlapping them saves width without merging different states. */}
                   <span className="inline-flex shrink-0 items-center -space-x-0.5 pl-0.5">

@@ -70,6 +70,28 @@ export function cardDotState(sessions: Session[]): AgentState {
   return SUMMARY_STATE_ORDER.find((state) => present.has(state)) ?? "unknown";
 }
 
+/**
+ * The worktree's agent identity for the card's status lane: the session that
+ * owns the state the lane's glyph is showing (`cardDotState`'s winning
+ * group), and only when that session actually reported a harness. The lane
+ * draws no avatar for a plain shell or an empty card — the reference's
+ * summary pill pairs an AgentStateDot with the AgentIcon of the agents in
+ * that same state group (worktree-card-compact-agents.tsx), and this is the
+ * same pairing for the single card-level lane.
+ */
+export function cardIdentitySession(sessions: Session[]): Session | null {
+  const identified = sessions.filter(
+    (session) => session.harnessId !== null && session.harnessId !== undefined,
+  );
+  if (identified.length === 0) return null;
+  const dot = cardDotState(sessions);
+  return (
+    identified.find((session) => sessionDotState(session) === dot) ??
+    identified[0] ??
+    null
+  );
+}
+
 export function summarizeCardAgentStates(sessions: Session[]): string {
   if (sessions.length === 0) return "";
   const counts = new Map<AgentState, number>();

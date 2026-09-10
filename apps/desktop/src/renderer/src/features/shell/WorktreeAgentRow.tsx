@@ -120,8 +120,10 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
   const identity = (
     <>
       {/* The source's inline rows pass stateDotSize="sm" (a 10px box) so
-          the dot isn't mistaken for the adjacent identity glyph. */}
-      <AgentStateIcon state={row.state} size={10} />
+          the dot isn't mistaken for the adjacent identity glyph; the glyph
+          set is the reference's AgentStateDot (`variant="row"`) — a filled
+          emerald check-circle for a concluded turn. */}
+      <AgentStateIcon state={row.state} size={10} variant="row" />
       <span
         className="inline-flex shrink-0"
         title={formatRowHarnessLabel(row.session.harnessId ?? null)}

@@ -169,6 +169,51 @@ describe("row copy", () => {
     expect(formatRowHarnessLabel("codex")).toBe("Codex");
   });
 
+  it("shows the session's message preview after the dash, like the fork's last-message slot", () => {
+    // The reference draws the agent's last assistant line / tool preview
+    // (worktree-card-compact-agent-row.tsx). Drogon's session contract
+    // carries no last-message field, so the row shows the daemon's bounded
+    // first-known prompt preview — real message text, never invented.
+    expect(
+      resolveRowSecondary(
+        session({
+          agentState: "idle",
+          harnessId: "claude",
+          agentPromptPreview: "Refactor the sidebar card order",
+        }),
+        NOW,
+        "Terminal 1",
+      ),
+    ).toBe("Refactor the sidebar card order");
+    // A row whose title is already derived from that same prompt keeps the
+    // identity text instead of repeating the title after the dash.
+    expect(
+      resolveRowSecondary(
+        session({
+          agentState: "idle",
+          harnessId: "claude",
+          agentPromptPreview: "Refactor the sidebar card order",
+        }),
+        NOW,
+        "Refactor the sidebar card order",
+      ),
+    ).toBe("Claude");
+    // The freshness report still wins while the agent is not reporting.
+    expect(
+      resolveRowSecondary(
+        session({
+          agentState: "unknown",
+          harnessId: "claude",
+          agentPromptPreview: "Refactor the sidebar card order",
+          agentStateAt: null,
+          createdAt: "2026-09-08T11:26:00.000Z",
+        }),
+        NOW,
+        "Terminal 1",
+      ),
+    ).toBe("No update in 34m");
+  });
+
   it("reports silence with the fork's freshness copy", () => {
     expect(agentNoUpdateLabel(NOW - 34 * 60_000, NOW)).toBe(
       "No update in 34m",

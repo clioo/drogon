@@ -9,6 +9,7 @@ import type { Session } from "../../../../shared/session-contract";
 import {
   buildCardSummaryGroups,
   cardDotState,
+  cardIdentitySession,
   summarizeAgentsForAria,
   summarizeCardAgentStates,
   summarizeSessionIdentities,
@@ -113,5 +114,29 @@ describe("cardDotState", () => {
       ]),
     ).toBe("needs_input");
     expect(cardDotState([])).toBe("unknown");
+  });
+});
+
+describe("cardIdentitySession", () => {
+  test("picks the agent of the state the lane's dot is showing", () => {
+    const idle = session({ id: "idle", agentState: "idle", harnessId: "claude" });
+    const waiting = session({
+      id: "waiting",
+      harnessId: "pi",
+      agentState: "needs_input",
+    });
+    // The dot wins for needs_input (SUMMARY_STATE_ORDER), so the avatar is Pi's.
+    expect(cardIdentitySession([idle, waiting])?.id).toBe("waiting");
+  });
+
+  test("draws no avatar for an empty card or a harness-less shell", () => {
+    expect(cardIdentitySession([])).toBeNull();
+    expect(cardIdentitySession([session({ agentState: "idle", harnessId: null })])).toBeNull();
+  });
+
+  test("falls back to any identified session when the dot's group is a plain shell", () => {
+    const shell = session({ id: "shell", agentState: "working", harnessId: null });
+    const agent = session({ id: "agent", agentState: "idle", harnessId: "pi" });
+    expect(cardIdentitySession([shell, agent])?.id).toBe("agent");
   });
 });

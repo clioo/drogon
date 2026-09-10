@@ -31,6 +31,7 @@ import {
   resolveTabTitle,
 } from "./tab-order";
 import { recoveryTabLabel } from "../../session-recovery";
+import { deriveGeneratedTabTitle } from "../../../../shared/agent-tab-title";
 
 /** Fork-verbatim harness labels (src/shared/agent-type-label.ts). */
 const HARNESS_LABELS: Record<HarnessId, string> = {
@@ -102,14 +103,41 @@ function commandBasename(session: Session): string {
 }
 
 /**
- * Secondary row text (the fork's CompactAgentRow secondary slot): the
- * freshness report while the agent is not reporting, otherwise the
- * harness identity for agent sessions and the command basename for plain
- * shells.
+ * The row's message preview — the reference's `lastAssistantMessage` /
+ * tool-preview slot (`worktree-card-compact-agent-row.tsx`). Drogon's
+ * `session.list` records no last-assistant-message field
+ * (`crates/drogon-core/src/session.rs`), so the real text used here is
+ * `agentPromptPreview`: the daemon's bounded (512-char, first-known) prompt
+ * preview, i.e. genuine user-visible message text, never a fabricated line.
+ * A row whose own title already derives from that same prompt
+ * (`agent-generated-titles.ts` reuses `deriveGeneratedTabTitle`) returns ""
+ * so the dash never repeats the title it follows.
  */
-export function resolveRowSecondary(session: Session, now: number): string {
+export function resolveRowMessagePreview(
+  session: Session,
+  primaryTitle: string,
+): string {
+  const preview = session.agentPromptPreview?.trim() ?? "";
+  if (preview === "") return "";
+  if (deriveGeneratedTabTitle(preview) === primaryTitle) return "";
+  return preview;
+}
+
+/**
+ * Secondary row text (the fork's CompactAgentRow secondary slot): the
+ * freshness report while the agent is not reporting, then the session's
+ * message preview, then the harness identity for agent sessions and the
+ * command basename for plain shells.
+ */
+export function resolveRowSecondary(
+  session: Session,
+  now: number,
+  primaryTitle = "",
+): string {
   const state = sessionDotState(session);
   if (state === "unknown") return agentNoUpdateLabel(rowEvidenceMs(session), now);
+  const preview = resolveRowMessagePreview(session, primaryTitle);
+  if (preview) return preview;
   if (session.harnessId) return formatRowHarnessLabel(session.harnessId);
   return commandBasename(session);
 }
@@ -133,7 +161,7 @@ export type WorktreeAgentRow = {
   state: AgentState;
   /** Tab title, resolved exactly like the strip (rename wins). */
   title: string;
-  /** Freshness report or harness/command identity. */
+  /** Freshness report, message preview, or harness/command identity. */
   secondary: string;
   /** Compact age (`22m`) of the last report, or "" when unknowable. */
   relativeTime: string;
@@ -197,7 +225,7 @@ export function buildWorktreeAgentRows(
       session,
       state: sessionDotState(session),
       title,
-      secondary: resolveRowSecondary(session, now),
+      secondary: resolveRowSecondary(session, now, title),
       relativeTime: evidenceMs > 0 ? formatShortTimeAgo(evidenceMs, now) : "",
       focused: session.id === inputs.activeSessionId,
     };

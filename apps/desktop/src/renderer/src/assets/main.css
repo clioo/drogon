@@ -1527,22 +1527,84 @@ footer[data-testid="status-bar"] {
   padding: 3px 6px 4px 16px;
   gap: 2px;
 }
+/* Selected card: the fork's exact active recipe
+   ([data-worktree-card-surface][data-worktree-card-active='primary'] in the
+   reference main.css) over the sidebar's own tokens — a rounded border
+   around the WHOLE card, a translucent wash and a 1px shadow. The previous
+   rule mixed the app `--border`/`--foreground` tokens instead of
+   `--worktree-sidebar-border`/`--worktree-sidebar-foreground`, which is why
+   the outline read as almost invisible. */
 .shell-worktree-card[data-active="true"] {
-  border-color: color-mix(in srgb, var(--border) 40%, transparent);
-  background: color-mix(in srgb, var(--foreground) 8%, transparent);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 4%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--worktree-sidebar-border) 40%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 8%,
+    transparent
+  );
+  box-shadow: 0 1px 2px
+    color-mix(in srgb, var(--worktree-sidebar-foreground) 4%, transparent);
+}
+.dark .shell-worktree-card[data-active="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 18%,
+    var(--worktree-sidebar-border)
+  );
+  background: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 10%,
+    transparent
+  );
+  box-shadow: 0 1px 2px
+    color-mix(in srgb, var(--worktree-sidebar-foreground) 3%, transparent);
 }
 .shell-worktree-card:disabled {
   cursor: default;
 }
 /* Status lane (the fork's WorktreeCardStatusSlot column, items-start
-   pt-[2px] centered): the activity glyph lives left of the content. */
+   pt-[2px] centered): the activity glyph and the working agent's avatar
+   live left of the content, its tooltip names the state. */
 .shell-worktree-card-status-lane {
   display: flex;
   flex-shrink: 0;
   align-items: flex-start;
   justify-content: center;
+  gap: 2px;
   padding-top: 2px;
+}
+/* The agent avatar beside the status dot: the fork's summary-cluster chip
+   (worktree-card-compact-agents.tsx SummaryIdentityIcon — a 16px circle on
+   the sidebar surface with the harness glyph inside). */
+.shell-worktree-card-agent-avatar {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid
+    color-mix(in srgb, var(--worktree-sidebar-border) 70%, transparent);
+  border-radius: 999px;
+  background: var(--worktree-sidebar);
+}
+/* Right-side card affordances (fork MetaIconBadge shell): terminal marker
+   and branch marker, ahead of the kebab. */
+.shell-worktree-card-affordances {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  padding-top: 1px;
+}
+/* The branch marker keeps the branch's own accent on the sidebar ring
+   token — the sidebar's branch-colour token (the reference tints this
+   glyph with the repo accent; Drogon carries no per-project colour). */
+.shell-worktree-card-affordance-branch {
+  color: var(--worktree-sidebar-ring);
 }
 .shell-worktree-card-top {
   display: flex;
