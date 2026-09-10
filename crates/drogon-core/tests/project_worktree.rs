@@ -1066,3 +1066,94 @@ fn diagnostics_memory_reports_session_counts_honestly() {
     let after = ok(&engine, "diagnostics.memory", "dm5", json!({}));
     assert_eq!(after["liveSessions"], json!(0));
 }
+
+#[test]
+fn session_rename_sets_and_clears_the_durable_title() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let workspace = ok(
+        &engine,
+        "workspace.register",
+        "rn1",
+        json!({"path": data_dir.path().to_string_lossy()}),
+    );
+    let session = ok(
+        &engine,
+        "session.start",
+        "rn2",
+        json!({
+            "workspaceId": workspace["id"],
+            "command": "/bin/sh",
+            "args": ["-c", "sleep 30"],
+            "cols": 80, "rows": 24
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+    assert_eq!(session["title"], Value::Null);
+
+    let renamed = ok(
+        &engine,
+        "session.rename",
+        "rn3",
+        json!({"sessionId": session_id, "incarnation": incarnation, "title": "deploy worker"}),
+    );
+    assert_eq!(renamed["title"], json!("deploy worker"));
+
+    // The rename is visible on list and show for the live row.
+    let listed = ok(
+        &engine,
+        "session.list",
+        "rn4",
+        json!({"workspaceId": workspace["id"]}),
+    );
+    let row = &listed["sessions"].as_array().unwrap()[0];
+    assert_eq!(row["title"], json!("deploy worker"));
+    let shown = ok(
+        &engine,
+        "session.show",
+        "rn5",
+        json!({"sessionId": session_id}),
+    );
+    assert_eq!(shown["title"], json!("deploy worker"));
+
+    // A blank title clears; the row persists after engine reopen.
+    let cleared = ok(
+        &engine,
+        "session.rename",
+        "rn6",
+        json!({"sessionId": session_id, "incarnation": incarnation, "title": "   "}),
+    );
+    assert_eq!(cleared["title"], Value::Null);
+
+    let renamed = ok(
+        &engine,
+        "session.rename",
+        "rn7",
+        json!({"sessionId": session_id, "incarnation": incarnation, "title": "persisted"}),
+    );
+    assert_eq!(renamed["title"], json!("persisted"));
+    drop(engine);
+    let reopened = Engine::open(data_dir.path()).unwrap();
+    let shown = ok(
+        &reopened,
+        "session.show",
+        "rn8",
+        json!({"sessionId": session_id}),
+    );
+    assert_eq!(shown["title"], json!("persisted"));
+
+    // Wrong incarnation is fenced like every other mutation. After reopen
+    // there is no retained handle, so the fence reads `unverifiable`; a live
+    // handle would read `stale_incarnation`. Either way it is never applied.
+    let fence = err_code(
+        &reopened,
+        "session.rename",
+        "rn9",
+        json!({"sessionId": session_id, "incarnation": "stale", "title": "x"}),
+    );
+    assert!(
+        fence == "unverifiable" || fence == "stale_incarnation",
+        "unexpected fence code: {fence}"
+    );
+}

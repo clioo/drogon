@@ -127,7 +127,8 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
             created_at TEXT NOT NULL,
             harness_id TEXT,
             needs_input_at TEXT,
-            parent_session_id TEXT
+            parent_session_id TEXT,
+            title TEXT
         );
         CREATE TABLE IF NOT EXISTS requests (
             request_id TEXT PRIMARY KEY,
@@ -270,7 +271,8 @@ fn pending_forward_migrations(conn: &Connection) -> rusqlite::Result<Vec<Pending
     // lacks them; a fresh or current one already has all three.
     if let Ok(Some((_, cols))) = table_columns(conn, "sessions") {
         let has = |name: &str| cols.iter().any(|c| c == name);
-        if !(has("harness_id") && has("needs_input_at") && has("parent_session_id")) {
+        if !(has("harness_id") && has("needs_input_at") && has("parent_session_id") && has("title"))
+        {
             pending.push(PendingMigration {
                 component: "sessions (main schema columns)".to_string(),
                 recorded: 1,
@@ -451,6 +453,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     migrate_sessions_harness_id(&tx)?;
     migrate_sessions_needs_input(&tx)?;
     migrate_sessions_parent_session_id(&tx)?;
+    migrate_sessions_title(&tx)?;
     recover_from_prior_instance(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
     tx.commit()?;
@@ -514,6 +517,23 @@ fn migrate_sessions_parent_session_id(tx: &Transaction<'_>) -> rusqlite::Result<
         .map(|count| count > 0)?;
     if !has_column {
         tx.execute_batch("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;")?;
+    }
+    Ok(())
+}
+
+/// Additive migration for the user-facing display title: `title` is what
+/// `terminal rename` edits and what `session.show`/list surfaces. `NULL`
+/// keeps the command line as the display name. Idempotent like its siblings.
+fn migrate_sessions_title(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    let has_column: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'title'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)?;
+    if !has_column {
+        tx.execute_batch("ALTER TABLE sessions ADD COLUMN title TEXT;")?;
     }
     Ok(())
 }

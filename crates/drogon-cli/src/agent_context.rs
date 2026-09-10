@@ -262,6 +262,20 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["Refuses a dirty checkout unless --force is passed."],
         ),
         entry(
+            "terminal rename",
+            &["terminal", "rename"],
+            "Rename a session's display title (omitted/blank clears it)",
+            "drogon-cli terminal rename --session <ID> --incarnation <TOKEN> [--title <TEXT>]",
+            &["incarnation", "session", "title"],
+            &[],
+            &[
+                "drogon-cli terminal rename --session sess-1 --incarnation tok --title 'deploy worker'",
+            ],
+            &[
+                "Incarnation-gated like every other session mutation; the title persists across daemon restarts and shows up on terminal list/show.",
+            ],
+        ),
+        entry(
             "terminal show",
             &["terminal", "show"],
             "Show a session's metadata and output preview",

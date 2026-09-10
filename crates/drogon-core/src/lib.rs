@@ -478,6 +478,7 @@ impl Engine {
             "session.write" => self.mutating(request, Self::do_session_write),
             "session.stop_workspace" => self.mutating(request, Self::do_session_stop_workspace),
             "session.show" => self.do_session_show(&request.params),
+            "session.rename" => self.mutating(request, Self::do_session_rename),
             "diagnostics.memory" => self.do_diagnostics_memory(&request.params),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
@@ -818,7 +819,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id FROM sessions ORDER BY created_at",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, title FROM sessions ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
         let rows: Vec<_> = stmt
@@ -830,8 +831,12 @@ impl Engine {
         let mut sessions = Vec::new();
         for row in rows {
             let (id, mut value) = row.map_err(error::from_sqlite)?;
+            let row_title = value["title"].clone();
             if let Some(handle) = sessions_guard.get(&id) {
                 value = session::snapshot(handle);
+                // The snapshot is handle-derived and has no title; carry the
+                // durable rename across so a rename is visible on live rows.
+                value["title"] = row_title;
             }
             if workspace_filter.is_none_or(|w| value["workspaceId"] == w) {
                 sessions.push(value);
@@ -897,7 +902,7 @@ impl Engine {
             let conn = self.db.lock().unwrap();
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id FROM sessions WHERE id = ?1",
+                    "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, title FROM sessions WHERE id = ?1",
                 )
                 .map_err(error::from_sqlite)?;
             let row = stmt
@@ -908,7 +913,9 @@ impl Engine {
         };
         let handle = self.sessions.lock().unwrap().get(session_id).cloned();
         let preview = if let Some(handle) = handle {
+            let row_title = value["title"].clone();
             value = session::snapshot(&handle);
+            value["title"] = row_title;
             let tail = session::read_tail(&handle);
             let bytes = tail.bytes;
             let start = bytes.len().saturating_sub(SHOW_PREVIEW_BYTES);
@@ -943,6 +950,50 @@ impl Engine {
             "liveSessions": live_sessions,
             "totalSessions": total_sessions,
         }))
+    }
+
+    /// `session.rename { sessionId, incarnation, title? }`: source
+    /// `terminal rename`. Sets or clears (absent/empty-after-trim) the
+    /// durable display title; the reply is the updated session record.
+    /// Incarnation-gated like every other session mutation.
+    fn do_session_rename(&self, params: &Value) -> Result<Value, RpcError> {
+        let (handle, session_id) = self.require_session_with_incarnation(params)?;
+        let title = params
+            .get("title")
+            .map(|value| {
+                value
+                    .as_str()
+                    .ok_or_else(|| error::invalid_argument("title must be a string or null"))
+            })
+            .transpose()?;
+        let stored: Option<String> = title
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if let Some(title) = &stored
+            && title.chars().count() > 256
+        {
+            return Err(error::invalid_argument(
+                "title must be at most 256 characters",
+            ));
+        }
+        {
+            let conn = self.db.lock().unwrap();
+            let changed = conn
+                .execute(
+                    "UPDATE sessions SET title = ?1 WHERE id = ?2",
+                    rusqlite::params![stored, session_id],
+                )
+                .map_err(error::from_sqlite)?;
+            if changed != 1 {
+                return Err(error::internal_error(
+                    "the rename wrote no row; refusing to acknowledge it",
+                ));
+            }
+        }
+        let mut value = session::snapshot(&handle);
+        value["title"] = stored.map(Value::String).unwrap_or(Value::Null);
+        Ok(value)
     }
 
     /// `session.stop_workspace { workspaceId }`: source `terminal.stop` —
@@ -1049,7 +1100,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let row = conn
             .query_row(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id FROM sessions WHERE id = ?1",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, title FROM sessions WHERE id = ?1",
                 [session_id],
                 row_to_session_json,
             )
@@ -1139,6 +1190,7 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "cacheIdleAt": null,
             "harnessId": r.get::<_, Option<String>>(11)?,
             "parentSessionId": r.get::<_, Option<String>>(13)?,
+            "title": r.get::<_, Option<String>>(14)?,
         }),
     ))
 }

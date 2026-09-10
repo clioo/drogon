@@ -353,6 +353,36 @@ async fn terminal(
             )
             .await
         }
+        TerminalAction::Rename {
+            session,
+            incarnation,
+            title,
+        } => {
+            let call = client
+                .call(
+                    "session.rename",
+                    json!({
+                        "sessionId": session,
+                        "incarnation": incarnation,
+                        "title": title,
+                    }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let renamed: Session = Client::decode_checked(&call, "session.rename", check_session)?;
+            let session_id = session.clone();
+            emit(
+                call,
+                json,
+                || match &renamed.title {
+                    Some(title) => format!("Renamed {session_id} to {title:?}."),
+                    None => format!("Cleared the title on {session_id}."),
+                },
+                0,
+                None,
+            )
+        }
         TerminalAction::Show { session } => {
             let call = client
                 .call(

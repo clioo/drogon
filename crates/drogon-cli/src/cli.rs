@@ -575,6 +575,20 @@ pub enum TerminalAction {
         #[arg(long)]
         rows: u16,
     },
+    /// Rename a session's display title (source `terminal rename`)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli terminal rename --session <ID> --incarnation <TOKEN> [--title <TEXT>]\nValid flags: --data-dir, --help, --incarnation, --json, --request-id, --retry-request, --session, --title"
+    )]
+    Rename {
+        #[arg(long, value_name = "ID")]
+        session: String,
+        #[arg(long, value_name = "TOKEN")]
+        incarnation: String,
+        /// New title; omitted or blank-after-trim clears it
+        #[arg(long, value_name = "TEXT")]
+        title: Option<String>,
+    },
     /// Show a session's metadata and output preview
     #[command(
         args_override_self = true,
@@ -1005,6 +1019,21 @@ impl Cli {
                     require_nonempty("incarnation", incarnation)?;
                     validate_dimension("cols", *cols)?;
                     validate_dimension("rows", *rows)?;
+                }
+                TerminalAction::Rename {
+                    session,
+                    incarnation,
+                    title,
+                } => {
+                    require_nonempty("session", session)?;
+                    require_nonempty("incarnation", incarnation)?;
+                    if let Some(title) = title
+                        && title.chars().count() > 256
+                    {
+                        return Err(CliError::Usage(
+                            "--title must be at most 256 characters".into(),
+                        ));
+                    }
                 }
                 TerminalAction::Show { session } => {
                     require_nonempty("session", session)?;

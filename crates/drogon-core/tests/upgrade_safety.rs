@@ -210,15 +210,16 @@ fn main_schema_v1_gains_sessions_columns_and_keeps_rows() {
     seed(&dir, "main-schema-v1");
     Engine::open(dir.path()).unwrap();
     let conn = read_db(&dir);
-    let (harness_id, needs_input_at): (Option<String>, Option<String>) = conn
-        .query_row(
-            "SELECT harness_id, needs_input_at FROM sessions WHERE id = 'sess-seed'",
+    let (harness_id, needs_input_at, title): (Option<String>, Option<String>, Option<String>) =
+        conn.query_row(
+            "SELECT harness_id, needs_input_at, title FROM sessions WHERE id = 'sess-seed'",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap();
     assert_eq!(harness_id, None);
     assert_eq!(needs_input_at, None);
+    assert_eq!(title, None, "v1 rows gain a NULL title via ALTER TABLE");
 }
 
 #[test]

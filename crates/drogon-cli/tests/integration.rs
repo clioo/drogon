@@ -2043,3 +2043,60 @@ async fn worktree_list_limit_caps_the_json_payload() {
     assert_eq!(worktrees[0]["id"], "w1");
     drop(service);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_rename_maps_title_and_prints_source_shape() {
+    let dir = temp_data_dir("term-rename");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request| match request["method"].as_str() {
+            Some("session.rename") => {
+                let mut session = session_result("sess-1");
+                session["title"] = request["params"]["title"].clone();
+                Action::Respond(ok_envelope(
+                    request["requestId"].as_str().unwrap_or(""),
+                    session,
+                ))
+            }
+            _ => Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({}),
+            )),
+        }),
+    );
+    let output = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "rename",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+            "--title",
+            "deploy worker",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("Renamed sess-1 to \"deploy worker\"."));
+    let request = service.last_captured();
+    assert_eq!(request["method"], "session.rename");
+    assert_eq!(request["params"]["title"], "deploy worker");
+
+    // Clearing: --title omitted maps to a JSON null.
+    let cleared = run_cli(
+        dir.path(),
+        &[
+            "terminal",
+            "rename",
+            "--session",
+            "sess-1",
+            "--incarnation",
+            "inc-1",
+        ],
+    );
+    assert_eq!(cleared.status.code(), Some(0));
+    let request = service.last_captured();
+    assert_eq!(request["params"]["title"], Value::Null);
+    drop(service);
+}

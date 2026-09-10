@@ -90,6 +90,9 @@ pub struct Session {
     pub created_at: String,
     pub agent_state: AgentState,
     pub agent_state_at: Option<String>,
+    /// Durable display title from `terminal rename`; absent on old daemons.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 /// A git repository or a plain folder that owns Worktrees.
@@ -1041,6 +1044,7 @@ mod tests {
             created_at: "2026-09-05T12:00:00Z".into(),
             agent_state,
             agent_state_at: agent_state_at.map(str::to_string),
+            title: None,
         }
     }
 
