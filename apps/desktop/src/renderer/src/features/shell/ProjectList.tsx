@@ -791,8 +791,8 @@ function ProjectRow({
               type="button"
               className="shell-icon-button"
               data-project-header-action=""
-              aria-label={`New worktree in ${project.name}`}
-              title={`New worktree in ${project.name}`}
+              aria-label={`Create new worktree for ${project.name}`}
+              title={`Create new worktree for ${project.name}`}
               disabled={disabled}
               onClick={onNewWorktree}
               onPointerDown={(event) => event.stopPropagation()}
