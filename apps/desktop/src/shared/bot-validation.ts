@@ -98,7 +98,11 @@ const history = z.object({
     endedAt: timestamp.nullable(),
     recipe: recipe.nullable(),
     hostObservation: observation.nullable(),
-    invocation: z.enum(["scheduled", "manual"]).nullable(),
+    // Mirrors `ResponsibilityRunInvocation` in
+    // crates/drogon-core/src/bots/records.rs. The delegation drain stamps
+    // `reactive` when a monitor fires; omitting it here made a single such
+    // history row fail the whole `bot.snapshot` parse and blank the Bots page.
+    invocation: z.enum(["scheduled", "manual", "reactive"]).nullable(),
   }),
   responsibilityName: z.string().nullable(),
   automationName: z.string().nullable(),
