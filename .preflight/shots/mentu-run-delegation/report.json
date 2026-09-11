@@ -1,0 +1,131 @@
+{
+  "kind": "mentu-run-delegation",
+  "status": "PASSED",
+  "startedAt": "2026-09-11T00:24:29.801Z",
+  "checks": [
+    "app-launched-in-background-window",
+    "main-agent-session-idle-before-click",
+    "mentu-tab-open-with-live-main-session",
+    "review-staged-before-approval",
+    "run-recipe-button-animates-after-approval",
+    "prompt-visible-in-main-session",
+    "agent-session-ran-drogon-cli-mentu-run",
+    "run-row-live-with-finished-step-while-running",
+    "evidence-populated-while-running",
+    "metrics-populated-while-running",
+    "evidence-and-metrics-read-while-status-running",
+    "running-indicator-and-evidence-captured-light-4-widths",
+    "button-returns-to-idle-after-settle",
+    "settled-run-shows-both-steps",
+    "second-run-restages-review-after-remount",
+    "running-indicator-and-evidence-captured-dark-4-widths",
+    "second-run-delegated-in-dark-and-settled",
+    "delegation-proven-end-to-end"
+  ],
+  "screenshots": [
+    {
+      "name": "01-idle-light-1440",
+      "file": "/tmp/mentu-postmerge-VeTD/01-idle-light-1440.png",
+      "sha256": "eec3bdf06a946fa462c16848d008bf2d9f444306d4e53475d57b047e9c2ae109"
+    },
+    {
+      "name": "02-review-light-1440",
+      "file": "/tmp/mentu-postmerge-VeTD/02-review-light-1440.png",
+      "sha256": "a61164e2d856713c027ca2b648e31e9b09e5ff3764b4616aa27fe885e3a2f679"
+    },
+    {
+      "name": "04-running-metrics-light-1440",
+      "file": "/tmp/mentu-postmerge-VeTD/04-running-metrics-light-1440.png",
+      "sha256": "1fd3b9d4f15997e2569bbd686f1667dd0c6a0d5d4ada2b9889b2ca93bc75f71e"
+    },
+    {
+      "name": "03-running-evidence-light-1440",
+      "file": "/tmp/mentu-postmerge-VeTD/03-running-evidence-light-1440.png",
+      "sha256": "65aa5fa694a2dcee5b8f9ca8dbecad53f5ecc4046fe4ec33d18dc0ae93622a5c"
+    },
+    {
+      "name": "03-running-evidence-light-1100",
+      "file": "/tmp/mentu-postmerge-VeTD/03-running-evidence-light-1100.png",
+      "sha256": "3c958f76abef832e58cf95c1e09bd141bd5b752b71adc77ad2b4cb2f3b0a9a6f"
+    },
+    {
+      "name": "03-running-evidence-light-900",
+      "file": "/tmp/mentu-postmerge-VeTD/03-running-evidence-light-900.png",
+      "sha256": "a01ca97275975cb239bf62481558250f72f03741c10e9505332d7eaed42b1642"
+    },
+    {
+      "name": "03-running-evidence-light-760",
+      "file": "/tmp/mentu-postmerge-VeTD/03-running-evidence-light-760.png",
+      "sha256": "c7d28bb005d051725e3bb1dfc1331aa98697ad344672d2a5553b11b66cdd1748"
+    },
+    {
+      "name": "05-settled-light-1440",
+      "file": "/tmp/mentu-postmerge-VeTD/05-settled-light-1440.png",
+      "sha256": "5982ebde3038443bf97d763a64e6f64a9211ef96d078ad16b88446cd75a14c4d"
+    },
+    {
+      "name": "06-idle-dark-1440",
+      "file": "/tmp/mentu-postmerge-VeTD/06-idle-dark-1440.png",
+      "sha256": "d3445126ade7c827169d86fbfdbfa1441e4dfb94eaf708832055208fd9066861"
+    },
+    {
+      "name": "03-running-evidence-dark-1440",
+      "file": "/tmp/mentu-postmerge-VeTD/03-running-evidence-dark-1440.png",
+      "sha256": "920dc84c68a9d65a1a3a3b549ae19015c37593dc54eae9ecb92f1572b9cab244"
+    },
+    {
+      "name": "03-running-evidence-dark-1100",
+      "file": "/tmp/mentu-postmerge-VeTD/03-running-evidence-dark-1100.png",
+      "sha256": "cdd2518b7c075c7945b9134452f659323afc28436fb60efc00a56cafc8958095"
+    },
+    {
+      "name": "03-running-evidence-dark-900",
+      "file": "/tmp/mentu-postmerge-VeTD/03-running-evidence-dark-900.png",
+      "sha256": "a7ee98e10c884cd15bc7583d4a1cd2c2a94d2b9d5055e0eda415d6c299f8821c"
+    },
+    {
+      "name": "03-running-evidence-dark-760",
+      "file": "/tmp/mentu-postmerge-VeTD/03-running-evidence-dark-760.png",
+      "sha256": "5e0751ee728889d9b4921b41de841c20a835f816c0a693a12546d8a62b6a6af7"
+    },
+    {
+      "name": "08-settled-dark-1440",
+      "file": "/tmp/mentu-postmerge-VeTD/08-settled-dark-1440.png",
+      "sha256": "fe9497ea082826a823ea1db6530477d86d2adf805b435160042cbe02b0460ce1"
+    }
+  ],
+  "processes": {
+    "desktopPids": [
+      2340
+    ]
+  },
+  "cleanup": {
+    "survivors": [],
+    "desktopPids": [
+      2340
+    ]
+  },
+  "survivors": [],
+  "dataDir": "/var/folders/8g/w9x4n8ws4mx6vxjhmnrnwy640000gn/T/mentu-delegation-jWwSng/data",
+  "output": "/tmp/mentu-postmerge-VeTD",
+  "fixture": "/var/folders/8g/w9x4n8ws4mx6vxjhmnrnwy640000gn/T/mentu-delegation-jWwSng",
+  "workspace": "/var/folders/8g/w9x4n8ws4mx6vxjhmnrnwy640000gn/T/mentu-delegation-jWwSng/folder",
+  "workspaceId": "e3bf0599-af85-4253-9c47-140b9a6cbcdd",
+  "consoleErrors": [],
+  "mainSession": {
+    "id": "917cfe70-764d-4948-b13f-6f7aa67cdbf5",
+    "agentState": "idle"
+  },
+  "terminalTail": "agent-settings-fixture\r\nARG=--dangerously-skip-permissions\r\nARG=--settings\r\nARG=/private/var/folders/8g/w9x4n8ws4mx6vxjhmnrnwy640000gn/T/mentu-delegation-jWwSng/data/hooks/4b851506-2167-4d24-a109-765a4c29c537.json\r\nENV=\r\nDrogon Mentu run request for recipe \"acceptance-live\" in workspace \"e3bf0599-af85-4253-9c47-140b9a6cbcdd\" (approved, approval 070b4d75-5b06-47e4-87e1-ca5d7e569a20). You are the orchestrator: do not edit the recipe and do not run its steps by hand. If you have not read it this session, run drogon-cli skills get --topic drogon-cli first, then run and follow it to the end with: drogon-cli mentu run --workspace e3bf0599-af85-4253-9c47-140b9a6cbcdd --recipe acceptance-live --approval 070b4d75-5b06-47e4-87e1-ca5d7e569a20 --follow --timeout-ms 900000. When it settles, report here the run id, every step's status, and the failing step's error; stop it with drogon-cli mentu cancel --run <RUN-ID>. The daemon records the run, so Evidence and Metrics in the Mentu tab fill in while it runs.\r\nfixture-input=Drogon Mentu run request for recipe \"acceptance-live\" in workspace \"e3bf0599-af85-4253-9c47-140b9a6cbcdd\" (approved, approval 070b4d75-5b06-47e4-87e1-ca5d7e569a20). You are the orchestrator: do not edit the recipe and do not run its steps by hand. If you have not read it this session, run drogon-cli skills get --topic drogon-cli first, then run and follow it to the end with: drogon-cli mentu run --workspace e3bf0599-af85-4253-9c47-140b9a6cbcdd --recipe acceptance-live --approval 070b4d75-5b06-47e4-87e1-ca5d7e569a20 --follow --timeout-ms 900000. When it settles, report here the run id, every step's status, and the failing step's error; stop it with drogon-cli mentu cancel --run <RUN-ID>. The daemon records the run, so Evidence and Metrics in the Mentu tab fill in while it runs.\r\nfixture-mentu-run recipe=acceptance-live workspace=e3bf0599-af85-4253-9c47-140b9a6cbcdd\r\n",
+  "prompt": "Drogon Mentu run request for recipe \"acceptance-live\" in workspace \"e3bf0599-af85-4253-9c47-140b9a6cbcdd\" (approved, approval 070b4d75-5b06-47e4-87e1-ca5d7e569a20). You are the orchestrator: do not edit the recipe and do not run its steps by hand. If you have not read it this session, run drogon-cli skills get --topic drogon-cli first, then run and follow it to the end with: drogon-cli mentu run --workspace e3bf0599-af85-4253-9c47-140b9a6cbcdd --recipe acceptance-live --approval 070b4d75-5b06-47e4-87e1-ca5d7e569a20 --follow --timeout-ms 900000. When it settles, report here the run id, every step's status, and the failing step's error; stop it with drogon-cli mentu cancel --run <RUN-ID>. The daemon records the run, so Evidence and Metrics in the Mentu tab fill in while it runs.\r",
+  "liveRun": {
+    "id": "dc7740f1-aab5-4e9e-86d6-2f355badc592",
+    "status": "running",
+    "mentuRunId": "run_20260911002432_DFDDB88D",
+    "steps": [
+      "write-marker"
+    ]
+  },
+  "desktopStopped": true,
+  "finishedAt": "2026-09-11T00:25:35.310Z"
+}
