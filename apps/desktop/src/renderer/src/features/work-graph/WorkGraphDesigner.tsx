@@ -130,6 +130,8 @@ export function WorkGraphDesigner({
   document,
   onDone,
   onSaved,
+  onIntentSaved,
+  onRunLaunched,
 }: {
   /** The gated graph bridge; null renders an honest refusal to edit (an
    *  old preload build cannot reach the ownership-enforcing RPC). */
@@ -142,6 +144,16 @@ export function WorkGraphDesigner({
   onDone: () => void;
   /** Called after a successful save with the fresh document. */
   onSaved?: (document: WorkGraphDocument) => void;
+  /** Called after a successful save with the exact intent payload nodes
+   *  just written — lets the parent keep a saved workflow's node snapshot
+   *  in sync with what actually runs (work-graph-workflows). */
+  onIntentSaved?: (nodes: Record<string, unknown>[]) => void;
+  /** Called right after `graph.run` launches successfully, with the run id
+   *  and the exact compiled node set — the parent's adversarial-review
+   *  loop (work-graph-workflows) hangs off this, not off any polling of
+   *  its own inside this component (which unmounts when the user switches
+   *  back to the read-only view). */
+  onRunLaunched?: (info: { runId: string; nodeIds: string[] }) => void;
 }): React.JSX.Element {
   const seed = useMemo(
     () => draftFromIntentNodes(document?.intent.nodes ?? []),
@@ -317,7 +329,8 @@ export function WorkGraphDesigner({
     setDirty(false);
     setDraft((current) => markDesignerSaved(current));
     onSaved?.(result.result.graph as unknown as WorkGraphDocument);
-  }, [draft, graphBridge, onSaved, workspaceId]);
+    onIntentSaved?.(built.payload.nodes);
+  }, [draft, graphBridge, onSaved, onIntentSaved, workspaceId]);
 
   // --- running (through the ONE existing compiler path) ---------------------
 
@@ -360,7 +373,8 @@ export function WorkGraphDesigner({
       return;
     }
     setRun({ kind: "launched", runId: result.result.run.id, label: "Running" });
-  }, [graphBridge, run, workspaceId]);
+    onRunLaunched?.({ runId: result.result.run.id, nodeIds: result.result.compile.nodeIds });
+  }, [graphBridge, run, workspaceId, onRunLaunched]);
 
   const allNodeIds = useMemo(() => draft.nodes.map((node) => node.id), [draft]);
   const runDisabledReason =
