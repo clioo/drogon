@@ -2,8 +2,8 @@
    src/renderer/src/components/sidebar/SidebarNav.tsx (adapter: Orca's
    zustand view store becomes props; the Tasks row is the ported
    SidebarTaskNavButton with its hover-revealed provider shortcut chips;
-   the setup-guide/agent-dashboard entries are out of MVP scope; Meetings
-   and Mobile rows stay in the code behind the product-mode gate, hidden).
+   the setup-guide/agent-dashboard entries are out of MVP scope; the Mobile
+   row stays in the code behind the product-mode gate, hidden).
    In the source Files and Changes live in the right-sidebar activity bar
    and Browser opens as a tab: they are not nav rows. Until that
    restructure lands, Sessions routes to the terminals view and
@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { BOTS_ROUTE_ID } from "../../bots-mount";
+import { MEETINGS_ROUTE_ID } from "../../meetings-mount";
 import { AUTOMATIONS_ROUTE_ID } from "../../automations-mount";
 import { TASKS_ROUTE_ID } from "../../tasks-mount";
 import { ShortcutKeyCombo } from "../../components/ShortcutKeyCombo";
@@ -132,9 +133,9 @@ export function SidebarNav({
           {isDrogonProductSurfaceVisible("meetings") ? (
             <ProductNavButton
               label="Meetings"
-              active={route === "meetings"}
+              active={route === MEETINGS_ROUTE_ID}
               icon={CalendarDays}
-              onClick={() => onSelectRoute("meetings")}
+              onClick={() => onSelectRoute(MEETINGS_ROUTE_ID)}
             />
           ) : null}
         </div>

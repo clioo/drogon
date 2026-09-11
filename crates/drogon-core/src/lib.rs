@@ -34,6 +34,11 @@ pub mod jira;
 pub mod locale_ordering;
 pub mod mentu;
 mod mentu_rpc;
+// Meetings (additive): the owner's own Write That Down notes, indexed
+// read-only from disk. See `meetings` for its three rules (read-only,
+// honest states, bounded walk).
+pub mod meetings;
+mod meetings_rpc;
 pub mod session_authority;
 
 mod agent_state;
@@ -137,6 +142,9 @@ const CAPABILITIES: &[&str] = &[
     // the Mentu tab as the authoring surface; the runtime underneath is
     // unchanged.
     drogon_protocol::graph::GRAPH_CAPABILITY,
+    // Meetings (additive): read-only index of the owner's local Write That
+    // Down Markdown notes, discoverable by Bots through `drogon-cli meeting`.
+    meetings::MEETINGS_CAPABILITY,
 ];
 
 pub(crate) fn now_rfc3339() -> String {
@@ -593,6 +601,12 @@ impl Engine {
             "mentu.retry" => self.mentu_retry(request),
             "mentu.retry_step" => self.mentu_retry_step(request),
             "mentu.cancel" => self.mentu_cancel(request),
+            // Meetings (additive, read-only): both arms are pure reads served
+            // straight from the owner's notes directory. `meeting.read`
+            // re-validates the id against the resolved root on every call, so
+            // neither arm can become a general-purpose file read.
+            "meeting.list" => self.do_meeting_list(&request.params),
+            "meeting.read" => self.do_meeting_read(&request.params),
             // The work graph. `graph.read`/`graph.node_state`/`graph.compile`
             // are read-only projections (they write only the daemon-owned
             // `state` half or the compiled recipe); the rest mutate.

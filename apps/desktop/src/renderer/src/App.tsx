@@ -225,6 +225,14 @@ import {
   shouldGateLaunchOnAgentSettingsReadiness,
 } from "./daemon-capabilities";
 import { BOTS_PAGE_HOST_TESTID } from "./features/bots";
+import { MeetingsPage } from "./features/meetings";
+import {
+  MEETINGS_PAGE_HOST_TESTID,
+  MEETINGS_ROUTE_ID,
+  createGatedMeetingsBridge,
+  isMeetingsAvailable,
+  windowMeetingsBridge,
+} from "./meetings-mount";
 import type { BotsPanelProps } from "../../shared/bot-contract";
 import { dispatchOpenBotSession } from "./features/bots/bot-session-open";
 import { mergeSessionsForBots } from "./features/bots/bot-session-visibility";
@@ -883,12 +891,14 @@ export function App() {
   const tasksGateRef = useRef(false);
   const botsGateRef = useRef(false);
   const automationsGateRef = useRef(false);
+  const meetingsGateRef = useRef(false);
   useEffect(() => {
     filesGateRef.current = isFilesAvailable(liveCapabilities);
     gitGateRef.current = isChangesAvailable(liveCapabilities);
     tasksGateRef.current = isTasksAvailable(liveCapabilities);
     botsGateRef.current = isBotsAvailable(liveCapabilities);
     automationsGateRef.current = isAutomationsAvailable(liveCapabilities);
+    meetingsGateRef.current = isMeetingsAvailable(liveCapabilities);
     gatedSnapshotRef.current = gateSnapshot;
     setGateEpoch((epoch) => epoch + 1);
   }, [gateSnapshot]);
@@ -946,6 +956,17 @@ export function App() {
   const botsGatedBridge = useMemo(
     () => createGatedBotBridge(window.drogon, () => botsGateRef.current),
     [],
+  );
+  // Meetings: the granted namespace may be absent on an older bridge, so the
+  // gate wraps whatever the window exposes and the page renders its honest
+  // "no bridge" failure when there is nothing to wrap.
+  const meetingsStaticBridge = useMemo(() => windowMeetingsBridge(), []);
+  const meetingsGatedBridge = useMemo(
+    () =>
+      meetingsStaticBridge
+        ? createGatedMeetingsBridge(meetingsStaticBridge, () => meetingsGateRef.current)
+        : null,
+    [meetingsStaticBridge],
   );
   const automationsGatedBridge = useMemo(
     () =>
@@ -1344,6 +1365,7 @@ export function App() {
   const sessionSectionRef = useRef<HTMLElement>(null);
   const portsSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
+  const meetingsSectionRef = useRef<HTMLElement>(null);
   const automationsSectionRef = useRef<HTMLElement>(null);
   const tasksSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
@@ -1357,7 +1379,9 @@ export function App() {
           ? automationsSectionRef.current
           : route === TASKS_ROUTE_ID
             ? tasksSectionRef.current
-            : null;
+            : route === MEETINGS_ROUTE_ID
+              ? meetingsSectionRef.current
+              : null;
     if (route !== null && target && prevRouteRef.current !== route) {
       applyPanelFocus(
         resolveRoute(
@@ -1414,6 +1438,18 @@ export function App() {
   )
     botsAliveRef.current = false;
   const botsAlive = botsAliveRef.current;
+  // Meetings keep-alive mirrors Bots (#348): the notes live outside any
+  // workspace, so the page mounts with none selected and unmounts only on an
+  // explicit capability withhold — never for having no workspace, and never
+  // because a session transiently vanished.
+  const meetingsAvailable = isMeetingsAvailable(liveCapabilities);
+  const meetingsExplicitWithhold =
+    status !== null && !isMeetingsAvailable(liveCapabilities);
+  const meetingsAliveRef = useRef(false);
+  if (route === MEETINGS_ROUTE_ID && meetingsAvailable)
+    meetingsAliveRef.current = true;
+  else if (meetingsExplicitWithhold) meetingsAliveRef.current = false;
+  const meetingsAlive = meetingsAliveRef.current;
   // Browser tab strip mirror: workspace-scoped pages from the host. The
   // strip selection below (not the host verdict) decides what the tab area
   // shows; the pane reports bounds for the selected page, which activates
@@ -1581,9 +1617,10 @@ export function App() {
   const automationsPageActive =
     route === AUTOMATIONS_ROUTE_ID && automationsAlive && filesProps !== null;
   const tasksPageActive = route === TASKS_ROUTE_ID && tasksAlive;
+  const meetingsPageActive = route === MEETINGS_ROUTE_ID && meetingsAlive;
   const fullPageActive =
     isFullPageRoute(route) &&
-    (botsPageActive || automationsPageActive || tasksPageActive);
+    (botsPageActive || automationsPageActive || tasksPageActive || meetingsPageActive);
   const noWorkspaceCopy = noWorkspacePageCopy(route);
   const checked = <T,>(value: Result<T>): T => {
     if (!value.ok) throw new Error(value.error.message);
@@ -4446,7 +4483,11 @@ export function App() {
             </div>
           ) : workspaces.length === 0 &&
             route !== TASKS_ROUTE_ID &&
-            route !== BOTS_ROUTE_ID ? (
+            route !== BOTS_ROUTE_ID &&
+            // Meetings reads the owner's notes off disk: it is workspace-
+            // independent, so a first-run install with no project must still
+            // reach it instead of the Landing page.
+            route !== MEETINGS_ROUTE_ID ? (
             noWorkspaceCopy ? (
               <NoWorkspacePage
                 title={noWorkspaceCopy.title}
@@ -4942,6 +4983,33 @@ export function App() {
                       return <p>Loading bots…</p>;
                     })()}
                   </div>
+                )}
+              </section>
+            ) : null}
+            {meetingsAlive || route === MEETINGS_ROUTE_ID ? (
+              // No aria-label (see the Tasks host above): the Meetings page
+              // root is already `<main>`.
+              <section
+                ref={meetingsSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                data-testid={MEETINGS_PAGE_HOST_TESTID}
+                style={{
+                  display: route === MEETINGS_ROUTE_ID ? undefined : "none",
+                }}
+              >
+                {!meetingsAvailable ? (
+                  <div className="empty-state">
+                    <ServiceCapabilityNotice
+                      feature="Meetings"
+                      connected={status !== null}
+                    />
+                  </div>
+                ) : (
+                  <MeetingsPage
+                    bridge={meetingsGatedBridge}
+                    onClose={() => closePageRoute(MEETINGS_ROUTE_ID)}
+                  />
                 )}
               </section>
             ) : null}

@@ -147,6 +147,15 @@ pub enum Command {
         #[command(subcommand)]
         action: GraphAction,
     },
+    /// Meetings: the owner's own Write That Down Markdown notes, indexed
+    /// read-only from this host's notes directory (requires the service
+    /// capability meetings.v1). There is no API and no credential in this
+    /// path: the notes are files, so a Bot discovers conversations the same
+    /// way the desktop surface lists them.
+    Meeting {
+        #[command(subcommand)]
+        action: MeetingAction,
+    },
     /// Integration secrets: seal a value into the daemon's 0600 store or
     /// list configured names (user-only; values are read from stdin for
     /// `set`, never echoed, and never appear in argv; requires the service
@@ -185,6 +194,37 @@ pub enum Command {
     Skills {
         #[command(subcommand)]
         action: SkillsAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MeetingAction {
+    /// List indexed meeting notes, newest first, with the folder they came
+    /// from and the honest reason when there are none
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli meeting list [--limit <N>] [--offset <N>]\nValid flags: --data-dir, --help, --json, --limit, --offset, --request-id, --retry-request"
+    )]
+    List {
+        /// Page size (1..=200, default 50)
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
+        /// Skip this many meetings before the page starts
+        #[arg(long, value_name = "N")]
+        offset: Option<u32>,
+    },
+    /// Read one transcript by the id `meeting list` printed
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli meeting read --id <ID> [--max-bytes <N>]\nValid flags: --data-dir, --help, --id, --json, --max-bytes, --request-id, --retry-request"
+    )]
+    Read {
+        /// Transcript id, exactly as printed by `meeting list`
+        #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+        id: String,
+        /// Byte budget for the returned content (1..=5242880)
+        #[arg(long, value_name = "N")]
+        max_bytes: Option<u64>,
     },
 }
 
@@ -1297,6 +1337,35 @@ impl Cli {
                         require_nonempty("step", step)?;
                     }
                     validate_follow_timeout(*timeout_ms)?;
+                }
+            },
+            // Meetings: `list` takes optional paging, `read` needs a
+            // non-empty id. Both bounds are refused here, before any
+            // transport work, so a typo never reaches the daemon.
+            Command::Meeting { action } => match action {
+                MeetingAction::List { limit, offset } => {
+                    if let Some(limit) = limit
+                        && (*limit == 0 || *limit > 200)
+                    {
+                        return Err(CliError::Usage("--limit must be between 1 and 200".into()));
+                    }
+                    if let Some(offset) = offset
+                        && *offset > 1_000_000
+                    {
+                        return Err(CliError::Usage(
+                            "--offset must be between 0 and 1000000".into(),
+                        ));
+                    }
+                }
+                MeetingAction::Read { id, max_bytes } => {
+                    require_nonempty("id", id)?;
+                    if let Some(max_bytes) = max_bytes
+                        && (*max_bytes == 0 || *max_bytes > 5_242_880)
+                    {
+                        return Err(CliError::Usage(
+                            "--max-bytes must be between 1 and 5242880".into(),
+                        ));
+                    }
                 }
             },
             Command::Automation { action } => match action {

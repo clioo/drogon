@@ -2,6 +2,10 @@ import { z } from "zod";
 import { agentSettingsResultSchema } from "./agent-settings-contract";
 import { automationResultSchemas } from "./automation-contract";
 import { fileResultSchemas } from "./file-validation";
+import {
+  meetingReadSchema,
+  meetingsPageSchema,
+} from "./meetings-contract";
 import { workspacePortKillResultSchema } from "./usage-contract";
 
 const id = z.string().min(1).max(128);
@@ -157,4 +161,10 @@ export const resultSchemas: Record<string, z.ZodType> = {
   "harness.start": session,
   "agent.settings": agentSettingsResultSchema,
   "agent.settings_update": agentSettingsResultSchema,
+  // Meetings (additive): the read-only Write That Down index. Every daemon
+  // reply passes through here before the bridge sees it, so the page's
+  // honest states (named folder, named failures, read-only) are enforced on
+  // the wire, not only in the renderer.
+  "meeting.list": meetingsPageSchema,
+  "meeting.read": meetingReadSchema,
 };

@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import { AUTOMATIONS_ROUTE_ID } from "../../automations-mount";
 import { BOTS_ROUTE_ID } from "../../bots-mount";
+import { MEETINGS_ROUTE_ID } from "../../meetings-mount";
 import { MENTU_ROUTE_ID } from "../../mentu-mount";
 import { SETTINGS_ROUTE_ID } from "../settings/settings-route";
 import { TASKS_ROUTE_ID } from "../tasks/TasksPage";
@@ -20,10 +21,13 @@ import {
 } from "./view-history";
 
 describe("isFullPageRoute", () => {
-  it("treats Bots, Tasks and Automations as standalone pages", () => {
+  it("treats Bots, Tasks, Automations and Meetings as standalone pages", () => {
     assert.equal(isFullPageRoute(BOTS_ROUTE_ID), true);
     assert.equal(isFullPageRoute(TASKS_ROUTE_ID), true);
     assert.equal(isFullPageRoute(AUTOMATIONS_ROUTE_ID), true);
+    // Meetings replaces the session view too: the notes live outside any
+    // workspace, so nothing in the session chrome applies to it.
+    assert.equal(isFullPageRoute(MEETINGS_ROUTE_ID), true);
   });
   it("keeps the session view for landing, settings and session tabs", () => {
     assert.equal(isFullPageRoute(null), false);
@@ -46,6 +50,9 @@ describe("no-workspace page routing", () => {
       description: "Schedule repeatable work for your workspaces.",
     });
     assert.equal(noWorkspacePageCopy(TASKS_ROUTE_ID), null);
+    // Meetings is workspace-independent (files on disk), so it needs no
+    // workspace gate at all.
+    assert.equal(noWorkspacePageCopy(MEETINGS_ROUTE_ID), null);
     assert.equal(noWorkspacePageCopy(null), null);
   });
 });

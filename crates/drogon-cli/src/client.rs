@@ -666,6 +666,226 @@ pub fn check_automation_run_now(result: &AutomationRunNow) -> Result<(), String>
     Ok(())
 }
 
+/// Where the notes folder came from and what state it is in. Every field is
+/// required: an unavailable answer without a reason, or a root without a
+/// state, is exactly the dishonest shape this surface exists to prevent.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingAvailability {
+    pub status: String,
+    pub reason: String,
+    pub platform: String,
+    pub supported: bool,
+    pub installation: String,
+    pub configuration: String,
+    pub configured: bool,
+    pub config_path: String,
+    pub config_present: bool,
+    pub transcript_root: String,
+    pub transcript_root_source: String,
+    pub transcript_root_state: String,
+    pub read_only: bool,
+}
+
+/// One indexed meeting note.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingTranscript {
+    pub id: String,
+    pub title: String,
+    pub file_name: String,
+    pub file_path: String,
+    pub relative_path: String,
+    pub date_folder: String,
+    pub started_at: Option<String>,
+    pub duration_minutes: Option<u32>,
+    pub status: String,
+    pub excerpt: String,
+    pub failure_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingList {
+    pub availability: MeetingAvailability,
+    pub meetings: Vec<MeetingTranscript>,
+    pub total: u64,
+    pub offset: u32,
+    pub limit: u32,
+    pub has_more: bool,
+    pub scan_truncated: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingRead {
+    pub meeting: MeetingTranscript,
+    pub content: String,
+    pub size: u64,
+    pub truncated: bool,
+}
+
+/// Invariants `meeting.list` must satisfy before any of it is printed:
+/// the folder is always named and its provenance/state are always known,
+/// the index is always read-only, a failed transcript always names its
+/// reason, and a healthy one never carries one.
+pub fn check_meeting_list(list: &MeetingList) -> Result<(), String> {
+    check_meeting_availability(&list.availability)?;
+    for meeting in &list.meetings {
+        check_meeting_transcript(meeting)?;
+    }
+    if list.limit == 0 || list.limit > 200 {
+        return Err(format!("limit {} is outside 1..=200", list.limit));
+    }
+    let page = list.meetings.len() as u64;
+    if list.has_more && (list.offset as u64).saturating_add(page) >= list.total {
+        return Err(format!(
+            "hasMore is true but offset {} + {} rows covers the reported total {}",
+            list.offset, page, list.total
+        ));
+    }
+    // An offset past the end is a legitimate empty page (`--offset 50` on a
+    // four-meeting folder); only a page that actually carries rows can
+    // overrun the reported total.
+    if page > 0 && (list.offset as u64).saturating_add(page) > list.total {
+        return Err(format!(
+            "offset {} + {} rows exceeds the reported total {}",
+            list.offset, page, list.total
+        ));
+    }
+    Ok(())
+}
+
+pub fn check_meeting_read(read: &MeetingRead) -> Result<(), String> {
+    check_meeting_transcript(&read.meeting)?;
+    if read.truncated && read.size <= read.content.len() as u64 {
+        return Err(format!(
+            "truncated is true but size {} is not larger than the {} bytes returned",
+            read.size,
+            read.content.len()
+        ));
+    }
+    Ok(())
+}
+
+fn check_meeting_availability(availability: &MeetingAvailability) -> Result<(), String> {
+    if availability.status != "available" && availability.status != "unavailable" {
+        return Err(format!(
+            "availability.status must be available|unavailable, got {}",
+            availability.status
+        ));
+    }
+    if ![
+        "unsupported-platform",
+        "not-installed",
+        "invalid-configuration",
+        "transcript-root-missing",
+        "transcript-root-unreadable",
+        "empty",
+        "ready",
+    ]
+    .contains(&availability.reason.as_str())
+    {
+        return Err(format!(
+            "availability.reason {} is not a documented state",
+            availability.reason
+        ));
+    }
+    require_nonempty("transcriptRoot", &availability.transcript_root)?;
+    require_nonempty("configPath", &availability.config_path)?;
+    if !["default", "config", "environment"].contains(&availability.transcript_root_source.as_str())
+    {
+        return Err(format!(
+            "transcriptRootSource must be default|config|environment, got {}",
+            availability.transcript_root_source
+        ));
+    }
+    if !["readable", "missing", "unreadable"].contains(&availability.transcript_root_state.as_str())
+    {
+        return Err(format!(
+            "transcriptRootState must be readable|missing|unreadable, got {}",
+            availability.transcript_root_state
+        ));
+    }
+    if !["installed", "not-installed", "unsupported"].contains(&availability.installation.as_str())
+    {
+        return Err(format!(
+            "installation must be installed|not-installed|unsupported, got {}",
+            availability.installation
+        ));
+    }
+    if !["defaults", "configured", "invalid"].contains(&availability.configuration.as_str()) {
+        return Err(format!(
+            "configuration must be defaults|configured|invalid, got {}",
+            availability.configuration
+        ));
+    }
+    if !availability.read_only {
+        return Err("the meetings index must report readOnly: true".to_string());
+    }
+    if availability.status == "available"
+        && availability.reason != "ready"
+        && availability.reason != "empty"
+    {
+        return Err(format!(
+            "status available contradicts reason {}",
+            availability.reason
+        ));
+    }
+    Ok(())
+}
+
+fn check_meeting_transcript(meeting: &MeetingTranscript) -> Result<(), String> {
+    require_nonempty("id", &meeting.id)?;
+    require_nonempty("title", &meeting.title)?;
+    require_nonempty("fileName", &meeting.file_name)?;
+    require_nonempty("filePath", &meeting.file_path)?;
+    require_nonempty("relativePath", &meeting.relative_path)?;
+    require_nonempty("dateFolder", &meeting.date_folder)?;
+    if !meeting.id.starts_with("write-that-down:") {
+        return Err(format!(
+            "meeting id {} is not a Write That Down transcript id",
+            meeting.id
+        ));
+    }
+    match meeting.status.as_str() {
+        "failed" => {
+            if meeting.failure_reason.is_none() {
+                return Err(format!(
+                    "failed transcript {} must name a failureReason",
+                    meeting.file_name
+                ));
+            }
+        }
+        "recording" | "saved" => {
+            if meeting.failure_reason.is_some() {
+                return Err(format!(
+                    "healthy transcript {} must not carry a failureReason",
+                    meeting.file_name
+                ));
+            }
+            if meeting.status == "saved" && meeting.duration_minutes.is_none() {
+                return Err(format!(
+                    "saved transcript {} must carry a duration",
+                    meeting.file_name
+                ));
+            }
+            if meeting.status == "recording" && meeting.duration_minutes.is_some() {
+                return Err(format!(
+                    "recording transcript {} must not carry a duration",
+                    meeting.file_name
+                ));
+            }
+        }
+        other => {
+            return Err(format!(
+                "meeting status must be recording|saved|failed, got {other}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// One embedded browser pane tab, as executed by the desktop host and
 /// relayed through the daemon (`browser.relay.v1`).
 #[derive(Debug, Clone, Deserialize)]
