@@ -87,12 +87,22 @@ function WorkGraphStatusIcon({
   return <Circle className={className} aria-hidden />;
 }
 
-function MetricCard({ value, exact }: { value: string; exact: boolean }): React.JSX.Element {
+function MetricCard({
+  value,
+  exact,
+  partial = false,
+}: {
+  value: string;
+  exact: boolean;
+  /** Some recorded values plus explicitly-counted unknowns: the total is
+   *  neither fully exact nor unavailable, and the badge says so. */
+  partial?: boolean;
+}): React.JSX.Element {
   return (
     <div className="min-w-0 rounded-md border border-border bg-card p-3 text-xs">
       <p className="break-words font-medium">{value}</p>
       <Badge variant="outline" className="mt-2 text-[10px]">
-        {exact ? "Exact · state record" : "Unavailable"}
+        {exact ? "Exact · state record" : partial ? "Partial · unknowns counted" : "Unavailable"}
       </Badge>
     </div>
   );
@@ -490,52 +500,53 @@ export function WorkGraphPane({
             className="shrink-0 border-b border-border bg-card px-4 py-3"
             data-testid="work-graph-totals"
           >
-            <div className="grid gap-2 @container/work-graph-totals @md/work-graph-totals:grid-cols-2 @2xl/work-graph-totals:grid-cols-4">
-              <MetricCard
-                value={
-                  totals.durationTotalMs !== null
-                    ? `Duration: ${formatDurationMs(totals.durationTotalMs)}${
-                        totals.durationUnknownCount > 0
-                          ? ` + ${totals.durationUnknownCount} unknown`
-                          : ""
-                      }`
-                    : "Duration: unavailable"
-                }
-                exact={totals.durationTotalMs !== null && totals.durationUnknownCount === 0}
-              />
-              <MetricCard
-                value={
-                  totals.inputTokens !== null
-                    ? `Input tokens: ${totals.inputTokens}${
-                        totals.agentUsageUnavailableCount > 0
-                          ? ` + ${totals.agentUsageUnavailableCount} unavailable`
-                          : ""
-                      }`
-                    : totals.agentUsageKnownCount === 0
-                      ? totals.shellNodeCount === totals.nodeCount
-                        ? "Input tokens: not applicable (shell nodes only)"
-                        : "Input tokens: unavailable"
+            <div className="@container/work-graph-totals">
+              <div className="grid gap-2 @md/work-graph-totals:grid-cols-2 @2xl/work-graph-totals:grid-cols-4">
+                <MetricCard
+                  value={
+                    totals.durationTotalMs !== null
+                      ? `Duration: ${formatDurationMs(totals.durationTotalMs)}${
+                          totals.durationUnknownCount > 0
+                            ? ` + ${totals.durationUnknownCount} unknown`
+                            : ""
+                        }`
+                      : "Duration: unavailable"
+                  }
+                  exact={totals.durationTotalMs !== null && totals.durationUnknownCount === 0}
+                  partial={totals.durationTotalMs !== null && totals.durationUnknownCount > 0}
+                />
+                <MetricCard
+                  value={
+                    totals.inputTokens !== null
+                      ? `Input tokens: ${totals.inputTokens}${
+                          totals.agentUsageUnavailableCount > 0
+                            ? ` + ${totals.agentUsageUnavailableCount} unavailable`
+                            : ""
+                        }`
+                    : totals.shellNodeCount === totals.nodeCount
+                      ? "Input tokens: not applicable (shell nodes only)"
                       : "Input tokens: unavailable"
-                }
-                exact={totals.inputTokens !== null}
-              />
-              <MetricCard
-                value={
-                  totals.outputTokens !== null
-                    ? `Output tokens: ${totals.outputTokens}${
-                        totals.agentUsageUnavailableCount > 0
-                          ? ` + ${totals.agentUsageUnavailableCount} unavailable`
-                          : ""
-                      }`
-                    : totals.agentUsageKnownCount === 0
-                      ? totals.shellNodeCount === totals.nodeCount
-                        ? "Output tokens: not applicable (shell nodes only)"
-                        : "Output tokens: unavailable"
+                  }
+                  exact={totals.inputTokens !== null && totals.agentUsageUnavailableCount === 0}
+                  partial={totals.inputTokens !== null && totals.agentUsageUnavailableCount > 0}
+                />
+                <MetricCard
+                  value={
+                    totals.outputTokens !== null
+                      ? `Output tokens: ${totals.outputTokens}${
+                          totals.agentUsageUnavailableCount > 0
+                            ? ` + ${totals.agentUsageUnavailableCount} unavailable`
+                            : ""
+                        }`
+                    : totals.shellNodeCount === totals.nodeCount
+                      ? "Output tokens: not applicable (shell nodes only)"
                       : "Output tokens: unavailable"
-                }
-                exact={totals.outputTokens !== null}
-              />
-              <MetricCard value="Cost: unavailable" exact={false} />
+                  }
+                  exact={totals.outputTokens !== null && totals.agentUsageUnavailableCount === 0}
+                  partial={totals.outputTokens !== null && totals.agentUsageUnavailableCount > 0}
+                />
+                <MetricCard value="Cost: unavailable" exact={false} />
+              </div>
             </div>
             <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               {(["running", "succeeded", "failed", "blocked", "unverifiable", "idle"] as const).map(
