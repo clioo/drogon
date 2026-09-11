@@ -215,6 +215,7 @@ fn pi_translation_requires_an_executable_shaped_binding() {
     );
     let valid = PiProviderBinding {
         provider_name: "kimi-coding".to_string(),
+        api: "cli".to_string(),
         base_url: "https://kimi.example.com/v1".to_string(),
         model: "kimi-for-coding".to_string(),
         api_key_env: Some("KIMI_FIXTURE_KEY".to_string()),
@@ -310,6 +311,7 @@ fn pi_selected_model_must_match_the_binding_model() {
     );
     let binding = PiProviderBinding {
         provider_name: "kimi-coding".to_string(),
+        api: "cli".to_string(),
         base_url: "https://kimi.example.com/v1".to_string(),
         model: "kimi-for-coding".to_string(),
         api_key_env: Some("KIMI_FIXTURE_KEY".to_string()),
@@ -407,6 +409,7 @@ fn pi_omitted_model_validates_the_effective_selection() {
     );
     let binding_for = |model: &str| PiProviderBinding {
         provider_name: "kimi-coding".to_string(),
+        api: "cli".to_string(),
         base_url: "https://kimi.example.com/v1".to_string(),
         model: model.to_string(),
         api_key_env: Some("KIMI_FIXTURE_KEY".to_string()),
@@ -548,6 +551,7 @@ fn catalog_refuted_selections_are_not_translated() {
     let catalog = enumerated_catalog(HarnessId::Pi, vec![entry("zai", "glm-5.3-flash", None)]);
     let valid = PiProviderBinding {
         provider_name: "kimi-coding".to_string(),
+        api: "cli".to_string(),
         base_url: "https://kimi.example.com/v1".to_string(),
         model: "kimi-for-coding".to_string(),
         api_key_env: Some("KIMI_FIXTURE_KEY".to_string()),

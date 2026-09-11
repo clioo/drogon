@@ -40,6 +40,10 @@ fn runs_root(workspace_root: &Path) -> PathBuf {
     workspace_root.join(".mentu").join("runs")
 }
 
+/// Mirrors the 1 MiB recipe source limit; a keyword re-check never pulls in a
+/// larger file than the recipe pipeline itself accepts.
+const MAX_KEYWORD_RECIPE_BYTES: u64 = 1024 * 1024;
+
 /// The run directory `mentu-recipes` owns for `mentu_run_id`, containment
 /// checked the same way recipe paths are.
 pub fn run_dir(workspace_root: &Path, mentu_run_id: &str) -> Result<PathBuf, RpcError> {
@@ -182,18 +186,244 @@ pub fn parse_steps(run_json: &Value, mentu_run_id: &str) -> Vec<MentuStepRun> {
 /// product's status enum. A run with no steps that ever failed is
 /// `succeeded` even if the top-level field is absent (older/partial
 /// records); anything reporting an explicit non-`ok` outcome is `failed`.
+///
+/// The review-powering exception (the eval's third false-success seam): a
+/// run that the runtime stamped `ok` despite an unresolved step warning
+/// (`warn_bookkeeping`, recorded warnings, verification warnings, drift or
+/// quarantined files) is never a clean success. The reference classifies
+/// those as `warning`; this product's wire enum has no warning state, so the
+/// deterministic, honest mapping is a non-clean `failed` verdict with the
+/// warning named by [`unresolved_warning`] — never a silent `succeeded`.
 pub fn overall_status(run_json: &Value, steps: &[MentuStepRun]) -> MentuRunStatus {
+    let warned = unresolved_warning(run_json).is_some();
+    let step_failed = steps
+        .iter()
+        .any(|s| matches!(s.status, MentuRunStatus::Failed));
     match run_json.get("outcome").and_then(Value::as_str) {
-        Some("ok") => MentuRunStatus::Succeeded,
+        Some("ok") if !warned && !step_failed => MentuRunStatus::Succeeded,
+        Some("ok") => MentuRunStatus::Failed,
         Some(_) => MentuRunStatus::Failed,
-        None if steps
-            .iter()
-            .any(|s| matches!(s.status, MentuRunStatus::Failed)) =>
-        {
-            MentuRunStatus::Failed
-        }
+        None if warned || step_failed => MentuRunStatus::Failed,
         None => MentuRunStatus::Succeeded,
     }
+}
+
+/// The first unresolved warning the record carries, if any. Mirrors the
+/// reference's `hasRunWarnings` (`mentu-run-status.ts`): the runtime's own
+/// `warn_bookkeeping` outcome, a step's recorded `warnings`, a verification
+/// warning, unexpected drift paths, or quarantined files. A step that
+/// merely printed a completion keyword is not a warning; a step that
+/// exists only as a keyword match is handled separately by the completion
+/// re-check.
+pub fn unresolved_warning(run_json: &Value) -> Option<String> {
+    if run_json.get("outcome").and_then(Value::as_str) == Some("warn_bookkeeping") {
+        return Some(
+            "The run completed, but mentu-recipes recorded unresolved bookkeeping warnings."
+                .to_string(),
+        );
+    }
+    let steps = run_json.get("steps").and_then(Value::as_array)?;
+    for step in steps {
+        let label = step.get("label").and_then(Value::as_str).unwrap_or("step");
+        if step.get("outcome").and_then(Value::as_str) == Some("warn_bookkeeping") {
+            return Some(format!(
+                "Step '{label}' completed with unresolved bookkeeping warnings."
+            ));
+        }
+        if let Some(warnings) = step.get("warnings").and_then(Value::as_array)
+            && !warnings.is_empty()
+        {
+            return Some(format!(
+                "Step '{label}' recorded warnings: {}",
+                join_issue_strings(warnings)
+            ));
+        }
+        if let Some(warnings) = step
+            .get("verification")
+            .and_then(|verification| verification.get("warnings"))
+            .and_then(Value::as_array)
+            && !warnings.is_empty()
+        {
+            return Some(format!(
+                "Step '{label}' verification warnings: {}",
+                warnings
+                    .iter()
+                    .map(verification_issue)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ));
+        }
+        if let Some(paths) = step
+            .get("drift")
+            .and_then(|drift| drift.get("unexpected_paths"))
+            .and_then(Value::as_array)
+            && !paths.is_empty()
+        {
+            return Some(format!(
+                "Step '{label}' created unexpected paths: {}",
+                join_issue_strings(paths)
+            ));
+        }
+        if let Some(files) = step
+            .get("git")
+            .and_then(|git| git.get("quarantine_files"))
+            .and_then(Value::as_array)
+            && !files.is_empty()
+        {
+            return Some(format!(
+                "Step '{label}' left quarantined files: {}",
+                join_issue_strings(files)
+            ));
+        }
+    }
+    None
+}
+
+fn join_issue_strings(values: &[Value]) -> String {
+    values
+        .iter()
+        .map(|value| match value.as_str() {
+            Some(text) => text.to_string(),
+            None => value.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// The eval's second false-success seam, re-checked on the evidence Drogon
+/// owns: the pinned runtime treats a bare `completion_keyword` match
+/// ANYWHERE in the step output — including inside a fenced code block — as
+/// completion (`completion_method: "keyword_output"`), so a model that merely
+/// prints an example satisfies the policy while doing no work. For every
+/// step the runtime completed by keyword, this re-evaluates the recorded
+/// stdout with an anchored match: the keyword must appear on the final
+/// non-empty line and outside every fenced code block. A match that only
+/// exists inside a fence, or only earlier in the transcript, is refused as
+/// completion evidence and named on the run verdict.
+///
+/// The recipe is read from the run record's own `recipe_ref` (the exact file
+/// the runtime loaded), containment-checked under the workspace; an
+/// unreadable or out-of-workspace reference is skipped rather than guessed.
+pub fn keyword_completion_warning(
+    workspace_root: &Path,
+    mentu_run_id: &str,
+    run_json: &Value,
+) -> Option<String> {
+    let steps = run_json.get("steps").and_then(Value::as_array)?;
+    let keyword_steps: Vec<(&str, &str)> = steps
+        .iter()
+        .filter(|step| {
+            step.get("completion_method").and_then(Value::as_str) == Some("keyword_output")
+        })
+        .filter_map(|step| {
+            Some((
+                step.get("label").and_then(Value::as_str)?,
+                step.get("output_file").and_then(Value::as_str)?,
+            ))
+        })
+        .collect();
+    if keyword_steps.is_empty() {
+        return None;
+    }
+    let keywords = recipe_completion_keywords(workspace_root, run_json)?;
+    let run_dir = run_dir(workspace_root, mentu_run_id)
+        .ok()?
+        .canonicalize()
+        .ok()?;
+    for (label, output_file) in keyword_steps {
+        let Some(keyword) = keywords.get(label) else {
+            continue;
+        };
+        let output = read_evidence_output(&run_dir, output_file);
+        let Some(stdout) = output.content.as_deref() else {
+            // No stdout to re-check: the keyword completion is unproven.
+            return Some(format!(
+                "Step '{label}' completed by completion_keyword, but its output could not be read \
+                 to confirm the keyword was not merely printed inside a code fence."
+            ));
+        };
+        if !keyword_completion_satisfied(stdout, keyword) {
+            return Some(format!(
+                "Step '{label}' completed by completion_keyword '{keyword}', but the keyword only \
+                 appears inside a fenced code block or before the final line; it is not completion \
+                 evidence (expected_changes and verify.commands are the primary signals)."
+            ));
+        }
+    }
+    None
+}
+
+/// Label -> `completion_keyword` for the recipe the run loaded (`recipe_ref`),
+/// containment-checked under the workspace and size-capped like every other
+/// recipe read. `None` when the reference is missing, outside the workspace,
+/// unreadable or not JSON.
+fn recipe_completion_keywords(
+    workspace_root: &Path,
+    run_json: &Value,
+) -> Option<std::collections::HashMap<String, String>> {
+    let reference = run_json.get("recipe_ref").and_then(Value::as_str)?;
+    if reference.is_empty() || reference.contains('\0') {
+        return None;
+    }
+    let candidate = Path::new(reference);
+    if !candidate.is_absolute() {
+        return None;
+    }
+    let workspace_real = workspace_root.canonicalize().ok()?;
+    let recipe_real = candidate.canonicalize().ok()?;
+    if !recipe_real.starts_with(&workspace_real) {
+        return None;
+    }
+    let metadata = fs::metadata(&recipe_real).ok()?;
+    if metadata.len() > MAX_KEYWORD_RECIPE_BYTES {
+        return None;
+    }
+    let text = fs::read_to_string(&recipe_real).ok()?;
+    let recipe: Value = serde_json::from_str(&text).ok()?;
+    let steps = recipe.get("steps").and_then(Value::as_array)?;
+    let mut keywords = std::collections::HashMap::new();
+    for step in steps {
+        let (Some(label), Some(keyword)) = (
+            step.get("label").and_then(Value::as_str),
+            step.get("completion_keyword").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        if !keyword.is_empty() {
+            keywords.insert(label.to_string(), keyword.to_string());
+        }
+    }
+    Some(keywords)
+}
+
+/// The anchored completion-keyword match: the keyword must sit on the final
+/// non-empty line of the output and outside every fenced code block. A
+/// keyword that appears only inside a fence example, or only on an earlier
+/// line, does not satisfy the policy.
+fn keyword_completion_satisfied(stdout: &str, keyword: &str) -> bool {
+    if keyword.is_empty() {
+        return false;
+    }
+    let mut in_fence = false;
+    let mut last_unfenced_line: Option<&str> = None;
+    for raw in stdout.lines() {
+        let line = raw.trim();
+        if is_fence_delimiter(line) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence || line.is_empty() {
+            continue;
+        }
+        last_unfenced_line = Some(line);
+    }
+    last_unfenced_line.is_some_and(|line| line.contains(keyword))
+}
+
+/// A markdown code-fence delimiter line (``` or ~~~), optionally carrying an
+/// info string; toggles fence tracking for [`keyword_completion_satisfied`].
+fn is_fence_delimiter(line: &str) -> bool {
+    line.starts_with("```") || line.starts_with("~~~")
 }
 
 pub fn ended_at(run_json: &Value) -> Option<String> {
@@ -421,6 +651,157 @@ mod tests {
         run_json["steps"][0]["outcome"] = json!("failed");
         let steps = parse_steps(&run_json, "run_20260907202509_15F1772D");
         assert_eq!(steps[0].status, MentuRunStatus::Failed);
+    }
+
+    #[test]
+    fn a_warn_bookkeeping_step_never_reads_as_a_clean_run() {
+        // The eval's third false-success seam: the runtime stamps the run
+        // `ok` while a step is `warn_bookkeeping` (work completed, nothing
+        // was booked). The reference classifies that as `warning`; this
+        // product's enum has no warning state, so the run must be non-clean
+        // — never `succeeded`.
+        let mut run_json = sample_run_json();
+        run_json["outcome"] = json!("ok");
+        run_json["steps"][0]["outcome"] = json!("warn_bookkeeping");
+        run_json["steps"][0]["exit_code"] = json!(0);
+        let steps = parse_steps(&run_json, "run_20260907202509_15F1772D");
+        assert_eq!(
+            overall_status(&run_json, &steps),
+            MentuRunStatus::Failed,
+            "a bookkeeping warning must not read as a clean success"
+        );
+        assert!(
+            unresolved_warning(&run_json).is_some_and(|warning| warning.contains("bookkeeping")),
+            "the warning must be named: {:?}",
+            unresolved_warning(&run_json)
+        );
+    }
+
+    #[test]
+    fn recorded_step_warnings_also_keep_the_run_non_clean() {
+        let mut run_json = sample_run_json();
+        run_json["steps"][0]["warnings"] = json!(["boundary drift is advisory"]);
+        let steps = parse_steps(&run_json, "run_20260907202509_15F1772D");
+        assert_eq!(overall_status(&run_json, &steps), MentuRunStatus::Failed);
+        let warning = unresolved_warning(&run_json).unwrap();
+        assert!(warning.contains("boundary drift is advisory"), "{warning}");
+    }
+
+    #[test]
+    fn a_clean_ok_run_still_succeeds() {
+        // Regression guard: the warning rule must not downgrade ordinary
+        // clean runs (the acceptance shell recipes ride exit_code success).
+        let run_json = sample_run_json();
+        let steps = parse_steps(&run_json, "run_20260907202509_15F1772D");
+        assert!(unresolved_warning(&run_json).is_none());
+        assert_eq!(overall_status(&run_json, &steps), MentuRunStatus::Succeeded);
+        assert!(
+            keyword_completion_warning(Path::new("/nonexistent"), "run_x", &run_json).is_none()
+        );
+    }
+
+    fn keyword_workspace(stdout: &str) -> tempfile::TempDir {
+        let workspace = tempfile::tempdir().unwrap();
+        let recipes = workspace.path().join(".mentu").join("recipes");
+        let run_dir = workspace.path().join(".mentu").join("runs").join("run_kw1");
+        fs::create_dir_all(&recipes).unwrap();
+        fs::create_dir_all(&run_dir).unwrap();
+        let recipe_path = recipes.join("kw.json");
+        fs::write(
+            &recipe_path,
+            json!({
+                "name": "kw",
+                "steps": [
+                    {"label": "fence", "backend": "shell", "completion_keyword": "DONE_OK"}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(run_dir.join("fence.stdout"), stdout).unwrap();
+        fs::write(
+            run_dir.join("run.json"),
+            json!({
+                "run_id": "run_kw1",
+                "recipe_name": "kw",
+                "recipe_ref": recipe_path.to_string_lossy(),
+                "outcome": "ok",
+                "steps": [{
+                    "label": "fence",
+                    "backend": "shell",
+                    "outcome": "success",
+                    "completion_method": "keyword_output",
+                    "exit_code": 0,
+                    "output_file": "fence.stdout",
+                    "error_file": "fence.stderr"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        workspace
+    }
+
+    #[test]
+    fn a_keyword_printed_only_inside_a_code_fence_is_not_completion() {
+        let workspace = keyword_workspace("example:\n```\nDONE_OK\n```\n");
+        let run_json = read_run_json(workspace.path(), "run_kw1").unwrap().unwrap();
+        let warning = keyword_completion_warning(workspace.path(), "run_kw1", &run_json)
+            .expect("a fenced-only keyword must be refused");
+        assert!(warning.contains("fence"), "{warning}");
+        assert!(warning.contains("fence"), "names the step: {warning}");
+        // The run verdict reflects it: never a clean success.
+        let steps = parse_steps(&run_json, "run_kw1");
+        assert_eq!(overall_status(&run_json, &steps), MentuRunStatus::Succeeded);
+        let status = if keyword_completion_warning(workspace.path(), "run_kw1", &run_json).is_some()
+        {
+            MentuRunStatus::Failed
+        } else {
+            overall_status(&run_json, &steps)
+        };
+        assert_eq!(status, MentuRunStatus::Failed);
+    }
+
+    #[test]
+    fn a_keyword_on_the_final_unfenced_line_is_completion() {
+        let workspace = keyword_workspace("work done\nDONE_OK\n");
+        let run_json = read_run_json(workspace.path(), "run_kw1").unwrap().unwrap();
+        assert!(
+            keyword_completion_warning(workspace.path(), "run_kw1", &run_json).is_none(),
+            "a final-line keyword outside a fence is real completion"
+        );
+    }
+
+    #[test]
+    fn a_keyword_before_a_later_line_is_not_the_final_line() {
+        let workspace = keyword_workspace("DONE_OK\nmuch later\n");
+        let run_json = read_run_json(workspace.path(), "run_kw1").unwrap().unwrap();
+        assert!(
+            keyword_completion_warning(workspace.path(), "run_kw1", &run_json).is_some(),
+            "an early keyword is not the anchored final-line match"
+        );
+    }
+
+    #[test]
+    fn a_recipe_outside_the_workspace_is_not_read_for_keywords() {
+        let outside = tempfile::tempdir().unwrap();
+        let recipe_path = outside.path().join("kw.json");
+        fs::write(
+            &recipe_path,
+            json!({
+                "name": "kw",
+                "steps": [{"label": "fence", "completion_keyword": "DONE_OK"}]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let workspace = keyword_workspace("```\nDONE_OK\n```\n");
+        let mut run_json = read_run_json(workspace.path(), "run_kw1").unwrap().unwrap();
+        run_json["recipe_ref"] = json!(recipe_path.to_string_lossy());
+        assert!(
+            keyword_completion_warning(workspace.path(), "run_kw1", &run_json).is_none(),
+            "a recipe outside the workspace is skipped rather than trusted"
+        );
     }
 
     #[test]
