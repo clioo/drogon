@@ -1,7 +1,8 @@
 /* C10 bots monitors: bounded local-file digest monitor model.
  * Original to this repo (no fork source). Pure helpers only: no daemon,
  * network, or model calls. Unchanged checks produce zero model requests;
- * changes default to a local notification/event. */
+ * a changed monitor releases its durable event, and only a monitor
+ * explicitly bound to a responsibility (its ACTION) dispatches a run. */
 
 export const MONITOR_RULE_KIND = "local_file_digest.v1" as const;
 export const MONITOR_RULE_KIND_SCRIPT = "script_command.v1" as const;

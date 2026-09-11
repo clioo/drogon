@@ -1417,6 +1417,9 @@ impl Cli {
                     resource,
                     cron,
                     manual,
+                    responsibility_id,
+                    responsibility_name,
+                    instructions,
                     ..
                 } => {
                     require_nonempty("bot", bot)?;
@@ -1424,6 +1427,40 @@ impl Cli {
                     require_nonempty("resource", resource)?;
                     if *manual && cron.is_some() {
                         return Err(CliError::Usage("--manual takes no --cron".into()));
+                    }
+                    validate_monitor_action_flags(
+                        responsibility_id.as_deref(),
+                        responsibility_name.as_deref(),
+                        instructions.as_deref(),
+                    )?;
+                }
+                BotAction::BindMonitor {
+                    bot,
+                    workspace,
+                    monitor,
+                    expected_rev,
+                    responsibility_id,
+                    responsibility_name,
+                    instructions,
+                } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("monitor", monitor)?;
+                    if *expected_rev < 0 {
+                        return Err(CliError::Usage(
+                            "--expected-rev must be 0 or greater".into(),
+                        ));
+                    }
+                    validate_monitor_action_flags(
+                        responsibility_id.as_deref(),
+                        responsibility_name.as_deref(),
+                        instructions.as_deref(),
+                    )?;
+                    if responsibility_id.is_none() && responsibility_name.is_none() {
+                        return Err(CliError::Usage(
+                            "bind-monitor requires --responsibility-id or --responsibility-name"
+                                .into(),
+                        ));
                     }
                 }
                 BotAction::UpdateMonitor {
@@ -1598,6 +1635,27 @@ impl Cli {
 fn require_nonempty(flag: &str, value: &str) -> Result<(), CliError> {
     if value.is_empty() {
         return Err(CliError::Usage(format!("--{flag} must not be empty")));
+    }
+    Ok(())
+}
+
+/// Monitor action flags are shared by `create-monitor` and `bind-monitor`:
+/// the id and the name are mutually exclusive, and standing instructions
+/// only make sense attached to a (minted) responsibility name.
+fn validate_monitor_action_flags(
+    responsibility_id: Option<&str>,
+    responsibility_name: Option<&str>,
+    instructions: Option<&str>,
+) -> Result<(), CliError> {
+    if responsibility_id.is_some() && responsibility_name.is_some() {
+        return Err(CliError::Usage(
+            "--responsibility-id and --responsibility-name are mutually exclusive".into(),
+        ));
+    }
+    if responsibility_id.is_none() && responsibility_name.is_none() && instructions.is_some() {
+        return Err(CliError::Usage(
+            "--instructions needs --responsibility-name to attach to".into(),
+        ));
     }
     Ok(())
 }
@@ -2737,10 +2795,13 @@ pub enum BotAction {
         #[arg(long, value_name = "ID")]
         responsibility: String,
     },
-    /// Create one of the Bot's own file monitors (in-scope resources only)
+    /// Create one of the Bot's own file monitors (in-scope resources only);
+    /// declare the action it releases with --responsibility-name (mints a
+    /// reactive responsibility) or --responsibility-id (binds an existing
+    /// reactive one); without either the monitor observes and records only
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli bot create-monitor --bot <ID> --workspace <ID> --resource <PATH> [--max-bytes <N>] [--cron <EXPR> | --manual] [--disabled]\nValid flags: --bot, --cron, --data-dir, --disabled, --help, --json, --manual, --max-bytes, --request-id, --resource, --retry-request, --workspace"
+        override_usage = "drogon-cli bot create-monitor --bot <ID> --workspace <ID> --resource <PATH> [--max-bytes <N>] [--cron <EXPR> | --manual] [--disabled] [--responsibility-id <ID> | --responsibility-name <NAME> [--instructions <TEXT>]]\nValid flags: --bot, --cron, --data-dir, --disabled, --help, --instructions, --json, --manual, --max-bytes, --request-id, --resource, --responsibility-id, --responsibility-name, --retry-request, --workspace"
     )]
     CreateMonitor {
         #[arg(long, value_name = "ID")]
@@ -2757,6 +2818,35 @@ pub enum BotAction {
         manual: bool,
         #[arg(long)]
         disabled: bool,
+        #[arg(long, value_name = "ID")]
+        responsibility_id: Option<String>,
+        #[arg(long, value_name = "NAME")]
+        responsibility_name: Option<String>,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        instructions: Option<String>,
+    },
+    /// Bind an action to an existing Bot-owned monitor: the reactive
+    /// responsibility the delegation drain dispatches when the watch
+    /// fires (CAS on the monitor revision; never parks approval)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot bind-monitor --bot <ID> --workspace <ID> --monitor <ID> --expected-rev <N> (--responsibility-id <ID> | --responsibility-name <NAME>) [--instructions <TEXT>]\nValid flags: --bot, --data-dir, --expected-rev, --help, --instructions, --json, --monitor, --request-id, --responsibility-id, --responsibility-name, --retry-request, --workspace"
+    )]
+    BindMonitor {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        monitor: String,
+        #[arg(long, value_name = "N")]
+        expected_rev: i64,
+        #[arg(long, value_name = "ID")]
+        responsibility_id: Option<String>,
+        #[arg(long, value_name = "NAME")]
+        responsibility_name: Option<String>,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        instructions: Option<String>,
     },
     /// Edit one of the Bot's own monitors (CAS on the monitor revision)
     #[command(

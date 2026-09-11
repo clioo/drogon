@@ -336,7 +336,6 @@ export type MonitorLastCheck = {
   /** Relative age of the newest real check row, e.g. "8m ago". */
   ageLabel: string;
 } | null;
-
 /** LAST CHECK cell: health word + the newest durable check row's age, or
  *  null when no check has ever run (the store has no row to show). */
 export function monitorLastCheck(
@@ -373,6 +372,67 @@ export function monitorTriggerLabel(
   trigger: BotMonitorView["trigger"],
 ): string {
   return trigger.kind === "scheduled" ? trigger.cron : "Manual";
+}
+
+/** ACTION cell: what the monitor releases when it fires. Bound monitors
+ *  name their responsibility (by name when the bot still carries it, else
+ *  by id); unbound monitors observe and record only — an honest absence,
+ *  not a promise. */
+export function monitorActionLabel(
+  view: Pick<BotMonitorView, "responsibilityId">,
+  responsibilityName: string | null,
+): string {
+  if (!view.responsibilityId) return "Observes only";
+  return `Dispatches ${responsibilityName ?? view.responsibilityId}`;
+}
+
+export type MonitorLastFiring = {
+  /** The settled delegation verdict, worded for the card. */
+  label: string;
+  /** True when the verdict is one a user should look into. */
+  adverse: boolean;
+  /** The honest refusal reason, when the daemon recorded one. */
+  detail: string | null;
+  /** Relative age of the firing, e.g. "8m ago". */
+  ageLabel: string;
+};
+
+const MONITOR_FIRING_LABELS: Record<
+  NonNullable<BotMonitorView["firing"]>["lastOutcome"],
+  { label: string; adverse: boolean }
+> = {
+  dispatched: { label: "Prompt sent", adverse: false },
+  joined_existing: { label: "Prompt sent (replay)", adverse: false },
+  refused: { label: "Refused", adverse: true },
+  orphaned: { label: "Target missing", adverse: true },
+  cap_exceeded: { label: "Cap reached", adverse: true },
+  stale_skipped: { label: "Too old to act", adverse: true },
+};
+
+/** LAST FIRING cell: the newest durable delegation verdict for this
+ *  monitor with its age, or null when the monitor has never released an
+ *  action. Every wording maps 1:1 to a stored outcome — nothing invented. */
+export function monitorLastFiring(
+  view: BotMonitorView,
+  now: number = Date.now(),
+): MonitorLastFiring | null {
+  if (!view.firing) return null;
+  const wording = MONITOR_FIRING_LABELS[view.firing.lastOutcome];
+  if (!wording) return null;
+  const deltaMs = Math.max(0, now - view.firing.lastAtMs);
+  const minutes = Math.floor(deltaMs / 60_000);
+  const ageLabel =
+    deltaMs < 60_000
+      ? "now"
+      : minutes < 60
+        ? `${minutes}m ago`
+        : `${Math.floor(minutes / 60)}h ago`;
+  return {
+    label: wording.label,
+    adverse: wording.adverse,
+    detail: view.firing.lastDetail,
+    ageLabel,
+  };
 }
 
 /** Collapsed-row muted line: what is genuinely true about the bot. The

@@ -131,16 +131,18 @@ pub struct Bot {
 }
 
 /// How a [`ResponsibilityRun`] was invoked: a daemon scheduler fire of the
-/// responsibility's owned automation, or an explicit `bot.run` call (the
-/// Run control, a `scheduledDue`/`reactiveEvent` reason included -- an
-/// explicit invocation, never a schedule fire). Display-only evidence for
-/// the history's Scheduled/Manual trigger label; never an automation
-/// status or a dispatch authorization.
+/// responsibility's owned automation, an explicit `bot.run` call (the Run
+/// control, a `scheduledDue`/`reactiveEvent` reason included -- an
+/// explicit invocation, never a schedule fire), or a monitor event the
+/// delegation drain released (a watch fired and the bound responsibility
+/// ran — never a human click). Display-only evidence for the history's
+/// trigger label; never an automation status or a dispatch authorization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ResponsibilityRunInvocation {
     Scheduled,
     Manual,
+    Reactive,
 }
 
 /// Source `DrogonBotResponsibilityRun`.

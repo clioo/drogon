@@ -1890,6 +1890,9 @@ async fn bot(
             cron,
             manual,
             disabled,
+            responsibility_id,
+            responsibility_name,
+            instructions,
         } => {
             let mut params = scope(bot, workspace);
             params["resource"] = json!(resource);
@@ -1904,6 +1907,17 @@ async fn bot(
             if *disabled {
                 params["enabled"] = json!(false);
             }
+            // The action this monitor releases when it fires: bind an
+            // existing reactive responsibility, or mint one from a name.
+            if let Some(id) = responsibility_id {
+                params["responsibilityId"] = json!(id);
+            }
+            if let Some(name) = responsibility_name {
+                params["responsibilityName"] = json!(name);
+            }
+            if let Some(text) = instructions {
+                params["instructions"] = json!(text);
+            }
             let call = client
                 .call(
                     "bot.self_create_monitor",
@@ -1917,13 +1931,58 @@ async fn bot(
                 call,
                 json,
                 || {
-                    format!(
-                        "created monitor {}",
-                        result
-                            .get("monitorId")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("?")
-                    )
+                    let monitor = result
+                        .get("monitorId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    match result.get("responsibilityId").and_then(|v| v.as_str()) {
+                        Some(resp) => format!("created monitor {monitor}, action bound to {resp}"),
+                        None => format!("created monitor {monitor} (observes only)"),
+                    }
+                },
+                0,
+                None,
+            )
+        }
+        BotAction::BindMonitor {
+            bot,
+            workspace,
+            monitor,
+            expected_rev,
+            responsibility_id,
+            responsibility_name,
+            instructions,
+        } => {
+            let mut params = scope(bot, workspace);
+            params["monitorId"] = json!(monitor);
+            params["expectedRev"] = json!(expected_rev);
+            if let Some(id) = responsibility_id {
+                params["responsibilityId"] = json!(id);
+            }
+            if let Some(name) = responsibility_name {
+                params["responsibilityName"] = json!(name);
+            }
+            if let Some(text) = instructions {
+                params["instructions"] = json!(text);
+            }
+            let call = client
+                .call(
+                    "bot.self_bind_monitor_action",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let result = call.result.clone();
+            emit(
+                call,
+                json,
+                || {
+                    let resp = result
+                        .get("responsibilityId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    format!("monitor {monitor} now releases {resp} when it fires")
                 },
                 0,
                 None,

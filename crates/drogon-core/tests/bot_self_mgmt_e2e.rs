@@ -778,3 +778,228 @@ fn self_capability_is_advertised() {
         "status must advertise {BOT_SELF_CAPABILITY}"
     );
 }
+
+// --- The action a monitor releases: bind + create-time declaration ---------
+
+#[test]
+fn self_monitor_can_declare_and_rebind_the_action_it_releases() {
+    let fx = Fx::new();
+    let bot = fx.create_bot("c1", "Watcher", Some("watcher"));
+    let bot_id = bot["id"].as_str().unwrap();
+    let provisioned = fx.provision("p1", bot_id);
+    let home_path = provisioned["path"].as_str().unwrap().to_string();
+    std::fs::write(home_path.clone() + "/notes.md", "v1").unwrap();
+
+    // Create-time declaration: one call stages the watch AND mints the
+    // reactive responsibility that fires when it changes.
+    let created = success(fx.self_call(
+        "m1",
+        "bot.self_create_monitor",
+        json!({
+            "botId": bot_id, "actorBotId": bot_id,
+            "resource": "notes.md",
+            "trigger": {"kind": "scheduled", "cron": "* * * * *"},
+            "responsibilityName": "Triage changes",
+            "instructions": "Check the diff and report.",
+        }),
+    ));
+    let monitor_id = created["monitorId"].as_str().unwrap().to_string();
+    let minted = created["responsibilityId"].as_str().unwrap().to_string();
+    assert!(!minted.is_empty());
+    assert_eq!(created["approved"], true, "binding never parks approval");
+
+    let home = fx.home_of(bot_id);
+    let view = &home["monitors"][0];
+    assert_eq!(view["responsibilityId"], minted);
+    // The minted responsibility is visible on the bot itself.
+    assert!(
+        home["automations"].as_array().unwrap().iter().any(|r| {
+            r["responsibilityId"] == *minted.as_str() && r["name"] == "Triage changes"
+        })
+    );
+
+    // Rev from the self list, then rebind to an EXISTING reactive
+    // responsibility via bot.self_bind_monitor_action (CAS).
+    // A second monitor mints a second reactive responsibility; the first
+    // monitor then rebinds to that EXISTING id via the bind action (CAS).
+    let other = success(fx.self_call(
+        "m2",
+        "bot.self_create_monitor",
+        json!({
+            "botId": bot_id, "actorBotId": bot_id,
+            "resource": "notes.md",
+            "trigger": {"kind": "scheduled", "cron": "* * * * *"},
+            "responsibilityName": "Other action",
+        }),
+    ));
+    let existing = other["responsibilityId"].as_str().unwrap().to_string();
+    let rev = view["rev"].as_i64().unwrap();
+    let rebound = success(fx.self_call(
+        "bind-1",
+        "bot.self_bind_monitor_action",
+        json!({
+            "botId": bot_id, "actorBotId": bot_id,
+            "monitorId": monitor_id,
+            "expectedRev": rev,
+            "responsibilityId": existing,
+        }),
+    ));
+    assert_eq!(rebound["responsibilityId"], *existing);
+    assert_eq!(rebound["approved"], true, "rebinding never parks approval");
+
+    // A stale rev is refused loudly, never applied silently.
+    let stale = fx.self_call(
+        "bind-2",
+        "bot.self_bind_monitor_action",
+        json!({
+            "botId": bot_id, "actorBotId": bot_id,
+            "monitorId": monitor_id,
+            "expectedRev": rev,
+            "responsibilityName": "Other",
+        }),
+    );
+    assert_eq!(failure_code(stale), "stale_update");
+
+    // Binding needs a target: neither id nor name is a usage error.
+    let missing = fx.self_call(
+        "bind-3",
+        "bot.self_bind_monitor_action",
+        json!({
+            "botId": bot_id, "actorBotId": bot_id,
+            "monitorId": monitor_id,
+            "expectedRev": rev + 1,
+        }),
+    );
+    assert_eq!(failure_code(missing), "invalid_argument");
+}
+
+#[test]
+fn self_monitor_binding_refuses_scheduled_and_foreign_responsibilities() {
+    let fx = Fx::new();
+    let bot = fx.create_bot("c1", "Watcher", Some("watcher"));
+    let bot_id = bot["id"].as_str().unwrap();
+    let provisioned = fx.provision("p1", bot_id);
+    let home_path = provisioned["path"].as_str().unwrap().to_string();
+    std::fs::write(home_path.clone() + "/notes.md", "v1").unwrap();
+
+    // A scheduled responsibility: created through the self automation
+    // lane (mints an automation + scheduled responsibility).
+    success(fx.self_call(
+        "auto-1",
+        "bot.self_create_automation",
+        json!({
+            "botId": bot_id, "actorBotId": bot_id,
+            "name": "Nightly", "schedule": "* * * * *", "prompt": "Sweep."
+        }),
+    ));
+    let home = fx.home_of(bot_id);
+    let scheduled_id = home["automations"][0]["responsibilityId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    create_self_monitor(&fx, "m1", bot_id, "notes.md");
+    let monitor_id = fx.home_of(bot_id)["monitors"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let rev = fx.home_of(bot_id)["monitors"][0]["rev"].as_i64().unwrap();
+
+    // Scheduled responsibilities run from their automation, never from a
+    // monitor — the binding refuses rather than double-driving.
+    let refused = fx.self_call(
+        "bind-scheduled",
+        "bot.self_bind_monitor_action",
+        json!({
+            "botId": bot_id, "actorBotId": bot_id,
+            "monitorId": monitor_id,
+            "expectedRev": rev,
+            "responsibilityId": scheduled_id,
+        }),
+    );
+    assert_eq!(failure_code(refused), "invalid_argument");
+
+    // Another bot's responsibility id is not_found, never a silent bind.
+    let other = fx.create_bot("c2", "Second", Some("second"));
+    let other_id = other["id"].as_str().unwrap();
+    fx.provision("p2", other_id);
+    std::fs::write(home_path.clone() + "/notes.md", "v1").unwrap();
+    create_self_monitor(&fx, "m2", other_id, "notes.md");
+    let other_home = fx.home_of(other_id);
+    let _other_monitor = &other_home["monitors"][0];
+    let foreign = fx.self_call(
+        "bind-foreign",
+        "bot.self_bind_monitor_action",
+        json!({
+            "botId": bot_id, "actorBotId": bot_id,
+            "monitorId": monitor_id,
+            "expectedRev": rev,
+            "responsibilityId": "resp-of-someone-else",
+        }),
+    );
+    assert_eq!(failure_code(foreign), "not_found");
+
+    // A foreign monitor id never binds either: the ownership fence holds.
+    let other_monitor_id = other_home["monitors"][0]["id"].as_str().unwrap();
+    let cross = fx.self_call(
+        "bind-cross",
+        "bot.self_bind_monitor_action",
+        json!({
+            "botId": bot_id, "actorBotId": bot_id,
+            "monitorId": other_monitor_id,
+            "expectedRev": 0,
+            "responsibilityName": "Hijack",
+        }),
+    );
+    assert_eq!(failure_code(cross), "foreign_bot");
+}
+
+#[test]
+fn self_list_carries_the_firing_evidence_of_a_bound_monitor() {
+    let fx = Fx::new();
+    let bot = fx.create_bot("c1", "Watcher", Some("watcher"));
+    let bot_id = bot["id"].as_str().unwrap();
+    let provisioned = fx.provision("p1", bot_id);
+    let home_path = provisioned["path"].as_str().unwrap().to_string();
+    std::fs::write(home_path.clone() + "/notes.md", "v1").unwrap();
+
+    let created = success(fx.self_call(
+        "m1",
+        "bot.self_create_monitor",
+        json!({
+            "botId": bot_id, "actorBotId": bot_id,
+            "resource": "notes.md",
+            "trigger": {"kind": "scheduled", "cron": "* * * * *"},
+            "responsibilityName": "Triage changes",
+        }),
+    ));
+    let monitor_id = created["monitorId"].as_str().unwrap().to_string();
+
+    // No firing yet: the self list shows an honest null.
+    let home = fx.home_of(bot_id);
+    assert!(home["monitors"][0]["firing"].is_null());
+
+    // Record a firing the way the delegation drain does, then re-list.
+    let conn =
+        rusqlite::Connection::open(fx._root.path().join("data").join(drogon_core::DB_FILE_NAME))
+            .unwrap();
+    conn.execute(
+        "INSERT INTO bot_monitor_firings
+             (event_id, monitor_id, bot_id, responsibility_id, outcome, run_id, detail, at_ms)
+         VALUES ('mev_x', ?1, ?2, 'resp_y', 'dispatched', 'run-9', NULL, ?3)",
+        rusqlite::params![
+            &monitor_id,
+            bot_id,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as f64
+        ],
+    )
+    .unwrap();
+    let home = fx.home_of(bot_id);
+    let firing = &home["monitors"][0]["firing"];
+    assert_eq!(firing["lastOutcome"], "dispatched");
+    assert_eq!(firing["lastRunId"], "run-9");
+    assert_eq!(firing["countToday"], 1);
+}

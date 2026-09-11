@@ -2,13 +2,15 @@
 name: drogon-cli
 description: >-
   Drive Drogon through the public `drogon-cli`: resolve the executable, check
-  status and capabilities, manage workspaces, projects and worktrees, and
-  operate terminals (create, list, send, read, wait, close), the embedded
-  browser pane (open, navigate, snapshot, click, fill, tabs), harness
-  launch, and the optional Mentu recipe environment (status, open, run,
-  follow, cancel). Use for terminal control, lightweight prompts and shell
-  commands. Use the orchestration guide for supervised multi-agent
-  coordination.
+  status and capabilities, manage workspaces, projects and worktrees,
+  operate terminals (create, list, send, read, wait, close) and the embedded
+  browser pane (open, navigate, snapshot, click, fill, tabs), launch
+  harnesses, create and run cron automations, manage Bots and their
+  self-managed automations, monitors and monitor actions, seal and grant
+  integration secrets, and use the optional Mentu recipe environment
+  (status, open, run, follow, cancel). Use for terminal control, lightweight
+  prompts and shell commands. Use the orchestration guide for supervised
+  multi-agent coordination.
 ---
 
 # Drogon CLI
@@ -61,7 +63,9 @@ and `harness.launch.v1` for harness commands, `orchestration.native.v1`
 for the orchestration verbs, `project.v1` and `worktree.v1` for projects
 and worktrees, `git.v1` for Git operations, `session.agent-state.v1`
 for agent-state fields on sessions, `browser.relay.v1` for the browser
-commands below (which additionally need a connected Drogon desktop), and
+commands below (which additionally need a connected Drogon desktop),
+`automation.v1` for the cron automation verbs, `bot.self.v1` for the Bot
+self-management verbs, `bot.secrets.v1` for the secret verbs, and
 `mentu.v1` for the Mentu recipe verbs below.
 
 Run `drogon-cli status --json` first, then the narrowest command for the
@@ -138,6 +142,106 @@ it. List a workspace's tabs with `drogon-cli browser tabs --workspace <ID>`.
 Inside a Drogon terminal both spellings work with no `--data-dir` flag:
 `drogon-cli browser open --workspace <ID> <URL>` or the shorter `drogon`
 alias — the shim is already on `PATH`.
+
+## Automation
+
+A workspace can own cron automations the daemon's scheduler fires. Create
+one with `drogon-cli automation create --name <NAME> --cron <EXPR>
+--workspace <ID> --harness <ID> --prompt <TEXT>` (schedules are evaluated
+in UTC; `--disabled` stages it paused and `--grace-minutes <N>` bounds the
+missed-run catch-up), list them with `drogon-cli automation list --json`,
+fire one immediately with `drogon-cli automation run --id <ID>`, and read
+an automation's past runs with `drogon-cli automation history --id <ID>
+--json`.
+
+## Bots (self-management)
+
+A Bot is a persistent agent identity with its own workspace, harness and
+purpose. A Bot manages its OWN automations and monitors through the
+`bot` verbs; every call needs `--bot <ID> --workspace <ID>` and the
+service capability `bot.self.v1`.
+
+Provision the Bot's dedicated working folder with `drogon-cli bot
+provision --bot <ID> --workspace <ID>` (automations and monitors live in
+that home), and read everything the Bot owns with `drogon-cli bot list
+--bot <ID> --workspace <ID> --json` (automations, monitors with their
+health and revisions, home profile, audit count).
+
+### Bot automations
+
+`drogon-cli bot create-automation --bot <ID> --workspace <ID> --name
+<NAME> --schedule <EXPR> --prompt <TEXT>` gives the Bot a scheduled
+responsibility that runs in its home under its own harness. Edit it with
+`drogon-cli bot update-automation --bot <ID> --workspace <ID>
+--responsibility <ID> --expected-bot-rev 3` (CAS: the current bot
+revision is in `bot list`), pause or resume it with `bot enable-automation` / `bot disable-automation`
+(same CAS flags), remove it with `bot delete-automation`
+(history is retained), and dry-run admission with `bot test-automation` —
+`eligible` is an admission verdict only, never a dispatch.
+
+### Bot monitors and the action they release
+
+A monitor watches one file in the Bot's home and writes a durable change
+event each time the content changes. Create one with `drogon-cli bot
+create-monitor --bot <ID> --workspace <ID> --resource <PATH>`, adding
+`--max-bytes <N>` for the size bound, `--cron <EXPR>` (default every
+minute) or `--manual` for the trigger, and `--disabled` to stage it
+paused. File-digest monitors self-approve; an edit re-approves only while
+the watched file stays in the home.
+
+A monitor observes by default — it records events and releases nothing.
+Declare the ACTION it releases with --responsibility-name (plus optional
+--instructions), which mints an enabled reactive responsibility and binds
+it in the same call, or --responsibility-id to bind an existing reactive
+one. A bound monitor's change event
+makes the daemon dispatch a headless run of that responsibility: the
+prompt is a template of event metadata plus the responsibility's standing
+instructions (the watched file's bytes never enter it), the run is
+idempotent per event (a replay joins the existing run instead of opening
+a second one), and a bot-wide per-day cap bounds flood. The same binding
+is available after creation:
+
+```text
+drogon-cli bot bind-monitor --bot bot-1 --workspace ws-1 --monitor mon-1 --expected-rev 3 --responsibility-name Triage --instructions Check-the-diff-and-report.
+```
+
+`bind-monitor` is CAS on the monitor revision (`--expected-rev <N>` from
+`bot list`) and lives outside approval: it changes what a committed change
+does, never what is watched, so it never parks or unparks the monitor.
+Every firing is recorded with its outcome — `dispatched` (run id
+included), `joined_existing`, `refused`, `orphaned`, `cap_exceeded` or
+`stale_skipped` — and surfaces in `bot list` under each monitor's
+`firing` and in the desktop Bots page, so a monitor that could not act
+says so instead of failing silently.
+
+Edit the watch with `drogon-cli bot update-monitor --bot <ID> --workspace
+<ID> --monitor <ID> --expected-rev 3 --resource <PATH>` (every other
+field is optional), pause or resume with `bot enable-monitor`
+/ `bot disable-monitor`, dry-run with
+`bot test-monitor` (reads real bytes, commits nothing), and
+delete with `bot delete-monitor` (check history is retained).
+
+### Bot secret grants
+
+Integration secret VALUES stay in the daemon's sealed store (see Secrets
+below). Grant a Bot the right to USE one by reference with `drogon-cli bot
+grant-secret --bot <ID> --workspace <ID> --secret-ref <NAME> --kind <KIND>`
+(user-only; optional --granted-by names the human who granted it, and
+revocation hits the bot's next tick),
+review grants with `drogon-cli bot list-grants --bot <ID> --workspace <ID>
+--json`, and revoke with `drogon-cli bot revoke-secret --bot <ID>
+--workspace <ID> --secret-ref <NAME>`.
+
+## Secrets
+
+`drogon-cli secrets set --kind <KIND> --name <NAME>` seals one integration
+secret value into the daemon store — the value is read from stdin, never
+argv or echo: `printf '%s' "$GITHUB_TOKEN" | drogon-cli secrets set --kind
+github --name GITHUB_TOKEN_REF`. `secrets list --json` shows what is
+sealed (names and kinds, never values) and `secrets delete --kind <KIND>
+--name <NAME>` removes one. Grant a sealed reference to a Bot with
+`drogon-cli bot grant-secret --bot <ID> --workspace <ID> --secret-ref <NAME>
+--kind <KIND>` (above).
 
 ## Mentu Recipes
 
@@ -232,6 +336,16 @@ verifiable: give each step a `shell` command whose exit code means
 something, then run it and read the evidence back rather than asserting
 success.
 
+## Skill Topics
+
+The `drogon-cli` guide and the orchestration guide are installable into
+other agents' skill systems: `drogon-cli skills list --json` lists the
+topics, `drogon-cli skills get --topic <TOPIC>` prints one, and
+`drogon-cli skills install --skill <TOPIC> --agent <AGENT>` (or
+`skills update`, `--all`; add `--dry-run` to preview the argv) installs or
+refreshes them through the community `skills` CLI. `--dry-run` prints the exact npx argv without
+running it, and installation never needs a running daemon.
+
 ## Harness Launch
 
 `drogon-cli harness list --json` shows the harnesses the service host can
@@ -285,7 +399,10 @@ choose the narrowest command: `workspace list`, `project list`,
 `terminal wait`. To run a Mentu recipe the human approved, use
 `drogon-cli mentu run --workspace <ID> --recipe <ID> --follow`; to report on
 one that is already in flight, `drogon-cli mentu run-status --run <RUN-ID>`.
-When discovering flags from scratch, prefer
+To give a Bot a purpose that fires on change, bind a monitor action with
+`drogon-cli bot bind-monitor --bot <ID> --workspace <ID> --monitor <ID>
+--expected-rev 3 --responsibility-name <NAME>`. When discovering flags
+from scratch, prefer
 `drogon-cli agent-context --json` over guessing. For supervised work with
 task ownership and completion tracking, read
 `drogon-cli skills get --topic orchestration`.

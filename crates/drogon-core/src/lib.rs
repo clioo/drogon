@@ -436,6 +436,7 @@ impl Engine {
             "bot.self_delete_automation" => self.bot_self_delete_automation(request),
             "bot.self_test_automation" => self.bot_self_test_automation(request),
             "bot.self_create_monitor" => self.bot_self_create_monitor(request),
+            "bot.self_bind_monitor_action" => self.bot_self_bind_monitor_action(request),
             "bot.self_update_monitor" => self.bot_self_update_monitor(request),
             "bot.self_set_monitor_enabled" => self.bot_self_set_monitor_enabled(request),
             "bot.self_delete_monitor" => self.bot_self_delete_monitor(request),

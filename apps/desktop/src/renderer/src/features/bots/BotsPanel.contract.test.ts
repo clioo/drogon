@@ -218,14 +218,21 @@ describe("BotsPanel projection", () => {
     expect(historyTriggerLabel("scheduled")).toBe("Scheduled");
     expect(historyTriggerLabel("manual")).toBe("Manual");
     expect(historyTriggerLabel(null)).toBe("Manual");
+    // A monitor-released run is neither a schedule fire nor a human click;
+    // its own honest label exists so the history cannot blur the origins.
+    expect(historyTriggerLabel("reactive")).toBe("Monitor event");
     const rows = projectHistoryRows([
       historyEntry({
         run: { ...historyEntry().run, id: "sched", invocation: "scheduled" },
+      }),
+      historyEntry({
+        run: { ...historyEntry().run, id: "mon", invocation: "reactive" },
       }),
       historyEntry(),
     ]);
     expect(rows.map((row) => row.triggerLabel)).toEqual([
       "Scheduled",
+      "Monitor event",
       "Manual",
     ]);
   });

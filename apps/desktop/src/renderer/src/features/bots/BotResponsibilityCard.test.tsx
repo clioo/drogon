@@ -100,6 +100,7 @@ function monitor(
     lastCheckOutcome: "no_change",
     incidentCount: 0,
     delegationsToday: { used: 0, max: 10 },
+    firing: null,
     resource: "notes/status.md",
     maxBytes: 65536,
     ...overrides,
@@ -461,5 +462,69 @@ describe("BotResponsibilityCard", () => {
     expect(markup).toContain("Monitor details are unavailable");
     const empty = render({ monitors: [] });
     expect(empty).toContain("No monitors yet.");
+  });
+
+  it("renders the monitor's action and firing evidence from the durable rows", () => {
+    // A bound monitor whose last event dispatched: the card names the
+    // action by the bot's own responsibility name and shows the honest
+    // "Prompt sent" verdict — the user can see the monitor acted.
+    const fired = render({
+      bot: bot({ responsibilities: [responsibility()] }),
+      monitors: [
+        monitor({
+          responsibilityId: "resp-1",
+          firing: {
+            lastEventId: "mev_1",
+            lastOutcome: "dispatched",
+            lastRunId: "run-1",
+            lastDetail: null,
+            lastAtMs: 1_000_000,
+            countToday: 1,
+          },
+        }),
+      ],
+    });
+    expect(fired).toContain("Dispatches Nightly review");
+    expect(fired).toContain("Prompt sent ·");
+    expect(fired).not.toContain("Never fired");
+    // An unbound monitor says exactly what it does — observes only — and
+    // never claims a firing that never happened.
+    const observes = render({ monitors: [monitor()] });
+    expect(observes).toContain("Observes only");
+    expect(observes).toContain("Never fired");
+    expect(observes).not.toContain("Dispatches");
+    // A refusal keeps its real reason: the name resolves by id even when
+    // the wording is adverse.
+    const refused = render({
+      bot: bot({ responsibilities: [responsibility()] }),
+      monitors: [
+        monitor({
+          responsibilityId: "resp-1",
+          firing: {
+            lastEventId: "mev_2",
+            lastOutcome: "refused",
+            lastRunId: null,
+            lastDetail: "bound responsibility is disabled",
+            lastAtMs: 1_000_000,
+            countToday: 0,
+          },
+        }),
+      ],
+    });
+    expect(refused).toContain("Refused ·");
+    expect(refused).toContain("bound responsibility is disabled");
+  });
+
+  it("falls back to the responsibility id when the bot no longer carries the name", () => {
+    const markup = render({
+      bot: bot({ responsibilities: [] }),
+      monitors: [
+        monitor({
+          responsibilityId: "resp-gone",
+          firing: null,
+        }),
+      ],
+    });
+    expect(markup).toContain("Dispatches resp-gone");
   });
 });

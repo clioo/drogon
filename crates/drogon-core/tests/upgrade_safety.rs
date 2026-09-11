@@ -25,7 +25,7 @@ const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("bots", 3, &[("bots-v1", 1), ("bots-v2", 2)]),
     ("bot_monitors", 2, &[("bot_monitors-v1", 1)]),
     ("bot_self", 1, &[]),
-    ("bot_delegation", 1, &[]),
+    ("bot_delegation", 2, &[]),
     ("automations", 2, &[("automations-v1", 1)]),
     ("projects", 5, &[("projects-v1", 1)]),
     ("mentu", 1, &[]),

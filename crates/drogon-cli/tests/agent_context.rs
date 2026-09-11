@@ -168,6 +168,64 @@ async fn agent_context_schema_shape_matches_the_fork_contract() {
     );
 }
 
+/// The schema must never drift from the binary: every VISIBLE leaf in the
+/// real clap grammar has an entry, and every entry names a real command.
+/// This is the same contract the bundled skill guide is verified against
+/// (see `skill_guides.rs`), so `drogon-cli agent-context --json` stays a
+/// faithful machine-readable inventory of what the binary can do.
+#[test]
+fn agent_context_inventory_matches_the_real_command_tree() {
+    use clap::CommandFactory;
+    use drogon_cli::agent_context::all_commands;
+    use drogon_cli::cli::Cli;
+
+    fn visible_leaf_paths(cmd: &clap::Command, prefix: &mut Vec<String>, out: &mut Vec<String>) {
+        for sub in cmd.get_subcommands() {
+            if sub.is_hide_set() {
+                continue;
+            }
+            prefix.push(sub.get_name().to_string());
+            if sub.get_subcommands().any(|s| !s.is_hide_set()) {
+                visible_leaf_paths(sub, prefix, out);
+            } else {
+                out.push(prefix.join(" "));
+            }
+            prefix.pop();
+        }
+    }
+
+    let mut prefix = Vec::new();
+    let mut leaves = Vec::new();
+    visible_leaf_paths(&Cli::command(), &mut prefix, &mut leaves);
+    let mut schema: Vec<String> = all_commands()
+        .iter()
+        .map(|entry| entry.command.to_string())
+        .collect();
+    // Same exemption as the guide test: the hidden service-internal
+    // callback is described in the schema on purpose, but it is not part
+    // of the public command tree.
+    schema.retain(|name| *name != "internal hook-event");
+    schema.sort();
+    leaves.sort();
+
+    let missing_from_schema: Vec<&String> = leaves
+        .iter()
+        .filter(|leaf| !schema.contains(leaf))
+        .collect();
+    assert!(
+        missing_from_schema.is_empty(),
+        "clap verbs the agent-context schema never describes: {missing_from_schema:?}"
+    );
+    let phantom_entries: Vec<&String> = schema
+        .iter()
+        .filter(|name| !leaves.contains(name))
+        .collect();
+    assert!(
+        phantom_entries.is_empty(),
+        "agent-context entries that name no real clap verb: {phantom_entries:?}"
+    );
+}
+
 /// `agent-context` is a pure local read like the fork's: this data
 /// directory was never given a socket or token, and both modes exit 0.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
