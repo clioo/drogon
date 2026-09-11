@@ -10,10 +10,13 @@
 //      fixture, which answers a Mentu prompt by running the documented
 //      `drogon-cli mentu run`, i.e. it stands in for an agent that read the
 //      skill);
-//   3. the Mentu tab's Run Recipe button: review, approve, and DELIVER the
-//      prompt into that session;
-//   4. the daemon's own run row driving the button's animation, Evidence
-//      and Metrics while the run is still in flight;
+//   3. the Mentu panel's run control: review, approve, and DELIVER the
+//      prompt into that session (the delegation path the app ships; the
+//      work graph owns the wide tab since the takeover);
+//   4. the daemon's own run row driving the button's animation and the
+//      live Evidence while the run is still in flight, with the run row
+//      carrying the finished step's recorded usage (the data the old
+//      detached Metrics view rendered — now it belongs to the node);
 //   5. the settle back to idle.
 //
 // It never activates the window: `DROGON_BACKGROUND_WINDOW=1`, its own
@@ -331,7 +334,9 @@ async function main() {
   report.mainSession = { id: session.id, agentState: session.agentState };
   report.checks.push("main-agent-session-idle-before-click");
 
-  // 4. Mentu tab: open the panel, select the recipe, open the wide tab.
+  // 4. Mentu panel: open it and select the recipe. The panel drives the
+  //    SAME review -> approve & run controller the old wide-tab header
+  //    drove; the wide tab now renders the work graph.
   const panel = page.locator('[data-testid="mentu-panel"]');
   if (!(await panel.isVisible().catch(() => false))) {
     await page.locator('.right-sidebar-header-drag button[aria-label="Mentu"]').click();
@@ -340,30 +345,29 @@ async function main() {
   await panel.getByRole("combobox", { name: "Recipe", exact: true }).click();
   await page.getByRole("option", { name: RECIPE_ID, exact: true }).click();
   await panel.getByText("write-marker", { exact: true }).waitFor();
-  await panel.getByRole("button", { name: "Open full tab", exact: true }).click();
-  const runButton = page.getByTestId("mentu-run-recipe");
+  // Every surface below is scoped to the PANEL: the run control, review
+  // card and status live here, and the probe must not read another copy.
+  const runButton = panel.locator('[data-testid="mentu-run"]');
   await runButton.waitFor({ timeout: 20000 });
-  // Every surface below is scoped to the WIDE tab: the right-sidebar panel
-  // renders the same testids, and the probe must not read the panel's copy.
-  const pane = page.getByTestId("recipe-pane");
   // The shell's session list has to have caught up before the hint clears.
   await page
     .locator('[data-testid="mentu-main-session-hint"]')
     .waitFor({ state: "hidden", timeout: 20000 });
-  report.checks.push("mentu-tab-open-with-live-main-session");
+  report.checks.push("mentu-panel-open-with-live-main-session");
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await selectSettingsTheme(page, "light");
-  await page.getByTestId("recipe-pane").waitFor();
+  if (!(await panel.isVisible().catch(() => false))) {
+    await page.locator('.right-sidebar-header-drag button[aria-label="Mentu"]').click();
+  }
+  await panel.waitFor();
   await runButton.waitFor();
   await shot(page, "01-idle-light-1440");
 
   // 5. Review -> approve: the click that used to call mentu.run itself.
   await pointerClick(page, runButton);
-  await runButton.filter({ hasText: "Approve & run recipe" }).waitFor({ timeout: 20000 });
-  // The review card lives on the wide tab's Run tab.
-  await pane.getByRole("tab", { name: "Run", exact: true }).click();
-  await pane.getByTestId("mentu-review").waitFor({ timeout: 20000 });
+  await runButton.filter({ hasText: "Approve & run" }).waitFor({ timeout: 20000 });
+  await panel.getByTestId("mentu-review").waitFor({ timeout: 20000 });
   await shot(page, "02-review-light-1440");
   report.checks.push("review-staged-before-approval");
 
@@ -384,7 +388,7 @@ async function main() {
   };
 
   await pointerClick(page, runButton);
-  await page.locator('[data-testid="mentu-run-recipe"][data-running="true"]').waitFor({
+  await page.locator('[data-testid="mentu-run"][data-running="true"]').waitFor({
     timeout: 20000,
   });
   report.checks.push("run-recipe-button-animates-after-approval");
@@ -448,8 +452,8 @@ async function main() {
   report.checks.push("run-row-live-with-finished-step-while-running");
 
   const paneRunEvidence = async () => {
-    await pane.getByRole("tab", { name: "Evidence", exact: true }).click();
-    const evidence = pane.getByTestId("recipe-evidence");
+    await panel.getByRole("tab", { name: "Evidence", exact: true }).click();
+    const evidence = panel.getByTestId("recipe-evidence");
     await evidence.waitFor();
     await evidence.getByText("write-marker", { exact: true }).first().waitFor({ timeout: 20000 });
     return (await evidence.innerText()) ?? "";
@@ -462,24 +466,27 @@ async function main() {
   );
   report.checks.push("evidence-populated-while-running");
 
-  await pane.getByRole("tab", { name: "Metrics", exact: true }).click();
-  const metrics = pane.getByTestId("recipe-metrics");
-  await metrics.waitFor();
-  let metricsText = "";
-  const metricsDeadline = Date.now() + 20000;
+  // The old detached Metrics view is gone (metrics moved ONTO the work
+  // graph's nodes); its DATA must still be live in the daemon's own run
+  // row while the run is in flight — the recorded usage of the finished
+  // step, exactly what Metrics rendered, read from the same record.
+  let liveUsage = null;
+  const usageDeadline = Date.now() + 20000;
   for (;;) {
-    metricsText = await metrics.innerText();
-    if (metricsText.includes("write-marker")) break;
-    if (Date.now() >= metricsDeadline) break;
+    const row = (await cliJson(dataDir, ["mentu", "run-status", "--run", liveRun.id])).run;
+    const finished = row.steps.find((step) => step.label === "write-marker");
+    liveUsage = finished?.usage ?? null;
+    if (liveUsage && (liveUsage.usageKnown === true || liveUsage.inputTokens !== null)) break;
+    if (Date.now() >= usageDeadline) break;
     await delay(300);
   }
-  assert.match(
-    metricsText,
-    /write-marker/,
-    "live metrics must carry the finished step: " + metricsText.slice(0, 400),
+  assert.ok(
+    liveUsage,
+    "the live run row must carry the finished step's recorded usage (the old Metrics data)",
   );
-  report.checks.push("metrics-populated-while-running");
-  await shot(page, "04-running-metrics-light-1440");
+  report.liveUsage = liveUsage;
+  report.checks.push("live-run-row-carries-recorded-usage");
+  await shot(page, "04-running-evidence-light-1440");
 
   // The evidence read is the daemon's, not the settled record's.
   const stillRunning = (await cliJson(dataDir, ["mentu", "run-status", "--run", liveRun.id])).run
@@ -497,8 +504,8 @@ async function main() {
     await paneRunEvidence();
     for (const width of [1440, 1100, 900, 760]) {
       await page.setViewportSize({ width, height: 900 });
-      await pane.getByTestId("recipe-evidence").waitFor();
-      await page.locator('[data-testid="mentu-run-recipe"][data-running="true"]').waitFor();
+      await panel.getByTestId("recipe-evidence").waitFor();
+      await page.locator('[data-testid="mentu-run"][data-running="true"]').waitFor();
       await shot(page, `03-running-evidence-${theme}-${width}`);
     }
     report.checks.push(`running-indicator-and-evidence-captured-${theme}-4-widths`);
@@ -533,10 +540,10 @@ async function main() {
     "run did not succeed: " + JSON.stringify(settled),
   );
   await page
-    .locator('[data-testid="mentu-run-recipe"][data-running="false"]')
+    .locator('[data-testid="mentu-run"][data-running="false"]')
     .waitFor({ timeout: 30000 });
-  await pane.getByRole("tab", { name: "Evidence", exact: true }).click();
-  await pane
+  await panel.getByRole("tab", { name: "Evidence", exact: true }).click();
+  await panel
     .getByTestId("recipe-evidence")
     .getByText("read-marker", { exact: true })
     .first()
@@ -547,19 +554,23 @@ async function main() {
 
   // 10. Run 2 in dark: the same delegation, the dark matrix DURING the run.
   await selectSettingsTheme(page, "dark");
-  await page.getByTestId("recipe-pane").waitFor();
+  if (!(await panel.isVisible().catch(() => false))) {
+    await page.locator('.right-sidebar-header-drag button[aria-label="Mentu"]').click();
+  }
+  await panel.waitFor();
+  await runButton.waitFor();
   await shot(page, "06-idle-dark-1440");
   // The Settings detour remounts the Mentu surfaces, so the staged review
   // is gone: run 2 walks the same two-phase gate as run 1 (stage, then
   // approve), which is also what a user switching theme mid-session sees.
   const labelBefore = await runButton.evaluate((node) => node.textContent ?? "");
-  if (labelBefore.includes("Run Recipe")) {
+  if (labelBefore.includes("Review Run")) {
     await pointerClick(page, runButton);
-    await runButton.filter({ hasText: "Approve & run recipe" }).waitFor({ timeout: 20000 });
+    await runButton.filter({ hasText: "Approve & run" }).waitFor({ timeout: 20000 });
     report.checks.push("second-run-restages-review-after-remount");
   }
   await pointerClick(page, runButton);
-  await page.locator('[data-testid="mentu-run-recipe"][data-running="true"]').waitFor({
+  await page.locator('[data-testid="mentu-run"][data-running="true"]').waitFor({
     timeout: 20000,
   });
   const secondRun = await waitForLiveRun(liveRun.id);
@@ -573,7 +584,7 @@ async function main() {
     "second run did not succeed: " + JSON.stringify(secondSettled),
   );
   await page
-    .locator('[data-testid="mentu-run-recipe"][data-running="false"]')
+    .locator('[data-testid="mentu-run"][data-running="false"]')
     .waitFor({ timeout: 30000 });
   report.checks.push("second-run-delegated-in-dark-and-settled");
   await shot(page, "08-settled-dark-1440");
