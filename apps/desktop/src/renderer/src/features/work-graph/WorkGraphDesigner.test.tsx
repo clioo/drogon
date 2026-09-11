@@ -11,6 +11,34 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+
+/** One real keystroke against a controlled field: set the committed value
+ *  through the PROTOTYPE setter (bypassing React's instance value tracker,
+ *  so the change is not deduped), place the caret where the browser would
+ *  leave it, then dispatch the bubbling `input` event React's onChange
+ *  listens to. `fireEvent.change` in one shot is fill(), not typing —
+ *  the remount-per-keystroke bug only reproduces key by key. */
+function typeInto(
+  field: HTMLInputElement | HTMLTextAreaElement,
+  nextValue: string,
+  caret = nextValue.length,
+): void {
+  const proto = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement : HTMLInputElement;
+  const setter = Object.getOwnPropertyDescriptor(proto.prototype, "value")?.set;
+  setter?.call(field, nextValue);
+  field.setSelectionRange(caret, caret);
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function focusedField(testId: string): HTMLInputElement | HTMLTextAreaElement {
+  const field = screen.getByTestId(testId) as HTMLInputElement | HTMLTextAreaElement;
+  field.focus();
+  return field;
+}
+
+function inputValue(field: HTMLInputElement | HTMLTextAreaElement): string {
+  return (field as HTMLInputElement).value ?? "";
+}
 import type {
   GraphBridge,
   GraphCompileParams,
@@ -441,4 +469,98 @@ describe("WorkGraphDesigner", () => {
     expect(listbox.textContent).toContain("recommended");
     expect(listbox.textContent).toContain("unverified");
   });
+
+  it("typing a name into a NEW node keeps focus and the caret — one field, five keystrokes", async () => {
+    renderDesigner(null, graphBridgeWith({}).bridge);
+    fireEvent.click(await screen.findByTestId("design-add-node"));
+    let name = focusedField("design-field-title");
+    let typed = "";
+    for (const char of "hello") {
+      typed += char;
+      typeInto(name, typed);
+      // The field the user is typing into must still be THE SAME DOM node
+      // (no unmount/remount), still focused, holding every keystroke,
+      // with the caret where typing left it.
+      const current = screen.getByTestId("design-field-title") as HTMLInputElement;
+      expect(current).toBe(name);
+      expect(document.activeElement).toBe(current);
+      expect(inputValue(current)).toBe(typed);
+      expect(current.selectionStart).toBe(typed.length);
+      expect(current.selectionEnd).toBe(typed.length);
+      name = current;
+    }
+  });
+
+  it("typing in the MIDDLE of a name inserts at the caret and keeps it there", async () => {
+    renderDesigner(null, graphBridgeWith({}).bridge);
+    fireEvent.click(await screen.findByTestId("design-add-node"));
+    let name = focusedField("design-field-title");
+    for (const char of "hello") typeInto(name, typedSoFar(name, char));
+    // Caret between "he" and "llo", then one keystroke "X" at it.
+    (name as HTMLInputElement).setSelectionRange(2, 2);
+    typeInto(name, "heXllo", 3);
+    const current = screen.getByTestId("design-field-title") as HTMLInputElement;
+    expect(current).toBe(name);
+    expect(document.activeElement).toBe(current);
+    expect(inputValue(current)).toBe("heXllo");
+    expect(current.selectionStart).toBe(3);
+    expect(current.selectionEnd).toBe(3);
+  });
+
+  it("the verify box accepts a second command — the Enter keystroke survives", async () => {
+    const { bridge, recorded } = graphBridgeWith({});
+    renderDesigner(null, bridge);
+    fireEvent.click(await screen.findByTestId("design-add-node"));
+    fireEvent.change(screen.getByTestId("design-field-prompt"), {
+      target: { value: "the prompt" },
+    });
+    const verify = focusedField("design-field-verify");
+    let typed = "";
+    for (const char of "true\nfalse") {
+      typed += char;
+      typeInto(verify, typed);
+      const current = screen.getByTestId("design-field-verify");
+      expect(current).toBe(verify);
+      expect(inputValue(current as HTMLTextAreaElement)).toBe(typed);
+    }
+    // Commit on blur (the Save click blurs first), then save.
+    fireEvent.blur(verify);
+    fireEvent.click(screen.getByTestId("design-save"));
+    await screen.findByTestId("design-status-saved");
+    const intent = recorded.writes[0].intent as {
+      nodes: { verifyCommands?: string[] }[];
+    };
+    expect(intent.nodes[0].verifyCommands).toEqual(["true", "false"]);
+  });
+
+  it("a re-rendered document (as a poll would produce) never clobbers in-progress edits", async () => {
+    const { bridge } = graphBridgeWith({});
+    const { rerender } = renderDesigner(null, bridge);
+    fireEvent.click(await screen.findByTestId("design-add-node"));
+    const name = focusedField("design-field-title");
+    typeInto(name, "half-typed");
+    fireEvent.change(screen.getByTestId("design-field-prompt"), {
+      target: { value: "still editing" },
+    });
+    // The pane re-renders with a fresh document object — what a snapshot
+    // read would hand it. The designer's draft must not re-seed.
+    rerender(
+      <WorkGraphDesigner
+        graphBridge={bridge}
+        workspaceId="ws-1"
+        document={seedDocument([
+          { id: "other", title: "Other", harness: "shell", model: "", dependsOn: [], prompt: "p", enabled: true },
+        ])}
+        onDone={() => {}}
+      />,
+    );
+    expect(inputValue(screen.getByTestId("design-field-title"))).toBe("half-typed");
+    expect(inputValue(screen.getByTestId("design-field-prompt"))).toBe("still editing");
+    expect(document.activeElement).toBe(screen.getByTestId("design-field-title"));
+  });
 });
+
+/** The value the field should carry after typing `char` at its end. */
+function typedSoFar(field: HTMLInputElement | HTMLTextAreaElement, char: string): string {
+  return inputValue(field) + char;
+}
