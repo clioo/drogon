@@ -319,14 +319,48 @@ export function useMentuPaneController(
   // another editor used to stay invisible in the selector until the app was
   // reloaded — the owner's "I cannot see the recipe I just created". Main's
   // watcher already reports WHICH workspace changed, debounced (R16-L #157,
-  // the same live path the Explorer and Source Control read), so this re-runs
-  // exactly the load the Refresh affordance runs.
+  // the same live path the Explorer and Source Control read), so a tick
+  // re-reads the catalog.
+  //
+  // Deliberately narrow: a file landing is not a user refresh. The tick path
+  // reads the recipe list and nothing else, because the two things the mount
+  // path also does are both wrong to repeat on a background tick — the
+  // runtime read hashes the whole locked binary and spawns it for
+  // `--version` (a lock-file fact no workspace file can change, and every run
+  // re-verifies it daemon-side through `require_verified_runtime`), and the
+  // empty state's subproject report is a bounded scan of up to 25 directories
+  // that must not fan out from a coarse tick. It is also silent: flipping
+  // `loading` would disable the selector under the user's cursor mid-click.
+  // At most one read is in flight, and a burst of ticks collapses into one
+  // extra read, because the daemon's answer is the whole directory.
   useEffect(() => {
     if (!workspaceId) return;
-    return subscribeWorkspaceFilesChanged(workspaceId, () =>
-      setRecipesGeneration((value) => value + 1),
-    );
-  }, [workspaceId]);
+    let cancelled = false;
+    let inFlight = false;
+    let pending = false;
+    const readCatalog = (): void => {
+      if (inFlight) {
+        pending = true;
+        return;
+      }
+      inFlight = true;
+      void bridge.mentuRecipes({ workspaceId }).then((result) => {
+        inFlight = false;
+        if (cancelled) return;
+        if (result.ok) setRecipes(result.result.recipes);
+        else setError(result.error.message);
+        if (pending) {
+          pending = false;
+          readCatalog();
+        }
+      });
+    };
+    const unsubscribe = subscribeWorkspaceFilesChanged(workspaceId, readCatalog);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [bridge, workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
