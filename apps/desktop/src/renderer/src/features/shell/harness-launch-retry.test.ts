@@ -66,4 +66,21 @@ describe("buildHarnessLaunchRetry", () => {
     expect(retry.model).toBe("");
     expect(retry.provider).toBe("");
   });
+
+  test("carries a resume's identity so the relaunch reopens the same conversation", () => {
+    // A session that WAS a resume is still that conversation: relaunching it
+    // must name it again instead of silently starting a blank one.
+    const resumed = buildHarnessLaunchRetry(
+      { ...launch, resume: true, resumeSessionId: "sess-prior" },
+      "req-4",
+    );
+    expect(resumed.resume).toBe(true);
+    expect(resumed.resumeSessionId).toBe("sess-prior");
+  });
+
+  test("never invents resume keys for a plain launch", () => {
+    const retry = buildHarnessLaunchRetry(launch, "req-5");
+    expect(retry).not.toHaveProperty("resume");
+    expect(retry).not.toHaveProperty("resumeSessionId");
+  });
 });

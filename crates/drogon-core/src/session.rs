@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use drogon_protocol::RpcError;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use serde_json::{Value, json};
 
 use crate::agent_state::{self, Activity, AgentState};
@@ -42,6 +42,42 @@ const TURN_ENDED: u8 = 2;
 /// means INACTIVE — no known turn.
 pub(crate) const TURN_ACTIVE_WIRE: &str = "active";
 pub(crate) const TURN_ENDED_WIRE: &str = "ended";
+
+/// The provider-native conversation identity a harness reported for one of
+/// this daemon's sessions. Written by the harness's own hook plumbing
+/// (`hooks::do_session_hook_event`'s `agentSessionId`/
+/// `agentSessionTranscriptPath` fields) and mirrored into the durable
+/// `sessions.agent_session_id`/`agent_session_transcript_path` columns so a
+/// reopen after a daemon restart still names the same conversation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentSessionIdentity {
+    pub id: String,
+    pub transcript_path: Option<String>,
+}
+
+impl AgentSessionIdentity {
+    /// Normalizes a hook-reported locator. Returns `None` for anything that
+    /// could not be handed to a child's argv verbatim: empty/whitespace ids,
+    /// ids that could be read as a flag (leading `-`), overlong ids and any
+    /// control character. A rejected locator is never persisted, so a reopen
+    /// degrades to the harness's own most-recent entrypoint rather than
+    /// launching something the hook invented.
+    pub fn parse(id: Option<&str>, transcript_path: Option<&str>) -> Option<Self> {
+        let id = id.map(str::trim).filter(|id| !id.is_empty())?;
+        if id.starts_with('-') || id.len() > 512 || id.chars().any(char::is_control) {
+            return None;
+        }
+        let transcript_path = transcript_path
+            .map(str::trim)
+            .filter(|path| !path.is_empty() && path.len() <= 4096)
+            .filter(|path| !path.chars().any(char::is_control))
+            .map(str::to_string);
+        Some(Self {
+            id: id.to_string(),
+            transcript_path,
+        })
+    }
+}
 
 pub(crate) struct SessionHandle {
     pub(crate) session_id: String,
@@ -103,6 +139,16 @@ pub(crate) struct SessionHandle {
     hook_transition_at: Mutex<Option<(Instant, String)>>,
     agent_prompt_preview: Mutex<Option<String>>,
     cache_idle_at: Mutex<Option<String>>,
+    /// Provider-native conversation identity for this session, as the harness
+    /// itself reported it through `session.hook_event` (Claude/Codex
+    /// `session_id`, OpenCode's session id, Antigravity's `conversation_id`;
+    /// plus the `transcript_path`/`session_file` some CLIs resume by). This is
+    /// what makes a reopen name the SAME conversation
+    /// (`claude --resume <id>`) instead of asking the CLI for the most recent
+    /// one in the directory. `None` until a hook reports one — plain shells
+    /// and harnesses with no identity surface keep `None`, and the reopen
+    /// degrades honestly rather than pretending.
+    agent_session: Mutex<Option<AgentSessionIdentity>>,
     /// Per-session harness hook install artifacts `harness.start` wrote for
     /// this session (Claude's `--settings` file; OpenCode's
     /// `OPENCODE_CONFIG_DIR` overlay directory; Pi's `--extension` file and
@@ -186,6 +232,7 @@ impl SessionHandle {
             hook_transition_at: Mutex::new(None),
             agent_prompt_preview: Mutex::new(None),
             cache_idle_at: Mutex::new(None),
+            agent_session: Mutex::new(None),
             hook_cleanup_paths: Mutex::new(Vec::new()),
             suspended_hook_files: Mutex::new(Vec::new()),
             explicit_wait_clear: AtomicBool::new(false),
@@ -1177,6 +1224,71 @@ pub(crate) fn stop(handle: &SessionHandle) -> Result<Value, RpcError> {
     stop_with_action(handle).session
 }
 
+/// Mirrors the harness-reported conversation identity into the durable
+/// `sessions` row so a reopen after a daemon restart still names the same
+/// conversation. Best-effort like [`persist_wait_signal`]: a failed write
+/// must never break the live session it describes, and the next hook event
+/// overwrites it anyway.
+pub(crate) fn note_agent_session(
+    handle: &SessionHandle,
+    identity: &AgentSessionIdentity,
+) -> Result<bool, RpcError> {
+    {
+        let mut current = handle.agent_session.lock().unwrap();
+        // First-writer-wins per conversation: the id a harness reports at
+        // session start and on every later hook is the same value, but a
+        // resume launch reports the SAME id it was asked to resume -- no
+        // later event may silently retarget the row at a different
+        // conversation (a hook from a nested session, say).
+        if current.as_ref().map(|s| &s.id) == Some(&identity.id) {
+            if current.as_ref().and_then(|s| s.transcript_path.clone()) == identity.transcript_path
+            {
+                return Ok(false);
+            }
+        } else if current.is_some() {
+            return Ok(false);
+        }
+        *current = Some(identity.clone());
+    }
+    let conn = handle.db.lock().unwrap();
+    let changed = conn
+        .execute(
+            "UPDATE sessions SET agent_session_id = ?2, agent_session_transcript_path = ?3 WHERE id = ?1",
+            rusqlite::params![
+                handle.session_id,
+                identity.id,
+                identity.transcript_path
+            ],
+        )
+        .map_err(error::from_sqlite)?;
+    if changed != 1 {
+        return Err(error::unverifiable(format!(
+            "Session {}'s harness conversation could not be recorded; a reopen would not name it",
+            handle.session_id,
+        )));
+    }
+    Ok(true)
+}
+
+/// The provider-native conversation a durable session row recorded, if any.
+/// Read straight from SQLite (never from a retained handle) so a reopen path
+/// works for a row this process instance does not own -- exactly the
+/// post-restart `unverifiable` case.
+pub(crate) fn recorded_agent_session(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<Option<AgentSessionIdentity>, RpcError> {
+    let row: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT agent_session_id, agent_session_transcript_path FROM sessions WHERE id = ?1",
+            rusqlite::params![session_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(error::from_sqlite)?;
+    Ok(row.and_then(|(id, path)| AgentSessionIdentity::parse(id.as_deref(), path.as_deref())))
+}
+
 /// Forgets the durable row of a session the caller is explicitly done with
 /// (R16-AL2, issue #228). This is the only honest way to dismiss an
 /// `unverifiable` stub: the liveness rule forbids rewriting loss of contact
@@ -1334,6 +1446,19 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         "agentStateAt": agent_state_at,
         "agentPromptPreview": handle.agent_prompt_preview.lock().unwrap().clone(),
         "cacheIdleAt": handle.cache_idle_at.lock().unwrap().clone(),
+        // Additive (`session-contract.ts`): the provider-native conversation
+        // this session is (Claude's hook `session_id`, Codex's `session_id`,
+        // OpenCode's session id, Antigravity's `conversation_id`) plus the
+        // transcript file some CLIs resume by. Both are `null` until the
+        // harness's own hook reports one, which is exactly when a reopen can
+        // name that conversation instead of guessing.
+        "agentSessionId": handle.agent_session.lock().unwrap().as_ref().map(|s| s.id.clone()),
+        "agentSessionTranscriptPath": handle
+            .agent_session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|s| s.transcript_path.clone()),
     })
 }
 
@@ -1369,6 +1494,51 @@ mod session_close_tests;
 #[cfg(all(test, unix))]
 #[path = "session_signal_reset_tests.rs"]
 mod session_signal_reset_tests;
+
+#[cfg(test)]
+mod agent_session_identity_tests {
+    use super::AgentSessionIdentity;
+
+    /// A hook-reported locator becomes child argv on a later resume, so its
+    /// shape is a trust boundary. Only a plain, bounded, non-flag-like id is
+    /// accepted; everything else is dropped (and therefore never persisted).
+    #[test]
+    fn a_locator_that_could_be_read_as_a_flag_is_refused() {
+        assert_eq!(
+            AgentSessionIdentity::parse(Some("   "), Some("/tmp/t")),
+            None
+        );
+        assert_eq!(AgentSessionIdentity::parse(None, Some("/tmp/t")), None);
+        for hostile in ["--resume", "-c", "bad\nid", "bad\rid", "bad\0id"] {
+            assert_eq!(
+                AgentSessionIdentity::parse(Some(hostile), None),
+                None,
+                "{hostile:?} must never be persisted"
+            );
+        }
+        let long = "a".repeat(513);
+        assert_eq!(AgentSessionIdentity::parse(Some(&long), None), None);
+    }
+
+    /// A transcript path is optional and independently validated: an unusable
+    /// path degrades to id-only (which is enough for claude/codex/opencode/
+    /// agy, and makes Pi fall back to its own continue entrypoint) instead of
+    /// poisoning the whole locator.
+    #[test]
+    fn an_id_trim_survives_an_unusable_transcript_path() {
+        let parsed = AgentSessionIdentity::parse(Some("  sess-1 "), Some("  ")).unwrap();
+        assert_eq!(parsed.id, "sess-1");
+        assert_eq!(parsed.transcript_path, None);
+        let parsed = AgentSessionIdentity::parse(Some("sess-1"), Some(" /tmp/t.jsonl ")).unwrap();
+        assert_eq!(parsed.transcript_path.as_deref(), Some("/tmp/t.jsonl"));
+        assert_eq!(
+            AgentSessionIdentity::parse(Some("sess-1"), Some("bad\npath"))
+                .unwrap()
+                .transcript_path,
+            None
+        );
+    }
+}
 
 #[cfg(test)]
 mod headless_completion_tests {

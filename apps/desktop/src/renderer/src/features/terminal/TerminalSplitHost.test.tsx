@@ -11,8 +11,25 @@ import type { Session } from "../../../../shared/session-contract";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 
 vi.mock("./TerminalPane", () => ({
-  TerminalPane: ({ session }: { session: Session }) => (
-    <div data-testid={`stub-pane-${session.id}`} />
+  TerminalPane: ({
+    session,
+    restoredBannerReason,
+    onDismissRestoredBanner,
+  }: {
+    session: Session;
+    restoredBannerReason?: string | null;
+    onDismissRestoredBanner?: () => void;
+  }) => (
+    <div
+      data-testid={`stub-pane-${session.id}`}
+      data-restored-banner={restoredBannerReason ?? ""}
+    >
+      <button
+        type="button"
+        data-testid={`dismiss-${session.id}`}
+        onClick={() => onDismissRestoredBanner?.()}
+      />
+    </div>
   ),
 }));
 
@@ -170,5 +187,45 @@ describe("TerminalSplitHost", () => {
     expect(onResize).toHaveBeenCalledWith(0.45);
     fireEvent.keyDown(divider, { key: "ArrowRight" });
     expect(onResize).toHaveBeenCalledWith(0.55);
+  });
+});
+
+describe("TerminalSplitHost resume banner routing", () => {
+  it("raises each pane's own resume banner and never a neighbour's", () => {
+    // The banner belongs to the pane whose launch produced it: a resumed
+    // pane must not paint its restore onto a sibling that was never
+    // resumed, and a pane with no resume gets nothing.
+    const { container } = renderHost({
+      ...BASE,
+      panes: [session("root"), session("second")],
+      split: { ...SPLIT, sizes: [0.5, 0.5] },
+      restoredBannerReasonFor: (sessionId) =>
+        sessionId === "second" ? "resume-unavailable" : null,
+    });
+    expect(
+      container.querySelector('[data-testid="stub-pane-root"]')?.getAttribute(
+        "data-restored-banner",
+      ),
+    ).toBe("");
+    expect(
+      container.querySelector('[data-testid="stub-pane-second"]')?.getAttribute(
+        "data-restored-banner",
+      ),
+    ).toBe("resume-unavailable");
+  });
+
+  it("dismisses the banner for the pane the user touched", () => {
+    const onDismissRestoredBanner = vi.fn();
+    renderHost({
+      ...BASE,
+      panes: [session("root"), session("second")],
+      split: { ...SPLIT, sizes: [0.5, 0.5] },
+      restoredBannerReasonFor: () => "restored",
+      onDismissRestoredBanner,
+    });
+    // The pane's own dismissal is routed with the pane's session id -- so a
+    // restore on the right pane can never retire the left pane's banner.
+    fireEvent.click(screen.getByTestId("dismiss-second"));
+    expect(onDismissRestoredBanner).toHaveBeenCalledWith("second");
   });
 });

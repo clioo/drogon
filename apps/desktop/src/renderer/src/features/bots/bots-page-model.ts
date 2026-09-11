@@ -190,6 +190,34 @@ export function harnessSupportsConversationResume(
     harnessId === "codex"
   );
 }
+
+/**
+ * What the Bots page must SAY about a reopen, or `null` when there is nothing
+ * to disclose. Reopening a Bot's session always runs the harness's own resume
+ * path, but the strength of that resume depends on whether the daemon recorded
+ * the provider conversation the harness reported:
+ *
+ * - `resumeByIdentity` set: the launch names THAT conversation, so nothing
+ *   needs saying — the session comes back as itself.
+ * - `resumeByIdentity` null and the harness can continue: the best available
+ *   answer is the CLI's own most-recent conversation in the Bot's home. That
+ *   is a real continuation, but it is not the recorded one, so the page says
+ *   which conversation it asked for instead of implying an exact restore.
+ * - harness without a resume verb: a NEW session opens, and the page says so
+ *   rather than presenting it as a continuation.
+ */
+export function botReopenNotice(input: {
+  harnessId: string;
+  resumeByIdentity?: "session" | "bot-record" | null;
+}): string | null {
+  if (!harnessSupportsConversationResume(input.harnessId)) {
+    return `${input.harnessId} cannot reopen its previous conversation; a NEW session was opened instead.`;
+  }
+  if (!input.resumeByIdentity) {
+    return `${input.harnessId} will reopen its most recent conversation in this Bot's home; no exact session id was recorded for it.`;
+  }
+  return null;
+}
 // ---------------------------------------------------------------------------
 // Owner-design page model (task_197f6a7eb370). Pure derivations over real
 // snapshot/monitor data only — every label below is computed from a stored

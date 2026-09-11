@@ -65,6 +65,19 @@ pub struct BotSession {
     pub model: Option<String>,
     pub started_at: f64,
     pub rotated_at: Option<f64>,
+    /// The provider-native conversation this Bot session is, as the harness
+    /// itself reported it (Claude/Codex `session_id`, OpenCode's session id,
+    /// Antigravity's `conversation_id`) plus the transcript file some CLIs
+    /// resume by (`transcriptPath`). Learned from the daemon's own session row
+    /// and latched onto the Bot record so the Bot's conversation stays
+    /// resumable by identity even after that row is gone (an explicit close
+    /// deletes it) -- the case that used to be a permanent `unknown` dead end.
+    /// `None` until the harness reports one, and for harnesses that report
+    /// no identity surface.
+    #[serde(default)]
+    pub agent_session_id: Option<String>,
+    #[serde(default)]
+    pub agent_session_transcript_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -405,6 +418,14 @@ pub fn normalize_bot(
                 model: s.get("model").and_then(|v| v.as_str()).map(str::to_string),
                 started_at: s.get("startedAt").and_then(|v| v.as_f64()).unwrap_or(now),
                 rotated_at: s.get("rotatedAt").and_then(|v| v.as_f64()),
+                agent_session_id: s
+                    .get("agentSessionId")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                agent_session_transcript_path: s
+                    .get("agentSessionTranscriptPath")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
             })
         });
 

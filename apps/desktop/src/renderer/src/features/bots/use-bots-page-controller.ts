@@ -27,6 +27,7 @@ import type {
   BotSessionResolution,
 } from "./bots-panel-contracts";
 import {
+  botReopenNotice,
   buildBotCreateBody,
   emptyBotCreateForm,
   emptyResponsibilityForm,
@@ -544,11 +545,15 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
             resolution.harnessId ?? live.harnessPolicy.defaultHarness;
           // Resume only through a harness that actually supports it; a
           // harness without a resume mechanism gets a fresh session AND an
-          // honest notice, never a pretend continuation.
+          // honest notice, never a pretend continuation. When the daemon has
+          // no recorded provider conversation, the notice names what the
+          // reopen will actually do (its own most-recent entrypoint) instead
+          // of implying an exact restore.
           resume = harnessSupportsConversationResume(harnessId);
-          if (!resume) {
-            resumeNotice = `${harnessId} cannot reopen its previous conversation; a NEW session was opened instead.`;
-          }
+          resumeNotice = botReopenNotice({
+            harnessId,
+            resumeByIdentity: resolution.resumeByIdentity,
+          });
         }
         // kind === "open": nothing recorded; a fresh session is correct.
       }

@@ -46,7 +46,15 @@ const session = z.object({
   // Delegation attribution (monitor event id that caused the session):
   // optional so a response from an older service without the column still
   // validates; absent reads as "nobody delegated this session".
-  causedByEventId: z.string().nullable().optional(),
+  causedByEventId: z.string().nullable().optional(),  // Session resume by identity (owner directive): the provider-native
+  // conversation the harness itself reported, so a reopen names THAT one
+  // (`claude --resume <id>`) instead of the most recent in the directory.
+  // Additive/optional so a service without the columns still validates;
+  // absent and null both read as "no recorded identity".
+  agentSessionId: z.string().max(512).nullable().optional(),
+  agentSessionTranscriptPath: z.string().max(4096).nullable().optional(),
+  // `harness.start` replies only: how a resume request actually landed.
+  agentResume: z.enum(["resumed", "continued", "fresh"]).optional(),
 });
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const harness = z

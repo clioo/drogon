@@ -134,7 +134,9 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
             parent_session_id TEXT,
             turn_fact TEXT,
             turn_fact_at TEXT,
-            caused_by_event_id TEXT
+            caused_by_event_id TEXT,
+            agent_session_id TEXT,
+            agent_session_transcript_path TEXT
         );
         CREATE TABLE IF NOT EXISTS requests (
             request_id TEXT PRIMARY KEY,
@@ -303,7 +305,7 @@ fn pending_forward_migrations(conn: &Connection) -> rusqlite::Result<Vec<Pending
         }
     }
     // Main-schema additive columns: an older data dir's `sessions` table
-    // lacks them; a fresh or current one already has all three.
+    // lacks them; a fresh or current one already has all of them.
     if let Ok(Some((_, cols))) = table_columns(conn, "sessions") {
         let has = |name: &str| cols.iter().any(|c| c == name);
         if !(has("harness_id")
@@ -311,7 +313,9 @@ fn pending_forward_migrations(conn: &Connection) -> rusqlite::Result<Vec<Pending
             && has("parent_session_id")
             && has("turn_fact")
             && has("turn_fact_at")
-            && has("caused_by_event_id"))
+            && has("caused_by_event_id")
+            && has("agent_session_id")
+            && has("agent_session_transcript_path"))
         {
             pending.push(PendingMigration {
                 component: "sessions (main schema columns)".to_string(),
@@ -509,6 +513,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     migrate_sessions_parent_session_id(&tx)?;
     migrate_sessions_turn_fact(&tx)?;
     migrate_sessions_caused_by_event_id(&tx)?;
+    migrate_sessions_agent_session(&tx)?;
     recover_from_prior_instance(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
     tx.commit()?;
@@ -605,6 +610,35 @@ fn migrate_sessions_caused_by_event_id(tx: &Transaction<'_>) -> rusqlite::Result
 /// already created the columns in [`create_tables`].
 fn migrate_sessions_turn_fact(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     for column in ["turn_fact", "turn_fact_at"] {
+        let has_column: bool = tx
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = '{column}'"
+                ),
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)?;
+        if !has_column {
+            tx.execute_batch(&format!("ALTER TABLE sessions ADD COLUMN {column} TEXT;"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Additive migration for the provider-native conversation identity:
+/// `agent_session_id` is the id the harness itself reported for this
+/// session's conversation (Claude/Codex `session_id`, OpenCode's session id,
+/// Antigravity's `conversation_id`), and `agent_session_transcript_path` is
+/// the transcript/rollout file it reported (`transcript_path`, Pi's
+/// `session_file`). Together they let a reopen name the SAME conversation
+/// (`claude --resume <id>`) instead of asking the CLI for the most recent
+/// one in the directory — the owner's "abrirme la misma sesión en la que
+/// estaba trabajando". `NULL` until a hook reports one, and `NULL` forever
+/// for plain shells and harnesses that report no identity. Idempotent: fresh
+/// databases already created the columns in [`create_tables`].
+fn migrate_sessions_agent_session(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    for column in ["agent_session_id", "agent_session_transcript_path"] {
         let has_column: bool = tx
             .query_row(
                 &format!(

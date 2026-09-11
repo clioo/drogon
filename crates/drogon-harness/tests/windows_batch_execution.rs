@@ -22,6 +22,8 @@ fn request(id: HarnessId) -> HarnessLaunchRequest {
         permission_mode: PermissionMode::Inherit,
         headless: false,
         resume: false,
+        agent_session_id: None,
+        agent_session_transcript_path: None,
     }
 }
 

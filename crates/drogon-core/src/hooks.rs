@@ -104,8 +104,16 @@ pub(crate) fn settings_json(cli: &str, session_id: &str, incarnation: &str) -> V
     // already classified in `agent_state` (the codex vocabulary shares the
     // names, so no new classification entries). No matchers: an omitted
     // matcher matches every tool.
+    //
+    // `SessionStart` rides along to capture the provider-native session id
+    // (the hook payload's `session_id`/`transcript_path`) at the session
+    // boundary, so a session that is closed before its first turn can still
+    // be resumed by identity. It is classified for claude as a turn end (the
+    // reference maps SessionStart to a done row) -- see
+    // `agent_state::classify_hook_event_for_harness`.
     json!({
         "hooks": {
+            "SessionStart": entries("SessionStart"),
             "UserPromptSubmit": entries("UserPromptSubmit"),
             "Notification": entries("Notification"),
             "Stop": entries("Stop"),
@@ -164,11 +172,6 @@ impl Engine {
     /// or an exited session never gains a wait signal.
     pub(crate) fn do_session_hook_event(&self, params: &Value) -> Result<Value, RpcError> {
         let event = require_str(params, "event")?;
-        let Some(signal) = crate::agent_state::classify_hook_event(event) else {
-            return Err(error::invalid_argument(
-                "event is not a recognized harness hook signal",
-            ));
-        };
         let (handle, _) = self.require_session_with_incarnation(params)?;
         if !crate::agent_state::event_belongs_to_harness(event, handle.harness_id.as_deref()) {
             // The flat classification namespace is safe only because each
@@ -178,6 +181,46 @@ impl Engine {
             return Err(error::invalid_argument(
                 "event is not a recognized harness hook signal",
             ));
+        }
+        // Which signal this name means for THIS harness (claude's
+        // `SessionStart` is the idle session boundary, codex's is a turn
+        // start). Classification is harness-aware; the flat namespace above
+        // is not enough once two harnesses spell one name differently.
+        let Some(signal) = crate::agent_state::classify_hook_event_for_harness(
+            event,
+            handle.harness_id.as_deref(),
+        ) else {
+            return Err(error::invalid_argument(
+                "event is not a recognized harness hook signal",
+            ));
+        };
+        // The harness's own stdin payload names the conversation this
+        // session is having. Recording it is what makes a later "Resume
+        // Session" open the SAME conversation rather than the most recent
+        // one in the directory (the owner's contract). An unusable
+        // locator is dropped, never persisted and never passed on.
+        if let Some(identity) = session::AgentSessionIdentity::parse(
+            params.get("agentSessionId").and_then(Value::as_str),
+            params
+                .get("agentSessionTranscriptPath")
+                .and_then(Value::as_str),
+        ) && session::note_agent_session(&handle, &identity)?
+        {
+            // The Bot twin needs the same identity on its OWN record: the
+            // resolution there has to survive an explicit close, which before
+            // then deletes the session row and left the Bot permanently
+            // unobservable ("the daemon has not reported whether this Bot's
+            // session is still running"). Latching happens here, where the
+            // identity is learned, never on a read path. Best-effort: a
+            // failed latch must not fail the harness's own hook callback.
+            let conn = self.db.lock().unwrap();
+            let _ = crate::bots::storage::latch_bot_agent_identity(
+                &conn,
+                &self.host_id,
+                &handle.session_id,
+                Some(&identity),
+                crate::now_unix_ms() as f64 / 1000.0,
+            );
         }
         if handle.is_exited() {
             return Err(error::unverifiable(
@@ -272,6 +315,7 @@ mod tests {
     fn settings_json_installs_the_turn_lifecycle_hook_commands() {
         let value = settings_json("drogon-cli", "sess-1", "inc-2");
         for event in [
+            "SessionStart",
             "UserPromptSubmit",
             "Notification",
             "Stop",

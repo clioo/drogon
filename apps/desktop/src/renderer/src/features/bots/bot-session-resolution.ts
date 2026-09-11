@@ -61,6 +61,9 @@ export function resolveBotSession(input: {
         kind: "reopen",
         sessionId: observed.id,
         harnessId: observed.harnessId ?? recordedHarnessId(recorded),
+        // The daemon reads the provider id off the session row this names.
+        resumeByIdentity:
+          observed.agentSessionId || recorded.agentSessionId ? "session" : null,
       };
     }
     return {
@@ -85,6 +88,7 @@ export function resolveBotSession(input: {
       kind: "reopen",
       sessionId: recorded.sessionId,
       harnessId: recordedHarnessId(recorded),
+      resumeByIdentity: recorded.agentSessionId ? "bot-record" : null,
     };
   }
   if (verdict === "live") {
@@ -100,7 +104,25 @@ export function resolveBotSession(input: {
       },
     };
   }
-  // A recorded link with no projected verdict (an older daemon build, or a
-  // snapshot that has not loaded). Refuse honestly; never open a duplicate.
+  // A recorded link with no projected verdict (an older daemon build, a
+  // snapshot that has not loaded, or -- the dead end this closes -- a Drogon
+  // session row that no longer exists because the user closed that tab).
+  //
+  // The duplicate-prevention instinct is kept: a record whose liveness is not
+  // established must never silently open a SECOND session. But when the
+  // record itself carries the harness-reported provider conversation, the
+  // honest and useful answer is `reopen`: the harness's own resume verb names
+  // THAT conversation, so the worst case is the same conversation coming back
+  // (never two live processes on different conversations), and the refusal
+  // that used to be permanent becomes a real recovery. Without a latched
+  // identity there is nothing to name, so the refusal stays.
+  if (recorded.agentSessionId) {
+    return {
+      kind: "reopen",
+      sessionId: recorded.sessionId,
+      harnessId: recordedHarnessId(recorded),
+      resumeByIdentity: "bot-record",
+    };
+  }
   return { kind: "unknown" };
 }

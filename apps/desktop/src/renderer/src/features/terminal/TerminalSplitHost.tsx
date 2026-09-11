@@ -11,6 +11,7 @@ import type { Session } from "../../../../shared/session-contract";
 import type { TerminalGpuAcceleration } from "../../settings-store";
 import { TerminalPane } from "./TerminalPane";
 import { TerminalSplitHeaderOverlay } from "./TerminalSplitHeaderOverlay";
+import type { SessionRestoredBannerReason } from "./SessionRestoredBanner";
 import {
   splitFractionFromClientX,
   splitSizesFromFirst,
@@ -31,6 +32,8 @@ export function TerminalSplitHost({
   onClosePane,
   onFocusPane,
   onResize,
+  restoredBannerReasonFor,
+  onDismissRestoredBanner,
 }: {
   /** Tab identity (the root session id while single). */
   rootId: string;
@@ -50,6 +53,9 @@ export function TerminalSplitHost({
   onClosePane: (sessionId: string) => void;
   onFocusPane: (paneId: string) => void;
   onResize: (first: number) => void;
+  /** Resume banner for each pane's own session, or null when it was not resumed. */
+  restoredBannerReasonFor?: (sessionId: string) => SessionRestoredBannerReason | null;
+  onDismissRestoredBanner?: (sessionId: string) => void;
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -98,6 +104,8 @@ export function TerminalSplitHost({
         onSplitRight={() => onSplitRight(panes[0].id)}
         onClosePane={() => onClosePane(panes[0].id)}
         onFocusPane={onFocusPane}
+        restoredBannerReasonFor={restoredBannerReasonFor}
+        onDismissRestoredBanner={onDismissRestoredBanner}
       />
       {isSplit && panes.length === 2 ? (
         <>
@@ -157,6 +165,8 @@ export function TerminalSplitHost({
             onSplitRight={() => onSplitRight(panes[1].id)}
             onClosePane={() => onClosePane(panes[1].id)}
             onFocusPane={onFocusPane}
+            restoredBannerReasonFor={restoredBannerReasonFor}
+            onDismissRestoredBanner={onDismissRestoredBanner}
           />
         </>
       ) : null}
@@ -179,6 +189,8 @@ function SplitPane({
   onSplitRight,
   onClosePane,
   onFocusPane,
+  restoredBannerReasonFor,
+  onDismissRestoredBanner,
 }: {
   session: Session;
   grow: number;
@@ -194,6 +206,8 @@ function SplitPane({
   onSplitRight: () => void;
   onClosePane: () => void;
   onFocusPane: (paneId: string) => void;
+  restoredBannerReasonFor?: (sessionId: string) => SessionRestoredBannerReason | null;
+  onDismissRestoredBanner?: (sessionId: string) => void;
 }): React.JSX.Element {
   return (
     <div
@@ -214,6 +228,8 @@ function SplitPane({
         onError={onError}
         onSession={onSession}
         onFocus={() => onFocusPane(session.id)}
+        restoredBannerReason={restoredBannerReasonFor?.(session.id) ?? null}
+        onDismissRestoredBanner={() => onDismissRestoredBanner?.(session.id)}
       />
       <TerminalSplitHeaderOverlay
         tabId={tabId}

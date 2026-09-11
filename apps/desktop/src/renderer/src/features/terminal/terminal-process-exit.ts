@@ -12,7 +12,13 @@ export type TerminalProcessExitReason =
   // be revived by waiting. The overlay stays the fork's exited-overlay
   // structure; only the copy is adapted, and it never claims the session
   // exited (loss of contact is not exit).
-  | "connection-unrecoverable";
+  | "connection-unrecoverable"
+  // SLEEPING (owner directive): the daemon holds no child for this session
+  // but its harness supports resuming its own conversation, so the pane is
+  // not dead — it is asleep. The primary action resumes THAT conversation
+  // (`claude --resume <id>`) through the harness's own verb instead of
+  // relaunching a blank tab; the copy never asserts an exit.
+  | "session-sleeping";
 
 export type TerminalProcessExit = {
   exitCode: number | null;
@@ -57,8 +63,26 @@ export function describeTerminalProcessExit(exit: TerminalProcessExit): {
         "Drogon could not re-establish this terminal's session. Its output is preserved. Restart relaunches it with the same command, or close the tab.",
     };
   }
+  if (exit.reason === "session-sleeping") {
+    return {
+      title: "This session is sleeping",
+      detail:
+        "Drogon holds no process for this session, but its conversation is still there. Resume opens the same conversation with the harness's own resume command, or close the tab.",
+    };
+  }
   return {
     title: "Terminal exited",
     detail: `The shell process ended with exit code ${String(exit.exitCode)}. Its output is preserved.`,
   };
+}
+
+/**
+ * The overlay's primary action label. A sleeping session is resumed, not
+ * restarted: the same conversation comes back, so calling the button
+ * "Restart" would read as "start a new one".
+ */
+export function terminalProcessExitActionLabel(
+  exit: TerminalProcessExit,
+): string {
+  return exit.reason === "session-sleeping" ? "Resume session" : "Restart";
 }

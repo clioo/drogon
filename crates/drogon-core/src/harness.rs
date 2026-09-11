@@ -16,6 +16,17 @@ use serde_json::{Value, json};
 use crate::session::session_admission;
 use crate::{Engine, error, require_dimension, require_str};
 
+/// Whether the launch will name one exact provider conversation (or its
+/// transcript file) rather than asking the CLI for the most recent one.
+fn explicit_resume_is_usable(request: &HarnessLaunchRequest) -> bool {
+    drogon_harness::explicit_resume_argv(
+        request.harness_id,
+        request.agent_session_id.as_deref(),
+        request.agent_session_transcript_path.as_deref(),
+    )
+    .is_some()
+}
+
 #[path = "harness_hooks/mod.rs"]
 mod harness_hooks;
 
@@ -147,15 +158,43 @@ impl Engine {
         let workspace_id = require_str(params, "workspaceId")?;
         let mut request: HarnessLaunchRequest = serde_json::from_value(params.clone())
             .map_err(|_| error::invalid_argument("Invalid harness launch preferences"))?;
-        // Resume degrade (Defect 2 safety): a reopen asks the harness to
-        // continue its most recent conversation in this session's cwd. When
-        // the harness's own store positively holds no conversation there --
-        // a Bot home provisioned moments ago, or one whose earlier sessions
-        // never persisted a transcript -- `claude --continue` refuses to
-        // start and exits instead of opening a fresh interactive session.
-        // Degrade to a normal start rather than boot nothing; an unmodeled
-        // harness layout returns `None` and keeps the caller's request.
-        if request.resume && !request.headless {
+        // Resume by identity (the owner's contract): `resumeSessionId` names
+        // a durable Drogon session whose harness conversation should be
+        // reopened. The provider-native id is read from THAT row (written by
+        // the harness's own hook payload through `session.hook_event`), so a
+        // reopen after a daemon restart -- when this instance holds no child
+        // for the row and its verdict is `unverifiable` -- still asks the CLI
+        // for the same conversation instead of the most recent one in the
+        // directory. A row that recorded no identity leaves the explicit
+        // locator unset and the launch degrades exactly as before.
+        if let Some(prior) = crate::optional_str(params, "resumeSessionId")? {
+            let recorded = {
+                let conn = self.db.lock().unwrap();
+                crate::session::recorded_agent_session(&conn, prior)?
+            };
+            if let Some(identity) = recorded {
+                request.agent_session_id.get_or_insert(identity.id);
+                if request.agent_session_transcript_path.is_none() {
+                    request.agent_session_transcript_path = identity.transcript_path;
+                }
+            }
+        }
+        // Resume degrade (Defect 2 safety): a reopen with no recorded
+        // provider id asks the harness to continue its most recent
+        // conversation in this session's cwd. When the harness's own store
+        // positively holds no conversation there -- a Bot home provisioned
+        // moments ago, or one whose earlier sessions never persisted a
+        // transcript -- `claude --continue` refuses to start and exits
+        // instead of opening a fresh interactive session. Degrade to a normal
+        // start rather than boot nothing; an unmodeled harness layout returns
+        // `None` and keeps the caller's request. The degrade is reported back
+        // (`agentResume: "fresh"`) so the pane can say it started fresh
+        // instead of implying a continuation. An EXPLICIT locator skips this
+        // check entirely: the harness's own reported id is authoritative, and
+        // a stale id is the harness's own error to report, never something to
+        // second-guess from a directory listing.
+        let mut declined_resume = false;
+        if request.resume && !request.headless && !explicit_resume_is_usable(&request) {
             let cwd = {
                 let conn = self.db.lock().unwrap();
                 crate::workspace::get_path(&conn, workspace_id)?
@@ -167,6 +206,7 @@ impl Engine {
             ) == Some(false)
             {
                 request.resume = false;
+                declined_resume = true;
             }
         }
         // C01 consumer (C01-QA-1): the explicit selection is validated
@@ -437,6 +477,19 @@ impl Engine {
                 }
             };
 
+        // How the resume request actually landed, reported to the caller so
+        // the pane never presents a fresh conversation as a continuation
+        // (the reference's `agentResumeUnavailable` banner contract).
+        // `explicit` is computed from the request the planner used, not from
+        // the argv it produced: an unusable locator degrades to the CLI's own
+        // most-recent entrypoint inside the planner.
+        let agent_resume = if declined_resume || !request.resume {
+            "fresh"
+        } else if explicit_resume_is_usable(&request) {
+            "resumed"
+        } else {
+            "continued"
+        };
         if let Some(prompt) = request.prompt.as_deref() {
             handle.note_agent_prompt(prompt);
         }
@@ -446,7 +499,9 @@ impl Engine {
             .insert(session_id, handle.clone());
         // Retain ownership even when the post-spawn durable transition fails.
         crate::session::persist_admission(&handle)?;
-        Ok(crate::session::snapshot(&handle))
+        let mut value = crate::session::snapshot(&handle);
+        value["agentResume"] = json!(agent_resume);
+        Ok(value)
     }
 
     /// Writes/installs the hook artifact now that admission minted the real
