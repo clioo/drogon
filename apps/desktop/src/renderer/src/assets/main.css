@@ -2848,10 +2848,62 @@ footer[data-testid="status-bar"] {
 }
 
 /* R13-C toasts (Orca port, MIT Copyright (c) 2026 Lovecast Inc.,
-   verbatim from the source main.css [data-sonner-toaster] section). */
+   verbatim from the source main.css [data-sonner-toaster] section, plus the
+   pointer-bounds deviation below). */
 [data-sonner-toaster] {
   font-family: var(--font-sans);
   z-index: 40 !important;
+  /* Why (Drogon deviation: the source leaves this unset): the <ol> is a
+     26rem-wide fixed box whose height is 0 — its toasts are absolute — yet
+     Sonner never opts it out of hit-testing, so the whole column (and the
+     expanded stack's 15px ::after hover gap) stayed clickable over page
+     content. The packaged acceptance click on the Bots form's Create Bot hit
+     it. The layer claims nothing; a toast claims nothing either (next rule). */
+  pointer-events: none;
+}
+
+[data-sonner-toaster] [data-sonner-toast] {
+  /* Why: a Sonner toast is a notification, not a control. The card's text and
+     padding take no input of their own, so claiming pointer events on them only
+     swallows clicks aimed at the app underneath — the packaged acceptance's
+     Create Bot click landed on `<div data-title>Automation run queued.</div>`
+     and never reached the submit. The card is transparent to the pointer; every
+     control it actually offers (next rule) stays interactive, so nothing a user
+     can act on is lost. Sonner's hover-to-expand and drag-to-dismiss need the
+     card itself to receive pointer events; the stack still drains on its own
+     (each toast keeps its own lifetime) and every toast keeps its close
+     button, which is the affordance this app relies on (`closeButton`). */
+  pointer-events: none;
+}
+
+/* The controls a toast offers keep working: Sonner's close button and action/
+   cancel buttons, plus any real control a custom toast body renders (the
+   delete-worktree failure card's View / Force Delete buttons, the OSC 52
+   clipboard card's action, and so on). */
+[data-sonner-toaster]
+  [data-sonner-toast]
+  :is(
+    button,
+    a,
+    input,
+    select,
+    textarea,
+    [role='button'],
+    [role='link'],
+    [data-close-button],
+    [data-button]
+  ) {
+  pointer-events: auto;
+}
+
+/* A toast the user dismissed (Sonner keeps it mounted, fully transparent, for
+   its exit animation) — and one that is still entering or stacked out of
+   sight — must never be the target of a click either. The failing acceptance
+   log named a `data-removed='true'` toast as the intercepting element. */
+[data-sonner-toaster] [data-sonner-toast][data-removed='true'],
+[data-sonner-toaster] [data-sonner-toast][data-mounted='false'],
+[data-sonner-toaster] [data-sonner-toast][data-visible='false'] {
+  pointer-events: none;
 }
 
 [data-sonner-toaster] [data-sonner-toast][data-styled='true'] {
