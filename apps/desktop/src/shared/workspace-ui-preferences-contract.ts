@@ -41,6 +41,14 @@ export type WorkspaceUIPreferences = Pick<
    *  other Workspace Options field rather than a second, private
    *  localStorage-only preference. */
   cardLayout: "comfortable" | "compact";
+  /** One-shot stamp, Drogon-local like `cardLayout`: builds before this
+   *  field shipped `ports` inside the Default card preset and wrote it
+   *  into every saved profile, so array membership cannot distinguish a
+   *  user's choice from that old default. Once stamped, hydration has
+   *  removed the never-explicitly-chosen default exactly once and every
+   *  later `ports` toggle is the user's own and is preserved. Same
+   *  pattern as the reference's `_portsStatusBarDefaultAdded`. */
+  _worktreeCardPortsDefaultedOff?: boolean;
 };
 
 export type WorkspaceUIPreferencesBridge = {

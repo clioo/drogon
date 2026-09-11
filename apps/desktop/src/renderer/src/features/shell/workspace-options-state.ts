@@ -278,6 +278,7 @@ export const INITIAL_SHARED_UI_PREFERENCES: WorkspaceUIPreferences = {
     | "workspaceBoardOpacity"
     | "workspaceBoardColumnWidth"
     | "syncTaskStatusFromWorkspaceBoard"
+    | "_worktreeCardPortsDefaultedOff"
     | "_workspaceStatusesDefaultOrderMigrated"
     | "_workspaceStatusesReorderedDefaultRepaired"
     | "_workspaceStatusesDefaultWorkflowMigrated"
@@ -287,6 +288,7 @@ export const INITIAL_SHARED_UI_PREFERENCES: WorkspaceUIPreferences = {
   workspaceBoardOpacity: 1,
   workspaceBoardColumnWidth: WORKSPACE_BOARD_COLUMN_WIDTH_DEFAULT,
   syncTaskStatusFromWorkspaceBoard: false,
+  _worktreeCardPortsDefaultedOff: true,
   _workspaceStatusesDefaultOrderMigrated: true,
   _workspaceStatusesReorderedDefaultRepaired: true,
   _workspaceStatusesDefaultWorkflowMigrated: true,

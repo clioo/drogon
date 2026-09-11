@@ -39,6 +39,9 @@ export const DEFAULT_WORKSPACE_UI_PREFERENCES: WorkspaceUIPreferences = {
   worktreeCardProperties: [...DEFAULT_WORKTREE_CARD_PROPERTIES],
   agentActivityDisplayMode: "compact",
   _expandedWorktreeCardPropertiesDefaulted: true,
+  // Fresh profiles never carried the old default-on ports card property, so
+  // the one-shot removal below has nothing left to do for them.
+  _worktreeCardPortsDefaultedOff: true,
   workspaceStatuses: cloneDefaultWorkspaceStatuses(),
   workspaceBoardOpacity: 1,
   workspaceBoardColumnWidth: WORKSPACE_BOARD_COLUMN_WIDTH_DEFAULT,
@@ -115,6 +118,17 @@ export function normalizeWorkspaceUIPreferences(raw: unknown): WorkspaceUIPrefer
   const visualsMigrated = isBoolean(state._workspaceStatusesDefaultVisualsMigrated)
     ? state._workspaceStatusesDefaultVisualsMigrated
     : false;
+  // One-shot default collapse: profiles saved while `ports` shipped inside
+  // the Default preset carry it without ever having chosen it (the old
+  // default was ON, so array membership proves nothing). Remove it exactly
+  // once, gated on its own stamp, then honor later toggles forever --
+  // `Show properties → Ports` re-adding the id re-persists it normally.
+  const portsDefaultedOff = isBoolean(state._worktreeCardPortsDefaultedOff)
+    ? state._worktreeCardPortsDefaultedOff
+    : false;
+  if (!portsDefaultedOff) {
+    properties = properties.filter((id) => id !== "ports");
+  }
 
   return {
     groupBy: normalizeGroupBy(state.groupBy),
@@ -164,6 +178,11 @@ export function normalizeWorkspaceUIPreferences(raw: unknown): WorkspaceUIPrefer
     _workspaceStatusesReorderedDefaultRepaired: true,
     _workspaceStatusesDefaultWorkflowMigrated: true,
     _workspaceStatusesDefaultVisualsMigrated: true,
+    // Same "stamped true after this hydration" contract as the four status
+    // stamps: this hydration either removed the old defaulted `ports` entry
+    // or correctly found nothing to remove, so retrying it on a later
+    // hydration would clobber a user's own opt-in.
+    _worktreeCardPortsDefaultedOff: true,
   };
 }
 

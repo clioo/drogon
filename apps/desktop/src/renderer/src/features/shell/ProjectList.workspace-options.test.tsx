@@ -953,8 +953,11 @@ for (const provider of ["linear", "jira"] as const)
     },
   );
 
-test("Ports property displays only this workspace's attributed listener and hides it", async () => {
+test("Ports property stays off by default, renders this workspace's attributed listener once opted in, and persists the off choice", async () => {
   const store = makeUiStore();
+  // The default preset no longer carries `ports` (owner directive: port
+  // numbers on cards are unwanted), so the host scan is never requested.
+  expect(store.current().worktreeCardProperties).not.toContain("ports");
   const list = vi.fn(async () => ({
     ok: true,
     result: {
@@ -997,10 +1000,20 @@ test("Ports property displays only this workspace's attributed listener and hide
       },
     ],
   });
-  await waitFor(() => expect(screen.getByText(":4317")).toBeTruthy());
-  expect(list).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(screen.getByText("Workspace")).toBeTruthy());
+  expect(screen.queryByText(":4317")).toBeNull();
+  expect(list).not.toHaveBeenCalled();
+  // Opting in through the real menu renders the attributed listener and
+  // starts the real host scan.
   openWorkspaceOptionsMenu();
   fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Ports" }));
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+  await waitFor(() => expect(screen.getByText(":4317")).toBeTruthy());
+  expect(list).toHaveBeenCalledTimes(1);
+  // Toggling it back off hides the labels and persists the choice.
+  openWorkspaceOptionsMenu();
+  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Ports" }));
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
   await waitFor(() => expect(screen.queryByText(":4317")).toBeNull());
   expect(store.current().worktreeCardProperties).not.toContain("ports");
 });

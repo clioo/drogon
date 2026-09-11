@@ -1,5 +1,12 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from shared/worktree/card-properties.ts.
-   Only the erased type bindings differ; source preset/normalization behavior is unchanged. */
+   Only the erased type bindings differ; normalization behavior is unchanged.
+   One deliberate preset divergence from the pinned source (owner directive,
+   2026-09-09): `ports` is no longer in the Default preset because the source's
+   `:${port}`-less card never rendered port numbers while Drogon's linked-meta
+   row did; the property stays toggleable through Show properties and the
+   one-shot `_worktreeCardPortsDefaultedOff` stamp in
+   main/workspace-ui-preferences.ts removes it once from profiles the old
+   default had already written it into. */
 import type { PersistedUIState } from '../persistence-contracts/persisted-ui-state-types'
 import type { WorktreeCardMode, WorktreeCardProperty } from '../persistence-contracts/ui-chrome-types'
 type GlobalSettings = { compactWorktreeCards: boolean }
@@ -19,10 +26,22 @@ export const DEFAULT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = [
   'automation',
   'cli',
   'comment',
-  'ports',
   // Why: agent activity is the primary reason users opt into the feature, so
   // the Default mode keeps it inline on each card while Compact removes the
   // extra row.
+  'inline-agents'
+]
+
+/** Preset as the pinned source shipped it, with default-on `ports`; kept so
+ *  tests and the pre-stamp migration story can name the old payload exactly. */
+export const LEGACY_PORTS_ON_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = [
+  ...FIXED_WORKTREE_CARD_PROPERTIES,
+  ...TASK_WORKTREE_CARD_PROPERTIES,
+  'pr',
+  'automation',
+  'cli',
+  'comment',
+  'ports',
   'inline-agents'
 ]
 
