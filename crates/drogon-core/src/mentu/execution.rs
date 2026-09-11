@@ -36,6 +36,12 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// to bound memory.
 const MAX_DIAGNOSTIC_BYTES: usize = 2 * 1024 * 1024;
 
+/// How often the in-flight progress poller re-reads `run.json` while a run
+/// is live. `mentu-recipes` rewrites the record after every step, so a
+/// sub-second poll makes Evidence and Metrics populate DURING the run
+/// instead of only at exit.
+const PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
 struct ChildEntry {
     child: Arc<Mutex<Child>>,
     cancelled: Arc<AtomicBool>,
@@ -396,6 +402,40 @@ pub fn launch_run(
 
     let watch_id = internal_id.clone();
     let watcher_db = Arc::clone(&db);
+    // Live progress: a second thread mirrors `mentu-recipes`'s own
+    // `run.json` into the run row while the child is alive, so
+    // `mentu.run_status` and `mentu.run_evidence` answer with the steps
+    // that have already finished, not an empty list until exit. The
+    // watcher flips `progress_done` once it has written the final row.
+    let progress_done = Arc::new(AtomicBool::new(false));
+    let poller_done = Arc::clone(&progress_done);
+    let poller_db = Arc::clone(&db);
+    let poller_workspace = workspace_root.clone();
+    let poller_id = internal_id.clone();
+    let poller_mentu_run_id = known_mentu_run_id.clone();
+    let poller_before_ids = before_run_ids.clone();
+    std::thread::spawn(move || {
+        let mut mentu_run_id = poller_mentu_run_id;
+        while !poller_done.load(Ordering::SeqCst) {
+            if mentu_run_id.is_none() {
+                mentu_run_id = poller_before_ids
+                    .as_ref()
+                    .and_then(|before| run_record::discover_new_run_id(&poller_workspace, before));
+            }
+            if let Some(id) = &mentu_run_id
+                && let Ok(Some(run_json)) = run_record::read_run_json(&poller_workspace, id)
+            {
+                let conn = poller_db.lock().unwrap();
+                let _ = storage::record_run_progress(&conn, &poller_id, id, &run_json);
+            }
+            // Short slices, so a run that exits mid-interval is finalized
+            // by the watcher without the poller holding the connection.
+            let wake = Instant::now() + PROGRESS_POLL_INTERVAL;
+            while Instant::now() < wake && !poller_done.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        }
+    });
     std::thread::spawn(move || {
         let outcome = wait_bounded(&child_arc, &cancelled);
         registry().remove(&watch_id);
@@ -411,6 +451,7 @@ pub fn launch_run(
             &stderr_buf,
             attest_resources,
         );
+        progress_done.store(true, Ordering::SeqCst);
     });
 
     storage::get_run(&db.lock().unwrap(), &internal_id)?
@@ -458,11 +499,22 @@ fn finish(
         return;
     }
 
-    let mentu_run_id = known_mentu_run_id.or_else(|| {
-        before_run_ids
-            .as_ref()
-            .and_then(|before| run_record::discover_new_run_id(workspace_root, before))
-    });
+    let mentu_run_id = known_mentu_run_id
+        .or_else(|| {
+            // The live progress poller may already have discovered and
+            // recorded the runtime's run id; prefer that over a second
+            // directory diff, which could pick a different concurrent run.
+            let conn = db.lock().unwrap();
+            storage::get_run(&conn, internal_id)
+                .ok()
+                .flatten()
+                .and_then(|run| run.mentu_run_id)
+        })
+        .or_else(|| {
+            before_run_ids
+                .as_ref()
+                .and_then(|before| run_record::discover_new_run_id(workspace_root, before))
+        });
 
     let Some(mentu_run_id) = mentu_run_id else {
         let tail = diagnostic_tail(stdout_buf, stderr_buf);

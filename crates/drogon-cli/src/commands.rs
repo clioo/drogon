@@ -17,16 +17,17 @@ use crate::cli::{
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
     BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, MentuOpenResult,
-    MentuRecipesResult, MentuRuntimeInfo, MentuRuntimeResult, Project, ProjectList, ReadResult,
+    MentuPendingApprovalResult, MentuRecipesResult, MentuRun, MentuRunResult, MentuRunStatus,
+    MentuRunsResult, MentuRuntimeInfo, MentuRuntimeResult, Project, ProjectList, ReadResult,
     Removed, Session, SessionList, StatusResult, Verdict, Workspace, WorkspaceList, Worktree,
     WorktreeList, WriteResult, check_automation, check_automation_history, check_automation_list,
     check_automation_run_now, check_browser_snapshot, check_browser_tab, check_browser_tabs,
-    check_harness_catalog, check_mentu_open, check_mentu_recipes, check_mentu_runtime,
-    check_project, check_project_list, check_read, check_removed, check_session, check_status,
-    check_workspace, check_workspace_list, check_worktree, check_worktree_list, check_write,
-    partition_session_list,
+    check_harness_catalog, check_mentu_open, check_mentu_pending_approval, check_mentu_recipes,
+    check_mentu_run, check_mentu_run_result, check_mentu_runs, check_mentu_runtime, check_project,
+    check_project_list, check_read, check_removed, check_session, check_status, check_workspace,
+    check_workspace_list, check_worktree, check_worktree_list, check_write, partition_session_list,
 };
-use crate::error::{CliError, method_not_found, timeout};
+use crate::error::{CliError, mentu_approval_required, method_not_found, timeout};
 use crate::output;
 use crate::paths;
 use crate::skills;
@@ -1000,7 +1001,223 @@ async fn mentu(
                 Client::decode_checked(&call, "mentu.open", check_mentu_open)?;
             emit(call, json, || output::mentu_opened(&opened), 0, None)
         }
+        MentuAction::Run {
+            workspace,
+            recipe,
+            approval,
+            follow,
+            timeout_ms,
+        } => {
+            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            let approval = match approval {
+                Some(approval_id) => approval_id.clone(),
+                None => resolve_pending_approval(client, request_id, workspace, recipe).await?,
+            };
+            // The daemon re-validates the approval (workspace/recipe match,
+            // unconsumed, content hash still equals the recipe on disk) and
+            // runs the exact approved bytes through the same `mentu.run`
+            // path the desktop button uses. This CLI adds no engine.
+            let call = client
+                .call(
+                    "mentu.run",
+                    json!({
+                        "workspaceId": workspace,
+                        "recipeId": recipe,
+                        "approvalId": approval,
+                    }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let started: MentuRunResult =
+                Client::decode_checked(&call, "mentu.run", check_mentu_run_result)?;
+            if !follow {
+                return emit(
+                    call,
+                    json,
+                    || output::mentu_run_started(&started.run),
+                    0,
+                    None,
+                );
+            }
+            mentu_follow(client, request_id, json, call, started.run, *timeout_ms).await
+        }
+        MentuAction::RunStatus { run } => {
+            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            let call = client
+                .call(
+                    "mentu.run_status",
+                    json!({ "runId": run }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let decoded: MentuRunResult =
+                Client::decode_checked(&call, "mentu.run_status", check_mentu_run_result)?;
+            let exit_code = mentu_exit_code(decoded.run.status);
+            emit(
+                call,
+                json,
+                || output::mentu_run_status(&decoded.run),
+                exit_code,
+                None,
+            )
+        }
+        MentuAction::Runs { workspace, limit } => {
+            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            let mut params = json!({ "workspaceId": workspace });
+            if let Some(limit) = limit {
+                params["limit"] = json!(limit);
+            }
+            let call = client
+                .call("mentu.runs", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let runs: MentuRunsResult =
+                Client::decode_checked(&call, "mentu.runs", check_mentu_runs)?;
+            emit(call, json, || output::mentu_run_list(&runs), 0, None)
+        }
+        MentuAction::Cancel { run } => {
+            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            let call = client
+                .call(
+                    "mentu.cancel",
+                    json!({ "runId": run }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let cancelled: crate::client::MentuCancelResult = Client::decode_checked(
+                &call,
+                "mentu.cancel",
+                |result: &crate::client::MentuCancelResult| check_mentu_run(&result.run),
+            )?;
+            emit(
+                call,
+                json,
+                || output::mentu_cancel_requested(&cancelled.run),
+                0,
+                None,
+            )
+        }
     }
+}
+
+/// Resolves the recipe's pending approval, or refuses.
+///
+/// `mentu run` must never approve: an edited recipe has no pending approval,
+/// so this returns an explicit `mentu_approval_required` refusal that names
+/// the workspace and recipe instead of minting consent the human never gave.
+async fn resolve_pending_approval(
+    client: &Client,
+    request_id: &str,
+    workspace: &str,
+    recipe: &str,
+) -> Result<String, CliError> {
+    let call = client
+        .call(
+            "mentu.pending_approval",
+            json!({ "workspaceId": workspace, "recipeId": recipe }),
+            request_id,
+            DEFAULT_TIMEOUT,
+        )
+        .await?;
+    let pending: MentuPendingApprovalResult = Client::decode_checked(
+        &call,
+        "mentu.pending_approval",
+        check_mentu_pending_approval,
+    )?;
+    match pending.approval {
+        Some(approval) => Ok(approval.id),
+        None => Err(CliError::local(
+            mentu_approval_required(output::mentu_approval_required(workspace, recipe)),
+            request_id,
+        )),
+    }
+}
+
+/// A run's exit code in this CLI's vocabulary: 0 only for a run that
+/// actually succeeded (or is still running), 1 for every settled failure —
+/// an agent can branch on the exit status without parsing prose.
+fn mentu_exit_code(status: MentuRunStatus) -> u8 {
+    match status {
+        MentuRunStatus::Succeeded | MentuRunStatus::Running => 0,
+        MentuRunStatus::Failed | MentuRunStatus::Cancelled | MentuRunStatus::Unavailable => 1,
+    }
+}
+
+/// `mentu run --follow`: client-side polling over `mentu.run_status`, the
+/// same shape `terminal wait` uses over `session.read`. The final state's
+/// own envelope is what JSON mode prints, so the caller gets the last
+/// observed run rather than the stale `running` row from the start call.
+/// Budget exhaustion is an explicit `timeout` failure naming the last
+/// observed status — never a claim about what happened after the deadline.
+async fn mentu_follow(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    started: CallOk,
+    initial: MentuRun,
+    timeout_ms: u64,
+) -> Result<RunOutcome, CliError> {
+    use std::time::{Duration, Instant};
+
+    const POLL_INTERVAL: Duration = Duration::from_millis(750);
+
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut run = initial;
+    let mut last_call = started;
+    let mut transitions = vec![output::mentu_status_change(&run)];
+    while !run.status.is_terminal() {
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(CliError::local(
+                timeout(format!(
+                    "mentu run {} did not settle within {timeout_ms}ms; last observed status {}",
+                    run.id,
+                    run.status.as_wire()
+                )),
+                request_id,
+            ));
+        }
+        let sleep = POLL_INTERVAL.min(deadline.saturating_duration_since(now));
+        tokio::time::sleep(sleep).await;
+        let call = client
+            .call(
+                "mentu.run_status",
+                json!({ "runId": run.id }),
+                request_id,
+                DEFAULT_TIMEOUT,
+            )
+            .await?;
+        let decoded: MentuRunResult =
+            Client::decode_checked(&call, "mentu.run_status", check_mentu_run_result)?;
+        let next = decoded.run;
+        if next.status != run.status || next.steps.len() != run.steps.len() {
+            transitions.push(output::mentu_status_change(&next));
+        }
+        run = next;
+        last_call = call;
+    }
+    let exit_code = mentu_exit_code(run.status);
+    let stderr_note = match run.status {
+        MentuRunStatus::Succeeded | MentuRunStatus::Running => None,
+        _ => Some(format!(
+            "mentu run {} finished as {}; inspect `mentu run-status --run {}` for the failing step.",
+            run.id,
+            run.status.as_wire(),
+            run.id
+        )),
+    };
+    emit(
+        last_call,
+        json,
+        || {
+            transitions.push(output::mentu_run_status(&run));
+            transitions.join("\n")
+        },
+        exit_code,
+        stderr_note,
+    )
 }
 
 /// The honest verdict vocabulary for `mentu status`. `installed` requires

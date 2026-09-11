@@ -884,7 +884,14 @@ const MENTU_TWO_STEP_RECIPE = {
   ],
 };
 
-export async function probeMentuApproveRunEvidence({ page, workspace, output }) {
+export async function probeMentuApproveRunEvidence({
+  page,
+  workspace,
+  output,
+  cli,
+  dataDir,
+  workspaceId,
+}) {
   await closeExitedStripTabs(page);
   // The right sidebar collapses at the foundation probe's narrow 760px
   // viewport; Mentu's real sidebar journey is exercised at the desktop width.
@@ -895,6 +902,53 @@ export async function probeMentuApproveRunEvidence({ page, workspace, output }) 
     path.join(recipesDir, "acceptance-two-step.json"),
     JSON.stringify(MENTU_TWO_STEP_RECIPE, null, 2) + "\n",
   );
+  // The Run Recipe control delegates the run to the workspace's MAIN agent
+  // session: it must exist and be idle, because the UI never calls
+  // `mentu.run` itself any more. The stub harness (writeAgentSettingsFixtures)
+  // stands in for an agent that read the drogon-cli skill and answers a
+  // Mentu prompt by running the documented `drogon-cli mentu run`.
+  const started = await runCliJson(
+    cli,
+    [
+      "--data-dir",
+      dataDir,
+      "--json",
+      "harness",
+      "start",
+      "--workspace",
+      workspaceId,
+      "--harness",
+      "claude",
+    ],
+    { timeout: 30000 },
+  );
+  assert.equal(started.ok, true, JSON.stringify(started));
+  const agentSessionId = started.result.id;
+  const agentDeadline = Date.now() + 30000;
+  for (;;) {
+    const listed = await runCliJson(
+      cli,
+      [
+        "--data-dir",
+        dataDir,
+        "--json",
+        "terminal",
+        "list",
+        "--workspace",
+        workspaceId,
+      ],
+      { timeout: 30000 },
+    );
+    const agent = listed.result.sessions.find(
+      (session) => session.id === agentSessionId,
+    );
+    if (agent && agent.agentState === "idle") break;
+    if (Date.now() >= agentDeadline)
+      throw new Error(
+        `the main agent session never went idle: ${JSON.stringify(agent ?? null)}`,
+      );
+    await delay(500);
+  }
   await page
     .locator('.right-sidebar-header-drag button[aria-label="Mentu"]')
     .click();

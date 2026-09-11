@@ -960,7 +960,14 @@ try {
       ...(await probeJumpPaletteSwitch({ page, root, output })),
     );
     report.checks.push(
-      ...(await probeMentuApproveRunEvidence({ page, workspace, output })),
+      ...(await probeMentuApproveRunEvidence({
+        page,
+        workspace,
+        output,
+        cli: journeyCli,
+        dataDir,
+        workspaceId: registered.id,
+      })),
     );
     if (process.env.DROGON_SKIP_MODEL_JOURNEYS !== "1") {
       report.checks.push(

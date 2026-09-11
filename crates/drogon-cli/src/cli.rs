@@ -214,6 +214,69 @@ pub enum MentuAction {
         #[arg(long, value_name = "MS", default_value_t = 15_000)]
         timeout_ms: u64,
     },
+    /// Start a recipe through the daemon's own execution path (the same
+    /// `mentu.run` call the desktop's Run button uses; there is no second
+    /// engine). Requires the service capability mentu.v1 AND an existing
+    /// approval bound to the recipe's exact current bytes: this verb never
+    /// approves anything. Omit `--approval` to use the recipe's pending
+    /// approval (`mentu.pending_approval`); an edited recipe therefore
+    /// refuses with `mentu_approval_required` until a human approves the
+    /// new content.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli mentu run --workspace <ID> --recipe <ID> [--approval <ID>] [--follow] [--timeout-ms <MS>]\nValid flags: --approval, --data-dir, --follow, --help, --json, --recipe, --request-id, --retry-request, --timeout-ms, --workspace"
+    )]
+    Run {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        recipe: String,
+        /// Exact approval id to consume. Omit to use the recipe's pending
+        /// approval; a supplied id is still verified by the daemon (it must
+        /// name this workspace/recipe and be unconsumed).
+        #[arg(long, value_name = "ID")]
+        approval: Option<String>,
+        /// Poll until the run reaches a terminal status (succeeded, failed,
+        /// cancelled, unavailable) instead of returning as soon as it starts
+        #[arg(long)]
+        follow: bool,
+        /// Bound for `--follow`, in ms (1..=3600000; default 900000). A
+        /// blown budget exits 1 with the last observed status.
+        #[arg(long, value_name = "MS", default_value_t = 900_000)]
+        timeout_ms: u64,
+    },
+    /// Report one run once, by the daemon's run id: status, per-step
+    /// outcome, evidence paths and counts. Safe to poll from an agent.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli mentu run-status --run <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --run"
+    )]
+    RunStatus {
+        #[arg(long, value_name = "ID")]
+        run: String,
+    },
+    /// List a workspace's runs, newest first (default 50, max 200)
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli mentu runs --workspace <ID> [--limit <N>]\nValid flags: --data-dir, --help, --json, --limit, --request-id, --retry-request, --workspace"
+    )]
+    Runs {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
+    },
+    /// Cancel a running run by its daemon run id. Works no matter who
+    /// started it, so a run an agent began stays stoppable from here (or
+    /// from the Mentu tab's Cancel).
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli mentu cancel --run <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --run"
+    )]
+    Cancel {
+        #[arg(long, value_name = "ID")]
+        run: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -966,6 +1029,31 @@ impl Cli {
                     }
                     validate_relay_timeout(*timeout_ms)?;
                 }
+                MentuAction::Run {
+                    workspace,
+                    recipe,
+                    approval,
+                    timeout_ms,
+                    ..
+                } => {
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("recipe", recipe)?;
+                    if let Some(approval) = approval {
+                        validate_opaque_id("approval", approval)?;
+                    }
+                    validate_follow_timeout(*timeout_ms)?;
+                }
+                MentuAction::RunStatus { run } | MentuAction::Cancel { run } => {
+                    require_nonempty("run", run)?;
+                }
+                MentuAction::Runs { workspace, limit } => {
+                    require_nonempty("workspace", workspace)?;
+                    if let Some(limit) = limit
+                        && (*limit == 0 || *limit > 200)
+                    {
+                        return Err(CliError::Usage("--limit must be in 1..=200".into()));
+                    }
+                }
             },
             Command::Automation { action } => match action {
                 AutomationAction::Create {
@@ -1329,6 +1417,18 @@ fn validate_preference(flag: &str, value: &str) -> Result<(), CliError> {
 fn validate_relay_timeout(timeout_ms: u64) -> Result<(), CliError> {
     if timeout_ms == 0 || timeout_ms > 25_000 {
         return Err(CliError::Usage("--timeout-ms must be in 1..=25000".into()));
+    }
+    Ok(())
+}
+
+/// `mentu run --follow` polls the daemon's own run record, so its budget is
+/// a wall-clock wait over many short RPCs rather than one relay round trip:
+/// bounded at an hour, and 1 is the smallest honest budget.
+fn validate_follow_timeout(timeout_ms: u64) -> Result<(), CliError> {
+    if timeout_ms == 0 || timeout_ms > 3_600_000 {
+        return Err(CliError::Usage(
+            "--timeout-ms must be in 1..=3600000".into(),
+        ));
     }
     Ok(())
 }
@@ -2889,5 +2989,147 @@ mod mentu_tests {
             .unwrap();
             assert!(cli.validate().is_err(), "timeout {value} must be refused");
         }
+    }
+
+    #[test]
+    fn mentu_run_parses_and_defaults_the_follow_budget() {
+        let cli = parse(&["mentu", "run", "--workspace", "ws-1", "--recipe", "hello"]).unwrap();
+        let Command::Mentu {
+            action:
+                MentuAction::Run {
+                    workspace,
+                    recipe,
+                    approval,
+                    follow,
+                    timeout_ms,
+                },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(workspace, "ws-1");
+        assert_eq!(recipe, "hello");
+        assert!(approval.is_none());
+        assert!(!follow);
+        assert_eq!(*timeout_ms, 900_000);
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&[
+            "mentu",
+            "run",
+            "--workspace",
+            "ws-1",
+            "--recipe",
+            "hello",
+            "--approval",
+            "appr-1",
+            "--follow",
+            "--timeout-ms",
+            "5000",
+        ])
+        .unwrap();
+        let Command::Mentu {
+            action: MentuAction::Run { follow, .. },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert!(follow);
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn mentu_run_refuses_empty_ids_and_unbounded_follow_budgets() {
+        assert!(parse(&["mentu", "run", "--recipe", "hello"]).is_err());
+        for args in [
+            vec!["mentu", "run", "--workspace", "", "--recipe", "hello"],
+            vec!["mentu", "run", "--workspace", "ws-1", "--recipe", ""],
+            vec![
+                "mentu",
+                "run",
+                "--workspace",
+                "ws-1",
+                "--recipe",
+                "hello",
+                "--approval",
+                "",
+            ],
+        ] {
+            let cli = parse(&args).unwrap();
+            assert!(cli.validate().is_err(), "{args:?} must be refused");
+        }
+        for value in ["0", "3600001"] {
+            let cli = parse(&[
+                "mentu",
+                "run",
+                "--workspace",
+                "ws-1",
+                "--recipe",
+                "hello",
+                "--timeout-ms",
+                value,
+            ])
+            .unwrap();
+            assert!(cli.validate().is_err(), "timeout {value} must be refused");
+        }
+    }
+
+    #[test]
+    fn mentu_run_status_runs_and_cancel_parse_and_validate() {
+        let cli = parse(&["mentu", "run-status", "--run", "run-1"]).unwrap();
+        let Command::Mentu {
+            action: MentuAction::RunStatus { run },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(run, "run-1");
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["mentu", "runs", "--workspace", "ws-1", "--limit", "10"]).unwrap();
+        let Command::Mentu {
+            action: MentuAction::Runs { workspace, limit },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(workspace, "ws-1");
+        assert_eq!(*limit, Some(10));
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&["mentu", "cancel", "--run", "run-1"]).unwrap();
+        let Command::Mentu {
+            action: MentuAction::Cancel { run },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(run, "run-1");
+        assert!(cli.validate().is_ok());
+
+        assert!(
+            parse(&["mentu", "run-status", "--run", ""])
+                .unwrap()
+                .validate()
+                .is_err()
+        );
+        assert!(
+            parse(&["mentu", "runs", "--workspace", "ws-1", "--limit", "0"])
+                .unwrap()
+                .validate()
+                .is_err()
+        );
+        assert!(
+            parse(&["mentu", "runs", "--workspace", "ws-1", "--limit", "201"])
+                .unwrap()
+                .validate()
+                .is_err()
+        );
+        assert!(
+            parse(&["mentu", "cancel", "--run", ""])
+                .unwrap()
+                .validate()
+                .is_err()
+        );
     }
 }

@@ -813,6 +813,154 @@ pub fn check_mentu_open(result: &MentuOpenResult) -> Result<(), String> {
     Ok(())
 }
 
+/// One explicit, content-bound approval, as the daemon recorded it.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuApproval {
+    pub id: String,
+    pub workspace_id: String,
+    pub recipe_id: String,
+    pub content_hash: String,
+    pub approved_at: String,
+}
+
+/// `mentu.pending_approval`: `null` means this recipe's exact current bytes
+/// are NOT approved, which `mentu run` reports as a refusal rather than
+/// approving them itself.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuPendingApprovalResult {
+    pub approval: Option<MentuApproval>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MentuRunStatus {
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
+    Unavailable,
+}
+
+impl MentuRunStatus {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            MentuRunStatus::Running => "running",
+            MentuRunStatus::Succeeded => "succeeded",
+            MentuRunStatus::Failed => "failed",
+            MentuRunStatus::Cancelled => "cancelled",
+            MentuRunStatus::Unavailable => "unavailable",
+        }
+    }
+
+    /// `unavailable` is terminal for the CLI's purposes: the host never
+    /// confirmed an outcome, so waiting longer would not produce one.
+    pub fn is_terminal(self) -> bool {
+        !matches!(self, MentuRunStatus::Running)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuStepRun {
+    pub label: String,
+    pub backend: String,
+    pub status: MentuRunStatus,
+    pub exit_code: Option<i64>,
+    pub duration_seconds: Option<i64>,
+    pub attempts: Option<i64>,
+    pub output_path: Option<String>,
+    pub error_path: Option<String>,
+    pub error: Option<String>,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRun {
+    pub id: String,
+    pub workspace_id: String,
+    pub recipe_id: String,
+    pub approval_id: String,
+    pub mentu_run_id: Option<String>,
+    pub status: MentuRunStatus,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub steps: Vec<MentuStepRun>,
+    pub error: Option<String>,
+    pub retry_of: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRunResult {
+    pub run: MentuRun,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuRunsResult {
+    pub runs: Vec<MentuRun>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuCancelResult {
+    pub run: MentuRun,
+}
+
+pub fn check_mentu_approval(approval: &MentuApproval) -> Result<(), String> {
+    require_nonempty("id", &approval.id)?;
+    require_nonempty("workspaceId", &approval.workspace_id)?;
+    require_nonempty("recipeId", &approval.recipe_id)?;
+    if approval.content_hash.len() != 64
+        || !approval.content_hash.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Err("approval content hash is not a 64-character hex digest".into());
+    }
+    require_nonempty("approvedAt", &approval.approved_at)?;
+    Ok(())
+}
+
+pub fn check_mentu_pending_approval(result: &MentuPendingApprovalResult) -> Result<(), String> {
+    match &result.approval {
+        Some(approval) => check_mentu_approval(approval),
+        None => Ok(()),
+    }
+}
+
+pub fn check_mentu_run(run: &MentuRun) -> Result<(), String> {
+    require_nonempty("id", &run.id)?;
+    require_nonempty("workspaceId", &run.workspace_id)?;
+    require_nonempty("recipeId", &run.recipe_id)?;
+    require_nonempty("approvalId", &run.approval_id)?;
+    require_nonempty("startedAt", &run.started_at)?;
+    if run.status != MentuRunStatus::Running && run.ended_at.is_none() {
+        return Err(format!(
+            "run {} is {} without an endedAt",
+            run.id,
+            run.status.as_wire()
+        ));
+    }
+    for step in &run.steps {
+        require_nonempty("label", &step.label)?;
+        require_nonempty("backend", &step.backend)?;
+    }
+    Ok(())
+}
+
+pub fn check_mentu_run_result(result: &MentuRunResult) -> Result<(), String> {
+    check_mentu_run(&result.run)
+}
+
+pub fn check_mentu_runs(result: &MentuRunsResult) -> Result<(), String> {
+    for run in &result.runs {
+        check_mentu_run(run).map_err(|err| format!("run {}: {err}", run.id))?;
+    }
+    Ok(())
+}
+
 /// The service must accept exactly the bytes the CLI sent, no more, no less.
 pub fn check_write(result: &WriteResult, expected_bytes: u64) -> Result<(), String> {
     if result.accepted_bytes != expected_bytes {

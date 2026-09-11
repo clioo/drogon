@@ -10,9 +10,29 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import { RecipePaneHeader } from "./RecipePaneHeader";
 import type { MentuPaneController } from "./recipe-pane-controller";
+import type { MentuRun } from "../../../../shared/mentu-contract";
+import type { Session } from "../../../../shared/session-contract";
 
 beforeEach(installRadixJsdomStubs);
 afterEach(cleanup);
+
+function mainSession(): Session {
+  return {
+    id: "s-1",
+    workspaceId: "ws",
+    hostId: "host-1",
+    incarnation: "inc-1",
+    command: "claude",
+    args: [],
+    cols: 80,
+    rows: 24,
+    verdict: "live",
+    exitCode: null,
+    createdAt: "2026-09-07T00:00:00Z",
+    harnessId: "claude",
+    agentState: "idle",
+  };
+}
 
 function fixtureController(overrides: Partial<MentuPaneController> = {}): MentuPaneController {
   return {
@@ -91,6 +111,11 @@ function fixtureController(overrides: Partial<MentuPaneController> = {}): MentuP
     busy: false,
     operationRunning: false,
     error: null,
+    mainSession: null,
+    mainSessionReady: false,
+    dispatching: false,
+    delivering: false,
+    dispatchNotice: null,
     stageReview: vi.fn(),
     clearReview: vi.fn(),
     approveAndRun: vi.fn(),
@@ -162,5 +187,98 @@ describe("RecipePaneHeader Run Recipe button", () => {
     render(<RecipePaneHeader controller={fixtureController({ refreshRecipes })} />);
     fireEvent.click(screen.getByRole("button", { name: "Refresh recipes" }));
     expect(refreshRecipes).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns into a live running indicator while a run is in flight and returns to idle", () => {
+    const runningRun: MentuRun = {
+      id: "run-row-1",
+      workspaceId: "ws",
+      recipeId: "demo",
+      approvalId: "appr-1",
+      mentuRunId: "run_fixture_1",
+      status: "running",
+      startedAt: "2026-09-07T00:00:00Z",
+      endedAt: null,
+      steps: [
+        {
+          label: "build",
+          backend: "shell",
+          status: "succeeded",
+          exitCode: 0,
+          durationSeconds: 1,
+          attempts: 1,
+          outputPath: null,
+          errorPath: null,
+          error: null,
+          verification: null,
+        },
+      ],
+      error: null,
+      retryOf: null,
+    };
+    const { rerender } = render(
+      <RecipePaneHeader
+        controller={fixtureController({ run: runningRun, operationRunning: true })}
+      />,
+    );
+    const running = screen.getByTestId("mentu-run-recipe");
+    expect(running.getAttribute("data-running")).toBe("true");
+    expect(running.textContent).toContain("Running… 1 step recorded");
+    expect(running.querySelector(".animate-spin")).toBeTruthy();
+
+    // The prompt is in flight but the daemon has no run row yet: still
+    // animating, and labeled as such rather than as a live run.
+    rerender(
+      <RecipePaneHeader
+        controller={fixtureController({ run: null, dispatching: true })}
+      />,
+    );
+    const starting = screen.getByTestId("mentu-run-recipe");
+    expect(starting.getAttribute("data-running")).toBe("true");
+    expect(starting.textContent).toContain("Starting run…");
+
+    // Delivery itself is in flight (waiting for a busy main session to
+    // become safe to type into): also animated, with its own honest label.
+    rerender(
+      <RecipePaneHeader controller={fixtureController({ run: null, delivering: true })} />,
+    );
+    const delivering = screen.getByTestId("mentu-run-recipe");
+    expect(delivering.getAttribute("data-running")).toBe("true");
+    expect(delivering.textContent).toContain("Waiting for agent…");
+
+    // Settled: the indicator stops because the STATE says so, not a timer.
+    rerender(
+      <RecipePaneHeader
+        controller={fixtureController({ run: { ...runningRun, status: "succeeded", endedAt: "2026-09-07T00:00:02Z" } })}
+      />,
+    );
+    const idle = screen.getByTestId("mentu-run-recipe");
+    expect(idle.getAttribute("data-running")).toBe("false");
+    expect(idle.textContent).toContain("Run Recipe");
+    expect(idle.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("says what happened when the prompt was delivered, and when there is no agent session", () => {
+    const { rerender } = render(
+      <RecipePaneHeader
+        controller={fixtureController({
+          mainSession: mainSession(),
+          mainSessionReady: true,
+          dispatchNotice: "Prompt delivered to agent session s-1. Waiting for it to start the run…",
+        })}
+      />,
+    );
+    expect(screen.getByTestId("mentu-dispatch-notice").textContent).toContain(
+      "Prompt delivered to agent session s-1",
+    );
+
+    rerender(
+      <RecipePaneHeader
+        controller={fixtureController({ mainSession: null, mainSessionReady: false })}
+      />,
+    );
+    expect(screen.getByTestId("mentu-main-session-hint").textContent).toContain(
+      "No agent session open in this workspace",
+    );
   });
 });

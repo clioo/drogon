@@ -276,6 +276,7 @@ import {
 } from "./mentu-mount";
 import { MENTU_OPEN_TAB_EVENT, MentuPanel } from "./features/mentu/MentuPanel";
 import { mentuStore } from "./features/mentu/mentu-store";
+import { pickMentuMainSession } from "./features/mentu/mentu-run-dispatch";
 import { refreshWorktreeIssueLinks } from "./features/tasks/issue-links";
 import { TasksPage } from "./features/tasks/TasksPage";
 import { loadBotSnapshot, resolveBotsScope } from "./bots-loader";
@@ -904,6 +905,16 @@ export function App() {
   const mentuGatedBridge = useMemo(
     () => createGatedMentuBridge(windowMentuBridge(), () => mentuGateRef.current),
     [],
+  );
+  // The Run Recipe delegation target: the selected workspace's main agent
+  // session. Derived from the same session list the tab strip renders, so
+  // the Mentu pane can never believe in a session the shell does not show.
+  const mentuDispatchContext = useMemo(
+    () => ({
+      activeSessionId: active || null,
+      mainSession: pickMentuMainSession(sessions, active || null),
+    }),
+    [active, sessions],
   );
   const filesGatedBridge = useMemo(
     () => createGatedFileBridge(window.drogon, () => filesGateRef.current),
@@ -4836,6 +4847,7 @@ export function App() {
                       fileBridge={filesGatedBridge}
                       hostId={status?.hostId ?? null}
                       workspacePath={current.path}
+                      dispatchContext={mentuDispatchContext}
                     />
                   </div>
                 ) : null}
@@ -5051,6 +5063,7 @@ export function App() {
                             fileBridge={filesGatedBridge}
                             hostId={filesProps.status?.hostId ?? null}
                             workspacePath={filesProps.workspace.path}
+                            dispatchContext={mentuDispatchContext}
                           />
                         </section>
                       ),

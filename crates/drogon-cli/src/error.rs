@@ -107,3 +107,11 @@ pub fn method_not_found(message: impl Into<String>) -> RpcError {
 pub fn timeout(message: impl Into<String>) -> RpcError {
     RpcError::new("timeout", message)
 }
+
+/// `mentu run` found no approval bound to the recipe's exact current bytes.
+/// A distinct code on purpose: the caller must be able to tell "a human has
+/// not approved these bytes" apart from "the daemon is unreachable", and
+/// this CLI must never approve the recipe itself to make the run happen.
+pub fn mentu_approval_required(message: impl Into<String>) -> RpcError {
+    RpcError::new("mentu_approval_required", message)
+}

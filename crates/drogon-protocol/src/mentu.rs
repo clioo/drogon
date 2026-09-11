@@ -337,6 +337,25 @@ impl MentuRunParams {
     }
 }
 
+/// Params for `mentu.pending_approval`: the unconsumed approval bound to
+/// this recipe's exact on-disk content, if one exists. Read-only, and the
+/// only way a caller can turn "the human already approved this recipe"
+/// into the approval id `mentu.run` demands without inventing a second
+/// approval path (`mentu.approve` stays the human-facing write).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuPendingApprovalParams {
+    pub workspace_id: String,
+    pub recipe_id: String,
+}
+
+impl MentuPendingApprovalParams {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        validate_workspace_id(&self.workspace_id)?;
+        validate_recipe_id(&self.recipe_id)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MentuRunsParams {
@@ -436,6 +455,16 @@ pub struct MentuRunResult {
 #[serde(rename_all = "camelCase")]
 pub struct MentuRunsResult {
     pub runs: Vec<MentuRun>,
+}
+
+/// The pending approval for a recipe's exact current content, if any.
+/// `approval: null` is the honest "nothing is approved right now" answer;
+/// it never fabricates an approval, and the caller must refuse the run
+/// rather than approve it itself.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentuPendingApprovalResult {
+    pub approval: Option<MentuApproval>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -650,6 +679,55 @@ mod tests {
             params.content_hash = bad.to_string();
             assert_eq!(params.validate().unwrap_err().code, "invalid_argument");
         }
+    }
+
+    #[test]
+    fn pending_approval_params_validate_ids_like_recipe_params() {
+        let params = MentuPendingApprovalParams {
+            workspace_id: "ws1".into(),
+            recipe_id: "hello".into(),
+        };
+        params.validate().unwrap();
+        // Additive fields stay forward-compatible.
+        let forward: MentuPendingApprovalParams = serde_json::from_value(
+            json!({"workspaceId": "ws1", "recipeId": "hello", "future": true}),
+        )
+        .unwrap();
+        forward.validate().unwrap();
+        for bad in ["", "has space", "has\nnewline"] {
+            let params = MentuPendingApprovalParams {
+                workspace_id: "ws1".into(),
+                recipe_id: bad.into(),
+            };
+            assert!(params.validate().is_err(), "recipe id {bad:?}");
+            let params = MentuPendingApprovalParams {
+                workspace_id: bad.into(),
+                recipe_id: "hello".into(),
+            };
+            assert!(params.validate().is_err(), "workspace id {bad:?}");
+        }
+    }
+
+    #[test]
+    fn pending_approval_result_serializes_null_approval_as_absence() {
+        let result = MentuPendingApprovalResult { approval: None };
+        let value = serde_json::to_value(&result).unwrap();
+        assert_eq!(value, json!({"approval": null}));
+        let result = MentuPendingApprovalResult {
+            approval: Some(MentuApproval {
+                id: "appr-1".into(),
+                workspace_id: "ws1".into(),
+                recipe_id: "hello".into(),
+                content_hash: "a".repeat(64),
+                approved_at: "2026-09-07T00:00:00Z".into(),
+            }),
+        };
+        let value = serde_json::to_value(&result).unwrap();
+        assert_eq!(value["approval"]["contentHash"], json!("a".repeat(64)));
+        assert_eq!(
+            value["approval"]["approvedAt"],
+            json!("2026-09-07T00:00:00Z")
+        );
     }
 
     #[test]

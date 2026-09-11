@@ -34,12 +34,17 @@ import {
 } from "./recipe-pane-views";
 import { mentuRuntimeNote } from "./recipe-directory-state";
 import { windowShellBridge } from "../shell/worktree-bridges";
+import type { MentuDispatchContext } from "./recipe-pane-controller";
 import { RunControls } from "./recipe-pane-run-controls";
 
 export type MentuPanelProps = {
   bridge: MentuBridge;
   workspaceId: string;
   variant?: "panel" | "tab";
+  /** The workspace's main agent session plus the transport the Run Recipe
+   *  prompt is delivered through (see `mentu-run-dispatch`). Optional so
+   *  the panel still renders for callers that only read Mentu state. */
+  dispatchContext?: MentuDispatchContext;
   /** Opens the wide Mentu tab. Defaults to a `drogon:open-mentu-tab`
    *  window event the shell may listen for. */
   onOpenFullTab?: () => void;
@@ -58,6 +63,7 @@ export function MentuPanel({
   bridge,
   workspaceId,
   variant = "panel",
+  dispatchContext,
   onOpenFullTab,
   fileBridge = null,
   hostId = null,
@@ -71,6 +77,7 @@ export function MentuPanel({
         fileBridge={fileBridge}
         hostId={hostId}
         workspacePath={workspacePath}
+        dispatchContext={dispatchContext}
       />
     );
   }
@@ -78,6 +85,7 @@ export function MentuPanel({
     <MentuPanelBody
       bridge={bridge}
       workspaceId={workspaceId}
+      dispatchContext={dispatchContext}
       onOpenFullTab={onOpenFullTab}
       fileBridge={fileBridge}
       hostId={hostId}
@@ -89,6 +97,7 @@ export function MentuPanel({
 function MentuPanelBody({
   bridge,
   workspaceId,
+  dispatchContext,
   onOpenFullTab,
   fileBridge,
   hostId,
@@ -96,6 +105,7 @@ function MentuPanelBody({
 }: {
   bridge: MentuBridge;
   workspaceId: string;
+  dispatchContext?: MentuDispatchContext;
   onOpenFullTab?: () => void;
   fileBridge?: FileBridge | null;
   hostId?: string | null;
@@ -105,6 +115,7 @@ function MentuPanelBody({
     fileBridge,
     hostId,
     workspacePath,
+    dispatchContext,
   });
   const showingEvidence = controller.mode === "evidence";
   const runtimeAvailable =
@@ -205,6 +216,17 @@ function MentuPanelBody({
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-3 pr-2">
+          {!controller.mainSessionReady ? (
+            <div
+              className="rounded-md border border-border bg-card p-3 text-xs text-muted-foreground"
+              data-testid="mentu-main-session-hint"
+            >
+              <p>
+                No agent session open in this workspace. Run Recipe hands the prompt to your
+                main agent session, so open one (Claude, Pi, OpenCode or Codex) first.
+              </p>
+            </div>
+          ) : null}
           {controller.runtimeMessage ? (
             <div
               className="rounded-md border border-border bg-card p-3 text-xs text-muted-foreground"
@@ -259,6 +281,9 @@ function MentuPanelBody({
                     runtimeAvailable={runtimeAvailable}
                     dependencyGraphValid={controller.graph.valid}
                     operationRunning={controller.operationRunning}
+                    dispatching={controller.dispatching}
+                    delivering={controller.delivering}
+                    dispatchNotice={controller.dispatchNotice}
                     busy={controller.busy}
                     run={controller.run}
                     approval={controller.approval}

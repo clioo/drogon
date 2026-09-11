@@ -24,8 +24,30 @@ export const AGENT_SETTINGS_FIXTURE_NAMES = [
 
 /** `skip` leaves a harness unstubbed so a journey can drive its real TUI. */
 export async function writeAgentSettingsFixtures(bin, { skip = [] } = {}) {
+  // The stub also stands in for an agent that has read the drogon-cli
+  // skill: a line naming a Mentu run is answered by running the documented
+  // `drogon-cli mentu run` for the recipe/workspace that line carries. That
+  // is what lets the Mentu delegation journeys prove the prompt actually
+  // reached an agent that could orchestrate the run, instead of asserting
+  // the UI called the daemon itself.
   const body =
-    '#!/bin/sh\nprintf "agent-settings-fixture\\n"\nprintf "ARG=%s\\n" "$@"\nprintf "ENV=%s\\n" "$AGENT_FIXTURE_VALUE"\nwhile IFS= read -r line; do printf "fixture-input=%s\\n" "$line"; done\n';
+    '#!/bin/sh\n' +
+    'printf "agent-settings-fixture\\n"\n' +
+    'printf "ARG=%s\\n" "$@"\n' +
+    'printf "ENV=%s\\n" "$AGENT_FIXTURE_VALUE"\n' +
+    'while IFS= read -r line; do\n' +
+    '  printf "fixture-input=%s\\n" "$line"\n' +
+    '  case "$line" in\n' +
+    '    *"mentu run"*)\n' +
+    '      recipe=$(printf "%s" "$line" | sed -n \'s/.*--recipe \\([^ ]*\\).*/\\1/p\')\n' +
+    '      workspace=$(printf "%s" "$line" | sed -n \'s/.*--workspace \\([^ ]*\\).*/\\1/p\')\n' +
+    '      [ -n "$workspace" ] || workspace="$DROGON_WORKSPACE_ID"\n' +
+    '      printf "fixture-mentu-run recipe=%s workspace=%s\\n" "$recipe" "$workspace"\n' +
+    '      drogon-cli mentu run --workspace "$workspace" --recipe "$recipe" --follow --timeout-ms 120000\n' +
+    '      printf "fixture-mentu-exit=%s\\n" "$?"\n' +
+    '      ;;\n' +
+    '  esac\n' +
+    'done\n';
   for (const name of AGENT_SETTINGS_FIXTURE_NAMES) {
     if (skip.includes(name)) continue;
     const target = path.join(bin, name);

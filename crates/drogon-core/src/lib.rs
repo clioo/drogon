@@ -577,6 +577,7 @@ impl Engine {
             "mentu.runtime" => self.mentu_runtime_info(&request.params),
             "mentu.runtime_install" => self.mentu_runtime_install(&request.params),
             "mentu.approve" => self.mentu_approve(request),
+            "mentu.pending_approval" => self.mentu_pending_approval(&request.params),
             "mentu.run" => self.mentu_run(request),
             "mentu.runs" => self.mentu_runs(&request.params),
             "mentu.run_status" => self.mentu_run_status(&request.params),

@@ -6,9 +6,10 @@ use base64::engine::general_purpose::STANDARD;
 
 use crate::client::{
     AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, BrowserSnapshot,
-    BrowserTab, BrowserTabsList, HarnessCatalog, MentuOpenResult, MethodResult, Project,
-    ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Workspace, WorkspaceList,
-    Worktree, WorktreeList, WriteResult,
+    BrowserTab, BrowserTabsList, HarnessCatalog, MentuApproval, MentuOpenResult, MentuRun,
+    MentuRunsResult, MentuStepRun, MethodResult, Project, ProjectList, ReadResult, Removed,
+    Session, SessionList, StatusResult, Workspace, WorkspaceList, Worktree, WorktreeList,
+    WriteResult,
 };
 
 pub fn status_line(result: &StatusResult) -> String {
@@ -483,6 +484,138 @@ pub fn mentu_opened(result: &MentuOpenResult) -> String {
             result.workspace_id
         ),
     }
+}
+
+/// `mentu run`: the run started. The daemon's own run id leads, because
+/// that is the handle the caller needs to follow or cancel it.
+pub fn mentu_run_started(run: &MentuRun) -> String {
+    format!(
+        "Started Mentu run {} (recipe {}, status {}).",
+        run.id,
+        run.recipe_id,
+        run.status.as_wire()
+    )
+}
+
+/// `mentu run-status`: the run's status plus one line per recorded step, so
+/// a human sees which step is still running without asking for JSON.
+pub fn mentu_run_status(run: &MentuRun) -> String {
+    let mut lines = vec![mentu_run_line(run)];
+    for step in &run.steps {
+        lines.push(mentu_step_line(step));
+    }
+    if let Some(error) = &run.error {
+        lines.push(format!("error: {error}"));
+    }
+    lines.join("\n")
+}
+
+/// `mentu run --follow`: one line per observed status change, newest last.
+/// The caller prints these as they happen; the final line is the terminal
+/// verdict, so the last thing a reader sees is the outcome.
+pub fn mentu_status_change(run: &MentuRun) -> String {
+    format!("run {} {}", run.id, mentu_progress(run))
+}
+
+/// A compact progress phrase: status plus "(3/5 steps done)" once the
+/// record carries steps, so a follow loop reports real movement rather
+/// than the same word twice.
+pub fn mentu_progress(run: &MentuRun) -> String {
+    let status = run.status.as_wire();
+    if run.steps.is_empty() {
+        return status.to_string();
+    }
+    let done = run
+        .steps
+        .iter()
+        .filter(|step| step.status.is_terminal())
+        .count();
+    format!("{status} ({done}/{} steps recorded)", run.steps.len())
+}
+
+fn mentu_run_line(run: &MentuRun) -> String {
+    let mut line = format!(
+        "Mentu run {}: recipe {} status {}",
+        run.id,
+        run.recipe_id,
+        run.status.as_wire()
+    );
+    if let Some(mentu_run_id) = &run.mentu_run_id {
+        line.push_str(&format!(" ({mentu_run_id})"));
+    }
+    line.push_str(&format!(" started {}", run.started_at));
+    if let Some(ended_at) = &run.ended_at {
+        line.push_str(&format!(", ended {ended_at}"));
+    }
+    line
+}
+
+fn mentu_step_line(step: &MentuStepRun) -> String {
+    let mut line = format!(
+        "  {} [{}] {}",
+        step.label,
+        step.backend,
+        step.status.as_wire()
+    );
+    if let Some(exit_code) = step.exit_code {
+        line.push_str(&format!(" exit {exit_code}"));
+    }
+    if let Some(duration) = step.duration_seconds {
+        line.push_str(&format!(" {duration}s"));
+    }
+    if let Some(output) = &step.output_path {
+        line.push_str(&format!(" stdout {output}"));
+    }
+    if let Some(error) = &step.error {
+        line.push_str(&format!(" error: {error}"));
+    }
+    line
+}
+
+/// `mentu runs`: one line per run, newest first.
+pub fn mentu_run_list(result: &MentuRunsResult) -> String {
+    if result.runs.is_empty() {
+        return "No Mentu runs recorded for this workspace.".into();
+    }
+    result
+        .runs
+        .iter()
+        .map(mentu_run_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `mentu run` when the recipe has no pending approval. The refusal is the
+/// point: say exactly what is missing and who can supply it, never imply
+/// the run happened.
+pub fn mentu_approval_required(workspace: &str, recipe: &str) -> String {
+    format!(
+        "Recipe {recipe} in workspace {workspace} has no approval for its current content. \
+         Review and approve it from the Drogon Mentu tab (Run Recipe), then run it again. \
+         This verb never approves a recipe on its own."
+    )
+}
+
+/// `mentu run` when an approval was resolved: name it, so a caller can
+/// follow the run it is about to create back to this exact consent.
+pub fn mentu_approval_used(approval: &MentuApproval) -> String {
+    format!(
+        "Using approval {} (sha256:{})",
+        approval.id,
+        &approval.content_hash[..12.min(approval.content_hash.len())]
+    )
+}
+
+/// `mentu cancel`: the daemon accepted the request and reports the row it
+/// currently holds. The row may still read `running`: cancellation is
+/// asynchronous, so the line must not claim the run already stopped.
+pub fn mentu_cancel_requested(run: &MentuRun) -> String {
+    format!(
+        "Cancellation requested for Mentu run {} (status {}). Poll `mentu run-status --run {}` until it settles.",
+        run.id,
+        run.status.as_wire(),
+        run.id
+    )
 }
 
 /// One line per discovered harness; unknown future harness ids render

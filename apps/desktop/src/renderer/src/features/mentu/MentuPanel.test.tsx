@@ -13,6 +13,7 @@ import type {
   MentuRecipeDetail,
   MentuRun,
 } from "../../../../shared/mentu-contract";
+import type { Session } from "../../../../shared/session-contract";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import { MENTU_OPEN_TAB_EVENT, MentuPanel } from "./MentuPanel";
 import { mentuStore } from "./mentu-store";
@@ -71,6 +72,50 @@ function runningRun(): MentuRun {
   return { ...failedRun(), id: "run-10", status: "running", error: null };
 }
 
+function agentSession(): Session {
+  return {
+    id: "s-agent",
+    workspaceId: "ws",
+    hostId: "host-1",
+    incarnation: "inc-1",
+    command: "claude",
+    args: [],
+    cols: 80,
+    rows: 24,
+    verdict: "live",
+    exitCode: null,
+    createdAt: "2026-09-07T00:00:00Z",
+    harnessId: "claude",
+    agentState: "idle",
+  };
+}
+
+/** A bridge plus a dispatch context whose fake agent session "starts" the
+ *  run when the prompt is written: the run row appears only after the write,
+ *  exactly like the real daemon's row appearing after the agent's CLI call. */
+function delegatedHarness() {
+  const bridge = fakeBridge();
+  let started = false;
+  const write = vi.fn(
+    async (_input: { sessionId: string; incarnation: string; text: string }) => {
+      started = true;
+      return ok({ acceptedBytes: 1 });
+    },
+  );
+  bridge.mentuRuns = vi.fn(async () =>
+    ok({ runs: started ? [{ ...runningRun(), approvalId: "approval-1" }] : [] }),
+  );
+  const dispatchContext = {
+    activeSessionId: "s-agent",
+    mainSession: agentSession(),
+    deps: {
+      sessions: async () => ok({ sessions: [agentSession()] }),
+      write,
+    },
+  };
+  return { bridge, write, dispatchContext };
+}
+
 const ok = <T,>(result: T) => ({ ok: true as const, result });
 
 function fakeBridge(): MentuBridge & Record<string, ReturnType<typeof vi.fn>> {
@@ -127,10 +172,12 @@ describe("MentuPanel", () => {
     expect(seen).toEqual(["opened"]);
   });
 
-  it("runs Review → Approve & run into a cancellable execution", async () => {
+  it("delegates Review → Approve & run to the main agent session instead of calling mentu.run", async () => {
     const ws = `ws-flow-${Math.random()}`;
-    const bridge = fakeBridge();
-    render(<MentuPanel bridge={bridge} workspaceId={ws} />);
+    const { bridge, write, dispatchContext } = delegatedHarness();
+    render(
+      <MentuPanel bridge={bridge} workspaceId={ws} dispatchContext={dispatchContext} />,
+    );
     await selectRecipe(ws);
     expect(screen.getByText("build")).toBeTruthy();
 
@@ -141,7 +188,50 @@ describe("MentuPanel", () => {
     fireEvent.click(screen.getByText("Approve & run"));
     await waitFor(() => expect(screen.getByTestId("mentu-cancel")).toBeTruthy());
     expect(bridge.mentuApprove).toHaveBeenCalledTimes(1);
-    expect(bridge.mentuRun).toHaveBeenCalledTimes(1);
+    // The thesis in one assertion: the UI did NOT run the recipe; it handed
+    // the approved prompt to the agent, which is what creates the run row.
+    expect(bridge.mentuRun).not.toHaveBeenCalled();
+    expect(write).toHaveBeenCalledTimes(1);
+    const written = write.mock.calls[0][0];
+    expect(written.sessionId).toBe("s-agent");
+    expect(written.text).toContain("drogon-cli mentu run --workspace");
+    expect(written.text).toContain("--approval approval-1");
+    expect(written.text.endsWith("\r")).toBe(true);
+    // The run was adopted from the daemon's own row by approval id.
+    expect(screen.getByTestId("mentu-dispatch-notice").textContent).toContain(
+      "Run run-10 started by the agent session s-agent",
+    );
+  });
+
+  it("says nothing was run when the workspace has no agent session", async () => {
+    const ws = `ws-nosession-${Math.random()}`;
+    const bridge = fakeBridge();
+    render(
+      <MentuPanel
+        bridge={bridge}
+        workspaceId={ws}
+        dispatchContext={{
+          activeSessionId: null,
+          mainSession: null,
+          deps: {
+            sessions: async () => ok({ sessions: [] as Session[] }),
+            write: async () => ok({ acceptedBytes: 0 }),
+          },
+        }}
+      />,
+    );
+    await selectRecipe(ws);
+    fireEvent.click(screen.getByTestId("mentu-run"));
+    await waitFor(() => expect(screen.getByTestId("mentu-review")).toBeTruthy());
+    fireEvent.click(screen.getByText("Approve & run"));
+    await waitFor(() =>
+      expect(screen.getByTestId("mentu-panel-status").textContent).toContain(
+        "No agent session is open in this workspace",
+      ),
+    );
+    expect(bridge.mentuRun).not.toHaveBeenCalled();
+    // The approval exists but nothing ran: the row stays absent.
+    expect(screen.queryByTestId("mentu-cancel")).toBeNull();
   });
 
   it("routes an execution failure to the evidence view", async () => {
@@ -159,9 +249,18 @@ describe("MentuPanel", () => {
 
   it("shares the running execution between the panel and the full tab", async () => {
     const ws = `ws-sync-${Math.random()}`;
-    const bridge = fakeBridge();
-    render(<MentuPanel bridge={bridge} workspaceId={ws} />);
-    render(<MentuPanel bridge={bridge} workspaceId={ws} variant="tab" />);
+    const { bridge, dispatchContext } = delegatedHarness();
+    render(
+      <MentuPanel bridge={bridge} workspaceId={ws} dispatchContext={dispatchContext} />,
+    );
+    render(
+      <MentuPanel
+        bridge={bridge}
+        workspaceId={ws}
+        variant="tab"
+        dispatchContext={dispatchContext}
+      />,
+    );
     // The tab's run controls live on its Run tab; the panel keeps its
     // default Plan view.
     mentuStore.set(ws, { selectedRecipeId: "demo", mode: "run" });
@@ -187,6 +286,46 @@ describe("MentuPanel", () => {
     expect(
       within(tab).getByTestId("mentu-run-status").textContent,
     ).toContain("Running…");
+  });
+
+  it("returns to idle after a run settles and can run the recipe again", async () => {
+    const ws = `ws-rerun-${Math.random()}`;
+    const { bridge, write, dispatchContext } = delegatedHarness();
+    // The first run settles on the next status poll.
+    bridge.mentuRunStatus = vi.fn(async () =>
+      ok({
+        run: {
+          ...runningRun(),
+          approvalId: "approval-1",
+          status: "succeeded" as const,
+          endedAt: "t",
+        },
+      }),
+    );
+    render(
+      <MentuPanel
+        bridge={bridge}
+        workspaceId={ws}
+        variant="tab"
+        dispatchContext={dispatchContext}
+      />,
+    );
+    await waitFor(() => {
+      mentuStore.set(ws, { selectedRecipeId: "demo" });
+      expect(screen.getByTestId("mentu-run-recipe")).toBeTruthy();
+    });
+    const runButton = screen.getByTestId("mentu-run-recipe");
+    fireEvent.click(runButton);
+    await waitFor(() => expect(runButton.textContent).toContain("Approve & run recipe"));
+    fireEvent.click(runButton);
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    // Adoption publishes the run, then its status poll settles it.
+    await waitFor(() => expect(runButton.getAttribute("data-running")).toBe("false"));
+
+    // A second click must dispatch again, not silently do nothing.
+    fireEvent.click(runButton);
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(2));
+    expect(runButton.getAttribute("data-running")).toBe("true");
   });
 
   it("renders the wide tab with the reference tab order", async () => {
