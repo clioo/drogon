@@ -19,6 +19,7 @@ import { SelectedNodeInspector } from "./recipe-pane-inspector";
 import { RunControls } from "./recipe-pane-run-controls";
 import { EmptyRecipeState, EvidenceView, GraphView, MetricsView } from "./recipe-pane-views";
 import { mentuRuntimeNote } from "./recipe-directory-state";
+import { windowShellBridge } from "../shell/worktree-bridges";
 import type { MentuPaneController } from "./recipe-pane-controller";
 import { statusLabel } from "./run-status";
 
@@ -140,6 +141,16 @@ export function RecipePaneContent({
               recipesPathLabel={controller.recipesPathLabel}
               workspaceId={controller.workspaceId}
               runtimeNote={mentuRuntimeNote(controller.runtime)}
+              nestedFindings={controller.nestedFindings}
+              onRevealNested={
+                controller.workspacePath
+                  ? (relativeDir) => {
+                      void windowShellBridge()?.showItemInFolder({
+                        path: `${controller.workspacePath}/${relativeDir}`,
+                      });
+                    }
+                  : null
+              }
               canCreateStarter={controller.canCreateStarter}
               creatingStarter={controller.creatingStarter}
               createStarterError={controller.createStarterError}

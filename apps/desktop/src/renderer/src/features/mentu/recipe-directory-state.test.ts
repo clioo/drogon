@@ -5,6 +5,7 @@
 // copy must blame the workspace (or the host) exactly as observed.
 
 import { describe, expect, it } from "vitest";
+import assert from "node:assert/strict";
 import type { FileBridge, FileListResult } from "../../../../shared/file-contract";
 import type { Result } from "../../../../shared/session-contract";
 import type { MentuRecipeSummary } from "../../../../shared/mentu-contract";
@@ -13,6 +14,7 @@ import {
   invalidMentuRecipes,
   mentuRuntimeNote,
   probeMentuRecipeDirectory,
+  probeNestedMentuRecipes,
 } from "./recipe-directory-state";
 
 function listBridge(result: Result<FileListResult>): FileBridge {
@@ -153,6 +155,104 @@ describe("invalidMentuRecipes", () => {
         issue: "Recipe is missing \"name\" or \"steps\".",
       },
     ]);
+  });
+});
+
+describe("probeNestedMentuRecipes", () => {
+  const input = { hostId: "host", workspaceId: "ws" };
+
+  /** A files bridge whose answers are keyed by the queried path. */
+  function walkBridge(
+    answers: Record<string, { name: string; kind: "file" | "directory" }[]>,
+  ): FileBridge {
+    return {
+      fileList: async (input: { path: string }) => {
+        const key = input.path.replace(/^\/+|\/+$/g, "");
+        if (!(key in answers)) {
+          return {
+            ok: false,
+            error: { code: "not_found", message: "directory not found", retryable: false },
+          };
+        }
+        return {
+          ok: true,
+          result: {
+            hostId: "host",
+            workspaceId: "ws",
+            path: key,
+            entries: answers[key].map((e) => ({
+              ...e,
+              size: 1,
+              mtime: "",
+            })),
+            truncated: false,
+          },
+        };
+      },
+    } as unknown as FileBridge;
+  }
+
+  it("finds recipe directories one level down and reports provenance", async () => {
+    const findings = await probeNestedMentuRecipes(
+      walkBridge({
+        "": [
+          { name: "mentu-recipes", kind: "directory" },
+          { name: "README.md", kind: "file" },
+        ],
+        "mentu-recipes/.mentu/recipes": [
+          { name: "demo-tareas.json", kind: "file" },
+          { name: "claude-smoke.json", kind: "file" },
+          { name: "notes.txt", kind: "file" },
+        ],
+      }),
+      input,
+    );
+    assert.deepEqual(findings, [
+      {
+        relativeDir: "mentu-recipes/.mentu/recipes",
+        total: 2,
+        fileNames: ["demo-tareas.json", "claude-smoke.json"],
+      },
+    ]);
+  });
+
+  it("skips dependency/build/tool directories and hidden dirs", async () => {
+    const findings = await probeNestedMentuRecipes(
+      walkBridge({
+        "": [
+          { name: "node_modules", kind: "directory" },
+          { name: "target", kind: "directory" },
+          { name: ".hidden", kind: "directory" },
+          { name: "subproject", kind: "directory" },
+        ],
+        "subproject/.mentu/recipes": [
+          { name: "ok.json", kind: "file" },
+        ],
+      }),
+      input,
+    );
+    // Only `subproject` was probed: the answer map has no answers for the
+    // skipped candidates, so reaching them would have failed the test.
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].relativeDir, "subproject/.mentu/recipes");
+  });
+
+  it("returns nothing without a bridge or a host", async () => {
+    assert.deepEqual(await probeNestedMentuRecipes(null, input), []);
+    assert.deepEqual(
+      await probeNestedMentuRecipes(walkBridge({}), { hostId: null, workspaceId: "ws" }),
+      [],
+    );
+  });
+
+  it("reports nothing when no candidate subproject carries recipes", async () => {
+    const findings = await probeNestedMentuRecipes(
+      walkBridge({
+        "": [{ name: "plain", kind: "directory" }],
+      }),
+      input,
+    );
+    assert.deepEqual(findings, []);
   });
 });
 

@@ -27,6 +27,7 @@ function fixtureController(overrides: Partial<MentuPaneController> = {}): MentuP
     recipesDirectory: { kind: "unknown" },
     directorySummary: "Select a valid workspace recipe to view its graph.",
     invalidRecipes: [],
+    nestedFindings: [],
     recipesPathLabel: ".mentu/recipes",
     canCreateStarter: false,
     creatingStarter: false,

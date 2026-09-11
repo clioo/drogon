@@ -46,8 +46,11 @@ import {
 import {
   describeMentuRecipeDirectory,
   invalidMentuRecipes,
+  mentuRuntimeNote,
   probeMentuRecipeDirectory,
+  probeNestedMentuRecipes,
   type MentuInvalidRecipe,
+  type MentuNestedRecipeFinding,
   type MentuRecipeDirectoryStatus,
 } from "./recipe-directory-state";
 import {
@@ -102,6 +105,9 @@ export type MentuPaneController = {
   directorySummary: string;
   /** Every recipe file the daemon refused, with filename and reason. */
   invalidRecipes: MentuInvalidRecipe[];
+  /** Nested `<subproject>/.mentu/recipes` directories found when the root
+   *  has none: reported with provenance, never mixed into selection. */
+  nestedFindings: MentuNestedRecipeFinding[];
   /** Human path of the workspace's recipe directory (absolute when the
    *  workspace path is known). */
   recipesPathLabel: string;
@@ -273,6 +279,29 @@ export function useMentuPaneController(
       cancelled = true;
     };
   }, [fileBridge, hostId, workspaceId, recipesGeneration]);
+  // Nested subproject findings only matter when the root itself has no
+  // recipes to show; the effect skips the extra probes otherwise and
+  // re-runs with every refresh so the report always reflects reality.
+  const [nestedFindings, setNestedFindings] = useState<
+    MentuNestedRecipeFinding[]
+  >([]);
+  const nestedProbeNeeded =
+    recipesDirectory.kind === "missing" || recipesDirectory.kind === "empty";
+  useEffect(() => {
+    if (!nestedProbeNeeded) {
+      setNestedFindings([]);
+      return;
+    }
+    let cancelled = false;
+    void probeNestedMentuRecipes(fileBridge, { hostId, workspaceId }).then(
+      (findings) => {
+        if (!cancelled) setNestedFindings(findings);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [fileBridge, hostId, workspaceId, recipesGeneration, nestedProbeNeeded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -802,6 +831,7 @@ export function useMentuPaneController(
     recipesDirectory,
     directorySummary,
     invalidRecipes,
+    nestedFindings,
     recipesPathLabel,
     canCreateStarter,
     creatingStarter,

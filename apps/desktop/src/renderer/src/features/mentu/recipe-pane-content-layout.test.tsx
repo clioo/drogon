@@ -31,6 +31,7 @@ function fixtureController(
     recipesDirectory: { kind: "missing" },
     directorySummary: "No .mentu/recipes directory yet — this workspace has never had a recipe.",
     invalidRecipes: [],
+    nestedFindings: [],
     recipesPathLabel: "/tmp/ws/.mentu/recipes",
     canCreateStarter: false,
     creatingStarter: false,

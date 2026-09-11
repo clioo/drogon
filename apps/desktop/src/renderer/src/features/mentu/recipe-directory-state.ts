@@ -106,6 +106,88 @@ export function mentuRuntimeNote(
   return null;
 }
 
+/** One nested `.mentu/recipes` directory found under the open workspace. */
+export type MentuNestedRecipeFinding = {
+  /** Workspace-relative recipe directory, e.g. `mentu-recipes/.mentu/recipes`. */
+  relativeDir: string;
+  /** Total recipe files in that directory (honest even past the preview cap). */
+  total: number;
+  /** Up to 8 file names, for the preview list. */
+  fileNames: string[];
+};
+
+/** Direct workspace children that are never treated as recipe-bearing
+ *  subprojects: build output, dependency trees and tool state. */
+const NESTED_PROBE_SKIP_DIRS = new Set([
+  "node_modules",
+  "target",
+  "dist",
+  "build",
+  "out",
+  "vendor",
+  "tmp",
+  "temp",
+]);
+
+/** Bounds so the probe can never walk the whole tree: at most 24 candidate
+ *  subdirectories, at most 3 findings reported. */
+export const NESTED_PROBE_MAX_DIRS = 24;
+export const NESTED_PROBE_MAX_FINDINGS = 3;
+const NESTED_PREVIEW_FILES = 8;
+
+/**
+ * When the workspace root has no usable `.mentu/recipes`, look ONE level
+ * down for nested `<subproject>/.mentu/recipes` directories — the real
+ * layout when a workspace contains a Mentu subproject. Purely informative:
+ * the daemon's catalog is root-scoped by design, so nested recipes are
+ * REPORTED with their provenance (never mixed into selection, never
+ * presented as belonging to the workspace root). Bounded: one root
+ * listing plus at most 24 directory probes.
+ */
+export async function probeNestedMentuRecipes(
+  fileBridge: FileBridge | null,
+  input: { hostId: string | null; workspaceId: string },
+): Promise<MentuNestedRecipeFinding[]> {
+  if (!fileBridge || input.hostId === null) return [];
+  const root = await fileBridge.fileList({
+    hostId: input.hostId,
+    workspaceId: input.workspaceId,
+    path: "",
+    includeHidden: true,
+  });
+  if (!root.ok) return [];
+  const candidates = root.result.entries
+    .filter(
+      (entry) =>
+        entry.kind === "directory" &&
+        !entry.name.startsWith(".") &&
+        !NESTED_PROBE_SKIP_DIRS.has(entry.name.toLowerCase()),
+    )
+    .map((entry) => entry.name)
+    .sort()
+    .slice(0, NESTED_PROBE_MAX_DIRS);
+  const findings: MentuNestedRecipeFinding[] = [];
+  for (const dir of candidates) {
+    if (findings.length >= NESTED_PROBE_MAX_FINDINGS) break;
+    const nested = await fileBridge.fileList({
+      hostId: input.hostId,
+      workspaceId: input.workspaceId,
+      path: `${dir}/.mentu/recipes`,
+    });
+    if (!nested.ok) continue;
+    const fileNames = nested.result.entries
+      .filter((entry) => entry.kind === "file" && entry.name.toLowerCase().endsWith(".json"))
+      .map((entry) => entry.name);
+    if (fileNames.length === 0) continue;
+    findings.push({
+      relativeDir: `${dir}/.mentu/recipes`,
+      total: fileNames.length,
+      fileNames: fileNames.slice(0, NESTED_PREVIEW_FILES),
+    });
+  }
+  return findings;
+}
+
 /**
  * The empty state's honest one-line verdict, from the on-disk probe plus
  * the daemon's own catalog. Pure so the copy is unit-testable.
