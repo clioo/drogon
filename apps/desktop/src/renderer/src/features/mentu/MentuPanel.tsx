@@ -10,8 +10,9 @@
 // `variant="tab"` renders the wide tab surface; both read/write the same
 // shared state.
 
-import { ExternalLink, Network, Settings2 } from "lucide-react";
+import { AlertCircle, ExternalLink, Network, Settings2 } from "lucide-react";
 import type { MentuBridge } from "../../../../shared/mentu-contract";
+import type { FileBridge } from "../../../../shared/file-contract";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
@@ -26,7 +27,12 @@ import { Textarea } from "../../components/ui/textarea";
 import { MentuRuntimeMessage } from "./MentuRuntimeMessage";
 import { RecipePane } from "./RecipePane";
 import { useMentuPaneController } from "./recipe-pane-controller";
-import { EvidenceView, GraphView } from "./recipe-pane-views";
+import {
+  EmptyRecipeState,
+  EvidenceView,
+  GraphView,
+} from "./recipe-pane-views";
+import { mentuRuntimeNote } from "./recipe-directory-state";
 import { RunControls } from "./recipe-pane-run-controls";
 
 export type MentuPanelProps = {
@@ -36,6 +42,13 @@ export type MentuPanelProps = {
   /** Opens the wide Mentu tab. Defaults to a `drogon:open-mentu-tab`
    *  window event the shell may listen for. */
   onOpenFullTab?: () => void;
+  /** Workspace files bridge for the empty state's honest directory probe
+   *  and its starter-recipe affordance; optional and degrading. */
+  fileBridge?: FileBridge | null;
+  hostId?: string | null;
+  /** Absolute workspace root, so the empty state can show the real
+   *  recipes path instead of a generic sentence. */
+  workspacePath?: string | null;
 };
 
 export const MENTU_OPEN_TAB_EVENT = "drogon:open-mentu-tab";
@@ -45,23 +58,53 @@ export function MentuPanel({
   workspaceId,
   variant = "panel",
   onOpenFullTab,
+  fileBridge = null,
+  hostId = null,
+  workspacePath = null,
 }: MentuPanelProps) {
   if (variant === "tab") {
-    return <RecipePane bridge={bridge} workspaceId={workspaceId} />;
+    return (
+      <RecipePane
+        bridge={bridge}
+        workspaceId={workspaceId}
+        fileBridge={fileBridge}
+        hostId={hostId}
+        workspacePath={workspacePath}
+      />
+    );
   }
-  return <MentuPanelBody bridge={bridge} workspaceId={workspaceId} onOpenFullTab={onOpenFullTab} />;
+  return (
+    <MentuPanelBody
+      bridge={bridge}
+      workspaceId={workspaceId}
+      onOpenFullTab={onOpenFullTab}
+      fileBridge={fileBridge}
+      hostId={hostId}
+      workspacePath={workspacePath}
+    />
+  );
 }
 
 function MentuPanelBody({
   bridge,
   workspaceId,
   onOpenFullTab,
+  fileBridge,
+  hostId,
+  workspacePath,
 }: {
   bridge: MentuBridge;
   workspaceId: string;
   onOpenFullTab?: () => void;
+  fileBridge?: FileBridge | null;
+  hostId?: string | null;
+  workspacePath?: string | null;
 }) {
-  const controller = useMentuPaneController(bridge, workspaceId);
+  const controller = useMentuPaneController(bridge, workspaceId, {
+    fileBridge,
+    hostId,
+    workspacePath,
+  });
   const showingEvidence = controller.mode === "evidence";
   const runtimeAvailable =
     controller.runtime?.available === true && controller.runtime?.lockMatches === true;
@@ -116,6 +159,23 @@ function MentuPanelBody({
           ))}
         </SelectContent>
       </Select>
+
+      {controller.selectedRecipeId && controller.invalidRecipes.length > 0 ? (
+        // Same never-silently-skipped rule as the wide tab: refused files
+        // stay named with their reasons even while a recipe is selected.
+        <p
+          className="flex shrink-0 items-start gap-1.5 text-xs text-muted-foreground"
+          role="status"
+          data-testid="recipe-invalid-banner"
+        >
+          <AlertCircle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 break-words">
+            {controller.invalidRecipes
+              .map((recipe) => `${recipe.path} — ${recipe.issue}`)
+              .join(" · ")}
+          </span>
+        </p>
+      ) : null}
 
       <div
         className="grid shrink-0 grid-cols-2 gap-1 rounded-md border border-border bg-card p-1"
@@ -211,9 +271,19 @@ function MentuPanelBody({
               ) : null}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Select a valid recipe to inspect its plan.
-            </p>
+            <EmptyRecipeState
+              invalidCount={controller.invalidCount}
+              invalidRecipes={controller.invalidRecipes}
+              directory={controller.recipesDirectory}
+              directorySummary={controller.directorySummary}
+              recipesPathLabel={controller.recipesPathLabel}
+              workspaceId={controller.workspaceId}
+              runtimeNote={mentuRuntimeNote(controller.runtime)}
+              canCreateStarter={controller.canCreateStarter}
+              creatingStarter={controller.creatingStarter}
+              createStarterError={controller.createStarterError}
+              onCreateStarter={() => void controller.createStarterRecipe()}
+            />
           )}
         </div>
       </ScrollArea>

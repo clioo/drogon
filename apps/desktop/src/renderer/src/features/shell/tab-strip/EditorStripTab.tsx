@@ -171,9 +171,14 @@ export function EditorStripTab({
       </div>
     </div>
   );
-  if (hideTooltip) return <div className={TAB_CONTAINER_WIDTH_CLASSES}>{tabRoot}</div>;
+  // Why h-full: the strip row stretches its flex items, but this width
+  // box sits between the stretched wrapper and the h-full tab root — with
+  // auto height it collapses to content height and the editor tab renders
+  // shorter than the terminal tabs next to it (the #235 browser-tab bug).
+  if (hideTooltip)
+    return <div className={`${TAB_CONTAINER_WIDTH_CLASSES} h-full`}>{tabRoot}</div>;
   return (
-    <div className={TAB_CONTAINER_WIDTH_CLASSES}>
+    <div className={`${TAB_CONTAINER_WIDTH_CLASSES} h-full`}>
       <Tooltip.Root>
         <Tooltip.Trigger asChild>{tabRoot}</Tooltip.Trigger>
         <Tooltip.Portal>

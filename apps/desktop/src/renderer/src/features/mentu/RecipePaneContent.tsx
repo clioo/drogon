@@ -18,6 +18,7 @@ import type { MentuPaneMode } from "../../../../shared/persistence-contracts/men
 import { SelectedNodeInspector } from "./recipe-pane-inspector";
 import { RunControls } from "./recipe-pane-run-controls";
 import { EmptyRecipeState, EvidenceView, GraphView, MetricsView } from "./recipe-pane-views";
+import { mentuRuntimeNote } from "./recipe-directory-state";
 import type { MentuPaneController } from "./recipe-pane-controller";
 import { statusLabel } from "./run-status";
 
@@ -36,24 +37,39 @@ export function RecipePaneContent({
         onValueChange={(value) => controller.setMode(value as MentuPaneMode)}
         className="min-h-0 flex-1"
       >
-        <TabsList variant="line" className="w-full justify-start border-b border-border">
-          <TabsTrigger value="graph">
-            <Network />
-            Graph
-          </TabsTrigger>
-          <TabsTrigger value="run">
-            <Play />
-            Run
-          </TabsTrigger>
-          <TabsTrigger value="evidence">
-            <FileJson />
-            Evidence
-          </TabsTrigger>
-          <TabsTrigger value="metrics">
-            <Gauge />
-            Metrics
-          </TabsTrigger>
-        </TabsList>
+        {/* Why the scroll wrapper: the four view triggers keep their label
+            width (whitespace-nowrap), so in a narrow main column the list
+            would overflow the recipe surface and paint beneath the right
+            sidebar, whose rows then intercept every click aimed at the
+            hidden triggers (the packaged-acceptance Evidence failure).
+            Scrolling keeps every view inside this surface's own column and
+            reachable at the parity widths. The 1px bottom padding keeps the
+            active trigger's underline (it paints 1px past the list's border
+            box) inside the clip; the negative margin hands that pixel
+            straight back so layout matches the source exactly. */}
+        <div className="recipe-pane-view-tabs -mb-px min-w-0 overflow-x-auto pb-px">
+          <TabsList
+            variant="line"
+            className="w-fit min-w-full justify-start border-b border-border"
+          >
+            <TabsTrigger value="graph">
+              <Network />
+              Graph
+            </TabsTrigger>
+            <TabsTrigger value="run">
+              <Play />
+              Run
+            </TabsTrigger>
+            <TabsTrigger value="evidence">
+              <FileJson />
+              Evidence
+            </TabsTrigger>
+            <TabsTrigger value="metrics">
+              <Gauge />
+              Metrics
+            </TabsTrigger>
+          </TabsList>
+        </div>
         <TabsContent value="graph" className="min-h-0 flex-1 pt-3">
           {controller.loading || controller.loadingRecipe ? (
             <div className="space-y-3" data-testid="recipe-loading">
@@ -116,7 +132,19 @@ export function RecipePaneContent({
               </div>
             </div>
           ) : (
-            <EmptyRecipeState invalidCount={controller.invalidCount} />
+            <EmptyRecipeState
+              invalidCount={controller.invalidCount}
+              invalidRecipes={controller.invalidRecipes}
+              directory={controller.recipesDirectory}
+              directorySummary={controller.directorySummary}
+              recipesPathLabel={controller.recipesPathLabel}
+              workspaceId={controller.workspaceId}
+              runtimeNote={mentuRuntimeNote(controller.runtime)}
+              canCreateStarter={controller.canCreateStarter}
+              creatingStarter={controller.creatingStarter}
+              createStarterError={controller.createStarterError}
+              onCreateStarter={() => void controller.createStarterRecipe()}
+            />
           )}
         </TabsContent>
         <TabsContent value="run" className="min-h-0 flex-1 pt-3">

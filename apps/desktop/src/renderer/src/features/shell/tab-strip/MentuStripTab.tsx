@@ -128,9 +128,16 @@ export function MentuStripTab({
       )}
     </div>
   );
-  if (hideTooltip) return <div className={TAB_CONTAINER_WIDTH_CLASSES}>{tabRoot}</div>;
+  // Why h-full: the strip row stretches its flex items, but this width
+  // box sits between the stretched wrapper and the h-full tab root — with
+  // auto height it collapses to content height and the Mentu tab renders
+  // shorter than the terminal tabs next to it (the #235 browser-tab bug,
+  // reintroduced here when the tab moved into the strip). Terminal tabs
+  // have no middle box, so their h-full root stretches directly.
+  if (hideTooltip)
+    return <div className={`${TAB_CONTAINER_WIDTH_CLASSES} h-full`}>{tabRoot}</div>;
   return (
-    <div className={TAB_CONTAINER_WIDTH_CLASSES}>
+    <div className={`${TAB_CONTAINER_WIDTH_CLASSES} h-full`}>
       <Tooltip.Root>
         <Tooltip.Trigger asChild>{tabRoot}</Tooltip.Trigger>
         <Tooltip.Portal>

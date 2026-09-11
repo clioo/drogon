@@ -636,6 +636,18 @@
   width: 0;
   height: 0;
 }
+/* Same suppression for the Mentu recipe surface's view tabs, which scroll
+   horizontally when the main column is too narrow to fit all four labels
+   (keeps the surface inside its own column instead of painting under the
+   right sidebar). */
+.recipe-pane-view-tabs {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.recipe-pane-view-tabs::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
 /* R6-B "+" static create menu rows (tab-bar-static-create-menu recipe:
    icon + label + trailing hint). Radix renders the items unstyled, so the
    flex row and the muted trailing hint live here. */
