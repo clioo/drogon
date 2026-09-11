@@ -283,6 +283,7 @@ import {
   windowMentuBridge,
 } from "./mentu-mount";
 import { MENTU_OPEN_TAB_EVENT, MentuPanel } from "./features/mentu/MentuPanel";
+import { WorkGraphPane } from "./features/work-graph/WorkGraphPane";
 import { mentuStore } from "./features/mentu/mentu-store";
 import { pickMentuMainSession } from "./features/mentu/mentu-run-dispatch";
 import { refreshWorktreeIssueLinks } from "./features/tasks/issue-links";
@@ -4836,11 +4837,14 @@ export function App() {
                   )
                 ) : null}
               </div>
-              {/* Mentu as a tab (fixes the reported bug): the wide recipe
-                  surface renders in the tab area, exactly like the browser
-                  and editor panes above, so the tab strip stays mounted and
-                  keeps its membership. The panel is the `variant="tab"`
-                  MentuPanel the full-page route used to render, unchanged.
+              {/* Mentu as a tab (fixes the reported bug): the tab area
+                  renders the WORK GRAPH — the tab's content the owner
+                  replaced (the recipe surface stays in the right-sidebar
+                  Mentu panel). The graph reads <workspace>/.drogon/graph.json
+                  through the files bridge: `intent` is the human's plan,
+                  `state` is what the daemon observed, and the pane is
+                  strictly read-only. The tab strip stays mounted and keeps
+                  its membership exactly like the browser and editor panes.
                   Why overflow-hidden: the surface must never paint outside
                   this column — an overflowing child used to slide beneath
                   the right sidebar, whose rows then intercepted the clicks
@@ -4857,14 +4861,10 @@ export function App() {
               >
                 {mentuAlive && current ? (
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                    <MentuPanel
-                      bridge={mentuGatedBridge}
-                      workspaceId={current.id}
-                      variant="tab"
+                    <WorkGraphPane
                       fileBridge={filesGatedBridge}
                       hostId={status?.hostId ?? null}
-                      workspacePath={current.path}
-                      dispatchContext={mentuDispatchContext}
+                      workspaceId={current.id}
                     />
                   </div>
                 ) : null}
