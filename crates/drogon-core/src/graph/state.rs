@@ -107,9 +107,18 @@ fn project_node(
         .find(|step| step.label == mapping.step_label);
     let status = project_status(run, step, live(&run.id));
     let mut state = base(node_id, status, run.id.clone(), Some(run.clone()));
+    // `run.error` belongs to the RUN, not to every node mapped into it. Falling
+    // back to it unconditionally stamped the one failing step's message onto
+    // each sibling — including the nodes that succeeded — inside the `state`
+    // half that exists to be observed truth. A node inherits the run-level
+    // message only when the node itself failed and its own step recorded no
+    // reason; every other status keeps its own explicit account below.
     state.last_error = step
         .and_then(|step| step.error.clone())
-        .or_else(|| run.error.clone())
+        .or_else(|| match status {
+            GraphNodeStatus::Failed => run.error.clone(),
+            _ => None,
+        })
         .or_else(|| match status {
             GraphNodeStatus::Unverifiable => Some(
                 "The daemon lost contact with this node's run; its outcome is unverifiable.".into(),
@@ -403,6 +412,84 @@ mod tests {
         );
         assert_eq!(state.nodes[0].status, GraphNodeStatus::Succeeded);
         assert_eq!(state.nodes[1].status, GraphNodeStatus::Failed);
+    }
+
+    #[test]
+    fn the_run_level_error_is_not_stamped_onto_nodes_that_did_not_fail() {
+        // A graph QA pass found the one failing step's message rendered red as
+        // "Last error" on every sibling node, including the ones that
+        // succeeded, because the projection fell back to `run.error`
+        // unconditionally. `state` is the observed-truth half: a node that
+        // succeeded has no error of its own to report.
+        let mappings = vec![
+            NodeRunMapping {
+                node_id: "n1".into(),
+                run_id: "r1".into(),
+                step_label: "n1".into(),
+            },
+            NodeRunMapping {
+                node_id: "n2".into(),
+                run_id: "r1".into(),
+                step_label: "n2".into(),
+            },
+        ];
+        let mut failing = run(
+            "r1",
+            MentuRunStatus::Failed,
+            vec![
+                step("n1", MentuRunStatus::Succeeded),
+                step("n2", MentuRunStatus::Failed),
+            ],
+        );
+        failing.error = Some("step n2 exited 1".into());
+        let state = project(
+            &intent(&["n1", "n2"]),
+            &mappings,
+            &runs(vec![failing]),
+            &live_always,
+            "now",
+        );
+        assert_eq!(state.nodes[0].status, GraphNodeStatus::Succeeded);
+        assert_eq!(
+            state.nodes[0].last_error, None,
+            "a succeeded node must not inherit the run's failure message"
+        );
+        assert_eq!(state.nodes[1].status, GraphNodeStatus::Failed);
+        assert_eq!(
+            state.nodes[1].last_error.as_deref(),
+            Some("step n2 exited 1"),
+            "the node that actually failed still reports the run-level reason \
+             when its own step recorded none"
+        );
+    }
+
+    #[test]
+    fn a_blocked_node_reports_its_own_reason_not_the_upstream_error() {
+        // Same defect, the blocked path: the upstream's message used to win
+        // over this node's honest "it never started" account.
+        let mappings = vec![NodeRunMapping {
+            node_id: "n2".into(),
+            run_id: "r1".into(),
+            step_label: "n2".into(),
+        }];
+        let mut failing = run(
+            "r1",
+            MentuRunStatus::Failed,
+            vec![step("n2", MentuRunStatus::Cancelled)],
+        );
+        failing.error = Some("upstream n1 exited 1".into());
+        let state = project(
+            &intent(&["n2"]),
+            &mappings,
+            &runs(vec![failing]),
+            &live_always,
+            "now",
+        );
+        assert_eq!(state.nodes[0].status, GraphNodeStatus::Blocked);
+        assert_eq!(
+            state.nodes[0].last_error.as_deref(),
+            Some("An upstream node failed, so this node never started.")
+        );
     }
 
     #[test]
