@@ -138,6 +138,15 @@ pub enum Command {
         #[command(subcommand)]
         action: MentuAction,
     },
+    /// The work graph (`.drogon/graph.json`): read the human-owned `intent`
+    /// half and the daemon-owned `state` half, compile a node plus its
+    /// transitive dependencies into the Mentu recipe the system runs, and
+    /// resume/retry a single node without redoing the graph (requires the
+    /// service capability graph.v1).
+    Graph {
+        #[command(subcommand)]
+        action: GraphAction,
+    },
     /// Integration secrets: seal a value into the daemon's 0600 store or
     /// list configured names (user-only; values are read from stdin for
     /// `set`, never echoed, and never appear in argv; requires the service
@@ -276,6 +285,163 @@ pub enum MentuAction {
     Cancel {
         #[arg(long, value_name = "ID")]
         run: String,
+    },
+    /// Rerun the steps of a past run that did not succeed, through the
+    /// runtime's own `resume` (the same run directory, new attempts
+    /// appended). Unlike `mentu run` this starts no new recipe run.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli mentu resume --run <ID> [--follow] [--timeout-ms <MS>]\nValid flags: --data-dir, --follow, --help, --json, --request-id, --retry-request, --run, --timeout-ms"
+    )]
+    Resume {
+        #[arg(long, value_name = "ID")]
+        run: String,
+        /// Poll until the relaunched run reaches a terminal status
+        #[arg(long)]
+        follow: bool,
+        /// Bound for `--follow`, in ms (1..=3600000; default 900000)
+        #[arg(long, value_name = "MS", default_value_t = 900_000)]
+        timeout_ms: u64,
+    },
+    /// Rerun exactly ONE step of a past run, through the runtime's own
+    /// `retry-step <run-id> <label>`. The failing node is fixed without
+    /// redoing the rest of the graph.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli mentu retry-step --run <ID> --step <LABEL> [--follow] [--timeout-ms <MS>]\nValid flags: --data-dir, --follow, --help, --json, --request-id, --retry-request, --run, --step, --timeout-ms"
+    )]
+    RetryStep {
+        #[arg(long, value_name = "ID")]
+        run: String,
+        /// Exact step label to rerun (the graph compiler emits the node id
+        /// as its label)
+        #[arg(long, value_name = "LABEL")]
+        step: String,
+        /// Poll until the relaunched run reaches a terminal status
+        #[arg(long)]
+        follow: bool,
+        /// Bound for `--follow`, in ms (1..=3600000; default 900000)
+        #[arg(long, value_name = "MS", default_value_t = 900_000)]
+        timeout_ms: u64,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GraphAction {
+    /// Read the whole graph: the human-owned `intent` half and the
+    /// daemon-owned `state` half, projected from real observation (a
+    /// `running` node is only reported when a live process is confirmed;
+    /// loss of contact is `unverifiable`).
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli graph read --workspace <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --workspace"
+    )]
+    Read {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+    },
+    /// Replace the human-owned `intent` half from a JSON file (or stdin with
+    /// `-`). The daemon-owned `state` half is preserved; a payload that
+    /// carries `state` is refused, never silently ignored.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli graph write-intent --workspace <ID> --file <PATH|->\nValid flags: --data-dir, --file, --help, --json, --request-id, --retry-request, --workspace"
+    )]
+    WriteIntent {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        /// Path to a JSON intent file, or `-` for stdin
+        #[arg(long, value_name = "PATH")]
+        file: String,
+    },
+    /// Compile a node (or explicit selection) plus its transitive
+    /// dependencies into a Mentu recipe and validate it with the pinned
+    /// runtime's own `check`/`doctor --strict`. Writes the compiled recipe
+    /// to `.mentu/recipes`; runs nothing.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli graph compile --workspace <ID> (--node <ID> | --nodes <ID,ID>) [--output <PATH>]\nValid flags: --data-dir, --help, --json, --node, --nodes, --output, --request-id, --retry-request, --workspace"
+    )]
+    Compile {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        /// Target node: the node plus its transitive dependencies
+        #[arg(long, value_name = "ID", conflicts_with = "nodes")]
+        node: Option<String>,
+        /// Explicit selection: comma-separated node ids, still closed over
+        /// their dependencies
+        #[arg(long, value_name = "ID,ID")]
+        nodes: Option<String>,
+        /// Write the emitted recipe JSON to this path (default: stdout)
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
+    },
+    /// Compile and run a node's subgraph through the daemon's one execution
+    /// path (`mentu.run` on the approved, validated recipe). Refuses a graph
+    /// the runtime would not validate, and a node that already has a live
+    /// run.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli graph run --workspace <ID> --node <ID> [--follow] [--timeout-ms <MS>]\nValid flags: --data-dir, --follow, --help, --json, --node, --request-id, --retry-request, --timeout-ms, --workspace"
+    )]
+    Run {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        node: String,
+        /// Poll until the run reaches a terminal status
+        #[arg(long)]
+        follow: bool,
+        /// Bound for `--follow`, in ms (1..=3600000; default 900000)
+        #[arg(long, value_name = "MS", default_value_t = 900_000)]
+        timeout_ms: u64,
+    },
+    /// Resume the node's latest run (rerun only the steps that did not
+    /// succeed) without redoing the graph.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli graph resume --workspace <ID> --node <ID> [--follow] [--timeout-ms <MS>]\nValid flags: --data-dir, --follow, --help, --json, --node, --request-id, --retry-request, --timeout-ms, --workspace"
+    )]
+    Resume {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        node: String,
+        #[arg(long)]
+        follow: bool,
+        #[arg(long, value_name = "MS", default_value_t = 900_000)]
+        timeout_ms: u64,
+    },
+    /// Retry exactly one node's step of its latest run, without redoing the
+    /// graph. `--step` defaults to the node id (the label the compiler
+    /// emits).
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli graph retry-step --workspace <ID> --node <ID> [--step <LABEL>] [--follow] [--timeout-ms <MS>]\nValid flags: --data-dir, --follow, --help, --json, --node, --request-id, --retry-request, --step, --timeout-ms, --workspace"
+    )]
+    RetryStep {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        node: String,
+        #[arg(long, value_name = "LABEL")]
+        step: Option<String>,
+        #[arg(long)]
+        follow: bool,
+        #[arg(long, value_name = "MS", default_value_t = 900_000)]
+        timeout_ms: u64,
+    },
+    /// Read one node's observed state (the same projection `graph read`
+    /// returns, without the whole file).
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli graph node-state --workspace <ID> --node <ID>\nValid flags: --data-dir, --help, --json, --node, --request-id, --retry-request, --workspace"
+    )]
+    NodeState {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        node: String,
     },
 }
 
@@ -1053,6 +1219,84 @@ impl Cli {
                     {
                         return Err(CliError::Usage("--limit must be in 1..=200".into()));
                     }
+                }
+                MentuAction::Resume {
+                    run, timeout_ms, ..
+                } => {
+                    require_nonempty("run", run)?;
+                    validate_follow_timeout(*timeout_ms)?;
+                }
+                MentuAction::RetryStep {
+                    run,
+                    step,
+                    timeout_ms,
+                    ..
+                } => {
+                    require_nonempty("run", run)?;
+                    require_nonempty("step", step)?;
+                    validate_follow_timeout(*timeout_ms)?;
+                }
+            },
+            Command::Graph { action } => match action {
+                GraphAction::Read { workspace } | GraphAction::WriteIntent { workspace, .. } => {
+                    require_nonempty("workspace", workspace)?;
+                }
+                GraphAction::NodeState { workspace, node } => {
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("node", node)?;
+                }
+                GraphAction::Compile {
+                    workspace,
+                    node,
+                    nodes,
+                    ..
+                } => {
+                    require_nonempty("workspace", workspace)?;
+                    match (node, nodes) {
+                        (Some(node), None) => require_nonempty("node", node)?,
+                        (None, Some(nodes)) => {
+                            if nodes.split(',').all(|id| id.trim().is_empty()) {
+                                return Err(CliError::Usage(
+                                    "graph compile --nodes needs at least one node id".into(),
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(CliError::Usage(
+                                "graph compile takes exactly one of --node or --nodes".into(),
+                            ));
+                        }
+                    }
+                }
+                GraphAction::Run {
+                    workspace,
+                    node,
+                    timeout_ms,
+                    ..
+                }
+                | GraphAction::Resume {
+                    workspace,
+                    node,
+                    timeout_ms,
+                    ..
+                } => {
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("node", node)?;
+                    validate_follow_timeout(*timeout_ms)?;
+                }
+                GraphAction::RetryStep {
+                    workspace,
+                    node,
+                    step,
+                    timeout_ms,
+                    ..
+                } => {
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("node", node)?;
+                    if let Some(step) = step {
+                        require_nonempty("step", step)?;
+                    }
+                    validate_follow_timeout(*timeout_ms)?;
                 }
             },
             Command::Automation { action } => match action {

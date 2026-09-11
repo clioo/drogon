@@ -28,6 +28,8 @@ mod coordination_worker_control;
 mod coordination_worker_retain;
 mod coordination_workers;
 mod desktop_relay_rpc;
+pub mod graph;
+mod graph_rpc;
 pub mod jira;
 pub mod locale_ordering;
 pub mod mentu;
@@ -43,9 +45,9 @@ pub mod git;
 pub mod git_process;
 mod git_rpc;
 pub mod git_worktree;
-pub mod integrations;
 mod harness;
 mod hooks;
+pub mod integrations;
 mod project;
 mod project_card_revision;
 mod quick_session_delete;
@@ -130,6 +132,11 @@ const CAPABILITIES: &[&str] = &[
     // R5-S: Mentu (recipes, content-bound approval, execution through the
     // pinned mentu-recipes runtime, run evidence, retry).
     drogon_protocol::mentu::MENTU_CAPABILITY,
+    // The work graph (`.drogon/graph.json`): the two-halves store, the
+    // graph→recipe compiler and node-level resume/retry. The graph replaces
+    // the Mentu tab as the authoring surface; the runtime underneath is
+    // unchanged.
+    drogon_protocol::graph::GRAPH_CAPABILITY,
 ];
 
 pub(crate) fn now_rfc3339() -> String {
@@ -583,7 +590,18 @@ impl Engine {
             "mentu.run_status" => self.mentu_run_status(&request.params),
             "mentu.run_evidence" => self.mentu_run_evidence(&request.params),
             "mentu.retry" => self.mentu_retry(request),
+            "mentu.retry_step" => self.mentu_retry_step(request),
             "mentu.cancel" => self.mentu_cancel(request),
+            // The work graph. `graph.read`/`graph.node_state`/`graph.compile`
+            // are read-only projections (they write only the daemon-owned
+            // `state` half or the compiled recipe); the rest mutate.
+            "graph.read" => self.graph_read(&request.params),
+            "graph.node_state" => self.graph_node_state(&request.params),
+            "graph.compile" => self.graph_compile(&request.params),
+            "graph.write_intent" => self.graph_write_intent(request),
+            "graph.run" => self.graph_run(request),
+            "graph.resume_node" => self.graph_resume_node(request),
+            "graph.retry_step" => self.graph_retry_step(request),
             "orchestration.runCreate"
             | "orchestration.runUse"
             | "orchestration.runBind"

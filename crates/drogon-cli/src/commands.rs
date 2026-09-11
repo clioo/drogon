@@ -10,9 +10,9 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    AutomationAction, BotAction, BrowserAction, Cli, Command, HarnessAction, InternalAction,
-    MentuAction, ProjectAction, SecretsAction, TerminalAction, WaitFor, WorkspaceAction,
-    WorktreeAction,
+    AutomationAction, BotAction, BrowserAction, Cli, Command, GraphAction, HarnessAction,
+    InternalAction, MentuAction, ProjectAction, SecretsAction, TerminalAction, WaitFor,
+    WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
@@ -32,6 +32,9 @@ use crate::output;
 use crate::paths;
 use crate::skills;
 use crate::transport::DEFAULT_TIMEOUT;
+use drogon_protocol::graph::{
+    GraphNodeStateResult, GraphResult, GraphResumeResult, GraphRunResult,
+};
 
 /// What one successful (RPC-level) invocation printed and how the process
 /// should exit. Most commands exit 0; `terminal close` exits 1 when the
@@ -102,6 +105,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Terminal { action } => terminal(&client, &request_id, json, action).await,
         Command::Browser { action } => browser(&client, &request_id, json, action).await,
         Command::Mentu { action } => mentu(&client, &request_id, json, action).await,
+        Command::Graph { action } => graph(&client, &request_id, json, action).await,
         Command::Harness { action } => harness(&client, &request_id, json, action).await,
         Command::Automation { action } => automation(&client, &request_id, json, action).await,
         Command::Bot { action } => match action {
@@ -1099,7 +1103,302 @@ async fn mentu(
                 None,
             )
         }
+        MentuAction::Resume {
+            run,
+            follow,
+            timeout_ms,
+        } => {
+            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            // The runtime's own `resume`: rerun only the steps that did not
+            // succeed. `mentu.retry` is that verb (kept for the panel).
+            let call = client
+                .call(
+                    "mentu.retry",
+                    json!({ "runId": run }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let started: MentuRunResult =
+                Client::decode_checked(&call, "mentu.retry", check_mentu_run_result)?;
+            if !follow {
+                return emit(
+                    call,
+                    json,
+                    || output::mentu_run_started(&started.run),
+                    0,
+                    None,
+                );
+            }
+            mentu_follow(client, request_id, json, call, started.run, *timeout_ms).await
+        }
+        MentuAction::RetryStep {
+            run,
+            step,
+            follow,
+            timeout_ms,
+        } => {
+            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            let call = client
+                .call(
+                    "mentu.retry_step",
+                    json!({ "runId": run, "step": step }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let started: MentuRunResult =
+                Client::decode_checked(&call, "mentu.retry_step", check_mentu_run_result)?;
+            if !follow {
+                return emit(
+                    call,
+                    json,
+                    || output::mentu_run_started(&started.run),
+                    0,
+                    None,
+                );
+            }
+            mentu_follow(client, request_id, json, call, started.run, *timeout_ms).await
+        }
     }
+}
+
+/// The work graph: `graph.read`/`graph.node_state`/`graph.compile` are
+/// read-only, `graph.run`/`graph.resume_node`/`graph.retry_step` mutate.
+/// Everything here goes through the daemon; this CLI adds no engine and
+/// never compiles a recipe itself.
+async fn graph(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &GraphAction,
+) -> Result<RunOutcome, CliError> {
+    match action {
+        GraphAction::Read { workspace } => {
+            capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
+            let call = client
+                .call(
+                    "graph.read",
+                    json!({ "workspaceId": workspace }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let decoded: GraphResult = Client::decode(&call, "graph.read")?;
+            emit(call, json, || output::graph_read(&decoded.graph), 0, None)
+        }
+        GraphAction::NodeState { workspace, node } => {
+            capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
+            let call = client
+                .call(
+                    "graph.node_state",
+                    json!({ "workspaceId": workspace, "nodeId": node }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let decoded: GraphNodeStateResult = Client::decode(&call, "graph.node_state")?;
+            emit(
+                call,
+                json,
+                || output::graph_node_state(&decoded.state),
+                0,
+                None,
+            )
+        }
+        GraphAction::WriteIntent { workspace, file } => {
+            capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
+            let intent = read_intent(request_id, file)?;
+            let call = client
+                .call(
+                    "graph.write_intent",
+                    json!({ "workspaceId": workspace, "intent": intent }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let decoded: GraphResult = Client::decode(&call, "graph.write_intent")?;
+            emit(call, json, || output::graph_read(&decoded.graph), 0, None)
+        }
+        GraphAction::Compile {
+            workspace,
+            node,
+            nodes,
+            output: out_path,
+        } => {
+            capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
+            let call = client
+                .call(
+                    "graph.compile",
+                    compile_params(workspace, node, nodes),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let compiled: drogon_protocol::graph::GraphCompileResult =
+                Client::decode(&call, "graph.compile")?;
+            if let Some(path) = out_path {
+                let source = serde_json::to_string_pretty(&compiled.recipe).map_err(|err| {
+                    CliError::local(
+                        crate::error::internal_error(format!("cannot encode recipe: {err}")),
+                        request_id.to_string(),
+                    )
+                })?;
+                std::fs::write(path, source).map_err(|err| {
+                    CliError::local(
+                        crate::error::internal_error(format!(
+                            "cannot write {}: {err}",
+                            path.display()
+                        )),
+                        request_id.to_string(),
+                    )
+                })?;
+            }
+            emit(call, json, || output::graph_compiled(&compiled), 0, None)
+        }
+        GraphAction::Run {
+            workspace,
+            node,
+            follow,
+            timeout_ms,
+        } => {
+            capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
+            let call = client
+                .call(
+                    "graph.run",
+                    json!({ "workspaceId": workspace, "nodeId": node }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let started: GraphRunResult = Client::decode(&call, "graph.run")?;
+            if !follow {
+                let run = to_client_run(started.run, request_id)?;
+                return emit(
+                    call,
+                    json,
+                    || output::graph_run_started(&started.compile, &run),
+                    0,
+                    None,
+                );
+            }
+            let run = to_client_run(started.run, request_id)?;
+            mentu_follow(client, request_id, json, call, run, *timeout_ms).await
+        }
+        GraphAction::Resume {
+            workspace,
+            node,
+            follow,
+            timeout_ms,
+        } => {
+            capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
+            let call = client
+                .call(
+                    "graph.resume_node",
+                    json!({ "workspaceId": workspace, "nodeId": node }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let resumed: GraphResumeResult = Client::decode(&call, "graph.resume_node")?;
+            let run = to_client_run(resumed.run, request_id)?;
+            if !follow {
+                return emit(call, json, || output::mentu_run_started(&run), 0, None);
+            }
+            mentu_follow(client, request_id, json, call, run, *timeout_ms).await
+        }
+        GraphAction::RetryStep {
+            workspace,
+            node,
+            step,
+            follow,
+            timeout_ms,
+        } => {
+            capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
+            let mut params = json!({ "workspaceId": workspace, "nodeId": node });
+            if let Some(step) = step {
+                params["step"] = json!(step);
+            }
+            let call = client
+                .call("graph.retry_step", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let resumed: GraphResumeResult = Client::decode(&call, "graph.retry_step")?;
+            let run = to_client_run(resumed.run, request_id)?;
+            if !follow {
+                return emit(call, json, || output::mentu_run_started(&run), 0, None);
+            }
+            mentu_follow(client, request_id, json, call, run, *timeout_ms).await
+        }
+    }
+}
+
+/// Rebuilds the CLI's own `MentuRun` view from a protocol `MentuRun` (the
+/// graph results carry the daemon's protocol type). The wire spellings are
+/// identical, so this is a strict round trip; a mismatch is a protocol bug,
+/// never guessed at.
+fn to_client_run(
+    run: drogon_protocol::mentu::MentuRun,
+    request_id: &str,
+) -> Result<MentuRun, CliError> {
+    let value = serde_json::to_value(run).map_err(|err| {
+        CliError::local(
+            crate::error::internal_error(format!("cannot encode run: {err}")),
+            request_id.to_string(),
+        )
+    })?;
+    serde_json::from_value(value).map_err(|err| {
+        CliError::local(
+            crate::error::internal_error(format!("cannot decode run: {err}")),
+            request_id.to_string(),
+        )
+    })
+}
+
+fn compile_params(workspace: &str, node: &Option<String>, nodes: &Option<String>) -> Value {
+    let mut params = json!({ "workspaceId": workspace });
+    if let Some(node) = node {
+        params["nodeId"] = json!(node);
+    }
+    if let Some(nodes) = nodes {
+        let ids: Vec<&str> = nodes
+            .split(',')
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .collect();
+        params["nodeIds"] = json!(ids);
+    }
+    params
+}
+
+/// Reads a graph intent JSON document from a path or stdin (`-`). The bytes
+/// are validated by the daemon, not here.
+fn read_intent(request_id: &str, file: &str) -> Result<Value, CliError> {
+    let text = if file == "-" {
+        let mut buffer = String::new();
+        use std::io::Read as _;
+        std::io::stdin()
+            .read_to_string(&mut buffer)
+            .map_err(|err| {
+                CliError::local(
+                    crate::error::internal_error(format!("cannot read stdin: {err}")),
+                    request_id.to_string(),
+                )
+            })?;
+        buffer
+    } else {
+        std::fs::read_to_string(file).map_err(|err| {
+            CliError::local(
+                crate::error::internal_error(format!("cannot read {file}: {err}")),
+                request_id.to_string(),
+            )
+        })?
+    };
+    serde_json::from_str(&text).map_err(|err| {
+        CliError::local(
+            crate::error::invalid_argument(format!("intent is not valid JSON: {err}")),
+            request_id.to_string(),
+        )
+    })
 }
 
 /// Resolves the recipe's pending approval, or refuses.
