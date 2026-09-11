@@ -22,7 +22,7 @@ function fixtureDocument(state: WorkGraphDocument["state"]["nodes"]): WorkGraphD
           id: "n0",
           title: "Leader",
           harness: "pi",
-          model: null,
+          model: "",
           dependsOn: [],
           prompt: "",
           enabled: true,

@@ -8,9 +8,16 @@
 // existing Mentu graph rendering (`features/mentu/recipe-pane-views.tsx`)
 // rather than any new graph library.
 //
+// Evidence lives ON the node. The daemon embeds the run-record STEP in the
+// state half's `evidence` (`{ runId, mentuRunId, step }` — see
+// `crates/drogon-core/src/graph/state.rs`); the step's stdout/stderr
+// CONTENT is not part of the file, so the inspector resolves it through
+// the EXISTING `mentu.run_evidence` RPC using the state node's run id —
+// the same seam the Mentu Evidence view uses. No invented paths.
+//
 // Honesty rules, non-negotiable (see shared/work-graph-contract.ts):
 //   - every status, timestamp, stream and token value renders EXACTLY
-//     what the daemon's state records carry — the view estimates nothing;
+//     what the daemon's records carry — the view estimates nothing;
 //   - `unverifiable` is rendered as its own outcome (loss of contact),
 //     never folded into failed or succeeded;
 //   - a shell node's token/cost metrics are NOT APPLICABLE (a distinct
@@ -20,10 +27,10 @@
 //
 // Phase 1 is read-only: this pane performs no writes of any kind, to
 // `state` or to `intent`. Per-node retry/resume and intent editing arrive
-// with the backend RPCs (phase 2) behind capability-shaped optional
-// bridges — never invented paths.
+// with the backend's graph.* RPCs (landed daemon-side in PR #444) behind
+// a preload bridge — never invented paths.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertCircle,
@@ -41,7 +48,12 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { FileBridge } from "../../../../shared/file-contract";
+import type {
+  MentuBridge,
+  MentuRunEvidenceResult,
+} from "../../../../shared/mentu-contract";
 import {
+  intentModel,
   isShellHarness,
   stateNodeFor,
   type WorkGraphDocument,
@@ -50,15 +62,9 @@ import {
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
-import {
-  dependencyTitles,
-  type WorkGraphLayout,
-} from "./work-graph-layout";
+import { dependencyTitles, type WorkGraphLayout } from "./work-graph-layout";
 import { buildWorkGraphLayout } from "./work-graph-layout";
-import {
-  formatDurationMs,
-  summarizeWorkGraph,
-} from "./work-graph-metrics";
+import { formatDurationMs, summarizeWorkGraph } from "./work-graph-metrics";
 import { useWorkGraphSource } from "./work-graph-source";
 import {
   workGraphStatusLabel,
@@ -108,41 +114,62 @@ function MetricCard({
   );
 }
 
-/** One stdio stream of a node's evidence: content in a scrollable block
- *  with its recorded path. Nothing renders when the state carries neither
- *  content nor path — the evidence header already says what is missing. */
+/** One stdio stream resolved for the node's run through
+ *  `mentu.run_evidence`: content in a scrollable block, the daemon's
+ *  truncation reason spelled out with the full path, read failures as
+ *  muted text. Mirrors the Mentu Evidence view's rendering. */
 function EvidenceStream({
   label,
-  content,
-  path,
+  output,
 }: {
   label: string;
-  content: string | null | undefined;
-  path: string | null | undefined;
+  output: { content: string | null; path: string | null; error: string | null };
 }): React.JSX.Element | null {
-  if ((content === null || content === undefined) && !path) return null;
-  return (
-    <div className="mt-2 min-w-0">
-      <p className="text-muted-foreground">
-        {label}
-        {content ? "" : " (no content recorded)"}
-      </p>
-      {content ? (
+  if (
+    (output.content === null || output.content === undefined) &&
+    !output.path &&
+    !output.error
+  ) {
+    return null;
+  }
+  if (output.content !== null && output.content !== undefined && output.content.length > 0) {
+    const truncated = output.error === "content_truncated";
+    return (
+      <div className="mt-2 min-w-0">
+        <p className="text-muted-foreground">
+          {label}
+          {truncated ? " (truncated to the first 512 KiB)" : ""}
+        </p>
         <pre
           aria-label={`${label} output`}
           className="mt-1 max-h-48 overflow-auto rounded-md border border-border bg-muted/40 p-2 font-mono whitespace-pre-wrap break-words text-foreground"
         >
-          {content}
+          {output.content}
         </pre>
-      ) : null}
-      {path ? <p className="mt-1 font-mono text-muted-foreground">{path}</p> : null}
+        {truncated && output.path ? (
+          <p className="mt-1 text-muted-foreground">Full output at {output.path}</p>
+        ) : null}
+      </div>
+    );
+  }
+  if (output.error && output.error !== "content_truncated") {
+    return (
+      <p className="mt-1 text-muted-foreground">
+        {label} unavailable: {output.error}
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 min-w-0">
+      <p className="text-muted-foreground">{label} (no content recorded)</p>
+      {output.path ? <p className="mt-1 font-mono text-muted-foreground">{output.path}</p> : null}
     </div>
   );
 }
 
 /** The drift pair exactly as the task defines it: which paths the node
- *  EXPECTED versus which it CREATED. Each side renders only what the
- *  record carries; an absent side says so. */
+ *  EXPECTED versus which it CREATED, rendered only when the state record
+ *  carries one — never invented. */
 function EvidenceDrift({
   drift,
 }: {
@@ -188,15 +215,7 @@ function EvidenceDrift({
   );
 }
 
-const KNOWN_EVIDENCE_KEYS = new Set([
-  "exitCode",
-  "stdout",
-  "stderr",
-  "stdoutPath",
-  "stderrPath",
-  "drift",
-  "usage",
-]);
+const KNOWN_EVIDENCE_KEYS = new Set(["runId", "mentuRunId", "step", "drift"]);
 
 /** Evidence keys the schema does not know yet, rendered verbatim so the
  *  daemon's newer fields are spelled out — never silently dropped. */
@@ -210,7 +229,10 @@ function UnknownEvidence({
   const raw: Record<string, unknown> = {};
   for (const key of unknown) raw[key] = evidence[key];
   return (
-    <details className="mt-2 rounded-md border border-border bg-card p-2" data-testid="work-graph-node-evidence-unknown">
+    <details
+      className="mt-2 rounded-md border border-border bg-card p-2"
+      data-testid="work-graph-node-evidence-unknown"
+    >
       <summary className="cursor-pointer text-[11px] text-muted-foreground">
         {unknown.length} more evidence field{unknown.length === 1 ? "" : "s"} from the state record
       </summary>
@@ -227,11 +249,12 @@ function UnknownEvidence({
  *  evidence presence does not change which words apply. */
 function UsageLine({
   shell,
-  usage,
+  step,
 }: {
   shell: boolean;
-  usage: WorkGraphEvidence["usage"];
+  step: WorkGraphEvidence["step"];
 }): React.JSX.Element {
+  const usage = step?.usage ?? null;
   if (shell) {
     // Not applicable ≠ unavailable: a shell node HAS no model/token
     // fields by contract.
@@ -250,7 +273,7 @@ function UsageLine({
   }
   return (
     <p className="mt-2" data-testid="work-graph-node-usage">
-      <span className="text-muted-foreground">Model:</span> {usage.model ?? "unavailable"}
+      <span className="text-muted-foreground">Model:</span> {step?.model ?? "unavailable"}
       <br />
       <span className="text-muted-foreground">Input tokens:</span>{" "}
       {typeof usage.inputTokens === "number" && usage.usageKnown !== false
@@ -265,18 +288,78 @@ function UsageLine({
   );
 }
 
+type ResolvedEvidence =
+  | { kind: "none" }
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "resolved"; result: MentuRunEvidenceResult };
+
+/** Resolves the node's recorded stdout/stderr through the EXISTING
+ *  `mentu.run_evidence` RPC (the same seam the Mentu Evidence view uses),
+ *  matched to the node's compiled step label. No run id, no bridge, or a
+ *  refusal each render honestly — never as empty success. */
+function useRunEvidence(
+  mentuBridge: MentuBridge | null,
+  runId: string | null | undefined,
+  stepLabel: string | null | undefined,
+): ResolvedEvidence {
+  const [state, setState] = useState<ResolvedEvidence>({ kind: "none" });
+  useEffect(() => {
+    if (!runId || !stepLabel) {
+      setState({ kind: "none" });
+      return;
+    }
+    if (!mentuBridge?.mentuRunEvidence) {
+      setState({ kind: "error", message: "Evidence content is unavailable in this build." });
+      return;
+    }
+    let cancelled = false;
+    setState({ kind: "loading" });
+    mentuBridge
+      .mentuRunEvidence({ runId })
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.ok) {
+          setState({ kind: "error", message: result.error.message });
+          return;
+        }
+        setState({ kind: "resolved", result: result.result });
+      })
+      .catch((error: unknown) => {
+        if (!cancelled)
+          setState({
+            kind: "error",
+            message: error instanceof Error ? error.message : String(error),
+          });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mentuBridge, runId, stepLabel]);
+  return state;
+}
+
 /** The selected node's evidence and metrics, on the node: exit code,
  *  streams, drift, usage. Shell/agent distinction is exact. */
 function WorkGraphNodeInspector({
   document,
   layout,
   nodeId,
+  mentuBridge,
 }: {
   document: WorkGraphDocument;
   layout: WorkGraphLayout;
   nodeId: string | null;
+  mentuBridge: MentuBridge | null;
 }): React.JSX.Element {
   const intentNode = nodeId ? layout.nodes.find((node) => node.id === nodeId) ?? null : null;
+  const state = intentNode ? stateNodeFor(document, intentNode.id) : null;
+  const step = state?.evidence?.step ?? null;
+  const evidenceStreams = useRunEvidence(
+    mentuBridge,
+    state?.runId ?? state?.evidence?.runId ?? null,
+    step?.label ?? null,
+  );
   if (!intentNode) {
     return (
       <div
@@ -287,11 +370,14 @@ function WorkGraphNodeInspector({
       </div>
     );
   }
-  const state = stateNodeFor(document, intentNode.id);
   const status = state?.status ?? "idle";
   const evidence = state?.evidence ?? null;
   const shell = isShellHarness(intentNode.harness);
   const deps = dependencyTitles(layout, intentNode);
+  const streams =
+    evidenceStreams.kind === "resolved"
+      ? (evidenceStreams.result.evidence.find((entry) => entry.label === step?.label) ?? null)
+      : null;
   return (
     <div
       className="@container/work-graph-inspector min-w-0 space-y-3 text-xs [overflow-wrap:anywhere]"
@@ -310,15 +396,19 @@ function WorkGraphNodeInspector({
           <Badge variant="secondary" className="text-[10px]">
             {intentNode.harness}
           </Badge>
-          {intentNode.model ? (
-            <span className="font-mono text-[11px]">{intentNode.model}</span>
+          {intentModel(intentNode) ? (
+            <span className="font-mono text-[11px]">{intentModel(intentNode)}</span>
           ) : (
             <span className="text-[11px]">
               {shell ? "no model (shell)" : "harness default model"}
             </span>
           )}
           {!intentNode.enabled ? (
-            <Badge variant="outline" className="text-[10px]" data-testid="work-graph-node-disabled-badge">
+            <Badge
+              variant="outline"
+              className="text-[10px]"
+              data-testid="work-graph-node-disabled-badge"
+            >
               Disabled — not to relaunch
             </Badge>
           ) : null}
@@ -349,25 +439,59 @@ function WorkGraphNodeInspector({
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                 <dt className="text-muted-foreground">Ended</dt>
-                <dd className="min-w-0 break-all">{state.endedAt ?? (status === "running" ? "running" : "unavailable")}</dd>
+                <dd className="min-w-0 break-all">
+                  {state.endedAt ?? (status === "running" ? "running" : "unavailable")}
+                </dd>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                <dt className="text-muted-foreground">Duration</dt>
+                <dd className="min-w-0 break-all">
+                  {typeof step?.durationSeconds === "number"
+                    ? formatDurationMs(step.durationSeconds * 1000)
+                    : "unavailable"}
+                </dd>
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                 <dt className="text-muted-foreground">Run</dt>
                 <dd className="min-w-0 break-all font-mono">{state.runId ?? "unavailable"}</dd>
               </div>
+              {state.mentuRunId ?? evidence?.mentuRunId ? (
+                <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                  <dt className="text-muted-foreground">Runtime run</dt>
+                  <dd className="min-w-0 break-all font-mono">
+                    {state.mentuRunId ?? evidence?.mentuRunId}
+                  </dd>
+                </div>
+              ) : null}
             </dl>
-            <UsageLine shell={shell} usage={evidence?.usage ?? null} />
+            <UsageLine shell={shell} step={step} />
             {evidence ? (
               <>
                 <p className="mt-2">
                   Exit code:{" "}
                   <span className="font-mono">
-                    {typeof evidence.exitCode === "number" ? evidence.exitCode : "unavailable"}
+                    {typeof step?.exitCode === "number" ? step.exitCode : "unavailable"}
                   </span>
                 </p>
-                <EvidenceDrift drift={evidence.drift} />
-                <EvidenceStream label="stdout" content={evidence.stdout} path={evidence.stdoutPath} />
-                <EvidenceStream label="stderr" content={evidence.stderr} path={evidence.stderrPath} />
+                <EvidenceDrift drift={evidence.drift ?? null} />
+                {streams ? (
+                  <>
+                    <EvidenceStream label="stdout" output={streams.stdout} />
+                    <EvidenceStream label="stderr" output={streams.stderr} />
+                  </>
+                ) : evidenceStreams.kind === "loading" ? (
+                  <p className="mt-2 text-muted-foreground">Loading stdout and stderr…</p>
+                ) : evidenceStreams.kind === "error" ? (
+                  <p role="status" className="mt-2 text-muted-foreground">
+                    Evidence content unavailable: {evidenceStreams.message}
+                  </p>
+                ) : null}
+                {step?.outputPath ? (
+                  <p className="mt-1 font-mono text-muted-foreground">stdout: {step.outputPath}</p>
+                ) : null}
+                {step?.errorPath ? (
+                  <p className="mt-1 font-mono text-muted-foreground">stderr: {step.errorPath}</p>
+                ) : null}
                 <UnknownEvidence evidence={evidence} />
               </>
             ) : (
@@ -375,9 +499,9 @@ function WorkGraphNodeInspector({
                 No evidence recorded yet for this node.
               </p>
             )}
-            {state.lastError ? (
+            {state.lastError ?? step?.error ? (
               <p role="alert" className="mt-2 text-destructive">
-                {state.lastError}
+                {state.lastError ?? step?.error}
               </p>
             ) : null}
           </>
@@ -427,10 +551,15 @@ function useGraphZoom(): {
 
 export function WorkGraphPane({
   fileBridge,
+  mentuBridge = null,
   hostId,
   workspaceId,
 }: {
   fileBridge: FileBridge | null;
+  /** The gated Mentu bridge, so a selected node can resolve its recorded
+   *  stdout/stderr through the existing `mentu.run_evidence` RPC. Optional;
+   *  without it the streams report honestly as unavailable. */
+  mentuBridge?: MentuBridge | null;
   hostId: string | null;
   workspaceId: string;
 }): React.JSX.Element {
@@ -448,10 +577,7 @@ export function WorkGraphPane({
     () => buildWorkGraphLayout(document?.intent.nodes ?? []),
     [document],
   );
-  const totals = useMemo(
-    () => (document ? summarizeWorkGraph(document) : null),
-    [document],
-  );
+  const totals = useMemo(() => (document ? summarizeWorkGraph(document) : null), [document]);
   const runningCount = totals?.byStatus["running"] ?? 0;
 
   return (
@@ -462,7 +588,7 @@ export function WorkGraphPane({
       {/* Header: what this surface is, where the truth lives, how fresh. */}
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Network />
+          <Network className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-sm font-medium">Work Graph</h1>
@@ -487,7 +613,9 @@ export function WorkGraphPane({
             aria-label="Refresh work graph"
             data-testid="work-graph-refresh"
           >
-            <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin motion-reduce:animate-none" : ""}`} />
+            <RefreshCw
+              className={`size-3.5 ${refreshing ? "animate-spin motion-reduce:animate-none" : ""}`}
+            />
           </Button>
         </div>
       </div>
@@ -571,7 +699,12 @@ export function WorkGraphPane({
 
           <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
             <div className="grid h-full min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,300px)]">
-              <ScrollArea className="min-h-0 rounded-lg border border-border bg-card p-3">
+              {/* max-h below lg: the stacked single-column layout must scroll
+                  WITHIN the canvas, never let its content run under the
+                  inspector column below it — an unbounded canvas used to
+                  paint nodes beneath the inspector and intercept the clicks
+                  aimed at them at the acceptance's narrow widths. */}
+              <ScrollArea className="max-h-[46vh] min-h-0 rounded-lg border border-border bg-card p-3 lg:max-h-none">
                 <div className="relative min-w-0" data-testid="work-graph-canvas">
                   <div
                     className="pointer-events-none absolute inset-0 -m-3 rounded-lg opacity-60 [background-image:radial-gradient(var(--border)_1px,transparent_1px)] [background-size:16px_16px] dark:opacity-30"
@@ -699,9 +832,9 @@ export function WorkGraphPane({
                                       <Badge variant="secondary" className="text-[10px]">
                                         {node.harness}
                                       </Badge>
-                                      {node.model ? (
+                                      {intentModel(node) ? (
                                         <span className="truncate font-mono text-[11px]">
-                                          {node.model}
+                                          {intentModel(node)}
                                         </span>
                                       ) : null}
                                       {!node.enabled ? (
@@ -740,6 +873,7 @@ export function WorkGraphPane({
                     document={document}
                     layout={layout}
                     nodeId={selectedNodeId}
+                    mentuBridge={mentuBridge}
                   />
                 </ScrollArea>
               </div>

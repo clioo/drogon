@@ -338,14 +338,14 @@ export async function probeRenderedMentuTab({
   //     code, streams and drift right there, with the shell/agent
   //     distinction intact. Then the Refresh re-read flips a node's
   //     status — the live-update seam the daemon writes through.
-  await panel.getByText("Plan the migration", { exact: true }).click();
+  await panel.locator('[data-work-graph-node="n0"]').click();
   const inspector = panel.locator('[data-testid="work-graph-node-inspector"]');
   await inspector.waitFor();
   await waitForText(inspector, "plan ready");
   const inspectorText = (await inspector.innerText()) ?? "";
   assert.match(inspectorText, /run-accept-1/);
   assert.match(inspectorText, /qwen3\.8-flash-next-nvidia-nvfp4/);
-  await panel.getByText("Old exporter", { exact: true }).click();
+  await panel.locator('[data-work-graph-node="n3"]').click();
   await waitForText(inspector, "not to relaunch");
 
   // The daemon settles the build and records its failure: a Refresh (and
@@ -353,7 +353,7 @@ export async function probeRenderedMentuTab({
   await writeFile(graphPath, `${JSON.stringify(failedBuildState(workGraphFixture("failed")), null, 2)}\n`);
   await panel.locator('[data-testid="work-graph-refresh"]').click();
   await panel.locator('[data-work-graph-status="failed"]').waitFor({ timeout: 15000 });
-  await panel.getByText("Build workspace", { exact: true }).click();
+  await panel.locator('[data-work-graph-node="n1"]').click();
   await waitForText(inspector, "Completion policy was not satisfied");
   const buildInspectorText = (await inspector.innerText()) ?? "";
   assert.match(buildInspectorText, /WORK-GRAPH-STDOUT-MARKER/);

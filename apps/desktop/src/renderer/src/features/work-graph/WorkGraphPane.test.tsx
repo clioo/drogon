@@ -1,22 +1,51 @@
 // @vitest-environment jsdom
 // MIT Copyright (c) 2026 Lovecast Inc.
-// Pane tests over a real fixture graph written through the SAME data seam
-// the product uses (the files bridge). Covers: the graph renders the
-// leader/children DAG with real statuses; selecting a node shows its
-// evidence (exit code, streams, drift, usage) ON the node; the shell vs
-// agent metrics distinction; `unverifiable` renders as its own outcome; a
-// live re-read changes a node's status mid-"run"; and the pane never
-// writes — the fake bridge throws on fileWrite, and the static scan test
-// pins that features/work-graph contains no write call at all.
+// Pane tests over a fixture graph written through the SAME data seam the
+// product uses (the files bridge), with evidence in the daemon's real
+// shape (`{ runId, mentuRunId, step }` — the run-record step the backend's
+// state writer embeds). Covers: the graph renders the leader/children DAG
+// with real statuses; selecting a node shows its evidence (exit code,
+// duration, usage) ON the node and resolves the recorded stdout/stderr
+// through `mentu.run_evidence`; the shell vs agent metrics distinction;
+// `unverifiable` renders as its own outcome; a live re-read changes a
+// node's status mid-"run"; and the pane never writes — the fake bridge
+// throws on fileWrite, and the static scan test pins that
+// features/work-graph contains no write call at all.
 
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import type { FileBridge, FileReadResult } from "../../../../shared/file-contract";
+import type {
+  MentuBridge,
+  MentuRunEvidenceResult,
+} from "../../../../shared/mentu-contract";
 import type { Result } from "../../../../shared/session-contract";
 import type { WorkGraphDocument } from "../../../../shared/work-graph-contract";
 import { WorkGraphPane } from "./WorkGraphPane";
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
+
+function stepEvidence(label: string, overrides: Record<string, unknown> = {}) {
+  return {
+    label,
+    backend: "pi",
+    status: "succeeded",
+    exitCode: 0,
+    durationSeconds: 60,
+    attempts: 1,
+    outputPath: ".drogon/runs/run-1/leader.out",
+    errorPath: null,
+    error: null,
+    model: "qwen3.8-flash-next-nvidia-nvfp4",
+    usage: {
+      inputTokens: 120,
+      outputTokens: 45,
+      usageKnown: true,
+      invalid: [],
+    },
+    ...overrides,
+  };
+}
 
 const GRAPH: WorkGraphDocument = {
   version: 1,
@@ -35,7 +64,7 @@ const GRAPH: WorkGraphDocument = {
         id: "build",
         title: "Build",
         harness: "shell",
-        model: null,
+        model: "",
         dependsOn: ["leader"],
         prompt: "pnpm build",
         enabled: true,
@@ -44,7 +73,7 @@ const GRAPH: WorkGraphDocument = {
         id: "review",
         title: "Review changes",
         harness: "pi",
-        model: null,
+        model: "",
         dependsOn: ["leader"],
         prompt: "",
         enabled: false,
@@ -58,20 +87,13 @@ const GRAPH: WorkGraphDocument = {
         id: "leader",
         status: "succeeded",
         runId: "run-1",
+        mentuRunId: "run_abc123",
         startedAt: "2026-09-11T11:58:00.000Z",
         endedAt: "2026-09-11T11:59:00.000Z",
         evidence: {
-          exitCode: 0,
-          stdout: "plan ready",
-          stderr: null,
-          stdoutPath: ".drogon/runs/run-1/leader.out",
-          drift: { expected: ["docs/plan.md"], created: ["docs/plan.md"] },
-          usage: {
-            model: "qwen3.8-flash-next-nvidia-nvfp4",
-            inputTokens: 120,
-            outputTokens: 45,
-            usageKnown: true,
-          },
+          runId: "run-1",
+          mentuRunId: "run_abc123",
+          step: stepEvidence("leader"),
         },
       },
       { id: "build", status: "running" },
@@ -81,7 +103,13 @@ const GRAPH: WorkGraphDocument = {
   },
 };
 
-function bridgeWith(raw: string): FileBridge {
+function bridgeWith(
+  raw: string,
+  evidence?: {
+    calls: { runId: string }[];
+    result: MentuRunEvidenceResult | null;
+  },
+): FileBridge {
   return {
     fileList: async () => {
       throw new Error("not used");
@@ -101,12 +129,40 @@ function bridgeWith(raw: string): FileBridge {
     fileWrite: async () => {
       throw new Error("work-graph pane attempted a write");
     },
-  };
+    // Satisfy the structural type; evidence resolution rides the Mentu bridge.
+    fileCreate: async () => {
+      throw new Error("work-graph pane attempted a create");
+    },
+  } as unknown as FileBridge;
 }
 
-function renderPane(raw: string) {
+function mentuBridgeWith(evidence: {
+  calls: { runId: string }[];
+  result: MentuRunEvidenceResult | null;
+}): MentuBridge {
+  const bridge = {
+    mentuRunEvidence: async (input: { runId: string }) => {
+      evidence.calls.push(input);
+      if (!evidence.result) {
+        return {
+          ok: false as const,
+          error: { code: "not_found", message: "run directory is gone", retryable: false },
+        };
+      }
+      return { ok: true as const, result: evidence.result };
+    },
+  };
+  return bridge as unknown as MentuBridge;
+}
+
+function renderPane(raw: string, mentuBridge?: MentuBridge) {
   return render(
-    <WorkGraphPane fileBridge={bridgeWith(raw)} hostId="host" workspaceId="ws" />,
+    <WorkGraphPane
+      fileBridge={bridgeWith(raw)}
+      mentuBridge={mentuBridge}
+      hostId="host"
+      workspaceId="ws"
+    />,
   );
 }
 
@@ -120,8 +176,7 @@ describe("WorkGraphPane", () => {
     await screen.findByText("Build");
     await screen.findByText("Review changes");
 
-    const statuses = await screen.findAllByTestId("work-graph-canvas");
-    expect(statuses.length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("work-graph-canvas").length).toBeGreaterThan(0);
 
     // Status badges render the daemon's own words.
     expect(document.querySelector('[data-work-graph-status="running"]')).not.toBeNull();
@@ -130,13 +185,13 @@ describe("WorkGraphPane", () => {
     expect(unverifiable?.textContent).toContain("Unverifiable");
 
     // Aggregates: one running, one succeeded, one unverifiable; duration
-    // from the single recorded start/end pair; tokens from the one agent
+    // from the step's recorded durationSeconds; tokens from the one agent
     // record (the shell node contributes nothing at all).
     expect(screen.getByTestId("work-graph-total-running").textContent).toContain("1");
     expect(screen.getByTestId("work-graph-total-succeeded").textContent).toContain("1");
     expect(screen.getByTestId("work-graph-total-unverifiable").textContent).toContain("1");
     const totals = screen.getByTestId("work-graph-totals").textContent ?? "";
-    // Only the leader recorded start+end; the running and unverifiable
+    // Only the leader recorded a duration; the running and unverifiable
     // nodes' durations stay unknown and are COUNTED, never estimated.
     expect(totals).toContain("Duration: 1m 00s + 2 unknown");
     // The review agent node reported no usage: counted as unavailable,
@@ -146,21 +201,54 @@ describe("WorkGraphPane", () => {
     expect(totals).toContain("Cost: unavailable");
   });
 
-  it("shows the selected node's evidence ON the node", async () => {
-    renderPane(JSON.stringify(GRAPH));
+  it("shows the selected node's evidence ON the node and resolves its streams", async () => {
+    const evidence: {
+      calls: { runId: string }[];
+      result: MentuRunEvidenceResult | null;
+    } = {
+      calls: [],
+      result: {
+        runId: "run-1",
+        mentuRunId: "run_abc123",
+        evidence: [
+          {
+            label: "leader",
+            stdout: {
+              reference: "leader.out",
+              path: ".drogon/runs/run-1/leader.out",
+              content: "plan ready",
+              error: null,
+            },
+            stderr: {
+              reference: "leader.err",
+              path: ".drogon/runs/run-1/leader.err",
+              content: null,
+              error: null,
+            },
+          },
+        ],
+      },
+    };
+    renderPane(JSON.stringify(GRAPH), mentuBridgeWith(evidence));
     fireEvent.click(await screen.findByText("Plan the migration"));
     const inspector = await screen.findByTestId("work-graph-node-inspector");
-    await waitFor(() => expect(inspector.textContent).toContain("plan ready"));
-    expect(inspector.textContent).toContain("Exit code:");
-    expect(inspector.textContent).toContain("run-1");
-    expect(inspector.textContent).toContain("qwen3.8-flash-next-nvidia-nvfp4");
-    expect(inspector.textContent).toContain("120");
-    expect(inspector.textContent).toContain("45");
-    // Drift: expected vs created paths.
-    const drift = inspector.querySelector('[data-testid="work-graph-node-drift"]');
-    expect(drift?.textContent).toContain("docs/plan.md");
-    const stdout = inspector.querySelector('pre[aria-label="stdout output"]');
-    expect(stdout?.textContent).toContain("plan ready");
+    // Streams resolved through the EXISTING mentu.run_evidence seam.
+    await waitFor(() =>
+      expect(evidence.calls).toEqual([{ runId: "run-1" }]),
+    );
+    const stdout = await waitFor(() => {
+      const found = inspector.querySelector('pre[aria-label="stdout output"]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(stdout.textContent).toContain("plan ready");
+    const inspectorText = inspector.textContent ?? "";
+    expect(inspectorText).toContain("Exit code:");
+    expect(inspectorText).toContain("run-1");
+    expect(inspectorText).toContain("run_abc123");
+    expect(inspectorText).toContain("qwen3.8-flash-next-nvidia-nvfp4");
+    expect(inspectorText).toContain("120");
+    expect(inspectorText).toContain("45");
   });
 
   it("renders a shell node's token metrics as NOT APPLICABLE, not unavailable", async () => {
@@ -200,7 +288,9 @@ describe("WorkGraphPane", () => {
         throw new Error("work-graph pane attempted a write");
       },
     };
-    render(<WorkGraphPane fileBridge={missingBridge} hostId="host" workspaceId="ws" />);
+    render(
+      <WorkGraphPane fileBridge={missingBridge} hostId="host" workspaceId="ws" />,
+    );
     const empty = await screen.findByTestId("work-graph-empty");
     expect(empty.textContent).toContain(".drogon/graph.json");
   });
@@ -227,7 +317,17 @@ describe("WorkGraphPane", () => {
             status: "failed" as const,
             endedAt: "2026-09-11T12:01:00.000Z",
             lastError: "Completion policy was not satisfied",
-            evidence: { exitCode: 1, stderr: "boom" },
+            evidence: {
+              runId: "run-2",
+              step: stepEvidence("build", {
+                status: "failed",
+                exitCode: 1,
+                durationSeconds: 30,
+                error: "recipe compile failed",
+                model: null,
+                usage: null,
+              }),
+            },
           }
         : node,
     );
@@ -242,19 +342,24 @@ describe("WorkGraphPane", () => {
       expect(document.querySelector('[data-work-graph-status="failed"]')).not.toBeNull(),
     );
 
-    // The failing node carries its error and streams on the node.
+    // The failing node carries its error and exit code on the node.
     fireEvent.click(screen.getByText("Build"));
     const inspector = await screen.findByTestId("work-graph-node-inspector");
     await waitFor(() =>
       expect(inspector.textContent).toContain("Completion policy was not satisfied"),
     );
-    expect(inspector.textContent).toContain("boom");
+    expect(inspector.textContent).toContain("Exit code:");
+    expect(inspector.textContent).toContain("1");
+    // state.lastError is the primary error; step.error renders when the
+    // state carries no lastError of its own.
+    expect(inspector.textContent).toContain("30s");
   });
 
   it("writes nothing — a static scan over features/work-graph finds no write call", () => {
     const dir = path.dirname(new URL(import.meta.url).pathname);
-    const sources = readdirSync(dir).filter((file) =>
-      /\.(ts|tsx)$/.test(file) && !file.endsWith(".test.ts") && !file.endsWith(".test.tsx"),
+    const sources = readdirSync(dir).filter(
+      (file) =>
+        /\.(ts|tsx)$/.test(file) && !file.endsWith(".test.ts") && !file.endsWith(".test.tsx"),
     );
     expect(sources.length).toBeGreaterThan(0);
     for (const file of sources) {

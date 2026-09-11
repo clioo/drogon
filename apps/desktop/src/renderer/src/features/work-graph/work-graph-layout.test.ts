@@ -10,7 +10,7 @@ function node(overrides: Partial<WorkGraphIntentNode> & { id: string }): WorkGra
   return {
     title: overrides.id,
     harness: "pi",
-    model: null,
+    model: "",
     dependsOn: [],
     prompt: "",
     enabled: true,

@@ -34,7 +34,15 @@ export type WorkGraphTotals = {
   shellNodeCount: number;
 };
 
-function recordedDurationMs(node: WorkGraphStateNode): number | null {
+/** A node's recorded duration, from the record alone: the run-record
+ *  step's `durationSeconds` when present, else the difference of the
+ *  recorded start/end timestamps, else null (unknown). */
+function recordedDurationMs(node: WorkGraphStateNode | null): number | null {
+  if (!node) return null;
+  const seconds = node.evidence?.step?.durationSeconds;
+  if (typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
   if (!node.startedAt || !node.endedAt) return null;
   const start = Date.parse(node.startedAt);
   const end = Date.parse(node.endedAt);
@@ -67,6 +75,14 @@ export function summarizeWorkGraph(document: WorkGraphDocument): WorkGraphTotals
     const status = state?.status ?? "idle";
     byStatus[status] = (byStatus[status] ?? 0) + 1;
 
+    const duration = recordedDurationMs(state);
+    if (duration !== null) {
+      durationKnownCount += 1;
+      durationTotalMs = (durationTotalMs ?? 0) + duration;
+    } else {
+      durationUnknownCount += 1;
+    }
+
     const shell = isShellHarness(intent.harness);
     if (shell) {
       shellNodeCount += 1;
@@ -74,7 +90,7 @@ export function summarizeWorkGraph(document: WorkGraphDocument): WorkGraphTotals
       // token totals, not even an "unavailable" — not applicable.
       continue;
     }
-    const usage = state?.evidence?.usage ?? null;
+    const usage = state?.evidence?.step?.usage ?? null;
     const usageKnown = usage?.usageKnown ?? null;
     const input = usableToken(usage?.inputTokens, usageKnown);
     const output = usableToken(usage?.outputTokens, usageKnown);
@@ -84,16 +100,6 @@ export function summarizeWorkGraph(document: WorkGraphDocument): WorkGraphTotals
       outputTokens = (outputTokens ?? 0) + (output ?? 0);
     } else {
       agentUsageUnavailableCount += 1;
-    }
-  }
-
-  for (const state of document.state.nodes) {
-    const duration = recordedDurationMs(state);
-    if (duration !== null) {
-      durationKnownCount += 1;
-      durationTotalMs = (durationTotalMs ?? 0) + duration;
-    } else {
-      durationUnknownCount += 1;
     }
   }
 

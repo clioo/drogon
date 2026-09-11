@@ -12,7 +12,9 @@ export type WorkGraphNode = {
   id: string;
   title: string;
   harness: string;
-  model: string | null;
+  /** The exact model id, or the empty string (shell / harness default) —
+   *  exactly what the daemon writes. */
+  model: string;
   prompt: string;
   enabled: boolean;
   /** Resolved dependency ids (only those that exist in the graph). */
@@ -47,7 +49,7 @@ export function buildWorkGraphLayout(
       id: intent.id,
       title: intent.title,
       harness: intent.harness,
-      model: intent.model ?? null,
+      model: intent.model ?? "",
       prompt: intent.prompt,
       enabled: intent.enabled,
       dependencies: [],

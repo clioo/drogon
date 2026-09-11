@@ -31,7 +31,7 @@ function fixtureDocument(): WorkGraphDocument {
           id: "n1",
           title: "Run the migration",
           harness: "shell",
-          model: null,
+          model: "",
           dependsOn: ["n0"],
           prompt: "apply the migration",
           enabled: false,
@@ -48,17 +48,23 @@ function fixtureDocument(): WorkGraphDocument {
           startedAt: "2026-09-11T11:58:00.000Z",
           endedAt: "2026-09-11T11:59:30.000Z",
           evidence: {
-            exitCode: 0,
-            stdout: "done",
-            stderr: null,
-            stdoutPath: "/tmp/run-123/n0.out",
-            drift: { expected: ["src/a.rs"], created: ["src/a.rs", "src/b.rs"] },
-            usage: {
-              model: "qwen3.8-flash-next-nvidia-nvfp4",
-              inputTokens: 120,
-              outputTokens: 45,
-              usageKnown: true,
+            runId: "run-123",
+            mentuRunId: "run_abc",
+            step: {
+              label: "n0",
+              backend: "pi",
+              status: "succeeded",
+              exitCode: 0,
+              durationSeconds: 90,
+              outputPath: "/tmp/run-123/n0.out",
+              usage: {
+                inputTokens: 120,
+                outputTokens: 45,
+                usageKnown: true,
+                invalid: [],
+              },
             },
+            drift: { expected: ["src/a.rs"], created: ["src/a.rs", "src/b.rs"] },
           },
         },
         { id: "n1", status: "unverifiable", lastError: "contact lost" },
@@ -75,19 +81,25 @@ describe("parseWorkGraphDocument", () => {
     expect(parsed.document.version).toBe(WORK_GRAPH_VERSION);
     expect(parsed.document.intent.nodes).toHaveLength(2);
     expect(parsed.document.state.nodes).toHaveLength(2);
-    expect(parsed.document.intent.nodes[1].model).toBeNull();
+    // The daemon writes the EMPTY string for a shell node, never null.
+    expect(parsed.document.intent.nodes[1].model).toBe("");
     expect(parsed.document.intent.nodes[1].enabled).toBe(false);
   });
 
   it("keeps a recorded measured zero as zero (usageKnown true)", () => {
     const document = fixtureDocument();
     document.state.nodes[0].evidence = {
-      usage: { inputTokens: 0, outputTokens: 0, usageKnown: true },
+      step: {
+        label: "n0",
+        backend: "pi",
+        status: "succeeded",
+        usage: { inputTokens: 0, outputTokens: 0, usageKnown: true, invalid: [] },
+      },
     };
     const parsed = parseWorkGraphDocument(JSON.stringify(document));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    const usage = parsed.document.state.nodes[0].evidence?.usage;
+    const usage = parsed.document.state.nodes[0].evidence?.step?.usage;
     expect(usage).toMatchObject({ inputTokens: 0, outputTokens: 0, usageKnown: true });
   });
 

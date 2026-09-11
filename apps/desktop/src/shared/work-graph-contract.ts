@@ -1,5 +1,6 @@
 // Work-graph contract (renderer display contract for `<workspace>/.drogon/graph.json`,
-// version 1). This mirrors the coordinator-defined shared contract EXACTLY at the
+// version 1). This mirrors the daemon's serde projection in
+// `crates/drogon-protocol/src/graph.rs` (landed in PR #444) EXACTLY at the
 // ownership seam:
 //
 //   - `intent`  — written ONLY by the human (through the UI) and, later, by an
@@ -14,9 +15,10 @@
 // invents a value the file does not carry.
 //
 // Parsing is intentionally lenient where the contract is open (`evidence` is
-// `{ ... }` "or a reference the UI can resolve", so unknown evidence keys are
-// preserved verbatim for display instead of dropped), and strict where the
-// contract is closed (top-level shape, ownership sections, version).
+// `Option<Value>` on the daemon and currently embeds the run-record step, so
+// unknown keys are preserved verbatim for display instead of dropped), and
+// strict where the contract is closed (top-level shape, ownership sections,
+// version).
 
 import { z } from "zod";
 
@@ -25,8 +27,10 @@ export const WORK_GRAPH_VERSION = 1;
 /** The workspace-relative file this view renders. */
 export const WORK_GRAPH_RELATIVE_PATH = ".drogon/graph.json";
 
-/** Every status the daemon may observe for a node. `unverifiable` is a
- *  first-class outcome (loss of contact), never folded into failed. */
+/** Every status the daemon may observe for a node (`GraphNodeStatus`).
+ *  `unverifiable` is a first-class outcome (loss of contact), never folded
+ *  into failed; `blocked` means not runnable in this graph (disabled, or an
+ *  upstream failure) — also never a loss-of-contact claim. */
 export const WORK_GRAPH_STATUSES = [
   "idle",
   "running",
@@ -38,86 +42,46 @@ export const WORK_GRAPH_STATUSES = [
 export type WorkGraphStatus = (typeof WORK_GRAPH_STATUSES)[number];
 
 /** Shell vs agent is a property of the node's harness: the contract's shell
- *  steps run a local command (no model, no tokens — token/cost metrics are
- *  NOT APPLICABLE there, never "unavailable"), every other harness is an
- *  agent node whose usage is reported or honestly unavailable. */
+ *  backend runs a local command (no model — its model field is the EMPTY
+ *  string, and token/cost metrics are NOT APPLICABLE there, never
+ *  "unavailable"); every other harness is an agent node whose usage is
+ *  reported or honestly unavailable. */
 export const WORK_GRAPH_SHELL_HARNESS = "shell";
 
 export function isShellHarness(harness: string): boolean {
   return harness === WORK_GRAPH_SHELL_HARNESS;
 }
 
-/** One intent node: what the human wants. Fields mirror the contract
- *  literally; `model` is nullable because a shell node has none, and an
- *  agent node may legitimately ride its harness default. */
-export type WorkGraphIntentNode = {
-  id: string;
-  title: string;
-  /** From the real harness catalog (e.g. `pi`, `claude-code`, `shell`). */
-  harness: string;
-  /** From the real per-harness model catalog; null = harness default /
-   *  not applicable (shell). */
-  model: string | null;
-  dependsOn: string[];
-  /** What this node must do. */
-  prompt: string;
-  /** false = not to be relaunched (deleting marks; stopping is separate). */
-  enabled: boolean;
+/** Additive Pi provider binding inputs (the daemon refuses to compile a
+ *  `pi` node without them). */
+export type WorkGraphProvider = {
+  baseUrl: string;
+  apiKeyEnv: string;
 };
 
-/** Drift as the task defines it: which paths the node EXPECTED versus
- *  which it CREATED, straight from the run record. Both lists optional —
- *  the view renders whatever the record actually carried. */
-export type WorkGraphDrift = {
-  expected: string[];
-  created: string[];
-};
+// The node/doc types are DERIVED from the schemas so the parse rules and
+// the shape can never drift apart. See each schema for the honesty notes.
 
-/** Observed usage for one agent node. Mirrors the run-record honesty
- *  rules: a recorded 0 is a measured zero only when `usageKnown` is true;
- *  null means the record did not carry the value. Cost is not part of the
- *  runtime's evidence schema, so this view never renders one. */
-export type WorkGraphUsage = {
-  model?: string | null;
-  inputTokens?: number | null;
-  outputTokens?: number | null;
-  usageKnown?: boolean | null;
-};
+/** One intent node: what the human wants — the daemon's `GraphNodeIntent`
+ *  (camelCase on the wire). `model` is the exact model id or the EMPTY
+ *  string for shell / harness default; the daemon never writes null. */
+export type WorkGraphIntentNode = z.infer<typeof workGraphIntentNodeSchema>;
 
-/** The evidence one node produced. Every field optional: the daemon writes
- *  what the run actually recorded. Unknown keys ride through (`passthrough`
- *  below) so the view can spell out — never silently drop — evidence the
- *  schema does not know yet. */
-export type WorkGraphEvidence = {
-  exitCode?: number | null;
-  stdout?: string | null;
-  stderr?: string | null;
-  stdoutPath?: string | null;
-  stderrPath?: string | null;
-  drift?: WorkGraphDrift | null;
-  usage?: WorkGraphUsage | null;
-  [key: string]: unknown;
-};
+/** The evidence one node produced. The daemon writes
+ *  `{ runId, mentuRunId, step }` where `step` is the run-record step; the
+ *  shape stays open (`Option<Value>` daemon-side), so unknown keys ride
+ *  through and the view spells them out — never silently drops them. */
+export type WorkGraphEvidence = z.infer<typeof workGraphEvidenceSchema>;
 
-/** One state node: what the daemon OBSERVED. Written only by the daemon. */
-export type WorkGraphStateNode = {
-  id: string;
-  status: WorkGraphStatus;
-  /** The Mentu run this node produced, when any. The UI may resolve this
-   *  through the existing mentu RPCs — it never fabricates one. */
-  runId?: string | null;
-  startedAt?: string | null;
-  endedAt?: string | null;
-  evidence?: WorkGraphEvidence | null;
-  lastError?: string | null;
-  [key: string]: unknown;
-};
+export type WorkGraphEvidenceStep = z.infer<typeof evidenceStepSchema>;
 
-export type WorkGraphDocument = {
-  version: 1;
-  intent: { nodes: WorkGraphIntentNode[] };
-  state: { updatedAt: string; nodes: WorkGraphStateNode[] };
-};
+export type WorkGraphStepUsage = z.infer<typeof stepUsageSchema>;
+
+/** One state node: what the daemon OBSERVED (`GraphNodeState`). Written
+ *  only by the daemon. */
+export type WorkGraphStateNode = z.infer<typeof workGraphStateNodeSchema>;
+
+export type WorkGraphDocument = z.infer<typeof workGraphDocumentSchema>;
 
 // ---------------------------------------------------------------------------
 // zod schemas (lenient on unknown evidence/state keys, strict on the seam)
@@ -126,47 +90,72 @@ export type WorkGraphDocument = {
 const isoText = z.string().min(1);
 const idText = z.string().min(1).max(200);
 
-export const workGraphDriftSchema = z.object({
-  expected: z.array(z.string()).optional().default([]),
-  created: z.array(z.string()).optional().default([]),
+export const workGraphIntentNodeSchema = z.object({
+  id: idText,
+  title: z.string().min(1).max(500),
+  harness: z.string().min(1).max(200),
+  /** Empty string = shell / harness default; the daemon never writes null. */
+  model: z.string().max(500).optional().default(""),
+  dependsOn: z.array(z.string().min(1).max(200)).optional().default([]),
+  prompt: z.string().max(100_000).optional().default(""),
+  enabled: z.boolean().optional().default(true),
+  verifyCommands: z.array(z.string().min(1).max(65_536)).optional(),
+  provider: z
+    .object({ baseUrl: z.string().min(1), apiKeyEnv: z.string().min(1) })
+    .optional(),
 });
 
-export const workGraphUsageSchema = z
+const stepUsageSchema = z
   .object({
-    model: z.string().nullable().optional(),
     inputTokens: z.number().nullable().optional(),
     outputTokens: z.number().nullable().optional(),
     usageKnown: z.boolean().nullable().optional(),
+    invalid: z
+      .array(
+        z.object({ field: z.string(), reason: z.string() }).passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough();
+
+const evidenceStepSchema = z
+  .object({
+    label: z.string().min(1),
+    backend: z.string().min(1),
+    status: z.string().min(1),
+    exitCode: z.number().int().nullable().optional(),
+    durationSeconds: z.number().nullable().optional(),
+    attempts: z.number().int().nullable().optional(),
+    outputPath: z.string().nullable().optional(),
+    errorPath: z.string().nullable().optional(),
+    error: z.string().nullable().optional(),
+    model: z.string().nullable().optional(),
+    usage: stepUsageSchema.nullable().optional(),
   })
   .passthrough();
 
 export const workGraphEvidenceSchema = z
   .object({
-    exitCode: z.number().int().nullable().optional(),
-    stdout: z.string().nullable().optional(),
-    stderr: z.string().nullable().optional(),
-    stdoutPath: z.string().nullable().optional(),
-    stderrPath: z.string().nullable().optional(),
-    drift: workGraphDriftSchema.nullable().optional(),
-    usage: workGraphUsageSchema.nullable().optional(),
+    runId: z.string().nullable().optional(),
+    mentuRunId: z.string().nullable().optional(),
+    step: evidenceStepSchema.nullable().optional(),
+    drift: z
+      .object({
+        expected: z.array(z.string()).optional().default([]),
+        created: z.array(z.string()).optional().default([]),
+      })
+      .passthrough()
+      .nullable()
+      .optional(),
   })
   .passthrough();
-
-export const workGraphIntentNodeSchema = z.object({
-  id: idText,
-  title: z.string().min(1).max(500),
-  harness: z.string().min(1).max(200),
-  model: z.string().min(1).max(500).nullable().optional().default(null),
-  dependsOn: z.array(z.string().min(1).max(200)).optional().default([]),
-  prompt: z.string().max(100_000).optional().default(""),
-  enabled: z.boolean().optional().default(true),
-});
 
 export const workGraphStateNodeSchema = z
   .object({
     id: idText,
     status: z.enum(WORK_GRAPH_STATUSES),
     runId: z.string().nullable().optional(),
+    mentuRunId: z.string().nullable().optional(),
     startedAt: isoText.nullable().optional(),
     endedAt: isoText.nullable().optional(),
     evidence: workGraphEvidenceSchema.nullable().optional(),
@@ -251,4 +240,10 @@ export function stateNodeFor(
   nodeId: string,
 ): WorkGraphStateNode | null {
   return document.state.nodes.find((node) => node.id === nodeId) ?? null;
+}
+
+/** The node's model id as displayed: the exact id, or null when the field
+ *  is empty (shell / harness default). */
+export function intentModel(node: { model: string }): string | null {
+  return node.model.length > 0 ? node.model : null;
 }

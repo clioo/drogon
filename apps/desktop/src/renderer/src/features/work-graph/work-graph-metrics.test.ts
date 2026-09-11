@@ -34,7 +34,7 @@ const shell = {
   id: "shell-1",
   title: "Shell node",
   harness: "shell",
-  model: null,
+  model: "",
   dependsOn: [],
   prompt: "",
   enabled: true,
@@ -49,8 +49,7 @@ describe("summarizeWorkGraph", () => {
           {
             id: "agent-1",
             status: "succeeded",
-            startedAt: "2026-09-11T11:58:00.000Z",
-            endedAt: "2026-09-11T11:59:00.000Z",
+            evidence: { step: { label: "agent-1", backend: "pi", status: "succeeded", durationSeconds: 60 } },
           },
           { id: "agent-2", status: "running", startedAt: "2026-09-11T11:59:30.000Z" },
         ],
@@ -82,13 +81,17 @@ describe("summarizeWorkGraph", () => {
             id: "agent-1",
             status: "succeeded",
             evidence: {
-              usage: { inputTokens: 120, outputTokens: 45, usageKnown: true },
+              step: { label: "agent-1", backend: "pi", status: "succeeded",
+                usage: { inputTokens: 120, outputTokens: 45, usageKnown: true, invalid: [] } },
             },
           },
           {
             id: "agent-2",
             status: "succeeded",
-            evidence: { usage: { inputTokens: 10, outputTokens: 5, usageKnown: true } },
+            evidence: {
+              step: { label: "agent-2", backend: "pi", status: "succeeded",
+                usage: { inputTokens: 10, outputTokens: 5, usageKnown: true, invalid: [] } },
+            },
           },
           { id: "agent-3", status: "failed" },
         ],
@@ -106,7 +109,10 @@ describe("summarizeWorkGraph", () => {
         {
           id: "agent-1",
           status: "succeeded",
-          evidence: { usage: { inputTokens: 999, outputTokens: 999, usageKnown: false } },
+          evidence: {
+            step: { label: "agent-1", backend: "pi", status: "succeeded",
+              usage: { inputTokens: 999, outputTokens: 999, usageKnown: false, invalid: [] } },
+          },
         },
       ]),
     );
@@ -120,7 +126,10 @@ describe("summarizeWorkGraph", () => {
         {
           id: "agent-1",
           status: "succeeded",
-          evidence: { usage: { inputTokens: 0, outputTokens: 0, usageKnown: true } },
+          evidence: {
+            step: { label: "agent-1", backend: "pi", status: "succeeded",
+              usage: { inputTokens: 0, outputTokens: 0, usageKnown: true, invalid: [] } },
+          },
         },
       ]),
     );
