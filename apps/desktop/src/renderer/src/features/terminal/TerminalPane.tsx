@@ -77,6 +77,7 @@ import {
 import { useDaemonConnection } from "../shell/daemon-connection-store";
 import {
   isRecoverableAfterReconnect,
+  recoveryOfferKey,
   showRecoveryOverlay,
 } from "../../session-recovery";
 import {
@@ -257,7 +258,6 @@ export function TerminalPane({
   gpuMode,
   canSplit,
   onSplitRight,
-  recoveryNonce = 0,
   onError,
   onSession,
   onFocus,
@@ -284,16 +284,6 @@ export function TerminalPane({
   canSplit?: boolean;
   /** Split entry point for this pane (context menu item). */
   onSplitRight?: () => void;
-  /**
-   * R16-AL2 (issue #228): advances each time the user clicked Retry
-   * connection and the fresh session list confirmed THIS pane's session
-   * is still `unverifiable`. While the nonce is ahead of the pane's
-   * dismissed nonce, the pane shows the recovery overlay (the fork's
-   * exited-overlay structure with its Restart action) instead of the inert
-   * retry loop. Omitted by hosts that never retry (tests, split host
-   * callers pre-dating the prop): the overlay simply never shows.
-   */
-  recoveryNonce?: number;
   onError(message: string): void;
   onSession(value: Session): void;
   /** Called when focus-follows-mouse makes this pane active in a split host. */
@@ -336,11 +326,14 @@ export function TerminalPane({
   const [processExit, setProcessExit] = useState<TerminalProcessExit | null>(
     () => projectTerminalProcessExit(session),
   );
-  // R16-AL2 (issue #228): the nonce of the retry offer this pane has
-  // dismissed. A remounting pane (tabs are cleared while a retry
-  // refreshes) starts un-dismissed at the current nonce, so the offer only
-  // ever re-arms on a NEW retry click that again confirms unverifiable.
-  const [dismissedRecoveryNonce, setDismissedRecoveryNonce] = useState(0);
+  // The recovery offer (an `unverifiable` session while the daemon is up)
+  // is dismissed per session incarnation, so a dismissal recorded against
+  // a superseded incarnation could never hide the offer on the session
+  // that replaced it (Close also closes the tab, but this keeps the two
+  // actions ordered under one commit).
+  const [dismissedRecoveryKey, setDismissedRecoveryKey] = useState<
+    string | null
+  >(null);
   // R12-E: the source's link action popover — plain clicks on a file link
   // open this instead of doing nothing; direct (⌘/Ctrl) clicks still open.
   const [linkActionRequest, setLinkActionRequest] =
@@ -1504,19 +1497,26 @@ export function TerminalPane({
     setProcessExit(null);
     closePane();
   };
-  // R16-AL2 (issue #228): the recovery overlay for a session an explicit
-  // Retry click confirmed still unverifiable. Same overlay component and
-  // actions as the exit overlay (Restart re-launches the same harness,
-  // Close dismisses the offer); only the copy differs and never asserts
-  // an exit. `null` while the offer does not apply.
+  // R16-AL2 (issue #228) + task_c31304f08555: the recovery overlay for a
+  // session the connected daemon reports `unverifiable` — it holds no child
+  // for that id. Same overlay component and actions as the exit overlay
+  // (Restart re-launches the same harness/command, Close dismisses the
+  // offer); only the copy differs and never asserts an exit. Showing it as
+  // soon as the session is unverifiable (not only after a manual Retry) is
+  // what keeps the owner's post-restart session from being a blank pane
+  // with a cursor that looks live.
+  const recoveryKey = recoveryOfferKey({
+    id: session.id,
+    incarnation: session.incarnation,
+  });
   const recoveryOffer = showRecoveryOverlay({
     verdict: session.verdict,
-    recoveryNonce,
-    dismissedNonce: dismissedRecoveryNonce,
     connected: daemonConnection.state === "connected",
+    offerKey: recoveryKey,
+    dismissedKey: dismissedRecoveryKey,
   });
   const dismissRecoveryOffer = () => {
-    setDismissedRecoveryNonce(recoveryNonce);
+    setDismissedRecoveryKey(recoveryKey);
     current?.focus();
   };
 

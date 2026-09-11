@@ -66,7 +66,21 @@ export function agentStateOf(session: Session): AgentState {
  * `agent_state::derive`), so the single function reads it, defaulting an
  * unreported state to `unknown` — never a guess. The tab badge, the card
  * dot and the card summary text must all go through this function.
+ *
+ * `unverifiable` is a verdict, not an agent state: the daemon holds no
+ * child for that id (a held, running child always reports `live`), so a
+ * `working`/`idle` agent state is history, never a live claim. Rendering
+ * it as-is put the owner's "green check" (the row's concluded-turn glyph)
+ * and the working spinner on a dead tab. Those two map to `unknown` ("not
+ * reporting") here instead; `needs_input`/`exited` keep their own honest
+ * meaning (the durable wait signal survives a restart by design).
  */
 export function sessionDotState(session: Session): AgentState {
-  return session.agentState ?? "unknown";
+  const state = session.agentState ?? "unknown";
+  if (
+    session.verdict === "unverifiable" &&
+    (state === "working" || state === "idle")
+  )
+    return "unknown";
+  return state;
 }

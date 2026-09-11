@@ -4,10 +4,9 @@ import {
   assertCloseReplyFor,
   isRecoverableAfterReconnect,
   recoveryActionFor,
+  recoveryOfferKey,
   recoveryTabLabel,
   retryAffordanceDisabled,
-  retryOfferKey,
-  retryStillUnverifiable,
   showRecoveryOverlay,
 } from "./session-recovery";
 
@@ -111,68 +110,47 @@ describe("isRecoverableAfterReconnect", () => {
   });
 });
 
-describe("retryOfferKey", () => {
+describe("recoveryOfferKey", () => {
   it("keys on id and incarnation so a superseded incarnation never matches", () => {
-    const key = retryOfferKey({ id: "s1", incarnation: "inc-1" });
+    const key = recoveryOfferKey({ id: "s1", incarnation: "inc-1" });
     expect(key).toBe("s1:inc-1");
-    expect(retryOfferKey({ id: "s1", incarnation: "inc-2" })).not.toBe(key);
-    expect(retryOfferKey({ id: "s2", incarnation: "inc-1" })).not.toBe(key);
-  });
-});
-
-describe("retryStillUnverifiable", () => {
-  const stub = { id: "s1", incarnation: "inc-1", verdict: "unverifiable" as Verdict };
-  it("keeps only pending sessions the fresh list still reports unverifiable", () => {
-    const pending = new Set([retryOfferKey(stub)]);
-    expect(retryStillUnverifiable(pending, [stub])).toEqual(["s1:inc-1"]);
-  });
-  it("never offers a session that came back live", () => {
-    const pending = new Set([retryOfferKey(stub)]);
-    expect(
-      retryStillUnverifiable(pending, [{ ...stub, verdict: "live" }]),
-    ).toEqual([]);
-  });
-  it("never offers sessions the pending click did not target", () => {
-    const pending = new Set([retryOfferKey(stub)]);
-    const other = { id: "s9", incarnation: "inc-9", verdict: "unverifiable" as Verdict };
-    expect(retryStillUnverifiable(pending, [other])).toEqual([]);
-  });
-  it("never offers an exited session, even when pending", () => {
-    const pending = new Set([retryOfferKey(stub)]);
-    expect(
-      retryStillUnverifiable(pending, [{ ...stub, verdict: "exited" }]),
-    ).toEqual([]);
+    expect(recoveryOfferKey({ id: "s1", incarnation: "inc-2" })).not.toBe(key);
+    expect(recoveryOfferKey({ id: "s2", incarnation: "inc-1" })).not.toBe(key);
   });
 });
 
 describe("showRecoveryOverlay", () => {
-  it("shows only for an unverifiable session after a confirmed-failed retry, while connected", () => {
+  const offerKey = "s1:inc-1";
+  it("shows for an unverifiable session as soon as the daemon is connected — no manual retry required", () => {
+    // Regression (task_c31304f08555): the daemon holds no child for an
+    // `unverifiable` id, so the pane must show the honest recovery offer
+    // instead of a blank pane that only reacted to a Retry click.
     expect(
       showRecoveryOverlay({
         verdict: "unverifiable",
-        recoveryNonce: 1,
-        dismissedNonce: 0,
         connected: true,
+        offerKey,
+        dismissedKey: null,
       }),
     ).toBe(true);
   });
-  it("hides after the user dismissed this offer", () => {
+  it("hides after the user dismissed this incarnation's offer", () => {
     expect(
       showRecoveryOverlay({
         verdict: "unverifiable",
-        recoveryNonce: 1,
-        dismissedNonce: 1,
         connected: true,
+        offerKey,
+        dismissedKey: offerKey,
       }),
     ).toBe(false);
   });
-  it("re-arms only on a NEW retry click (a higher nonce)", () => {
+  it("does not transfer a dismissal to a different incarnation", () => {
     expect(
       showRecoveryOverlay({
         verdict: "unverifiable",
-        recoveryNonce: 2,
-        dismissedNonce: 1,
         connected: true,
+        offerKey: "s1:inc-2",
+        dismissedKey: "s1:inc-1",
       }),
     ).toBe(true);
   });
@@ -181,9 +159,9 @@ describe("showRecoveryOverlay", () => {
       expect(
         showRecoveryOverlay({
           verdict,
-          recoveryNonce: 3,
-          dismissedNonce: 0,
           connected: true,
+          offerKey,
+          dismissedKey: null,
         }),
       ).toBe(false);
   });
@@ -191,9 +169,9 @@ describe("showRecoveryOverlay", () => {
     expect(
       showRecoveryOverlay({
         verdict: "unverifiable",
-        recoveryNonce: 1,
-        dismissedNonce: 0,
         connected: false,
+        offerKey,
+        dismissedKey: null,
       }),
     ).toBe(false);
   });
