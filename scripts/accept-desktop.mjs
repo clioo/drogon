@@ -33,6 +33,7 @@ import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
 import { probeRenderedMentuTab } from "./probe-rendered-mentu-tab.mjs";
+import { probeGraphDesigner } from "./probe-graph-designer.mjs";
 import { probeRenderedDaemonRestart } from "./probe-rendered-daemon-restart.mjs";
 import {
   probeRenderedBrowserTabsAcrossDaemonRestart,
@@ -878,6 +879,18 @@ try {
     // tabs persist per workspace and come back in order after a reload.
     report.checks.push(
       ...(await probeRenderedTabs({ page, workspace, output })),
+    );
+    // The graph-design probe runs FIRST: it needs a workspace with NO
+    // .drogon/graph.json (the honest empty state and the design journey).
+    // The Mentu tab probe below then writes its own fixture graph.
+    report.checks.push(
+      ...(await probeGraphDesigner({
+        page,
+        workspace,
+        output,
+        cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
+        dataDir,
+      })),
     );
     // Mentu-as-tab: the reported bug (the "+" menu's Mentu entry used to
     // hide the whole tab strip) plus the Bot-facing `drogon-cli mentu open`
