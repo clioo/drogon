@@ -38,6 +38,45 @@ export type UsageProjection = {
   output: UsageFieldProjection;
 };
 
+/** How a usage card's value must be read. `not_applicable` is a shell-only
+ *  run (no model, so no tokens or cost can exist); `not_reported` is an
+ *  agent run whose record omits the field; `failed_to_parse` is a value the
+ *  record carried but Drogon refused; `partial` is a real total that does
+ *  not cover every entry. */
+export type UsageCardKind =
+  | "exact"
+  | "partial"
+  | "not_applicable"
+  | "not_reported"
+  | "failed_to_parse";
+
+export const USAGE_CARD_BADGE: Record<UsageCardKind, string> = {
+  exact: "Exact · run record",
+  partial: "Unavailable",
+  not_applicable: "Not applicable",
+  not_reported: "Not reported",
+  failed_to_parse: "Failed to parse",
+};
+
+/** True when any step is an agent step. A shell-only run has no model, so
+ *  token and cost fields are not applicable rather than merely unreported. */
+export function runHasAgentSteps(steps: MentuStepRun[]): boolean {
+  return steps.some((step) => step.backend !== "shell");
+}
+
+/** Classifies a total card from its projection and whether the run has any
+ *  agent step at all. */
+export function usageCardKind(
+  projection: UsageFieldProjection,
+  hasAgentSteps: boolean,
+): UsageCardKind {
+  if (!hasAgentSteps) return "not_applicable";
+  if (projection.invalidCount > 0) return "failed_to_parse";
+  if (projection.total === null) return "not_reported";
+  if (usageExact(projection)) return "exact";
+  return "partial";
+}
+
 export function projectUsageField(
   steps: MentuStepRun[],
   field: UsageTokenField,
@@ -79,23 +118,29 @@ export function usageExact(projection: UsageFieldProjection): boolean {
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
-/** Fork copy (`MetricsView`'s `tokenLabel`): totals say "unavailable" when
- *  nothing was measured, and count unknown entries only alongside a real
- *  total. Invalid values are always spelled out, total or not. */
+/** Fork copy (`MetricsView`'s `tokenLabel`) with the three honest states:
+ *  a shell-only run says `not applicable` (no model, no tokens), an agent
+ *  run with no measurement says `not reported`, and a recorded-but-rejected
+ *  value is always spelled out as `N failed to parse`. Nothing is ever
+ *  estimated. */
 export function formatUsageTotal(
   label: string,
   projection: UsageFieldProjection,
+  applicability: "applicable" | "not_applicable" = "applicable",
 ): string {
+  if (applicability === "not_applicable") {
+    return `${label}: not applicable`;
+  }
   let text = `${label}: ${
     projection.total === null
-      ? "unavailable"
+      ? "not reported"
       : numberFormatter.format(projection.total)
   }`;
   if (projection.total !== null && projection.unknownCount > 0) {
-    text += ` + ${projection.unknownCount} unknown`;
+    text += ` + ${projection.unknownCount} not reported`;
   }
   if (projection.invalidCount > 0) {
-    text += ` + ${projection.invalidCount} invalid`;
+    text += ` + ${projection.invalidCount} failed to parse`;
   }
   return text;
 }
@@ -108,12 +153,17 @@ const REASON_LABELS: Record<MentuUsageInvalidReason, string> = {
   out_of_range: "out of range",
 };
 
-/** One attempt row's value: measured values are exact, rejected values
- *  say why, everything else is honestly unavailable. */
+/** One attempt row's value: measured values are exact, a shell step's
+ *  fields are not applicable (there is no model), a recorded-but-rejected
+ *  value says it failed to parse and why, and an applicable-but-absent
+ *  value is honestly not reported. */
 export function formatStepUsageValue(
   step: MentuStepRun,
   field: UsageTokenField,
 ): string {
+  if (step.backend === "shell") {
+    return "not applicable";
+  }
   const value = step.usage?.[field];
   if (typeof value === "number") {
     return `${numberFormatter.format(value)} (exact)`;
@@ -122,5 +172,7 @@ export function formatStepUsageValue(
   const issue = step.usage?.invalid.find(
     (candidate) => candidate.field === recordKey,
   );
-  return issue ? `unavailable (${REASON_LABELS[issue.reason]})` : "unavailable";
+  return issue
+    ? `failed to parse (${REASON_LABELS[issue.reason]})`
+    : "not reported";
 }

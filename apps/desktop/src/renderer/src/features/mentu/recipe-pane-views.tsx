@@ -61,6 +61,11 @@ import {
 import { RecipeVerification } from "./RecipeVerification";
 import { statusLabel, statusToneClass } from "./run-status";
 import { UsageStepMetrics, UsageTokenCards } from "./MentuUsageMetrics";
+import {
+  runHasAgentSteps,
+  USAGE_CARD_BADGE,
+  type UsageCardKind,
+} from "./usage-projection";
 
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 200;
@@ -84,12 +89,20 @@ function NodeStatusIcon({
   return <Circle className={className} aria-hidden />;
 }
 
-function MetricValue({ value, exact }: { value: string; exact: boolean }): React.JSX.Element {
+function MetricValue({
+  value,
+  exact,
+  kind,
+}: {
+  value: string;
+  exact: boolean;
+  kind?: UsageCardKind;
+}): React.JSX.Element {
   return (
     <div className="rounded-md border border-border bg-card p-3 text-xs">
       <p className="font-medium">{value}</p>
       <Badge variant="outline" className="mt-2 text-[10px]">
-        {exact ? "Exact · run record" : "Unavailable"}
+        {USAGE_CARD_BADGE[kind ?? (exact ? "exact" : "partial")]}
       </Badge>
     </div>
   );
@@ -418,6 +431,7 @@ export function MetricsView({ run }: { run: MentuRun | null }): React.JSX.Elemen
   const knownDurations = run.steps
     .map((step) => step.durationSeconds)
     .filter((value): value is number => typeof value === "number");
+  const hasAgentSteps = runHasAgentSteps(run.steps);
   const durationTotal = knownDurations.reduce((total, value) => total + value, 0);
   const durationUnknown = run.steps.length - knownDurations.length;
   const durationValue =
@@ -436,7 +450,11 @@ export function MetricsView({ run }: { run: MentuRun | null }): React.JSX.Elemen
       <div className="grid gap-2 @md/mentu-metrics:grid-cols-2 @2xl/mentu-metrics:grid-cols-4">
         <MetricValue value={durationValue} exact={knownDurations.length > 0 && durationUnknown === 0} />
         <UsageTokenCards steps={run.steps} />
-        <MetricValue value="Cost: unavailable" exact={false} />
+        <MetricValue
+          value={hasAgentSteps ? "Cost: not reported by the run record" : "Cost: not applicable"}
+          exact={false}
+          kind={hasAgentSteps ? "not_reported" : "not_applicable"}
+        />
       </div>
       <p className="text-xs text-muted-foreground">
         Scope: recipe · session aggregate: unavailable
