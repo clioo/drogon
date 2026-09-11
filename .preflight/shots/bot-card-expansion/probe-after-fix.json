@@ -1,0 +1,56 @@
+{
+  "label": "merge-head",
+  "checks": [
+    "workspace-selected",
+    "bots-page-empty-state",
+    "bot-created-through-the-form",
+    "unconfigured-bot-renders-compact-and-collapsed",
+    "card-expands-on-click",
+    "still-expanded-after-two-polls",
+    "screenshots-light-dark-1440-1100-900-760",
+    "acceptance-journeys-handled-separately"
+  ],
+  "fixture": "/tmp/dg-merge-head-93v5Jc",
+  "daemonPid": 53853,
+  "electronPid": 53854,
+  "botTestId": "bot-expand-6c6d9ebd-a811-4e27-9307-a4e19bd1e5bc",
+  "collapsedAfterMs": null,
+  "expandedAfterTwoPolls": true,
+  "shots": "/tmp/drogon-bot-expand/shots-mergehead",
+  "ok": true,
+  "teardown": [
+    {
+      "name": "electron",
+      "verdict": "exited",
+      "code": 0,
+      "signal": null,
+      "forced": false,
+      "pids": [
+        53871,
+        53872,
+        53875
+      ],
+      "survivors": []
+    },
+    {
+      "name": "daemon",
+      "verdict": "exited",
+      "code": null,
+      "signal": "SIGTERM",
+      "forced": false,
+      "pids": [],
+      "survivors": []
+    }
+  ],
+  "ownedPids": [
+    53854,
+    53871,
+    53872,
+    53875,
+    53853
+  ],
+  "survivors": [],
+  "tempRemoved": [
+    "/tmp/dg-merge-head-93v5Jc"
+  ]
+}

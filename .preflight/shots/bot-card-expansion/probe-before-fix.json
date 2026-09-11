@@ -1,0 +1,50 @@
+{
+  "label": "prefix-main",
+  "checks": [
+    "workspace-selected",
+    "bots-page-empty-state",
+    "bot-created-through-the-form",
+    "unconfigured-bot-renders-compact-and-collapsed",
+    "card-expands-on-click"
+  ],
+  "fixture": "/tmp/dg-prefix-main-4lfIhB",
+  "daemonPid": 51004,
+  "electronPid": 51005,
+  "botTestId": "bot-expand-9c53cbe3-3a5e-418b-b1ac-35c8464a66e7",
+  "collapsedAfterMs": 10003,
+  "expandedAfterTwoPolls": false,
+  "ok": false,
+  "error": "AssertionError [ERR_ASSERTION]: card collapsed on its own after the poll\n\n'false' !== 'true'\n\n    at file:///private/tmp/drogon-bot-expand/probe.mjs:251:10",
+  "teardown": [
+    {
+      "name": "electron",
+      "verdict": "exited",
+      "code": 0,
+      "signal": null,
+      "forced": false,
+      "pids": [
+        51006,
+        51007,
+        51010
+      ],
+      "survivors": []
+    },
+    {
+      "name": "daemon",
+      "verdict": "exited",
+      "code": null,
+      "signal": "SIGTERM",
+      "forced": false,
+      "pids": [],
+      "survivors": []
+    }
+  ],
+  "ownedPids": [
+    51005,
+    51006,
+    51007,
+    51010,
+    51004
+  ],
+  "survivors": []
+}
