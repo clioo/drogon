@@ -112,6 +112,31 @@ export type Session = {
    * the user can find in the monitor's firing history.
    */
   causedByEventId?: string | null;
+  /**
+   * Additive (session resume by identity): the provider-native conversation
+   * this session is, as the harness ITSELF reported it through
+   * `session.hook_event` (Claude/Codex `session_id`, OpenCode's session id,
+   * Antigravity's `conversation_id`). A reopen passes it back so the CLI opens
+   * THAT conversation (`claude --resume <id>`) instead of the most recent one
+   * in the directory. `null`/absent when the harness never reported one — a
+   * plain shell, or a harness with no identity surface.
+   */
+  agentSessionId?: string | null;
+  /**
+   * Additive: the transcript/rollout file that id names (`transcript_path`,
+   * Pi's `session_file`). Some CLIs resume by file rather than by id, so a
+   * reopen needs both when the harness reported both.
+   */
+  agentSessionTranscriptPath?: string | null;
+  /**
+   * Additive, `harness.start` replies only: how the resume request actually
+   * landed. `resumed` = the launch named the recorded provider conversation;
+   * `continued` = no recorded identity, so the CLI's own most-recent entrypoint
+   * was used; `fresh` = the daemon declined to resume (nothing to resume) and
+   * started a NEW conversation. Absent on `session.list` rows (a list read is
+   * not a launch) — and `fresh` must never be presented as a restore.
+   */
+  agentResume?: "resumed" | "continued" | "fresh";
 };
 export type Status = {
   hostId: string;
@@ -187,6 +212,22 @@ export type HarnessLaunchInput = {
   prompt?: string;
   permissionMode: PermissionMode;
   requestId: string;
+  /**
+   * Additive (resume): reopen the harness's own prior conversation instead of
+   * starting blank. The daemon reports how it landed in the reply's
+   * `agentResume`, so the pane can say "started fresh" instead of implying a
+   * continuation.
+   */
+  resume?: boolean;
+  /**
+   * Additive (resume by identity): the Drogon session whose recorded provider
+   * conversation should be reopened. The daemon reads the provider id off THAT
+   * row (written by the harness's own hook payload), so the renderer never has
+   * to carry or reconstruct it — one source of truth, and it works for a row
+   * this daemon instance holds no child for (a post-restart `unverifiable`
+   * stub) exactly as for a live one.
+   */
+  resumeSessionId?: string;
 };
 /**
  * Additive (R12-E terminal restart): explicit launch argv for

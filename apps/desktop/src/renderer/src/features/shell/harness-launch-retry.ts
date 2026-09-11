@@ -57,5 +57,13 @@ export function buildHarnessLaunchRetry(
     prompt: input.prompt,
     permissionMode: input.permissionMode,
     requestId,
+    // A resume is part of the launch identity: relaunching a session that was
+    // itself a resume must reopen the same provider conversation, not a blank
+    // one. Both keys were in the remembered input verbatim, so the replay
+    // stays exact (and absent keys stay absent, keeping a plain launch plain).
+    ...(input.resume ? { resume: true as const } : {}),
+    ...(input.resumeSessionId
+      ? { resumeSessionId: input.resumeSessionId }
+      : {}),
   };
 }

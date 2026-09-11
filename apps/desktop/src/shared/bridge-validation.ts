@@ -30,6 +30,13 @@ const harnessLaunch = z.object({
   effort: opaque(256),
   prompt: opaque(65536),
   permissionMode: z.enum(["inherit", "unattended"]),
+  // Resume (additive): reopen the harness's own prior conversation instead of
+  // starting blank, optionally naming the exact provider conversation by the
+  // Drogon session it was recorded on. Both stay optional so every existing
+  // launch validates, and they must be listed here or the IPC gate's own
+  // parse would silently strip them (the whole point of a gate).
+  resume: z.boolean().optional(),
+  resumeSessionId: id.optional(),
   // Caller-chosen so a genuine same-params retry after an ambiguous
   // transport failure can reuse it and let the service's idempotency
   // ledger dedupe, instead of always minting a fresh identity that could

@@ -8,6 +8,7 @@ import { renderToString } from "react-dom/server";
 import {
   describeTerminalProcessExit,
   projectTerminalProcessExit,
+  terminalProcessExitActionLabel,
 } from "./terminal-process-exit";
 import { TerminalProcessExitOverlay } from "./TerminalProcessExitOverlay";
 
@@ -69,6 +70,30 @@ describe("describeTerminalProcessExit", () => {
     // Honesty: loss of contact is not exit, so the copy must not assert a
     // shell exit code for a session that was never observed to exit.
     expect(described.detail).not.toContain("exit code");
+    // A non-sleeping session is restarted, not resumed.
+    expect(
+      terminalProcessExitActionLabel({
+        exitCode: null,
+        reason: "connection-unrecoverable",
+      }),
+    ).toBe("Restart");
+  });
+
+  it("says a process-less session is SLEEPING and offers to resume it (owner directive)", () => {
+    const described = describeTerminalProcessExit({
+      exitCode: null,
+      reason: "session-sleeping",
+    });
+    expect(described.title).toBe("This session is sleeping");
+    expect(described.detail).toContain("Resume opens the same conversation");
+    // Honesty: sleeping is not exit and not a failed reconnect.
+    expect(described.detail).not.toContain("exit code");
+    expect(described.detail).not.toContain("Could not re-establish");
+    // The primary action resumes the same conversation; calling it
+    // "Restart" would read as starting a new one.
+    expect(
+      terminalProcessExitActionLabel({ exitCode: null, reason: "session-sleeping" }),
+    ).toBe("Resume session");
   });
 });
 
@@ -115,6 +140,21 @@ describe("TerminalProcessExitOverlay", () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain("Could not reconnect to terminal");
     expect(html).toContain("Restart");
+    expect(html).toContain("Close");
+  });
+
+  it("renders the sleeping overlay with the resume action label", () => {
+    const html = renderToString(
+      createElement(TerminalProcessExitOverlay, {
+        processExit: { exitCode: null, reason: "session-sleeping" },
+        onRestart: vi.fn(),
+        onClose: vi.fn(),
+      }),
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("This session is sleeping");
+    expect(html).toContain("Resume session");
+    expect(html).not.toContain(">Restart<");
     expect(html).toContain("Close");
   });
 });

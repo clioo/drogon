@@ -113,16 +113,21 @@ fn launch_claude(engine: &Engine, workspace_id: &str) -> Value {
 }
 
 fn listed_state(engine: &Engine, session_id: &str) -> String {
+    listed_row(engine, session_id)["agentState"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+fn listed_row(engine: &Engine, session_id: &str) -> Value {
     let listed = ok(engine, "session.list", json!({}));
     listed["sessions"]
         .as_array()
         .unwrap()
         .iter()
         .find(|s| s["id"] == session_id)
-        .unwrap_or_else(|| panic!("session {session_id} must be listed"))["agentState"]
-        .as_str()
-        .unwrap()
-        .to_string()
+        .unwrap_or_else(|| panic!("session {session_id} must be listed"))
+        .clone()
 }
 
 fn hook_event(engine: &Engine, session_id: &str, incarnation: &str, event: &str) -> Value {
@@ -275,6 +280,10 @@ fn settings_file_installs_the_full_claude_turn_lifecycle() {
     .unwrap();
 
     for event in [
+        // `SessionStart` is installed so the harness's own payload can report
+        // the provider conversation at the session boundary (resume by
+        // identity), even for a session closed before its first turn.
+        "SessionStart",
         "UserPromptSubmit",
         "Notification",
         "Stop",
@@ -521,7 +530,6 @@ fn foreign_harness_event_names_are_refused() {
         "NewTurn",
         "ToolApprovalRequested",
         "SubagentStart",
-        "SessionStart",
     ] {
         assert_eq!(
             err_code(
@@ -538,4 +546,73 @@ fn foreign_harness_event_names_are_refused() {
         "idle",
         "refused foreign events must not move the row"
     );
+}
+
+/// `SessionStart` used to be foreign for claude (codex owns it as a turn
+/// start). It is now claude's own name too: the workspace-session-resume work
+/// installs it so the harness's own hook payload can report the provider
+/// conversation at the session boundary, even for a session closed before its
+/// first turn. Claude's SessionStart is the idle session boundary (the
+/// reference maps it to a done row), NOT a turn start -- a freshly launched
+/// session must never show a phantom spinner.
+#[test]
+fn claude_session_start_reports_the_conversation_and_stays_idle() {
+    let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    let started = ok(
+        &engine,
+        "session.hook_event",
+        json!({
+            "sessionId": session_id,
+            "incarnation": incarnation,
+            "event": "SessionStart",
+            "agentSessionId": "11111111-2222-3333-4444-555555555555",
+            "agentSessionTranscriptPath": "/tmp/11111111.jsonl",
+        }),
+    );
+    assert_eq!(started["agentState"], "idle");
+    assert_eq!(
+        started["agentSessionId"],
+        "11111111-2222-3333-4444-555555555555"
+    );
+    assert_eq!(started["agentSessionTranscriptPath"], "/tmp/11111111.jsonl");
+    // The identity is durable on the row, not just in the reply.
+    let row = listed_row(&engine, &session_id);
+    assert_eq!(
+        row["agentSessionId"],
+        "11111111-2222-3333-4444-555555555555"
+    );
+}
+
+/// A hook-reported locator is untrusted input to a future child's argv:
+/// anything that could be read as a flag or smuggle control characters is
+/// dropped, never persisted and never passed on.
+#[test]
+fn a_hostile_hook_locator_is_never_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    install_echoing_claude_fixture(&dir, true);
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let session = launch_claude(&engine, &workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_string();
+
+    for hostile in ["--dangerously-skip-permissions", "bad\nid", ""] {
+        let updated = ok(
+            &engine,
+            "session.hook_event",
+            json!({
+                "sessionId": session_id,
+                "incarnation": session["incarnation"],
+                "event": "UserPromptSubmit",
+                "agentSessionId": hostile,
+            }),
+        );
+        assert_eq!(updated["agentSessionId"], Value::Null, "{hostile:?}");
+    }
 }

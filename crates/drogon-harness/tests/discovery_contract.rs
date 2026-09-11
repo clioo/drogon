@@ -80,6 +80,8 @@ fn cmd_shim_is_unsupported_at_discovery_though_plan_launch_alone_would_wrap_it()
         permission_mode: PermissionMode::Inherit,
         headless: false,
         resume: false,
+        agent_session_id: None,
+        agent_session_transcript_path: None,
     };
     assert!(plan_launch(&req, &executable).is_ok());
 }

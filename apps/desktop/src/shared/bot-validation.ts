@@ -75,6 +75,13 @@ const bot = z.object({
       workspaceId: z.string().optional(),
       incarnation: z.string().optional(),
       verdict: z.enum(["live", "unverifiable", "exited"]).optional(),
+      // Session resume by identity (owner directive): the provider-native
+      // conversation the harness reported, latched onto the Bot record so a
+      // reopen names it even after the Drogon session row is gone. Listed
+      // here or the snapshot gate's own parse would strip it — the whole
+      // point of the gate is that it never invents or drops identity.
+      agentSessionId: z.string().max(512).nullable().optional(),
+      agentSessionTranscriptPath: z.string().max(4096).nullable().optional(),
     })
     .nullable(),
   createdAt: timestamp,

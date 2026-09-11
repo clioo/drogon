@@ -87,6 +87,11 @@ mod session_stop_tests;
 /// integration tests (a separate crate that only sees `pub` items) can open
 /// their own connection to the same file for fault injection.
 pub use db::DB_FILE_NAME;
+/// The provider-native conversation identity a harness reported for one of
+/// this daemon's sessions (additive session-resume record). Exported so the
+/// integration tests can assert the exact normalization/latch rules the
+/// launch planner and the Bot record share.
+pub use session::AgentSessionIdentity;
 
 use std::collections::HashMap;
 use std::fs;
@@ -877,7 +882,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at, caused_by_event_id FROM sessions ORDER BY created_at",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at, caused_by_event_id, agent_session_id, agent_session_transcript_path FROM sessions ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
         let rows: Vec<_> = stmt
@@ -1015,7 +1020,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let row = conn
             .query_row(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at, caused_by_event_id FROM sessions WHERE id = ?1",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at, caused_by_event_id, agent_session_id, agent_session_transcript_path FROM sessions WHERE id = ?1",
                 [session_id],
                 row_to_session_json,
             )
@@ -1116,6 +1121,14 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "harnessId": r.get::<_, Option<String>>(11)?,
             "parentSessionId": r.get::<_, Option<String>>(13)?,
             "causedByEventId": r.get::<_, Option<String>>(16)?,
+            // Additive: the provider-native conversation this session is, as
+            // the harness itself reported it (`session.hook_event`'s
+            // `agentSessionId`/`agentSessionTranscriptPath`). A reopen names
+            // THIS conversation; `null` means the harness never reported one
+            // and the reopen degrades to the CLI's own most-recent
+            // entrypoint (never a pretend continuation).
+            "agentSessionId": r.get::<_, Option<String>>(17)?,
+            "agentSessionTranscriptPath": r.get::<_, Option<String>>(18)?,
         }),
     ))
 }

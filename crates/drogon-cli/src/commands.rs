@@ -758,15 +758,25 @@ async fn internal(
             incarnation,
             event,
         } => {
-            // Capture only the bounded prompt preview from hook JSON stdin;
-            // session identity remains in the managed command arguments.
-            let prompt_preview = read_hook_prompt_preview();
-            let params = json!({
-                "promptPreview": prompt_preview,
+            // The harness hands its hook payload on stdin: the bounded prompt
+            // preview the sidebar uses, plus the provider-native conversation
+            // identity (Claude/Codex `session_id` + `transcript_path`).
+            // Session identity for the CALLBACK remains in the managed
+            // command arguments; the payload only ever contributes the
+            // conversation locator, which the daemon normalizes before use.
+            let payload = read_hook_payload();
+            let mut params = json!({
+                "promptPreview": payload.prompt_preview,
                 "sessionId": session,
                 "incarnation": incarnation,
                 "event": event,
             });
+            if let Some(agent_session_id) = payload.agent_session_id {
+                params["agentSessionId"] = json!(agent_session_id);
+            }
+            if let Some(transcript_path) = payload.transcript_path {
+                params["agentSessionTranscriptPath"] = json!(transcript_path);
+            }
             let call = client
                 .call("session.hook_event", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
@@ -777,36 +787,62 @@ async fn internal(
     }
 }
 
+/// What one harness hook invocation contributes: the bounded prompt
+/// preview, and the provider-native conversation locator its payload names.
+#[derive(Default, Debug, PartialEq, Eq)]
+struct HookPayload {
+    prompt_preview: Option<String>,
+    agent_session_id: Option<String>,
+    transcript_path: Option<String>,
+}
+
 /// Read bounded hook JSON without hanging the agent on an open stdin pipe.
-/// Only the first prompt preview is forwarded; the CLI exits the drain thread.
-fn read_hook_prompt_preview() -> Option<String> {
+/// The CLI exits the drain thread, so a harness that leaves the pipe open
+/// after writing its payload still returns.
+fn read_hook_payload() -> HookPayload {
     use std::io::{IsTerminal as _, Read as _};
     if std::io::stdin().is_terminal() {
-        return None;
+        return HookPayload::default();
     }
     let (send, receive) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
         let mut bytes = Vec::new();
         let _ = std::io::stdin().lock().take(65_537).read_to_end(&mut bytes);
-        let preview = hook_prompt_preview(&bytes);
-        let _ = send.send(preview);
+        let _ = send.send(hook_payload(&bytes));
     });
     receive
         .recv_timeout(std::time::Duration::from_millis(100))
         .ok()
-        .flatten()
+        .unwrap_or_default()
 }
 
-fn hook_prompt_preview(bytes: &[u8]) -> Option<String> {
+/// `session_id` is the key every harness's hook payload uses for its own
+/// conversation (Claude and Codex both; the reference's
+/// `normalizeAgentProviderSession` reads the same key from the hook record).
+/// `session_file` is Pi's own spelling for the transcript it resumes by
+/// (`getAgentResumeArgv`'s `Pi` arm takes the transcript path).
+fn hook_payload(bytes: &[u8]) -> HookPayload {
     if bytes.len() > 65_536 {
-        return None;
+        return HookPayload::default();
     }
-    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    value
-        .get("prompt")
-        .or_else(|| value.get("user_prompt"))
-        .and_then(|value| value.as_str())
-        .map(|prompt| prompt.chars().take(512).collect())
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return HookPayload::default();
+    };
+    let string = |key: &str| {
+        value
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    };
+    HookPayload {
+        prompt_preview: value
+            .get("prompt")
+            .or_else(|| value.get("user_prompt"))
+            .and_then(|value| value.as_str())
+            .map(|prompt| prompt.chars().take(512).collect()),
+        agent_session_id: string("session_id").or_else(|| string("conversation_id")),
+        transcript_path: string("transcript_path").or_else(|| string("session_file")),
+    }
 }
 
 /// Read-only status negotiation. The preflight request id is distinct from
@@ -2523,17 +2559,59 @@ mod tests {
     #[test]
     fn hook_previews_are_bounded_and_ignore_non_prompt_payloads() {
         assert_eq!(
-            hook_prompt_preview(br#"{"prompt":"hello","transcript_path":"ignored"}"#).as_deref(),
+            hook_payload(br#"{"prompt":"hello","transcript_path":"ignored"}"#)
+                .prompt_preview
+                .as_deref(),
             Some("hello")
         );
         assert_eq!(
-            hook_prompt_preview(br#"{"user_prompt":"fallback"}"#).as_deref(),
+            hook_payload(br#"{"user_prompt":"fallback"}"#)
+                .prompt_preview
+                .as_deref(),
             Some("fallback")
         );
-        assert_eq!(hook_prompt_preview(b"not json"), None);
-        assert_eq!(hook_prompt_preview(&vec![b' '; 65_537]), None);
+        assert_eq!(hook_payload(b"not json").prompt_preview, None);
+        assert_eq!(hook_payload(&vec![b' '; 65_537]).prompt_preview, None);
         let long = serde_json::to_vec(&json!({"prompt": "🦀".repeat(600)})).unwrap();
-        assert_eq!(hook_prompt_preview(&long).unwrap().chars().count(), 512);
+        assert_eq!(
+            hook_payload(&long).prompt_preview.unwrap().chars().count(),
+            512
+        );
+    }
+
+    /// The harness's own hook payload is the only place the provider-native
+    /// conversation id comes from; both spellings the harnesses use are read,
+    /// and nothing is inferred from the filesystem.
+    #[test]
+    fn hook_payload_carries_the_provider_conversation_locator() {
+        let claude = hook_payload(
+            br#"{"session_id":"9f8d","transcript_path":"/tmp/p/9f8d.jsonl","hook_event_name":"SessionStart"}"#,
+        );
+        assert_eq!(claude.agent_session_id.as_deref(), Some("9f8d"));
+        assert_eq!(claude.transcript_path.as_deref(), Some("/tmp/p/9f8d.jsonl"));
+        // Pi names its transcript `session_file`; Antigravity names the
+        // conversation `conversation_id`.
+        assert_eq!(
+            hook_payload(br#"{"session_id":"s","session_file":"/tmp/s.jsonl"}"#)
+                .transcript_path
+                .as_deref(),
+            Some("/tmp/s.jsonl")
+        );
+        assert_eq!(
+            hook_payload(br#"{"conversation_id":"conv-1"}"#)
+                .agent_session_id
+                .as_deref(),
+            Some("conv-1")
+        );
+        // A payload with neither key contributes no locator at all.
+        assert_eq!(
+            hook_payload(br#"{"hook_event_name":"Stop"}"#),
+            HookPayload {
+                prompt_preview: None,
+                agent_session_id: None,
+                transcript_path: None,
+            }
+        );
     }
 
     #[test]

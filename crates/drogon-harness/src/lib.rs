@@ -30,8 +30,8 @@ pub use discovery::{HarnessAvailability, HarnessInstallation, discover, resolve_
 pub use headless_env::{HeadlessEnvPlan, plan_headless_env};
 pub use known_tui_agents::{KNOWN_TUI_AGENT_IDS, is_known_tui_agent};
 pub use launch::{
-    HarnessLaunchPlan, HarnessLaunchRequest, PermissionMode, harness_resume_is_supported,
-    plan_launch, plan_launch_with_args,
+    HarnessLaunchPlan, HarnessLaunchRequest, PermissionMode, explicit_resume_argv,
+    harness_resume_is_explicit, harness_resume_is_supported, plan_launch, plan_launch_with_args,
 };
 pub use mentu_contract::{
     AdapterEvidence, CONTRACT_DERIVED_FROM_REVISION, CONTRACT_DERIVED_FROM_VERSION,

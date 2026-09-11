@@ -45,7 +45,7 @@ impl Engine {
             .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?;
         project_bots_trigger_automation_id(&mut bots_json);
         project_bots_home(&tx, &mut bots_json);
-        self.project_bots_current_session_facts(&conn, &mut bots_json);
+        self.project_bots_current_session_facts(&tx, &mut bots_json);
         let result = json!({"hostId":self.host_id,"workspaceId":scope.workspace_id,"bots":bots_json,"history":history});
         if serde_json::to_vec(&result)
             .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?
@@ -143,7 +143,19 @@ impl Engine {
     /// for leaves the record untouched, so the renderer can tell "no record"
     /// (safe to open fresh) apart from "recorded but unobserved" (never
     /// dispatch a duplicate).
-    fn project_bots_current_session_facts(&self, conn: &Connection, bots_json: &mut Value) {
+    ///
+    /// The harness-reported conversation identity
+    /// (`agentSessionId`/`agentSessionTranscriptPath`) is projected too: it is
+    /// what lets the renderer route an unobserved record to resume-by-identity
+    /// instead of the old permanent refusal. The record itself is latched at
+    /// capture time (`bots::storage::latch_bot_agent_identity`, called from
+    /// `session.hook_event`), never here — a snapshot is a read.
+    fn project_bots_current_session_facts(
+        &self,
+        tx: &rusqlite::Transaction,
+        bots_json: &mut Value,
+    ) {
+        let conn: &Connection = tx;
         let Some(bots) = bots_json.as_array_mut() else {
             return;
         };
@@ -171,6 +183,14 @@ impl Engine {
             if let Some(pid) = facts.get("processId").and_then(Value::as_u64) {
                 session_obj.insert("processId".to_string(), json!(pid));
             }
+            // Additive: the provider-native conversation, so the renderer can
+            // route an unobserved record to resume-by-identity instead of the
+            // old permanent refusal.
+            for key in ["agentSessionId", "agentSessionTranscriptPath"] {
+                if let Some(value) = facts.get(key) {
+                    session_obj.insert(key.to_string(), value.clone());
+                }
+            }
         }
     }
 
@@ -193,7 +213,8 @@ impl Engine {
             return Some(facts);
         }
         conn.query_row(
-            "SELECT workspace_id, incarnation, verdict, harness_id FROM sessions \
+            "SELECT workspace_id, incarnation, verdict, harness_id, agent_session_id, \
+             agent_session_transcript_path FROM sessions \
              WHERE id = ?1 AND host_id = ?2",
             params![session_id, self.host_id],
             |row| {
@@ -202,6 +223,8 @@ impl Engine {
                     "incarnation": row.get::<_, String>(1)?,
                     "verdict": row.get::<_, String>(2)?,
                     "harnessId": row.get::<_, Option<String>>(3)?,
+                    "agentSessionId": row.get::<_, Option<String>>(4)?,
+                    "agentSessionTranscriptPath": row.get::<_, Option<String>>(5)?,
                 }))
             },
         )

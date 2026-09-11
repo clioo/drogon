@@ -331,7 +331,20 @@ export type BotLiveSession = {
  *    duplicate-creating bug; the caller refuses honestly instead. */
 export type BotSessionResolution =
   | { kind: "focus"; session: BotLiveSession }
-  | { kind: "reopen"; sessionId: string; harnessId: string | null }
+  | {
+      kind: "reopen";
+      sessionId: string;
+      harnessId: string | null;
+      /**
+       * Whether the reopen can name the harness's own prior conversation: the
+       * Drogon session id to hand to `resumeSessionId` (`"session"`, the
+       * recorded row — the daemon reads the provider id off it), or
+       * `"bot-record"` (the record's latched locator, for a row that no longer
+       * exists). `null` = no identity to resume by, so the reopen is a
+       * continue/fresh launch and the caller must not claim a restore.
+       */
+      resumeByIdentity?: "session" | "bot-record" | null;
+    }
   | { kind: "open" }
   | { kind: "unknown" };
 
@@ -379,6 +392,17 @@ export type BotsPanelSession = {
   workspaceId?: string;
   incarnation?: string;
   verdict?: "live" | "unverifiable" | "exited";
+  /** The provider-native conversation this Bot session is, as the harness
+   *  itself reported it (Claude/Codex `session_id`, ...), latched onto the
+   *  record when the daemon learned it. This is what a reopen names, and it
+   *  is the reason an unobserved record is resumable instead of a permanent
+   *  dead end: the Drogon session row is deleted by an explicit close, but
+   *  this latched locator survives. `null`/absent when the harness reported
+   *  none (or on an older daemon build). */
+  agentSessionId?: string | null;
+  /** The transcript/rollout file that id names (`transcript_path`, Pi's
+   *  `session_file`) — some CLIs resume by file rather than by id. */
+  agentSessionTranscriptPath?: string | null;
 };
 
 export type BotsPanelBot = {

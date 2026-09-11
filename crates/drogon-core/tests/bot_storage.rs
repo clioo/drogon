@@ -518,6 +518,8 @@ fn rotate_session_never_touches_instructions_memories_character_responsibilities
             model: None,
             started_at: 10.0,
             rotated_at: Some(10.0),
+            agent_session_id: None,
+            agent_session_transcript_path: None,
         }),
         10.0,
     )
@@ -1612,4 +1614,132 @@ fn migrate_ownership_rolls_back_completely_when_an_automation_payload_is_corrupt
             "the corrupt row itself is untouched"
         );
     }
+}
+
+/// The Bot-record half of resume-by-identity: the harness's reported
+/// conversation is latched onto the record that owns the session, survives
+/// that session's row, and is never inherited by a rotated session.
+#[test]
+fn a_bots_reported_conversation_identity_is_latched_onto_its_record() {
+    let c = conn();
+    let mut bot = sample_bot("b1", "Arya", 1.0);
+    bot.current_session = Some(BotSession {
+        session_id: "sess-1".to_string(),
+        harness: "claude".to_string(),
+        model: None,
+        started_at: 1.0,
+        rotated_at: None,
+        agent_session_id: None,
+        agent_session_transcript_path: None,
+    });
+    bstorage::create_bot(&c, HOST, FOLDER, &bot).unwrap();
+
+    // Latched by session id: the owning record changes, a foreign session id
+    // changes nothing.
+    let identity = |id: &str, path: Option<&str>| {
+        drogon_core::AgentSessionIdentity::parse(Some(id), path).unwrap()
+    };
+    assert!(
+        !bstorage::latch_bot_agent_identity(
+            &c,
+            HOST,
+            "someone-elses-session",
+            Some(&identity("conv-x", None)),
+            2.0
+        )
+        .unwrap()
+    );
+    assert!(
+        bstorage::latch_bot_agent_identity(
+            &c,
+            HOST,
+            "sess-1",
+            Some(&identity("conv-1", Some("/tmp/conv-1.jsonl"))),
+            2.0
+        )
+        .unwrap()
+    );
+    let latched = bstorage::get_bot(&c, HOST, FOLDER, "b1")
+        .unwrap()
+        .unwrap()
+        .current_session
+        .unwrap();
+    assert_eq!(latched.agent_session_id.as_deref(), Some("conv-1"));
+    assert_eq!(
+        latched.agent_session_transcript_path.as_deref(),
+        Some("/tmp/conv-1.jsonl")
+    );
+
+    // Idempotent: re-observing the same identity writes nothing (no CAS churn
+    // on every snapshot), and a missing identity never erases a known locator.
+    assert!(
+        !bstorage::latch_bot_agent_identity(
+            &c,
+            HOST,
+            "sess-1",
+            Some(&identity("conv-1", Some("/tmp/conv-1.jsonl"))),
+            3.0
+        )
+        .unwrap()
+    );
+    assert!(!bstorage::latch_bot_agent_identity(&c, HOST, "sess-1", None, 3.0).unwrap());
+    let unchanged = bstorage::get_bot(&c, HOST, FOLDER, "b1")
+        .unwrap()
+        .unwrap()
+        .current_session
+        .unwrap();
+    assert_eq!(unchanged.agent_session_id.as_deref(), Some("conv-1"));
+
+    // A rotated session is a NEW conversation: the previous locator must not
+    // carry over, and a rotation writes no identity of its own.
+    bstorage::rotate_session(
+        &c,
+        HOST,
+        FOLDER,
+        "b1",
+        Some(BotSession {
+            session_id: "sess-2".to_string(),
+            harness: "claude".to_string(),
+            model: None,
+            started_at: 4.0,
+            rotated_at: Some(4.0),
+            agent_session_id: None,
+            agent_session_transcript_path: None,
+        }),
+        4.0,
+    )
+    .unwrap();
+    let rotated = bstorage::get_bot(&c, HOST, FOLDER, "b1")
+        .unwrap()
+        .unwrap()
+        .current_session
+        .unwrap();
+    assert_eq!(rotated.agent_session_id, None);
+    assert!(
+        !bstorage::latch_bot_agent_identity(
+            &c,
+            HOST,
+            "sess-1",
+            Some(&identity("conv-1", None)),
+            5.0
+        )
+        .unwrap(),
+        "the old session's identity must not be re-latched onto the rotated record"
+    );
+    assert!(
+        bstorage::latch_bot_agent_identity(
+            &c,
+            HOST,
+            "sess-2",
+            Some(&identity("conv-2", None)),
+            5.0
+        )
+        .unwrap()
+    );
+    let rotated = bstorage::get_bot(&c, HOST, FOLDER, "b1")
+        .unwrap()
+        .unwrap()
+        .current_session
+        .unwrap();
+    assert_eq!(rotated.agent_session_id.as_deref(), Some("conv-2"));
 }

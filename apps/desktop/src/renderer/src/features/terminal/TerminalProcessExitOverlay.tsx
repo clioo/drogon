@@ -7,6 +7,7 @@ import { RotateCw, X } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import {
   describeTerminalProcessExit,
+  terminalProcessExitActionLabel,
   type TerminalProcessExit,
 } from "./terminal-process-exit";
 
@@ -20,6 +21,7 @@ export function TerminalProcessExitOverlay({
   onClose: () => void;
 }): React.JSX.Element {
   const { title, detail } = describeTerminalProcessExit(processExit);
+  const actionLabel = terminalProcessExitActionLabel(processExit);
 
   return (
     <div className="pointer-events-none absolute inset-0 z-40 flex items-end justify-center p-4">
@@ -38,7 +40,7 @@ export function TerminalProcessExitOverlay({
           </Button>
           <Button type="button" size="sm" onClick={onRestart}>
             <RotateCw />
-            Restart
+            {actionLabel}
           </Button>
         </div>
       </div>

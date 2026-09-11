@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BOT_HARNESS_IDS,
   PRESETS,
+  botReopenNotice,
   applyBotCharacterPreset,
   botInitials,
   botStatusPill,
@@ -377,6 +378,32 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
     );
     expect(collapsedRowNote({ home: { path: "/x" } } as never)).toBe(
       "No automations or monitors yet · Standby workspace initialized",
+    );
+  });
+
+  it("says nothing about a reopen that names the recorded conversation", () => {
+    expect(
+      botReopenNotice({ harnessId: "claude", resumeByIdentity: "bot-record" }),
+    ).toBeNull();
+    expect(
+      botReopenNotice({ harnessId: "claude", resumeByIdentity: "session" }),
+    ).toBeNull();
+  });
+
+  it("names what a reopen without a recorded conversation will actually do", () => {
+    // Still a real continuation through the CLI's own entrypoint -- but not
+    // the recorded session id, and the page says which one it asked for
+    // rather than implying an exact restore.
+    expect(botReopenNotice({ harnessId: "claude", resumeByIdentity: null })).toBe(
+      "claude will reopen its most recent conversation in this Bot's home; no exact session id was recorded for it.",
+    );
+  });
+
+  it("says a NEW session opened for a harness that cannot resume", () => {
+    expect(
+      botReopenNotice({ harnessId: "aider", resumeByIdentity: "bot-record" }),
+    ).toBe(
+      "aider cannot reopen its previous conversation; a NEW session was opened instead.",
     );
   });
 });

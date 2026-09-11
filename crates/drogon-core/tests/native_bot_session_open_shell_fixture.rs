@@ -114,6 +114,55 @@ fn write_claude_fixture_staying_alive(bin: &std::path::Path) {
     std::fs::copy(&pi, bin.join("claude")).unwrap();
 }
 
+/// A `claude` stand-in that keeps a per-home conversation and can be pointed
+/// at one by id, the way the real CLI's `--resume <session-id>` does:
+///
+/// - fresh start: record this home's conversation id (`PROVIDER_ID`), append a
+///   turn to its transcript, and print the transcript;
+/// - `--resume <id>`: print `RESUMED:<id>` plus the transcript stored FOR THAT
+///   ID -- so `RESUMED:<wrong id>` or `NO SUCH CONVERSATION` is a real failure,
+///   not just a missing error message.
+const PROVIDER_ID: &str = "9f8d1c2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f";
+
+fn write_resuming_claude_fixture(bin: &std::path::Path) {
+    let script = bin.join("claude");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+for arg in "$@"; do echo "ARG:$arg"; done
+case "$*" in
+  *--resume*)
+    # The id is the argument right after --resume.
+    shift_count=0
+    for arg in "$@"; do
+      if [ "$previous" = "--resume" ]; then resume_id="$arg"; fi
+      previous="$arg"
+      shift_count=$((shift_count + 1))
+    done
+    echo "RESUMED:${{resume_id}}"
+    if [ -f ".drogon-conversation-${{resume_id}}" ]; then
+      echo "CONVERSATION:$(cat .drogon-conversation-${{resume_id}})"
+    else
+      echo "NO SUCH CONVERSATION"
+    fi
+    ;;
+  *)
+    echo "{PROVIDER_ID}" > .drogon-provider-id
+    echo "the first turn of {PROVIDER_ID}" > .drogon-conversation-{PROVIDER_ID}
+    echo "CONVERSATION:$(cat .drogon-conversation-{PROVIDER_ID})"
+    ;;
+esac
+trap 'exit 0' TERM INT
+while IFS= read -r line; do echo "you said: $line"; done
+"#
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 fn base64_decode(text: &str) -> Vec<u8> {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD
@@ -855,6 +904,145 @@ fn reopened_bot_session_resumes_the_harness_conversation() {
         &fx.engine,
         "session.stop",
         "req-stop-2",
+        json!({"sessionId": second_id, "incarnation": second_inc}),
+    );
+}
+
+/// The owner's contract for the Bot twin, end to end: the harness reports the
+/// conversation it is having (its own hook payload), the Bot record latches
+/// that identity, and reopening the Bot names THAT conversation -- not the
+/// most recent one in the home. The Drogon session row is REMOVED before the
+/// reopen on purpose: the latched identity on the Bot record is what keeps the
+/// dead end ("the daemon has not reported whether this Bot's session is still
+/// running") from being permanent.
+#[test]
+fn reopened_bot_session_resumes_the_exact_conversation_the_harness_reported() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let _saved_claude_dir = SavedEnv::capture("CLAUDE_CONFIG_DIR");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_resuming_claude_fixture(bin.path());
+    prepend_fixture_bin(bin.path());
+    // An EMPTY Claude Code store: the filesystem would say "nothing to
+    // resume", so only the harness's own reported id can name the
+    // conversation.
+    let claude_root = tempfile::tempdir().unwrap();
+    unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", claude_root.path()) };
+
+    // 1. A fresh open, no resume claim.
+    let opened = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-identity",
+        fx.open_session_params_for("claude"),
+    );
+    assert_eq!(opened["outcome"], "dispatched", "{opened:?}");
+    let first_id = opened["session"]["sessionId"].as_str().unwrap().to_string();
+    let first_inc = opened["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (first_output, _) = read_until(
+        &fx.engine,
+        &first_id,
+        &first_inc,
+        |text| text.contains("CONVERSATION:"),
+        Duration::from_secs(20),
+    );
+    assert!(
+        !first_output.contains("ARG:--resume"),
+        "a fresh open must not claim to resume anything: {first_output:?}"
+    );
+
+    // 2. The harness's own hook payload reports the provider conversation.
+    let reported = ok(
+        &fx.engine,
+        "session.hook_event",
+        "req-hook-identity",
+        json!({
+            "sessionId": first_id,
+            "incarnation": first_inc,
+            "event": "SessionStart",
+            "agentSessionId": PROVIDER_ID,
+        }),
+    );
+    assert_eq!(reported["agentSessionId"], PROVIDER_ID);
+
+    // 3. The snapshot latches it onto the Bot record.
+    let snapshot = ok(
+        &fx.engine,
+        "bot.snapshot",
+        "req-snapshot-identity",
+        json!({"workspaceId": "", "hostId": fx.host, "locale": "en"}),
+    );
+    assert_eq!(
+        snapshot["bots"][0]["currentSession"]["agentSessionId"], PROVIDER_ID,
+        "the Bot record must learn the conversation identity"
+    );
+
+    // 4. Close the session and REMOVE its row: from here on the Bot record is
+    //    the only place the identity exists.
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-identity",
+        json!({"sessionId": first_id, "incarnation": first_inc}),
+    );
+    ok(
+        &fx.engine,
+        "session.forget",
+        "req-forget-identity",
+        json!({"sessionId": first_id, "incarnation": first_inc}),
+    );
+    let listed = ok(&fx.engine, "session.list", "req-list-identity", json!({}));
+    assert!(
+        !listed["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == first_id.as_str()),
+        "the durable row is gone; the record alone must carry the identity"
+    );
+
+    // 5. Reopen: the launch must name THAT conversation, and the harness must
+    //    hand the prior turn's content back.
+    let mut params = fx.open_session_params_for("claude");
+    params["resume"] = json!(true);
+    let reopened = ok(&fx.engine, "bot.run", "req-open-reopen", params);
+    assert_eq!(reopened["outcome"], "dispatched", "{reopened:?}");
+    let second_id = reopened["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let second_inc = reopened["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (output, verdict) = read_until(
+        &fx.engine,
+        &second_id,
+        &second_inc,
+        |text| text.contains("CONVERSATION:") || text.contains("NO SUCH CONVERSATION"),
+        Duration::from_secs(20),
+    );
+    assert_eq!(verdict, "live", "{output:?}");
+    assert!(
+        output.contains("ARG:--resume") && output.contains(&format!("ARG:{PROVIDER_ID}")),
+        "the reopen must name the reported conversation id: {output:?}"
+    );
+    assert!(
+        output.contains(&format!("RESUMED:{PROVIDER_ID}")),
+        "the harness must be pointed at the SAME conversation: {output:?}"
+    );
+    assert!(
+        output.contains(&format!("CONVERSATION:the first turn of {PROVIDER_ID}")),
+        "the resumed run must return the prior conversation's CONTENT, not just exit cleanly: {output:?}"
+    );
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-reopen",
         json!({"sessionId": second_id, "incarnation": second_inc}),
     );
 }

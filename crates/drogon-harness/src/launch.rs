@@ -28,14 +28,29 @@ pub struct HarnessLaunchRequest {
     /// a user-facing tab gets. Absent (user tabs) means interactive.
     #[serde(default)]
     pub headless: bool,
-    /// Reopen the harness's OWN most recent conversation in this session's
-    /// working directory instead of starting a blank one. A closed Bot
-    /// session must resume the prior conversation, not merely open an empty
-    /// tab; the locator is per-harness and lives in [`resume_args`]. Only
-    /// meaningful for an interactive (non-headless) launch: a headless run
-    /// consumes a prompt and exits, so resuming one is refused.
+    /// Reopen the harness's OWN conversation instead of starting a blank
+    /// one. A closed Bot (or sleeping) session must resume the prior
+    /// conversation, not merely open an empty tab; the locator is
+    /// per-harness and lives in [`resume_argv`]. Only meaningful for an
+    /// interactive (non-headless) launch: a headless run consumes a prompt
+    /// and exits, so resuming one is refused.
     #[serde(default)]
     pub resume: bool,
+    /// The provider-native session id the harness itself reported for the
+    /// conversation being resumed (Claude's hook `session_id`, Codex's
+    /// `session_id`, OpenCode's session id, Antigravity's
+    /// `conversation_id`). When present and usable for this harness,
+    /// [`resume_argv`] names that exact conversation rather than asking the
+    /// CLI to pick the most recent one — identity, not inference from the
+    /// filesystem (see `resume_store`).
+    #[serde(default)]
+    pub agent_session_id: Option<String>,
+    /// The provider-native transcript/rollout file the harness reported
+    /// (`transcript_path` / Pi's `session_file`). Some CLIs resume by file
+    /// rather than by id (Pi's `--session`, the reference's
+    /// `getAgentResumeArgv`), so the id alone is not always enough.
+    #[serde(default)]
+    pub agent_session_transcript_path: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -108,7 +123,12 @@ pub fn plan_launch_with_args(
     // command position while the shared options still apply to it (measured
     // against each CLI's own `--help`, matching the ids this crate
     // launches).
-    args.extend(resume_args(request.harness_id, request.resume));
+    args.extend(resume_argv(
+        request.harness_id,
+        request.resume,
+        request.agent_session_id.as_deref(),
+        request.agent_session_transcript_path.as_deref(),
+    ));
     if let Some(provider) = &request.provider {
         if request.harness_id != HarnessId::Pi {
             return Err(invalid("Provider selection is available only for Pi"));
@@ -230,25 +250,43 @@ pub fn plan_launch_with_args(
     })
 }
 
-/// The harness-owned argv that reopens that harness's most recent
-/// conversation in the session's working directory, or nothing when resume
-/// was not requested. Each entry is the CLI's own documented continue
-/// entrypoint (verified against the installed binaries' `--help`):
+/// The harness-owned argv that reopens a conversation, or nothing when
+/// resume was not requested.
 ///
-/// - Claude Code: `--continue` (alias `-c`) — most recent conversation in
-///   the cwd.
-/// - Pi: `--continue` (alias `-c`).
-/// - OpenCode: `--continue` (alias `-c`).
-/// - Antigravity (`agy`): `--continue` (alias `-c`).
-/// - Codex: the `resume --last` SUBCOMMAND — `--last` skips the picker and
-///   picks the most recent session for the cwd.
+/// With a provider-native locator the argv names THAT conversation — the
+/// owner's contract ("cuando yo le doy Resume Session, use el CLI de Claude
+/// para abrirme la misma sesión"). The per-harness spellings are the
+/// reference's `getAgentResumeArgv` (`src/shared/agent-session-resume.ts`,
+/// ported for the AI Vault in
+/// `drogon_core::claim_identity::resume::get_agent_resume_argv`), narrowed to
+/// the harnesses this crate launches:
 ///
-/// A harness whose CLI has no continue entrypoint yields no argv; the caller
+/// - Claude: `claude --resume <session_id>`.
+/// - Codex: the `resume <session_id>` SUBCOMMAND.
+/// - OpenCode: `opencode --session <session_id>`.
+/// - Antigravity (`agy`): `agy --conversation <conversation_id>`.
+/// - Pi: `pi --session <transcript>` — Pi resumes by the session FILE it
+///   reported, so an id without a transcript path cannot name one.
+///
+/// Without a locator the CLI's own most-recent-in-cwd entrypoint is the best
+/// available answer (`--continue`; Codex's `resume --last`) and is kept
+/// exactly as before — that is what every pre-existing caller asked for. A
+/// harness whose CLI has no continue entrypoint yields no argv; the caller
 /// that requested resume is the one that must state the limitation honestly
 /// (`harness_resume_is_supported`).
-fn resume_args(harness_id: HarnessId, resume: bool) -> Vec<String> {
+fn resume_argv(
+    harness_id: HarnessId,
+    resume: bool,
+    agent_session_id: Option<&str>,
+    agent_session_transcript_path: Option<&str>,
+) -> Vec<String> {
     if !resume {
         return Vec::new();
+    }
+    if let Some(argv) =
+        explicit_resume_argv(harness_id, agent_session_id, agent_session_transcript_path)
+    {
+        return argv;
     }
     match harness_id {
         HarnessId::Codex => vec!["resume".into(), "--last".into()],
@@ -258,11 +296,56 @@ fn resume_args(harness_id: HarnessId, resume: bool) -> Vec<String> {
     }
 }
 
+/// The resume argv that names one exact provider conversation, or `None`
+/// when this harness cannot be pointed at the locator it was given (an
+/// unmodeled harness, or an id-only locator for a CLI that resumes by file).
+/// Pure, so the per-harness table is unit-testable without a launch.
+pub fn explicit_resume_argv(
+    harness_id: HarnessId,
+    agent_session_id: Option<&str>,
+    agent_session_transcript_path: Option<&str>,
+) -> Option<Vec<String>> {
+    let id = agent_session_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    // A hook-reported id crosses a trust boundary into a child's argv: it
+    // must never be able to inject a flag or control characters (the same
+    // rejection the reference applies in `normalizeAgentProviderSession`).
+    if id.starts_with('-') || id.len() > 512 || id.chars().any(char::is_control) {
+        return None;
+    }
+    let transcript = agent_session_transcript_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty() && !path.chars().any(char::is_control));
+    match harness_id {
+        HarnessId::Claude => Some(vec!["--resume".into(), id.to_string()]),
+        HarnessId::Codex => Some(vec!["resume".into(), id.to_string()]),
+        HarnessId::Opencode => Some(vec!["--session".into(), id.to_string()]),
+        HarnessId::Antigravity => Some(vec!["--conversation".into(), id.to_string()]),
+        // Pi's `--session` takes the session FILE it wrote, not the id.
+        HarnessId::Pi => transcript.map(|path| vec!["--session".into(), path.to_string()]),
+    }
+}
+
+/// Whether this harness's own `--resume`-style entrypoint can be pointed at
+/// a previously reported conversation (rather than only at "the most recent
+/// one in this directory"). Callers use it to decide between the explicit
+/// resume and the honest degrade.
+#[allow(dead_code)]
+pub fn harness_resume_is_explicit(harness_id: HarnessId) -> bool {
+    matches!(
+        harness_id,
+        HarnessId::Claude | HarnessId::Codex | HarnessId::Opencode | HarnessId::Antigravity
+    )
+}
+
 /// Whether this harness exposes a mechanism to reopen a prior conversation.
 /// Every harness this crate launches does; the helper exists so a caller can
 /// refuse honestly instead of pretending a blank session is a continuation
 /// if that ever stops being true (`None`/unknown harness ids are unsupported).
 pub fn harness_resume_is_supported(harness_id: HarnessId) -> bool {
+    // (Kept beside `harness_resume_is_explicit`: supported = "some continue
+    // entrypoint exists", explicit = "can name one exact conversation".)
     matches!(
         harness_id,
         HarnessId::Claude
@@ -509,6 +592,8 @@ mod tests {
             permission_mode: PermissionMode::Inherit,
             headless,
             resume: false,
+            agent_session_id: None,
+            agent_session_transcript_path: None,
         }
     }
 
@@ -627,6 +712,8 @@ mod tests {
             permission_mode: PermissionMode::Inherit,
             headless: false,
             resume: false,
+            agent_session_id: None,
+            agent_session_transcript_path: None,
         }
     }
 
@@ -746,6 +833,105 @@ mod tests {
         let mut pi = interactive(HarnessId::Pi);
         pi.resume = true;
         assert_eq!(plan(&pi), ["--continue"]);
+    }
+
+    /// The owner's contract: with the provider session id the harness itself
+    /// reported, the resume names THAT conversation instead of asking the CLI
+    /// to pick the most recent one. Spelled per the reference's
+    /// `getAgentResumeArgv`.
+    #[test]
+    fn a_recorded_provider_session_id_resumes_that_exact_conversation() {
+        for (harness_id, expected) in [
+            (
+                HarnessId::Claude,
+                vec!["--resume", "11111111-2222-3333-4444-555555555555"],
+            ),
+            (
+                HarnessId::Codex,
+                vec!["resume", "11111111-2222-3333-4444-555555555555"],
+            ),
+            (HarnessId::Opencode, vec!["--session", "ses_abc"]),
+            (HarnessId::Antigravity, vec!["--conversation", "conv_abc"]),
+        ] {
+            let mut base = interactive(harness_id);
+            base.resume = true;
+            base.agent_session_id = Some(if harness_id == HarnessId::Antigravity {
+                "conv_abc".to_string()
+            } else if harness_id == HarnessId::Opencode {
+                "ses_abc".to_string()
+            } else {
+                "11111111-2222-3333-4444-555555555555".to_string()
+            });
+            assert_eq!(plan(&base), expected, "{harness_id:?}");
+            assert!(harness_resume_is_explicit(harness_id));
+        }
+    }
+
+    /// Pi resumes by the session FILE it wrote, so an id alone cannot name
+    /// one: the launch degrades to the CLI's own most-recent entrypoint
+    /// rather than passing an id Pi would read as a path.
+    #[test]
+    fn pi_resumes_by_transcript_file_and_degrades_without_one() {
+        let mut by_id = interactive(HarnessId::Pi);
+        by_id.resume = true;
+        by_id.agent_session_id = Some("11111111-2222-3333-4444-555555555555".to_string());
+        assert_eq!(plan(&by_id), ["--continue"]);
+        assert!(!harness_resume_is_explicit(HarnessId::Pi));
+
+        let mut by_file = interactive(HarnessId::Pi);
+        by_file.resume = true;
+        by_file.agent_session_id = Some("11111111-2222-3333-4444-555555555555".to_string());
+        by_file.agent_session_transcript_path = Some("/tmp/pi-sessions/1111.jsonl".to_string());
+        assert_eq!(plan(&by_file), ["--session", "/tmp/pi-sessions/1111.jsonl"]);
+    }
+
+    /// A locator crosses a trust boundary into a child's argv: anything that
+    /// could inject a flag or smuggle control characters is refused, and the
+    /// resume degrades to the harness's own most-recent entrypoint.
+    #[test]
+    fn a_hostile_locator_degrades_instead_of_reaching_argv() {
+        for hostile in ["--dangerously-skip-permissions", "bad\nid", ""] {
+            assert_eq!(
+                explicit_resume_argv(HarnessId::Claude, Some(hostile), None),
+                None,
+                "{hostile:?} must never become argv"
+            );
+        }
+        let mut base = interactive(HarnessId::Claude);
+        base.resume = true;
+        base.agent_session_id = Some("--dangerously-skip-permissions".to_string());
+        assert_eq!(plan(&base), ["--continue"]);
+        assert_eq!(explicit_resume_argv(HarnessId::Claude, None, None), None);
+        // An unusable transcript path for Pi is dropped, not passed through.
+        assert_eq!(
+            explicit_resume_argv(HarnessId::Pi, Some("id"), Some("bad\npath")),
+            None
+        );
+    }
+
+    /// The explicit resume must keep its options, exactly like the continue
+    /// form: Claude's `--resume <id>` is a flag pair, Codex's is a subcommand.
+    #[test]
+    fn explicit_resume_keeps_the_launch_options() {
+        let mut claude = interactive(HarnessId::Claude);
+        claude.resume = true;
+        claude.agent_session_id = Some("sess-1".to_string());
+        claude.model = Some("sonnet".to_string());
+        assert_eq!(plan(&claude), ["--resume", "sess-1", "--model", "sonnet"]);
+
+        let mut codex = interactive(HarnessId::Codex);
+        codex.resume = true;
+        codex.agent_session_id = Some("sess-1".to_string());
+        assert_eq!(plan(&codex), ["resume", "sess-1"]);
+    }
+
+    /// An explicit locator is meaningless without `resume`, and never leaks
+    /// into a fresh launch's argv.
+    #[test]
+    fn a_locator_without_resume_never_reaches_argv() {
+        let mut base = interactive(HarnessId::Claude);
+        base.agent_session_id = Some("sess-1".to_string());
+        assert_eq!(plan(&base), Vec::<String>::new());
     }
 
     #[test]

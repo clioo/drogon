@@ -795,6 +795,101 @@ pub fn update_bot(
     Ok(bot)
 }
 
+/// Latches the harness-reported conversation identity onto the Bot's
+/// `current_session`, so a later reopen can name it even after the daemon's
+/// session row is gone (an explicit close deletes that row). Idempotent and
+/// scoped: only the record's OWN current Drogon session id may contribute a
+/// locator (a Bot that rotated to a new session resets it rather than
+/// carrying the previous conversation across), a known locator is never
+/// erased by a missing one, and an unchanged value writes nothing (no CAS
+/// churn on every snapshot). Returns whether the record changed.
+pub fn record_session_agent_identity(
+    conn: &Connection,
+    host_id: &str,
+    folder: &str,
+    id: &str,
+    session_id: &str,
+    identity: &crate::session::AgentSessionIdentity,
+    observed_at: f64,
+) -> Result<bool> {
+    let Some((mut bot, expected_rev)) = get_bot_with_rev(conn, host_id, folder, id)? else {
+        return Ok(false);
+    };
+    let Some(current) = bot.current_session.as_mut() else {
+        return Ok(false);
+    };
+    if current.session_id != session_id {
+        return Ok(false);
+    }
+    if current.agent_session_id.as_deref() == Some(identity.id.as_str())
+        && current.agent_session_transcript_path == identity.transcript_path
+    {
+        return Ok(false);
+    }
+    current.agent_session_id = Some(identity.id.clone());
+    current.agent_session_transcript_path = identity.transcript_path.clone();
+    bot.updated_at = observed_at;
+    cas_write(conn, host_id, folder, &bot, expected_rev)?;
+    Ok(true)
+}
+
+/// Latches the harness-reported conversation identity onto whichever Bot
+/// record owns this Drogon session. Called from the hook-capture path, where
+/// the identity is learned -- never from a read path -- so the record carries
+/// it from then on. That matters because an explicit `session.close` deletes
+/// the session row: after that the Bot record is the only place the provider
+/// conversation is named, and without it the Bot page's resolution could only
+/// ever answer `unknown` (the permanent refusal). Returns whether a record
+/// changed; a session no Bot owns, or a Bot that has since rotated, changes
+/// nothing.
+pub fn latch_bot_agent_identity(
+    conn: &Connection,
+    host_id: &str,
+    session_id: &str,
+    identity: Option<&crate::session::AgentSessionIdentity>,
+    observed_at: f64,
+) -> Result<bool> {
+    // Nothing to latch: never erase a locator already on the record.
+    let Some(identity) = identity else {
+        return Ok(false);
+    };
+    // The bot whose `currentSession.sessionId` is this session. Bots are few
+    // (tens at most) and this runs at most twice per session (the id, then its
+    // transcript path), so a bounded scan beats a second index to keep in
+    // sync.
+    let mut stmt = conn.prepare("SELECT folder, id, payload_json FROM bots WHERE host_id = ?1")?;
+    let rows = stmt
+        .query_map(params![host_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (folder, bot_id, payload) in rows {
+        let Ok(bot) = serde_json::from_str::<Bot>(&payload) else {
+            continue;
+        };
+        let Some(current) = bot.current_session.as_ref() else {
+            continue;
+        };
+        if current.session_id != session_id {
+            continue;
+        }
+        return record_session_agent_identity(
+            conn,
+            host_id,
+            &folder,
+            &bot_id,
+            session_id,
+            identity,
+            observed_at,
+        );
+    }
+    Ok(false)
+}
+
 /// Rotates only `current_session`; every other field (instructions,
 /// memories, character, responsibilities, history) is untouched.
 pub fn rotate_session(

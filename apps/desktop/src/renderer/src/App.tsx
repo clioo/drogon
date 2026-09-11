@@ -167,6 +167,11 @@ import { CommandPaletteHost } from "./components/command-palette";
 import { supportsHarnessLaunch } from "./harness-capability";
 import { projectTerminalRestartLaunch } from "./features/terminal/terminal-restart-launch";
 import {
+  restoredBannerReason,
+  sleepingSessionFor,
+} from "./features/terminal/sleeping-session";
+import type { SessionRestoredBannerReason } from "./features/terminal/SessionRestoredBanner";
+import {
   TERMINAL_CLEAR_EVENT,
   TERMINAL_SEARCH_EVENT,
   TERMINAL_CLOSE_EVENT,
@@ -513,6 +518,13 @@ export function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selected, setSelected] = useState("");
   const [sessions, setSessions] = useState<Session[]>([]);
+  // SLEEPING / RESUME (owner directive): the outcome of a resume launch, kept
+  // per session id until the user touches the pane. `resume-unavailable` is
+  // deliberately loud -- a requested resume that main declined must never look
+  // like a successful restore.
+  const [restoredBanners, setRestoredBanners] = useState<
+    Record<string, SessionRestoredBannerReason>
+  >({});
   const [active, setActive] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
   // Read inside in-flight `create`/`launchHarness`/`close` callbacks so a
@@ -2298,7 +2310,9 @@ export function App() {
     // dispatch a fresh open-session turn (no model turn) and focus it when
     // it lands. `resume` continues the harness's own prior conversation for
     // a known-exited session; a harness that cannot resume is not pretended
-    // into a continuation.
+    // into a continuation. When the record latched the harness-reported
+    // conversation, the daemon's resume names THAT one (`resumeByIdentity`),
+    // which is what turns the old permanent refusal into a real recovery.
     const resume =
       resolution.kind === "reopen" &&
       harnessSupportsConversationResume(
@@ -3795,6 +3809,14 @@ export function App() {
           .catch(() => {});
       };
       const launch = projectTerminalRestartLaunch(prior, detail.workspaceId);
+      // Resume by identity: a SLEEPING session (the daemon holds no child for
+      // it) is reopened through the harness's own resume verb naming the
+      // conversation that harness reported. A non-sleeping restart keeps
+      // today's behaviour exactly (no resume flag, no claim of a restore).
+      const sleeping = prior ? sleepingSessionFor(prior) : null;
+      const resumeInput = sleeping
+        ? { resume: true, resumeSessionId: sleeping.sessionId }
+        : {};
       // R16-AJ2 follow-up (issue #221): the record alone carries only the
       // harness id; a remembered launch input replays provider/model/prompt
       // verbatim, so Restart/Retry relaunch the same agent command like the
@@ -3809,7 +3831,10 @@ export function App() {
           launch.kind === "harness"
             ? await startHarnessTracked(
                 remembered
-                  ? buildHarnessLaunchRetry(remembered, crypto.randomUUID())
+                  ? {
+                      ...buildHarnessLaunchRetry(remembered, crypto.randomUUID()),
+                      ...resumeInput,
+                    }
                   : {
                       workspaceId: launch.workspaceId,
                       harnessId: launch.harnessId,
@@ -3822,6 +3847,7 @@ export function App() {
                         harnessDefaults,
                       ),
                       requestId: crypto.randomUUID(),
+                      ...resumeInput,
                     },
               )
             : await window.drogon.start(
@@ -3834,6 +3860,18 @@ export function App() {
         // A late reply for a host/workspace no longer current is skipped,
         // exactly like create() above; then the new tab activates.
         if (!contextMatches(captured, contextRef.current)) return;
+        // The pane's own banner: only `harness.start` reports how a resume
+        // landed, and only a resume may claim a restore (a plain shell
+        // relaunch has no `agentResume` and raises nothing).
+        const banner = restoredBannerReason(result.agentResume);
+        setRestoredBanners((banners) => {
+          const next = { ...banners };
+          // The superseded session's banner cannot outlive its tab.
+          if (typeof detail.sessionId === "string") delete next[detail.sessionId];
+          if (banner) next[result.id] = banner;
+          else delete next[result.id];
+          return next;
+        });
         // The replacement owns the launch memory now; the superseded
         // session's entry must not grow the map unbounded.
         harnessLaunchMemoryRef.current.delete(detail.sessionId);
@@ -4707,6 +4745,17 @@ export function App() {
                         sessionsRef.current.find((item) => item.id === paneId);
                       if (listed) void closeSplitPane(listed);
                     }}
+                    restoredBannerReasonFor={(sessionId) =>
+                      restoredBanners[sessionId] ?? null
+                    }
+                    onDismissRestoredBanner={(sessionId) =>
+                      setRestoredBanners((banners) => {
+                        if (!(sessionId in banners)) return banners;
+                        const next = { ...banners };
+                        delete next[sessionId];
+                        return next;
+                      })
+                    }
                     onFocusPane={(paneId) => {
                       const split = splitForTab(liveSplits, terminal.id);
                       if (!split || split.activePaneId === paneId) return;

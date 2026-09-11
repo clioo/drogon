@@ -965,6 +965,7 @@ pub fn authorized_prepare(
                 Some(&operating_prompt),
                 &harness_params,
                 false,
+                None,
             );
             Ok(BotRunPrepare::ReadyChat {
                 plan: ChatPlan {
@@ -987,19 +988,37 @@ pub fn authorized_prepare(
             // task_e7c183ebc637). Liveness/environment facts belong to
             // the daemon's status pill and inspector, never to a model
             // recital.
-            let bot_exists = bots_storage::get_bot(conn, derived_host_id, &folder, &request.bot_id)
+            let Some(bot) = bots_storage::get_bot(conn, derived_host_id, &folder, &request.bot_id)
                 .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
-                .is_some();
-            if !bot_exists {
+            else {
                 return Ok(BotRunPrepare::Refused {
                     workspace_id,
                     refusal: json!({"type": "bot", "kind": "unknownBot", "botId": request.bot_id}),
                     error: format!("bot {} not found", request.bot_id),
                 });
-            }
+            };
+            // Resume by identity: the provider-native conversation this Bot's
+            // session is having, so the harness opens THAT conversation
+            // (`claude --resume <id>`) instead of the most recent one in the
+            // Bot's home. The Bot record's latched locator is preferred -- it
+            // survives the Drogon session row's deletion on an explicit close
+            // -- and the daemon's own row is consulted only to fill in what
+            // the record does not have yet. Absent both, the launch degrades
+            // exactly as before and reports `agentResume: "fresh"`/
+            // `"continued"` from the daemon, never a pretend continuation.
+            let identity = if *resume {
+                resolve_bot_agent_session(conn, derived_host_id, &bot, request.bot_id.as_str())
+            } else {
+                None
+            };
             let chat_request_id = format!("bot-open:{envelope_request_id}");
-            let params =
-                build_chat_harness_start_params(&workspace_id, None, &harness_params, *resume);
+            let params = build_chat_harness_start_params(
+                &workspace_id,
+                None,
+                &harness_params,
+                *resume,
+                identity.as_ref(),
+            );
             Ok(BotRunPrepare::ReadyChat {
                 plan: ChatPlan {
                     bot_id: request.bot_id.clone(),
@@ -1026,6 +1045,7 @@ fn build_chat_harness_start_params(
     prompt: Option<&str>,
     harness_params: &HarnessLaunchParams,
     resume: bool,
+    agent_session: Option<&crate::session::AgentSessionIdentity>,
 ) -> Value {
     let mut params = json!({
         "workspaceId": workspace_id,
@@ -1035,6 +1055,16 @@ fn build_chat_harness_start_params(
         // Defect 2: reopen the harness's own prior conversation. Native's
         // launch planner maps this to `--continue` / `codex resume --last`.
         params["resume"] = json!(true);
+    }
+    if let Some(identity) = agent_session {
+        // The exact conversation, when the harness reported one. The planner
+        // spells it per harness (`claude --resume <id>`, `pi --session
+        // <transcript>`, ...) and degrades to its own most-recent entrypoint
+        // when the locator cannot name one.
+        params["agentSessionId"] = json!(identity.id);
+        if let Some(path) = &identity.transcript_path {
+            params["agentSessionTranscriptPath"] = json!(path);
+        }
     }
     if let Some(prompt) = prompt {
         params["prompt"] = json!(prompt);
@@ -1181,6 +1211,41 @@ fn not_found_bot(bot_id: &str) -> RpcError {
     RpcError::new("not_found", format!("bot {bot_id} not found"))
 }
 
+/// The provider-native conversation a Bot's recorded session is having: the
+/// record's latched locator first (it survives the Drogon session row's
+/// deletion), else the daemon's own durable row for that session id (written
+/// by the harness's hook payload). Never both, never invented.
+fn resolve_bot_agent_session(
+    conn: &Connection,
+    host_id: &str,
+    bot: &crate::bots::records::Bot,
+    bot_id: &str,
+) -> Option<crate::session::AgentSessionIdentity> {
+    let recorded = bot.current_session.as_ref()?;
+    if let Some(identity) = crate::session::AgentSessionIdentity::parse(
+        recorded.agent_session_id.as_deref(),
+        recorded.agent_session_transcript_path.as_deref(),
+    ) {
+        return Some(identity);
+    }
+    let identity = crate::session::recorded_agent_session(conn, &recorded.session_id)
+        .ok()
+        .flatten()?;
+    // Learn it for next time: the row may be gone by then.
+    if let Ok(Some(folder)) = bots_storage::folder_for_bot_id(conn, host_id, bot_id) {
+        let _ = bots_storage::record_session_agent_identity(
+            conn,
+            host_id,
+            &folder,
+            bot_id,
+            &recorded.session_id,
+            &identity,
+            crate::now_unix_ms() as f64 / 1000.0,
+        );
+    }
+    Some(identity)
+}
+
 /// Persists the open-session side effect [`record_chat`] does not cover:
 /// rotates the Bot's `current_session` to the just-opened one (so
 /// `bot.snapshot` reflects the live session immediately), when the dispatch
@@ -1232,6 +1297,14 @@ fn record_opened_session(
             model,
             started_at: plan.attempt_at,
             rotated_at: Some(observed_at),
+            // The provider-native conversation is learned from the harness's
+            // own hook payload after the session starts; `bot.snapshot`
+            // latches it onto this record (see
+            // `project_bots_current_session_facts`). A rotated session must
+            // never inherit the previous conversation's locator, so both stay
+            // unset here.
+            agent_session_id: None,
+            agent_session_transcript_path: None,
         }),
         observed_at,
     )

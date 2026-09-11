@@ -84,6 +84,9 @@ import {
   projectTerminalProcessExit,
   type TerminalProcessExit,
 } from "./terminal-process-exit";
+import { SessionRestoredBanner } from "./SessionRestoredBanner";
+import type { SessionRestoredBannerReason } from "./SessionRestoredBanner";
+import { sleepingSessionFor } from "./sleeping-session";
 import {
   extractTerminalFileLinks,
   requestTerminalFileOpen,
@@ -261,6 +264,8 @@ export function TerminalPane({
   onError,
   onSession,
   onFocus,
+  restoredBannerReason = null,
+  onDismissRestoredBanner,
 }: {
   session: Session;
   /** Terminal font size in px, mirrored from the settings store by App. */
@@ -288,6 +293,15 @@ export function TerminalPane({
   onSession(value: Session): void;
   /** Called when focus-follows-mouse makes this pane active in a split host. */
   onFocus?(): void;
+  /**
+   * SLEEPING / RESUME (owner directive): the banner the pane's own resume
+   * launch raised — `restored` when the harness reopened its conversation,
+   * `resume-unavailable` when the daemon declined and a fresh one started.
+   * `null` for a pane that was not resumed, so a plain tab never claims a
+   * restore. Cleared on the user's first interaction with the pane.
+   */
+  restoredBannerReason?: SessionRestoredBannerReason | null;
+  onDismissRestoredBanner?: () => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const surface = useRef<HTMLDivElement>(null);
@@ -1515,6 +1529,12 @@ export function TerminalPane({
     offerKey: recoveryKey,
     dismissedKey: dismissedRecoveryKey,
   });
+  // SLEEPING (owner directive): the daemon holds no child for this session, but
+  // its harness can reopen its own conversation — so the pane is asleep, not
+  // dead. The overlay says so and its primary action resumes THAT conversation
+  // (App adds `resume`/`resumeSessionId` to the restart launch), instead of
+  // relaunching the harness into a blank one.
+  const sleeping = sleepingSessionFor(session);
   const dismissRecoveryOffer = () => {
     setDismissedRecoveryKey(recoveryKey);
     current?.focus();
@@ -1526,7 +1546,15 @@ export function TerminalPane({
       className="terminal-surface"
       style={{ position: "relative" }}
       aria-label="Session terminal"
-      onKeyDown={onContainerKeyDown}
+      onKeyDown={(event) => {
+        onContainerKeyDown(event);
+        // First interaction with a restored pane retires its banner, exactly
+        // like the reference's pointer/key dismissal.
+        if (restoredBannerReason) onDismissRestoredBanner?.();
+      }}
+      onPointerDown={() => {
+        if (restoredBannerReason) onDismissRestoredBanner?.();
+      }}
       onContextMenu={onContainerContextMenu}
       onMouseEnter={onContainerMouseEnter}
     >
@@ -1553,7 +1581,10 @@ export function TerminalPane({
         />
       ) : recoveryOffer ? (
         <TerminalProcessExitOverlay
-          processExit={{ exitCode: null, reason: "connection-unrecoverable" }}
+          processExit={{
+            exitCode: null,
+            reason: sleeping ? "session-sleeping" : "connection-unrecoverable",
+          }}
           onRestart={restartExits}
           onClose={() => {
             dismissRecoveryOffer();
@@ -1561,6 +1592,10 @@ export function TerminalPane({
           }}
         />
       ) : null}
+      <SessionRestoredBanner
+        visible={restoredBannerReason !== null}
+        reason={restoredBannerReason ?? "restored"}
+      />
       {/* Daemon loss keeps the tab and its scrollback: the banner covers
           the stalled pane while live/unverifiable sessions wait to
           re-attach. Exited sessions keep the exit overlay above instead —

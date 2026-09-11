@@ -178,7 +178,8 @@ pub(crate) fn event_belongs_to_harness(event: &str, harness_id: Option<&str>) ->
     match harness_id {
         Some("claude") => matches!(
             event,
-            "UserPromptSubmit"
+            "SessionStart"
+                | "UserPromptSubmit"
                 | claude_events::NOTIFICATION
                 | claude_events::STOP
                 | "PreToolUse"
@@ -252,6 +253,28 @@ pub(crate) fn classify_hook_event(event: &str) -> Option<HookSignal> {
     } else {
         None
     }
+}
+
+/// [`classify_hook_event`] with the harness's own reading of a shared name.
+///
+/// `SessionStart` is the one name two harnesses spell identically but mean
+/// differently: Codex fires it when a root session begins (a resumption —
+/// the turn fact becomes Active), while Claude Code fires it at the session
+/// boundary itself, including on resume and after `/clear`. The reference
+/// maps that to a **done** row ("'working' would show a phantom spinner on
+/// an idle TUI"), which is exactly the boundary `harness.rs` already lands
+/// at admission (`initial_hook_turn_ended`); classifying it as a turn start
+/// instead would spin a freshly launched idle Claude session. Every other
+/// name keeps the flat classification, which is safe because each harness's
+/// plumbing names only its own events.
+pub(crate) fn classify_hook_event_for_harness(
+    event: &str,
+    harness_id: Option<&str>,
+) -> Option<HookSignal> {
+    if harness_id == Some("claude") && event == "SessionStart" {
+        return Some(HookSignal::TurnEnd);
+    }
+    classify_hook_event(event)
 }
 
 /// Silence-after-activity threshold: sustained output within this window is
@@ -581,6 +604,44 @@ mod tests {
         for event in ["NotificationSent", "ToolResult", "bogus", ""] {
             assert_eq!(classify_hook_event(event), None, "{event} must be unknown");
         }
+    }
+
+    /// `SessionStart` is the one shared name two harnesses mean differently:
+    /// Claude lands on the idle session boundary (the reference maps it to a
+    /// done row, so a fresh session must not show a phantom spinner), Codex
+    /// opens a turn. The harness-aware classifier is what keeps both true.
+    #[test]
+    fn session_start_is_idle_for_claude_and_a_turn_start_for_codex() {
+        assert_eq!(
+            classify_hook_event_for_harness(codex_events::SESSION_START, Some("claude")),
+            Some(HookSignal::TurnEnd)
+        );
+        assert_eq!(
+            classify_hook_event_for_harness(codex_events::SESSION_START, Some("codex")),
+            Some(HookSignal::TurnStart)
+        );
+        // Every other name keeps the flat classification, harness or not.
+        for harness in [Some("claude"), Some("codex"), None] {
+            assert_eq!(
+                classify_hook_event_for_harness(claude_events::STOP, harness),
+                Some(HookSignal::TurnEnd)
+            );
+            assert_eq!(
+                classify_hook_event_for_harness(claude_events::NOTIFICATION, harness),
+                Some(HookSignal::Wait)
+            );
+        }
+    }
+
+    /// A claude session may only receive claude's own names -- including the
+    /// new `SessionStart` capture hook -- and a foreign harness may not.
+    #[test]
+    fn session_start_belongs_to_claude_and_codex_only() {
+        assert!(event_belongs_to_harness("SessionStart", Some("claude")));
+        assert!(event_belongs_to_harness("SessionStart", Some("codex")));
+        assert!(!event_belongs_to_harness("SessionStart", Some("pi")));
+        assert!(!event_belongs_to_harness("SessionStart", Some("opencode")));
+        assert!(!event_belongs_to_harness("SessionStart", None));
     }
 
     #[test]

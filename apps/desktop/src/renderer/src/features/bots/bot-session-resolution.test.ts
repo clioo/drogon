@@ -97,7 +97,12 @@ describe("resolveBotSession", () => {
         observed: null,
         hostId: "host-1",
       }),
-    ).toEqual({ kind: "reopen", sessionId: "sess-1", harnessId: "claude" });
+    ).toEqual({
+      kind: "reopen",
+      sessionId: "sess-1",
+      harnessId: "claude",
+      resumeByIdentity: null,
+    });
 
     expect(
       resolveBotSession({
@@ -105,7 +110,12 @@ describe("resolveBotSession", () => {
         observed: observedSession({ verdict: "exited", harnessId: "pi" }),
         hostId: "host-1",
       }),
-    ).toEqual({ kind: "reopen", sessionId: "sess-1", harnessId: "pi" });
+    ).toEqual({
+      kind: "reopen",
+      sessionId: "sess-1",
+      harnessId: "pi",
+      resumeByIdentity: null,
+    });
   });
 
   test("an unverifiable recorded session is not focusable: the daemon holds no child for it", () => {
@@ -121,16 +131,58 @@ describe("resolveBotSession", () => {
         observed: null,
         hostId: "host-1",
       }),
-    ).toEqual({ kind: "reopen", sessionId: "sess-1", harnessId: "claude" });
+    ).toEqual({
+      kind: "reopen",
+      sessionId: "sess-1",
+      harnessId: "claude",
+      resumeByIdentity: null,
+    });
 
-    // Same when the host-wide session list still carries the recovered stub.
+    // Same when the host-wide session list still carries the recovered stub:
+    // the recorded row is named, so the daemon can read its provider id.
     expect(
       resolveBotSession({
         bot: bot(record({ verdict: "unverifiable", workspaceId: "ws-home", incarnation: "inc-1" })),
         observed: observedSession({ verdict: "unverifiable", harnessId: "pi" }),
         hostId: "host-1",
       }),
-    ).toEqual({ kind: "reopen", sessionId: "sess-1", harnessId: "pi" });
+    ).toEqual({ kind: "reopen", sessionId: "sess-1", harnessId: "pi", resumeByIdentity: null });
+    expect(
+      resolveBotSession({
+        bot: bot(record()),
+        observed: observedSession({
+          verdict: "exited",
+          harnessId: "pi",
+          agentSessionId: "conv-1",
+        }),
+        hostId: "host-1",
+      }),
+    ).toEqual({ kind: "reopen", sessionId: "sess-1", harnessId: "pi", resumeByIdentity: "session" });
+  });
+
+  test("an unobserved record that carries the harness conversation reopens it by identity", () => {
+    // The dead end this closes: the Drogon session row is gone (an explicit
+    // close deletes it) so no verdict can ever be projected, and the old
+    // answer was a permanent refusal the owner could never get past. The
+    // record's latched provider id turns it into a real recovery -- and the
+    // duplicate-prevention instinct survives, because the worst case is the
+    // SAME conversation coming back, not a second live one.
+    expect(
+      resolveBotSession({
+        bot: bot(record({ agentSessionId: "conv-1" })),
+        observed: null,
+        hostId: "host-1",
+      }),
+    ).toEqual({
+      kind: "reopen",
+      sessionId: "sess-1",
+      harnessId: "claude",
+      resumeByIdentity: "bot-record",
+    });
+    // A record with no identity keeps the honest refusal.
+    expect(resolveBotSession({ bot: bot(record()), observed: null, hostId: "host-1" })).toEqual({
+      kind: "unknown",
+    });
   });
 
   test("a recorded session with no projected verdict is UNKNOWN, never a fresh dispatch", () => {
