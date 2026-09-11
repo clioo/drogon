@@ -301,8 +301,8 @@ function WorkGraphNodeInspector({
       <div className="rounded-lg border border-border bg-card p-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <WorkGraphStatusIcon status={status} />
-          <span className="min-w-0 font-medium">{intentNode.title}</span>
-          <Badge variant="outline" className="ml-auto text-[10px]">
+          <span className="min-w-0 flex-1 font-medium">{intentNode.title}</span>
+          <Badge variant="outline" className="text-[10px]">
             {workGraphStatusLabel(status)}
           </Badge>
         </div>
@@ -668,15 +668,19 @@ export function WorkGraphPane({
                                         : "border-border bg-card hover:bg-accent/50"
                                     }`}
                                   >
-                                    <div className="flex min-w-0 items-center gap-2">
+                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                                       <WorkGraphStatusIcon status={status} />
-                                      <span className="min-w-0 truncate text-sm font-medium">
+                                      {/* flex-1 + wrap: on a narrow tab column the status badge
+                                          wraps to its own line instead of starving the title to a
+                                          zero-width box (the acceptance drives 760px with both
+                                          sidebars open — a real state, not a probe artifact). */}
+                                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
                                         {node.title}
                                       </span>
                                       {selected ? (
                                         <Badge
                                           variant="destructive"
-                                          className="ml-auto text-[9px] tracking-wide"
+                                          className="text-[9px] tracking-wide"
                                           data-testid="work-graph-node-selected-badge"
                                         >
                                           SELECTED
@@ -684,7 +688,7 @@ export function WorkGraphPane({
                                       ) : (
                                         <Badge
                                           variant="outline"
-                                          className={`ml-auto text-[10px] ${workGraphStatusToneClass(status)}`}
+                                          className={`text-[10px] ${workGraphStatusToneClass(status)}`}
                                           data-work-graph-status={status}
                                         >
                                           {workGraphStatusLabel(status)}
