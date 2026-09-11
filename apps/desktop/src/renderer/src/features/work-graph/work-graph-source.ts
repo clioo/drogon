@@ -38,6 +38,13 @@ export type WorkGraphSource =
   | { kind: "loading" }
   | { kind: "missing"; message: string }
   | { kind: "read_error"; message: string }
+  | {
+      /** The files.v1 fallback refused the graph: it exceeds the bridge's
+       *  per-read byte cap. The graph itself is intact on disk — this is a
+       *  recoverable, honest state, never a dead tab. */
+      kind: "too_large";
+      message: string;
+    }
   | { kind: "invalid"; message: string; detail?: string }
   | {
       kind: "loaded";
@@ -143,6 +150,12 @@ export function useWorkGraphSource({
             kind: "missing",
             message: `No work graph at ${WORK_GRAPH_RELATIVE_PATH} yet.`,
           });
+        } else if (/exceeds max_bytes/i.test(message)) {
+          // files.v1's own cap refusal: a graph the designer lets the owner
+          // author (65,536-byte prompts across many nodes) can exceed the
+          // 65,536-byte read cap. Name what happened and keep the tab
+          // recoverable — never a dead "read failed" end state.
+          setSource({ kind: "too_large", message });
         } else {
           setSource({ kind: "read_error", message });
         }

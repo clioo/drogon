@@ -355,6 +355,47 @@ describe("WorkGraphPane", () => {
     expect(inspector.textContent).toContain("30s");
   });
 
+  it("a graph over the files-read cap is a named, recoverable state — not a dead tab", async () => {
+    // The designer permits 65,536-byte prompts across many nodes, so a
+    // legal graph can exceed files.v1's 65,536-byte per-read cap. The
+    // files fallback must NAME the refusal and keep the tab recoverable:
+    // the intact path, what happened, and refresh — never the bare
+    // "file exceeds max_bytes limit" dead end.
+    const oversize = {
+      fileList: async () => {
+        throw new Error("not used");
+      },
+      fileRead: async (): Promise<Result<FileReadResult>> => ({
+        ok: false,
+        error: {
+          code: "invalid_argument",
+          message: "file exceeds max_bytes limit",
+          retryable: false,
+        },
+      }),
+      fileWrite: async () => {
+        throw new Error("work-graph pane attempted a write");
+      },
+      fileCreate: async () => {
+        throw new Error("work-graph pane attempted a create");
+      },
+    } as unknown as FileBridge;
+    render(
+      <WorkGraphPane fileBridge={oversize} mentuBridge={null} hostId="host" workspaceId="ws" />,
+    );
+    const state = await screen.findByTestId("work-graph-too-large");
+    expect(state.textContent).toContain("intact");
+    expect(state.textContent).toContain(".drogon/graph.json");
+    expect(state.textContent).toContain("65,536");
+    // Recovery stays armed: refresh retries, so a fixed file re-renders.
+    expect(screen.getByTestId("work-graph-refresh")).toBeTruthy();
+    // And the designer must NOT open over an unread graph: an empty
+    // canvas saved now would replace the real intent wholesale.
+    const design = screen.getByTestId("work-graph-design");
+    expect(design.getAttribute("disabled")).not.toBeNull();
+    expect(design.getAttribute("data-blocked-reason") ?? "").toContain("too large");
+  });
+
   it("writes nothing — a static scan over features/work-graph finds no write call", () => {
     const dir = path.dirname(new URL(import.meta.url).pathname);
     const sources = readdirSync(dir).filter(
