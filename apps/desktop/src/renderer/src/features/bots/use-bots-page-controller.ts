@@ -39,6 +39,10 @@ import type {
   ResponsibilityFormValues,
 } from "./bots-page-model";
 import { dispatchOpenBotSession } from "./bot-session-open";
+import {
+  loadBotCardExpansion,
+  saveBotCardExpansion,
+} from "./bot-card-expansion-preference";
 
 /** The App keep-alive host for the Bots page. Single source of truth
  *  shared by the host element and the Escape visibility check (same
@@ -170,10 +174,13 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
   > | null>(null);
   // Per-bot card expansion. Unset means "the design's default": configured
   // bots render expanded, bots with nothing configured render as the
-  // compact collapsed row. Explicit toggles win over the default.
+  // compact collapsed row. Explicit toggles win over the default and are
+  // persisted (see bot-card-expansion-preference.ts): the fork keeps its
+  // equivalent sidebar disclosure in the persisted UI state, so the user's
+  // choice survives a renderer reload, not only the keep-alive mount.
   const [expandedOverrides, setExpandedOverrides] = useState<
     Record<string, boolean>
-  >({});
+  >(() => loadBotCardExpansion());
   // Header "Filter bots…" query (client-side, real fields only).
   const [filterQuery, setFilterQuery] = useState("");
 
@@ -634,7 +641,9 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
   // Explicit expand/collapse of a bot card. The flip is over the card's
   // EFFECTIVE state (the design default — configured bots expanded,
   // unconfigured bots collapsed — or the user's last toggle), so the
-  // first click on a default-expanded card collapses it.
+  // first click on a default-expanded card collapses it. The choice is
+  // written to the persisted envelope before the state update so a reload
+  // mid-flight cannot lose it.
   const toggleExpanded = useCallback(
     (botId: string): void => {
       const bot = (localSnapshot ?? snapshot).bots.find(
@@ -644,12 +653,14 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       const defaultExpanded = bot
         ? !isBotUnconfigured(bot, monitorCount)
         : true;
-      setExpandedOverrides((current) => ({
-        ...current,
-        [botId]: !(current[botId] ?? defaultExpanded),
-      }));
+      const next = {
+        ...expandedOverrides,
+        [botId]: !(expandedOverrides[botId] ?? defaultExpanded),
+      };
+      saveBotCardExpansion(next);
+      setExpandedOverrides(next);
     },
-    [localSnapshot, snapshot, monitorsByBotId],
+    [localSnapshot, snapshot, monitorsByBotId, expandedOverrides],
   );
 
   return {
