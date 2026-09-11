@@ -4,14 +4,25 @@
 // so every one of these assertions is about a refusal staying a refusal.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  MEETINGS_ACTIONS_CAPABILITY,
   MEETINGS_CAPABILITY,
   MEETINGS_PAGE_HOST_TESTID,
   MEETINGS_ROUTE_ID,
   createGatedMeetingsBridge,
+  isMeetingsActionsAvailable,
   isMeetingsAvailable,
   windowMeetingsBridge,
 } from "./meetings-mount";
 import type { MeetingsBridge } from "../../shared/meetings-contract";
+import {
+  NOTE_ID,
+  availability,
+  bridgeFor,
+  commitment,
+  commitmentPage,
+  page,
+  transcript,
+} from "./features/meetings/meetings-test-fixtures";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -19,29 +30,18 @@ afterEach(() => {
 
 const pageResult = {
   ok: true as const,
-  result: {
-    availability: {
-      status: "available" as const,
-      reason: "empty" as const,
-      platform: "macos",
-      supported: true,
-      installation: "installed" as const,
-      configuration: "defaults" as const,
+  result: page({
+    availability: availability({
+      reason: "empty",
+      configuration: "defaults",
       configured: false,
-      configPath: "/Users/meetings-fixture/Library/Application Support/WriteThatDown/config.json",
       configPresent: false,
       transcriptRoot: "/Users/meetings-fixture/Transcripts",
-      transcriptRootSource: "default" as const,
-      transcriptRootState: "readable" as const,
-      readOnly: true,
-    },
+      transcriptRootSource: "default",
+    }),
     meetings: [],
     total: 0,
-    offset: 0,
-    limit: 50,
-    hasMore: false,
-    scanTruncated: false,
-  },
+  }),
 };
 
 describe("meetings mount", () => {
@@ -57,8 +57,19 @@ describe("meetings mount", () => {
     expect(isMeetingsAvailable([])).toBe(false);
   });
 
+  it("gates the working half on its own capability", () => {
+    // An index-only service still lists and searches; it simply does not get
+    // the extraction and the ledger.
+    expect(isMeetingsActionsAvailable(["meetings.v1", "meetings.actions.v1"])).toBe(true);
+    expect(isMeetingsActionsAvailable(["meetings.v1"])).toBe(false);
+    expect(isMeetingsActionsAvailable([])).toBe(false);
+    expect(MEETINGS_ACTIONS_CAPABILITY).toBe("meetings.actions.v1");
+  });
+
   it("finds the granted namespace or reports none", () => {
-    vi.stubGlobal("window", { drogon: { meetings: { list: () => {}, read: () => {} } } });
+    vi.stubGlobal("window", {
+      drogon: { meetings: { list: () => {}, read: () => {} } },
+    });
     expect(windowMeetingsBridge()).toBeTruthy();
     vi.stubGlobal("window", { drogon: {} });
     expect(windowMeetingsBridge()).toBeNull();
@@ -67,53 +78,86 @@ describe("meetings mount", () => {
   });
 
   it("refuses every call while the capability is withheld", async () => {
-    const source: MeetingsBridge = {
-      list: vi.fn(async () => pageResult),
-      read: vi.fn(async () => ({ ok: false as const, error: { code: "x", message: "y", retryable: false } })),
-    };
+    const source = bridgeFor({ list: vi.fn(async () => pageResult) });
     const gated = createGatedMeetingsBridge(source, () => false);
     const list = await gated.list();
     const read = await gated.read({ id: "write-that-down:/x/y.md" });
+    const analyze = await gated.analyze({ id: NOTE_ID });
+    const accepted = await gated.accept({
+      meetingId: NOTE_ID,
+      text: "t",
+      quote: "a quote long enough",
+      source: "owner",
+    });
     expect(list.ok).toBe(false);
     expect(read.ok).toBe(false);
+    expect(analyze.ok).toBe(false);
+    expect(accepted.ok).toBe(false);
     if (!list.ok) expect(list.error.code).toBe("unsupported_capability");
     expect(source.list).not.toHaveBeenCalled();
     expect(source.read).not.toHaveBeenCalled();
+    expect(source.analyze).not.toHaveBeenCalled();
+    expect(source.accept).not.toHaveBeenCalled();
+  });
+
+  it("keeps the index usable when only the actions capability is withheld", async () => {
+    const source = bridgeFor({ list: vi.fn(async () => pageResult) });
+    const gated = createGatedMeetingsBridge(
+      source,
+      () => true,
+      () => false,
+    );
+    expect((await gated.list()).ok).toBe(true);
+    const analyze = await gated.analyze({ id: NOTE_ID });
+    const accept = await gated.accept({
+      meetingId: NOTE_ID,
+      text: "t",
+      quote: "a quote long enough",
+      source: "owner",
+    });
+    expect(analyze.ok).toBe(false);
+    expect(accept.ok).toBe(false);
+    if (!analyze.ok) {
+      expect(analyze.error.message).toContain("meetings.actions.v1");
+    }
+    expect(source.analyze).not.toHaveBeenCalled();
+    expect(source.accept).not.toHaveBeenCalled();
   });
 
   it("passes calls through and fails closed the moment the capability drops", async () => {
     let allowed = true;
-    const source: MeetingsBridge = {
+    const source = bridgeFor({
       list: vi.fn(async () => pageResult),
       read: vi.fn(async () => ({
         ok: true as const,
         result: {
-          meeting: {
+          meeting: transcript({
             id: "write-that-down:/x/y.md",
-            title: "t",
-            fileName: "y.md",
             filePath: "/x/y.md",
             relativePath: "2026-09-10/y.md",
-            dateFolder: "2026-09-10",
             startedAt: null,
             durationMinutes: null,
-            status: "recording" as const,
+            status: "recording",
             excerpt: "",
-            failureReason: null,
-          },
+          }),
           content: "x",
           size: 1,
           truncated: false,
         },
       })),
-    };
+      commitments: vi.fn(async () => ({ ok: true as const, result: commitmentPage() })),
+    });
     const gated = createGatedMeetingsBridge(source, () => allowed);
     expect((await gated.list()).ok).toBe(true);
+    expect((await gated.commitments()).ok).toBe(true);
     allowed = false;
     expect((await gated.list()).ok).toBe(false);
     expect((await gated.read({ id: "write-that-down:/x/y.md" })).ok).toBe(false);
-    // Only the first call reached the source.
+    expect((await gated.resolve({ id: "commitment-1", status: "done" })).ok).toBe(false);
+    // Only the calls made while it was allowed reached the source.
     expect(source.list).toHaveBeenCalledTimes(1);
+    expect(source.commitments).toHaveBeenCalledTimes(1);
     expect(source.read).not.toHaveBeenCalled();
+    expect(source.resolve).not.toHaveBeenCalled();
   });
 });

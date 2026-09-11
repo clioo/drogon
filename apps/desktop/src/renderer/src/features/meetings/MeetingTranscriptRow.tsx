@@ -7,7 +7,8 @@
 // scopes Meetings to browse and read, and the fork's Ask mounts the notes
 // root as a writable workspace, which the read-only boundary forbids — and
 // the excerpt is rendered exactly as the daemon returned it instead of the
-// fork's client-side slice.
+// fork's client-side slice, and a row a search produced also shows the
+// transcript line the match came from (additive: the fork had no search).
 import { FileText } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -44,9 +45,28 @@ export function MeetingTranscriptRow({
           {meetingStatusLabel(meeting.status)}
         </Badge>
       </div>
-      <p className="mt-3 line-clamp-2 whitespace-pre-wrap text-sm leading-5 text-muted-foreground">
-        {meeting.excerpt || "No transcript text was saved yet."}
-      </p>
+      {meeting.searched && meeting.matches.length > 0 ? (
+        <ul className="mt-3 space-y-1" aria-label="Matching transcript lines">
+          {meeting.matches.map((hit) => (
+            <li
+              key={`${hit.line}-${hit.text}`}
+              className="border-l-2 border-border pl-3 text-xs leading-5 text-muted-foreground"
+            >
+              <span className="mr-1.5 font-mono text-[11px]">line {hit.line}</span>
+              {hit.text}
+            </li>
+          ))}
+          {meeting.matchCount > meeting.matches.length ? (
+            <li className="pl-3 text-xs text-muted-foreground">
+              {meeting.matchCount} matches in this note
+            </li>
+          ) : null}
+        </ul>
+      ) : (
+        <p className="mt-3 line-clamp-2 whitespace-pre-wrap text-sm leading-5 text-muted-foreground">
+          {meeting.excerpt || "No transcript text was saved yet."}
+        </p>
+      )}
       {meeting.status === "failed" ? (
         <p className="mt-2 text-xs text-destructive">
           This transcript could not be read safely

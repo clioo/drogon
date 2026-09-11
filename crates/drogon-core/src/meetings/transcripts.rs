@@ -31,6 +31,14 @@ pub const MAX_EXCERPT_CHARS: usize = 400;
 /// Bound on `limit` for one page.
 pub const MAX_PAGE_SIZE: u32 = 200;
 pub const DEFAULT_PAGE_SIZE: u32 = 50;
+/// Bytes read from a note to build a list row.
+///
+/// Every field a row shows (title, date, duration, status and a
+/// 400-character excerpt) lives in the note's own header, so the walk reads
+/// this window and only pays for the whole file when the window cannot
+/// decide. Writing a 16 KiB read per row beats pulling 327 whole
+/// conversations into memory to render a list.
+pub const HEADER_WINDOW_BYTES: u64 = 16 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeetingStatus {
@@ -98,6 +106,16 @@ pub struct MeetingTranscript {
     pub status: MeetingStatus,
     pub excerpt: String,
     pub failure_reason: Option<TranscriptFailureReason>,
+    /// The transcript lines a text search matched, with their line numbers.
+    /// Empty whenever the request carried no query — an empty list here
+    /// never means "no matches", it means "nobody searched".
+    pub matches: Vec<super::query::MeetingMatchLine>,
+    /// How many times the query occurred in the whole note (not capped at
+    /// the three lines carried in `matches`).
+    pub match_count: u32,
+    /// `true` only when the row was produced by a text search, so the UI can
+    /// tell "no matches" apart from "not searched".
+    pub searched: bool,
 }
 
 impl MeetingTranscript {
@@ -352,117 +370,32 @@ fn failed_transcript(
         status: MeetingStatus::Failed,
         excerpt,
         failure_reason: Some(reason),
+        matches: Vec::new(),
+        match_count: 0,
+        searched: false,
     }
 }
 
-/// Indexes one date folder's transcripts. Unrelated Markdown files (summary
-/// sidecars, hand-written notes) are skipped by name, never guessed at.
-fn read_date_folder(
-    file_system: &dyn MeetingFileSystem,
-    root: &Path,
-    date_folder: &str,
-    budget: &mut ScanBudget,
-) -> Vec<MeetingTranscript> {
-    let folder_path = root.join(date_folder);
-    let Ok(entries) = file_system.read_dir(&folder_path) else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = entries
-        .into_iter()
-        .filter(|entry| entry.kind == EntryKind::File)
-        .map(|entry| entry.name)
-        .collect();
-    names.sort();
-    let mut out = Vec::new();
-    for name in names {
-        let Some(filename) = parse_transcript_filename(&name) else {
-            continue;
-        };
-        if budget.files_left == 0 {
-            budget.truncated = true;
-            break;
-        }
-        budget.files_left -= 1;
-        let file_path = folder_path.join(&name);
-        let Ok(meta) = file_system.metadata(&file_path) else {
-            out.push(failed_transcript(
-                root,
-                date_folder,
-                &name,
-                filename,
-                TranscriptFailureReason::Unreadable,
-                String::new(),
-            ));
-            continue;
-        };
-        if !meta.is_file {
-            continue;
-        }
-        if meta.size > MAX_TRANSCRIPT_BYTES {
-            out.push(failed_transcript(
-                root,
-                date_folder,
-                &name,
-                filename,
-                TranscriptFailureReason::Oversized,
-                String::new(),
-            ));
-            continue;
-        }
-        let Ok(bytes) = file_system.read_file(&file_path) else {
-            out.push(failed_transcript(
-                root,
-                date_folder,
-                &name,
-                filename,
-                TranscriptFailureReason::Unreadable,
-                String::new(),
-            ));
-            continue;
-        };
-        let Ok(content) = std::str::from_utf8(&bytes) else {
-            out.push(failed_transcript(
-                root,
-                date_folder,
-                &name,
-                filename,
-                TranscriptFailureReason::Malformed,
-                String::new(),
-            ));
-            continue;
-        };
-        match parse_transcript_markdown(content, date_folder, filename) {
-            Some(parsed) => {
-                let relative_path = format!("{date_folder}/{name}");
-                out.push(MeetingTranscript {
-                    id: transcript_id(&file_path),
-                    title: parsed.title,
-                    file_name: name,
-                    relative_path,
-                    file_path: file_path.display().to_string(),
-                    date_folder: date_folder.to_string(),
-                    started_at: Some(parsed.started_at),
-                    duration_minutes: parsed.duration_minutes,
-                    status: if parsed.duration_minutes.is_some() {
-                        MeetingStatus::Saved
-                    } else {
-                        MeetingStatus::Recording
-                    },
-                    excerpt: parsed.excerpt,
-                    failure_reason: None,
-                })
-            }
-            None => out.push(failed_transcript(
-                root,
-                date_folder,
-                &name,
-                filename,
-                TranscriptFailureReason::Malformed,
-                transcript_excerpt(content),
-            )),
-        }
+/// One transcript file the walk found, before a single byte of it was read.
+///
+/// Everything needed to *filter* a note — its date folder, its clock time and
+/// its duration — is encoded in the file's own name, exactly where Write That
+/// Down wrote it. So a filtered list over 327 transcripts costs 327 `readdir`
+/// + `stat` calls and zero reads of note content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanEntry {
+    pub root: PathBuf,
+    pub path: PathBuf,
+    pub date_folder: String,
+    pub file_name: String,
+    pub filename: TranscriptFilename,
+    pub size: u64,
+}
+
+impl ScanEntry {
+    pub fn relative_path(&self) -> String {
+        format!("{}/{}", self.date_folder, self.file_name)
     }
-    out
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -470,6 +403,15 @@ struct ScanBudget {
     folders_left: usize,
     files_left: usize,
     pub truncated: bool,
+}
+
+/// What the budgeted walk saw. `entries` is newest-first.
+#[derive(Debug, Clone)]
+pub struct Walk {
+    pub entries: Vec<ScanEntry>,
+    pub directory_state: DirectoryState,
+    /// The walk stopped at a budget, so "nothing older" would be a lie.
+    pub scan_truncated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -480,19 +422,21 @@ pub struct Discovery {
     pub scan_truncated: bool,
 }
 
-/// Newest-first index of the notes directory. Date folders are visited in
-/// descending name order (= descending date), so the newest meetings are
-/// always found even when the budget stops the walk.
-pub fn discover(
+/// Newest-first metadata walk of the notes directory. Date folders are
+/// visited in descending name order (= descending date), so the newest
+/// meetings are always found even when the budget stops the walk. Unrelated
+/// Markdown files (summary sidecars, hand-written notes) are skipped by name,
+/// never guessed at.
+pub fn walk(
     file_system: &dyn MeetingFileSystem,
     root: &Path,
     max_folders: usize,
     max_files: usize,
-) -> Discovery {
+) -> Walk {
     let directory_state = inspect_directory(file_system, root);
     if directory_state != DirectoryState::Readable {
-        return Discovery {
-            transcripts: Vec::new(),
+        return Walk {
+            entries: Vec::new(),
             directory_state,
             scan_truncated: false,
         };
@@ -500,8 +444,8 @@ pub fn discover(
     let entries = match file_system.read_dir(root) {
         Ok(entries) => entries,
         Err(_) => {
-            return Discovery {
-                transcripts: Vec::new(),
+            return Walk {
+                entries: Vec::new(),
                 directory_state: DirectoryState::Unreadable,
                 scan_truncated: false,
             };
@@ -520,32 +464,244 @@ pub fn discover(
         files_left: max_files,
         truncated: false,
     };
-    let mut transcripts = Vec::new();
-    for date_folder in date_folders {
+    let mut out = Vec::new();
+    'folders: for date_folder in date_folders {
         if budget.folders_left == 0 {
             budget.truncated = true;
             break;
         }
         budget.folders_left -= 1;
-        transcripts.extend(read_date_folder(
-            file_system,
-            root,
-            &date_folder,
-            &mut budget,
-        ));
+        let folder_path = root.join(&date_folder);
+        let Ok(children) = file_system.read_dir(&folder_path) else {
+            continue;
+        };
+        let mut named: Vec<(String, TranscriptFilename)> = children
+            .into_iter()
+            .filter(|entry| entry.kind == EntryKind::File)
+            .filter_map(|entry| {
+                parse_transcript_filename(&entry.name).map(|filename| (entry.name, filename))
+            })
+            .collect();
+        named.sort_by(|left, right| right.0.cmp(&left.0));
+        for (file_name, filename) in named {
+            if budget.files_left == 0 {
+                budget.truncated = true;
+                break 'folders;
+            }
+            budget.files_left -= 1;
+            let path = folder_path.join(&file_name);
+            let Ok(meta) = file_system.metadata(&path) else {
+                // A file we cannot stat is still a meeting the owner has; it
+                // enters the walk as a named failure rather than vanishing.
+                out.push(ScanEntry {
+                    root: root.to_path_buf(),
+                    path,
+                    date_folder: date_folder.clone(),
+                    file_name,
+                    filename,
+                    size: 0,
+                });
+                continue;
+            };
+            if !meta.is_file {
+                continue;
+            }
+            out.push(ScanEntry {
+                root: root.to_path_buf(),
+                path,
+                date_folder: date_folder.clone(),
+                file_name,
+                filename,
+                size: meta.size,
+            });
+        }
     }
     // Newest first: date folder descending, then file name descending (the
     // time-of-day prefix makes the name order the chronological order).
-    transcripts.sort_by(|left, right| {
+    out.sort_by(|left, right| {
         right
             .date_folder
             .cmp(&left.date_folder)
             .then_with(|| right.file_name.cmp(&left.file_name))
     });
-    Discovery {
-        transcripts,
+    Walk {
+        entries: out,
         directory_state,
         scan_truncated: budget.truncated,
+    }
+}
+
+/// The verdict a bounded header window can reach on its own.
+enum WindowOutcome {
+    Row(ParsedTranscript),
+    /// The window ended before the document did and the window alone cannot
+    /// decide, so the caller must read the whole file. Never a failure: this
+    /// is what keeps a 16 KiB window from turning a big note into a
+    /// "malformed transcript".
+    Indeterminate,
+    /// The window held the whole document and it is not a transcript.
+    Invalid,
+}
+
+/// UTF-8 view of a window that may end mid-character. `None` when the bytes
+/// are not UTF-8 at all (the same verdict a full read reaches).
+enum WindowText<'a> {
+    Text(&'a str),
+    CutMidCharacter(&'a str),
+    NotUtf8,
+}
+
+fn window_text(prefix: &[u8]) -> WindowText<'_> {
+    match std::str::from_utf8(prefix) {
+        Ok(text) => WindowText::Text(text),
+        Err(error) if error.error_len().is_none() => {
+            let complete = &prefix[..error.valid_up_to()];
+            match std::str::from_utf8(complete) {
+                Ok(text) => WindowText::CutMidCharacter(text),
+                Err(_) => WindowText::NotUtf8,
+            }
+        }
+        Err(_) => WindowText::NotUtf8,
+    }
+}
+
+fn parse_window(prefix: &[u8], entry: &ScanEntry, window_truncated: bool) -> WindowOutcome {
+    let text = match window_text(prefix) {
+        WindowText::NotUtf8 => return WindowOutcome::Invalid,
+        WindowText::Text(text) => text,
+        WindowText::CutMidCharacter(_) => {
+            // The cut character cannot be inspected, so a window that ended
+            // mid-character is only usable when it is otherwise complete.
+            if window_truncated {
+                return WindowOutcome::Indeterminate;
+            }
+            return WindowOutcome::Invalid;
+        }
+    };
+    let has_heading = text
+        .split('\n')
+        .any(|line| line.trim_end_matches('\r') == "## Transcript");
+    if !has_heading && window_truncated {
+        return WindowOutcome::Indeterminate;
+    }
+    match parse_transcript_markdown(text, &entry.date_folder, entry.filename) {
+        Some(parsed) => WindowOutcome::Row(parsed),
+        None => WindowOutcome::Invalid,
+    }
+}
+
+fn row_from_parsed(
+    entry: &ScanEntry,
+    parsed: ParsedTranscript,
+    matches: Vec<super::query::MeetingMatchLine>,
+    match_count: u32,
+    searched: bool,
+) -> MeetingTranscript {
+    MeetingTranscript {
+        id: transcript_id(&entry.path),
+        title: parsed.title,
+        file_name: entry.file_name.clone(),
+        file_path: entry.path.display().to_string(),
+        relative_path: entry.relative_path(),
+        date_folder: entry.date_folder.clone(),
+        started_at: Some(parsed.started_at),
+        duration_minutes: parsed.duration_minutes,
+        status: if parsed.duration_minutes.is_some() {
+            MeetingStatus::Saved
+        } else {
+            MeetingStatus::Recording
+        },
+        excerpt: parsed.excerpt,
+        failure_reason: None,
+        matches,
+        match_count,
+        searched,
+    }
+}
+
+fn row_from_error(
+    entry: &ScanEntry,
+    reason: TranscriptFailureReason,
+    excerpt: String,
+) -> MeetingTranscript {
+    failed_transcript(
+        &entry.root,
+        &entry.date_folder,
+        &entry.file_name,
+        entry.filename,
+        reason,
+        excerpt,
+    )
+}
+
+/// A matching row, as a search builds it: parsed content plus the lines the
+/// query hit.
+pub fn row_from_parts(
+    entry: &ScanEntry,
+    parsed: ParsedTranscript,
+    matches: Vec<super::query::MeetingMatchLine>,
+    match_count: u32,
+) -> MeetingTranscript {
+    row_from_parsed(entry, parsed, matches, match_count, true)
+}
+
+/// Builds the row a list shows for one scanned file, reading no more than
+/// [`HEADER_WINDOW_BYTES`] unless the window cannot decide.
+pub fn row_for(file_system: &dyn MeetingFileSystem, entry: &ScanEntry) -> MeetingTranscript {
+    if entry.size > MAX_TRANSCRIPT_BYTES {
+        return row_from_error(entry, TranscriptFailureReason::Oversized, String::new());
+    }
+    let Ok(prefix) = file_system.read_prefix(&entry.path, HEADER_WINDOW_BYTES) else {
+        return row_from_error(entry, TranscriptFailureReason::Unreadable, String::new());
+    };
+    let window_truncated = (prefix.len() as u64) < entry.size;
+    match parse_window(&prefix, entry, window_truncated) {
+        WindowOutcome::Row(parsed) => row_from_parsed(entry, parsed, Vec::new(), 0, false),
+        WindowOutcome::Invalid => {
+            let excerpt = match window_text(&prefix) {
+                WindowText::Text(text) => transcript_excerpt(text),
+                WindowText::CutMidCharacter(text) => transcript_excerpt(text),
+                WindowText::NotUtf8 => String::new(),
+            };
+            row_from_error(entry, TranscriptFailureReason::Malformed, excerpt)
+        }
+        WindowOutcome::Indeterminate => match file_system.read_file(&entry.path) {
+            Err(_) => row_from_error(entry, TranscriptFailureReason::Unreadable, String::new()),
+            Ok(bytes) => match std::str::from_utf8(&bytes) {
+                Err(_) => row_from_error(entry, TranscriptFailureReason::Malformed, String::new()),
+                Ok(text) => {
+                    match parse_transcript_markdown(text, &entry.date_folder, entry.filename) {
+                        Some(parsed) => row_from_parsed(entry, parsed, Vec::new(), 0, false),
+                        None => row_from_error(
+                            entry,
+                            TranscriptFailureReason::Malformed,
+                            transcript_excerpt(text),
+                        ),
+                    }
+                }
+            },
+        },
+    }
+}
+
+/// Full read-only index of the notes directory, newest first, built through
+/// the bounded walk. Every page still reads only the rows it renders.
+pub fn discover(
+    file_system: &dyn MeetingFileSystem,
+    root: &Path,
+    max_folders: usize,
+    max_files: usize,
+) -> Discovery {
+    let walk = walk(file_system, root, max_folders, max_files);
+    let transcripts = walk
+        .entries
+        .iter()
+        .map(|entry| row_for(file_system, entry))
+        .collect();
+    Discovery {
+        transcripts,
+        directory_state: walk.directory_state,
+        scan_truncated: walk.scan_truncated,
     }
 }
 
@@ -614,6 +770,9 @@ pub fn read_by_id(
             },
             excerpt: parsed.excerpt,
             failure_reason: None,
+            matches: Vec::new(),
+            match_count: 0,
+            searched: false,
         }),
         None => Err(MeetingReadError::Malformed),
     }

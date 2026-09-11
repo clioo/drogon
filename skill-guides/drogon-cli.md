@@ -284,6 +284,18 @@ discover them with `drogon-cli meeting list --json` (newest first, with each
 note's date, duration, path and id) and read one with `drogon-cli meeting
 read --id <ID> --json`. Both require the service capability `meetings.v1`.
 
+The folder is a corpus, not a list: with hundreds of transcripts, search it
+instead of paging through it. `--query <TEXT>` is a case-insensitive
+full-text search over each note and returns, per row, `matchCount` plus up to
+three `matches` with the transcript line **and its line number**.
+`--from <YYYY-MM-DD>` / `--to <YYYY-MM-DD>` bound the meeting date (inclusive)
+and `--min-minutes <N>` / `--max-minutes <N>` bound the duration — a duration
+filter only ever matches a finalized transcript, never a `recording` one.
+The response echoes the filters it applied under `filters`, sets `searched`
+and reports how many transcript files were read (`scanned`). A search that
+finds nothing is not an empty folder: check `availability.reason` before you
+say `empty`.
+
 `meeting list` always reports where the folder came from and what state it
 is in, as `availability.transcriptRoot`, `transcriptRootSource`
 (`default` = `~/Transcripts`, `config` = the tool's own `config.json`, or
@@ -302,11 +314,56 @@ you whether to keep going, and `scanTruncated` means the index stopped
 early so `total` is a lower bound). `meeting read` refuses any id outside
 the resolved notes folder, and `--max-bytes <N>` caps the returned content.
 
+### From a meeting to tracked work
+
+`drogon-cli meeting analyze --id <ID> --json` reads one note and returns
+`suggested` decisions, actions and open questions, each with the verbatim
+transcript `quote` it came from and that quote's `line`. It requires the
+capability `meetings.actions.v1`.
+
+Three rules make the output safe to act on, and they are enforced by the
+daemon, not by the prompt:
+
+- The only model used is the **free local** one (`pi` / provider `dgx-spark` /
+  model `qwen3.8-flash-next-nvidia-nvfp4`). There is no flag, parameter or
+  field to select anything else, so browsing meetings can never be billed.
+  When the local model is not installed the verb fails with
+  `meeting_analysis_unavailable` and says so — it never substitutes another
+  model.
+- A suggestion whose `quote` is not found **verbatim** in the note (or is
+  shorter than 12 characters) is **discarded**, not shown. The answer reports
+  `discardedCount` and the discarded items with their reason
+  (`quote-not-found`, `quote-too-short`, `empty-text`). Treat everything in
+  `decisions`/`actions`/`openQuestions` as verified against the transcript and
+  everything in `discarded` as rejected evidence.
+- `analyze` creates nothing. It returns suggestions; turning one into tracked
+  work is an explicit act.
+
+The ledger of accepted commitments is Drogon's own file
+(`<data-dir>/meeting-commitments.json`); the notes folder is only ever read.
+Record what the owner accepts with `meeting actions add --meeting-id <ID>
+--text <TEXT> --quote "<line copied from the note>" [--owner <NAME>]
+[--source suggested|owner]`. The daemon re-reads the note and verifies the
+quote before storing anything: an unsupported claim is refused with
+`commitment_quote_not_found` and nothing is written. `--source suggested`
+records that the local model proposed it and the owner accepted it; `owner`
+means the owner wrote it himself.
+
+Across the corpus, `meeting actions list --open --json` answers the question
+a large archive makes possible: what was promised and never closed. Filter
+with `--status open|done|dismissed` or `--query <TEXT>` (matches the text,
+owner, quote, meeting title and date). Every row carries `meetingId`,
+`meetingTitle`, `meetingDate`, the `quote`, the `line` and the `id`; close one
+with `meeting actions done --id <ID>` or `meeting actions dismiss --id <ID>`
+(dismissed and done are deliberately different answers).
+
 A typical Bot flow — a morning brief of yesterday's meetings with
 recommended actions — is one automation whose prompt tells the harness to
 run `drogon-cli meeting list --limit 20 --json`, filter the dates it cares
-about, `drogon-cli meeting read --id <ID>` those notes, and deliver the brief
-the Bot already knows how to deliver. Nothing in that chain needs a new
+about, `drogon-cli meeting analyze --id <ID>` the notes that matter, and
+deliver the brief the Bot already knows how to deliver. The same Bot can add
+what the owner confirms with `meeting actions add` and report the open ones
+with `meeting actions list --open`. Nothing in that chain needs a new
 integration: the meetings come from the CLI and the schedule comes from the
 `bot create-automation` verb.
 

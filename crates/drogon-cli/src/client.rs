@@ -403,10 +403,12 @@ impl Client {
         call: &CallOk,
         method: &str,
     ) -> Result<T, CliError> {
-        serde_json::from_value(call.result.clone()).map_err(|_| {
+        serde_json::from_value(call.result.clone()).map_err(|err| {
+            // The serde detail names the field that disagreed. Without it a
+            // wire-shape break is an unactionable "malformed result".
             CliError::local(
                 internal_error(format!(
-                    "service returned a malformed {method} result; refusing to guess"
+                    "service returned a malformed {method} result; refusing to guess: {err}"
                 )),
                 &call.request_id,
             )
@@ -685,6 +687,24 @@ pub struct MeetingAvailability {
     pub transcript_root_source: String,
     pub transcript_root_state: String,
     pub read_only: bool,
+    /// Whether the free local analysis model is available on the host, and
+    /// with what. Reported so a caller never offers an action that cannot
+    /// work.
+    pub analysis: MeetingAnalysisStatus,
+}
+
+/// The local extraction runner's identity and availability. `model` and
+/// `provider` are the free local ones by construction: there is no field the
+/// daemon accepts to change them.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingAnalysisStatus {
+    pub available: bool,
+    pub reason: String,
+    pub harness: String,
+    pub provider: String,
+    pub model: String,
+    pub free_local_model: bool,
 }
 
 /// One indexed meeting note.
@@ -702,6 +722,35 @@ pub struct MeetingTranscript {
     pub status: String,
     pub excerpt: String,
     pub failure_reason: Option<String>,
+    /// The transcript lines a text search matched, with their line numbers.
+    /// Empty when the request carried no query.
+    #[serde(default)]
+    pub matches: Vec<MeetingMatchLine>,
+    #[serde(default)]
+    pub match_count: u32,
+    /// True only for rows produced by a text search, so "no matches" is
+    /// never confused with "nothing searched".
+    #[serde(default)]
+    pub searched: bool,
+}
+
+/// One matched transcript line, exactly as the note holds it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingMatchLine {
+    pub line: u32,
+    pub text: String,
+}
+
+/// The filter set the daemon actually applied, echoed back.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingFiltersEcho {
+    pub query: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub min_minutes: Option<u32>,
+    pub max_minutes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -714,6 +763,85 @@ pub struct MeetingList {
     pub limit: u32,
     pub has_more: bool,
     pub scan_truncated: bool,
+    #[serde(default)]
+    pub filters: MeetingFiltersEcho,
+    /// Transcript files whose text a search read (0 without a query).
+    #[serde(default)]
+    pub scanned: u64,
+    #[serde(default)]
+    pub searched: bool,
+}
+
+/// One extracted suggestion, with the transcript line that proves it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingSuggestion {
+    pub text: String,
+    pub quote: String,
+    pub line: u32,
+    pub owner: Option<String>,
+    pub due: Option<String>,
+    pub confidence: String,
+}
+
+/// A suggestion the verification step refused, with the reason.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingDiscardedSuggestion {
+    pub text: String,
+    pub reason: String,
+}
+
+/// One analysis run: the local model's answer, after every quote in it was
+/// checked against the note.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingAnalysis {
+    pub meeting: MeetingTranscript,
+    pub model: String,
+    pub provider: String,
+    pub harness: String,
+    pub summary: String,
+    pub decisions: Vec<MeetingSuggestion>,
+    pub actions: Vec<MeetingSuggestion>,
+    pub open_questions: Vec<MeetingSuggestion>,
+    pub discarded: Vec<MeetingDiscardedSuggestion>,
+    pub discarded_count: u64,
+    pub transcript_truncated: bool,
+    pub transcript_chars: u64,
+    pub duration_ms: u64,
+}
+
+/// One accepted commitment: tracked work with the quote that supports it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingCommitment {
+    pub id: String,
+    pub meeting_id: String,
+    pub relative_path: String,
+    pub meeting_title: String,
+    pub meeting_date: String,
+    pub text: String,
+    pub owner: Option<String>,
+    pub quote: String,
+    pub line: u32,
+    pub source: String,
+    pub confidence: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub resolved_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingCommitmentPage {
+    pub commitments: Vec<MeetingCommitment>,
+    pub total: u64,
+    pub open: u64,
+    pub offset: u32,
+    pub limit: u32,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -737,6 +865,35 @@ pub fn check_meeting_list(list: &MeetingList) -> Result<(), String> {
     if list.limit == 0 || list.limit > 200 {
         return Err(format!("limit {} is outside 1..=200", list.limit));
     }
+    for meeting in &list.meetings {
+        if meeting.searched != list.searched {
+            return Err(format!(
+                "row {} disagrees with the page about whether a search ran",
+                meeting.file_name
+            ));
+        }
+        if meeting.searched && meeting.match_count == 0 {
+            return Err(format!(
+                "row {} was returned by a search but reports no matches",
+                meeting.file_name
+            ));
+        }
+        if !meeting.searched && meeting.match_count != 0 {
+            return Err(format!(
+                "row {} reports matches without a search",
+                meeting.file_name
+            ));
+        }
+        for line in &meeting.matches {
+            if line.line == 0 {
+                return Err(format!(
+                    "row {} reports a match on line 0",
+                    meeting.file_name
+                ));
+            }
+            require_nonempty("match text", &line.text)?;
+        }
+    }
     let page = list.meetings.len() as u64;
     if list.has_more && (list.offset as u64).saturating_add(page) >= list.total {
         return Err(format!(
@@ -752,6 +909,88 @@ pub fn check_meeting_list(list: &MeetingList) -> Result<(), String> {
             "offset {} + {} rows exceeds the reported total {}",
             list.offset, page, list.total
         ));
+    }
+    Ok(())
+}
+
+/// Invariants `meeting.analyze` must satisfy before any of it is printed: a
+/// suggestion always carries the quote and line it came from, an unverified
+/// suggestion is never in the finding lists (only in `discarded`, with its
+/// reason), and the run always names the free local model it used.
+pub fn check_meeting_analysis(analysis: &MeetingAnalysis) -> Result<(), String> {
+    check_meeting_transcript(&analysis.meeting)?;
+    if analysis.model != "qwen3.8-flash-next-nvidia-nvfp4" || analysis.provider != "dgx-spark" {
+        return Err(format!(
+            "analysis must name the free local model, got {}/{}",
+            analysis.provider, analysis.model
+        ));
+    }
+    if analysis.harness != "pi" {
+        return Err(format!(
+            "analysis must name the local harness, got {}",
+            analysis.harness
+        ));
+    }
+    for suggestion in analysis
+        .decisions
+        .iter()
+        .chain(&analysis.actions)
+        .chain(&analysis.open_questions)
+    {
+        require_nonempty("suggestion text", &suggestion.text)?;
+        require_nonempty("suggestion quote", &suggestion.quote)?;
+        if suggestion.line == 0 {
+            return Err("a suggestion must name the transcript line it came from".to_string());
+        }
+        if !["high", "low"].contains(&suggestion.confidence.as_str()) {
+            return Err(format!(
+                "confidence must be high|low, got {}",
+                suggestion.confidence
+            ));
+        }
+    }
+    if (analysis.discarded.len() as u64) > analysis.discarded_count {
+        return Err("more discarded suggestions shown than reported".to_string());
+    }
+    Ok(())
+}
+
+/// Invariants `meeting.commitment_*` must satisfy: a commitment always names
+/// the meeting, the quote and the line it was verified against, and its
+/// status is one of the three the ledger defines.
+pub fn check_meeting_commitments(page: &MeetingCommitmentPage) -> Result<(), String> {
+    if page.limit == 0 || page.limit > 200 {
+        return Err(format!("limit {} is outside 1..=200", page.limit));
+    }
+    for commitment in &page.commitments {
+        check_meeting_commitment(commitment)?;
+    }
+    if page.commitments.len() as u64 > page.total {
+        return Err("more rows than the reported total".to_string());
+    }
+    Ok(())
+}
+
+pub fn check_meeting_commitment(commitment: &MeetingCommitment) -> Result<(), String> {
+    require_nonempty("id", &commitment.id)?;
+    require_nonempty("meetingId", &commitment.meeting_id)?;
+    require_nonempty("meetingTitle", &commitment.meeting_title)?;
+    require_nonempty("text", &commitment.text)?;
+    require_nonempty("quote", &commitment.quote)?;
+    if commitment.line == 0 {
+        return Err("a commitment must name the transcript line it came from".to_string());
+    }
+    if !["open", "done", "dismissed"].contains(&commitment.status.as_str()) {
+        return Err(format!("unknown commitment status {}", commitment.status));
+    }
+    if !["suggested", "owner"].contains(&commitment.source.as_str()) {
+        return Err(format!("unknown commitment source {}", commitment.source));
+    }
+    if commitment.status != "open" && commitment.resolved_at.is_none() {
+        return Err("a resolved commitment must carry resolvedAt".to_string());
+    }
+    if commitment.status == "open" && commitment.resolved_at.is_some() {
+        return Err("an open commitment must not carry resolvedAt".to_string());
     }
     Ok(())
 }
@@ -822,6 +1061,27 @@ fn check_meeting_availability(availability: &MeetingAvailability) -> Result<(), 
     }
     if !availability.read_only {
         return Err("the meetings index must report readOnly: true".to_string());
+    }
+    // Extraction is only ever the free local model.
+    if !availability.analysis.free_local_model {
+        return Err(format!(
+            "availability.analysis must report the free local model, got {}",
+            availability.analysis.model
+        ));
+    }
+    if availability.analysis.model != "qwen3.8-flash-next-nvidia-nvfp4"
+        || availability.analysis.provider != "dgx-spark"
+    {
+        return Err(format!(
+            "availability.analysis names {}/{}; only the free local model may be used",
+            availability.analysis.provider, availability.analysis.model
+        ));
+    }
+    if availability.analysis.available && availability.analysis.reason != "ready" {
+        return Err(format!(
+            "analysis.available contradicts reason {}",
+            availability.analysis.reason
+        ));
     }
     if availability.status == "available"
         && availability.reason != "ready"

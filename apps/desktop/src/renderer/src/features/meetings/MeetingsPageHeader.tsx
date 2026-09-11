@@ -15,11 +15,14 @@ import { meetingsCountLabel } from "./meetings-page-copy";
 export function MeetingsPageHeader({
   count,
   loading,
+  filtered = false,
   onClose,
   onRefresh,
 }: {
   count: number | null;
   loading: boolean;
+  /** The count is a filtered or searched total, not the folder's size. */
+  filtered?: boolean;
   onClose: (() => void) | undefined;
   onRefresh: () => void;
 }): React.JSX.Element {
@@ -51,7 +54,7 @@ export function MeetingsPageHeader({
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold text-foreground">Meetings</h1>
           <p className="truncate text-xs text-muted-foreground">
-            {meetingsCountLabel(count, loading)}
+            {meetingsCountLabel(count, loading, filtered)}
           </p>
         </div>
         <Tooltip>

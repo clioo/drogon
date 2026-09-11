@@ -3,6 +3,9 @@ import { agentSettingsResultSchema } from "./agent-settings-contract";
 import { automationResultSchemas } from "./automation-contract";
 import { fileResultSchemas } from "./file-validation";
 import {
+  meetingAnalysisSchema,
+  meetingCommitmentPageSchema,
+  meetingCommitmentSchema,
   meetingReadSchema,
   meetingsPageSchema,
 } from "./meetings-contract";
@@ -179,4 +182,13 @@ export const resultSchemas: Record<string, z.ZodType> = {
   // the wire, not only in the renderer.
   "meeting.list": meetingsPageSchema,
   "meeting.read": meetingReadSchema,
+  // The working half: the local-model answer (already verified against the
+  // note by the daemon) and the commitment ledger. Adding them here is what
+  // makes the honest-shape rules hold at the socket, not just in the
+  // renderer: an analysis whose suggestion has no line, or a commitment that
+  // is open and resolved at once, never crosses this boundary.
+  "meeting.analyze": meetingAnalysisSchema,
+  "meeting.commitment_list": meetingCommitmentPageSchema,
+  "meeting.commitment_create": meetingCommitmentSchema,
+  "meeting.commitment_update": meetingCommitmentSchema,
 };
