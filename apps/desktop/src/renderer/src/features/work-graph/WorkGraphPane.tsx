@@ -25,14 +25,26 @@
 //   - `running` appears only because the backend says a process is
 //     confirmed live.
 //
-// Phase 1 was read-only. The authoring canvas (WorkGraphDesigner) now owns
-// the WRITE half through the daemon's `graph.write_intent` (atomic,
+// Phase 1 was read-only. The authoring canvas (WorkGraphDesigner) owns the
+// WRITE half through the daemon's `graph.write_intent` (atomic,
 // intent-only, unknown fields merged forward) and the run through
 // `graph.compile`/`graph.run` — never through the files bridge, never a
-// second execution path. This pane itself stays the read-only projection:
-// it polls the file and renders exactly what the daemon records.
+// second execution path. This pane's own GRAPH VIEW stays a read-only
+// projection: it polls the file and renders exactly what the daemon
+// records, and it never calls the files bridge (see the static scan test).
+//
+// The one addition here (features/work-graph-workflows) is the workflow
+// bar and the bounded adversarial-review loop it can start after a run: it
+// writes ONLY through the same sanctioned `graph.write_intent`/`compile`/
+// `run` seam the designer already uses (never `state`, never the files
+// bridge for the graph itself), and it lives in THIS component — not the
+// designer — specifically so a review a run just asked for keeps running
+// after the user clicks "Watch the graph" back to this read-only view.
+// The workflow LIBRARY itself (`.drogon/workflows.json`, which named
+// workflow is selected, its adversarial-review settings) is a separate
+// file the daemon never reads or writes; see workflow-library.ts.
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertCircle,
@@ -75,6 +87,10 @@ import {
 } from "./work-graph-status";
 import { WorkGraphDesigner } from "./WorkGraphDesigner";
 import { WorkGraphStatusIcon } from "./work-graph-status-icon";
+import { WorkflowBar } from "../work-graph-workflows/WorkflowBar";
+import { useWorkflowLibrary } from "../work-graph-workflows/use-workflow-library";
+import { useAdversarialLoop } from "../work-graph-workflows/use-adversarial-loop";
+import { findWorkflow } from "../work-graph-workflows/workflow-library";
 
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 200;
@@ -586,12 +602,95 @@ export function WorkGraphPane({
   const totals = useMemo(() => (document ? summarizeWorkGraph(document) : null), [document]);
   const runningCount = totals?.byStatus["running"] ?? 0;
 
+  // --- workflows: multiple named, configurable graphs for this workspace,
+  // and the bounded adversarial-review loop one of them can trigger. See
+  // features/work-graph-workflows for the honesty rules; this component
+  // only wires the I/O the hooks there need.
+  const workflowLibrary = useWorkflowLibrary({ fileBridge, hostId, workspaceId });
+  const library = workflowLibrary.state.kind === "ready" ? workflowLibrary.state.library : null;
+  const selectedWorkflow = library ? findWorkflow(library, library.selectedWorkflowId) : null;
+  const loopController = useAdversarialLoop({ graphBridge, workspaceId });
+
+  useEffect(() => {
+    loopController.setPersist(
+      selectedWorkflow
+        ? (nextLedger) => void workflowLibrary.saveLoopLedger(selectedWorkflow.id, nextLedger)
+        : null,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWorkflow?.id]);
+
+  useEffect(() => {
+    if (selectedWorkflow) loopController.hydrate(selectedWorkflow.id, selectedWorkflow.lastLoop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWorkflow?.id]);
+
+  const handleSelectWorkflow = useCallback(
+    (id: string) => {
+      void (async () => {
+        const workflow = library ? findWorkflow(library, id) : null;
+        if (!workflow) return;
+        const result = await workflowLibrary.selectWorkflow(id);
+        if (!result.ok || !graphBridge) return;
+        // "Selecting" applies the workflow's saved nodes to the ONE live
+        // graph through the same sanctioned seam the designer uses — never
+        // a second execution path, never a write to `state`.
+        await graphBridge.graphWriteIntent({
+          workspaceId,
+          intent: { nodes: workflow.nodes as unknown[] },
+        });
+        refresh();
+      })();
+    },
+    [library, workflowLibrary, graphBridge, workspaceId, refresh],
+  );
+
+  const handleCreateWorkflow = useCallback(
+    (name: string) => workflowLibrary.createWorkflow(name, (document?.intent.nodes ?? []) as unknown[]),
+    [workflowLibrary, document],
+  );
+
+  const handleIntentSaved = useCallback(
+    (nodes: Record<string, unknown>[]) => {
+      if (selectedWorkflow) void workflowLibrary.syncNodes(selectedWorkflow.id, nodes);
+    },
+    [selectedWorkflow, workflowLibrary],
+  );
+
+  const handleRunLaunched = useCallback(
+    (info: { runId: string; nodeIds: string[] }) => {
+      if (!selectedWorkflow?.settings.adversarialReviewEnabled) return;
+      loopController.startForRun({
+        workflowId: selectedWorkflow.id,
+        baseRunId: info.runId,
+        baseNodeIds: info.nodeIds,
+        maxCycles: selectedWorkflow.settings.maxReviewCycles,
+      });
+    },
+    [selectedWorkflow, loopController],
+  );
+
+  const workflowBar = (
+    <WorkflowBar
+      library={library}
+      selected={selectedWorkflow}
+      loop={loopController.ledger}
+      interactive={Boolean(graphBridge)}
+      onSelect={handleSelectWorkflow}
+      onCreate={handleCreateWorkflow}
+      onRename={workflowLibrary.renameWorkflow}
+      onDelete={workflowLibrary.deleteWorkflow}
+      onSettingsChange={workflowLibrary.updateSettings}
+    />
+  );
+
   if (mode === "design") {
     return (
       <div
         className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
         data-testid="work-graph-pane"
       >
+        {workflowBar}
         <WorkGraphDesigner
           key="work-graph-designer"
           graphBridge={graphBridge}
@@ -601,6 +700,8 @@ export function WorkGraphPane({
             setMode("view");
             refresh();
           }}
+          onIntentSaved={handleIntentSaved}
+          onRunLaunched={handleRunLaunched}
         />
       </div>
     );
@@ -611,6 +712,7 @@ export function WorkGraphPane({
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
       data-testid="work-graph-pane"
     >
+      {workflowBar}
       {/* Header: what this surface is, where the truth lives, how fresh. */}
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
