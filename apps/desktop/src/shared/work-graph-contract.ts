@@ -103,6 +103,14 @@ export const workGraphIntentNodeSchema = z.object({
   provider: z
     .object({ baseUrl: z.string().min(1), apiKeyEnv: z.string().min(1) })
     .optional(),
+  /** The DESIGNER's canvas coordinates (the graph-canvas authoring surface).
+   *  Deliberately not part of the daemon's `GraphNodeIntent`: the store
+   *  preserves unknown node fields verbatim, so the daemon carries the
+   *  designer's layout without understanding it. Pure display, never
+   *  execution semantics. */
+  position: z
+    .object({ x: z.number().finite(), y: z.number().finite() })
+    .optional(),
 });
 
 const stepUsageSchema = z

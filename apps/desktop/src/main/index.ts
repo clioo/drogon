@@ -69,6 +69,8 @@ import { startSessionStatePush } from "./session-state-bridge";
 import { startBrowserRelay } from "./browser/relay-poller";
 import { dispatchBotSnapshot, registerBotBridge } from "./bot-bridge";
 import { autoInstallBundledMentuRuntime, registerMentuBridge } from "./mentu-bridge";
+// Work-graph authoring (graph.*): the designer's write/compile/run seam.
+import { registerGraphBridge } from "./graph-bridge";
 import { openMentuTabInBoundWindow } from "./mentu-open-relay";
 import {
   readCursorMismatches,
@@ -279,6 +281,7 @@ function registerBridge() {
   registerJiraBridge(() => window);
   registerBotBridge(() => window);
   registerMentuBridge(() => window);
+  registerGraphBridge(() => window);
   registerWorkspaceUIPreferencesBridge(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {
     ipcMain.handle(`drogon:${method}`, async (event, input: unknown) => {

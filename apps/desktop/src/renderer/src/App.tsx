@@ -289,6 +289,11 @@ import {
 } from "./mentu-mount";
 import { MENTU_OPEN_TAB_EVENT, MentuPanel } from "./features/mentu/MentuPanel";
 import { WorkGraphPane } from "./features/work-graph/WorkGraphPane";
+import {
+  createGatedGraphBridge,
+  isWorkGraphAuthoringAvailable,
+  windowGraphBridge,
+} from "./work-graph-mount";
 import { mentuStore } from "./features/mentu/mentu-store";
 import { pickMentuMainSession } from "./features/mentu/mentu-run-dispatch";
 import { refreshWorktreeIssueLinks } from "./features/tasks/issue-links";
@@ -927,6 +932,18 @@ export function App() {
     () => createGatedMentuBridge(windowMentuBridge(), () => mentuGateRef.current),
     [],
   );
+  // Work-graph authoring (graph.v1): the designer's write/compile/run seam,
+  // gated fail-closed like every other namespace. The source may be absent
+  // (an old preload has no graph namespace); WorkGraphPane then renders the
+  // honest "unavailable in this build" notice instead of a broken canvas.
+  const graphGateRef = useRef(false);
+  useEffect(() => {
+    graphGateRef.current = isWorkGraphAuthoringAvailable(liveCapabilities);
+  }, [liveCapabilities]);
+  const graphGatedBridge = useMemo(() => {
+    const source = windowGraphBridge();
+    return source ? createGatedGraphBridge(source, () => graphGateRef.current) : null;
+  }, []);
   // The Run Recipe delegation target: the selected workspace's main agent
   // session. Derived from the same session list the tab strip renders, so
   // the Mentu pane can never believe in a session the shell does not show.
@@ -4913,6 +4930,7 @@ export function App() {
                     <WorkGraphPane
                       fileBridge={filesGatedBridge}
                       mentuBridge={mentuGatedBridge}
+                      graphBridge={graphGatedBridge}
                       hostId={status?.hostId ?? null}
                       workspaceId={current.id}
                     />

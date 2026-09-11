@@ -148,63 +148,6 @@ function workGraphFixture(buildStatus) {
   };
 }
 
-function failedBuildState(graph) {
-  graph.state.nodes = graph.state.nodes.map((node) =>
-    node.id === "n1"
-      ? {
-          ...node,
-          status: "failed",
-          endedAt: "2026-09-11T12:01:00.000Z",
-          lastError: "Completion policy was not satisfied",
-          evidence: {
-            runId: "run-accept-2",
-            step: {
-              label: "n1",
-              backend: "shell",
-              status: "failed",
-              exitCode: 1,
-              durationSeconds: 30,
-              attempts: 1,
-              outputPath: null,
-              errorPath: ".drogon/runs/run-accept-2/n1.err",
-              error: null,
-            },
-            // Drift renders verbatim when the record carries it; the view
-            // never invents it.
-            drift: { expected: ["src/lib.rs"], created: ["src/lib.rs", "src/extra.rs"] },
-          },
-        }
-      : node,
-  );
-  return graph;
-}
-
-/** The state-writer attribution the daemon performs after a run settles:
- *  the node's state references the REAL daemon run row and embeds the
- *  real recorded step, so the UI can resolve its streams through
- *  `mentu.run_evidence`. `step` is the actual recorded entry. */
-function withRealRunAttribution(graph, runRow, recordedStep) {
-  graph.state.nodes = graph.state.nodes.map((node) =>
-    node.id === "n1"
-      ? {
-          ...node,
-          status: "succeeded",
-          runId: runRow.id,
-          mentuRunId: runRow.mentuRunId ?? null,
-          endedAt: runRow.endedAt ?? null,
-          lastError: null,
-          drift: null,
-          evidence: {
-            runId: runRow.id,
-            mentuRunId: runRow.mentuRunId ?? null,
-            step: recordedStep,
-          },
-        }
-      : node,
-  );
-  return graph;
-}
-
 async function shot(page, output, name) {
   await page.screenshot({
     path: path.join(output, name),
@@ -348,12 +291,17 @@ export async function probeRenderedMentuTab({
   assert.equal(await mentuTab.getAttribute("aria-selected"), "true");
   checks.push("mentu-tab-is-focusable-like-any-other-tab");
 
-  // 4. The work-graph fixture is written into the workspace and the tab
-  //    renders it: the DAG with the daemon's own statuses, the aggregate
-  //    strip, and `unverifiable` spelled as its own outcome. The viewport
-  //    is normalized first — earlier probes leave narrow captures behind,
-  //    and the interaction assertions here deserve the standard layout
-  //    (narrow widths get their own overflow/capture matrix in step 5).
+  // 4. The work-graph fixture INTENT is written into the workspace and
+  //    the tab renders it through the daemon's projecting read: the state
+  //    half is the daemon's alone, so a hand-written state fixture is
+  //    re-projected from real observation on every read (no runs in the
+  //    ledger yet → idle; the disabled node → blocked). The rich
+  //    recorded-evidence renderings (unverifiable, drift, streams, token
+  //    totals) are pinned by WorkGraphPane's own fixture tests, and the
+  //    REAL run journey is the graph-design probe, which runs a real
+  //    graph and asserts live statuses, evidence and intent immutability.
+  //    The viewport is normalized first — earlier probes leave narrow
+  //    captures behind.
   await page.setViewportSize({ width: 1440, height: 900 });
   const recipesDir = path.join(workspace, ".mentu", "recipes");
   await mkdir(recipesDir, { recursive: true });
@@ -369,55 +317,41 @@ export async function probeRenderedMentuTab({
   await panel.getByText("Plan the migration", { exact: true }).waitFor({ timeout: 15000 });
   await panel.getByText("Build workspace", { exact: true }).waitFor();
   await panel.getByText("Review changes", { exact: true }).waitFor();
-  const statusBadge = panel.locator('[data-work-graph-status="running"]');
-  await statusBadge.waitFor();
-  const unverifiableBadge = panel.locator('[data-work-graph-status="unverifiable"]');
-  await unverifiableBadge.waitFor();
-  assert.match(
-    (await unverifiableBadge.innerText()) ?? "",
-    /Unverifiable/i,
-    "loss of contact must render as Unverifiable, never as failed or succeeded",
+  // The daemon's projection: no ledger entries yet → every enabled node
+  // is honestly idle, and the disabled node is blocked (never runnable).
+  const idleBadges = panel.locator('[data-work-graph-status="idle"]');
+  await idleBadges.first().waitFor({ timeout: 15000 });
+  assert.equal(
+    await idleBadges.count(),
+    3,
+    "three enabled nodes must project as idle",
   );
+  const blockedBadge = panel.locator('[data-work-graph-status="blocked"]');
+  await blockedBadge.waitFor();
   const totals = panel.locator('[data-testid="work-graph-totals"]');
   await totals.waitFor();
+  assert.match((await totals.innerText()) ?? "", /Cost: unavailable/);
   assert.match(
     (await totals.innerText()) ?? "",
-    /Input tokens: 120/,
-    `the aggregate strip must sum the recorded usage, saw ${JSON.stringify(await totals.innerText())}`,
+    /4 nodes/,
+    `the aggregate strip must count the designed nodes, saw ${JSON.stringify(await totals.innerText())}`,
   );
-  assert.match((await totals.innerText()) ?? "", /Cost: unavailable/);
-  checks.push("work-graph-tab-renders-the-fixture-dag-with-real-statuses");
+  checks.push("work-graph-tab-renders-the-fixture-dag-with-projected-statuses");
 
-  // 4b. Evidence lives ON the node: selecting the node shows its exit
-  //     code, duration, usage and run ids right there, with the
-  //     shell/agent distinction intact. Then the Refresh re-read flips a
-  //     node's status — the live-update seam the daemon writes through.
+  // 4b. The honest never-run rendering: selecting a node with no state
+  //     record says the daemon has not recorded a run, never a made-up
+  //     outcome; the disabled node says it is not to relaunch.
   await panel.locator('[data-work-graph-node="n0"]').click();
   const inspector = panel.locator('[data-testid="work-graph-node-inspector"]');
   await inspector.waitFor();
-  await waitForText(inspector, "run-accept-1");
-  const inspectorText = (await inspector.innerText()) ?? "";
-  assert.match(inspectorText, /Exit code:/);
-  assert.match(inspectorText, /run_accept_1/);
-  assert.match(inspectorText, /qwen3\.8-flash-next-nvidia-nvfp4/);
-  assert.match(inspectorText, /Input tokens:/);
-  assert.match(inspectorText, /120/);
+  // The projection wrote an idle record with no evidence: the honest
+  // never-run rendering (the no-record-at-all variant is covered in the
+  // pane's own fixture tests).
+  await waitForText(inspector, "No evidence recorded yet for this node.");
+  await waitForText(inspector, "Drogon estimates nothing");
   await panel.locator('[data-work-graph-node="n3"]').click();
   await waitForText(inspector, "not to relaunch");
-
-  // The daemon settles the build and records its failure: a Refresh (and
-  // the pane's own poll) must flip the badge and surface the evidence.
-  await writeFile(graphPath, `${JSON.stringify(failedBuildState(workGraphFixture("failed")), null, 2)}\n`);
-  await panel.locator('[data-testid="work-graph-refresh"]').click();
-  await panel.locator('[data-work-graph-status="failed"]').waitFor({ timeout: 15000 });
-  await panel.locator('[data-work-graph-node="n1"]').click();
-  await waitForText(inspector, "Completion policy was not satisfied");
-  const buildInspectorText = (await inspector.innerText()) ?? "";
-  assert.match(buildInspectorText, /Exit code:/);
-  assert.match(buildInspectorText, /src\/lib\.rs/);
-  assert.match(buildInspectorText, /src\/extra\.rs/);
-  assert.match(buildInspectorText, /not applicable \(shell node\)/);
-  checks.push("work-graph-evidence-renders-on-the-node-and-refresh-flips-status");
+  checks.push("work-graph-never-run-nodes-render-honestly");
 
   // 4c. The recipe RUN journey moved intact to the right-sidebar Mentu
   //     panel, which owns the recipe surface since the takeover: select,
@@ -525,57 +459,6 @@ export async function probeRenderedMentuTab({
   );
   checks.push("mentu-panel-runs-a-recipe-and-shows-per-step-evidence");
 
-  // 4d. The real attribution: the daemon's state writer records the
-  //     node→run mapping after every graph run, so the graph can resolve
-  //     the node's streams through `mentu.run_evidence`. Simulate exactly
-  //     that attribution with the REAL run row and its REAL recorded
-  //     step, then prove the graph node resolves the run's true stdout.
-  const runs = await cliJson(cli, [
-    "--data-dir",
-    dataDir,
-    "--json",
-    "mentu",
-    "runs",
-    "--workspace",
-    workspaceId,
-  ]);
-  assert.equal(runs.ok, true, JSON.stringify(runs.error ?? runs));
-  const realRun = runs.result.runs.find((entry) => entry.status === "succeeded");
-  assert.ok(realRun, `the recipe run row must exist: ${JSON.stringify(runs.result?.runs)}`);
-  const detail = await cliJson(cli, [
-    "--data-dir",
-    dataDir,
-    "--json",
-    "mentu",
-    "run-status",
-    "--run",
-    realRun.id,
-  ]);
-  assert.equal(detail.ok, true, JSON.stringify(detail.error ?? detail));
-  const stepOne = detail.result.run.steps.find((step) => step.label === "tab-step-one");
-  assert.ok(stepOne, `the first step must be recorded: ${JSON.stringify(detail.result.run.steps)}`);
-  await writeFile(
-    graphPath,
-    `${JSON.stringify(
-      withRealRunAttribution(workGraphFixture("failed"), realRun, stepOne),
-      null,
-      2,
-    )}\n`,
-  );
-  await mentuTab.click();
-  await panel.locator('[data-testid="work-graph-refresh"]').click();
-  await panel.locator('[data-work-graph-node="n1"]').click();
-  await waitForText(inspector, realRun.id);
-  const resolved = await panel
-    .locator('[data-testid="work-graph-node-inspector"] pre[aria-label="stdout output"]')
-    .first();
-  await resolved.waitFor({ timeout: 20000 });
-  assert.match(
-    (await resolved.textContent()) ?? "",
-    /MENTU-TAB-STEP-ONE/,
-    "the graph node must resolve the real run's stdout through mentu.run_evidence",
-  );
-  checks.push("work-graph-resolves-real-run-evidence-through-mentu-rpc");
   // Back to the Mentu tab for the chrome checks below.
   await mentuTab.click();
 

@@ -26,6 +26,11 @@ import { ui } from "./workspace-ui-preferences";
 import { skills } from "./skills";
 // Meetings (additive): read-only Write That Down notes namespace.
 import { meetings } from "./meetings";
+// Work-graph authoring (additive): the designer's graph.* seam — the ONLY
+// renderer path to graph.write_intent/graph.compile/graph.run, each of
+// which the daemon gates behind the graph.v1 capability and its
+// ownership-enforcing store.
+import { graph } from "./graph";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -127,5 +132,7 @@ Object.assign(
   { ui, skills },
   // Additive: meetings (read-only notes index).
   { meetings },
+  // Work-graph authoring (additive): the designer's graph.* namespace.
+  { graph },
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));
