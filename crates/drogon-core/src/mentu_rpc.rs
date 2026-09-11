@@ -6,11 +6,12 @@
 use std::path::{Path, PathBuf};
 
 use drogon_protocol::mentu::{
-    MentuApproval, MentuApproveParams, MentuApproveResult, MentuCancelResult, MentuRecipeParams,
-    MentuRecipeResult, MentuRecipeSaveParams, MentuRecipeSaveResult, MentuRecipesResult,
-    MentuRunEvidenceParams, MentuRunEvidenceResult, MentuRunIdParams, MentuRunParams,
-    MentuRunResult, MentuRunStatus, MentuRunsParams, MentuRunsResult, MentuRuntimeInstallParams,
-    MentuRuntimeResult, MentuWorkspaceScopeParams,
+    MentuApproval, MentuApproveParams, MentuApproveResult, MentuCancelResult,
+    MentuPendingApprovalParams, MentuPendingApprovalResult, MentuRecipeParams, MentuRecipeResult,
+    MentuRecipeSaveParams, MentuRecipeSaveResult, MentuRecipesResult, MentuRunEvidenceParams,
+    MentuRunEvidenceResult, MentuRunIdParams, MentuRunParams, MentuRunResult, MentuRunStatus,
+    MentuRunsParams, MentuRunsResult, MentuRuntimeInstallParams, MentuRuntimeResult,
+    MentuWorkspaceScopeParams,
 };
 use drogon_protocol::{Request, RpcError};
 use serde_json::Value;
@@ -194,6 +195,30 @@ impl Engine {
             Some(staged),
         )?;
         to_value(MentuRunResult { run })
+    }
+
+    /// The pending approval bound to this recipe's exact current bytes, or
+    /// `None`. Read-only: `mentu run` needs a way to use consent a human
+    /// already gave, without ever minting one itself.
+    pub(crate) fn mentu_pending_approval(&self, params: &Value) -> Result<Value, RpcError> {
+        let parsed: MentuPendingApprovalParams = parse(params, "mentu.pending_approval")?;
+        parsed.validate()?;
+        let workspace_path = {
+            let conn = self.db.lock().unwrap();
+            workspace::get_path(&conn, &parsed.workspace_id)?
+        };
+        let current_hash =
+            recipe::current_content_hash(&PathBuf::from(workspace_path), &parsed.recipe_id)?;
+        let approval = {
+            let conn = self.db.lock().unwrap();
+            storage::pending_approval(
+                &conn,
+                &parsed.workspace_id,
+                &parsed.recipe_id,
+                &current_hash,
+            )?
+        };
+        to_value(MentuPendingApprovalResult { approval })
     }
 
     pub(crate) fn mentu_runs(&self, params: &Value) -> Result<Value, RpcError> {

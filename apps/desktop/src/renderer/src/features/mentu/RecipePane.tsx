@@ -6,6 +6,7 @@
 
 import type { MentuBridge } from "../../../../shared/mentu-contract";
 import type { FileBridge } from "../../../../shared/file-contract";
+import type { MentuDispatchContext } from "./recipe-pane-controller";
 import { RecipePaneContent } from "./RecipePaneContent";
 import { RecipePaneHeader } from "./RecipePaneHeader";
 import { useMentuPaneController } from "./use-recipe-pane-controller";
@@ -16,17 +17,20 @@ export function RecipePane({
   fileBridge = null,
   hostId = null,
   workspacePath = null,
+  dispatchContext,
 }: {
   bridge: MentuBridge;
   workspaceId: string;
   fileBridge?: FileBridge | null;
   hostId?: string | null;
   workspacePath?: string | null;
+  dispatchContext?: MentuDispatchContext;
 }): React.JSX.Element {
   const controller = useMentuPaneController(bridge, workspaceId, {
     fileBridge,
     hostId,
     workspacePath,
+    dispatchContext,
   });
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-background" data-testid="recipe-pane">

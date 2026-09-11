@@ -189,6 +189,61 @@ pub fn invalidate_stale_approvals(
     Ok(affected as u64)
 }
 
+/// The newest unconsumed approval bound to exactly `content_hash`, if one
+/// exists. Read-only: resolving "this recipe is already approved" must
+/// never create an approval, so a caller can only ever use consent a human
+/// already gave (or the UI recorded) for these exact bytes.
+///
+/// `rowid` breaks ties so two approvals recorded in the same RFC 3339
+/// second still resolve deterministically to the later insert.
+pub fn pending_approval(
+    conn: &Connection,
+    workspace_id: &str,
+    recipe_id: &str,
+    content_hash: &str,
+) -> Result<Option<MentuApproval>, RpcError> {
+    conn.query_row(
+        "SELECT id, workspace_id, recipe_id, content_hash, approved_at
+           FROM mentu_approvals
+          WHERE workspace_id = ?1 AND recipe_id = ?2 AND content_hash = ?3 AND consumed_at IS NULL
+          ORDER BY approved_at DESC, rowid DESC
+          LIMIT 1",
+        params![workspace_id, recipe_id, content_hash],
+        |r| {
+            Ok(MentuApproval {
+                id: r.get(0)?,
+                workspace_id: r.get(1)?,
+                recipe_id: r.get(2)?,
+                content_hash: r.get(3)?,
+                approved_at: r.get(4)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(error::from_sqlite)
+}
+
+/// Live progress for a running row: records the `mentu-recipes` run id and
+/// the run record exactly as the runtime currently has it on disk, WITHOUT
+/// touching status/ended_at. The background watcher owns those once the
+/// process exits, and the `status = 'running'` guard keeps this from ever
+/// overwriting a finished row with a stale partial record.
+pub fn record_run_progress(
+    conn: &Connection,
+    id: &str,
+    mentu_run_id: &str,
+    run_json: &Value,
+) -> Result<(), RpcError> {
+    conn.execute(
+        "UPDATE mentu_runs
+            SET mentu_run_id = COALESCE(mentu_run_id, ?1), run_json = ?2
+          WHERE id = ?3 AND status = 'running'",
+        params![mentu_run_id, run_json.to_string(), id],
+    )
+    .map_err(error::from_sqlite)?;
+    Ok(())
+}
+
 pub struct NewRun<'a> {
     pub id: &'a str,
     pub workspace_id: &'a str,
@@ -518,5 +573,117 @@ mod tests {
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].id, "run-2");
         assert_eq!(runs[1].id, "run-1");
+    }
+
+    #[test]
+    fn pending_approval_only_matches_the_current_hash_and_unconsumed_rows() {
+        let conn = conn();
+        let hash = "a".repeat(64);
+        assert!(
+            pending_approval(&conn, "ws1", "hello", &hash)
+                .unwrap()
+                .is_none()
+        );
+        insert_approval(
+            &conn,
+            &MentuApproval {
+                id: "old".into(),
+                workspace_id: "ws1".into(),
+                recipe_id: "hello".into(),
+                content_hash: "b".repeat(64),
+                approved_at: "2026-09-07T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        // A stale hash never resolves: an edited recipe has no pending
+        // approval until a human approves the new bytes.
+        assert!(
+            pending_approval(&conn, "ws1", "hello", &hash)
+                .unwrap()
+                .is_none()
+        );
+        insert_approval(
+            &conn,
+            &MentuApproval {
+                id: "fresh".into(),
+                workspace_id: "ws1".into(),
+                recipe_id: "hello".into(),
+                content_hash: hash.clone(),
+                approved_at: "2026-09-07T00:00:01Z".into(),
+            },
+        )
+        .unwrap();
+        let found = pending_approval(&conn, "ws1", "hello", &hash)
+            .unwrap()
+            .expect("the matching unconsumed approval");
+        assert_eq!(found.id, "fresh");
+        // Consuming it (as `mentu.run` does) retires it: a second run must
+        // require a fresh approval, never reuse this one.
+        consume_approval(&conn, "fresh", "ws1", "hello").unwrap();
+        assert!(
+            pending_approval(&conn, "ws1", "hello", &hash)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn record_run_progress_survives_the_earlier_partial_record_and_never_rewrites_finished_rows() {
+        let conn = conn();
+        insert_run(
+            &conn,
+            &NewRun {
+                id: "run-1",
+                workspace_id: "ws1",
+                recipe_id: "hello",
+                approval_id: "appr-1",
+                started_at: "2026-09-07T00:00:00Z",
+                retry_of: None,
+            },
+        )
+        .unwrap();
+        let mentu_run_id = "run_20260907202509_15F1772D";
+        // mentu-recipes writes run.json as it goes: the first record has no
+        // steps and outcome "running". Storing it must NOT flip the row off
+        // `running` (overall_status would read "running" as a failure).
+        let partial = serde_json::json!({"outcome": "running", "steps": []});
+        record_run_progress(&conn, "run-1", mentu_run_id, &partial).unwrap();
+        let live = get_run(&conn, "run-1").unwrap().unwrap();
+        assert_eq!(live.status, MentuRunStatus::Running);
+        assert_eq!(live.mentu_run_id.as_deref(), Some(mentu_run_id));
+        assert!(live.steps.is_empty());
+        // The next partial record exposes the first completed step while
+        // the run is still in flight.
+        let one_step = serde_json::json!({
+            "outcome": "running",
+            "steps": [{"label": "build", "backend": "shell", "outcome": "ok", "exit_code": 0,
+                        "output_file": "build.stdout", "error_file": "build.stderr"}]
+        });
+        record_run_progress(&conn, "run-1", mentu_run_id, &one_step).unwrap();
+        let live = get_run(&conn, "run-1").unwrap().unwrap();
+        assert_eq!(live.status, MentuRunStatus::Running);
+        assert_eq!(live.steps.len(), 1);
+        assert_eq!(live.steps[0].status, MentuRunStatus::Succeeded);
+        // Once the watcher finalizes the row, a late poller cannot reopen it.
+        finish_run(
+            &conn,
+            "run-1",
+            MentuRunStatus::Failed,
+            "2026-09-07T00:00:05Z",
+            Some("step failed"),
+            None,
+            Some(&serde_json::json!({"outcome": "failed", "steps": []})),
+        )
+        .unwrap();
+        record_run_progress(
+            &conn,
+            "run-1",
+            mentu_run_id,
+            &serde_json::json!({"outcome": "running", "steps": []}),
+        )
+        .unwrap();
+        let finished = get_run(&conn, "run-1").unwrap().unwrap();
+        assert_eq!(finished.status, MentuRunStatus::Failed);
+        assert_eq!(finished.ended_at.as_deref(), Some("2026-09-07T00:00:05Z"));
     }
 }

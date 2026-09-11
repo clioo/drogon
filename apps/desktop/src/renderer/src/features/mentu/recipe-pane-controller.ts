@@ -21,8 +21,16 @@ import type {
   MentuStepEvidence,
 } from "../../../../shared/mentu-contract";
 import type { FileBridge } from "../../../../shared/file-contract";
-import type { Harness } from "../../../../shared/session-contract";
+import type { Harness, Session } from "../../../../shared/session-contract";
 import type { MentuPaneMode } from "../../../../shared/persistence-contracts/mentu-pane-types";
+import {
+  composeMentuRunPrompt,
+  defaultMentuDispatchDeps,
+  describeMentuDispatchFailure,
+  dispatchMentuRunPrompt,
+  isMentuMainSessionLive,
+  type MentuDispatchDeps,
+} from "./mentu-run-dispatch";
 import { buildRecipeGraph, type RecipeGraph } from "./recipe-graph";
 import { useMentuState } from "./mentu-store";
 import { useHarnessCatalog } from "./mentu-harness-catalog";
@@ -77,6 +85,30 @@ export function STARTER_RECIPE(name: string) {
     ],
   };
 }
+
+/** How long the Run Recipe button stays in its "waiting for the agent"
+ *  state after the prompt was delivered and before a run row appears. The
+ *  agent has to read the skill and invoke `drogon-cli mentu run`; a prompt
+ *  the agent declined must not leave a spinner running forever, so this is
+ *  a hard bound with an honest notice at the end of it. */
+export const MENTU_DISPATCH_HOLD_MS = 90_000;
+
+/** Everything the dispatch path needs from outside the Mentu data layer:
+ *  the workspace's main agent session (for display) and the session
+ *  transport used to deliver the prompt. */
+export type MentuDispatchContext = {
+  activeSessionId: string | null;
+  mainSession: Session | null;
+  deps?: MentuDispatchDeps;
+};
+
+/** A prompt that was delivered and whose run row has not been seen yet. */
+type MentuPendingDispatch = {
+  approvalId: string;
+  recipeId: string;
+  sessionId: string;
+  dispatchedAt: number;
+};
 
 export type MentuReview = {
   recipeName: string;
@@ -176,6 +208,21 @@ export type MentuPaneController = {
   busy: boolean;
   operationRunning: boolean;
   error: string | null;
+  /** The main agent session the Run Recipe prompt is delivered to, as the
+   *  shell last listed it; null when the workspace has none. */
+  mainSession: Session | null;
+  /** False when there is no main agent session, or the one there is has
+   *  exited: Run Recipe will refuse rather than type into it. */
+  mainSessionReady: boolean;
+  /** A delivered prompt whose run has not been observed yet: the button's
+   *  "starting" animation is driven by this, never by a timer. */
+  dispatching: boolean;
+  /** The delivery itself is in flight (usually: waiting for a busy main
+   *  session to reach a state where typing is safe). */
+  delivering: boolean;
+  /** The honest outcome of the last dispatch (delivered where, or why it
+   *  was refused). Never silently cleared without a replacement. */
+  dispatchNotice: string | null;
   stageReview: () => void;
   clearReview: () => void;
   approveAndRun: () => Promise<void>;
@@ -186,15 +233,24 @@ export type MentuPaneController = {
 export function useMentuPaneController(
   bridge: MentuBridge,
   workspaceId: string,
-  options?: {
+  options: {
     /** Workspace files bridge: powers the empty state's honest directory
      *  probe and the starter-recipe creation. Absent (or the files
      *  capability withheld) degrades to saying less, never to guessing. */
     fileBridge?: FileBridge | null;
     hostId?: string | null;
     workspacePath?: string | null;
-  },
+    /** The workspace's main agent session plus the transport Run Recipe
+     *  delivers its prompt through (see `mentu-run-dispatch`). Absent means
+     *  the dispatch path falls back to `window.drogon`, and the no-session
+     *  refusal stays honest instead of guessing. */
+    dispatchContext?: MentuDispatchContext;
+  } = {},
 ): MentuPaneController {
+  const dispatchContext: MentuDispatchContext = options.dispatchContext ?? {
+    activeSessionId: null,
+    mainSession: null,
+  };
   const [state, setState] = useMentuState(workspaceId);
   const harnessCatalog = useHarnessCatalog();
   const [recipes, setRecipes] = useState<MentuRecipeSummary[]>([]);
@@ -204,6 +260,20 @@ export function useMentuPaneController(
   const [runtime, setRuntime] = useState<MentuRuntimeInfo | null>(null);
   const [approval, setApproval] = useState<MentuApproval | null>(null);
   const [review, setReview] = useState<MentuReview | null>(null);
+  const [pendingDispatch, setPendingDispatch] =
+    useState<MentuPendingDispatch | null>(null);
+  const [delivering, setDelivering] = useState(false);
+  const [dispatchNotice, setDispatchNotice] = useState<string | null>(null);
+  // Read through a ref so a dispatch always uses the newest deps without
+  // re-creating every callback (and re-running every effect) on each render
+  // of the shell's session list. Left null until a dispatch needs it, so a
+  // renderer without `window.drogon` (jsdom tests) never touches it.
+  const dispatchDepsRef = useRef<MentuDispatchDeps | null>(
+    dispatchContext.deps ?? null,
+  );
+  if (dispatchContext.deps) dispatchDepsRef.current = dispatchContext.deps;
+  const activeSessionIdRef = useRef(dispatchContext.activeSessionId);
+  activeSessionIdRef.current = dispatchContext.activeSessionId;
   const [run, setRun] = useState<MentuRun | null>(null);
   const [runs, setRuns] = useState<MentuRun[]>([]);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
@@ -311,6 +381,8 @@ export function useMentuPaneController(
     setRuns([]);
     setConflict(null);
     setSaveNotice(null);
+    setPendingDispatch(null);
+    setDispatchNotice(null);
     if (!state.selectedRecipeId) {
       setRecipe(null);
       return;
@@ -369,6 +441,46 @@ export function useMentuPaneController(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- updateRun only publishes what the poll learned
   }, [bridge, run]);
 
+  // Run adoption after a delegated dispatch. The prompt carries the exact
+  // approval id, and the run row records that id, so "which run did my
+  // click cause" is answered by the daemon's own data instead of by timing.
+  // The button's "starting" animation lives exactly as long as this does,
+  // and ends either on a real run row or on the honest timeout notice.
+  useEffect(() => {
+    if (!pendingDispatch) return;
+    let cancelled = false;
+    const check = async (): Promise<void> => {
+      const result = await bridge.mentuRuns({ workspaceId });
+      if (cancelled || !result.ok) return;
+      const adopted = result.result.runs.find(
+        (entry) =>
+          entry.approvalId === pendingDispatch.approvalId &&
+          entry.recipeId === pendingDispatch.recipeId,
+      );
+      if (adopted) {
+        setPendingDispatch(null);
+        setDispatchNotice(
+          `Run ${adopted.id} started by the agent session ${pendingDispatch.sessionId}.`,
+        );
+        updateRun(adopted);
+        return;
+      }
+      if (Date.now() - pendingDispatch.dispatchedAt >= MENTU_DISPATCH_HOLD_MS) {
+        setPendingDispatch(null);
+        setError(
+          `The prompt was delivered to session ${pendingDispatch.sessionId}, but no Mentu run has appeared for approval ${pendingDispatch.approvalId} yet. Read that session's reply; nothing was auto-approved or auto-run here.`,
+        );
+      }
+    };
+    void check();
+    const timer = setInterval(() => void check(), POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateRun only publishes what the poll learned
+  }, [bridge, workspaceId, pendingDispatch]);
+
   // Cross-mount run adoption: whichever mount (panel or tab) published
   // `state.activeRun` last wins, provided it names the recipe this mount
   // selected. `setRun` with the identical object is a React no-op, so a
@@ -387,7 +499,12 @@ export function useMentuPaneController(
   const evidence = run ? (state.evidenceByRunId[run.id] ?? null) : null;
   useEffect(() => {
     if (!run || !run.mentuRunId) return;
-    const key = `${run.id}:${run.status}`;
+    // The step signature is part of the key on purpose: a live run keeps
+    // the id AND the `running` status while its finished steps accumulate,
+    // so keying on status alone would freeze Evidence at whatever the run
+    // looked like when it started.
+    const signatures = run.steps.map((step) => step.status).join(",");
+    const key = `${run.id}:${run.status}:${run.steps.length}:${signatures}`;
     if (evidenceLoadedKey.current === key) return;
     if (run.status !== "running" && state.evidenceByRunId[run.id] !== undefined) {
       evidenceLoadedKey.current = key;
@@ -409,13 +526,16 @@ export function useMentuPaneController(
         evidenceLoadedKey.current = key;
       } else {
         setEvidenceError(result.error.message);
+        // A live run's evidence can legitimately not exist yet (the runtime
+        // has not referenced a file). Do not pin the failed key: the next
+        // step transition retries the read.
       }
     });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- setState is stable per workspace; the key ref guards re-entry
-  }, [bridge, run?.id, run?.status]);
+  }, [bridge, run?.id, run?.status, run?.steps.length]);
 
   const graph = useMemo(
     () => (recipe ? buildRecipeGraph(recipe.steps) : null),
@@ -580,25 +700,41 @@ export function useMentuPaneController(
     [setState],
   );
 
+  // `Run Recipe`'s first phase. It used to refuse when the draft differed
+  // from the saved recipe; a delegated run makes that refusal wrong — the
+  // agent runs what is ON DISK, so an unsaved edit would silently run the
+  // old bytes. Save first (the real `mentu.recipe_save`), then stage the
+  // review from the SAVED detail, so the hash the human approves is the
+  // hash the agent will consume.
   const stageReview = useCallback(() => {
-    if (!recipe) return;
-    // A review binds the saved content hash; staging one over unsaved
-    // edits would review bytes that can never run.
-    if (draftSource !== recipe.source) {
-      setError("Save or discard your recipe edits before reviewing.");
-      return;
-    }
-    setReview({
-      recipeName: recipe.name,
-      contentHash: recipe.contentHash,
-      stepCount: recipe.steps.length,
-      steps: recipe.steps.map((step) => ({ label: step.label, backend: step.backend })),
-      runner: runtime?.version ?? runtime?.expectedRevision ?? "unknown",
-    });
-  }, [draftSource, recipe, runtime]);
+    if (!recipe || !state.selectedRecipeId) return;
+    setError(null);
+    setDispatchNotice(null);
+    void (async () => {
+      let detail = recipe;
+      if (draftSource !== recipe.source) {
+        const saved = await persistSourceRef.current(draftSource);
+        if (!saved.ok || !saved.recipe) return;
+        detail = saved.recipe;
+      }
+      setReview({
+        recipeName: detail.name,
+        contentHash: detail.contentHash,
+        stepCount: detail.steps.length,
+        steps: detail.steps.map((step) => ({ label: step.label, backend: step.backend })),
+        runner: runtime?.version ?? runtime?.expectedRevision ?? "unknown",
+      });
+    })();
+  }, [draftSource, recipe, runtime, state.selectedRecipeId]);
 
   const clearReview = useCallback(() => setReview(null), []);
 
+  // `Approve & run recipe`'s phase: record the human's approval of that
+  // exact content, then HAND THE PROMPT TO THE AGENT. The UI no longer
+  // calls `mentu.run` itself: the run row has to be created by the agent's
+  // `drogon-cli mentu run`, which consumes this approval (the same seam the
+  // CLI refuses to short-circuit). The approval id rides the prompt, so the
+  // run the agent starts is attributable to this click.
   const approveAndRun = useCallback(async () => {
     if (!recipe || !state.selectedRecipeId || !review) return;
     if (draftSource !== recipe.source) {
@@ -607,6 +743,7 @@ export function useMentuPaneController(
     }
     setBusy(true);
     setError(null);
+    setDispatchNotice(null);
     const approved = await bridge.mentuApprove({
       workspaceId,
       recipeId: state.selectedRecipeId,
@@ -636,18 +773,39 @@ export function useMentuPaneController(
       return;
     }
     setApproval(approved.result.approval);
-    const started = await bridge.mentuRun({
+    const prompt = composeMentuRunPrompt({
       workspaceId,
       recipeId: state.selectedRecipeId,
+      contentHash: approved.result.approval.contentHash,
       approvalId: approved.result.approval.id,
     });
+    setDelivering(true);
+    const dispatched = await dispatchMentuRunPrompt(
+      dispatchDepsRef.current ?? defaultMentuDispatchDeps(),
+      {
+        workspaceId,
+        activeSessionId: activeSessionIdRef.current,
+        prompt,
+      },
+    );
+    setDelivering(false);
     setBusy(false);
-    if (started.ok) {
-      updateRun(started.result.run);
-    } else {
-      setError(started.error.message);
+    if (!dispatched.ok) {
+      // The approval exists but nothing ran. Say exactly that rather than
+      // implying a run started; the human can retry after fixing the cause.
+      setError(describeMentuDispatchFailure(dispatched.failure));
+      return;
     }
-  }, [bridge, workspaceId, recipe, review, draftSource, state.selectedRecipeId, updateRun]);
+    setPendingDispatch({
+      approvalId: approved.result.approval.id,
+      recipeId: state.selectedRecipeId,
+      sessionId: dispatched.sessionId,
+      dispatchedAt: Date.now(),
+    });
+    setDispatchNotice(
+      `Prompt delivered to agent session ${dispatched.sessionId}. Waiting for it to start the run…`,
+    );
+  }, [bridge, workspaceId, recipe, review, draftSource, state.selectedRecipeId]);
 
   const setDraftText = useCallback(
     (source: string) => {
@@ -701,14 +859,18 @@ export function useMentuPaneController(
     async (
       content: string,
       options?: { autosave?: boolean },
-    ): Promise<{ ok: boolean; message: string | null }> => {
+    ): Promise<{
+      ok: boolean;
+      message: string | null;
+      recipe: MentuRecipeDetail | null;
+    }> => {
       if (!recipe || !state.selectedRecipeId) {
-        return { ok: false, message: "No recipe is loaded." };
+        return { ok: false, message: "No recipe is loaded.", recipe: null };
       }
       if (!bridge.mentuRecipeSave) {
         const message = "Recipe saving is unavailable in this desktop build.";
         setError(message);
-        return { ok: false, message };
+        return { ok: false, message, recipe: null };
       }
       setSaving(true);
       // A step autosave must not flip the whole inspector into `busy` (that
@@ -725,7 +887,7 @@ export function useMentuPaneController(
       if (!options?.autosave) setBusy(false);
       if (!saved.ok) {
         setError(saved.error.message);
-        return { ok: false, message: saved.error.message };
+        return { ok: false, message: saved.error.message, recipe: null };
       }
       setRecipe(saved.result.recipe);
       setDrafts({
@@ -740,10 +902,15 @@ export function useMentuPaneController(
       setReview(null);
       setConflict(null);
       setSaveNotice("Saved. Review the new content before running.");
-      return { ok: true, message: null };
+      return { ok: true, message: null, recipe: saved.result.recipe };
     },
     [bridge, workspaceId, recipe, state.selectedRecipeId, setState],
   );
+
+  // The staging path runs before `persistSource` is declared, so it reaches
+  // it through a ref instead of reordering the whole controller.
+  const persistSourceRef = useRef(persistSource);
+  persistSourceRef.current = persistSource;
 
   const saveDraft = useCallback(async () => {
     if (!recipe || draftSource === recipe.source) return;
@@ -878,6 +1045,11 @@ export function useMentuPaneController(
     busy,
     operationRunning: run?.status === "running",
     error,
+    mainSession: dispatchContext.mainSession,
+    mainSessionReady: isMentuMainSessionLive(dispatchContext.mainSession),
+    dispatching: pendingDispatch !== null,
+    delivering,
+    dispatchNotice,
     stageReview,
     clearReview,
     approveAndRun,

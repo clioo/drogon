@@ -11,7 +11,7 @@
 // run's recorded Mentu run id (`mentu.retry`), re-running only the steps
 // that did not succeed against the recipe file as currently saved.
 
-import { Play, RefreshCw, X } from "lucide-react";
+import { Loader2, Play, RefreshCw, X } from "lucide-react";
 import type { MentuApproval, MentuRun } from "../../../../shared/mentu-contract";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -76,6 +76,9 @@ export function RunControls({
   runtimeAvailable,
   dependencyGraphValid,
   operationRunning,
+  dispatching = false,
+  delivering = false,
+  dispatchNotice = null,
   busy,
   run,
   approval,
@@ -90,6 +93,11 @@ export function RunControls({
   runtimeAvailable: boolean;
   dependencyGraphValid: boolean;
   operationRunning: boolean;
+  /** A prompt was delivered and its run row has not been observed yet. */
+  dispatching?: boolean;
+  /** The delivery is in flight (normally: waiting for a busy session). */
+  delivering?: boolean;
+  dispatchNotice?: string | null;
   busy: boolean;
   run: MentuRun | null;
   approval: MentuApproval | null;
@@ -99,11 +107,27 @@ export function RunControls({
   onCancel: () => void;
   onClearReview: () => void;
 }): React.JSX.Element {
-  const disabled = !runtimeAvailable || !dependencyGraphValid || busy;
+  const disabled =
+    !runtimeAvailable || !dependencyGraphValid || busy || dispatching || delivering;
   const reviewed = review !== null;
+  const runActive = operationRunning || dispatching || delivering;
+  const runLabel = delivering
+    ? "Waiting for agent…"
+    : dispatching
+      ? "Starting run…"
+      : operationRunning
+        ? "Running…"
+        : reviewed
+          ? "Approve & run"
+          : "Review Run";
   return (
     <div className="space-y-3">
       {review ? <ReviewScope review={review} owner={owner} approval={approval} /> : null}
+      <p className="text-xs text-muted-foreground">
+        Approving hands the run to this workspace's main agent session: the agent runs it with
+        <code className="mx-1">drogon-cli mentu run</code>
+        and reports back here, so Evidence and Metrics come from the daemon's own run record.
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
@@ -111,8 +135,15 @@ export function RunControls({
           disabled={disabled}
           onClick={() => (reviewed ? onApproveAndRun() : onStageReview())}
           data-testid="mentu-run"
+          data-running={runActive ? "true" : "false"}
+          aria-busy={runActive}
         >
-          <Play /> {reviewed ? "Approve & run" : "Review Run"}
+          {runActive ? (
+            <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />
+          ) : (
+            <Play />
+          )}
+          {runLabel}
         </Button>
         {run && (run.status === "failed" || run.status === "unavailable") && !operationRunning ? (
           <Button
@@ -148,6 +179,15 @@ export function RunControls({
           data-testid="mentu-run-status"
         >
           Latest run {run.mentuRunId ?? run.id}: {statusLabel(run.status)}
+        </p>
+      ) : null}
+      {dispatchNotice ? (
+        <p
+          className="text-xs text-muted-foreground"
+          role="status"
+          data-testid="mentu-dispatch-notice"
+        >
+          {dispatchNotice}
         </p>
       ) : null}
       {!dependencyGraphValid ? (

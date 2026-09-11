@@ -177,6 +177,9 @@ export function RecipePaneContent({
                   runtimeAvailable={runtimeAvailable}
                   dependencyGraphValid={graph?.valid === true}
                   operationRunning={controller.operationRunning}
+                  dispatching={controller.dispatching}
+                  delivering={controller.delivering}
+                  dispatchNotice={controller.dispatchNotice}
                   busy={controller.busy}
                   run={controller.run}
                   approval={controller.approval}

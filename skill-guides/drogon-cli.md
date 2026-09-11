@@ -5,9 +5,10 @@ description: >-
   status and capabilities, manage workspaces, projects and worktrees, and
   operate terminals (create, list, send, read, wait, close), the embedded
   browser pane (open, navigate, snapshot, click, fill, tabs), harness
-  launch, and the optional Mentu recipe environment (status, open). Use for
-  terminal control, lightweight prompts and shell commands. Use the
-  orchestration guide for supervised multi-agent coordination.
+  launch, and the optional Mentu recipe environment (status, open, run,
+  follow, cancel). Use for terminal control, lightweight prompts and shell
+  commands. Use the orchestration guide for supervised multi-agent
+  coordination.
 ---
 
 # Drogon CLI
@@ -66,7 +67,9 @@ commands below (which additionally need a connected Drogon desktop), and
 Run `drogon-cli status --json` first, then the narrowest command for the
 job. Before promising a Mentu recipe, run
 `drogon-cli mentu status --workspace <ID> --json` — the runtime is
-optional. The full guide for supervised coordination is one guide away:
+optional, and a recipe can only run once a human has approved its current
+content (`mentu run` refuses otherwise). The full guide for supervised
+coordination is one guide away:
 `drogon-cli skills get --topic orchestration`.
 
 ## Workspaces
@@ -168,6 +171,67 @@ With no desktop connected the call fails with `desktop_not_connected`
 inside the timeout, like the browser commands above. This verb shows a
 recipe; it never runs one.
 
+### Run A Recipe
+
+Running a recipe is a daemon operation you start and then follow. It needs
+an approval bound to the recipe's EXACT current bytes: `mentu run` never
+approves anything itself, so an edited recipe has to be re-approved by a
+human (the Drogon Mentu tab's Run Recipe action) before the CLI can run it.
+
+```text
+drogon-cli mentu run --workspace <ID> --recipe <ID> --follow --timeout-ms 900000
+```
+
+- Without `--approval`, the verb resolves the recipe's pending approval
+  (`mentu.pending_approval`: the newest unconsumed approval whose content
+  hash equals the recipe on disk). Pass `--approval <ID>` to consume one
+  specific approval instead — that is what the Mentu tab's Run Recipe
+  button does when it hands you the id it just approved.
+- With no matching approval the call fails with `mentu_approval_required`
+  (exit 1). Do not look for a way to approve it yourself: report the
+  recipe and ask the human to approve it in the Mentu tab, then run again.
+- `--follow` polls `mentu.run_status` until the run settles, bounded by
+  `--timeout-ms` (default 900000, range 1 to 3600000). Without `--follow`
+  the verb returns as soon as the daemon has recorded the `running` row.
+- Exit status is the truth, not the prose: `0` only when the run succeeded
+  (or is still running), `1` when it failed, was cancelled, or is
+  `unavailable` (the host never confirmed an outcome), and `1` with code
+  `timeout` when the follow budget ran out. A timeout names the last
+  observed status; it never claims the run died.
+- Inside a Drogon terminal drop `--data-dir`; the shim already binds the
+  running daemon.
+
+Follow or report a run by its daemon run id (the `id` from `mentu run`, not
+the runtime's `run_...` id):
+
+```text
+drogon-cli mentu run-status --run <RUN-ID> --json
+drogon-cli mentu runs --workspace <ID> --limit 10 --json
+```
+
+`mentu run-status` exits 0 while a run is running or succeeded and 1 once
+it settled as failed/cancelled/unavailable, so a shell `if` can branch on
+it. Its `steps[]` fill in as the run progresses — the daemon mirrors the
+runtime's own run record while the process is alive — and each step carries
+`outputPath`/`errorPath` for the captured streams, so report the failing
+step's label, exit code and error instead of paraphrasing the run.
+
+Stop a run with:
+
+```text
+drogon-cli mentu cancel --run <RUN-ID>
+```
+
+Cancellation is asynchronous: the returned row may still read `running`, so
+poll `mentu run-status` until it settles as `cancelled`. It works on any run
+row, including one another agent started, which is why a run started from
+the Mentu tab stays stoppable by the human (the tab's Cancel) and by you.
+
+When a recipe is worth writing, its steps should be independently
+verifiable: give each step a `shell` command whose exit code means
+something, then run it and read the evidence back rather than asserting
+success.
+
 ## Harness Launch
 
 `drogon-cli harness list --json` shows the harnesses the service host can
@@ -204,6 +268,12 @@ never established). Only an observed exit is an exit.
   advertise `mentu.v1` or `browser.relay.v1`, with `desktop_not_connected`
   when no desktop is connected, and with the desktop's own refusal code
   when the window would not open the tab.
+- `mentu run` exits 1 with `mentu_approval_required` when the recipe's
+  current bytes have no approval, with `timeout` when `--follow` exhausts
+  its budget, and with the daemon's own code (`not_found`,
+  `invalid_argument`) for an unknown recipe or an approval that does not
+  match it. It exits 1, never 0, for a run that settled as failed,
+  cancelled or unavailable.
 - The diagnostic passthrough `drogon-cli rpc status` sends one raw
   protocol method and prints the validated envelope.
 
@@ -212,7 +282,10 @@ never established). Only an observed exit is an exit.
 Confirm `drogon-cli status --json` unless already checked this turn, then
 choose the narrowest command: `workspace list`, `project list`,
 `worktree list --project <ID>`, `terminal list`, `terminal read`, or
-`terminal wait`. When discovering flags from scratch, prefer
+`terminal wait`. To run a Mentu recipe the human approved, use
+`drogon-cli mentu run --workspace <ID> --recipe <ID> --follow`; to report on
+one that is already in flight, `drogon-cli mentu run-status --run <RUN-ID>`.
+When discovering flags from scratch, prefer
 `drogon-cli agent-context --json` over guessing. For supervised work with
 task ownership and completion tracking, read
 `drogon-cli skills get --topic orchestration`.

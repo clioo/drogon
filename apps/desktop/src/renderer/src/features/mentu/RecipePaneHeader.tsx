@@ -15,7 +15,7 @@
 // (`controller.review`/`stageReview`/`approveAndRun`) so it is a second
 // entry point into real, already-gated behavior, never a parallel path.
 
-import { AlertCircle, Network, Play, RefreshCw } from "lucide-react";
+import { AlertCircle, Loader2, Network, Play, RefreshCw } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Label } from "../../components/ui/label";
@@ -36,14 +36,33 @@ export function RecipePaneHeader({
 }): React.JSX.Element {
   const runtimeAvailable =
     controller.runtime?.available === true && controller.runtime?.lockMatches === true;
+  // The animation is derived from real state only: a run row the daemon
+  // reports as `running`, a prompt this UI actually delivered and whose run
+  // row it is still waiting for, or a delivery still in flight (normally:
+  // waiting for a busy main session to become safe to type into). None of
+  // them is a timer, so the spinner cannot outlive the work or stop while
+  // it continues.
+  const runActive =
+    controller.operationRunning || controller.dispatching || controller.delivering;
   const runDisabled =
     controller.busy ||
     controller.saving ||
-    controller.operationRunning ||
+    runActive ||
     !controller.recipe ||
     controller.graph?.valid !== true ||
     !runtimeAvailable;
-  const runLabel = controller.review ? "Approve & run recipe" : "Run Recipe";
+  const recordedSteps = controller.run?.steps.length ?? 0;
+  const runLabel = runActive
+    ? controller.operationRunning
+      ? recordedSteps > 0
+        ? `Running… ${recordedSteps} step${recordedSteps === 1 ? "" : "s"} recorded`
+        : "Running…"
+      : controller.delivering
+        ? "Waiting for agent…"
+        : "Starting run…"
+    : controller.review
+      ? "Approve & run recipe"
+      : "Run Recipe";
   return (
     <>
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3">
@@ -105,11 +124,17 @@ export function RecipePaneHeader({
             variant="destructive"
             disabled={runDisabled}
             data-testid="mentu-run-recipe"
+            data-running={runActive ? "true" : "false"}
+            aria-busy={runActive}
             onClick={() =>
               controller.review ? void controller.approveAndRun() : controller.stageReview()
             }
           >
-            <Play />
+            {runActive ? (
+              <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />
+            ) : (
+              <Play />
+            )}
             {runLabel}
           </Button>
         </div>
@@ -158,6 +183,26 @@ export function RecipePaneHeader({
               .map((recipe) => `${recipe.path} — ${recipe.issue}`)
               .join(" · ")}
           </span>
+        </div>
+      ) : null}
+      {!controller.mainSessionReady ? (
+        <div
+          className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-4 py-2 text-xs text-muted-foreground"
+          data-testid="mentu-main-session-hint"
+        >
+          <p>
+            No agent session open in this workspace. Run Recipe hands the prompt to your main
+            agent session, so open one (Claude, Pi, OpenCode or Codex) first.
+          </p>
+        </div>
+      ) : null}
+      {controller.dispatchNotice ? (
+        <div
+          className="flex shrink-0 items-start gap-2 border-b border-border bg-card px-4 py-2 text-xs text-muted-foreground"
+          role="status"
+          data-testid="mentu-dispatch-notice"
+        >
+          <p>{controller.dispatchNotice}</p>
         </div>
       ) : null}
       {controller.runtimeMessage ? (
