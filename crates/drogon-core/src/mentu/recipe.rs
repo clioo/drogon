@@ -545,6 +545,42 @@ fn valid_content_hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// Writes a compiled recipe that may not exist yet — the graph compiler's
+/// compilation target. Same containment checks, per-recipe lock and atomic
+/// rename as [`save_recipe`], but it validates the content up front and does
+/// not require the file to pre-exist (a compiled recipe is newly emitted, not
+/// an edit of a human-authored document).
+pub fn save_compiled_recipe(
+    workspace_root: &Path,
+    recipe_id: &str,
+    content: &str,
+) -> Result<MentuRecipeDetail, RpcError> {
+    if content.len() as u64 > MAX_RECIPE_SOURCE_BYTES {
+        return Err(error::invalid_argument(
+            "Compiled recipe source exceeds the 1 MiB safety limit.",
+        ));
+    }
+    if recipe_id.is_empty()
+        || recipe_id.contains('\0')
+        || recipe_id.starts_with('/')
+        || recipe_id
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return Err(error::invalid_argument("Invalid Mentu recipe reference."));
+    }
+    let value: Value = serde_json::from_str(content)
+        .map_err(|e| error::invalid_argument(format!("Compiled recipe is not valid JSON: {e}")))?;
+    validate_recipe_value(&value)?;
+    let root = recipes_root(workspace_root);
+    fs::create_dir_all(&root).map_err(|e| error::io_error(e.to_string()))?;
+    let path = root.join(format!("{recipe_id}.json"));
+    let (dir, file_name) = recipe_dir_and_name(&path)?;
+    let _lock = acquire_recipe_lock(dir, &file_name)?;
+    write_recipe_locked(&path, content)?;
+    load_recipe(workspace_root, recipe_id)
+}
+
 /// Compare-and-save: writes `content` only when the recipe's exact
 /// current on-disk bytes still hash to `expected_hash` (the hash the
 /// caller saw at load time). The per-recipe lock is held across the hash
@@ -792,15 +828,9 @@ mod tests {
     fn the_daemons_own_snapshot_store_is_not_reported_as_a_recipe() {
         let dir = workspace();
         write_recipe(dir.path(), "hello", VALID);
-        let snapshots = dir
-            .path()
-            .join(".mentu/recipes/.snapshots/run-1");
+        let snapshots = dir.path().join(".mentu/recipes/.snapshots/run-1");
         fs::create_dir_all(&snapshots).unwrap();
-        fs::write(
-            snapshots.join("manifest.json"),
-            "{\"recipe\":\"hello\"}",
-        )
-        .unwrap();
+        fs::write(snapshots.join("manifest.json"), "{\"recipe\":\"hello\"}").unwrap();
         fs::write(snapshots.join("hello.json"), VALID).unwrap();
         // A user's own nested recipe directory is still discovered.
         let nested = dir.path().join(".mentu/recipes/team");

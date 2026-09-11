@@ -11,6 +11,7 @@ use crate::client::{
     Session, SessionList, StatusResult, Workspace, WorkspaceList, Worktree, WorktreeList,
     WriteResult,
 };
+use drogon_protocol::graph::{Graph, GraphCompileResult, GraphNodeState};
 
 pub fn status_line(result: &StatusResult) -> String {
     [
@@ -616,6 +617,119 @@ pub fn mentu_cancel_requested(run: &MentuRun) -> String {
         run.status.as_wire(),
         run.id
     )
+}
+
+/// `graph read`/`graph write-intent`: the whole graph. The human-owned
+/// intent and the daemon-owned state print side by side, with each state
+/// node's observed status and the run it belongs to, so a reader can see
+/// immediately when the two halves disagree.
+pub fn graph_read(graph: &Graph) -> String {
+    let mut lines = vec![format!("Work graph v{}", graph.version)];
+    if graph.intent.nodes.is_empty() {
+        lines.push("No intent nodes; the graph is empty.".into());
+    } else {
+        lines.push(format!("Intent ({} node(s)):", graph.intent.nodes.len()));
+        for node in &graph.intent.nodes {
+            let deps = if node.depends_on.is_empty() {
+                String::new()
+            } else {
+                format!(" after {}", node.depends_on.join(", "))
+            };
+            lines.push(format!(
+                "  {}{} [{} {}] {}{}",
+                node.id,
+                if node.enabled { "" } else { " (disabled)" },
+                node.harness,
+                if node.model.is_empty() {
+                    "no model"
+                } else {
+                    &node.model
+                },
+                node.title,
+                deps
+            ));
+        }
+    }
+    lines.push(format!(
+        "State (updated {}):",
+        if graph.state.updated_at.is_empty() {
+            "never"
+        } else {
+            &graph.state.updated_at
+        }
+    ));
+    if graph.state.nodes.is_empty() {
+        lines.push("  no observed nodes yet".into());
+    }
+    for node in &graph.state.nodes {
+        lines.push(format!("  {} {}", node.id, graph_node_state_line(node)));
+    }
+    lines.join("\n")
+}
+
+fn graph_node_state_line(node: &GraphNodeState) -> String {
+    let mut line = node.status.as_wire().to_string();
+    if let Some(run) = &node.run_id {
+        line.push_str(&format!(" (run {run}"));
+        if let Some(mentu) = &node.mentu_run_id {
+            line.push_str(&format!(", {mentu}"));
+        }
+        line.push(')');
+    }
+    if let Some(error) = &node.last_error {
+        line.push_str(&format!(" - {error}"));
+    }
+    line
+}
+
+/// `graph node-state`: one node's observed projection.
+pub fn graph_node_state(node: &GraphNodeState) -> String {
+    format!("{} {}", node.id, graph_node_state_line(node))
+}
+
+/// `graph compile`: the emitted recipe id and hash, the compiled nodes in
+/// execution order, and every runtime finding attributed to its node. A
+/// warning or info finding is shown but does not block execution; an error
+/// does, and the daemon refuses before running.
+pub fn graph_compiled(compiled: &GraphCompileResult) -> String {
+    let mut lines = vec![format!(
+        "Compiled recipe {} (sha256:{}) for nodes: {}",
+        compiled.recipe_id,
+        &compiled.content_hash[..12.min(compiled.content_hash.len())],
+        compiled.node_ids.join(" -> ")
+    )];
+    if compiled.findings.is_empty() {
+        lines.push("The pinned runtime's check/doctor --strict reported no findings.".into());
+    } else {
+        for finding in &compiled.findings {
+            let severity = match finding.severity {
+                drogon_protocol::graph::GraphFindingSeverity::Error => "error",
+                drogon_protocol::graph::GraphFindingSeverity::Warning => "warning",
+                drogon_protocol::graph::GraphFindingSeverity::Info => "info",
+            };
+            let node = finding
+                .node_id
+                .as_ref()
+                .map(|node| format!(" [{node}]"))
+                .unwrap_or_default();
+            lines.push(format!(
+                "{severity} {} {}:{node} {}",
+                finding.code,
+                if finding.is_error() {
+                    "(blocks execution)"
+                } else {
+                    "(advisory)"
+                },
+                finding.message
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
+/// `graph run`: the started run plus what was compiled for it.
+pub fn graph_run_started(compiled: &GraphCompileResult, run: &MentuRun) -> String {
+    format!("{}\n{}", graph_compiled(compiled), mentu_run_started(run))
 }
 
 /// One line per discovered harness; unknown future harness ids render

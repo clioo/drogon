@@ -5,13 +5,14 @@
 
 use std::path::{Path, PathBuf};
 
+use drogon_protocol::graph::MentuRetryStepParams;
 use drogon_protocol::mentu::{
     MentuApproval, MentuApproveParams, MentuApproveResult, MentuCancelResult,
     MentuPendingApprovalParams, MentuPendingApprovalResult, MentuRecipeParams, MentuRecipeResult,
-    MentuRecipeSaveParams, MentuRecipeSaveResult, MentuRecipesResult, MentuRunEvidenceParams,
-    MentuRunEvidenceResult, MentuRunIdParams, MentuRunParams, MentuRunResult, MentuRunStatus,
-    MentuRunsParams, MentuRunsResult, MentuRuntimeInstallParams, MentuRuntimeResult,
-    MentuWorkspaceScopeParams,
+    MentuRecipeSaveParams, MentuRecipeSaveResult, MentuRecipesResult, MentuRun,
+    MentuRunEvidenceParams, MentuRunEvidenceResult, MentuRunIdParams, MentuRunParams,
+    MentuRunResult, MentuRunStatus, MentuRunsParams, MentuRunsResult, MentuRuntimeInstallParams,
+    MentuRuntimeResult, MentuWorkspaceScopeParams,
 };
 use drogon_protocol::{Request, RpcError};
 use serde_json::Value;
@@ -141,21 +142,34 @@ impl Engine {
     fn do_mentu_run(&self, params: &Value) -> Result<Value, RpcError> {
         let parsed: MentuRunParams = parse(params, "mentu.run")?;
         parsed.validate()?;
+        let run = self.launch_approved_recipe(
+            &parsed.workspace_id,
+            &parsed.recipe_id,
+            &parsed.approval_id,
+        )?;
+        to_value(MentuRunResult { run })
+    }
+
+    /// Runs a recipe through the one execution path (`mentu-recipes run` on
+    /// the staged, approved bytes), shared by `mentu.run` and the graph
+    /// compiler's `graph.run`. The caller owns approval minting; this only
+    /// verifies and consumes it.
+    pub(crate) fn launch_approved_recipe(
+        &self,
+        workspace_id: &str,
+        recipe_id: &str,
+        approval_id: &str,
+    ) -> Result<MentuRun, RpcError> {
         let workspace_path = {
             let conn = self.db.lock().unwrap();
-            workspace::get_path(&conn, &parsed.workspace_id)?
+            workspace::get_path(&conn, workspace_id)?
         };
         let workspace_root = PathBuf::from(workspace_path);
         let runtime_path = runtime::require_verified_runtime(self.data_dir())?;
-        let current_hash = recipe::current_content_hash(&workspace_root, &parsed.recipe_id)?;
+        let current_hash = recipe::current_content_hash(&workspace_root, recipe_id)?;
         let stored_hash = {
             let conn = self.db.lock().unwrap();
-            storage::consume_approval(
-                &conn,
-                &parsed.approval_id,
-                &parsed.workspace_id,
-                &parsed.recipe_id,
-            )?
+            storage::consume_approval(&conn, approval_id, workspace_id, recipe_id)?
         };
         if stored_hash != current_hash {
             return Err(error::invalid_argument(
@@ -173,28 +187,27 @@ impl Engine {
         let staged = execution::stage_approved_snapshot(
             &workspace_root,
             execution::daemon_home_prompts().as_deref(),
-            &parsed.recipe_id,
+            recipe_id,
             &stored_hash,
         )?;
         // The invocation path is superseded by the snapshot path inside
         // `launch_run`; it still resolves through the containment checks
         // so a recipe that vanished between staging and spawn refuses
         // here rather than deeper in the spawn path.
-        let recipe_path = recipe::resolve_recipe_path(&workspace_root, &parsed.recipe_id)?;
-        let run = execution::launch_run(
+        let recipe_path = recipe::resolve_recipe_path(&workspace_root, recipe_id)?;
+        execution::launch_run(
             self.db_handle(),
             runtime_path,
             workspace_root,
-            parsed.workspace_id.clone(),
-            parsed.recipe_id.clone(),
-            parsed.approval_id.clone(),
+            workspace_id.to_string(),
+            recipe_id.to_string(),
+            approval_id.to_string(),
             None,
             execution::Invocation::Run {
                 recipe_path: &recipe_path,
             },
             Some(staged),
-        )?;
-        to_value(MentuRunResult { run })
+        )
     }
 
     /// The pending approval bound to this recipe's exact current bytes, or
@@ -276,9 +289,36 @@ impl Engine {
     fn do_mentu_retry(&self, params: &Value) -> Result<Value, RpcError> {
         let parsed: MentuRunIdParams = parse(params, "mentu.retry")?;
         parsed.validate()?;
+        let run = self.relaunch_run(&parsed.run_id, None)?;
+        to_value(MentuRunResult { run })
+    }
+
+    /// `mentu.retry_step`: rerun ONE step of a past run via the runtime's own
+    /// `retry-step <run-id> <label>`. No second engine; the same run row
+    /// (and its `mentu-recipes` run id) is reused, exactly as the runtime's
+    /// own `retry-step` appends an attempt to the existing run directory.
+    pub(crate) fn mentu_retry_step(&self, request: &Request) -> Result<Value, RpcError> {
+        self.mutating(request, Self::do_mentu_retry_step)
+    }
+
+    fn do_mentu_retry_step(&self, params: &Value) -> Result<Value, RpcError> {
+        let parsed: MentuRetryStepParams = parse(params, "mentu.retry_step")?;
+        parsed.validate()?;
+        let run = self.relaunch_run(&parsed.run_id, Some(&parsed.step))?;
+        to_value(MentuRunResult { run })
+    }
+
+    /// Shared relaunch of a settled run: `resume` (every step that did not
+    /// succeed) when `step` is `None`, or `retry-step <label>` when it names
+    /// one step. Refuses a still-running run rather than racing its watcher.
+    pub(crate) fn relaunch_run(
+        &self,
+        run_id: &str,
+        step: Option<&str>,
+    ) -> Result<MentuRun, RpcError> {
         let (prior, workspace_path) = {
             let conn = self.db.lock().unwrap();
-            let prior = storage::get_run(&conn, &parsed.run_id)?
+            let prior = storage::get_run(&conn, run_id)?
                 .ok_or_else(|| error::not_found("Mentu run not found."))?;
             let path = workspace::get_path(&conn, &prior.workspace_id)?;
             (prior, path)
@@ -292,6 +332,15 @@ impl Engine {
             error::invalid_argument("This run never produced a Mentu run id to retry.")
         })?;
         let runtime_path = runtime::require_verified_runtime(self.data_dir())?;
+        let invocation = match step {
+            Some(step) => execution::Invocation::RetryStep {
+                mentu_run_id: &mentu_run_id,
+                step,
+            },
+            None => execution::Invocation::Resume {
+                mentu_run_id: &mentu_run_id,
+            },
+        };
         let run = execution::launch_run(
             self.db_handle(),
             runtime_path,
@@ -300,14 +349,29 @@ impl Engine {
             prior.recipe_id.clone(),
             prior.approval_id.clone(),
             Some(prior.id.clone()),
-            execution::Invocation::Resume {
-                mentu_run_id: &mentu_run_id,
-            },
+            invocation,
             // A retry re-enters runtime-side state; approved bytes ride
             // the original run's snapshot, not a new staging.
             None,
         )?;
-        to_value(MentuRunResult { run })
+        // If the prior run came from the work graph, the node→run mapping
+        // follows the relaunch so the graph's observed state stays truthful
+        // no matter which verb (mentu.retry/retry_step or graph.*) did it.
+        {
+            let conn = self.db.lock().unwrap();
+            let nodes =
+                crate::graph::storage::nodes_for_run(&conn, &prior.workspace_id, &prior.id)?;
+            if !nodes.is_empty() {
+                crate::graph::storage::record_node_run(
+                    &conn,
+                    &prior.workspace_id,
+                    &run.id,
+                    &crate::now_rfc3339(),
+                    &nodes,
+                )?;
+            }
+        }
+        Ok(run)
     }
 
     pub(crate) fn mentu_cancel(&self, request: &Request) -> Result<Value, RpcError> {

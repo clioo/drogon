@@ -15,6 +15,7 @@ use crate::bot_self_mgmt as bot_self_storage;
 use crate::bots::monitors::storage as bot_monitors_storage;
 use crate::bots::storage as bots_storage;
 use crate::coordination_access;
+use crate::graph::storage as graph_storage;
 use crate::mentu::storage as mentu_storage;
 
 pub const DB_FILE_NAME: &str = "drogon.sqlite3";
@@ -223,6 +224,10 @@ const VERSIONED_COMPONENTS: &[(&str, i64)] = &[
     (
         mentu_storage::MENTU_SCHEMA_COMPONENT,
         mentu_storage::MENTU_SCHEMA_VERSION,
+    ),
+    (
+        graph_storage::GRAPH_SCHEMA_COMPONENT,
+        graph_storage::GRAPH_SCHEMA_VERSION,
     ),
     (
         crate::project::PROJECTS_SCHEMA_COMPONENT,
@@ -483,12 +488,14 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     // components above (forward, never duplicated here).
     crate::bots::delegation::apply_pending_steps_in_tx(&tx).map_err(StartupError::Delegation)?;
     // P0 per-Bot secret grants (user-minted, re-checked every tick).
-    bot_secrets_storage::apply_pending_steps_in_tx(&tx)
-        .map_err(|e| StartupError::Sqlite(match e {
+    bot_secrets_storage::apply_pending_steps_in_tx(&tx).map_err(|e| {
+        StartupError::Sqlite(match e {
             bot_secrets_storage::SecretStorageError::Sqlite(sqlite) => sqlite,
             other => rusqlite::Error::ToSqlConversionFailure(Box::new(other)),
-        }))?;
+        })
+    })?;
     mentu_storage::apply_pending_steps_in_tx(&tx)?;
+    graph_storage::apply_pending_steps_in_tx(&tx)?;
     crate::project::apply_pending_steps_in_tx(&tx)?;
     coordination_access::apply_pending_steps_in_tx(&tx)?;
     crate::coordination_worker_retain::apply_pending_steps_in_tx(&tx)?;

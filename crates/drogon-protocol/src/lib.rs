@@ -4,9 +4,10 @@ use std::fmt;
 
 pub mod automation;
 pub mod bot;
-pub mod harness_catalog;
 pub mod browser;
 pub mod git;
+pub mod graph;
+pub mod harness_catalog;
 pub mod jira;
 pub mod mentu;
 pub mod orchestration_common;

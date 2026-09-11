@@ -69,6 +69,15 @@ impl ChildRegistry {
         self.inner.lock().unwrap().remove(id);
     }
 
+    /// True while this daemon still holds the run's live child. Used by the
+    /// graph state projector: a row that says `running` without a tracked
+    /// child is loss of contact, reported `unverifiable` — never `running`.
+    /// (After a daemon restart nothing is tracked, so every stale `running`
+    /// row becomes unverifiable instead of a claim the daemon cannot back.)
+    pub fn is_tracked(&self, id: &str) -> bool {
+        self.inner.lock().unwrap().contains_key(id)
+    }
+
     /// Marks the run cancelled and kills its whole step tree if still
     /// registered. Returns `false` if the run is not (or no longer)
     /// tracked here — either it already finished, or `id` never named a
@@ -98,6 +107,12 @@ impl ChildRegistry {
 fn registry() -> &'static ChildRegistry {
     static REGISTRY: OnceLock<ChildRegistry> = OnceLock::new();
     REGISTRY.get_or_init(ChildRegistry::new)
+}
+
+/// Whether this daemon currently holds a confirmed live child for `id`.
+/// Loss of contact is never a claim about what happened.
+pub fn is_tracked(id: &str) -> bool {
+    registry().is_tracked(id)
 }
 
 /// Detaches a run child into its own process group (Unix only), so one
@@ -252,12 +267,21 @@ fn diagnostic_tail(stdout: &Arc<Mutex<Vec<u8>>>, stderr: &Arc<Mutex<Vec<u8>>>) -
     tail
 }
 
-/// What kind of invocation to launch: a fresh `run` of a recipe, or a
-/// `resume` of an existing (already-known) `mentu-recipes` run id. Both
-/// share the same watcher/finish logic below.
+/// What kind of invocation to launch: a fresh `run` of a recipe, a
+/// `resume` of an existing (already-known) `mentu-recipes` run id, or a
+/// `retry-step` of one step within that run. All three share the same
+/// watcher/finish logic below.
 pub enum Invocation<'a> {
-    Run { recipe_path: &'a Path },
-    Resume { mentu_run_id: &'a str },
+    Run {
+        recipe_path: &'a Path,
+    },
+    Resume {
+        mentu_run_id: &'a str,
+    },
+    RetryStep {
+        mentu_run_id: &'a str,
+        step: &'a str,
+    },
 }
 
 /// Launches one `mentu-recipes` invocation in the background and returns
@@ -285,7 +309,11 @@ pub fn launch_run(
     invocation: Invocation,
     snapshot: Option<StagedSnapshot>,
 ) -> Result<MentuRun, RpcError> {
-    if matches!(invocation, Invocation::Resume { .. }) && snapshot.is_some() {
+    if matches!(
+        invocation,
+        Invocation::Resume { .. } | Invocation::RetryStep { .. }
+    ) && snapshot.is_some()
+    {
         return Err(error::invalid_argument(
             "Snapshots ride fresh runs; retry resumes runtime-side state.",
         ));
@@ -346,6 +374,10 @@ pub fn launch_run(
             command.arg("resume").arg(mentu_run_id);
             None
         }
+        Invocation::RetryStep { mentu_run_id, step } => {
+            command.arg("retry-step").arg(mentu_run_id).arg(step);
+            None
+        }
     };
     command
         .arg("--workspace")
@@ -382,13 +414,17 @@ pub fn launch_run(
                 retry_of: retry_of.as_deref(),
             },
         )?;
-        if let Invocation::Resume { mentu_run_id } = &invocation {
+        if let Invocation::Resume { mentu_run_id } | Invocation::RetryStep { mentu_run_id, .. } =
+            &invocation
+        {
             storage::set_mentu_run_id(&conn, &internal_id, mentu_run_id)?;
         }
     }
 
     let known_mentu_run_id = match &invocation {
-        Invocation::Resume { mentu_run_id } => Some(mentu_run_id.to_string()),
+        Invocation::Resume { mentu_run_id } | Invocation::RetryStep { mentu_run_id, .. } => {
+            Some(mentu_run_id.to_string())
+        }
         Invocation::Run { .. } => None,
     };
 
