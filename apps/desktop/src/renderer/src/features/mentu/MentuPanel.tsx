@@ -33,6 +33,7 @@ import {
   GraphView,
 } from "./recipe-pane-views";
 import { mentuRuntimeNote } from "./recipe-directory-state";
+import { windowShellBridge } from "../shell/worktree-bridges";
 import { RunControls } from "./recipe-pane-run-controls";
 
 export type MentuPanelProps = {
@@ -279,6 +280,16 @@ function MentuPanelBody({
               recipesPathLabel={controller.recipesPathLabel}
               workspaceId={controller.workspaceId}
               runtimeNote={mentuRuntimeNote(controller.runtime)}
+              nestedFindings={controller.nestedFindings}
+              onRevealNested={
+                controller.workspacePath
+                  ? (relativeDir) => {
+                      void windowShellBridge()?.showItemInFolder({
+                        path: `${controller.workspacePath}/${relativeDir}`,
+                      });
+                    }
+                  : null
+              }
               canCreateStarter={controller.canCreateStarter}
               creatingStarter={controller.creatingStarter}
               createStarterError={controller.createStarterError}

@@ -38,6 +38,7 @@ import {
   Clock3,
   FileJson,
   FilePlus2,
+  FolderOpen,
   Gauge,
   Loader2,
   Maximize,
@@ -498,6 +499,8 @@ export function EmptyRecipeState({
   recipesPathLabel,
   workspaceId = null,
   runtimeNote = null,
+  nestedFindings = [],
+  onRevealNested = null,
   canCreateStarter = false,
   creatingStarter = false,
   createStarterError = null,
@@ -526,6 +529,16 @@ export function EmptyRecipeState({
   /** Present when the optional runtime is NOT usable on this host: the
    *  empty state must blame the host, never the workspace. */
   runtimeNote?: string | null;
+  /** Nested `<subproject>/.mentu/recipes` directories: reported with their
+   *  provenance so recipes one directory down are never a silent void. */
+  nestedFindings?: {
+    relativeDir: string;
+    total: number;
+    fileNames: string[];
+  }[];
+  /** Reveals a nested recipe directory in the OS file manager; null when
+   *  the shell bridge cannot (the affordance then hides, not lies). */
+  onRevealNested?: ((relativeDir: string) => void) | null;
   canCreateStarter?: boolean;
   creatingStarter?: boolean;
   createStarterError?: string | null;
@@ -567,6 +580,62 @@ export function EmptyRecipeState({
                 </li>
               ))}
             </ul>
+          </div>
+        ) : null}
+        {nestedFindings.length > 0 ? (
+          // Recipes found in a NESTED subproject: reported with provenance
+          // (which subproject each came from), never mixed into this
+          // workspace's selection and never presented as belonging to the
+          // workspace root — the daemon's catalog is root-scoped by design.
+          <div className="mt-3" data-testid="recipe-nested-findings">
+            <p className="text-xs font-medium text-foreground">
+              Recipe{nestedFindings.some((f) => f.total !== 1) ? "s" : ""} were
+              found one directory down, under this workspace's subprojects:
+            </p>
+            <ul className="mt-1 space-y-1">
+              {nestedFindings.map((finding) => (
+                <li
+                  key={finding.relativeDir}
+                  className="rounded-md border border-border bg-card px-2 py-1.5 text-xs"
+                >
+                  <div className="flex items-start gap-1.5">
+                    <span className="min-w-0 flex-1 break-words">
+                      <span className="font-mono text-foreground">
+                        {finding.relativeDir}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {" "}— {finding.total} recipe file
+                        {finding.total === 1 ? "" : "s"}
+                      </span>
+                    </span>
+                    {onRevealNested ? (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        data-testid={`recipe-reveal-${finding.relativeDir}`}
+                        onClick={() => onRevealNested(finding.relativeDir)}
+                      >
+                        <FolderOpen />
+                        Reveal
+                      </Button>
+                    ) : null}
+                  </div>
+                  {finding.fileNames.length > 0 ? (
+                    <span className="mt-0.5 block truncate text-muted-foreground">
+                      {finding.fileNames.join(", ")}
+                      {finding.total > finding.fileNames.length
+                        ? `, +${finding.total - finding.fileNames.length} more`
+                        : ""}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1.5 text-xs">
+              Mentu reads only the workspace root path above. Open that
+              subproject as its own workspace to view and run its recipes, or
+              move them into the root directory.
+            </p>
           </div>
         ) : null}
         {runtimeNote ? (

@@ -372,6 +372,53 @@ describe("EmptyRecipeState", () => {
     ).toBeTruthy();
   });
 
+  it("reports nested subproject recipes with provenance and a way forward", () => {
+    render(
+      <EmptyRecipeState
+        invalidCount={0}
+        directorySummary="No .mentu/recipes directory yet — this workspace has never had a recipe."
+        recipesPathLabel="/Users/carlos/Documents/mentu-ai/.mentu/recipes"
+        nestedFindings={[
+          {
+            relativeDir: "mentu-recipes/.mentu/recipes",
+            total: 11,
+            fileNames: ["demo-tareas.json", "claude-smoke.json", "demo-parallel.json"],
+          },
+        ]}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "Recipes were found one directory down, under this workspace's subprojects:",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("mentu-recipes/.mentu/recipes")).toBeTruthy();
+    expect(
+      screen.getByText("demo-tareas.json, claude-smoke.json, demo-parallel.json, +8 more"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Mentu reads only the workspace root path above/),
+    ).toBeTruthy();
+    // Without the shell reveal affordance the button hides instead of lying.
+    expect(screen.queryByRole("button", { name: /Reveal/ })).toBeNull();
+  });
+
+  it("offers the reveal affordance only when it can really act", () => {
+    const onRevealNested = vi.fn();
+    render(
+      <EmptyRecipeState
+        invalidCount={0}
+        nestedFindings={[
+          { relativeDir: "sub/.mentu/recipes", total: 2, fileNames: ["a.json"] },
+        ]}
+        onRevealNested={onRevealNested}
+      />,
+    );
+    const reveal = screen.getByRole("button", { name: /Reveal/ });
+    fireEvent.click(reveal);
+    expect(onRevealNested).toHaveBeenCalledWith("sub/.mentu/recipes");
+  });
+
   it("offers the starter-recipe affordance and reports a failed write", () => {
     const onCreateStarter = vi.fn();
     const { rerender } = render(
