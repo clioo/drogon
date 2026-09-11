@@ -22,7 +22,13 @@
 //! the CLI can do (`skills list`, `skills get`, `agent-context`,
 //! `status`) instead of an invented verb list that could drift from the
 //! binary that actually runs the Bot. An `AGENTS.md` that promises a verb
-//! the binary does not have is worse than one that says nothing.
+//! the binary does not have is worse than one that says nothing. The
+//! capabilities a Bot OWNS (monitors, automations, responsibilities,
+//! dispatching) are pointed at the shipped skill guides — kept in sync
+//! with the CLI by drift-tripwire tests — rather than duplicated here,
+//! because a hardcoded list in this file would rot; Mentu recipes are not
+//! part of the brief at all any more (a recipe is a compilation target the
+//! system emits from the work graph, never something a Bot authors).
 
 use std::path::Path;
 
@@ -125,7 +131,8 @@ what it actually does instead of guessing a command:
   ship inside this binary.
 - `drogon-cli skills get --topic drogon-cli` — print the full Drogon CLI guide
   (workspaces, projects, worktrees, terminals, the embedded browser, harness
-  launch, and the optional Mentu recipe environment).
+  launch, automations, Bots and the monitors, automations and responsibilities
+  they manage themselves, and integration secrets).
 - `drogon-cli skills get --topic orchestration` — print the multi-agent
   orchestration guide (run, task, dispatch, ask, check, reply).
 
@@ -134,13 +141,27 @@ you are not certain of. Do not guess flags, and do not assume a command exists
 because it sounds plausible: if the guide and the schema do not list it, it is
 not there.
 
-Mentu recipes are OPTIONAL work. Before you tell anyone you made one or can run
-one, ask this host whether it really has the Mentu environment —
-`drogon-cli mentu status --workspace <ID> --json` answers installed,
-not_installed or partially_available from the daemon's own probe — and if you do
-write a recipe, `drogon-cli mentu open --workspace <ID> --recipe <ID>` shows it
-to the person you are working for. The CLI guide says when a recipe is worth
-writing and when a plain answer is the right output.
+The work you OWN — monitors, automations, responsibilities, and dispatching
+sessions to other agents — is documented where it cannot rot: the skill guides
+shipped inside this exact binary, which are tested against the CLI so every
+command they name really exists. Read `drogon-cli skills get --topic drogon-cli`
+before you configure any of it; its \"Bots (self-management)\" section is your
+manual:
+
+- `drogon-cli bot list --bot <ID> --workspace <ID> --json` — everything you
+  currently own, with monitor health and revisions.
+- `drogon-cli bot create-automation --bot <ID> --workspace <ID> --name <NAME>
+  --schedule <EXPR> --prompt <TEXT>` — a scheduled responsibility that runs in
+  your home under your own harness.
+- `drogon-cli bot create-monitor --bot <ID> --workspace <ID> --resource <PATH>`
+  — a watched file in your home; declare the responsibility it releases with
+  `--responsibility-name` in the same call.
+- `drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME>` —
+  a pull-request watch that dispatches a review session once per new pull
+  request.
+
+For supervised multi-agent work — dispatching, tracking and collecting results
+from other sessions — read `drogon-cli skills get --topic orchestration`.
 ";
 
 /// Writes both context files into `home`, returning whether either file
@@ -172,6 +193,28 @@ fn write_if_changed(path: &Path, contents: &str) -> std::io::Result<bool> {
 mod tests {
     use super::*;
     use crate::bots::records::{DisplayIdentity, HarnessModelPolicy};
+
+    /// Single-backtick spans from the rendered markdown, whitespace-collapsed
+    /// so an invocation wrapped across lines inside its backticks is still
+    /// one span (the generated file has no fenced blocks).
+    fn backticked_spans(markdown: &str) -> Vec<String> {
+        let mut spans = Vec::new();
+        let mut rest = markdown;
+        while let Some(open) = rest.find('`') {
+            let after_open = &rest[open + 1..];
+            let Some(close) = after_open.find('`') else {
+                break;
+            };
+            spans.push(
+                after_open[..close]
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+            rest = &after_open[close + 1..];
+        }
+        spans
+    }
 
     fn bot(name: &str, handle: Option<&str>, title: Option<&str>) -> Bot {
         Bot {
@@ -240,23 +283,80 @@ mod tests {
         }
     }
 
-    /// The Mentu capability is optional, so the Bot's identity file must say
-    /// how to CHECK before promising a recipe, and name the two verbs that
-    /// exist (`mentu status`, `mentu open`) — never an invented one.
+    /// Recipes left the Bot's brief: a recipe is now a compilation target
+    /// the system emits from the work graph, not something a Bot authors or
+    /// runs, so the identity file must not teach recipe authoring at all.
+    /// What replaces it is the skills: the owned surface (monitors,
+    /// automations, responsibilities, dispatching) is pointed at the shipped
+    /// guides, with the concrete entry verbs named.
     #[test]
-    fn agents_md_gates_mentu_on_a_real_environment_check() {
+    fn agents_md_points_owned_capabilities_at_the_skill_guides() {
         let rendered = render_agents_md(&bot("Arya Stark", None, None));
+        assert!(
+            !rendered.to_ascii_lowercase().contains("mentu"),
+            "recipes are no longer a Bot capability; the brief must not teach them:\n{rendered}"
+        );
+        // Whitespace-collapsed so an invocation wrapped across lines inside
+        // its backticks still matches.
+        let flat = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
         for fragment in [
-            "drogon-cli mentu status --workspace <ID> --json",
-            "drogon-cli mentu open --workspace <ID> --recipe <ID>",
-            "not_installed",
-            "OPTIONAL",
+            "skills list",
+            "skills get --topic drogon-cli",
+            "skills get --topic orchestration",
+            "monitors, automations, responsibilities",
+            "drogon-cli bot list --bot <ID> --workspace <ID> --json",
+            "drogon-cli bot create-automation --bot <ID> --workspace <ID> --name <NAME> --schedule <EXPR> --prompt <TEXT>",
+            "drogon-cli bot create-monitor --bot <ID> --workspace <ID> --resource <PATH>",
+            "drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME>",
         ] {
             assert!(
-                rendered.contains(fragment),
-                "expected {fragment:?} in:\n{rendered}"
+                flat.contains(fragment),
+                "expected {fragment:?} in the generated brief:\n{rendered}"
             );
         }
+    }
+
+    /// The property worth keeping from the old Mentu gate, generalized: the
+    /// generated file never promises a capability without a way to verify
+    /// it. Every `drogon-cli ...` span it names must be documented by the
+    /// bundled drogon-cli guide — verbatim, or as the span's flag-less verb
+    /// prefix where the guide spells the flags differently (it writes
+    /// `--topic <TOPIC>`, the brief names the topic). The guide itself is
+    /// clap-tripwired by `drogon-cli/tests/skill_guides.rs` (every span it
+    /// documents parses; every visible leaf verb is documented somewhere),
+    /// so this file transitively cannot name a verb the binary does not
+    /// have.
+    #[test]
+    fn agents_md_names_only_verbs_the_bundled_guide_documents() {
+        let rendered = render_agents_md(&bot("Arya Stark", None, None));
+        let guide = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../skill-guides/drogon-cli.md"
+        ))
+        .expect("bundled drogon-cli guide source beside the crate");
+        let collapse =
+            |text: &str| -> String { text.split_whitespace().collect::<Vec<_>>().join(" ") };
+        let guide_corpus = collapse(&guide);
+        let mut checked = 0;
+        for span in backticked_spans(&rendered) {
+            if !span.starts_with("drogon-cli ") {
+                continue;
+            }
+            let verb_prefix: String = span
+                .split_whitespace()
+                .take_while(|token| !token.starts_with('-') && !token.starts_with('<'))
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(
+                guide_corpus.contains(&collapse(&span)) || guide_corpus.contains(&verb_prefix),
+                "generated AGENTS.md names a command the bundled guide does not document: {span:?}"
+            );
+            checked += 1;
+        }
+        assert!(
+            checked >= 9,
+            "the extractor must be checking the real invocation spans, got {checked}"
+        );
     }
 
     #[test]
