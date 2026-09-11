@@ -1208,27 +1208,6 @@ export async function probeAutomationRunNowDetail({
 // J8: Bots — preset create, manual responsibility run on the local model
 // ---------------------------------------------------------------------------
 
-/**
- * Sonner toasts live in the React Aria top layer and can overlap a form's
- * submit button. In the hidden background validation window their exit
- * transition never ends, so a toast that should have auto-dismissed can stay
- * mounted with pointer events enabled and swallow a real click. Clicking the
- * toast's own close button sets `data-visible=false` (pointer-events: none)
- * immediately, which clears the overlap without touching the journey's own
- * controls.
- */
-async function dismissToasts(page) {
-  const closeButtons = page.locator(
-    'section[aria-label="Notifications alt+T"] [data-sonner-toast] [data-close-button]',
-  );
-  for (let index = 0; index < (await closeButtons.count()); index += 1) {
-    await closeButtons
-      .nth(index)
-      .click({ timeout: 2000, force: true })
-      .catch(() => {});
-  }
-}
-
 export async function probeBotPresetManualRun({
   page,
   cli,
@@ -1271,9 +1250,10 @@ export async function probeBotPresetManualRun({
   await form.getByText(/^Advanced · /).click();
   await form.getByLabel("Agent", { exact: true }).selectOption("pi");
   await form.getByLabel("Model", { exact: true }).fill(PI_MODEL);
-  // A preceding journey (Automations Run Now) leaves an "Automation run
-  // queued." toast that can overlap this submit button; clear it first.
-  await dismissToasts(page);
+  // No toast-clearing step here on purpose: a notification raised earlier in
+  // the run may still overlap this submit, and the real click has to land on
+  // it anyway (main.css: only a live toast claims pointer events, and a toast
+  // that is entering, leaving or dismissed claims none).
   await form.getByRole("button", { name: "Create Bot", exact: true }).click();
   const card = panel.locator(
     `[data-slot="card"][data-testid^="bot-"]`,
