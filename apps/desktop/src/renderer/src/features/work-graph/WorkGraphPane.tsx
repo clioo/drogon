@@ -105,7 +105,7 @@ function MetricCard({
   partial?: boolean;
 }): React.JSX.Element {
   return (
-    <div className="min-w-0 rounded-md border border-border bg-card p-3 text-xs">
+    <div className="w-44 shrink-0 rounded-md border border-border bg-card p-3 text-xs @2xl/work-graph-totals:w-auto @2xl/work-graph-totals:shrink">
       <p className="break-words font-medium">{value}</p>
       <Badge variant="outline" className="mt-2 text-[10px]">
         {exact ? "Exact · state record" : partial ? "Partial · unknowns counted" : "Unavailable"}
@@ -628,8 +628,13 @@ export function WorkGraphPane({
             className="shrink-0 border-b border-border bg-card px-4 py-3"
             data-testid="work-graph-totals"
           >
+            {/* One horizontally-scrollable row at the base so a very narrow
+                tab column (the acceptance drives 760px with both sidebars
+                open) never spends the whole pane height on the strip — the
+                graph below it must stay usable, and nothing may run under
+                the status bar. Wide containers get the 4-across grid. */}
             <div className="@container/work-graph-totals">
-              <div className="grid gap-2 @md/work-graph-totals:grid-cols-2 @2xl/work-graph-totals:grid-cols-4">
+              <div className="flex gap-2 overflow-x-auto @2xl/work-graph-totals:grid @2xl/work-graph-totals:grid-cols-4">
                 <MetricCard
                   value={
                     totals.durationTotalMs !== null
@@ -676,7 +681,7 @@ export function WorkGraphPane({
                 <MetricCard value="Cost: unavailable" exact={false} />
               </div>
             </div>
-            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <p className="mt-2 flex flex-nowrap items-center gap-1.5 overflow-x-auto text-xs text-muted-foreground @2xl/work-graph-totals:flex-wrap">
               {(["running", "succeeded", "failed", "blocked", "unverifiable", "idle"] as const).map(
                 (status) =>
                   (totals.byStatus[status] ?? 0) > 0 ? (
@@ -690,21 +695,27 @@ export function WorkGraphPane({
                     </Badge>
                   ) : null,
               )}
-              <span>
-                {totals.nodeCount} node{totals.nodeCount === 1 ? "" : "s"} · updates every second
-                while a node runs
+              <span className="shrink-0">
+                {totals.nodeCount} node{totals.nodeCount === 1 ? "" : "s"}
+                <span className="hidden @2xl/work-graph-totals:inline">
+                  {" "}· updates every second while a node runs
+                </span>
               </span>
             </p>
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
-            <div className="grid h-full min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,300px)]">
+                        {/* Stacked below lg: the two halves SPLIT the bounded height
+                (grid-rows-2) so each ScrollArea scrolls internally — the
+                canvas can never paint under the inspector or the status
+                bar, at any acceptance width. */}
+            <div className="grid min-h-0 flex-1 grid-rows-2 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,300px)] lg:grid-rows-1">
               {/* max-h below lg: the stacked single-column layout must scroll
                   WITHIN the canvas, never let its content run under the
                   inspector column below it — an unbounded canvas used to
                   paint nodes beneath the inspector and intercept the clicks
                   aimed at them at the acceptance's narrow widths. */}
-              <ScrollArea className="max-h-[46vh] min-h-0 rounded-lg border border-border bg-card p-3 lg:max-h-none">
+              <ScrollArea className="min-h-0 flex-1 rounded-lg border border-border bg-card p-3">
                 <div className="relative min-w-0" data-testid="work-graph-canvas">
                   <div
                     className="pointer-events-none absolute inset-0 -m-3 rounded-lg opacity-60 [background-image:radial-gradient(var(--border)_1px,transparent_1px)] [background-size:16px_16px] dark:opacity-30"
