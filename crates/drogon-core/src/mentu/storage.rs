@@ -270,6 +270,44 @@ pub fn insert_run(conn: &Connection, run: &NewRun) -> Result<(), RpcError> {
     Ok(())
 }
 
+/// The truthful reason recorded on a run reconciled off `running` because
+/// this daemon could not confirm an outcome: loss of contact is never a
+/// failure and never a completion.
+const OUTCOME_UNCONFIRMED_MESSAGE: &str = "The daemon restarted before this run reported an \
+outcome; the in-flight result could not be confirmed. Retry to resume it.";
+
+/// Startup reconciliation (`Engine::open`): flips every `running` row to
+/// `unavailable`, because the process that held the run's child is gone
+/// and its outcome can never be confirmed by this one. The flip is
+/// unconditional on purpose — nothing can be tracked at open time: the
+/// child registry (`execution::ChildRegistry`) is process-local memory
+/// holding live `Child` handles, nothing about it is persisted, and the
+/// daemon opens its engine exactly once per process (under the data-dir
+/// flock, before any RPC can launch a run). A run tracked by a *prior*
+/// process is definitionally untracked here. `MentuRunStatus::Unavailable`
+/// is the vocabulary for exactly this ("the host process could not confirm
+/// an outcome"); the row stays cancellable and retryable, never `failed`.
+/// Returns how many rows moved.
+pub fn recover_prior_instance_runs(conn: &Connection) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE mentu_runs SET status = 'unavailable', ended_at = ?1, error = ?2 \
+         WHERE status = 'running'",
+        params![crate::now_rfc3339(), OUTCOME_UNCONFIRMED_MESSAGE],
+    )
+}
+
+/// Cancels that reached no tracked child (`execution::cancel` returned
+/// `false`) reconcile a row still claiming `running` instead of re-reporting
+/// it forever: the stop delivered nothing, so the claim must go. Settled
+/// rows are untouched by the status guard. Returns how many rows moved.
+pub fn reconcile_untracked_run(conn: &Connection, run_id: &str) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE mentu_runs SET status = 'unavailable', ended_at = ?2, error = ?3 \
+         WHERE id = ?1 AND status = 'running'",
+        params![run_id, crate::now_rfc3339(), OUTCOME_UNCONFIRMED_MESSAGE],
+    )
+}
+
 fn status_wire(status: MentuRunStatus) -> &'static str {
     match status {
         MentuRunStatus::Running => "running",

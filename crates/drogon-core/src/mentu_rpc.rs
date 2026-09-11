@@ -385,8 +385,20 @@ impl Engine {
         // it. The row's status transitions to `cancelled` asynchronously,
         // once the background watcher observes the exit — the caller polls
         // `mentu.run_status` to see it land, same as `run`/`retry`.
-        execution::cancel(&parsed.run_id);
+        //
+        // `false` means this daemon holds NO child for the run: it already
+        // settled, or the row is a stale `running` left behind by a prior
+        // daemon (restart mid-run). Discarding the return value used to
+        // make that cancel a silent no-op that re-reported `running`
+        // forever; instead a stale row reconciles to `unavailable` right
+        // here, so a cancel always lands the run somewhere truthful and
+        // retryable.
+        let tracked = execution::cancel(&parsed.run_id);
         let conn = self.db.lock().unwrap();
+        if !tracked {
+            storage::reconcile_untracked_run(&conn, &parsed.run_id)
+                .map_err(error::from_sqlite)?;
+        }
         let run = storage::get_run(&conn, &parsed.run_id)?
             .ok_or_else(|| error::not_found("Mentu run not found."))?;
         to_value(MentuCancelResult { run })

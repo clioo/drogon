@@ -515,6 +515,8 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     migrate_sessions_caused_by_event_id(&tx)?;
     migrate_sessions_agent_session(&tx)?;
     recover_from_prior_instance(&tx)?;
+    mentu_storage::recover_prior_instance_runs(&tx)?;
+    recover_prior_instance_headless_runs(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
     tx.commit()?;
     Ok(host_id)
@@ -677,6 +679,207 @@ fn recover_from_prior_instance(conn: &Connection) -> rusqlite::Result<()> {
         "UPDATE requests SET status = 'done', error_json = ?1, result_json = NULL WHERE status = 'pending'",
         [unverifiable_error],
     )?;
+    Ok(())
+}
+
+/// One session row's durable fate, as far as startup reconciliation is
+/// allowed to trust it. `exited_code` carries the exit code only when the
+/// row positively records an observed exit — the single piece of evidence
+/// strong enough to replay a completion. Everything else is loss of
+/// contact.
+struct SessionEvidence {
+    incarnation: Option<String>,
+    exited_code: Option<i64>,
+}
+
+fn session_evidence(conn: &Connection, session_id: &str) -> Option<SessionEvidence> {
+    conn.query_row(
+        "SELECT verdict, exit_code, incarnation FROM sessions WHERE id = ?1",
+        [session_id],
+        |row| {
+            let verdict: String = row.get(0)?;
+            let code: Option<i64> = row.get(1)?;
+            Ok(SessionEvidence {
+                incarnation: row.get(2)?,
+                exited_code: if verdict == "exited" { code } else { None },
+            })
+        },
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
+/// What a durable in-flight claim naming a session may honestly become.
+/// `Exited` only on positively recorded evidence (the session row durably
+/// records an observed exit — what the crashed process saw but may never
+/// have committed downstream). Every other fate — row gone, verdict
+/// `unverifiable`, or the claim naming a different incarnation than the
+/// row this database carries — is `Unverifiable`: loss of contact never
+/// proves exit, and it never proves failure either.
+fn reconciliation_target(
+    claim_incarnation: Option<&str>,
+    evidence: Option<SessionEvidence>,
+) -> (crate::bots::records::HostObservation, Option<i64>) {
+    use crate::bots::records::HostObservation;
+    let Some(evidence) = evidence else {
+        return (HostObservation::Unverifiable, None);
+    };
+    if let (Some(claim), Some(row)) = (claim_incarnation, &evidence.incarnation)
+        && claim != row
+    {
+        return (HostObservation::Unverifiable, None);
+    }
+    match evidence.exited_code {
+        Some(code) => (HostObservation::Exited, Some(code)),
+        None => (HostObservation::Unverifiable, None),
+    }
+}
+
+/// Runs once per `Engine::open`, inside [`migrate_and_recover`]'s
+/// transaction, right after [`recover_from_prior_instance`]: with the
+/// session verdicts already settled, every headless run record still
+/// claiming an in-flight execution is reconciled against them.
+///
+/// The only code that ever advances an automation run, a Bot
+/// responsibility run or a Bot chat turn off its in-flight status is the
+/// in-process child-exit observer (`session.rs`'s
+/// `advance_headless_run_records`), so a daemon restart strands every
+/// `dispatched`/`live` row forever, and RPCs pipe that status straight
+/// through to the UI. This is the startup branch that observer could never
+/// reach:
+///
+/// - `dispatching`/`dispatched` `automation_runs` rows whose session is
+///   gone or `unverifiable` land `skipped_unavailable` (labeled
+///   "Unavailable" by the renderer, and already wired into its re-run
+///   affordance) with the truthful reason — never `completed`, never
+///   `dispatch_failed`. A row whose session positively recorded an exit
+///   replays `completed` with that exit code.
+/// - `bot_responsibility_runs` linked to a reconciled automation run move
+///   with it (`exited` / `unverifiable`), the same linkage the live
+///   observer uses. Rows with no automation-run linkage carry no session
+///   identity to reconcile against and are left untouched.
+/// - `bot_messages` still claiming `live` move to `exited`/
+///   `unverifiable` by their session's evidence.
+///
+/// Unparseable rows are skipped, never fatal: a corrupt payload must not
+/// fail the whole startup transaction (same rule as
+/// `advance_headless_run_records`).
+fn recover_prior_instance_headless_runs(conn: &Connection) -> rusqlite::Result<()> {
+    use crate::automations::records::{AutomationRun, AutomationRunStatus};
+    use crate::bots::records::{HostObservation, ResponsibilityRun};
+
+    const OUTCOME_UNKNOWN_ERROR: &str = "The daemon restarted before this run reported \
+completion; its outcome is unknown. Run again to re-dispatch.";
+    let to_sql_err = |e: serde_json::Error| {
+        rusqlite::Error::ToSqlConversionFailure(Box::new(e)) as rusqlite::Error
+    };
+    let now_ms = crate::now_unix_ms() as f64;
+
+    let stranded: Vec<(String, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, payload_json FROM automation_runs \
+             WHERE json_extract(payload_json, '$.status') IN ('dispatching', 'dispatched')",
+        )?;
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    for (run_id, payload) in stranded {
+        let Ok(mut run): Result<AutomationRun, _> = serde_json::from_str(&payload) else {
+            continue;
+        };
+        let evidence = run
+            .terminal_session_id
+            .as_deref()
+            .and_then(|sid| session_evidence(conn, sid));
+        let (observation, exited_code) =
+            reconciliation_target(run.session_incarnation.as_deref(), evidence);
+        match observation {
+            HostObservation::Exited => {
+                run.status = AutomationRunStatus::Completed;
+                run.exit_code = exited_code;
+                run.observed_at = Some(now_ms);
+            }
+            _ => {
+                run.status = AutomationRunStatus::SkippedUnavailable;
+                run.error = Some(OUTCOME_UNKNOWN_ERROR.to_string());
+                run.observed_at = Some(now_ms);
+            }
+        }
+        let payload = serde_json::to_string(&run).map_err(to_sql_err)?;
+        conn.execute(
+            "UPDATE automation_runs SET payload_json = ?1 WHERE id = ?2",
+            rusqlite::params![payload, run_id],
+        )?;
+        // Responsibility runs ride the run they were admitted for, the
+        // same join the live exit observer advances them by.
+        let linked: Vec<(String, String)> = {
+            let mut stmt = conn.prepare(
+                "SELECT id, payload_json FROM bot_responsibility_runs \
+                 WHERE automation_run_id = ?1",
+            )?;
+            stmt.query_map([&run_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        for (linked_id, linked_payload) in linked {
+            let Ok(mut linked_run): Result<ResponsibilityRun, _> =
+                serde_json::from_str(&linked_payload)
+            else {
+                continue;
+            };
+            // A positively exited row is never demoted; already-terminal
+            // rows keep their earliest end.
+            if linked_run.host_observation == Some(HostObservation::Exited) {
+                continue;
+            }
+            linked_run.host_observation = Some(observation);
+            linked_run.ended_at = Some(now_ms);
+            let linked_payload = serde_json::to_string(&linked_run).map_err(to_sql_err)?;
+            conn.execute(
+                "UPDATE bot_responsibility_runs SET payload_json = ?1 WHERE id = ?2",
+                rusqlite::params![linked_payload, linked_id],
+            )?;
+        }
+    }
+
+    // Chat turns (bot.run with a prompt) never touch an automation run:
+    // they reconcile by their own session's evidence.
+    let live_messages: Vec<(String, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, payload_json FROM bot_messages \
+             WHERE json_extract(payload_json, '$.hostObservation') = 'live'",
+        )?;
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    for (message_id, payload) in live_messages {
+        let Ok(mut message): Result<crate::bots::records::BotMessage, _> =
+            serde_json::from_str(&payload)
+        else {
+            continue;
+        };
+        let evidence = message
+            .session_id
+            .as_deref()
+            .and_then(|sid| session_evidence(conn, sid));
+        let (observation, _code) =
+            reconciliation_target(message.incarnation.as_deref(), evidence);
+        if message.host_observation == Some(observation)
+            || message.host_observation == Some(HostObservation::Exited)
+        {
+            continue;
+        }
+        message.host_observation = Some(observation);
+        if observation == HostObservation::Exited {
+            // Mirror the live observer: the exit stamps the turn's end.
+            message.ended_at = Some(now_ms);
+        }
+        let payload = serde_json::to_string(&message).map_err(to_sql_err)?;
+        conn.execute(
+            "UPDATE bot_messages SET payload_json = ?1 WHERE id = ?2",
+            rusqlite::params![payload, message_id],
+        )?;
+    }
     Ok(())
 }
 

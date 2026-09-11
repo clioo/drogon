@@ -157,6 +157,7 @@ struct Fixture {
     _root: tempfile::TempDir,
     _override: RuntimeOverride,
     engine: Engine,
+    data_dir: PathBuf,
     workspace_path: PathBuf,
     workspace_id: String,
 }
@@ -190,6 +191,7 @@ impl Fixture {
             _root: root,
             _override,
             engine,
+            data_dir: data_dir.clone(),
             workspace_path,
             workspace_id,
         }
@@ -222,6 +224,7 @@ impl Fixture {
             _root: root,
             _override,
             engine,
+            data_dir: data_dir.clone(),
             workspace_path,
             workspace_id,
         }
@@ -251,6 +254,7 @@ impl Fixture {
             _root: root,
             _override,
             engine,
+            data_dir,
             workspace_path,
             workspace_id,
         }
@@ -312,18 +316,38 @@ impl Fixture {
     }
 
     fn wait_for_completion(&self, run_id: &str) -> Value {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let run = ok(&self.engine, "mentu.run_status", json!({"runId": run_id}))["run"].clone();
-            if run["status"] != "running" {
-                return run;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "run {run_id} did not finish in time: {run:?}"
-            );
-            std::thread::sleep(Duration::from_millis(20));
+        wait_for_completion_on(&self.engine, run_id)
+    }
+
+    /// Re-enacts exactly what a daemon crash mid-run leaves behind: the
+    /// run row stays `running` (the watcher that would have finalized it
+    /// died with the process). Direct SQL on this fixture's own data dir.
+    fn seed_row_left_running_by_a_crash(&self, run_id: &str) {
+        let conn =
+            rusqlite::Connection::open(self.data_dir.join("drogon.sqlite3")).unwrap();
+        let changed = conn
+            .execute(
+                "UPDATE mentu_runs SET status = 'running', ended_at = NULL, error = NULL \
+                 WHERE id = ?1",
+                rusqlite::params![run_id],
+            )
+            .unwrap();
+        assert_eq!(changed, 1, "seeded row not found: {run_id}");
+    }
+}
+
+fn wait_for_completion_on(engine: &Engine, run_id: &str) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let run = ok(engine, "mentu.run_status", json!({"runId": run_id}))["run"].clone();
+        if run["status"] != "running" {
+            return run;
         }
+        assert!(
+            Instant::now() < deadline,
+            "run {run_id} did not finish in time: {run:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
@@ -756,4 +780,62 @@ fn run_evidence_reports_a_failed_run_step_error_and_refuses_unknown_runs() {
         err_code(&fx.engine, "mentu.run_evidence", json!({"runId": ""})),
         "invalid_argument"
     );
+}
+
+/// A run left `running` by a daemon restart must stop claiming `running`
+/// once the new daemon opens, and the owner must have a way forward:
+/// `mentu.retry` succeeds instead of refusing forever with "still in
+/// progress; cancel it before retrying".
+#[test]
+fn a_run_left_running_by_a_restart_recovers_to_unavailable_and_retries() {
+    let fx = Fixture::new();
+    fx.write_recipe("success");
+    let approval_id = fx.approve("success");
+    let run = fx.run("success", &approval_id);
+    let run_id = run["id"].as_str().unwrap().to_string();
+    let finished = fx.wait_for_completion(&run_id);
+    assert_eq!(finished["status"], "succeeded");
+    // The completed run is what a retry needs; the crash simulation only
+    // fakes the status column, never the produced runtime record.
+    assert!(finished["mentuRunId"].is_string());
+
+    // The daemon restarts mid-run: flip the row to `running` exactly as a
+    // crash would leave it, then reopen the engine fresh.
+    fx.seed_row_left_running_by_a_crash(&run_id);
+    drop(fx.engine);
+    let restarted = Engine::open(&fx.data_dir).unwrap();
+
+    // The honest verdict: no longer `running`, `unavailable` instead —
+    // loss of contact never proves failure.
+    let after = ok(&restarted, "mentu.run_status", json!({"runId": run_id}))["run"].clone();
+    assert_eq!(after["status"], "unavailable");
+
+    // The way forward: retry succeeds instead of refusing.
+    let retried = ok(&restarted, "mentu.retry", json!({"runId": run_id}))["run"].clone();
+    let retried_id = retried["id"].as_str().unwrap().to_string();
+    let finished_retry = wait_for_completion_on(&restarted, &retried_id);
+    assert_eq!(finished_retry["status"], "succeeded");
+}
+
+/// `mentu.cancel` on a stale `running` row (this daemon holds no child for
+/// it) must honestly reconcile the row instead of re-reporting `running`
+/// forever. Before the fix this was a silent no-op: `ok:true` with the row
+/// still claiming `running`.
+#[test]
+fn cancel_on_a_run_this_daemon_is_not_executing_reports_the_reconciled_state() {
+    let fx = Fixture::new();
+    fx.write_recipe("success");
+    let approval_id = fx.approve("success");
+    let run = fx.run("success", &approval_id);
+    let run_id = run["id"].as_str().unwrap().to_string();
+    assert_eq!(fx.wait_for_completion(&run_id)["status"], "succeeded");
+    fx.seed_row_left_running_by_a_crash(&run_id);
+    drop(fx.engine);
+    let restarted = Engine::open(&fx.data_dir).unwrap();
+
+    let cancelled = ok(&restarted, "mentu.cancel", json!({"runId": run_id}))["run"].clone();
+    assert_eq!(cancelled["status"], "unavailable");
+    // And the reconciliation is durable, not just the reply.
+    let after = ok(&restarted, "mentu.run_status", json!({"runId": run_id}))["run"].clone();
+    assert_eq!(after["status"], "unavailable");
 }
