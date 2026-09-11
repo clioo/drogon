@@ -498,15 +498,27 @@ export function MountedPanel({
     applyPanelFocus(descriptor, null);
     return () => releasePanel(descriptor);
   }, [descriptor]);
-  const Component = descriptor.component;
+  // `component` is the contract's render function -- `(props) => ReactNode`
+  // -- so its RESULT is what mounts here. Rendering it as an element type
+  // (`<Component ... />`) instead made every re-registration a new element
+  // TYPE: React then unmounted and remounted the whole panel. App re-mints
+  // the Bots descriptor on each polled snapshot (4 s), so that remount threw
+  // away the panel's own UI state -- the per-Bot card expansion the owner
+  // set, plus the filter text and selection -- a moment after he set it.
+  // Invoking it keeps the returned element's real type (BotsPanel and
+  // friends), so a fresh descriptor re-renders the panel with the new props
+  // without destroying its state. Callers that already invoke descriptors
+  // directly (the no-workspace Bots host below) behave the same way.
   return (
-    <Component
-      routeId={descriptor.id}
-      session={null}
-      workspace={workspace}
-      status={status}
-      focusTarget={null}
-    />
+    <>
+      {descriptor.component({
+        routeId: descriptor.id,
+        session: null,
+        workspace,
+        status,
+        focusTarget: null,
+      })}
+    </>
   );
 }
 

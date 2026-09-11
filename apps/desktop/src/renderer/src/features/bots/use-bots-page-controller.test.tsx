@@ -8,7 +8,7 @@
    surface alerts, Escape closes forms before the page — over the same
    bots-page-model/controller semantics the source tests pin). */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -18,12 +18,16 @@ import {
   within,
 } from "@testing-library/react";
 import { BotsPanel } from "./BotsPanel";
+import { clearBotCardExpansion } from "./bot-card-expansion-preference";
 import type {
   BotsPanelBot,
   BotsPanelResponsibility,
 } from "./bots-panel-contracts";
 
 afterEach(cleanup);
+// The expansion cases below write the persisted per-Bot disclosure envelope;
+// clear it so each case starts from "the user has never touched a card".
+beforeEach(() => clearBotCardExpansion());
 
 const scope = { hostId: "host-1", workspaceId: "ws-1", locale: "en-US" };
 
