@@ -509,7 +509,10 @@ try {
   // sealed J9 journey) hands its prompt to a stub harness that answers by
   // running `drogon-cli mentu run`, so restore the shared agent-settings
   // stubs here, after the real Claude session is stopped.
-  if (packaged || withAgents || withSessions)
+  // A plain `--files` run also includes the Mentu journey (the tab probe),
+  // which delegates its prompt to a stub harness, so the stubs must come
+  // back here for it too — not only for packaged/agent/session runs.
+  if (packaged || withAgents || withSessions || withFiles)
     await writeAgentSettingsFixtures(fixtureBin, {
       skip: withAgents || withSessions ? [] : ["pi"],
     });
