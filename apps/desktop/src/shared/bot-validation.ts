@@ -380,6 +380,26 @@ export const botMonitorListResultSchema = z.object({
           used: z.number().int().nonnegative(),
           max: z.number().int().nonnegative(),
         }),
+        // The monitor's own firing history, projected by native from the
+        // delegation drain's durable rows (null = never released an
+        // action). Metadata only; native never includes watched bytes.
+        firing: z
+          .object({
+            lastEventId: z.string(),
+            lastOutcome: z.enum([
+              "dispatched",
+              "joined_existing",
+              "refused",
+              "orphaned",
+              "cap_exceeded",
+              "stale_skipped",
+            ]),
+            lastRunId: z.string().nullable(),
+            lastDetail: z.string().nullable(),
+            lastAtMs: timestamp,
+            countToday: z.number().int().nonnegative(),
+          })
+          .nullable(),
       })
       // Rule-kind summary fields (resource, maxBytes, scriptPath, …) are
       // flattened into the view by native; they are display-only here and

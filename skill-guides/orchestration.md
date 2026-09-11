@@ -133,6 +133,13 @@ moves that terminal to a run, fencing its previous run. No run is guessed
 from global recency, and explicit stale generations are never repaired.
 A lost or replaced terminal is refused; use a new live terminal to bind again.
 Named-run task and gate inspection does not require a terminal binding. Mail verbs
+are covered below; the remaining read-and-recover verbs name their target
+outright: `drogon-cli orchestration run-list --json` pages runs,
+`drogon-cli orchestration run-show --run <ID> --json` shows one,
+`drogon-cli orchestration request-show --request <ID> --scope dispatch`
+recovers a receipt, and `drogon-cli orchestration worker-abandon --dispatch
+<ID>` plus `drogon-cli orchestration worker-release --dispatch <ID>` give a
+supervisor honest exits for workers it will not or cannot stop.
 (`send`, `check`, `reply`, `ask`) accept either the coordinator binding or
 the dispatch binding (`--task`, `--dispatch`); a dispatched worker's own
 terminal fills missing dispatch fields from scoped hints. Explicit worker

@@ -511,6 +511,10 @@ fn monitor_list_in_conn(
                     "used": used,
                     "max": crate::bots::delegation::MAX_DELEGATIONS_PER_BOT_PER_DAY,
                 },
+                // The monitor's own firing history: what its last change
+                // event did, with the honest outcome — or null when it has
+                // never released an action.
+                "firing": crate::bot_self_mgmt::firing_view(conn, &record.id, now_ms),
             });
             if let (Some(view), Some(rule_fields)) =
                 (view.as_object_mut(), record.rule.summary_json().as_object())

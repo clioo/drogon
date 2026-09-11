@@ -1,21 +1,27 @@
 /* MIT Copyright (c) 2026 Lovecast Inc.
  * One card in the redesigned MONITORS column (owner-design mockup): the
  * watched resource as the title, the daemon's own health chip, and a
- * two-column grid of uppercase-labelled fields — SOURCE, TRIGGER,
- * FAILURE THRESHOLD, LAST CHECK, INCIDENTS — over a footer carrying the
- * real monitor id.
+ * two-column grid of uppercase-labelled fields — SOURCE, TRIGGER, ACTION,
+ * FAILURE THRESHOLD, LAST CHECK, LAST FIRING, INCIDENTS — over a footer
+ * carrying the real monitor id.
  * Honesty contract: rows come verbatim from `bot.monitor_list` (durable
- * health, check evidence and the real failure-threshold constant). The
- * mockup's CHECK-IN MARGIN, MAX RUNTIME, RECOVERY THRESHOLD, NOTIFY and
- * SLA strip have NO stored counterpart in this build and are omitted
- * rather than invented; the "Test" button is omitted because the only
- * test RPC is the bot's own self API, not callable from the UI. */
+ * health, check evidence, firing evidence and the real failure-threshold
+ * constant). ACTION shows what the monitor releases when it fires — a
+ * bound responsibility's dispatch, or an honest "Observes only"; LAST
+ * FIRING shows the newest delegation verdict ("Prompt sent", "Refused",
+ * …) straight from the drain's durable firing rows. The mockup's
+ * CHECK-IN MARGIN, MAX RUNTIME, RECOVERY THRESHOLD, NOTIFY and SLA strip
+ * have NO stored counterpart in this build and are omitted rather than
+ * invented; the "Test" button is omitted because the only test RPC is
+ * the bot's own self API, not callable from the UI. */
 
 import { Badge } from "../../components/ui/badge";
 import type { BotMonitorView } from "../../../../shared/bot-contract";
 import {
+  monitorActionLabel,
   monitorHealthPill,
   monitorLastCheck,
+  monitorLastFiring,
   monitorTitle,
   monitorTriggerLabel,
 } from "./bots-page-model";
@@ -40,14 +46,20 @@ function GridCell({
 
 export function BotMonitorCardItem({
   monitor,
+  responsibilityName = null,
   now = Date.now(),
 }: {
   monitor: BotMonitorView;
+  /** The bound responsibility's display name, resolved by the parent
+   *  from the bot's own responsibilities; null falls back to the id. */
+  responsibilityName?: string | null;
   now?: number;
 }) {
   const pill = monitorHealthPill(monitor.health);
   const lastCheck = monitorLastCheck(monitor, now);
+  const lastFiring = monitorLastFiring(monitor, now);
   const supported = monitorRuleKindSupported(monitor.ruleKind);
+  const actionLabel = monitorActionLabel(monitor, responsibilityName);
   return (
     <div
       data-testid={`bot-monitor-${monitor.monitorId}`}
@@ -88,6 +100,13 @@ export function BotMonitorCardItem({
             {monitorTriggerLabel(monitor.trigger)}
           </span>
         </GridCell>
+        <GridCell label="Action">
+          {monitor.responsibilityId ? (
+            <span>{actionLabel}</span>
+          ) : (
+            <span className="italic text-muted-foreground">{actionLabel}</span>
+          )}
+        </GridCell>
         <GridCell label="Failure threshold">
           {monitor.failureThreshold} consecutive errors
         </GridCell>
@@ -110,6 +129,28 @@ export function BotMonitorCardItem({
             </span>
           ) : (
             <span className="italic text-muted-foreground">No checks yet</span>
+          )}
+        </GridCell>
+        <GridCell label="Last firing">
+          {lastFiring ? (
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span
+                className={
+                  lastFiring.adverse
+                    ? "truncate text-destructive"
+                    : "truncate"
+                }
+              >
+                {lastFiring.label} · {lastFiring.ageLabel}
+              </span>
+              {lastFiring.detail ? (
+                <span className="truncate text-xs text-muted-foreground">
+                  {lastFiring.detail}
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            <span className="italic text-muted-foreground">Never fired</span>
           )}
         </GridCell>
         {monitor.incidentCount > 0 ? (

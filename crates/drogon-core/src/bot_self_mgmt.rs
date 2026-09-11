@@ -71,8 +71,8 @@ use crate::bot_mutation_rpc::{
 use crate::bots::monitors::commit::{CommitDecision, RetainReason, StoredMonitorState};
 use crate::bots::monitors::eval as monitor_eval;
 use crate::bots::monitors::record::{
-    MonitorRecord, MonitorTrigger, new_monitor as new_monitor_record, new_unapproved_monitor,
-    staged_rule_edit as staged_monitor_rule_edit,
+    MonitorRecord, MonitorTrigger, bind_responsibility, new_monitor as new_monitor_record,
+    new_unapproved_monitor, staged_rule_edit as staged_monitor_rule_edit,
 };
 use crate::bots::monitors::result::{MonitorCheckResult, MonitorErrorKind};
 use crate::bots::monitors::rule::{
@@ -84,7 +84,7 @@ use crate::bots::monitors::rule::{
 use crate::bots::monitors::storage as monitor_storage;
 use crate::bots::monitors::{backoff_ms, should_admit};
 use crate::bots::policy as bot_policy;
-use crate::bots::records::{Bot, ResponsibilityTrigger};
+use crate::bots::records::{Bot, Responsibility, ResponsibilityKind, ResponsibilityTrigger};
 use crate::bots::storage as bots_storage;
 use crate::{error, workspace};
 
@@ -1438,6 +1438,8 @@ fn monitor_view(record: &MonitorRecord) -> Value {
     // scriptPath/scriptHash/interpreter/argv/... for the script kind;
     // urlHash/cursorSpec/... for the http kind) come from the rule itself.
     // `ruleKind` lets the renderer fail closed on a kind it does not know.
+    // `responsibilityId` names the action this monitor releases when it
+    // fires (null: an honest observes-only monitor).
     let mut view = json!({
         "id": record.id,
         "version": record.version,
@@ -1445,6 +1447,10 @@ fn monitor_view(record: &MonitorRecord) -> Value {
         "approved": record.is_approved(),
         "health": monitor_health(record).as_str(),
         "trigger": record.trigger,
+        "responsibilityId": match &record.inference_policy {
+            crate::bots::monitors::policy::MonitorInferencePolicy::ExplicitResponsibility { responsibility_id } => json!(responsibility_id),
+            crate::bots::monitors::policy::MonitorInferencePolicy::NotificationOnly => json!(null),
+        },
         "consecutiveErrors": record.consecutive_errors,
         "nextEligibleAtMs": record.next_eligible_at_ms,
         "lastSuccessAtMs": record.last_success_at_ms,
@@ -1557,6 +1563,7 @@ impl crate::Engine {
         for (record, rev) in monitors_for_bot(&tx, &bot.id).map_err(monitor_storage_error)? {
             let mut view = monitor_view(&record);
             view["rev"] = json!(rev);
+            view["firing"] = firing_view(&tx, &record.id, crate::now_unix_ms() as f64);
             monitors.push(view);
         }
         let audit_count = audit_count_for_bot(&tx, &bot.id).map_err(self_storage_error)?;
@@ -2134,11 +2141,56 @@ struct SelfCreateMonitor {
     // shared
     #[serde(default)]
     secret_refs: Option<Vec<String>>,
+    // The action this monitor releases when it fires: an existing reactive
+    // responsibility by id, or a fresh one minted from a name (+ optional
+    // standing instructions). Absent → NotificationOnly: the monitor
+    // writes durable events and releases nothing — the honest default.
+    #[serde(default)]
+    responsibility_id: Option<String>,
+    #[serde(default)]
+    responsibility_name: Option<String>,
+    #[serde(default)]
+    instructions: Option<String>,
     trigger: SelfTriggerWire,
     enabled: Option<bool>,
 }
 
 impl SelfCreateMonitor {
+    fn scope(&self) -> SelfScope {
+        SelfScope {
+            workspace_id: self.workspace_id.clone(),
+            host_id: self.host_id.clone(),
+            bot_id: self.bot_id.clone(),
+            actor_bot_id: self.actor_bot_id.clone(),
+        }
+    }
+}
+
+/// `bot.self_bind_monitor_action`: point an OWNED monitor's change events
+/// at an action — the reactive responsibility the delegation drain
+/// dispatches when the watch fires. Same binding rules as create-time
+/// binding (existing reactive id, or a minted name + instructions), CAS
+/// on the monitor rev like every other self-lane write, and OUTSIDE the
+/// approval hash: binding changes what a committed change *does*, never
+/// what is *watched*, so it can never park or unpark a monitor.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SelfBindMonitorAction {
+    workspace_id: String,
+    host_id: String,
+    bot_id: String,
+    actor_bot_id: String,
+    monitor_id: String,
+    expected_rev: i64,
+    #[serde(default)]
+    responsibility_id: Option<String>,
+    #[serde(default)]
+    responsibility_name: Option<String>,
+    #[serde(default)]
+    instructions: Option<String>,
+}
+
+impl SelfBindMonitorAction {
     fn scope(&self) -> SelfScope {
         SelfScope {
             workspace_id: self.workspace_id.clone(),
@@ -2389,6 +2441,120 @@ pub(crate) fn build_self_http_rule(
     Ok(rule)
 }
 
+/// The wire shape of a monitor's action declaration, shared by
+/// create-time binding and `bot.self_bind_monitor_action`.
+struct ActionBindingSpec<'a> {
+    responsibility_id: Option<&'a str>,
+    responsibility_name: Option<&'a str>,
+    instructions: &'a str,
+}
+
+/// Resolve the action a self-managed monitor releases, shared by create
+/// and bind. The three wire fields are mutually exclusive by the same
+/// rules `bot.monitor_create` uses: an existing responsibility id, or a
+/// minted name (+ optional standing instructions). The id must name a
+/// REACTIVE responsibility on this very bot — scheduled responsibilities
+/// run from their automation, never from a monitor. Returns the bound id
+/// when an action is declared, `None` for an honest observes-only monitor.
+fn resolve_action_binding(
+    tx: &Transaction,
+    host_id: &str,
+    folder: &str,
+    bot_id: &str,
+    spec: ActionBindingSpec<'_>,
+    now_ms: f64,
+) -> Result<Option<String>, RpcError> {
+    let ActionBindingSpec {
+        responsibility_id,
+        responsibility_name,
+        instructions,
+    } = spec;
+    if responsibility_id.is_some() && responsibility_name.is_some() {
+        return Err(invalid_argument(
+            "responsibilityId and responsibilityName are mutually exclusive",
+        ));
+    }
+    if responsibility_id.is_none()
+        && responsibility_name.is_none()
+        && !instructions.trim().is_empty()
+    {
+        return Err(invalid_argument(
+            "instructions needs a responsibilityName to attach to",
+        ));
+    }
+    if instructions.contains('\0') || instructions.len() > 32768 {
+        return Err(invalid_argument(
+            "instructions must be NUL-free and at most 32768 bytes",
+        ));
+    }
+    if let Some(responsibility_id) = responsibility_id {
+        let bot = bots_storage::get_bot(tx, host_id, folder, bot_id)
+            .map_err(bots_storage_error)?
+            .ok_or_else(|| not_found(format!("bot {bot_id} not found")))?;
+        let responsibility = bot
+            .responsibilities
+            .iter()
+            .find(|r| r.id == responsibility_id)
+            .ok_or_else(|| {
+                not_found(format!(
+                    "responsibility {responsibility_id} not found on this bot"
+                ))
+            })?;
+        if !matches!(
+            responsibility.trigger,
+            ResponsibilityTrigger::Reactive { .. }
+        ) {
+            return Err(invalid_argument(
+                "responsibilityId must name a reactive responsibility; \
+                 scheduled responsibilities run from their automation, never from a monitor",
+            ));
+        }
+        return Ok(Some(responsibility_id.to_string()));
+    }
+    let Some(name) = responsibility_name else {
+        return Ok(None);
+    };
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed.len() > 128 || trimmed.chars().any(char::is_control) {
+        return Err(invalid_argument(
+            "responsibilityName must be 1..=128 bytes with no control characters",
+        ));
+    }
+    let minted_id = format!("resp-{}", uuid::Uuid::new_v4());
+    let minted = Responsibility {
+        id: minted_id.clone(),
+        name: trimmed.to_string(),
+        instructions: instructions.to_string(),
+        kind: ResponsibilityKind::Reactive,
+        trigger: ResponsibilityTrigger::Reactive { event: None },
+        enabled: true,
+        recipe: None,
+        created_at: now_ms,
+        updated_at: now_ms,
+    };
+    bots_storage::update_bot(tx, host_id, folder, bot_id, now_ms, |bot| {
+        bot.responsibilities.push(minted.clone());
+    })
+    .map_err(bots_storage_error)?;
+    Ok(Some(minted_id))
+}
+
+/// Firing evidence for one monitor as a JSON view (null, never a
+/// fabricated row, when the monitor has released nothing).
+pub(crate) fn firing_view(conn: &Connection, monitor_id: &str, now_ms: f64) -> Value {
+    match crate::bots::delegation::firing_evidence_for_monitor(conn, monitor_id, now_ms) {
+        Some(evidence) => json!({
+            "lastEventId": evidence.event_id,
+            "lastOutcome": evidence.outcome,
+            "lastRunId": evidence.run_id,
+            "lastDetail": evidence.detail,
+            "lastAtMs": evidence.at_ms,
+            "countToday": evidence.count_today,
+        }),
+        None => json!(null),
+    }
+}
+
 /// Kind dispatch for the agent-facing create surface. Scope is always
 /// `(derived host, provisioned home workspace)`; a client-supplied scope
 /// has no spelling. Unknown kinds are refused rather than guessed.
@@ -2502,7 +2668,7 @@ impl crate::Engine {
             &request.params,
             |tx| authorize_self(self, tx, &scope),
             |tx| {
-                let (_, _, _, home) = resolve_self(tx, &self.host_id, &scope)?;
+                let (folder, _, _, home) = resolve_self(tx, &self.host_id, &scope)?;
                 if !home.allows_workspace(&home.home_workspace_id) {
                     return Err(storage_error("bot home profile forbids new monitors"));
                 }
@@ -2515,6 +2681,22 @@ impl crate::Engine {
                 let trigger = admit_self_trigger(&params.trigger)?;
                 let now_ms = crate::now_unix_ms() as f64;
                 let id = uuid::Uuid::new_v4().to_string();
+                // The action this monitor releases, resolved BEFORE the
+                // record exists so a bad binding refuses without writing:
+                // an existing reactive responsibility by id, or a freshly
+                // minted one from a name (+ standing instructions).
+                let bound_responsibility_id = resolve_action_binding(
+                    tx,
+                    &self.host_id,
+                    &folder,
+                    &scope.bot_id,
+                    ActionBindingSpec {
+                        responsibility_id: params.responsibility_id.as_deref(),
+                        responsibility_name: params.responsibility_name.as_deref(),
+                        instructions: params.instructions.as_deref().unwrap_or(""),
+                    },
+                    now_ms,
+                )?;
                 // A self-created file digest arrives approved for its exact
                 // initial rule (in-scope file digests only — see
                 // build_self_rule) but follows the caller's enabled flag
@@ -2546,6 +2728,10 @@ impl crate::Engine {
                     .map_err(invalid_argument)?
                 };
                 record.enabled = params.enabled.unwrap_or(true);
+                if let Some(responsibility_id) = &bound_responsibility_id {
+                    record = bind_responsibility(record, responsibility_id.clone(), now_ms)
+                        .map_err(invalid_argument)?;
+                }
                 debug_assert_eq!(record.is_approved(), file_kind);
                 monitor_storage::create_monitor(tx, &record).map_err(monitor_storage_error)?;
                 let at = crate::now_unix_ms() as f64;
@@ -2564,6 +2750,77 @@ impl crate::Engine {
                     "ruleKind": record.rule.kind_str(),
                     "approved": record.is_approved(),
                     "health": monitor_health(&record).as_str(),
+                    "responsibilityId": bound_responsibility_id,
+                }))
+            },
+        )
+    }
+
+    pub(crate) fn bot_self_bind_monitor_action(
+        &self,
+        request: &Request,
+    ) -> Result<Value, RpcError> {
+        let params: SelfBindMonitorAction =
+            parse_params(&request.params, "bot.self_bind_monitor_action")?;
+        let scope = params.scope();
+        let _gate = self.lifecycle_gate.read().unwrap();
+        self.ledger.run_atomic(
+            &self.db,
+            &request.request_id,
+            &request.method,
+            &request.params,
+            |tx| authorize_self(self, tx, &scope),
+            |tx| {
+                let (folder, _, _, _) = resolve_self(tx, &self.host_id, &scope)?;
+                let (record, rev) = load_owned_monitor(tx, &scope.bot_id, &params.monitor_id)?;
+                if rev != params.expected_rev {
+                    return Err(stale_update(format!(
+                        "monitor rev changed since it was read: expected {}, current is {rev}",
+                        params.expected_rev
+                    )));
+                }
+                let now_ms = crate::now_unix_ms() as f64;
+                let bound_responsibility_id = resolve_action_binding(
+                    tx,
+                    &self.host_id,
+                    &folder,
+                    &scope.bot_id,
+                    ActionBindingSpec {
+                        responsibility_id: params.responsibility_id.as_deref(),
+                        responsibility_name: params.responsibility_name.as_deref(),
+                        instructions: params.instructions.as_deref().unwrap_or(""),
+                    },
+                    now_ms,
+                )?;
+                let Some(responsibility_id) = bound_responsibility_id else {
+                    return Err(invalid_argument(
+                        "binding requires responsibilityId or responsibilityName",
+                    ));
+                };
+                // Outside the approval hash by construction: binding
+                // changes neither version nor approved_rule_hash, so it
+                // never parks a running monitor nor unparks a parked one.
+                let updated = bind_responsibility(record, responsibility_id.clone(), now_ms)
+                    .map_err(invalid_argument)?;
+                monitor_storage::cas_write(tx, &updated, params.expected_rev)
+                    .map_err(monitor_storage_error)?;
+                let at = crate::now_unix_ms() as f64;
+                audit(
+                    tx,
+                    &request.request_id,
+                    &request.method,
+                    &scope,
+                    at,
+                    &json!({"monitorId": params.monitor_id, "responsibilityId": responsibility_id}),
+                )?;
+                Ok(json!({
+                    "hostId": self.host_id,
+                    "botId": scope.bot_id,
+                    "monitorId": updated.id,
+                    "version": updated.version,
+                    "approved": updated.is_approved(),
+                    "health": monitor_health(&updated).as_str(),
+                    "responsibilityId": responsibility_id,
                 }))
             },
         )

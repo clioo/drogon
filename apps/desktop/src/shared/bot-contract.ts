@@ -257,9 +257,31 @@ export type BotMonitorView = {
   lastCheckOutcome: "no_change" | "changed" | "error" | null;
   incidentCount: number;
   delegationsToday: { used: number; max: number };
+  /** The monitor's own firing history: what its last change event did
+   *  through the delegation chain (null = never released an action). */
+  firing: BotMonitorFiringView | null;
   /** Rule-kind summary fields (resource, maxBytes, scriptPath, …) —
    *  display-only, keyed by what native's `summary_json` flattened in. */
   [summaryField: string]: unknown;
+};
+
+/** One settled delegation verdict for a monitor: dispatched = the bound
+ *  responsibility ran (runId names the run row, also visible in the
+ *  bot's history as a "Monitor event"); the other outcomes are honest
+ *  refusals with their reason. Metadata only, never watched bytes. */
+export type BotMonitorFiringView = {
+  lastEventId: string;
+  lastOutcome:
+    | "dispatched"
+    | "joined_existing"
+    | "refused"
+    | "orphaned"
+    | "cap_exceeded"
+    | "stale_skipped";
+  lastRunId: string | null;
+  lastDetail: string | null;
+  lastAtMs: number;
+  countToday: number;
 };
 
 export type BotMonitorListInput = BotScope & { botId: string };
@@ -393,8 +415,9 @@ export type BotsPanelHistoryEntry = {
     hostObservation: BotsPanelHostObservation | null;
     /** How the run was invoked. `null` for rows written before native
      *  stamped it: every such row came through `bot.run`, so readers
-     *  treat `null` as manual. */
-    invocation: "scheduled" | "manual" | null;
+     *  treat `null` as manual. `reactive` marks a run released by a
+     *  monitor event through the delegation drain. */
+    invocation: "scheduled" | "manual" | "reactive" | null;
   };
   responsibilityName: string | null;
   automationName: string | null;

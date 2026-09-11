@@ -816,3 +816,247 @@ fn outbox_row_with_unparseable_payload_is_orphaned_not_retried() {
     assert_eq!(drained.dispatched, 0);
     assert_eq!(fixture.outbox_len(), 0);
 }
+
+// --- The self lane: a Bot's own monitor declares and releases an action ----
+
+/// Adds a provisioned home to the fixture, so the `bot.self_*` lane is
+/// authorized for the fixture bot.
+fn provision_home(fixture: &Fixture) {
+    ok(fixture._engine.dispatch(request(
+        "self-provision",
+        "bot.self_provision",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+            "actorBotId": fixture.bot_id,
+        }),
+    )));
+}
+
+#[test]
+fn self_created_monitor_with_action_dispatches_and_replays_join() {
+    let fixture = Fixture::new();
+    provision_home(&fixture);
+    // The Bot creates its own monitor through the self lane AND declares
+    // the action it releases — a fresh reactive responsibility minted
+    // from a name plus standing instructions.
+    let created = ok(fixture._engine.dispatch(request(
+        "self-create-monitor",
+        "bot.self_create_monitor",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+            "actorBotId": fixture.bot_id,
+            "resource": RESOURCE,
+            "trigger": {"kind": "scheduled", "cron": "* * * * *"},
+            "responsibilityName": "Triage changes",
+            "instructions": "Check the diff behind the event and report.",
+        }),
+    )));
+    let self_monitor_id = created["monitorId"].as_str().unwrap().to_string();
+    let bound_resp = created["responsibilityId"].as_str().unwrap().to_string();
+    assert!(
+        !bound_resp.is_empty(),
+        "a self-created monitor with an action is bound at create time"
+    );
+    assert_eq!(created["approved"], true, "file digests self-approve");
+
+    let now = Fixture::now_ms();
+    let event_id = fixture.enqueue_for(&self_monitor_id, 1, now);
+    let drained = fixture.drain(now);
+    assert_eq!(
+        drained.dispatched, 1,
+        "the self-lane monitor's event must release its action: {drained:?}"
+    );
+    assert_eq!(fixture.seam.dispatch_count(), 1);
+    assert_eq!(fixture.outbox_len(), 0);
+
+    // The prompt is the template: standing instructions + event metadata,
+    // never the watched bytes (the enqueue digest marker names content).
+    let prompt = &fixture.seam.prompts()[0];
+    assert!(
+        prompt.contains("Check the diff behind the event and report."),
+        "instructions reach the template: {prompt}"
+    );
+    assert!(prompt.contains(&event_id), "event id reaches the template");
+    assert!(
+        !prompt.contains("payload"),
+        "watched bytes never enter the prompt: {prompt}"
+    );
+
+    // The run history records the origin honestly: a monitor-released
+    // run is `reactive`, not a schedule fire and not a human click.
+    let conn = fixture.conn();
+    let history =
+        bstorage::history_for_bot(&conn, &fixture.host_id, &fixture.folder, &fixture.bot_id)
+            .unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(
+        history[0].responsibility_run.responsibility_id, bound_resp,
+        "the dispatched responsibility is the self-lane action"
+    );
+    assert_eq!(
+        history[0].responsibility_run.invocation,
+        Some(drogon_core::bots::records::ResponsibilityRunInvocation::Reactive),
+        "monitor-released runs carry their own invocation bucket"
+    );
+
+    // Replay of the SAME event joins the existing run — never a second
+    // session — and the firing row updates, never duplicates.
+    fixture.enqueue_for(&self_monitor_id, 1, now);
+    let replayed = fixture.drain(now + 1.0);
+    assert_eq!(replayed.joined_existing, 1, "{replayed:?}");
+    assert_eq!(replayed.dispatched, 0);
+    assert_eq!(fixture.seam.dispatch_count(), 1);
+    let firings: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM bot_monitor_firings WHERE monitor_id = ?1",
+            params![&self_monitor_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        firings, 1,
+        "replays refresh one firing row, never duplicate"
+    );
+}
+
+#[test]
+fn self_created_monitor_without_action_stays_observes_only() {
+    let fixture = Fixture::new();
+    provision_home(&fixture);
+    let created = ok(fixture._engine.dispatch(request(
+        "self-create-plain",
+        "bot.self_create_monitor",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+            "actorBotId": fixture.bot_id,
+            "resource": RESOURCE,
+            "trigger": {"kind": "scheduled", "cron": "* * * * *"},
+        }),
+    )));
+    assert_eq!(
+        created["responsibilityId"],
+        json!(null),
+        "no declared action: the monitor observes and records only"
+    );
+    let self_monitor_id = created["monitorId"].as_str().unwrap().to_string();
+    let now = Fixture::now_ms();
+    fixture.enqueue_for(&self_monitor_id, 1, now);
+    let drained = fixture.drain(now);
+    assert_eq!(
+        drained.claimed, 0,
+        "unbound rows stay another lane's evidence"
+    );
+    assert_eq!(fixture.seam.dispatch_count(), 0);
+    assert_eq!(fixture.outbox_len(), 1, "the event persists untouched");
+}
+
+#[test]
+fn firing_evidence_surfaces_through_monitor_list() {
+    let fixture = Fixture::new();
+    let now = Fixture::now_ms();
+    let event_id = fixture.enqueue(1, now);
+    let drained = fixture.drain(now);
+    assert_eq!(drained.dispatched, 1);
+
+    let listed = ok(fixture._engine.dispatch(request(
+        "monitor-list",
+        "bot.monitor_list",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+        }),
+    )));
+    let view = &listed["monitors"][0];
+    assert_eq!(view["firing"]["lastOutcome"], "dispatched");
+    assert_eq!(view["firing"]["countToday"], 1);
+    let run_id = view["firing"]["lastRunId"].as_str().unwrap();
+    let conn = fixture.conn();
+    let history =
+        bstorage::history_for_bot(&conn, &fixture.host_id, &fixture.folder, &fixture.bot_id)
+            .unwrap();
+    assert_eq!(
+        history[0].responsibility_run.id, run_id,
+        "the firing names the exact run row the user can open"
+    );
+    // No firing existed before this evidence path — the absence is
+    // honest (a monitor that never released an action shows null), and
+    // the fired event id is the one the enqueue produced.
+    assert_eq!(view["firing"]["lastEventId"], json!(event_id));
+}
+
+#[test]
+fn missing_responsibility_surfaces_an_honest_orphaned_firing() {
+    let fixture = Fixture::new();
+    // The bound responsibility is deleted after the monitor fired its
+    // event; the drain must record the honest refusal, not swallow it.
+    ok(fixture._engine.dispatch(request(
+        "resp-delete",
+        "bot.responsibility_delete",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+            "responsibilityId": fixture.responsibility_id,
+        }),
+    )));
+    let now = Fixture::now_ms();
+    fixture.enqueue(1, now);
+    let drained = fixture.drain(now);
+    assert_eq!(drained.orphaned, 1, "{drained:?}");
+    assert_eq!(drained.dispatched, 0);
+    assert_eq!(fixture.outbox_len(), 0, "a terminal verdict never retries");
+
+    let listed = ok(fixture._engine.dispatch(request(
+        "monitor-list",
+        "bot.monitor_list",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+        }),
+    )));
+    let view = &listed["monitors"][0];
+    assert_eq!(view["firing"]["lastOutcome"], "orphaned");
+    let detail = view["firing"]["lastDetail"].as_str().unwrap();
+    assert!(
+        detail.contains("responsibility"),
+        "the refusal names its real reason: {detail}"
+    );
+    assert_eq!(view["firing"]["lastRunId"], json!(null));
+}
+
+#[test]
+fn stale_event_records_too_old_to_act() {
+    let fixture = Fixture::new();
+    let now = Fixture::now_ms();
+    fixture.enqueue(1, now - (DELEGATION_GRACE_MS + 60_000.0));
+    let drained = fixture.drain(now);
+    assert_eq!(drained.skipped_stale, 1);
+    assert_eq!(fixture.seam.dispatch_count(), 0);
+    let listed = ok(fixture._engine.dispatch(request(
+        "monitor-list",
+        "bot.monitor_list",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+        }),
+    )));
+    let view = &listed["monitors"][0];
+    assert_eq!(view["firing"]["lastOutcome"], "stale_skipped");
+    assert!(
+        view["firing"]["lastDetail"]
+            .as_str()
+            .unwrap()
+            .contains("grace"),
+        "the detail names the outage grace: {:?}",
+        view["firing"]["lastDetail"]
+    );
+}

@@ -582,6 +582,7 @@ describe("use-bots-page-controller: design column side reads", () => {
       lastCheckOutcome: null,
       incidentCount: 0,
       delegationsToday: { used: 0, max: 10 },
+      firing: null,
       resource: "notes/status.md",
     } as const;
   }

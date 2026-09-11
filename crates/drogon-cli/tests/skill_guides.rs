@@ -107,6 +107,61 @@ fn every_backticked_cli_invocation_parses() {
     );
 }
 
+/// Every VISIBLE leaf command in the real clap grammar must be named in at
+/// least one bundled guide. This is the drift tripwire: a verb the binary
+/// gains (or renames) that no guide mentions fails this test, and a guide
+/// section that outlives its verb fails the parse test above. The hidden
+/// `internal hook-event` callback is deliberately exempt — it is a
+/// service-internal seam, not part of the agent surface.
+fn visible_leaf_paths(cmd: &clap::Command, prefix: &mut Vec<String>, out: &mut Vec<String>) {
+    for sub in cmd.get_subcommands() {
+        if sub.is_hide_set() {
+            continue;
+        }
+        prefix.push(sub.get_name().to_string());
+        let has_visible_children = sub.get_subcommands().any(|s| !s.is_hide_set());
+        if has_visible_children {
+            visible_leaf_paths(sub, prefix, out);
+        } else {
+            out.push(prefix.join(" "));
+        }
+        prefix.pop();
+    }
+}
+
+#[test]
+fn every_visible_cli_verb_is_documented_in_a_bundled_guide() {
+    let guides = canonical_guides();
+    // Guides wrap inside sentences, so match on whitespace-collapsed text:
+    // "bot\ncreate-monitor" still documents "bot create-monitor".
+    let collapsed =
+        |text: &str| -> String { text.split_whitespace().collect::<Vec<_>>().join(" ") };
+    let corpus = collapsed(
+        &guides
+            .iter()
+            .map(|guide| guide.markdown)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let mut prefix = Vec::new();
+    let mut leaves = Vec::new();
+    visible_leaf_paths(&Cli::command(), &mut prefix, &mut leaves);
+    assert!(
+        leaves.len() >= 80,
+        "the real command tree must be walked in full, found {leaves:?}"
+    );
+    let mut missing = Vec::new();
+    for path in &leaves {
+        if !corpus.contains(path.as_str()) {
+            missing.push(path.clone());
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "verbs the guides never mention (document each verb where it ships): {missing:?}"
+    );
+}
+
 #[test]
 fn guides_cover_the_contracted_surface() {
     let guides = canonical_guides();

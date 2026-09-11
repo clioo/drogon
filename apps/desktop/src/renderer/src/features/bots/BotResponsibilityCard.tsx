@@ -497,6 +497,12 @@ export function BotResponsibilityCard({
                 <BotMonitorCardItem
                   key={monitor.monitorId}
                   monitor={monitor}
+                  responsibilityName={
+                    bot.responsibilities.find(
+                      (responsibility) =>
+                        responsibility.id === monitor.responsibilityId,
+                    )?.name ?? null
+                  }
                 />
               ))
             ) : (

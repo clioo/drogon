@@ -68,7 +68,7 @@ use crate::bots::records::{
 use crate::bots::storage as bots_storage;
 
 pub const DELEGATION_SCHEMA_COMPONENT: &str = "bot_delegation";
-pub const DELEGATION_SCHEMA_VERSION: i64 = 1;
+pub const DELEGATION_SCHEMA_VERSION: i64 = 2;
 
 /// A stale outbox event is skipped, never caught up: past this age an event
 /// describes a world the daemon was not watching, and dispatching it would
@@ -154,16 +154,58 @@ pub struct DelegationEvent {
 fn create_tables(tx: &Transaction) -> Result<()> {
     // The outbox itself (`bot_monitor_events`) belongs to the BotSelf
     // component (`bot_self_mgmt::record_monitor_event_in_tx` writes it);
-    // this component owns only the delegation budget rows. Forward, never
-    // duplicated here.
+    // this component owns the delegation budget rows and the firing
+    // evidence. Forward, never duplicated here.
     tx.execute_batch(
         "CREATE TABLE IF NOT EXISTS bot_delegation_daily (
             bot_id TEXT NOT NULL,
             day_utc INTEGER NOT NULL,
             count INTEGER NOT NULL,
             PRIMARY KEY (bot_id, day_utc)
+        );
+        CREATE TABLE IF NOT EXISTS bot_monitor_firings (
+            event_id TEXT PRIMARY KEY,
+            monitor_id TEXT NOT NULL,
+            bot_id TEXT,
+            responsibility_id TEXT,
+            outcome TEXT NOT NULL,
+            run_id TEXT,
+            detail TEXT,
+            at_ms REAL NOT NULL
         );",
     )?;
+    Ok(())
+}
+
+/// Additive upgrade inside the caller's transaction: creates both tables
+/// (idempotent, so a version-1 database gains the firing evidence in
+/// place) and stamps the current component version when absent or behind.
+/// Refuses loudly only on a recorded version NEWER than this build.
+fn apply_schema_in_tx(tx: &Transaction) -> Result<()> {
+    check_schema_not_ahead(tx)?;
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT version FROM schema_versions WHERE component = ?1",
+            params![DELEGATION_SCHEMA_COMPONENT],
+            |r| r.get(0),
+        )
+        .optional()?;
+    create_tables(tx)?;
+    match existing {
+        None => {
+            tx.execute(
+                "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
+                params![DELEGATION_SCHEMA_COMPONENT, DELEGATION_SCHEMA_VERSION],
+            )?;
+        }
+        Some(version) if version < DELEGATION_SCHEMA_VERSION => {
+            tx.execute(
+                "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
+                params![DELEGATION_SCHEMA_COMPONENT, DELEGATION_SCHEMA_VERSION],
+            )?;
+        }
+        Some(_) => {}
+    }
     Ok(())
 }
 
@@ -192,49 +234,19 @@ pub fn check_schema_not_ahead(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Aggregate-startup shape for `db::migrate_and_recover`: creates both
-/// tables (or refuses loudly on a newer recorded version) inside the
-/// caller's transaction. Additive `CREATE TABLE IF NOT EXISTS` — safe to
-/// adopt on databases that predate the delegation chain.
+/// Aggregate-startup shape for `db::migrate_and_recover`: additive
+/// `CREATE TABLE IF NOT EXISTS` inside the caller's transaction — safe to
+/// adopt on databases that predate the delegation chain; the version-1 →
+/// version-2 path gains the firing-evidence table in place.
 pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> Result<()> {
-    check_schema_not_ahead(tx)?;
-    let existing: Option<i64> = tx
-        .query_row(
-            "SELECT version FROM schema_versions WHERE component = ?1",
-            params![DELEGATION_SCHEMA_COMPONENT],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if existing.is_none() {
-        create_tables(tx)?;
-        tx.execute(
-            "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
-            params![DELEGATION_SCHEMA_COMPONENT, DELEGATION_SCHEMA_VERSION],
-        )?;
-    }
-    Ok(())
+    apply_schema_in_tx(tx)
 }
 
 /// Standalone migration for controlled (test) databases. Production goes
 /// through [`apply_pending_steps_in_tx`] via the aggregate gate.
 pub fn migrate(conn: &Connection) -> Result<()> {
-    check_schema_not_ahead(conn)?;
-    let existing: Option<i64> = conn
-        .query_row(
-            "SELECT version FROM schema_versions WHERE component = ?1",
-            params![DELEGATION_SCHEMA_COMPONENT],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if existing.is_some() {
-        return Ok(());
-    }
     let tx = conn.unchecked_transaction()?;
-    create_tables(&tx)?;
-    tx.execute(
-        "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
-        params![DELEGATION_SCHEMA_COMPONENT, DELEGATION_SCHEMA_VERSION],
-    )?;
+    apply_schema_in_tx(&tx)?;
     tx.commit()?;
     Ok(())
 }
@@ -300,33 +312,205 @@ fn outbox_table_exists(conn: &Connection) -> bool {
     has("bot_monitor_events") && has("bot_monitors")
 }
 
-/// Terminal-verdict buckets for [`delete_counted`].
+/// Terminal-verdict buckets for [`settle_event`]. Each maps to the
+/// durable firing outcome string the monitor surfaces read back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeleteBucket {
     Orphaned,
     Refused,
     JoinedExisting,
     CapExceeded,
+    StaleSkipped,
 }
 
-/// Delete-or-count helper for terminal verdicts: a failed delete keeps the
-/// event queued and counts `failed` instead of the intended bucket, so no
-/// path can silently drop an event.
-fn delete_counted(
+impl DeleteBucket {
+    fn outcome_str(self) -> &'static str {
+        match self {
+            DeleteBucket::Orphaned => "orphaned",
+            DeleteBucket::Refused => "refused",
+            DeleteBucket::JoinedExisting => "joined_existing",
+            DeleteBucket::CapExceeded => "cap_exceeded",
+            DeleteBucket::StaleSkipped => "stale_skipped",
+        }
+    }
+}
+
+/// Durable verdict for one monitor event: what the delegation did with
+/// it. Written to `bot_monitor_firings` keyed by event id, so a replay
+/// refreshes the same row instead of duplicating evidence. Carries
+/// metadata only — ids, the outcome, and short refusal reasons; never
+/// watched bytes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FiringEvidence {
+    pub event_id: String,
+    pub monitor_id: String,
+    pub outcome: String,
+    pub run_id: Option<String>,
+    pub detail: Option<String>,
+    pub at_ms: f64,
+    /// Firings recorded for this monitor since the start of its bot's
+    /// current UTC day (honest cost share of the bot-wide cap).
+    pub count_today: i64,
+}
+
+fn record_firing_in_tx(
+    tx: &Transaction,
+    event: &DelegationEvent,
+    responsibility_id: Option<&str>,
+    run_id: Option<&str>,
+    detail: Option<&str>,
+    outcome: &str,
+    now_ms: f64,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO bot_monitor_firings
+             (event_id, monitor_id, bot_id, responsibility_id, outcome, run_id, detail, at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(event_id) DO UPDATE SET
+             bot_id = excluded.bot_id,
+             responsibility_id = excluded.responsibility_id,
+             outcome = excluded.outcome,
+             run_id = excluded.run_id,
+             detail = excluded.detail,
+             at_ms = excluded.at_ms",
+        params![
+            event.event_id,
+            event.monitor_id,
+            event.bot_id,
+            responsibility_id,
+            outcome,
+            run_id,
+            detail,
+            now_ms
+        ],
+    )?;
+    Ok(())
+}
+
+fn record_firing(
+    conn: &Connection,
+    event: &DelegationEvent,
+    responsibility_id: Option<&str>,
+    run_id: Option<&str>,
+    detail: Option<&str>,
+    outcome: &str,
+    now_ms: f64,
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    record_firing_in_tx(
+        &tx,
+        event,
+        responsibility_id,
+        run_id,
+        detail,
+        outcome,
+        now_ms,
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Firing evidence for one monitor, for `bot.monitor_list` and the
+/// self-lane list: the newest verdict plus today's count. Empty (zero)
+/// when the monitor never released an action — an honest absence, never
+/// a fabricated row.
+pub fn firing_evidence_for_monitor(
+    conn: &Connection,
+    monitor_id: &str,
+    now_ms: f64,
+) -> Option<FiringEvidence> {
+    let read = || -> Result<Option<FiringEvidence>> {
+        let mut stmt = conn.prepare(
+            "SELECT event_id, outcome, run_id, detail, at_ms FROM bot_monitor_firings
+             WHERE monitor_id = ?1
+             ORDER BY at_ms DESC, rowid DESC LIMIT 1",
+        )?;
+        let latest = stmt
+            .query_row(params![monitor_id], |r| {
+                Ok(FiringEvidence {
+                    event_id: r.get(0)?,
+                    monitor_id: monitor_id.to_string(),
+                    outcome: r.get(1)?,
+                    run_id: r.get(2)?,
+                    detail: r.get(3)?,
+                    at_ms: r.get(4)?,
+                    count_today: 0,
+                })
+            })
+            .optional()?;
+        let Some(mut evidence) = latest else {
+            return Ok(None);
+        };
+        evidence.count_today = conn
+            .query_row(
+                "SELECT COUNT(*) FROM bot_monitor_firings
+                 WHERE monitor_id = ?1 AND at_ms >= ?2",
+                params![monitor_id, (utc_day_number(now_ms) as f64) * 86_400_000.0],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0);
+        Ok(Some(evidence))
+    }();
+    match read {
+        Ok(evidence) => evidence,
+        Err(e) => {
+            // Evidence reads never break the list surfaces; the drain's
+            // own logs remain the fallback record.
+            eprintln!("[delegation] firing evidence read failed: {e}");
+            None
+        }
+    }
+}
+
+/// The firing context carried to every terminal verdict: what the event
+/// was bound to, which run it joined (if any), and the honest reason for
+/// a refusal. Metadata only, never watched bytes.
+struct Verdict<'a> {
+    responsibility_id: Option<&'a str>,
+    run_id: Option<&'a str>,
+    detail: Option<&'a str>,
+}
+
+/// Settle one terminal verdict: write the durable firing row FIRST (so
+/// evidence survives even if the delete below fails), then delete the
+/// outbox event, then count the bucket. A failed firing insert is logged
+/// and does not keep the event queued — a poison evidence table must
+/// never wedge the drain, and the outcome is still counted in logs.
+fn settle_event(
     db: &Mutex<Connection>,
-    event_id: &str,
-    summary: &mut DelegationSummary,
+    event: &DelegationEvent,
+    verdict: Verdict,
     bucket: DeleteBucket,
+    now_ms: f64,
+    summary: &mut DelegationSummary,
 ) {
-    match delete_event(&db.lock().unwrap(), event_id) {
+    {
+        let conn = db.lock().unwrap();
+        if let Err(e) = record_firing(
+            &conn,
+            event,
+            verdict.responsibility_id,
+            verdict.run_id,
+            verdict.detail,
+            bucket.outcome_str(),
+            now_ms,
+        ) {
+            eprintln!(
+                "[delegation] firing record failed for {}: {e}",
+                event.event_id
+            );
+        }
+    }
+    match delete_event(&db.lock().unwrap(), &event.event_id) {
         Ok(()) => match bucket {
             DeleteBucket::Orphaned => summary.orphaned += 1,
             DeleteBucket::Refused => summary.refused += 1,
             DeleteBucket::JoinedExisting => summary.joined_existing += 1,
             DeleteBucket::CapExceeded => summary.cap_exceeded += 1,
+            DeleteBucket::StaleSkipped => summary.skipped_stale += 1,
         },
         Err(e) => {
-            eprintln!("[delegation] delete failed for {event_id}: {e}");
+            eprintln!("[delegation] delete failed for {}: {e}", event.event_id);
             summary.failed += 1;
         }
     }
@@ -610,16 +794,29 @@ pub fn drain_delegation_events<S: DispatchSeam>(
         let event = match peeked {
             PeekedEvent::Event(event) => event,
             PeekedEvent::Poison(event_id) => {
-                delete_counted(db, event_id, &mut summary, DeleteBucket::Orphaned);
+                summary.claimed += 1;
+                match delete_event(&db.lock().unwrap(), event_id) {
+                    Ok(()) => summary.orphaned += 1,
+                    Err(_) => summary.failed += 1,
+                }
                 continue;
             }
         };
         if now_ms - event.observed_at_ms > DELEGATION_GRACE_MS {
-            if delete_event(&db.lock().unwrap(), &event.event_id).is_ok() {
-                summary.skipped_stale += 1;
-            } else {
-                summary.failed += 1;
-            }
+            // Stale is a verdict the monitor's history should show too:
+            // the change happened while no one was watching.
+            settle_event(
+                db,
+                event,
+                Verdict {
+                    responsibility_id: None,
+                    run_id: None,
+                    detail: Some("event older than the outage grace; never caught up"),
+                },
+                DeleteBucket::StaleSkipped,
+                now_ms,
+                &mut summary,
+            );
             continue;
         }
         drain_single_event(
@@ -633,6 +830,35 @@ pub fn drain_delegation_events<S: DispatchSeam>(
         );
     }
     summary
+}
+
+/// Short, honest, metadata-only refusal text for the firing evidence —
+/// what the monitor's history shows when the gate refused. Never carries
+/// watched bytes (refusals name states and ids, never content).
+fn responsibility_refusal_detail(refusal: &bots_policy::ResponsibilityRefusal) -> String {
+    match refusal {
+        bots_policy::ResponsibilityRefusal::Disabled => {
+            "bound responsibility is disabled".to_string()
+        }
+        bots_policy::ResponsibilityRefusal::ReactiveRequiresSuppliedEvent(_) => {
+            "gate refused: no supplied event".to_string()
+        }
+        bots_policy::ResponsibilityRefusal::UnownedAutomation(automation_id) => {
+            format!("bound responsibility names an unowned automation: {automation_id}")
+        }
+    }
+}
+
+fn automation_refusal_detail(refusal: &crate::automations::execution::DispatchRefusal) -> String {
+    use crate::automations::execution::DispatchRefusal as R;
+    match refusal {
+        R::ForeignHost {
+            execution_target_id,
+            ..
+        } => format!("automation lives on another host: {execution_target_id}"),
+        R::Disabled => "bound responsibility's automation is disabled".to_string(),
+        R::MissingReactiveEvent => "gate refused: no supplied event".to_string(),
+    }
 }
 
 /// One event through every gate. Counts exactly one summary bucket (or
@@ -658,7 +884,18 @@ fn drain_single_event<S: DispatchSeam>(
     let monitor: MonitorRecord = match monitor_lookup {
         Ok(Some((record, _))) => record,
         Ok(None) => {
-            delete_counted(db, &event.event_id, summary, DeleteBucket::Orphaned);
+            settle_event(
+                db,
+                event,
+                Verdict {
+                    responsibility_id: None,
+                    run_id: None,
+                    detail: Some("monitor row is gone"),
+                },
+                DeleteBucket::Orphaned,
+                now_ms,
+                summary,
+            );
             return;
         }
         Err(e) => {
@@ -680,11 +917,23 @@ fn drain_single_event<S: DispatchSeam>(
             responsibility_id.clone()
         }
     };
-    // Owning bot gone (deleted after firing): orphan, delete.
+    // Owning bot gone (deleted after firing): orphan, delete — recorded
+    // so the monitor's history shows the honest refusal.
     let bot_id = match event.bot_id.clone().or(monitor.bot_id.clone()) {
         Some(bot_id) => bot_id,
         None => {
-            delete_counted(db, &event.event_id, summary, DeleteBucket::Orphaned);
+            settle_event(
+                db,
+                event,
+                Verdict {
+                    responsibility_id: Some(&responsibility_id),
+                    run_id: None,
+                    detail: Some("no owning bot on the event or monitor"),
+                },
+                DeleteBucket::Orphaned,
+                now_ms,
+                summary,
+            );
             return;
         }
     };
@@ -697,7 +946,18 @@ fn drain_single_event<S: DispatchSeam>(
     let folder = match folder_lookup {
         Ok(Some(folder)) => folder,
         Ok(None) => {
-            delete_counted(db, &event.event_id, summary, DeleteBucket::Orphaned);
+            settle_event(
+                db,
+                event,
+                Verdict {
+                    responsibility_id: Some(&responsibility_id),
+                    run_id: None,
+                    detail: Some("bot home folder is gone"),
+                },
+                DeleteBucket::Orphaned,
+                now_ms,
+                summary,
+            );
             return;
         }
         Err(e) => {
@@ -718,9 +978,34 @@ fn drain_single_event<S: DispatchSeam>(
         &InvocationReason::ReactiveEvent(Some(event.event_id.clone())),
     );
     match gate {
-        Err(bots_policy::ResponsibilityLookupError::BotNotFound)
-        | Err(bots_policy::ResponsibilityLookupError::ResponsibilityNotFound) => {
-            delete_counted(db, &event.event_id, summary, DeleteBucket::Orphaned);
+        Err(bots_policy::ResponsibilityLookupError::BotNotFound) => {
+            settle_event(
+                db,
+                event,
+                Verdict {
+                    responsibility_id: Some(&responsibility_id),
+                    run_id: None,
+                    detail: Some("target bot no longer exists"),
+                },
+                DeleteBucket::Orphaned,
+                now_ms,
+                summary,
+            );
+            return;
+        }
+        Err(bots_policy::ResponsibilityLookupError::ResponsibilityNotFound) => {
+            settle_event(
+                db,
+                event,
+                Verdict {
+                    responsibility_id: Some(&responsibility_id),
+                    run_id: None,
+                    detail: Some("bound responsibility no longer exists"),
+                },
+                DeleteBucket::Orphaned,
+                now_ms,
+                summary,
+            );
             return;
         }
         Err(e) => {
@@ -728,13 +1013,37 @@ fn drain_single_event<S: DispatchSeam>(
             summary.failed += 1;
             return;
         }
-        Ok(
-            bots_policy::ResponsibilityDispatchAttempt::RefusedByResponsibility(_)
-            | bots_policy::ResponsibilityDispatchAttempt::RefusedByAutomation(_),
-        ) => {
-            // Disabled responsibility, unowned automation, or a reason the
-            // gate refuses: deterministic, so delete rather than spin.
-            delete_counted(db, &event.event_id, summary, DeleteBucket::Refused);
+        Ok(bots_policy::ResponsibilityDispatchAttempt::RefusedByResponsibility(refusal)) => {
+            // Disabled responsibility or a reason the gate refuses:
+            // deterministic, so delete rather than spin — with the gate's
+            // own reason as the honest, surfaced detail.
+            settle_event(
+                db,
+                event,
+                Verdict {
+                    responsibility_id: Some(&responsibility_id),
+                    run_id: None,
+                    detail: Some(&responsibility_refusal_detail(&refusal)),
+                },
+                DeleteBucket::Refused,
+                now_ms,
+                summary,
+            );
+            return;
+        }
+        Ok(bots_policy::ResponsibilityDispatchAttempt::RefusedByAutomation(refusal)) => {
+            settle_event(
+                db,
+                event,
+                Verdict {
+                    responsibility_id: Some(&responsibility_id),
+                    run_id: None,
+                    detail: Some(&automation_refusal_detail(&refusal)),
+                },
+                DeleteBucket::Refused,
+                now_ms,
+                summary,
+            );
             return;
         }
         Ok(bots_policy::ResponsibilityDispatchAttempt::Dispatched(
@@ -743,7 +1052,18 @@ fn drain_single_event<S: DispatchSeam>(
             // Unreachable for a reactive trigger (the pure gate never
             // delegates those to automation evaluation); treat as refused
             // rather than trusting an impossible dispatch.
-            delete_counted(db, &event.event_id, summary, DeleteBucket::Refused);
+            settle_event(
+                db,
+                event,
+                Verdict {
+                    responsibility_id: Some(&responsibility_id),
+                    run_id: None,
+                    detail: Some("gate returned an impossible automation dispatch"),
+                },
+                DeleteBucket::Refused,
+                now_ms,
+                summary,
+            );
             return;
         }
         Ok(bots_policy::ResponsibilityDispatchAttempt::Dispatched(
@@ -764,7 +1084,18 @@ fn drain_single_event<S: DispatchSeam>(
     };
     if used >= MAX_DELEGATIONS_PER_BOT_PER_DAY {
         capped.insert(bot_id);
-        delete_counted(db, &event.event_id, summary, DeleteBucket::CapExceeded);
+        settle_event(
+            db,
+            event,
+            Verdict {
+                responsibility_id: Some(&responsibility_id),
+                run_id: None,
+                detail: Some("per-day delegation cap already used"),
+            },
+            DeleteBucket::CapExceeded,
+            now_ms,
+            summary,
+        );
         return;
     }
     // Idempotency: the same event maps to the same run-row id, so a
@@ -787,7 +1118,18 @@ fn drain_single_event<S: DispatchSeam>(
         }
     };
     if already {
-        delete_counted(db, &event.event_id, summary, DeleteBucket::JoinedExisting);
+        settle_event(
+            db,
+            event,
+            Verdict {
+                responsibility_id: Some(&responsibility_id),
+                run_id: Some(&request_id),
+                detail: None,
+            },
+            DeleteBucket::JoinedExisting,
+            now_ms,
+            summary,
+        );
         return;
     }
     // Resolve the run context from durable rows only: the bot's own
@@ -799,7 +1141,18 @@ fn drain_single_event<S: DispatchSeam>(
             Ok(Some(bot)) => bot,
             Ok(None) => {
                 drop(conn);
-                delete_counted(db, &event.event_id, summary, DeleteBucket::Orphaned);
+                settle_event(
+                    db,
+                    event,
+                    Verdict {
+                        responsibility_id: Some(&responsibility_id),
+                        run_id: None,
+                        detail: Some("target bot no longer exists"),
+                    },
+                    DeleteBucket::Orphaned,
+                    now_ms,
+                    summary,
+                );
                 return;
             }
             Err(e) => {
@@ -812,7 +1165,18 @@ fn drain_single_event<S: DispatchSeam>(
             Ok(Some(workspace_id)) => workspace_id,
             Ok(None) => {
                 drop(conn);
-                delete_counted(db, &event.event_id, summary, DeleteBucket::Refused);
+                settle_event(
+                    db,
+                    event,
+                    Verdict {
+                        responsibility_id: Some(&responsibility_id),
+                        run_id: None,
+                        detail: Some("bot workspace row is gone"),
+                    },
+                    DeleteBucket::Refused,
+                    now_ms,
+                    summary,
+                );
                 return;
             }
             Err(e) => {
@@ -829,14 +1193,36 @@ fn drain_single_event<S: DispatchSeam>(
         .find(|r| r.id == responsibility_id)
     else {
         // Raced a responsibility delete between the gate and now: orphan.
-        delete_counted(db, &event.event_id, summary, DeleteBucket::Orphaned);
+        settle_event(
+            db,
+            event,
+            Verdict {
+                responsibility_id: Some(&responsibility_id),
+                run_id: None,
+                detail: Some("bound responsibility no longer exists"),
+            },
+            DeleteBucket::Orphaned,
+            now_ms,
+            summary,
+        );
         return;
     };
     if !matches!(
         responsibility.trigger,
         ResponsibilityTrigger::Reactive { .. }
     ) {
-        delete_counted(db, &event.event_id, summary, DeleteBucket::Refused);
+        settle_event(
+            db,
+            event,
+            Verdict {
+                responsibility_id: Some(&responsibility_id),
+                run_id: None,
+                detail: Some("bound responsibility is not reactive"),
+            },
+            DeleteBucket::Refused,
+            now_ms,
+            summary,
+        );
         return;
     }
     let overrides = bots_policy::harness_overrides(&bot);
@@ -868,8 +1254,8 @@ fn drain_single_event<S: DispatchSeam>(
     // No database guard held across the seam call.
     let outcome = runner::dispatch_run_plan(seam, &plan);
     let (host_observation, ended_at, _) = projection_of(&outcome, now_ms, now_ms);
-    // Claim = delete, in the SAME transaction as the run row and the cap
-    // bump: all three commit together or none do.
+    // Claim = delete, in the SAME transaction as the run row, the firing
+    // evidence, and the cap bump: all four commit together or none do.
     let record = (|| -> Result<()> {
         let conn = db.lock().unwrap();
         let tx = crate::automations::storage::begin_immediate(&conn)?;
@@ -887,13 +1273,22 @@ fn drain_single_event<S: DispatchSeam>(
                 ended_at,
                 recipe: None,
                 host_observation,
-                // An explicit daemon invocation with a reactive-event
-                // reason — the `Manual` display bucket covers exactly this
-                // (never a schedule fire).
-                invocation: Some(ResponsibilityRunInvocation::Manual),
+                // A monitor event released this run — never a schedule
+                // fire, never a human click. The history's own bucket
+                // keeps that distinction honest.
+                invocation: Some(ResponsibilityRunInvocation::Reactive),
             },
         )
         .map_err(|e| DelegationError::Storage(format!("run record failed: {e}")))?;
+        record_firing_in_tx(
+            &tx,
+            event,
+            Some(&responsibility_id),
+            Some(&request_id),
+            None,
+            "dispatched",
+            now_ms,
+        )?;
         delete_event(&tx, &event.event_id)?;
         bump_delegation_count(&tx, &bot_id, day_utc)?;
         tx.commit()?;

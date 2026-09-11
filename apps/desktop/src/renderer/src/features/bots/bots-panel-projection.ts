@@ -55,17 +55,21 @@ export type BotsPanelHistoryRow = {
   automationName: string | null;
   automationRunNumber: number | null;
   automationRunStatus: string | null;
-  triggerLabel: "Scheduled" | "Manual";
+  triggerLabel: "Scheduled" | "Manual" | "Monitor event";
 };
 
 /** Display label for how a history run was invoked. A `null` invocation
  *  predates native's stamp, and every such row was recorded through
  *  `bot.run` (the scheduler never wrote responsibility runs), so `null`
- *  reads as manual -- never invented, just the only possible origin. */
+ *  reads as manual -- never invented, just the only possible origin. A
+ *  `reactive` row was released by a monitor event through the delegation
+ *  drain — neither a schedule fire nor a human click. */
 export function historyTriggerLabel(
   invocation: BotsPanelHistoryEntry["run"]["invocation"],
-): "Scheduled" | "Manual" {
-  return invocation === "scheduled" ? "Scheduled" : "Manual";
+): "Scheduled" | "Manual" | "Monitor event" {
+  if (invocation === "scheduled") return "Scheduled";
+  if (invocation === "reactive") return "Monitor event";
+  return "Manual";
 }
 
 export function botDescription(
