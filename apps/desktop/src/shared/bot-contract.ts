@@ -167,6 +167,12 @@ export interface BotBridge {
   /** Bots-page monitor read (this task): optional like every other
    *  additive method so older callers keep compiling. */
   botMonitorList?(input: BotMonitorListInput): Promise<Result<BotMonitorListResult>>;
+  /** Bots-page parked-watch approval: arms the monitor's CURRENT rule
+   *  text through the daemon's hash-bound `bot.monitor_approve` — the
+   *  same approval the CLI sends, never a second path. */
+  botMonitorApprove?(
+    input: BotMonitorApproveInput,
+  ): Promise<Result<BotMonitorApproveResult>>;
 }
 
 // R7-E additive types: a scheduled responsibility is an automation owned by
@@ -252,6 +258,10 @@ export type BotMonitorView = {
   trigger: { kind: "manual" } | { kind: "scheduled"; cron: string };
   consecutiveErrors: number;
   lastError: string | null;
+  /** An informational note about the newest committed check — the
+   *  baseline seed, for example. NOT an error: the daemon stores the
+   *  first-observation note here so no consumer paints it red. */
+  lastNotice: string | null;
   failureThreshold: number;
   lastCheckAtMs: number | null;
   lastCheckOutcome: "no_change" | "changed" | "error" | null;
@@ -260,8 +270,9 @@ export type BotMonitorView = {
   /** The monitor's own firing history: what its last change event did
    *  through the delegation chain (null = never released an action). */
   firing: BotMonitorFiringView | null;
-  /** Rule-kind summary fields (resource, maxBytes, scriptPath, …) —
-   *  display-only, keyed by what native's `summary_json` flattened in. */
+  /** Rule-kind summary fields (resource, maxBytes, scriptPath, repo,
+   *  filter, login, urlHash, …) — display-only, keyed by what native's
+   *  `summary_json` flattened in. */
   [summaryField: string]: unknown;
 };
 
@@ -280,6 +291,11 @@ export type BotMonitorFiringView = {
     | "stale_skipped";
   lastRunId: string | null;
   lastDetail: string | null;
+  /** The released case's own resource (`pull/42` for a pull-request
+   *  watch, the watched path for a file watch) — WHAT the firing
+   *  released. Null on evidence rows written before the daemon's
+   *  delegation schema version 3. */
+  lastResource: string | null;
   lastAtMs: number;
   countToday: number;
 };
@@ -293,6 +309,23 @@ export type BotMonitorListResult = {
   workspaceId: string;
   botId: string;
   monitors: BotMonitorView[];
+};
+
+// Parked-watch approval (the product path a `bot watch-pr` monitor
+// needs): arms the monitor's CURRENT rule text — the daemon re-derives
+// the approval hash from the stored rule, so this approves exactly what
+// the parked card disclosed, nothing else. Result is lean; callers
+// re-read the full monitor via `botMonitorList`.
+export type BotMonitorApproveInput = BotScope & {
+  botId: string;
+  monitorId: string;
+};
+
+export type BotMonitorApproveResult = BotScope & {
+  botId: string;
+  monitorId: string;
+  approved: boolean;
+  approvalHash: string;
 };
 
 export type BotsPanelHostObservation = "live" | "unverifiable" | "exited";

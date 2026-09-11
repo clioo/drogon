@@ -212,6 +212,20 @@ describe("gated bot bridge (R2-S: botCreate/botRun/botHistory/read)", () => {
           result: { ...scope, botId: "bot-1", messages: [] },
         };
       },
+      botMonitorApprove: async () => {
+        calls.push("botMonitorApprove");
+        return {
+          ok: true as const,
+          result: {
+            hostId: scope.hostId,
+            workspaceId: scope.workspaceId,
+            botId: "bot-1",
+            monitorId: "mon-1",
+            approved: true,
+            approvalHash: "hash-1",
+          },
+        };
+      },
       read: async () => {
         calls.push("read");
         return {
@@ -234,10 +248,18 @@ describe("gated bot bridge (R2-S: botCreate/botRun/botHistory/read)", () => {
     const create = await gated.botCreate?.({} as never);
     const run = await gated.botRun?.(runInput);
     const history = await gated.botHistory?.({ ...scope, botId: "bot-1" });
+    const approve = await gated.botMonitorApprove?.({
+      hostId: scope.hostId,
+      workspaceId: scope.workspaceId,
+      botId: "bot-1",
+      monitorId: "mon-1",
+    });
     expect(create?.ok).toBe(false);
     expect(run?.ok).toBe(false);
     expect(history?.ok).toBe(false);
+    expect(approve?.ok).toBe(false);
     if (!create?.ok) expect(create?.error.code).toBe("unsupported_capability");
+    if (!approve?.ok) expect(approve?.error.code).toBe("unsupported_capability");
     expect(calls).toEqual([]);
   });
 
@@ -248,6 +270,39 @@ describe("gated bot bridge (R2-S: botCreate/botRun/botHistory/read)", () => {
     await gated.botRun?.(runInput);
     await gated.botHistory?.({ ...scope, botId: "bot-1" });
     expect(calls).toEqual(["botCreate", "botRun", "botHistory"]);
+  });
+
+  it("the parked-watch approval rides the same fail-closed gate: pass-through while allowed, unsupported_method when the source lacks it, never a second path", async () => {
+    // Allowed: reaches the source (the daemon's hash-bound approval).
+    const calls: string[] = [];
+    const gated = createGatedBotBridge(fullSource(calls), () => true);
+    const approved = await gated.botMonitorApprove?.({
+      hostId: scope.hostId,
+      workspaceId: scope.workspaceId,
+      botId: "bot-1",
+      monitorId: "mon-1",
+    });
+    expect(approved?.ok).toBe(true);
+    expect(calls).toEqual(["botMonitorApprove"]);
+    // A source without the method (an older preload) reports unsupported,
+    // never a silent fake success.
+    const gate = createGatedBotBridge(
+      {
+        botSnapshot: async () => ({
+          ok: true as const,
+          result: { ...scope, ...emptySnapshot },
+        }),
+      },
+      () => true,
+    );
+    const missing = await gate.botMonitorApprove?.({
+      hostId: scope.hostId,
+      workspaceId: scope.workspaceId,
+      botId: "bot-1",
+      monitorId: "mon-1",
+    });
+    expect(missing?.ok).toBe(false);
+    if (!missing?.ok) expect(missing?.error.code).toBe("unsupported_method");
   });
 
   it("passes read through ungated even while the capability is withheld", async () => {

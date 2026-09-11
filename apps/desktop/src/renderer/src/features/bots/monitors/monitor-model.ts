@@ -7,6 +7,7 @@
 export const MONITOR_RULE_KIND = "local_file_digest.v1" as const;
 export const MONITOR_RULE_KIND_SCRIPT = "script_command.v1" as const;
 export const MONITOR_RULE_KIND_HTTP_POLL = "http_poll.v1" as const;
+export const MONITOR_RULE_KIND_GITHUB_PR = "github_pr.v1" as const;
 export const MONITOR_RESULT_SCHEMA_VERSION = 1;
 export const MAX_MONITOR_FILE_BYTES = 256 * 1024;
 export const MAX_MONITOR_PATH_BYTES = 1024;
@@ -16,8 +17,20 @@ export const MAX_MONITOR_PATH_BYTES = 1024;
  * daemon before the UI that renders them ships, so anything outside this
  * set must fail CLOSED: it is never approved or run blindly from an old
  * UI. Widening this set is an explicit UI change, not a silent fallback.
+ *
+ * Drift guard: every kind the DAEMON accepts and this renderer can
+ * render/manage must be here. `monitor-model.test.ts` derives the
+ * daemon's accepted set from the Rust source (`rule.rs`) and fails this
+ * suite if a kind ships daemon-side without being admitted here — a
+ * drift between the two lists is exactly what disowned the shipped
+ * `github_pr.v1` watch in its own UI.
  */
-export const SUPPORTED_MONITOR_RULE_KINDS: readonly string[] = [MONITOR_RULE_KIND];
+export const SUPPORTED_MONITOR_RULE_KINDS: readonly string[] = [
+  MONITOR_RULE_KIND,
+  MONITOR_RULE_KIND_SCRIPT,
+  MONITOR_RULE_KIND_HTTP_POLL,
+  MONITOR_RULE_KIND_GITHUB_PR,
+];
 
 export function monitorRuleKindSupported(ruleKind: string): boolean {
   return SUPPORTED_MONITOR_RULE_KINDS.includes(ruleKind);
@@ -130,6 +143,32 @@ export function monitorStatusLabel(record: MonitorRecordView): string {
   if (record.lastError) return "Error";
   if (record.cursor) return "Watching";
   return "New";
+}
+
+/**
+ * The watched resource, honest per rule kind. Never the bare rule kind
+ * for a kind this renderer understands: a file watch shows its path, a
+ * pull-request watch shows its repository, a script watch shows its
+ * script path. A kind whose resource this view genuinely does not carry
+ * (an http poll's URL is sealed daemon-side, only its hash travels) says
+ * so in words rather than printing an internal token. Unknown kinds keep
+ * the fail-closed fallback: the rule kind itself.
+ */
+export function monitorResourceLabel(
+  record: Pick<MonitorRecordView, "ruleKind" | "resource">,
+): string {
+  switch (record.ruleKind) {
+    case MONITOR_RULE_KIND:
+      return record.resource || "file watch (no path recorded)";
+    case MONITOR_RULE_KIND_SCRIPT:
+      return "script command watch";
+    case MONITOR_RULE_KIND_HTTP_POLL:
+      return "http poll (URL sealed by the daemon)";
+    case MONITOR_RULE_KIND_GITHUB_PR:
+      return "GitHub pull-request watch";
+    default:
+      return record.ruleKind;
+  }
 }
 
 /**

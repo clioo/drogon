@@ -113,6 +113,13 @@ export function createGatedBotBridge(
       isAllowed()
         ? (source.botMonitorList?.(input) ?? notImplemented())
         : refused(),
+    // Parked-watch approval (the product path a `bot watch-pr` monitor
+    // needs) — same fail-closed gate as the monitor read: the daemon's
+    // hash-bound `bot.monitor_approve`, never a second approval path.
+    botMonitorApprove: (input) =>
+      isAllowed()
+        ? (source.botMonitorApprove?.(input) ?? notImplemented())
+        : refused(),
   };
   if (source.read) gated.read = source.read;
   return gated;

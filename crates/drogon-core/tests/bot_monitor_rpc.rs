@@ -160,6 +160,43 @@ fn create_stages_parked_and_approve_arms() {
 }
 
 #[test]
+fn approve_from_the_app_global_page_resolves_the_owning_workspace() {
+    // The Bots page is app-global: its monitor READ admits `workspaceId:
+    // ""` and resolves the bot's OWNING workspace (the same authoritative
+    // routing `bot.run` uses). The page's parked-watch APPROVAL rides the
+    // exact same resolution — the product's approval affordance would be a
+    // dead end if the read admitted the sentinel and the approve refused
+    // it. The resolved scope is echoed so the desktop's gate can verify
+    // what answered.
+    let fixture = Fixture::new();
+    fixture.create(
+        "m-create",
+        json!({
+            "monitorId": "mon-1",
+            "resource": "notes/status.md",
+            "responsibilityName": "triage",
+            "instructions": "Triage the change.",
+        }),
+    );
+    let mut params = fixture.scope();
+    params["workspaceId"] = json!("");
+    params["monitorId"] = json!("mon-1");
+    let approved = ok(
+        fixture
+            .engine
+            .dispatch(request("m-approve-global", "bot.monitor_approve", params)),
+    );
+    assert_eq!(approved["approved"], true, "{approved:?}");
+    // The echo names the RESOLVED workspace — a real id, never the sentinel.
+    assert_eq!(approved["workspaceId"], fixture.workspace_id);
+    assert_eq!(approved["hostId"], fixture.host_id);
+    assert_eq!(approved["botId"], fixture.bot_id);
+    assert_eq!(approved["monitorId"], "mon-1");
+    assert!(approved["approvalHash"].as_str().unwrap().len() == 64);
+    assert_eq!(fixture.list()["monitors"][0]["approved"], true);
+}
+
+#[test]
 fn create_refuses_unknown_and_scheduled_bindings() {
     let fixture = Fixture::new();
     // Unknown responsibility id.

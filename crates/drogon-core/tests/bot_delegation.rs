@@ -722,24 +722,93 @@ fn disabled_responsibility_refuses_without_spinning() {
 }
 
 #[test]
-fn deleted_monitor_leaves_its_event_untouched() {
+fn deleting_a_monitor_settles_its_queued_event_with_a_visible_orphaned_verdict() {
+    // The bar: a queued event must never sit where nothing will ever
+    // happen to it and nothing tells the owner so. Deleting a monitor
+    // settles its queued outbox events AT DELETE TIME: the receipt names
+    // them, the rows are gone, and a durable firing row records the
+    // honest reason (the drain's own orphaned path covers the reverse
+    // race — an event queued after the monitor row is gone).
+    let fixture = Fixture::new();
+    provision_home(&fixture);
+    let now = Fixture::now_ms();
+    let event_id = fixture.enqueue(1, now);
+    let deleted = ok(fixture._engine.dispatch(request(
+        "self-delete-monitor",
+        "bot.self_delete_monitor",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+            "actorBotId": fixture.bot_id,
+            "monitorId": fixture.monitor_id,
+        }),
+    )));
+    assert_eq!(deleted["removed"], true);
+    assert_eq!(
+        deleted["abandonedEvents"], 1,
+        "the receipt tells the owner at the decision moment: {deleted}"
+    );
+    assert_eq!(deleted["abandonedEventIds"][0], json!(event_id));
+    assert_eq!(fixture.outbox_len(), 0, "nothing is left queued forever");
+    let drained = fixture.drain(now);
+    assert_eq!(drained.claimed, 0, "the drain has nothing left to pick up");
+    // The visible truthful record survives the monitor's deletion: an
+    // `orphaned` firing row with the reason, never a silent drop.
+    let conn = fixture.conn();
+    let row: (String, String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT outcome, detail, run_id, resource FROM bot_monitor_firings
+             WHERE event_id = ?1",
+            params![event_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(row.0, "orphaned");
+    assert!(
+        row.1.contains("monitor deleted before its queued event"),
+        "the recorded reason is honest: {}",
+        row.1
+    );
+    assert_eq!(row.2, None, "no run was invented for an abandoned event");
+    assert_eq!(
+        row.3.as_deref(),
+        Some(RESOURCE),
+        "the abandoned event still names what it would have released"
+    );
+}
+
+#[test]
+fn an_event_queued_after_its_monitor_was_deleted_is_orphaned_by_the_drain() {
     use drogon_core::bots::monitors::storage as mstorage;
 
-    // The peek join admits only events whose monitor exists and is bound:
-    // deleting the monitor removes the event from the drain's universe
-    // (no dispatch, no delete — the row is another lane's evidence).
+    // The reverse race: the monitor row goes away BETWEEN the queue and
+    // the drain (a producer tick that read the monitor before the delete
+    // commits after it). The LEFT-JOIN peek must still REACH the event
+    // and settle it with a visible, truthful verdict — never leave it in
+    // a state where nothing will ever happen to it.
     let fixture = Fixture::new();
     let now = Fixture::now_ms();
-    fixture.enqueue(1, now);
+    let event_id = fixture.enqueue(1, now);
     {
         let conn = fixture.conn();
         assert!(mstorage::delete_monitor(&conn, &fixture.monitor_id).unwrap());
     }
     let drained = fixture.drain(now);
-    assert_eq!(drained.claimed, 0, "orphan is not even peeked: {drained:?}");
+    assert_eq!(drained.orphaned, 1, "the orphan is reached: {drained:?}");
     assert_eq!(drained.dispatched, 0);
     assert_eq!(fixture.seam.dispatch_count(), 0);
-    assert_eq!(fixture.outbox_len(), 1, "orphan row left for its owner");
+    assert_eq!(fixture.outbox_len(), 0, "a terminal verdict never retries");
+    let conn = fixture.conn();
+    let row: (String, String) = conn
+        .query_row(
+            "SELECT outcome, detail FROM bot_monitor_firings WHERE event_id = ?1",
+            params![event_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(row.0, "orphaned");
+    assert_eq!(row.1, "monitor row is gone");
 }
 
 #[test]
@@ -778,6 +847,107 @@ fn worktree_names_are_deterministic_and_branch_safe() {
         a,
         worktree_name_for_event("mev_fedcba9876543210fedcba9876543210")
     );
+}
+
+#[test]
+fn pr_case_worktree_names_are_case_scoped_and_stable() {
+    use drogon_core::bots::delegation::worktree_name_for_pr_case;
+    let a = worktree_name_for_pr_case(17, "clioo/drogon");
+    assert_eq!(a, "review-pr-17-clioo-drogon");
+    // A redelivery of the same case reuses the exact name.
+    assert_eq!(a, worktree_name_for_pr_case(17, "clioo/drogon"));
+    // Two different repositories sharing a PR number never collapse into
+    // one worktree.
+    assert_ne!(a, worktree_name_for_pr_case(17, "clioo/other"));
+    // Branch-safe: the slug is alphanumeric and dashes only.
+    assert!(a.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'));
+}
+
+#[test]
+fn delegation_identity_is_the_case_for_pull_requests_and_the_event_otherwise() {
+    use drogon_core::bots::delegation::{DelegationEvent, delegation_identity};
+    let base = DelegationEvent {
+        event_id: "mev_a".to_string(),
+        monitor_id: "mon-1".to_string(),
+        monitor_version: 1,
+        cursor: "v1:aa".to_string(),
+        host_id: "h".to_string(),
+        project_id: "p".to_string(),
+        resource: "pull/17".to_string(),
+        bot_id: Some("bot-1".to_string()),
+        observed_at_ms: 1.0,
+    };
+    // Two DIFFERENT events (two watches) for the same PR case share one
+    // identity: the second release joins the first run.
+    let mut other = base.clone();
+    other.event_id = "mev_b".to_string();
+    assert_eq!(
+        delegation_identity(&base, Some("clioo/drogon"), Some(17)),
+        delegation_identity(&other, Some("clioo/drogon"), Some(17))
+    );
+    // A different repo (or number) is a different case, and a non-PR
+    // event keeps its own event id as the identity.
+    assert_ne!(
+        delegation_identity(&base, Some("clioo/drogon"), Some(17)),
+        delegation_identity(&base, Some("clioo/other"), Some(17))
+    );
+    assert_ne!(
+        delegation_identity(&base, Some("clioo/drogon"), Some(17)),
+        delegation_identity(&base, Some("clioo/drogon"), Some(18))
+    );
+    assert_eq!(delegation_identity(&base, None, None), base.event_id);
+}
+
+#[test]
+fn a_version_2_database_gains_the_firing_resource_column_in_place() {
+    // Schema version 3 is additive: databases that already carry the
+    // version-2 firing table gain the released case's `resource` column
+    // via ALTER (never a rebuild), rows written before the upgrade keep
+    // NULL, and the recorded component version advances.
+    let dir = tempfile::tempdir().unwrap();
+    let conn = Connection::open(dir.path().join("drogon.db")).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_versions (
+            component TEXT PRIMARY KEY,
+            version INTEGER NOT NULL
+        );
+        CREATE TABLE bot_monitor_firings (
+            event_id TEXT PRIMARY KEY,
+            monitor_id TEXT NOT NULL,
+            bot_id TEXT,
+            responsibility_id TEXT,
+            outcome TEXT NOT NULL,
+            run_id TEXT,
+            detail TEXT,
+            at_ms REAL NOT NULL
+        );
+        INSERT INTO schema_versions(component, version) VALUES ('bot_delegation', 2);
+        INSERT INTO bot_monitor_firings
+            (event_id, monitor_id, outcome, at_ms)
+            VALUES ('mev_old', 'mon-1', 'dispatched', 1.0);",
+    )
+    .unwrap();
+    drogon_core::bots::delegation::migrate(&conn).unwrap();
+    let version: i64 = conn
+        .query_row(
+            "SELECT version FROM schema_versions WHERE component = 'bot_delegation'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, drogon_core::bots::delegation::DELEGATION_SCHEMA_VERSION);
+    // The pre-upgrade row survives with a NULL resource — the view must
+    // never fabricate a case for evidence written before the column.
+    let resource: Option<String> = conn
+        .query_row(
+            "SELECT resource FROM bot_monitor_firings WHERE event_id = 'mev_old'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(resource, None);
+    // Re-running the migration is idempotent (the pragma guard).
+    drogon_core::bots::delegation::migrate(&conn).unwrap();
 }
 
 #[test]

@@ -380,6 +380,10 @@ export const botMonitorListResultSchema = z.object({
         ]),
         consecutiveErrors: z.number().int().nonnegative(),
         lastError: z.string().nullable(),
+        // Informational note about the newest committed check (the
+        // baseline seed, for example) — deliberately NOT inside
+        // `lastError`, so no consumer paints normal operation red.
+        lastNotice: z.string().nullable(),
         // Durable check evidence projected by native (never UI-derived).
         failureThreshold: z.number().int().nonnegative(),
         lastCheckAtMs: timestamp.nullable(),
@@ -407,6 +411,10 @@ export const botMonitorListResultSchema = z.object({
             ]),
             lastRunId: z.string().nullable(),
             lastDetail: z.string().nullable(),
+            // The released case's own resource (`pull/42` for a
+            // pull-request watch): WHAT the firing released. Null on
+            // pre-version-3 evidence rows.
+            lastResource: z.string().nullable(),
             lastAtMs: timestamp,
             countToday: z.number().int().nonnegative(),
           })
@@ -417,4 +425,31 @@ export const botMonitorListResultSchema = z.object({
       // unknown kinds must stay visible, so the summary stays open.
       .passthrough(),
   ),
+});
+
+// Parked-watch approval (`bot.monitor_approve`): the product path a
+// `bot watch-pr` monitor needs. `workspaceId` admits the "" app-global
+// sentinel exactly like the monitor read — native resolves the bot's
+// owning workspace and echoes the RESOLVED id, so the dispatcher's echo
+// gate demands a real workspace id back. The daemon re-derives the
+// approval hash from the monitor's CURRENT stored rule text.
+export const botMonitorApproveInputSchema = z
+  .object({
+    hostId: id,
+    workspaceId: z
+      .string()
+      .max(128)
+      .regex(/^[^\x00-\x1f\x7f]*$/u),
+    botId: id,
+    monitorId: id,
+  })
+  .strict();
+
+export const botMonitorApproveResultSchema = z.object({
+  hostId: id,
+  botId: id,
+  workspaceId: id,
+  monitorId: id,
+  approved: z.boolean(),
+  approvalHash: z.string(),
 });

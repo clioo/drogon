@@ -68,7 +68,11 @@ use crate::bots::records::{
 use crate::bots::storage as bots_storage;
 
 pub const DELEGATION_SCHEMA_COMPONENT: &str = "bot_delegation";
-pub const DELEGATION_SCHEMA_VERSION: i64 = 2;
+/// Version 3: the firing evidence gains the released case's resource
+/// (`pull/<n>` for a pull-request watch, the path for a file watch) so
+/// the product can name WHAT a firing released — additive, old rows keep
+/// NULL.
+pub const DELEGATION_SCHEMA_VERSION: i64 = 3;
 
 /// A stale outbox event is skipped, never caught up: past this age an event
 /// describes a world the daemon was not watching, and dispatching it would
@@ -171,7 +175,8 @@ fn create_tables(tx: &Transaction) -> Result<()> {
             outcome TEXT NOT NULL,
             run_id TEXT,
             detail TEXT,
-            at_ms REAL NOT NULL
+            at_ms REAL NOT NULL,
+            resource TEXT
         );",
     )?;
     Ok(())
@@ -191,6 +196,19 @@ fn apply_schema_in_tx(tx: &Transaction) -> Result<()> {
         )
         .optional()?;
     create_tables(tx)?;
+    // Additive version-2 → version-3 step for databases that already
+    // have the firing table: the released case's resource column. Fresh
+    // databases got it from CREATE above; the pragma guard keeps the
+    // ALTER idempotent.
+    let has_resource: bool = tx
+        .prepare(
+            "SELECT 1 FROM pragma_table_info('bot_monitor_firings')
+             WHERE name = 'resource' LIMIT 1",
+        )?
+        .exists([])?;
+    if !has_resource {
+        tx.execute_batch("ALTER TABLE bot_monitor_firings ADD COLUMN resource TEXT;")?;
+    }
     match existing {
         None => {
             tx.execute(
@@ -260,11 +278,18 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 /// event behind the per-tick bound. Rows whose payload no longer parses
 /// (or whose id disagrees with its own payload) come back as poison the
 /// caller orphans instead of retrying forever.
+///
+/// LEFT JOIN (not an inner join): an event whose monitor was deleted
+/// after it was queued is still PEEKED — the drain reaches it and settles
+/// it as a visible, durable `orphaned` verdict instead of leaving it in a
+/// state where nothing will ever happen to it and nothing tells the owner
+/// so. The same join keeps live unbound rows excluded.
 fn peek_oldest(conn: &Connection, limit: usize) -> Result<Vec<PeekedEvent>> {
     let mut stmt = conn.prepare(
         "SELECT e.event_id, e.payload_json FROM bot_monitor_events e
-         JOIN bot_monitors m ON m.id = e.monitor_id
-         WHERE json_extract(m.payload_json, '$.inferencePolicy.kind')
+         LEFT JOIN bot_monitors m ON m.id = e.monitor_id
+         WHERE m.id IS NULL
+            OR json_extract(m.payload_json, '$.inferencePolicy.kind')
                = 'explicit_responsibility'
          ORDER BY e.at, e.rowid LIMIT ?1",
     )?;
@@ -347,6 +372,11 @@ pub struct FiringEvidence {
     pub outcome: String,
     pub run_id: Option<String>,
     pub detail: Option<String>,
+    /// The released case's own resource (`pull/<n>` for a pull-request
+    /// watch, the watched path for a file watch): the product names WHAT
+    /// a firing released, never the bare rule kind. NULL on rows written
+    /// before version 3.
+    pub resource: Option<String>,
     pub at_ms: f64,
     /// Firings recorded for this monitor since the start of its bot's
     /// current UTC day (honest cost share of the bot-wide cap).
@@ -364,15 +394,16 @@ fn record_firing_in_tx(
 ) -> Result<()> {
     tx.execute(
         "INSERT INTO bot_monitor_firings
-             (event_id, monitor_id, bot_id, responsibility_id, outcome, run_id, detail, at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             (event_id, monitor_id, bot_id, responsibility_id, outcome, run_id, detail, at_ms, resource)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(event_id) DO UPDATE SET
              bot_id = excluded.bot_id,
              responsibility_id = excluded.responsibility_id,
              outcome = excluded.outcome,
              run_id = excluded.run_id,
              detail = excluded.detail,
-             at_ms = excluded.at_ms",
+             at_ms = excluded.at_ms,
+             resource = excluded.resource",
         params![
             event.event_id,
             event.monitor_id,
@@ -381,7 +412,15 @@ fn record_firing_in_tx(
             outcome,
             run_id,
             detail,
-            now_ms
+            now_ms,
+            // An empty resource (a synthesized verdict event with nothing
+            // parseable left) persists as NULL, never a blank string the
+            // UI could render as if it were the resource.
+            if event.resource.is_empty() {
+                None
+            } else {
+                Some(event.resource.as_str())
+            },
         ],
     )?;
     Ok(())
@@ -410,6 +449,79 @@ fn record_firing(
     Ok(())
 }
 
+/// Settle every queued outbox event of a monitor being deleted: one
+/// durable firing row per event (outcome `orphaned`, the honest reason)
+/// and the outbox rows deleted, all inside the caller's transaction.
+/// The bar: an event must never sit where nothing will ever happen to it
+/// and nothing tells the owner so — deletion settles its events AT DELETE
+/// TIME with a recorded reason, and the drain's own orphaned path covers
+/// the reverse race (an event queued after the monitor row is gone).
+/// Returns the settled event ids for the delete receipt. Tolerant of a
+/// missing outbox table (databases that predate the component) and of
+/// unparseable payloads (still settled: the row id is enough evidence).
+pub fn settle_events_of_deleted_monitor_in_tx(
+    tx: &Transaction,
+    monitor_id: &str,
+    now_ms: f64,
+) -> Result<Vec<String>> {
+    let has_table = tx
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1")
+        .and_then(|mut stmt| stmt.exists(params!["bot_monitor_events"]))
+        .unwrap_or(false);
+    if !has_table {
+        return Ok(Vec::new());
+    }
+    let rows = {
+        let mut stmt = tx.prepare(
+            "SELECT event_id, payload_json FROM bot_monitor_events
+             WHERE monitor_id = ?1 ORDER BY at, rowid",
+        )?;
+        stmt.query_map(params![monitor_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    let mut settled = Vec::new();
+    for (event_id, payload_json) in rows {
+        let parsed = serde_json::from_str::<DelegationEvent>(&payload_json).ok();
+        let firing_event = DelegationEvent {
+            event_id: event_id.clone(),
+            monitor_id: monitor_id.to_string(),
+            monitor_version: parsed.as_ref().map(|e| e.monitor_version).unwrap_or(0),
+            cursor: parsed
+                .as_ref()
+                .map(|e| e.cursor.clone())
+                .unwrap_or_default(),
+            host_id: parsed
+                .as_ref()
+                .map(|e| e.host_id.clone())
+                .unwrap_or_default(),
+            project_id: parsed
+                .as_ref()
+                .map(|e| e.project_id.clone())
+                .unwrap_or_default(),
+            resource: parsed
+                .as_ref()
+                .map(|e| e.resource.clone())
+                .unwrap_or_default(),
+            bot_id: parsed.as_ref().and_then(|e| e.bot_id.clone()),
+            observed_at_ms: parsed.as_ref().map(|e| e.observed_at_ms).unwrap_or(now_ms),
+        };
+        record_firing_in_tx(
+            tx,
+            &firing_event,
+            None,
+            None,
+            Some("monitor deleted before its queued event could be dispatched"),
+            DeleteBucket::Orphaned.outcome_str(),
+            now_ms,
+        )?;
+        delete_event(tx, &event_id)?;
+        settled.push(event_id);
+    }
+    Ok(settled)
+}
+
 /// Firing evidence for one monitor, for `bot.monitor_list` and the
 /// self-lane list: the newest verdict plus today's count. Empty (zero)
 /// when the monitor never released an action — an honest absence, never
@@ -421,7 +533,7 @@ pub fn firing_evidence_for_monitor(
 ) -> Option<FiringEvidence> {
     let read = || -> Result<Option<FiringEvidence>> {
         let mut stmt = conn.prepare(
-            "SELECT event_id, outcome, run_id, detail, at_ms FROM bot_monitor_firings
+            "SELECT event_id, outcome, run_id, detail, at_ms, resource FROM bot_monitor_firings
              WHERE monitor_id = ?1
              ORDER BY at_ms DESC, rowid DESC LIMIT 1",
         )?;
@@ -434,6 +546,7 @@ pub fn firing_evidence_for_monitor(
                     run_id: r.get(2)?,
                     detail: r.get(3)?,
                     at_ms: r.get(4)?,
+                    resource: r.get(5)?,
                     count_today: 0,
                 })
             })
@@ -561,6 +674,42 @@ pub fn worktree_name_for_event(event_id: &str) -> String {
         .take(8)
         .collect();
     format!("deleg-{hex}")
+}
+
+/// Deterministic worktree name for a pull-request case. The case is the
+/// (repository, pull number) pair — NOT the pull number alone — so two
+/// different repositories sharing a PR number never collapse into one
+/// worktree, and a redelivered event for the same case reuses the name
+/// instead of creating a second worktree.
+pub fn worktree_name_for_pr_case(pull_number: u64, repo: &str) -> String {
+    let slug: String = repo
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("review-pr-{pull_number}-{slug}")
+}
+
+/// The idempotency identity of one delegation: the CASE when the event is
+/// a pull-request release (repository + pull number), else the event id.
+/// Keying on the case means a second watch releasing the same PR joins
+/// the existing run instead of racing it for the same worktree name; a
+/// redelivered event still produces the same identity (same case), so the
+/// proven replay/restart exactly-once behaviour is unchanged.
+pub fn delegation_identity(
+    event: &DelegationEvent,
+    case_repo: Option<&str>,
+    case_pull_number: Option<u64>,
+) -> String {
+    match (case_repo, case_pull_number) {
+        (Some(repo), Some(number)) => format!("pr-case:{repo}:{number}"),
+        _ => event.event_id.clone(),
+    }
 }
 
 /// The idempotency key for one delegation: the same event always produces
@@ -965,6 +1114,27 @@ fn drain_single_event<S: DispatchSeam>(
             responsibility_id.clone()
         }
     };
+    // The case fields come from the monitor rule (approval-hashed) when
+    // the watch is a `github_pr.v1` one; a file watch has none. Computed
+    // once, BEFORE the idempotency check, because the case is the dedupe
+    // identity: two watches releasing the same PR must land on the same
+    // run-row id and join instead of racing for one worktree name.
+    let github_case = monitor.rule.github_pr();
+    let case_repo = github_case.map(|rule| rule.repo.as_str());
+    let case_harness = github_case.and_then(|rule| rule.harness.as_deref());
+    let case_skills: &[String] = github_case
+        .map(|rule| rule.skills.as_slice())
+        .unwrap_or(&[]);
+    let case_pull_number =
+        crate::bots::monitors::github::pull_number_from_resource(&event.resource);
+    let identity = delegation_identity(event, case_repo, case_pull_number);
+    // A pull-request case is keyed BY THE CASE (repository + PR number):
+    // one bot, one PR, one review session — whatever watch (and whatever
+    // binding) released it, the second release joins the first run and
+    // says so in its firing evidence. The run row itself still records
+    // the dispatching event's own responsibility, and the joined event's
+    // history names the exact run it joined.
+    let is_pr_case = case_repo.is_some() && case_pull_number.is_some();
     // Owning bot gone (deleted after firing): orphan, delete — recorded
     // so the monitor's history shows the honest refusal.
     let bot_id = match event.bot_id.clone().or(monitor.bot_id.clone()) {
@@ -1146,15 +1316,21 @@ fn drain_single_event<S: DispatchSeam>(
         );
         return;
     }
-    // Idempotency: the same event maps to the same run-row id, so a
-    // redelivery after a crash (or a duplicate tick) joins instead of
-    // opening a second session — and no second worktree name is minted.
+    // Idempotency: the CASE (repository + pull number for a PR release,
+    // the event id otherwise) maps to the run-row id, so a second watch
+    // releasing the same PR — or a redelivery after a crash — joins
+    // instead of opening a second session, and no second worktree name is
+    // minted.
     let request_id = delegation_request_id(
         current_host_id,
         &folder,
         &bot_id,
-        &responsibility_id,
-        &event.event_id,
+        if is_pr_case {
+            "github-pr-case"
+        } else {
+            &responsibility_id
+        },
+        &identity,
     );
     let already_lookup = find_run_by_id(&db.lock().unwrap(), &request_id);
     let already = match already_lookup {
@@ -1286,20 +1462,15 @@ fn drain_single_event<S: DispatchSeam>(
     };
     // The case's own dispatch choices come from the monitor rule (approval-
     // hashed) when the watch is a `github_pr.v1` one; a file watch has none
-    // and keeps today's wording exactly.
-    let github_case = monitor.rule.github_pr();
-    let case_harness = github_case.and_then(|rule| rule.harness.as_deref());
-    let case_repo = github_case.map(|rule| rule.repo.as_str());
-    let case_skills: &[String] = github_case
-        .map(|rule| rule.skills.as_slice())
-        .unwrap_or(&[]);
-    let case_pull_number =
-        crate::bots::monitors::github::pull_number_from_resource(&event.resource);
-    // A pull-request case names its worktree after the PR (still derived
-    // from the event, so a redelivery reuses it).
-    let worktree_name = match case_pull_number {
-        Some(number) => format!("review-pr-{number}"),
-        None => worktree_name_for_event(&event.event_id),
+    // and keeps today's wording exactly. (The values were computed before
+    // the idempotency check — the case IS the dedupe identity.)
+    // A pull-request case names its worktree after the case (PR number AND
+    // repository): two different repos sharing a PR number never collapse
+    // into one worktree, and a redelivery reuses the exact name.
+    let worktree_name = match (case_repo, case_pull_number) {
+        (Some(repo), Some(number)) => worktree_name_for_pr_case(number, repo),
+        (_, Some(number)) => worktree_name_for_pr_case(number, &event.project_id),
+        _ => worktree_name_for_event(&event.event_id),
     };
     let operating = crate::bots::prompt::build_operating_prompt(
         &bot,

@@ -16,6 +16,8 @@ import {
   botDeleteResultSchema,
   botMonitorListInputSchema,
   botMonitorListResultSchema,
+  botMonitorApproveInputSchema,
+  botMonitorApproveResultSchema,
 } from "../shared/bot-validation";
 import type { Result } from "../shared/session-contract";
 import type {
@@ -24,6 +26,7 @@ import type {
   BotRunReceipt,
   BotHistoryResult,
   BotMonitorListResult,
+  BotMonitorApproveResult,
   BotResponsibilityCreateInput,
   BotResponsibilityCreateResult,
   BotResponsibilityDeleteInput,
@@ -52,6 +55,7 @@ resultSchemas["bot.responsibility_create"] = botResponsibilityCreateResultSchema
 resultSchemas["bot.responsibility_delete"] = botResponsibilityDeleteResultSchema;
 resultSchemas["bot.delete"] = botDeleteResultSchema;
 resultSchemas["bot.monitor_list"] = botMonitorListResultSchema;
+resultSchemas["bot.monitor_approve"] = botMonitorApproveResultSchema;
 
 type NativeCall = (
   method: string,
@@ -299,6 +303,50 @@ export async function dispatchBotMonitorList(
   return { ok: true, result: checked.data };
 }
 
+/** Bots-page parked-watch approval (`bot.monitor_approve`): arms the
+ *  monitor's CURRENT rule text through the daemon's hash-bound approval —
+ *  the same call the CLI sends, never a second path. Native resolves the
+ *  bot's owning workspace for the app-global "" sentinel and echoes the
+ *  RESOLVED scope, so this gate demands a real workspace id back, the
+ *  exact botId/monitorId, and a confirmed `approved: true` before the
+ *  renderer may flip the parked card. */
+export async function dispatchBotMonitorApprove(
+  input: unknown,
+  call: NativeCall = callNative,
+): Promise<Result<BotMonitorApproveResult>> {
+  const parsed = botMonitorApproveInputSchema.safeParse(input);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: {
+        code: "invalid_argument",
+        message: "Invalid Bot monitor approval request.",
+        retryable: false,
+      },
+    };
+  const result = await call("bot.monitor_approve", parsed.data);
+  if (!result.ok) return result;
+  const checked = botMonitorApproveResultSchema.safeParse(result.result);
+  if (
+    !checked.success ||
+    checked.data.hostId !== parsed.data.hostId ||
+    checked.data.botId !== parsed.data.botId ||
+    checked.data.monitorId !== parsed.data.monitorId ||
+    !scopeEchoMatches(parsed.data.workspaceId, checked.data.workspaceId) ||
+    checked.data.approved !== true
+  )
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message:
+          "The monitor approval does not match its requested scope or contract.",
+        retryable: false,
+      },
+    };
+  return { ok: true, result: checked.data };
+}
+
 const invalid = {
   ok: false,
   error: {
@@ -384,4 +432,8 @@ export function registerBotBridge(getWindow: () => BrowserWindow | null): void {
   );
   ipcMain.handle("drogon:botDelete", guarded(dispatchBotDelete));
   ipcMain.handle("drogon:botMonitorList", guarded(dispatchBotMonitorList));
+  ipcMain.handle(
+    "drogon:botMonitorApprove",
+    guarded(dispatchBotMonitorApprove),
+  );
 }
