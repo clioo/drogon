@@ -8,11 +8,7 @@ import {
   type MentuBridge,
 } from "../../shared/mentu-contract";
 import type { Result } from "../../shared/session-contract";
-import { createMentuPanelDescriptor } from "./features/mentu/mentu-panel-descriptor";
-import { registerRoute, routeId } from "./route-panel-contract";
-import type { PanelDescriptor, RouteRegistry } from "./route-panel-contract";
-
-export const MENTU_ROUTE_ID = routeId("mentu");
+import type { RouteRegistry } from "./route-panel-contract";
 
 export { MENTU_CAPABILITY };
 
@@ -80,22 +76,4 @@ export function createGatedMentuBridge(
     mentuRetry: gate(source.mentuRetry),
     mentuCancel: gate(source.mentuCancel),
   };
-}
-
-/** Registers the real Mentu route (capability-gated on mentu.v1). */
-export function registerMentuRoute(
-  registry: RouteRegistry,
-  bridge: MentuBridge,
-): RouteRegistry {
-  const descriptor = createMentuPanelDescriptor({
-    routeId: MENTU_ROUTE_ID,
-    title: "Mentu",
-    bridge,
-    capability: MENTU_CAPABILITY,
-  });
-  const adapted: PanelDescriptor = {
-    ...descriptor,
-    id: routeId(descriptor.id),
-  };
-  return registerRoute(registry, adapted);
 }

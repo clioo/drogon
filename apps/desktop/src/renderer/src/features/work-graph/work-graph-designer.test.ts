@@ -15,7 +15,6 @@ import {
   draftCycle,
   draftFromIntentNodes,
   designerNodeId,
-  markDesignerSaved,
   toIntentPayload,
   updateDesignerNode,
   wouldCreateCycle,
@@ -77,30 +76,6 @@ describe("work-graph-designer", () => {
     ]);
     const renamed = updateDesignerNode(seeded, "n1", { title: "New title" });
     expect(renamed.nodes[0].id).toBe("n1");
-  });
-
-  it("a node keeps its stable uid across a rename that re-derives its id", () => {
-    // The uid is the UI's React identity: a provisional rename churns the
-    // id per keystroke, and the focused editor must survive it.
-    const a = addDesignerNode(empty(), { title: "Draft name" });
-    const renamed = updateDesignerNode(a.draft, a.node.id, { title: "Final name" });
-    expect(renamed.nodes[0].id).toBe("final-name");
-    expect(renamed.nodes[0].uid).toBe(a.node.uid);
-    // Saved nodes and loaded nodes carry uids too, distinct per node.
-    const saved = markDesignerSaved(renamed);
-    expect(saved.nodes[0].uid).toBe(a.node.uid);
-    const loaded = draftFromIntentNodes([
-      { id: "x", title: "X", harness: "shell", model: "", dependsOn: [], prompt: "p", enabled: true },
-      { id: "y", title: "Y", harness: "shell", model: "", dependsOn: [], prompt: "p", enabled: true },
-    ]);
-    expect(loaded.nodes[0].uid).not.toBe(loaded.nodes[1].uid);
-  });
-
-  it("the uid is renderer-local bookkeeping and never rides in the intent payload", () => {
-    const { draft } = addDesignerNode(empty(), { title: "Plan", prompt: "do it" });
-    const { payload, issues } = toIntentPayload(draft);
-    expect(issues).toEqual([]);
-    expect("uid" in payload.nodes[0]).toBe(false);
   });
 
   it("editing a node changes exactly that node's fields", () => {

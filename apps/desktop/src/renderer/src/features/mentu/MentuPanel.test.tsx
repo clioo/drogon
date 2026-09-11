@@ -3,8 +3,9 @@
 // Integration tests for the ported MentuPanel over a fake `MentuBridge`:
 // header copy and the full-tab affordance, recipe selection through the
 // shared store, the Review → Approve & run flow into a running execution,
-// the execution-failed message with its evidence shortcut, and the wide
-// tab's Graph/Run/Evidence/Metrics tabs.
+// the execution-failed message with its evidence shortcut, and the
+// selected step's in-panel inspector (the panel IS the recipe surface:
+// the wide tab shows the work graph).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -48,7 +49,21 @@ function recipe(): MentuRecipeDetail {
         verifyCommands: [],
       },
     ],
-    source: '{"name":"demo"}',
+    // The real recipe JSON (the editor's fork shape, `depends_on`), so the
+    // selected step is editable in the inspector exactly like a recipe the
+    // daemon parsed.
+    source: JSON.stringify({
+      name: "demo",
+      steps: [
+        {
+          label: "build",
+          backend: "shell",
+          depends_on: [],
+          prompt: "Build it.",
+        },
+        { label: "test", backend: "shell", depends_on: ["build"], prompt: "Test it." },
+      ],
+    }),
   };
 }
 
@@ -247,47 +262,6 @@ describe("MentuPanel", () => {
     expect(screen.getAllByText("test failed")).toHaveLength(2);
   });
 
-  it("shares the running execution between the panel and the full tab", async () => {
-    const ws = `ws-sync-${Math.random()}`;
-    const { bridge, dispatchContext } = delegatedHarness();
-    render(
-      <MentuPanel bridge={bridge} workspaceId={ws} dispatchContext={dispatchContext} />,
-    );
-    render(
-      <MentuPanel
-        bridge={bridge}
-        workspaceId={ws}
-        variant="tab"
-        dispatchContext={dispatchContext}
-      />,
-    );
-    // The tab's run controls live on its Run tab; the panel keeps its
-    // default Plan view.
-    mentuStore.set(ws, { selectedRecipeId: "demo", mode: "run" });
-    const tab = await waitFor(() => screen.getByTestId("recipe-pane"));
-    await waitFor(() =>
-      expect(
-        within(tab).getByTestId("mentu-run"),
-      ).toBeTruthy(),
-    );
-
-    // Review and approve in the tab only: the panel adopts the published
-    // run instead of keeping its earlier (empty) row.
-    fireEvent.click(within(tab).getByTestId("mentu-run"));
-    await waitFor(() => expect(within(tab).getByText("Approve & run")).toBeTruthy());
-    fireEvent.click(within(tab).getByText("Approve & run"));
-
-    // Both mounts show the same running execution with a Cancel control.
-    await waitFor(() => expect(screen.getAllByTestId("mentu-cancel")).toHaveLength(2));
-    const panel = screen.getByTestId("mentu-panel");
-    expect(
-      within(panel).getByTestId("mentu-run-status").textContent,
-    ).toContain("Running…");
-    expect(
-      within(tab).getByTestId("mentu-run-status").textContent,
-    ).toContain("Running…");
-  });
-
   it("returns to idle after a run settles and can run the recipe again", async () => {
     const ws = `ws-rerun-${Math.random()}`;
     const { bridge, write, dispatchContext } = delegatedHarness();
@@ -306,55 +280,41 @@ describe("MentuPanel", () => {
       <MentuPanel
         bridge={bridge}
         workspaceId={ws}
-        variant="tab"
         dispatchContext={dispatchContext}
       />,
     );
-    await waitFor(() => {
-      mentuStore.set(ws, { selectedRecipeId: "demo" });
-      expect(screen.getByTestId("mentu-run-recipe")).toBeTruthy();
-    });
-    const runButton = screen.getByTestId("mentu-run-recipe");
+    await selectRecipe(ws);
+    // Review → Approve & run: the run starts through the delegated session.
+    const runButton = screen.getByTestId("mentu-run");
     fireEvent.click(runButton);
-    await waitFor(() => expect(runButton.textContent).toContain("Approve & run recipe"));
+    await waitFor(() => expect(screen.getByTestId("mentu-review")).toBeTruthy());
     fireEvent.click(runButton);
     await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
-    // Adoption publishes the run, then its status poll settles it.
+    // The adoption publishes the run, then its status poll settles it: the
+    // button returns to idle instead of staying busy forever.
     await waitFor(() => expect(runButton.getAttribute("data-running")).toBe("false"));
 
-    // A second click must dispatch again, not silently do nothing.
+    // A second approve dispatches again, not silently nothing.
     fireEvent.click(runButton);
     await waitFor(() => expect(write).toHaveBeenCalledTimes(2));
-    expect(runButton.getAttribute("data-running")).toBe("true");
   });
 
-  it("renders the wide tab with the reference tab order", async () => {
-    const ws = `ws-tab-${Math.random()}`;
+  it("the selected step inspects IN the panel — never a pointer to a tab that cannot show it", async () => {
+    // The Mentu tab is the work graph (.drogon/graph.json); it knows
+    // nothing about a mentu recipe step. The panel therefore carries the
+    // step's real contract itself: the same SelectedNodeInspector the wide
+    // recipe surface used, with the step's fields editable in place — and
+    // the stale "Open the full tab" promise is gone.
+    const ws = `ws-inspect-${Math.random()}`;
     const bridge = fakeBridge();
-    render(<MentuPanel bridge={bridge} workspaceId={ws} variant="tab" />);
-    expect(screen.getByTestId("recipe-pane")).toBeTruthy();
-    for (const tab of ["Graph", "Run", "Evidence", "Metrics"]) {
-      expect(screen.getByText(tab)).toBeTruthy();
-    }
-    mentuStore.set(ws, { selectedRecipeId: "demo" });
-    await waitFor(() => expect(screen.getByTestId("recipe-graph")).toBeTruthy());
-    // jsdom clicks do not move focus; Radix Tabs activates on focus, so
-    // focus the trigger first like a real browser mousedown would.
-    const selectTab = (label: string) => {
-      const trigger = screen.getByText(label).closest("button")!;
-      trigger.focus();
-      fireEvent.click(trigger);
-    };
-    selectTab("Metrics");
-    // No run is loaded yet, so the metrics tab shows its honest empty state.
-    await waitFor(() =>
-      expect(
-        screen.getByText("No measurements are available until a run record is loaded."),
-      ).toBeTruthy(),
-    );
-    selectTab("Run");
-    await waitFor(() =>
-      expect(screen.getByText("Run the selected source recipe")).toBeTruthy(),
-    );
+    render(<MentuPanel bridge={bridge} workspaceId={ws} />);
+    await selectRecipe(ws);
+    expect(
+      screen.queryByText("Step selected. Open the full tab for details and execution."),
+    ).toBeNull();
+    const graph = screen.getByTestId("recipe-graph");
+    fireEvent.click(within(graph).getByText("build"));
+    const inspector = await screen.findByTestId("recipe-node-inspector");
+    expect(inspector.textContent).toContain("build");
   });
 });

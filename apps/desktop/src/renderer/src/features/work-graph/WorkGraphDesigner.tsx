@@ -762,12 +762,7 @@ export function WorkGraphDesigner({
           <ScrollArea className="h-full min-h-0">
             {selected ? (
               <NodeInspector
-                // Keyed on the STABLE per-node uid, not the derived id: a
-                // provisional rename re-derives the id on every keystroke,
-                // and keying on it remounted (and defocused) the whole
-                // editor after every character typed. The uid is assigned
-                // once when the node enters the draft and never changes.
-                key={selected.uid}
+                key={selected.id}
                 node={selected}
                 draft={draft}
                 graphDocument={document}
@@ -776,13 +771,12 @@ export function WorkGraphDesigner({
                 onChange={(patch) => {
                   const next = updateDesignerNode(draft, selected.id, patch);
                   // A provisional rename re-derives the id; keep the
-                  // selection on the node — tracked by its stable uid,
-                  // not by the mutable id or (worse) the raw title.
-                  const renamed = next.nodes.find(
-                    (node) => node.uid === selected.uid,
-                  );
-                  if (renamed && renamed.id !== selected.id) {
-                    setSelectedId(renamed.id);
+                  // selection on the node, not on its old label.
+                  if (!next.nodes.some((node) => node.id === selected.id)) {
+                    const rederived = next.nodes.find(
+                      (node) => node.title === patch.title,
+                    );
+                    if (rederived) setSelectedId(rederived.id);
                   }
                   mutate(next);
                 }}
@@ -892,25 +886,6 @@ function NodeInspector({
     knownCount: shell ? 0 : knownModelsFor(node.harness).length,
   });
   const others = draft.nodes.filter((other) => other.id !== node.id);
-  // The verify box holds the RAW text while the user is in the field and
-  // only splits it into commands on blur: splitting on every keystroke
-  // filtered the empty line the Enter key had just created, so the newline
-  // snapped back out of the field and a second command could never be
-  // typed. The inspector remounts per selected node (uid key), which is
-  // what resets the raw text per node.
-  const [verifyText, setVerifyText] = useState(() => node.verifyCommands.join("\n"));
-  const commitVerify = useCallback(() => {
-    const commands = verifyText
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-    // Only report a real change (a bare blur must not dirty the draft) and
-    // normalize the visible text to the committed form.
-    const canonical = node.verifyCommands.join("\n");
-    const committed = commands.join("\n");
-    if (committed !== canonical) onChange({ verifyCommands: commands });
-    setVerifyText(committed);
-  }, [verifyText, node.verifyCommands, onChange]);
   return (
     <div className="space-y-3 text-xs" data-testid="design-inspector" aria-label={`Edit node ${node.title}`}>
       <div className="rounded-lg border border-border bg-card p-3">
@@ -958,9 +933,15 @@ function NodeInspector({
           </Label>
           <Textarea
             id="design-field-verify"
-            value={verifyText}
-            onChange={(event) => setVerifyText(event.target.value)}
-            onBlur={commitVerify}
+            value={node.verifyCommands.join("\n")}
+            onChange={(event) =>
+              onChange({
+                verifyCommands: event.target.value
+                  .split("\n")
+                  .map((line) => line.trim())
+                  .filter((line) => line.length > 0),
+              })
+            }
             className="mt-1 min-h-12 font-mono text-[11px]"
             placeholder="true"
             data-testid="design-field-verify"

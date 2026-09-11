@@ -4,11 +4,13 @@
 // right-sidebar panel with the reference's DOM, Tailwind classes, copy,
 // icons, keyboard and ARIA. Adapted only in the data layer: state comes
 // from this repo's `MentuPaneController` (mentu.* daemon RPCs through the
-// bridge plus the shared features/mentu store), so the panel and the wide
-// tab stay in sync. The reference's session-scope card has no counterpart
-// in this repo's model; the header keeps the workspace-source line instead.
-// `variant="tab"` renders the wide tab surface; both read/write the same
-// shared state.
+// bridge plus the shared features/mentu store). The reference's
+// session-scope card has no counterpart in this repo's model; the header
+// keeps the workspace-source line instead. THIS PANEL IS the recipe
+// surface: the wide tab shows the work graph, so the selected step's
+// details (the SelectedNodeInspector, model quick-pick included) and the
+// run controls live HERE — a pointer to the tab would promise details and
+// execution the graph tab does not carry for a recipe step.
 
 import { AlertCircle, ExternalLink, Network, Settings2 } from "lucide-react";
 import type { MentuBridge } from "../../../../shared/mentu-contract";
@@ -25,7 +27,7 @@ import {
 } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 import { MentuRuntimeMessage } from "./MentuRuntimeMessage";
-import { RecipePane } from "./RecipePane";
+import { SelectedNodeInspector } from "./recipe-pane-inspector";
 import { useMentuPaneController } from "./recipe-pane-controller";
 import {
   EmptyRecipeState,
@@ -40,7 +42,6 @@ import { RunControls } from "./recipe-pane-run-controls";
 export type MentuPanelProps = {
   bridge: MentuBridge;
   workspaceId: string;
-  variant?: "panel" | "tab";
   /** The workspace's main agent session plus the transport the Run Recipe
    *  prompt is delivered through (see `mentu-run-dispatch`). Optional so
    *  the panel still renders for callers that only read Mentu state. */
@@ -62,25 +63,12 @@ export const MENTU_OPEN_TAB_EVENT = "drogon:open-mentu-tab";
 export function MentuPanel({
   bridge,
   workspaceId,
-  variant = "panel",
   dispatchContext,
   onOpenFullTab,
   fileBridge = null,
   hostId = null,
   workspacePath = null,
 }: MentuPanelProps) {
-  if (variant === "tab") {
-    return (
-      <RecipePane
-        bridge={bridge}
-        workspaceId={workspaceId}
-        fileBridge={fileBridge}
-        hostId={hostId}
-        workspacePath={workspacePath}
-        dispatchContext={dispatchContext}
-      />
-    );
-  }
   return (
     <MentuPanelBody
       bridge={bridge}
@@ -266,12 +254,28 @@ function MentuPanelBody({
                 onSelectNode={controller.setSelectedNodeId}
               />
               {controller.selectedNode ? (
-                <div className="mt-3 rounded-md border border-border bg-card p-3 text-xs">
-                  <p className="font-medium">{controller.selectedNode.label}</p>
-                  <p className="mt-1 text-muted-foreground">
-                    Step selected. Open the full tab for details and execution.
-                  </p>
-                </div>
+                // The selected step's REAL contract, editable in place —
+                // the same inspector the wide recipe surface used, with the
+                // harness/model quick-pick. Execution stays in RunControls
+                // right below; details no longer point at a tab that
+                // cannot show them.
+                <SelectedNodeInspector
+                  node={controller.selectedNode}
+                  editStep={controller.editStep}
+                  backends={controller.availableBackends}
+                  inheritBackendLabel={controller.inheritBackendLabel}
+                  editable={controller.editable}
+                  disabled={controller.busy}
+                  saving={controller.saving}
+                  onCommit={(draft, stepLabel) =>
+                    controller.saveSelectedStep(draft, stepLabel)
+                  }
+                  harnessCatalog={controller.harnessCatalog}
+                  harnessCatalogLoading={controller.harnessCatalogLoading}
+                  harnessCatalogError={controller.harnessCatalogError}
+                  onRefreshHarnessCatalog={controller.refreshHarnessCatalog}
+                  recipeDefinition={controller.recipeDefinition}
+                />
               ) : null}
               {controller.recipe ? (
                 <div className="mt-3">

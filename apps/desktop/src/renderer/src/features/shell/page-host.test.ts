@@ -9,7 +9,6 @@ import { describe, it } from "vitest";
 import { AUTOMATIONS_ROUTE_ID } from "../../automations-mount";
 import { BOTS_ROUTE_ID } from "../../bots-mount";
 import { MEETINGS_ROUTE_ID } from "../../meetings-mount";
-import { MENTU_ROUTE_ID } from "../../mentu-mount";
 import { SETTINGS_ROUTE_ID } from "../settings/settings-route";
 import { TASKS_ROUTE_ID } from "../tasks/TasksPage";
 import { isFullPageRoute, noWorkspacePageCopy } from "./page-host";
@@ -32,7 +31,8 @@ describe("isFullPageRoute", () => {
   it("keeps the session view for landing, settings and session tabs", () => {
     assert.equal(isFullPageRoute(null), false);
     assert.equal(isFullPageRoute(SETTINGS_ROUTE_ID), false);
-    assert.equal(isFullPageRoute(MENTU_ROUTE_ID), false);
+    // The Mentu tab is a session tab (the work graph), never a page.
+    assert.equal(isFullPageRoute("mentu"), false);
     assert.equal(isFullPageRoute("files"), false);
     assert.equal(isFullPageRoute("changes"), false);
   });
