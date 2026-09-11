@@ -250,7 +250,8 @@ async function probeExplorerSurface({ page, workspace, output }) {
   return ["right-sidebar-explorer-opens-fixture-file-into-editor"];
 }
 
-/** Mentu (right sidebar): the fixture recipe lists and its steps render. */
+/** Mentu (right sidebar): the fixture recipe lists, its steps render, and a
+ *  recipe written while the panel is up appears without a reload. */
 async function probeMentuSurface({ page, workspace, output }) {
   const recipesDir = path.join(workspace, ".mentu", "recipes");
   await mkdir(recipesDir, { recursive: true });
@@ -275,7 +276,36 @@ async function probeMentuSurface({ page, workspace, output }) {
     path: path.join(output, "mentu.png"),
     animations: "disabled",
   });
-  return ["right-sidebar-mentu-lists-fixture-recipe-with-steps"];
+
+  // The catalog is a property of the DIRECTORY, not of when this panel
+  // mounted: the right-sidebar Mentu panel is keep-alive, so earlier
+  // journeys in this run already mounted it with the recipes that existed
+  // then. A second plain root-level recipe must therefore become selectable
+  // with NO reload — otherwise a user cannot see a recipe a Bot just wrote
+  // (the report this check exists for).
+  await writeFile(
+    path.join(recipesDir, "acceptance-live.json"),
+    JSON.stringify(
+      {
+        name: "acceptance-live",
+        description: "written while the panel is up",
+        steps: [
+          { label: "live-step", backend: "shell", prompt: "echo live", timeout: 30 },
+        ],
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+  await recipeSelect.click({ timeout: 15000 });
+  await page.getByRole("option", { name: "acceptance-live", exact: true }).click();
+  // The step name proves the SECOND recipe is the one loaded, not a stale
+  // selection still showing the first recipe's steps.
+  await panel.getByText("live-step", { exact: true }).waitFor();
+  return [
+    "right-sidebar-mentu-lists-fixture-recipe-with-steps",
+    "right-sidebar-mentu-discovers-a-recipe-written-while-mounted",
+  ];
 }
 
 /** Source Control (right sidebar): the unstaged edit stages into Staged. */

@@ -902,11 +902,13 @@ export async function probeMentuApproveRunEvidence({
     path.join(recipesDir, "acceptance-two-step.json"),
     JSON.stringify(MENTU_TWO_STEP_RECIPE, null, 2) + "\n",
   );
-  // Since the work-graph takeover the right-sidebar Mentu panel is
-  // keep-alive: earlier journeys in this acceptance may already have
-  // mounted it, and its recipe discovery runs on mount only (the panel has
-  // no refresh affordance). A reload remounts it fresh, so the recipe just
-  // written is discovered — the same state a fresh app open guarantees.
+  // The right-sidebar Mentu panel is a keep-alive mount: earlier journeys in
+  // this acceptance may already have mounted it, and the panel has no
+  // refresh affordance of its own (the catalog follows the workspace's
+  // files-changed tick, so it also picks up this file live). The reload is
+  // kept as an explicit fresh-mount guarantee for this journey — the same
+  // state a real app open produces — never as a substitute for live
+  // discovery, which the packaged surfaces journey asserts directly.
   await page.reload();
   await page
     .getByRole("button", { name: "Reveal active workspace", exact: true })
