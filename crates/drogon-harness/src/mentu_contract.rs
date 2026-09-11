@@ -389,6 +389,12 @@ pub struct PiProviderBinding {
     /// Name the binding gets in the recipe's `providers` map; the step's
     /// backend is set to this name.
     pub provider_name: String,
+    /// The recipe entry's `api` value. `"cli"` is the provider-config
+    /// adapter that hands the model tools; any other value (including a
+    /// missing key) makes the pinned runtime silently degrade the step to a
+    /// bare chat completion with no tools, and the run is still stamped
+    /// `ok`. Carried explicitly so [`Self::validate`] can refuse it.
+    pub api: String,
     /// HTTP(S) base URL without embedded credentials, query or fragment
     /// (`PiCLIAdapter.execute` guard, source-cited in module docs).
     pub base_url: String,
@@ -406,6 +412,27 @@ impl PiProviderBinding {
     pub fn validate(&self) -> Result<(), String> {
         if self.provider_name.trim().is_empty() {
             return Err("provider name must not be empty".to_string());
+        }
+        // The silent-degradation guard (the eval's worst seam): only
+        // `api: "cli"` reaches the CLI adapter. A missing or different api
+        // makes the runtime issue a plain chat completion (`tools: null`)
+        // and stamp the step `ok` anyway, so the model never gets tools.
+        // The message names the missing field exactly.
+        if self.api.trim().is_empty() {
+            return Err(
+                "provider binding is missing the required \"api\": \"cli\" field; without \
+                 it the runtime silently degrades the agent step to a bare chat completion \
+                 with no tools"
+                    .to_string(),
+            );
+        }
+        if self.api != "cli" {
+            return Err(format!(
+                "provider binding api {:?} is not supported: only \"api\": \"cli\" gives the \
+                 model tools; any other value silently degrades the agent step to a bare chat \
+                 completion",
+                self.api
+            ));
         }
         if self.model.trim().is_empty() {
             return Err("Pi requires an exact model ID".to_string());
@@ -788,12 +815,23 @@ mod tests {
     fn binding_requires_exactly_one_credential_source() {
         let mut binding = PiProviderBinding {
             provider_name: "kimi-coding".to_string(),
+            api: "cli".to_string(),
             base_url: "https://example.com/v1".to_string(),
             model: "kimi-for-coding".to_string(),
             api_key_env: Some("K".to_string()),
             api_key_vault: None,
         };
         assert!(binding.validate().is_ok());
+        // The silent-degradation seam: a missing or non-cli `api` is refused
+        // with the field named, so the binding can never reach the runtime in
+        // a shape that quietly drops tools.
+        binding.api = String::new();
+        let missing = binding.validate().unwrap_err();
+        assert!(missing.contains("api"), "{missing}");
+        binding.api = "chat".to_string();
+        let wrong = binding.validate().unwrap_err();
+        assert!(wrong.contains("api"), "{wrong}");
+        binding.api = "cli".to_string();
         binding.api_key_vault = Some("v".to_string());
         assert!(binding.validate().is_err(), "two sources must be refused");
         binding.api_key_vault = None;

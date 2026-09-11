@@ -173,15 +173,15 @@ describe("MetricsView", () => {
     expect(screen.getByTestId("recipe-metrics")).toBeTruthy();
     // One of two steps reports a duration: partial total, not exact.
     expect(screen.getByText("Duration: 4s + 1 unknown")).toBeTruthy();
-    expect(screen.getAllByText("Input tokens: unavailable")).toHaveLength(3);
-    expect(screen.getAllByText("Output tokens: unavailable")).toHaveLength(3);
-    expect(screen.getByText("Cost: unavailable")).toBeTruthy();
+    expect(screen.getAllByText("Input tokens: not applicable")).toHaveLength(3);
+    expect(screen.getAllByText("Output tokens: not applicable")).toHaveLength(3);
+    expect(screen.getByText("Cost: not applicable")).toBeTruthy();
     expect(screen.getByText("Scope: recipe · session aggregate: unavailable")).toBeTruthy();
     // Per-step rows carry outcome, duration, exit and harness.
     expect(screen.getByText("Outcome: Succeeded")).toBeTruthy();
     expect(screen.getByText("Process exit: 0")).toBeTruthy();
     expect(screen.getAllByText("Harness: shell")).toHaveLength(2);
-    expect(screen.getAllByText("Model: unavailable")).toHaveLength(2);
+    expect(screen.getAllByText("Model: not applicable")).toHaveLength(2);
   });
 
   it("marks duration unavailable when the record carries none", () => {
@@ -246,7 +246,7 @@ describe("MetricsView", () => {
     render(<MetricsView run={retried} />);
     expect(screen.getByText("Duration: 5s")).toBeTruthy();
     expect(screen.getByText("Input tokens: 140")).toBeTruthy();
-    expect(screen.getByText("Output tokens: 50 + 1 unknown")).toBeTruthy();
+    expect(screen.getByText("Output tokens: 50 + 1 not reported")).toBeTruthy();
     expect(screen.getByText("Attempt 1 of 2")).toBeTruthy();
     expect(screen.getByText("Attempt 2 of 2")).toBeTruthy();
     expect(screen.getByText("Model: model-a")).toBeTruthy();
@@ -254,7 +254,7 @@ describe("MetricsView", () => {
     expect(screen.getByText("Input tokens: 100 (exact)")).toBeTruthy();
     expect(screen.getByText("Input tokens: 40 (exact)")).toBeTruthy();
     expect(screen.getByText("Output tokens: 50 (exact)")).toBeTruthy();
-    expect(screen.getByText("Output tokens: unavailable")).toBeTruthy();
+    expect(screen.getByText("Output tokens: not reported")).toBeTruthy();
   });
 
   it("distinguishes a measured zero from unreported and rejected values", () => {
@@ -298,20 +298,23 @@ describe("MetricsView", () => {
       },
     ];
     render(<MetricsView run={mixed} />);
-    expect(screen.getByText("Input tokens: 0 + 1 unknown + 1 invalid")).toBeTruthy();
-    expect(screen.getByText("Output tokens: 5 + 1 unknown")).toBeTruthy();
+    expect(screen.getByText("Input tokens: 0 + 1 not reported + 1 failed to parse")).toBeTruthy();
+    expect(screen.getByText("Output tokens: 5 + 1 not reported")).toBeTruthy();
     expect(screen.getByText("Input tokens: 0 (exact)")).toBeTruthy();
-    expect(screen.getByText("Input tokens: unavailable (negative)")).toBeTruthy();
+    expect(screen.getByText("Input tokens: failed to parse (negative)")).toBeTruthy();
   });
 
-  it("keeps cost unavailable even when the record reports tokens", () => {
+  it("keeps cost not-reported even when the record reports tokens", () => {
     const billed = run();
     billed.steps = billed.steps.map((step) => ({
       ...step,
+      backend: "pi",
       usage: { inputTokens: 10, outputTokens: 10, usageKnown: true, invalid: [] },
     }));
     render(<MetricsView run={billed} />);
-    expect(screen.getByText("Cost: unavailable")).toBeTruthy();
+    // Cost is not in the run-record schema, so an agent run reads it as not
+    // reported; it is never estimated. A shell-only run reads not applicable.
+    expect(screen.getByText("Cost: not reported by the run record")).toBeTruthy();
     expect(screen.getByText("Scope: recipe · session aggregate: unavailable")).toBeTruthy();
   });
 });

@@ -66,11 +66,26 @@ describe("UsageTokenCards", () => {
     expect(screen.getAllByText("Exact · run record")).toHaveLength(2);
   });
 
-  it("keeps no-evidence runs unavailable without inventing zeros", () => {
+  it("keeps no-evidence runs not reported without inventing zeros", () => {
     render(<UsageTokenCards steps={[step({})]} />);
-    expect(screen.getByText("Input tokens: unavailable")).toBeTruthy();
-    expect(screen.getByText("Output tokens: unavailable")).toBeTruthy();
-    expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+    expect(screen.getByText("Input tokens: not reported")).toBeTruthy();
+    expect(screen.getByText("Output tokens: not reported")).toBeTruthy();
+    expect(screen.getAllByText("Not reported")).toHaveLength(2);
+  });
+
+  it("reads a shell-only run as not applicable, not unavailable", () => {
+    render(
+      <UsageTokenCards
+        steps={[
+          step({ label: "one", backend: "shell", usage: undefined }),
+          step({ label: "two", backend: "shell", usage: undefined }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("Input tokens: not applicable")).toBeTruthy();
+    expect(screen.getByText("Output tokens: not applicable")).toBeTruthy();
+    expect(screen.getAllByText("Not applicable")).toHaveLength(2);
+    expect(screen.queryByText("Unavailable")).toBeNull();
   });
 
   it("marks rejected values on the total card", () => {
@@ -85,7 +100,8 @@ describe("UsageTokenCards", () => {
         ]}
       />,
     );
-    expect(screen.getByText("Input tokens: unavailable + 1 invalid")).toBeTruthy();
+    expect(screen.getByText("Input tokens: not reported + 1 failed to parse")).toBeTruthy();
+    expect(screen.getByText("Failed to parse")).toBeTruthy();
   });
 });
 
@@ -104,7 +120,7 @@ describe("UsageStepMetrics", () => {
     expect(screen.getByText("Output tokens: 340 (exact)")).toBeTruthy();
   });
 
-  it("stays unavailable for absent values and says why values were rejected", () => {
+  it("distinguishes not reported, failed to parse and shell not applicable", () => {
     render(
       <UsageStepMetrics
         step={step({
@@ -114,8 +130,15 @@ describe("UsageStepMetrics", () => {
         })}
       />,
     );
-    expect(screen.getByText("Model: unavailable")).toBeTruthy();
-    expect(screen.getByText("Input tokens: unavailable")).toBeTruthy();
-    expect(screen.getByText("Output tokens: unavailable (not an integer)")).toBeTruthy();
+    expect(screen.getByText("Model: not reported")).toBeTruthy();
+    expect(screen.getByText("Input tokens: not reported")).toBeTruthy();
+    expect(screen.getByText("Output tokens: failed to parse (not an integer)")).toBeTruthy();
+  });
+
+  it("reads a shell step's token fields as not applicable", () => {
+    render(<UsageStepMetrics step={step({ backend: "shell", usage: undefined })} />);
+    expect(screen.getByText("Model: not applicable")).toBeTruthy();
+    expect(screen.getByText("Input tokens: not applicable")).toBeTruthy();
+    expect(screen.getByText("Output tokens: not applicable")).toBeTruthy();
   });
 });

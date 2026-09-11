@@ -572,7 +572,17 @@ fn finish(
     match run_record::read_run_json(workspace_root, &mentu_run_id) {
         Ok(Some(run_json)) => {
             let steps = run_record::parse_steps(&run_json, &mentu_run_id);
-            let status = run_record::overall_status(&run_json, &steps);
+            // The runtime's keyword completion is only a secondary signal;
+            // re-check it against the recorded stdout with an anchored match
+            // (not inside a fence, on the final line) and refuse a run whose
+            // only completion evidence was a keyword printed in an example.
+            let keyword_warning =
+                run_record::keyword_completion_warning(workspace_root, &mentu_run_id, &run_json);
+            let status = if keyword_warning.is_some() {
+                MentuRunStatus::Failed
+            } else {
+                run_record::overall_status(&run_json, &steps)
+            };
             let ended = run_record::ended_at(&run_json).unwrap_or_else(|| ended_at.clone());
             // Post-run attestation: resources pinned at approval are
             // re-hashed after the child exits. Drift means the run may
@@ -584,7 +594,13 @@ fn finish(
                 daemon_home_prompts().as_deref(),
                 &attest_resources,
             );
-            let error_message = match (first_step_error(&steps, status), drift.is_empty()) {
+            let error_message = match (
+                keyword_warning
+                    .clone()
+                    .or_else(|| run_record::unresolved_warning(&run_json))
+                    .or_else(|| first_step_error(&steps, status)),
+                drift.is_empty(),
+            ) {
                 (message, true) => message,
                 (message, false) => {
                     let disclosure = format!(
@@ -787,6 +803,42 @@ fn harness_for_backend(backend: &str) -> Option<HarnessId> {
     }
 }
 
+/// The silent-HTTP-downgrade guard for one resolved provider binding.
+///
+/// The pinned `mentu-recipes` runtime selects the tool-enabled provider-config
+/// adapter only when the entry carries `"api": "cli"`. A missing key, or any
+/// other value, makes it issue a bare chat completion — no system prompt, no
+/// tools, `tools: null` on the wire — and the step is still stamped `ok`, so
+/// the run reads as a success while the model could not touch anything. The
+/// refusal names the field and cites the runtime's ProviderConfig resolution,
+/// so a binding that would degrade silently never reaches the runtime.
+fn validate_provider_binding_api(
+    step_label: &str,
+    backend: &str,
+    entry: &serde_json::Value,
+) -> Result<(), RpcError> {
+    match entry.get("api").and_then(serde_json::Value::as_str) {
+        Some("cli") => Ok(()),
+        Some(other) => Err(unsupported(
+            format!(
+                "Step '{step_label}' resolves provider binding '{backend}' whose \"api\" is \
+                 {other:?}; only \"api\": \"cli\" reaches the provider-config adapter that gives \
+                 the model tools. Any other api silently degrades the agent step to a bare chat \
+                 completion with no tools."
+            ),
+            "mentu-recipes ProviderConfig.api / PiCLIAdapter provider-config resolution",
+        )),
+        None => Err(unsupported(
+            format!(
+                "Step '{step_label}' resolves provider binding '{backend}' that omits the required \
+                 \"api\": \"cli\" field; without it the runtime silently degrades the agent step \
+                 to a bare chat completion with no tools."
+            ),
+            "mentu-recipes ProviderConfig.api / PiCLIAdapter provider-config resolution",
+        )),
+    }
+}
+
 /// Validates one agent step's execution selection against the pinned
 /// runtime contract without spawning anything (no catalog probe, no
 /// `adapters --json`, no inference): pure planning over the recipe JSON
@@ -825,6 +877,17 @@ fn validate_one_agent_step(
         .and_then(|p| p.as_object())
         .and_then(|map| map.get(&step.backend))
         .filter(|entry| entry.get("agent").and_then(serde_json::Value::as_str) == Some("pi"));
+    // Silent-degradation seam (the eval's worst): the pinned runtime treats a
+    // binding without `"api": "cli"` as a bare chat completion — no system
+    // prompt, no tools, `tools: null` on the wire — and stamps the run `ok`
+    // anyway. This guard refuses such a binding by name, for every agent
+    // backend that resolves a providers entry, before it can be handed over.
+    if let Some(entry) = providers
+        .and_then(|p| p.as_object())
+        .and_then(|map| map.get(&step.backend))
+    {
+        validate_provider_binding_api(&step.label, &step.backend, entry)?;
+    }
     if pi_entry.is_some() || step.backend.eq_ignore_ascii_case("pi") {
         return validate_pi_step(step, providers, full_step);
     }
@@ -988,6 +1051,11 @@ fn validate_pi_step(
     };
     let binding = PiProviderBinding {
         provider_name: step.backend.clone(),
+        api: entry
+            .get("api")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
         base_url: entry
             .get("base_url")
             .and_then(serde_json::Value::as_str)
@@ -1670,6 +1738,67 @@ mod selection_snapshot_tests {
         let err = validate_agent_execution(&recipe).unwrap_err();
         assert_eq!(err.code, BACKEND_UNSUPPORTED_CODE);
         assert!(err.message.contains("credential"), "{}", err.message);
+    }
+
+    #[test]
+    fn provider_binding_without_api_cli_is_refused_before_it_can_degrade() {
+        // The eval's worst seam: a Pi binding that omits `"api": "cli"` is
+        // executed by the runtime as a bare chat completion with no tools,
+        // and the run is still stamped `ok`. Drogon must refuse it by name.
+        let recipe: serde_json::Value = serde_json::from_str(
+            r#"{
+            "name": "x",
+            "steps": [{"label": "work", "backend": "kimi", "model": "k1"}],
+            "providers": {"kimi": {"agent": "pi", "base_url": "https://x.test/v1", "model": "k1", "api_key_env": "K"}}
+        }"#,
+        )
+        .unwrap();
+        let err = validate_agent_execution(&recipe).unwrap_err();
+        assert_eq!(err.code, BACKEND_UNSUPPORTED_CODE, "{}", err.message);
+        assert!(
+            err.message.contains("api"),
+            "the refusal must name the missing field: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains("tools"),
+            "the refusal must say what is lost: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn provider_binding_with_a_non_cli_api_is_refused() {
+        let recipe: serde_json::Value = serde_json::from_str(
+            r#"{
+            "name": "x",
+            "steps": [{"label": "work", "backend": "kimi", "model": "k1"}],
+            "providers": {"kimi": {"api": "chat", "agent": "pi", "base_url": "https://x.test/v1", "model": "k1", "api_key_env": "K"}}
+        }"#,
+        )
+        .unwrap();
+        let err = validate_agent_execution(&recipe).unwrap_err();
+        assert_eq!(err.code, BACKEND_UNSUPPORTED_CODE, "{}", err.message);
+        assert!(err.message.contains("\"chat\""), "{}", err.message);
+    }
+
+    #[test]
+    fn a_runtime_owned_backend_resolving_a_bad_binding_is_also_refused() {
+        // The guard is backend-agnostic: any agent step that resolves a
+        // providers entry is checked, so an alias without `agent: "pi"`
+        // cannot slip past as "runtime-owned" while pointing at a binding
+        // that will silently drop tools.
+        let recipe: serde_json::Value = serde_json::from_str(
+            r#"{
+            "name": "x",
+            "steps": [{"label": "work", "backend": "my-alias"}],
+            "providers": {"my-alias": {"base_url": "https://x.test/v1", "model": "k1"}}
+        }"#,
+        )
+        .unwrap();
+        let err = validate_agent_execution(&recipe).unwrap_err();
+        assert_eq!(err.code, BACKEND_UNSUPPORTED_CODE, "{}", err.message);
+        assert!(err.message.contains("my-alias"), "{}", err.message);
     }
 
     #[test]

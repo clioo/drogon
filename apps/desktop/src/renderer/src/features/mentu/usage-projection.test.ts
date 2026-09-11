@@ -9,6 +9,8 @@ import {
   formatStepUsageValue,
   formatUsageTotal,
   projectUsage,
+  runHasAgentSteps,
+  usageCardKind,
   usageExact,
 } from "./usage-projection";
 
@@ -98,20 +100,43 @@ describe("projectUsage", () => {
 describe("formatUsageTotal", () => {
   it("matches the fork's unknown suffix only alongside a total", () => {
     expect(formatUsageTotal("Input tokens", { total: 140, unknownCount: 1, invalidCount: 0 })).toBe(
-      "Input tokens: 140 + 1 unknown",
+      "Input tokens: 140 + 1 not reported",
     );
     expect(formatUsageTotal("Input tokens", { total: null, unknownCount: 2, invalidCount: 0 })).toBe(
-      "Input tokens: unavailable",
+      "Input tokens: not reported",
     );
   });
 
   it("always spells out rejected values", () => {
     expect(formatUsageTotal("Output tokens", { total: 20, unknownCount: 0, invalidCount: 1 })).toBe(
-      "Output tokens: 20 + 1 invalid",
+      "Output tokens: 20 + 1 failed to parse",
     );
     expect(formatUsageTotal("Output tokens", { total: null, unknownCount: 1, invalidCount: 1 })).toBe(
-      "Output tokens: unavailable + 1 invalid",
+      "Output tokens: not reported + 1 failed to parse",
     );
+  });
+
+  it("says not applicable for a field that cannot exist (shell-only run)", () => {
+    expect(
+      formatUsageTotal("Input tokens", { total: null, unknownCount: 1, invalidCount: 0 }, "not_applicable"),
+    ).toBe("Input tokens: not applicable");
+  });
+
+  it("classifies the four honest card states", () => {
+    const shell = [step({ backend: "shell" })];
+    expect(runHasAgentSteps(shell)).toBe(false);
+    expect(
+      usageCardKind({ total: null, unknownCount: 1, invalidCount: 0 }, false),
+    ).toBe("not_applicable");
+    expect(
+      usageCardKind({ total: null, unknownCount: 1, invalidCount: 0 }, true),
+    ).toBe("not_reported");
+    expect(
+      usageCardKind({ total: null, unknownCount: 0, invalidCount: 1 }, true),
+    ).toBe("failed_to_parse");
+    expect(
+      usageCardKind({ total: 5, unknownCount: 0, invalidCount: 0 }, true),
+    ).toBe("exact");
   });
 });
 
@@ -124,17 +149,23 @@ describe("formatStepUsageValue", () => {
     expect(value).toBe("1,234 (exact)");
   });
 
-  it("says why a rejected value is unavailable", () => {
+  it("says a rejected value failed to parse and why", () => {
     const value = formatStepUsageValue(
       step({
         usage: usage({ invalid: [{ field: "input_tokens", reason: "negative" }] }),
       }),
       "inputTokens",
     );
-    expect(value).toBe("unavailable (negative)");
+    expect(value).toBe("failed to parse (negative)");
   });
 
-  it("stays plainly unavailable with no evidence", () => {
-    expect(formatStepUsageValue(step({}), "outputTokens")).toBe("unavailable");
+  it("says not reported when an agent step has no evidence", () => {
+    expect(formatStepUsageValue(step({}), "outputTokens")).toBe("not reported");
+  });
+
+  it("says not applicable for a shell step", () => {
+    expect(
+      formatStepUsageValue(step({ backend: "shell", usage: undefined }), "outputTokens"),
+    ).toBe("not applicable");
   });
 });
