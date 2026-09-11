@@ -125,7 +125,7 @@ describe("BotSessionInspector", () => {
       <BotSessionInspector
         meta={meta({ harnessId: "pi", model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4" })}
         session={session()}
-        workspacePath="/Users/carlos/Drogon/bots/arya-stark"
+        workspacePath="/Users/example/Drogon/bots/arya-stark"
         processId={48921}
         nowMs={STARTED_AT}
       />,
@@ -138,7 +138,7 @@ describe("BotSessionInspector", () => {
     );
     expect(
       screen.getByTestId("bot-session-row-workspace").textContent,
-    ).toContain("/Users/carlos/Drogon/bots/arya-stark");
+    ).toContain("/Users/example/Drogon/bots/arya-stark");
 
     rerender(
       <BotSessionInspector
@@ -156,7 +156,7 @@ describe("BotSessionInspector", () => {
       "Harness default",
     );
     expect(
-      screen.queryByText("/Users/carlos/Drogon/bots/arya-stark"),
+      screen.queryByText("/Users/example/Drogon/bots/arya-stark"),
     ).toBeNull();
     expect(screen.getByTestId("bot-session-row-workspace").textContent).toContain(
       "/tmp/other-bot-home",

@@ -43,6 +43,10 @@ const session = z.object({
   // parent when the spawn carried DROGON_SESSION_ID; optional so an older
   // service without the column still validates.
   parentSessionId: z.string().nullable().optional(),
+  // Delegation attribution (monitor event id that caused the session):
+  // optional so a response from an older service without the column still
+  // validates; absent reads as "nobody delegated this session".
+  causedByEventId: z.string().nullable().optional(),
 });
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const harness = z

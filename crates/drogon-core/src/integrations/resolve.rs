@@ -17,8 +17,8 @@
 use rusqlite::Transaction;
 
 use super::store::SecretStore;
-use crate::bots::monitors::result::MonitorErrorKind;
 use crate::bot_secrets::has_grant_in_tx;
+use crate::bots::monitors::result::MonitorErrorKind;
 
 /// Replacement marker [`scrub_for_persist`] writes over any resolved value
 /// occurrence. Shape-matched to the product's redaction vocabulary.
@@ -98,9 +98,11 @@ pub fn resolve_for_bot_in_tx(
         }
         let value = match store.read_secret(secret_ref) {
             Ok(Some(value)) => value,
-            Ok(None) => return Err(SecretResolutionError::NotConfigured {
-                secret_ref: secret_ref.clone(),
-            }),
+            Ok(None) => {
+                return Err(SecretResolutionError::NotConfigured {
+                    secret_ref: secret_ref.clone(),
+                });
+            }
             Err(e) => return Err(SecretResolutionError::Store(e.to_string())),
         };
         resolved.push((secret_ref.clone(), value));
@@ -204,13 +206,16 @@ mod tests {
         grant_in_tx(&tx, "bot-1", "TOKEN_REF", "github", "owner", 1.0).unwrap();
         let resolved =
             resolve_for_bot_in_tx(&tx, &store, "bot-1", &["TOKEN_REF".to_string()]).unwrap();
-        assert_eq!(resolved, vec![("TOKEN_REF".to_string(), CANARY.to_string())]);
+        assert_eq!(
+            resolved,
+            vec![("TOKEN_REF".to_string(), CANARY.to_string())]
+        );
 
         // Revoke: the SAME transaction view one "tick" later refuses, and
         // the store holds no cached value to fall back to.
         assert!(revoke_in_tx(&tx, "bot-1", "TOKEN_REF").unwrap());
-        let error = resolve_for_bot_in_tx(&tx, &store, "bot-1", &["TOKEN_REF".to_string()])
-            .unwrap_err();
+        let error =
+            resolve_for_bot_in_tx(&tx, &store, "bot-1", &["TOKEN_REF".to_string()]).unwrap_err();
         assert_eq!(error.monitor_error_kind(), MonitorErrorKind::Unauthorized);
     }
 

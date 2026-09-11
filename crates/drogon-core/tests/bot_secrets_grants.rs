@@ -131,10 +131,8 @@ impl Fx {
     }
 
     fn audit_rows(&self, bot_id: &str) -> Vec<(String, String, String)> {
-        let conn = rusqlite::Connection::open(
-            self.data_dir.join(drogon_core::DB_FILE_NAME),
-        )
-        .unwrap();
+        let conn =
+            rusqlite::Connection::open(self.data_dir.join(drogon_core::DB_FILE_NAME)).unwrap();
         let mut stmt = conn
             .prepare(
                 "SELECT request_id, method, actor_bot_id FROM bot_audit
@@ -430,7 +428,10 @@ fn set_secret_seals_the_value_and_the_ledger_never_holds_plaintext() {
 
     // The sealed store round-trips it; the plaintext file does not exist.
     let store = drogon_core::integrations::store::SecretStore::new(&fx.data_dir, "github").unwrap();
-    assert_eq!(store.read_secret("GITHUB_TOKEN_REF").unwrap().as_deref(), Some(CANARY));
+    assert_eq!(
+        store.read_secret("GITHUB_TOKEN_REF").unwrap().as_deref(),
+        Some(CANARY)
+    );
 
     // The durable DB files hold a fingerprint, never the params: grep the
     // raw bytes of every database file for the canary.

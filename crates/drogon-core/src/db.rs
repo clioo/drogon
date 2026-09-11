@@ -133,7 +133,8 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
             needs_input_at TEXT,
             parent_session_id TEXT,
             turn_fact TEXT,
-            turn_fact_at TEXT
+            turn_fact_at TEXT,
+            caused_by_event_id TEXT
         );
         CREATE TABLE IF NOT EXISTS requests (
             request_id TEXT PRIMARY KEY,
@@ -309,7 +310,8 @@ fn pending_forward_migrations(conn: &Connection) -> rusqlite::Result<Vec<Pending
             && has("needs_input_at")
             && has("parent_session_id")
             && has("turn_fact")
-            && has("turn_fact_at"))
+            && has("turn_fact_at")
+            && has("caused_by_event_id"))
         {
             pending.push(PendingMigration {
                 component: "sessions (main schema columns)".to_string(),
@@ -506,6 +508,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     migrate_sessions_needs_input(&tx)?;
     migrate_sessions_parent_session_id(&tx)?;
     migrate_sessions_turn_fact(&tx)?;
+    migrate_sessions_caused_by_event_id(&tx)?;
     recover_from_prior_instance(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
     tx.commit()?;
@@ -569,6 +572,26 @@ fn migrate_sessions_parent_session_id(tx: &Transaction<'_>) -> rusqlite::Result<
         .map(|count| count > 0)?;
     if !has_column {
         tx.execute_batch("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;")?;
+    }
+    Ok(())
+}
+
+/// Additive migration for delegation attribution: `caused_by_event_id`
+/// carries the monitor event id (`mev_…`) that caused this session, for
+/// both hops of the delegation chain — the Bot's headless run and the
+/// review session it dispatched. `NULL` for every session nobody delegated,
+/// so the value is trustworthy evidence rather than a hint. Idempotent:
+/// fresh databases already created the column in [`create_tables`].
+fn migrate_sessions_caused_by_event_id(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    let has_column: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'caused_by_event_id'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)?;
+    if !has_column {
+        tx.execute_batch("ALTER TABLE sessions ADD COLUMN caused_by_event_id TEXT;")?;
     }
     Ok(())
 }

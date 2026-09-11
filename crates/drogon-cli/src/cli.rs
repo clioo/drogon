@@ -497,7 +497,7 @@ pub enum HarnessAction {
     /// executable, so there is nothing to point at a local binary
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli harness start --workspace <ID> --harness <ID> [OPTIONS]\nValid flags: --data-dir, --effort, --help, --harness, --json, --model, --permission-mode, --provider, --prompt, --request-id, --retry-request, --workspace"
+        override_usage = "drogon-cli harness start --workspace <ID> --harness <ID> [OPTIONS]\nValid flags: --caused-by-event, --data-dir, --effort, --help, --harness, --json, --model, --permission-mode, --provider, --prompt, --request-id, --retry-request, --workspace"
     )]
     Start {
         #[arg(long, value_name = "ID")]
@@ -520,6 +520,11 @@ pub enum HarnessAction {
         /// interpolated, never @-file expanded
         #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
         prompt: Option<String>,
+        /// Monitor event id (`mev_…`) this session was caused by: the
+        /// attribution a delegated review carries, so the user can see WHY
+        /// the session appeared (the daemon refuses any other shape)
+        #[arg(long = "caused-by-event", value_name = "EVENT-ID")]
+        caused_by_event: Option<String>,
         #[arg(long, value_enum, default_value_t = PermissionModeArg::Inherit)]
         permission_mode: PermissionModeArg,
     },
@@ -1503,6 +1508,59 @@ impl Cli {
                         instructions.as_deref(),
                     )?;
                 }
+                BotAction::WatchPullRequest {
+                    bot,
+                    workspace,
+                    repo,
+                    filter,
+                    login,
+                    harness,
+                    skills,
+                    secret_ref,
+                    api_base,
+                    cron,
+                    manual,
+                    disabled: _,
+                    approve: _,
+                    responsibility_id,
+                    responsibility_name,
+                    instructions,
+                } => {
+                    require_nonempty("bot", bot)?;
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("repo", repo)?;
+                    if *manual && cron.is_some() {
+                        return Err(CliError::Usage("--manual takes no --cron".into()));
+                    }
+                    let filter = filter.as_deref().unwrap_or("opened");
+                    if !matches!(filter, "opened" | "assigned" | "review_requested") {
+                        return Err(CliError::Usage(
+                            "--filter must be opened, assigned or review_requested".into(),
+                        ));
+                    }
+                    if filter != "opened" && login.is_none() {
+                        return Err(CliError::Usage(format!(
+                            "--filter {filter} needs --login <GITHUB LOGIN>"
+                        )));
+                    }
+                    if let Some(harness) = harness {
+                        validate_opaque_id("harness", harness)?;
+                    }
+                    for skill in skills {
+                        validate_opaque_id("skill", skill)?;
+                    }
+                    if let Some(secret_ref) = secret_ref {
+                        require_nonempty("secret-ref", secret_ref)?;
+                    }
+                    if let Some(api_base) = api_base {
+                        validate_opaque_url(api_base)?;
+                    }
+                    validate_monitor_action_flags(
+                        responsibility_id.as_deref(),
+                        responsibility_name.as_deref(),
+                        instructions.as_deref(),
+                    )?;
+                }
                 BotAction::BindMonitor {
                     bot,
                     workspace,
@@ -1626,10 +1684,14 @@ impl Cli {
                     provider,
                     effort,
                     prompt,
+                    caused_by_event,
                     ..
                 } => {
                     require_nonempty("workspace", workspace)?;
                     validate_opaque_id("harness", harness)?;
+                    if let Some(event_id) = caused_by_event {
+                        validate_monitor_event_id(event_id)?;
+                    }
                     for (name, value) in
                         [("model", model), ("provider", provider), ("effort", effort)]
                     {
@@ -1727,6 +1789,33 @@ fn validate_monitor_action_flags(
         ));
     }
     Ok(())
+}
+
+/// `--caused-by-event` is a monitor event id: `mev_` plus 32 lowercase hex.
+/// Shape-only here (the daemon re-validates before recording it).
+fn validate_monitor_event_id(value: &str) -> Result<(), CliError> {
+    let hex = value.strip_prefix("mev_").unwrap_or("");
+    if hex.len() != 32
+        || !hex
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return Err(CliError::Usage(
+            "--caused-by-event must be a monitor event id (mev_<32 lowercase hex>)".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// `--api-base` is a URL the daemon will GET: shape-only here (absolute
+/// http/https), the daemon re-validates with the real parser.
+fn validate_opaque_url(value: &str) -> Result<(), CliError> {
+    if !(value.starts_with("http://") || value.starts_with("https://")) {
+        return Err(CliError::Usage(
+            "--api-base must be an absolute http(s) URL".into(),
+        ));
+    }
+    validate_opaque_id("api-base", value)
 }
 
 fn validate_dimension(flag: &str, value: u16) -> Result<(), CliError> {
@@ -2887,6 +2976,54 @@ pub enum BotAction {
         manual: bool,
         #[arg(long)]
         disabled: bool,
+        #[arg(long, value_name = "ID")]
+        responsibility_id: Option<String>,
+        #[arg(long, value_name = "NAME")]
+        responsibility_name: Option<String>,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        instructions: Option<String>,
+    },
+    /// Watch a GitHub repository for pull requests that are the case you
+    /// name (--filter assigned needs --login), and release the Bot's
+    /// review action when one appears: the delegation prompt tells the Bot
+    /// to open a worktree in the project and dispatch a session with
+    /// --harness and --skill exactly as given. Staged parked unless
+    /// --approve is passed (approval arms the EXACT rule hash).
+    #[command(
+        name = "watch-pr",
+        args_override_self = true,
+        override_usage = "drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME> [--filter opened|assigned|review_requested] [--login <LOGIN>] [--harness <ID>] [--skill <NAME>]... [--secret-ref <REF>] [--api-base <URL>] [--cron <EXPR> | --manual] [--disabled] [--approve] [--responsibility-id <ID> | --responsibility-name <NAME> [--instructions <TEXT>]]\nValid flags: --api-base, --approve, --bot, --cron, --data-dir, --disabled, --filter, --harness, --help, --instructions, --json, --login, --manual, --repo, --request-id, --responsibility-id, --responsibility-name, --retry-request, --secret-ref, --skill, --workspace"
+    )]
+    WatchPullRequest {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "OWNER/NAME")]
+        repo: String,
+        #[arg(long, value_name = "KIND")]
+        filter: Option<String>,
+        #[arg(long, value_name = "LOGIN")]
+        login: Option<String>,
+        #[arg(long, value_name = "ID")]
+        harness: Option<String>,
+        #[arg(long = "skill", value_name = "NAME")]
+        skills: Vec<String>,
+        #[arg(long = "secret-ref", value_name = "REF")]
+        secret_ref: Option<String>,
+        #[arg(long = "api-base", value_name = "URL")]
+        api_base: Option<String>,
+        #[arg(long, value_name = "EXPR")]
+        cron: Option<String>,
+        #[arg(long)]
+        manual: bool,
+        #[arg(long)]
+        disabled: bool,
+        /// Approve the exact rule hash in the same command (the single
+        /// consent point); without it the watch stays parked and runs
+        /// nothing until you approve it.
+        #[arg(long)]
+        approve: bool,
         #[arg(long, value_name = "ID")]
         responsibility_id: Option<String>,
         #[arg(long, value_name = "NAME")]

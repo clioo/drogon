@@ -119,13 +119,13 @@ describe("BotSessionHeader", () => {
       <BotSessionHeader
         meta={meta()}
         session={session()}
-        workspacePath="/Users/carlos/Drogon/bots/arya-stark"
+        workspacePath="/Users/example/Drogon/bots/arya-stark"
         onStop={() => {}}
         stopping={false}
         onOpenBots={() => {}}
       />,
     );
-    expect(screen.getByText("/Users/carlos/Drogon/bots/arya-stark")).toBeTruthy();
+    expect(screen.getByText("/Users/example/Drogon/bots/arya-stark")).toBeTruthy();
     expect(screen.getByTestId("bot-session-title").textContent).toBe(
       "Arya Stark · Claude",
     );
@@ -137,15 +137,15 @@ describe("BotSessionHeader", () => {
           harnessId: "pi",
         })}
         session={session()}
-        workspacePath="/Users/carlos/Drogon/bots/watcher"
+        workspacePath="/Users/example/Drogon/bots/watcher"
         onStop={() => {}}
         stopping={false}
         onOpenBots={() => {}}
       />,
     );
-    expect(screen.getByText("/Users/carlos/Drogon/bots/watcher")).toBeTruthy();
+    expect(screen.getByText("/Users/example/Drogon/bots/watcher")).toBeTruthy();
     expect(
-      screen.queryByText("/Users/carlos/Drogon/bots/arya-stark"),
+      screen.queryByText("/Users/example/Drogon/bots/arya-stark"),
     ).toBeNull();
     expect(screen.getByTestId("bot-session-title").textContent).toBe(
       "Watcher on the Wall · Pi",

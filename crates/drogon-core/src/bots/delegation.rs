@@ -587,6 +587,13 @@ pub fn delegation_request_id(
 /// field for watched file bytes, digests, or error text — the template
 /// rule is structural, not a review guideline. A caller cannot interpolate
 /// raw watched content because it is never given any.
+///
+/// The three case fields are the owner's per-case choices: which harness
+/// the released session must run, which skills it must use, and (for a
+/// pull-request watch) which PR the case is about. All three come from the
+/// monitor rule, so they are inside its approval hash and constrained to
+/// id-like alphabets; a pull number is a number. Prose still has exactly
+/// one channel — the responsibility's own standing instructions.
 pub struct DelegationPromptInput<'a> {
     pub event: &'a DelegationEvent,
     pub responsibility_name: &'a str,
@@ -594,6 +601,16 @@ pub struct DelegationPromptInput<'a> {
     pub worktree_name: &'a str,
     pub used_today: i64,
     pub max_per_day: i64,
+    /// Harness the released session must use. `None` leaves it to the Bot.
+    pub case_harness: Option<&'a str>,
+    /// Skills the released session must use (already id-like).
+    pub case_skills: &'a [String],
+    /// The pull request this case is about, when the watch is a
+    /// `github_pr.v1` one.
+    pub case_pull_number: Option<u64>,
+    /// The GitHub repository the case's pull request lives in (`owner/name`,
+    /// id-like and inside the rule's approval hash).
+    pub case_repo: Option<&'a str>,
 }
 
 /// Build the headless-run prompt from the template plus structured fields
@@ -608,14 +625,41 @@ pub fn build_delegation_prompt(input: &DelegationPromptInput) -> String {
     } else {
         instructions.to_string()
     };
+    // What the case is. A `github_pr.v1` watch carries `pull/<n>` as its
+    // resource; the number is a number, never watched bytes.
+    let case_line = match input.case_pull_number {
+        Some(number) => format!(
+            "- case: pull request #{number} in {repo} — the change to review\n",
+            repo = input.case_repo.unwrap_or(&event.project_id)
+        ),
+        None => String::new(),
+    };
+    let pull_note = match input.case_pull_number {
+        Some(number) => format!(
+            "   This case is pull request #{number}: bring it into the worktree \
+             (`gh pr checkout {number}` from inside it) or read its diff with \
+             `gh pr diff {number}` before you dispatch the review.\n"
+        ),
+        None => String::new(),
+    };
+    let harness_flag = input.case_harness.unwrap_or("<your harness>");
+    let skills_line = if input.case_skills.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n   That session MUST use these skills: {} — read each one with \
+             `drogon-cli skills get <name>` before starting the work.\n",
+            input.case_skills.join(", ")
+        )
+    };
     format!(
         "Monitor delegation {event_id} (delegation {used} of {max} today for this bot).\n\
          \n\
-         A watched file changed:\n\
+         A watched change was observed:\n\
          - monitor: {monitor} (rule version {version})\n\
          - project: {project}, resource: {resource}\n\
          - observed at: {observed_ms} ms epoch\n\
-         \n\
+         {case_line}\
          Your responsibility: {resp_name}\n\
          {standing}\n\
          \n\
@@ -624,13 +668,17 @@ pub fn build_delegation_prompt(input: &DelegationPromptInput) -> String {
          this exact name is derived from the event id, so a redelivered event \
          reuses it instead of creating a second worktree. If it already exists \
          from an earlier delivery of this event, reuse it.\n\
-         2. `drogon-cli harness start --workspace <the new workspace id> --harness <your harness> --prompt \"<task>\"` \
-         to open a worker session on that worktree.\n\
+         {pull_note}\
+         2. `drogon-cli harness start --workspace <the new workspace id> --harness {harness_flag} \
+         --caused-by-event {event_id} --prompt \"<task>\"` \
+         to open a worker session on that worktree. The `--caused-by-event` tag is \
+         how the user sees WHY that session appeared: pass this event id unchanged.\n\
+         {skills_line}\
          3. Send the worker its task prompt with `drogon-cli terminal send`, \
          and wait for it with `drogon-cli terminal wait`.\n\
          \n\
          Rules: refer to the change by event id ({event_id}) only. The watched \
-         file's contents are never included in prompts — do not paste them.",
+         content is never included in prompts — do not paste it.",
         event_id = event.event_id,
         used = input.used_today,
         max = input.max_per_day,
@@ -1236,20 +1284,46 @@ fn drain_single_event<S: DispatchSeam>(
         // no approval-answer surface.
         headless: true,
     };
+    // The case's own dispatch choices come from the monitor rule (approval-
+    // hashed) when the watch is a `github_pr.v1` one; a file watch has none
+    // and keeps today's wording exactly.
+    let github_case = monitor.rule.github_pr();
+    let case_harness = github_case.and_then(|rule| rule.harness.as_deref());
+    let case_repo = github_case.map(|rule| rule.repo.as_str());
+    let case_skills: &[String] = github_case
+        .map(|rule| rule.skills.as_slice())
+        .unwrap_or(&[]);
+    let case_pull_number =
+        crate::bots::monitors::github::pull_number_from_resource(&event.resource);
+    // A pull-request case names its worktree after the PR (still derived
+    // from the event, so a redelivery reuses it).
+    let worktree_name = match case_pull_number {
+        Some(number) => format!("review-pr-{number}"),
+        None => worktree_name_for_event(&event.event_id),
+    };
     let operating = crate::bots::prompt::build_operating_prompt(
         &bot,
         &build_delegation_prompt(&DelegationPromptInput {
             event,
             responsibility_name: &responsibility.name,
             responsibility_instructions: &responsibility.instructions,
-            worktree_name: &worktree_name_for_event(&event.event_id),
+            worktree_name: &worktree_name,
             used_today: used,
             max_per_day: MAX_DELEGATIONS_PER_BOT_PER_DAY,
+            case_harness,
+            case_skills,
+            case_pull_number,
+            case_repo,
         }),
     );
+    let mut params = build_harness_start_params(&workspace_id, &operating, &harness);
+    // Attribution, hop one: the delegated run's own session carries the
+    // event that caused it, so both hops of the chain answer "why did this
+    // session appear?" with the same monitor event id.
+    params["causedByEventId"] = serde_json::json!(event.event_id);
     let plan = DelegationPlan {
         request_id: request_id.clone(),
-        params: build_harness_start_params(&workspace_id, &operating, &harness),
+        params,
     };
     // No database guard held across the seam call.
     let outcome = runner::dispatch_run_plan(seam, &plan);

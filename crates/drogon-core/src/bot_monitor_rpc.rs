@@ -68,6 +68,19 @@ fn parse_scope(params: &Value, method: &str) -> Result<MonitorScope, RpcError> {
             // Manual monitor the tick skips.
             "cron",
             "manual",
+            // `github_pr.v1` (v3): the watch's repository, the case it
+            // names, its credential REFERENCE, the Enterprise API base, and
+            // the dispatch choices the case carries (harness + skills).
+            "kind",
+            "repo",
+            "filter",
+            "login",
+            "apiBase",
+            "secretRefs",
+            "harness",
+            "skills",
+            "timeoutMs",
+            "maxBodyBytes",
         ];
         if !admitted.contains(&key.as_str()) {
             return Err(invalid_argument(format!("{method}: unknown field {key}")));
@@ -203,13 +216,14 @@ pub(crate) fn create_monitor_in_tx(
     let scope = parse_scope(params, "bot.monitor_create")?;
     let (folder, workspace_id) = resolve_bot_scope(tx, derived_host_id, &scope)?;
     let object = params.as_object().expect("parse_scope checked object");
-    let resource = object
-        .get("resource")
+    // Rule kind dispatch. The default is unchanged (the file digest the
+    // redesigned Bots form creates); `github_pr.v1` is the owner's headline
+    // case — a pull request watched in the project workspace the Bot lives
+    // in, so the session it releases opens in that project's worktree.
+    let kind = object
+        .get("kind")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| invalid_argument("bot.monitor_create: missing required field resource"))?
-        .to_string();
+        .unwrap_or(crate::bots::monitors::rule::RULE_KIND_LOCAL_FILE_DIGEST);
     let max_bytes = match object.get("maxBytes") {
         None | Some(Value::Null) => 64 * 1024,
         Some(Value::Number(n)) => n.as_u64().ok_or_else(|| {
@@ -221,11 +235,6 @@ pub(crate) fn create_monitor_in_tx(
             ));
         }
     };
-    if max_bytes == 0 || max_bytes > MAX_FILE_BYTES {
-        return Err(invalid_argument(format!(
-            "bot.monitor_create: maxBytes must be 1..={MAX_FILE_BYTES}"
-        )));
-    }
     let monitor_id = object
         .get("monitorId")
         .and_then(Value::as_str)
@@ -324,15 +333,41 @@ pub(crate) fn create_monitor_in_tx(
     } else {
         None
     };
-    // The watched tree is the Bot's owning workspace: the P2 producer
-    // tick resolves a monitor's `project_id` through the `workspaces`
-    // table, so the rule names the workspace id, never an arbitrary path.
-    let rule = MonitorRule::LocalFileDigest(LocalFileRule {
-        host_id: derived_host_id.to_string(),
-        project_id: workspace_id.clone(),
-        resource,
-        max_bytes,
-    });
+    let rule = match kind {
+        crate::bots::monitors::rule::RULE_KIND_GITHUB_PR => MonitorRule::GithubPr(
+            crate::bots::monitors::rule::github_pr_rule_from_wire(
+                derived_host_id,
+                &workspace_id,
+                object,
+            )
+            .map_err(|e| invalid_argument(format!("bot.monitor_create: {e}")))?,
+        ),
+        _ => {
+            let resource = object
+                .get("resource")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    invalid_argument("bot.monitor_create: missing required field resource")
+                })?
+                .to_string();
+            if max_bytes == 0 || max_bytes > MAX_FILE_BYTES {
+                return Err(invalid_argument(format!(
+                    "bot.monitor_create: maxBytes must be 1..={MAX_FILE_BYTES}"
+                )));
+            }
+            // The watched tree is the Bot's owning workspace: the P2 producer
+            // tick resolves a monitor's `project_id` through the `workspaces`
+            // table, so the rule names the workspace id, never an arbitrary path.
+            MonitorRule::LocalFileDigest(LocalFileRule {
+                host_id: derived_host_id.to_string(),
+                project_id: workspace_id.clone(),
+                resource,
+                max_bytes,
+            })
+        }
+    };
     validate_rule(&rule).map_err(invalid_argument)?;
     // Scheduled by default (the P2 producer tick only fires
     // cron-scheduled monitors); explicit `cron` sets the cadence, and
@@ -371,6 +406,8 @@ pub(crate) fn create_monitor_in_tx(
     Ok(json!({
         "monitorId": record.id,
         "botId": scope.bot_id,
+        "ruleKind": record.rule.kind_str(),
+        "approvalHash": record.rule.approval_hash(),
         "approved": false,
         "trigger": trigger_view(&record.trigger),
         "responsibilityId": match &record.inference_policy {

@@ -77,9 +77,9 @@ use crate::bots::monitors::record::{
 use crate::bots::monitors::result::{MonitorCheckResult, MonitorErrorKind};
 use crate::bots::monitors::rule::{
     DEFAULT_HTTP_BODY_BYTES, DEFAULT_HTTP_TIMEOUT_MS, DEFAULT_SCRIPT_OUTPUT_BYTES,
-    DEFAULT_SCRIPT_TIMEOUT_MS, HttpCursorSpec, HttpPollRule, LocalFileRule, MAX_FILE_BYTES,
-    MAX_HTTP_BODY_BYTES, MAX_HTTP_TIMEOUT_MS, MAX_SCRIPT_OUTPUT_BYTES, MAX_SCRIPT_TIMEOUT_MS,
-    MonitorRule, ScriptInterpreter, ScriptRule,
+    DEFAULT_SCRIPT_TIMEOUT_MS, GithubPrRule, HttpCursorSpec, HttpPollRule, LocalFileRule,
+    MAX_FILE_BYTES, MAX_HTTP_BODY_BYTES, MAX_HTTP_TIMEOUT_MS, MAX_SCRIPT_OUTPUT_BYTES,
+    MAX_SCRIPT_TIMEOUT_MS, MonitorRule, ScriptInterpreter, ScriptRule,
 };
 use crate::bots::monitors::storage as monitor_storage;
 use crate::bots::monitors::{backoff_ms, should_admit};
@@ -982,6 +982,18 @@ pub struct MonitorTickSummary {
     pub events: usize,
 }
 
+/// How many `github_pr.v1` watches one tick may read over the network. A
+/// hostile or slow API can then never let one crowded table stall the tick
+/// (the leftover watches are read by the next tick; the rule's own timeout
+/// bounds each read).
+pub const MAX_GITHUB_POLLS_PER_TICK: usize = 4;
+
+/// Integration kind whose sealed store holds GitHub tokens. The rule names
+/// a secret REFERENCE and the grant table decides whether this Bot may open
+/// it; the value itself never leaves the sealed store except into one
+/// `curl` child's argv.
+pub const GITHUB_SECRET_KIND: &str = "github";
+
 /// Ticks every due Bot monitor: evaluate (no lock held during file IO),
 /// then commit cursor + check-in + outbox event in ONE transaction each.
 /// Best-effort per monitor — one bad row never aborts the tick — and
@@ -998,6 +1010,7 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
     if engine.is_quiescent() {
         return summary;
     }
+    let mut github_candidates: Vec<(MonitorRecord, i64)> = Vec::new();
     // Phase A: load under the lock, no IO.
     let candidates: Vec<Candidate> = {
         let conn = engine.db.lock().unwrap();
@@ -1023,6 +1036,15 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
             // P1 admits script/http rules and their approval, but execution
             // arrives with the bounded runner (P2). Skip honestly instead of
             // fabricating a file read for a kind that has no file to read.
+            // `github_pr.v1` has its own evaluator (Phase D below).
+            if let Some(github_rule) = record.rule.github_pr() {
+                if github_rule.host_id != engine.host_id {
+                    summary.refused += 1;
+                    continue;
+                }
+                github_candidates.push((record, rev));
+                continue;
+            }
             let Some(file_rule) = record.rule.local_file().cloned() else {
                 summary.skipped += 1;
                 continue;
@@ -1224,7 +1246,388 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
             }
         }
     }
+    // Phase D: GitHub pull-request watches. Each one reads over the network
+    // with no DB lock held, then commits cursor + seen set + check-in (+ the
+    // outbox event when a pull request is released) in ONE transaction.
+    // Bounded per tick so a slow API can never stall the scheduler.
+    for (record, rev) in github_candidates
+        .into_iter()
+        .take(MAX_GITHUB_POLLS_PER_TICK)
+    {
+        tick_github_monitor(engine, &record, rev, now_ms, &mut summary);
+    }
     summary
+}
+
+/// One `github_pr.v1` watch through its whole tick: resolve the token,
+/// read the pull list, decide, commit. Never holds the DB lock across the
+/// network read; a failure is an honest check-in that retains the cursor.
+fn tick_github_monitor(
+    engine: &crate::Engine,
+    record: &MonitorRecord,
+    rev: i64,
+    now_ms: f64,
+    summary: &mut MonitorTickSummary,
+) {
+    let Some(rule) = record.rule.github_pr().cloned() else {
+        summary.skipped += 1;
+        return;
+    };
+    summary.evaluated += 1;
+    // Resolve the token (grant-checked inside the caller's transaction) and
+    // the persisted seen set, then release the lock before any IO.
+    let (token, seen) = {
+        let conn = engine.db.lock().unwrap();
+        let token = match resolve_github_token(engine, &conn, record, &rule) {
+            Ok(token) => token,
+            Err((kind, message)) => {
+                drop(conn);
+                commit_github_error(engine, record, rev, kind, &message, now_ms, summary);
+                return;
+            }
+        };
+        let seen = crate::bots::monitors::github::seen_for_monitor(&conn, &record.id);
+        (token, seen)
+    };
+    let persisted = crate::bots::monitors::github::PersistedWatch {
+        monitor_id: &record.id,
+        monitor_version: record.version,
+        cursor: record.cursor.as_deref(),
+        seen: &seen,
+        last_success_at_ms: record.last_success_at_ms,
+    };
+    let outcome = crate::bots::monitors::github::evaluate_with_token(
+        &rule,
+        &persisted,
+        token.as_deref(),
+        now_ms,
+    );
+    match outcome {
+        crate::bots::monitors::github::GithubPollOutcome::Error {
+            error_kind,
+            message,
+        } => {
+            commit_github_error(engine, record, rev, error_kind, &message, now_ms, summary);
+        }
+        crate::bots::monitors::github::GithubPollOutcome::Seed {
+            cursor,
+            seen: next_seen,
+            reason,
+        } => {
+            commit_github_seed(
+                engine,
+                SeedCommit {
+                    record,
+                    rev,
+                    cursor: &cursor,
+                    seen: &next_seen,
+                    reason,
+                    now_ms,
+                },
+                summary,
+            );
+        }
+        crate::bots::monitors::github::GithubPollOutcome::Emit {
+            result,
+            resource,
+            seen: next_seen,
+        } => {
+            let state = StoredMonitorState {
+                monitor_id: record.id.clone(),
+                version: record.version,
+                cursor: record.cursor.clone(),
+                last_event_id: record.last_event_id.clone(),
+                enabled: record.enabled,
+            };
+            let input = crate::bots::monitors::commit::CommitInput {
+                expected_version: record.version,
+            };
+            let decision = crate::bots::monitors::commit::decide_commit(
+                &state,
+                &rule.host_id,
+                &rule.project_id,
+                &resource,
+                record.bot_id.as_deref(),
+                &result,
+                &input,
+            );
+            match decision {
+                CommitDecision::Advance { new_cursor, intent } => {
+                    let event_payload = json!({
+                        "eventId": intent.event_id,
+                        "monitorId": intent.monitor_id,
+                        "monitorVersion": intent.monitor_version,
+                        "cursor": intent.cursor,
+                        "hostId": intent.host_id,
+                        "projectId": intent.project_id,
+                        "resource": intent.resource,
+                        "botId": intent.bot_id,
+                        "observedAtMs": intent.observed_at_ms,
+                    });
+                    let mut updated = record.clone();
+                    updated.cursor = Some(new_cursor.clone());
+                    updated.last_event_id = Some(intent.event_id.clone());
+                    updated.consecutive_errors = 0;
+                    updated.next_eligible_at_ms = None;
+                    updated.last_success_at_ms = Some(now_ms);
+                    updated.last_error = None;
+                    updated.updated_at_ms = now_ms;
+                    let committed_seen = next_seen.clone();
+                    let check = monitor_storage::StoredCheck {
+                        id: format!("chk_{}", uuid::Uuid::new_v4().to_string().replace('-', "")),
+                        monitor_id: updated.id.clone(),
+                        monitor_version: updated.version,
+                        started_at_ms: now_ms,
+                        result: result.clone(),
+                        delivery: monitor_storage::DeliveryState::Pending,
+                    };
+                    let event_id = intent.event_id.clone();
+                    let bot_id = intent.bot_id.clone();
+                    let conn = engine.db.lock().unwrap();
+                    let tx = match auto_storage::begin_immediate(&conn) {
+                        Ok(tx) => tx,
+                        Err(e) => {
+                            eprintln!("[bot-monitors] github tick tx failed: {e}");
+                            summary.refused += 1;
+                            return;
+                        }
+                    };
+                    let enqueue = |tx: &Transaction| {
+                        record_monitor_event_in_tx(
+                            tx,
+                            &event_id,
+                            &updated.id,
+                            bot_id.as_deref(),
+                            now_ms,
+                            &event_payload,
+                        )
+                        .map_err(|e| e.to_string())
+                    };
+                    let seen_tx = |tx: &Transaction| {
+                        crate::bots::monitors::github::record_seen_in_tx(
+                            tx,
+                            &updated.id,
+                            &committed_seen,
+                            now_ms,
+                        )
+                        .map_err(|e| e.to_string())
+                    };
+                    let enqueue = |tx: &Transaction| -> std::result::Result<(), String> {
+                        enqueue(tx)?;
+                        seen_tx(tx)
+                    };
+                    match monitor_storage::commit_advance_in_tx(&tx, &updated, rev, &check, enqueue)
+                    {
+                        Ok(()) => {
+                            if tx.commit().is_ok() {
+                                summary.changed += 1;
+                                summary.events += 1;
+                            } else {
+                                summary.refused += 1;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[bot-monitors] github tick commit refused: {e}");
+                            summary.refused += 1;
+                        }
+                    }
+                }
+                CommitDecision::Retain { reason } => match reason {
+                    RetainReason::NoChange | RetainReason::DuplicateTick => summary.unchanged += 1,
+                    RetainReason::Disabled => summary.skipped += 1,
+                    // A github evaluation never routes here (an HTTP failure
+                    // is an explicit Error outcome); count it rather than
+                    // pretending the retry path ran.
+                    RetainReason::ErrorRetained => summary.errors += 1,
+                },
+                CommitDecision::RefuseStale { reason } => {
+                    eprintln!("[bot-monitors] github tick refused stale: {reason}");
+                    summary.refused += 1;
+                }
+            }
+        }
+    }
+}
+
+/// Resolve the watch's single token, grant-checked for this Bot. `Ok(None)`
+/// means "no token configured" (a public repository); `Err` carries the
+/// honest taxonomy plus a persisted-safe (scrubbed) message.
+fn resolve_github_token(
+    engine: &crate::Engine,
+    conn: &Connection,
+    record: &MonitorRecord,
+    rule: &GithubPrRule,
+) -> std::result::Result<Option<String>, (MonitorErrorKind, String)> {
+    if rule.secret_refs.is_empty() {
+        return Ok(None);
+    }
+    let Some(bot_id) = record.bot_id.as_deref() else {
+        return Err((
+            MonitorErrorKind::Forbidden,
+            "this rule names a secret reference but has no owning bot to grant it".to_string(),
+        ));
+    };
+    let store = crate::integrations::store::SecretStore::new(engine.data_dir(), GITHUB_SECRET_KIND)
+        .map_err(|e| {
+            (
+                MonitorErrorKind::IoError,
+                format!("secret store unavailable: {e}"),
+            )
+        })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| (MonitorErrorKind::IoError, format!("grant read failed: {e}")))?;
+    let resolved =
+        crate::integrations::resolve::resolve_for_bot_in_tx(&tx, &store, bot_id, &rule.secret_refs);
+    match resolved {
+        Ok(values) => Ok(values.into_iter().next().map(|(_, value)| value)),
+        Err(error) => {
+            let message = crate::integrations::resolve::scrub_for_persist(&error.message(), &[]);
+            Err((error.monitor_error_kind(), message))
+        }
+    }
+}
+
+/// Commit an honest error check-in for a GitHub watch: cursor retained, the
+/// monitor's backoff advanced, and the message scrubbed of any token value.
+fn commit_github_error(
+    engine: &crate::Engine,
+    record: &MonitorRecord,
+    rev: i64,
+    kind: MonitorErrorKind,
+    message: &str,
+    now_ms: f64,
+    summary: &mut MonitorTickSummary,
+) {
+    let result = MonitorCheckResult::error(&record.id, record.version, kind, message, now_ms);
+    let mut updated = record.clone();
+    updated.consecutive_errors = updated.consecutive_errors.saturating_add(1);
+    updated.next_eligible_at_ms = Some(now_ms + backoff_ms(updated.consecutive_errors));
+    updated.last_error = Some(outcome_error_text(&result).chars().take(512).collect());
+    updated.updated_at_ms = now_ms;
+    let check = monitor_storage::StoredCheck {
+        id: format!("chk_{}", uuid::Uuid::new_v4().to_string().replace('-', "")),
+        monitor_id: updated.id.clone(),
+        monitor_version: updated.version,
+        started_at_ms: now_ms,
+        result,
+        delivery: monitor_storage::DeliveryState::NotApplicable,
+    };
+    commit_github_quiet(
+        engine,
+        QuietCommit {
+            updated: &updated,
+            rev,
+            check: &check,
+            seen: None,
+            now_ms,
+        },
+        summary,
+    );
+}
+
+/// Commit a silent cursor advance: the watched set moved (a baseline seed)
+/// but nothing was released. No outbox row is written — that is the whole
+/// point of seeding instead of replaying an outage backlog.
+struct SeedCommit<'a> {
+    record: &'a MonitorRecord,
+    rev: i64,
+    cursor: &'a str,
+    seen: &'a std::collections::BTreeSet<u64>,
+    reason: &'static str,
+    now_ms: f64,
+}
+
+fn commit_github_seed(
+    engine: &crate::Engine,
+    seed: SeedCommit<'_>,
+    summary: &mut MonitorTickSummary,
+) {
+    let SeedCommit {
+        record,
+        rev,
+        cursor,
+        seen,
+        reason,
+        now_ms,
+    } = seed;
+    let mut updated = record.clone();
+    updated.cursor = Some(cursor.to_string());
+    updated.consecutive_errors = 0;
+    updated.next_eligible_at_ms = None;
+    updated.last_success_at_ms = Some(now_ms);
+    updated.last_error = Some(reason.to_string());
+    updated.updated_at_ms = now_ms;
+    let result =
+        MonitorCheckResult::no_change(&updated.id, updated.version, cursor.to_string(), now_ms);
+    let check = monitor_storage::StoredCheck {
+        id: format!("chk_{}", uuid::Uuid::new_v4().to_string().replace('-', "")),
+        monitor_id: updated.id.clone(),
+        monitor_version: updated.version,
+        started_at_ms: now_ms,
+        result,
+        delivery: monitor_storage::DeliveryState::NotApplicable,
+    };
+    commit_github_quiet(
+        engine,
+        QuietCommit {
+            updated: &updated,
+            rev,
+            check: &check,
+            seen: Some(seen),
+            now_ms,
+        },
+        summary,
+    );
+}
+
+/// Shared quiet commit: CAS the cursor + write the check row + rewrite the
+/// seen set in ONE transaction, with no outbox event.
+struct QuietCommit<'a> {
+    updated: &'a MonitorRecord,
+    rev: i64,
+    check: &'a monitor_storage::StoredCheck,
+    seen: Option<&'a std::collections::BTreeSet<u64>>,
+    now_ms: f64,
+}
+
+fn commit_github_quiet(
+    engine: &crate::Engine,
+    commit: QuietCommit<'_>,
+    summary: &mut MonitorTickSummary,
+) {
+    let QuietCommit {
+        updated,
+        rev,
+        check,
+        seen,
+        now_ms,
+    } = commit;
+    let conn = engine.db.lock().unwrap();
+    let tx = match auto_storage::begin_immediate(&conn) {
+        Ok(tx) => tx,
+        Err(e) => {
+            eprintln!("[bot-monitors] github quiet tx failed: {e}");
+            summary.refused += 1;
+            return;
+        }
+    };
+    let seen_write = |tx: &Transaction| -> std::result::Result<(), String> {
+        match seen {
+            Some(numbers) => {
+                crate::bots::monitors::github::record_seen_in_tx(tx, &updated.id, numbers, now_ms)
+                    .map_err(|e| e.to_string())
+            }
+            None => Ok(()),
+        }
+    };
+    let ok = monitor_storage::commit_advance_in_tx(&tx, updated, rev, check, seen_write).is_ok()
+        && tx.commit().is_ok();
+    if !ok {
+        summary.refused += 1;
+    } else {
+        summary.unchanged += 1;
+    }
 }
 
 fn outcome_error_text(result: &MonitorCheckResult) -> String {

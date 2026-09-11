@@ -73,6 +73,7 @@
 
 pub mod commit;
 pub mod eval;
+pub mod github;
 pub mod policy;
 pub mod record;
 pub mod result;
@@ -88,11 +89,13 @@ pub use policy::MonitorInferencePolicy;
 pub use record::{MonitorRecord, MonitorTrigger, approve_rule, new_monitor, staged_rule_edit};
 pub use result::{MonitorCheckResult, MonitorErrorKind, MonitorOutcome, RESULT_SCHEMA_VERSION};
 pub use rule::{
-    DEFAULT_HTTP_BODY_BYTES, DEFAULT_HTTP_TIMEOUT_MS, DEFAULT_SCRIPT_OUTPUT_BYTES,
-    DEFAULT_SCRIPT_TIMEOUT_MS, HttpCursorSpec, HttpPollRule, LocalFileRule, MAX_FILE_BYTES,
-    MAX_SCRIPT_ARG_BYTES, MAX_SCRIPT_ARGV_ARGS, MonitorRule, RULE_KIND_HTTP_POLL,
-    RULE_KIND_LOCAL_FILE_DIGEST, RULE_KIND_SCRIPT_COMMAND, RULE_SCHEMA_VERSION, ScriptInterpreter,
-    ScriptRule, validate_rule, validate_secret_ref,
+    DEFAULT_GITHUB_API_BASE, DEFAULT_HTTP_BODY_BYTES, DEFAULT_HTTP_TIMEOUT_MS,
+    DEFAULT_SCRIPT_OUTPUT_BYTES, DEFAULT_SCRIPT_TIMEOUT_MS, GITHUB_PULLS_PER_PAGE, GithubPrFilter,
+    GithubPrRule, HttpCursorSpec, HttpPollRule, LocalFileRule, MAX_CASE_SKILLS, MAX_FILE_BYTES,
+    MAX_SCRIPT_ARG_BYTES, MAX_SCRIPT_ARGV_ARGS, MonitorRule, RULE_KIND_GITHUB_PR,
+    RULE_KIND_HTTP_POLL, RULE_KIND_LOCAL_FILE_DIGEST, RULE_KIND_SCRIPT_COMMAND,
+    RULE_SCHEMA_VERSION, ScriptInterpreter, ScriptRule, github_pr_rule_from_wire, validate_rule,
+    validate_secret_ref,
 };
 pub use storage::{CommitTxError, commit_advance_in_tx};
 pub use storage::{DeliveryState, StoredCheck};

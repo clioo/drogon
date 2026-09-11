@@ -440,8 +440,8 @@ impl crate::Engine {
                     .map(|_| ())
             },
             |tx| {
-                let existed = revoke_in_tx(tx, &params.bot_id, &secret_ref)
-                    .map_err(secrets_storage_error)?;
+                let existed =
+                    revoke_in_tx(tx, &params.bot_id, &secret_ref).map_err(secrets_storage_error)?;
                 if !existed {
                     return Err(not_found(format!(
                         "bot {} has no grant for secret ref {}",
@@ -475,7 +475,9 @@ impl crate::Engine {
         let params: ListGrantsParams = parse_strict(params, "bot.list_secret_grants")?;
         check_host(&params.host_id, &self.host_id)?;
         let conn = self.db.lock().unwrap();
-        let tx = conn.unchecked_transaction().map_err(crate::error::from_sqlite)?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(crate::error::from_sqlite)?;
         resolve_user_target_bot(&tx, &self.host_id, &params.workspace_id, &params.bot_id)?;
         let grants = grants_for_bot(&tx, &params.bot_id).map_err(secrets_storage_error)?;
         let grants: Vec<Value> = grants
@@ -526,9 +528,7 @@ impl crate::Engine {
         let store = SecretStore::new(&self.data_dir, &kind)
             .map_err(|e| invalid_argument(format!("invalid integration kind: {e}")))?;
         if !store.has_secret(&name) {
-            return Err(not_found(format!(
-                "no stored secret for {kind}/{name}"
-            )));
+            return Err(not_found(format!("no stored secret for {kind}/{name}")));
         }
         store.delete_secret(&name);
         Ok(json!({ "kind": kind, "name": name, "deleted": true }))
@@ -585,7 +585,11 @@ mod tests {
 
         let grants = grants_for_bot(&tx, "bot-1").unwrap();
         assert_eq!(grants.len(), 1);
-        assert!(!has_grant_in_tx(&tx, "bot-2", "TOKEN_REF").unwrap().is_some());
+        assert!(
+            !has_grant_in_tx(&tx, "bot-2", "TOKEN_REF")
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
@@ -611,7 +615,10 @@ mod tests {
     #[test]
     fn granted_by_is_cleaned_and_bounded() {
         assert_eq!(clean_granted_by(&None).unwrap(), "owner");
-        assert_eq!(clean_granted_by(&Some("  carlos ".into())).unwrap(), "carlos");
+        assert_eq!(
+            clean_granted_by(&Some("  carlos ".into())).unwrap(),
+            "carlos"
+        );
         assert_eq!(clean_granted_by(&Some("   ".into())).unwrap(), "owner");
         assert!(clean_granted_by(&Some("x".repeat(129))).is_err());
         assert!(clean_granted_by(&Some("bad\nname".into())).is_err());

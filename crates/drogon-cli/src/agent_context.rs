@@ -382,6 +382,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             "Start a session running a harness; the service resolves the host executable",
             "drogon-cli harness start --workspace <ID> --harness <ID> [OPTIONS]",
             &[
+                "caused-by-event",
                 "effort",
                 "harness",
                 "model",
@@ -393,10 +394,12 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[],
             &[
                 "drogon-cli harness start --workspace ws-1 --harness pi --prompt 'fix the typo' --json",
+                "drogon-cli harness start --workspace ws-1 --harness codex --caused-by-event mev_00112233445566778899aabbccddeeff --prompt 'Review PR #42' --json",
             ],
             &[
                 "Requires the service capability harness.launch.v1.",
                 "The model id is exact and opaque: never guessed, never defaulted. There is nothing to point at a local binary.",
+                "--caused-by-event records the monitor event (mev_<32 hex>) that caused this session, so the UI can say why it appeared; any other shape is refused.",
             ],
         ),
         entry(
@@ -574,6 +577,42 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[
                 "Requires the service capability bot.self.v1.",
                 "Without a responsibility the monitor observes and records only. A bound monitor's change events dispatch a headless run of the named responsibility (idempotent per event, capped per day).",
+            ],
+        ),
+        entry(
+            "bot watch-pr",
+            &["bot", "watch-pr"],
+            "Watch a GitHub repository for the pull requests you name and release the Bot's review action for each new one; the released session opens a worktree in the project with the harness and skills the watch names",
+            "drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME> [--filter opened|assigned|review_requested] [--login <LOGIN>] [--harness <ID>] [--skill <NAME>]... [--secret-ref <REF>] [--api-base <URL>] [--cron <EXPR> | --manual] [--disabled] [--approve] [--responsibility-id <ID> | --responsibility-name <NAME> [--instructions <TEXT>]]",
+            &[
+                "api-base",
+                "approve",
+                "bot",
+                "cron",
+                "disabled",
+                "filter",
+                "harness",
+                "instructions",
+                "login",
+                "manual",
+                "repo",
+                "responsibility-id",
+                "responsibility-name",
+                "secret-ref",
+                "skill",
+                "workspace",
+            ],
+            &[],
+            &[
+                "drogon-cli bot watch-pr --bot bot-1 --workspace ws-1 --repo clioo/drogon --filter review_requested --login clioo --harness codex --skill drogon-cli --skill frontend-review --secret-ref GITHUB_TOKEN_REF --approve --json",
+                "drogon-cli bot watch-pr --bot bot-1 --workspace ws-1 --repo clioo/drogon --filter assigned --login clioo --responsibility-name 'Review assigned PRs' --instructions 'Read the diff, run the frontend checks, report findings.' --json",
+            ],
+            &[
+                "Requires the service capability bot.self.v1.",
+                "This is the USER lane (bot.monitor_create): the rule's project is the project workspace the Bot lives in, so the released session opens a worktree of that project.",
+                "Staged parked unless --approve is passed; approval arms the EXACT rule hash (repo, filter, login, harness, skills, secret refs are all inside it).",
+                "The token is named by reference only (--secret-ref). Grant it with `drogon-cli bot grant-secret` and store it with `drogon-cli secrets set --kind github`.",
+                "The same pull request never fires twice, and a watch that was not running seeds its baseline instead of replaying the backlog.",
             ],
         ),
         entry(

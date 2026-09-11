@@ -120,6 +120,12 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
             | BotAction::ListGrants { .. } => {
                 bot_secret_grants(&client, &request_id, json, action).await
             }
+            // The pull-request watch is a USER-lane monitor (the case names
+            // the project workspace the Bot lives in), so it does not go
+            // through the `bot.self_*` home-scoped surface.
+            BotAction::WatchPullRequest { .. } => {
+                bot_watch_pull_request(&client, &request_id, json, action).await
+            }
             other => bot(&client, &request_id, json, other).await,
         },
         Command::Secrets { action } => secrets(&client, &request_id, json, action).await,
@@ -599,6 +605,7 @@ async fn harness(
             provider,
             effort,
             prompt,
+            caused_by_event,
             permission_mode,
         } => {
             let mut params = json!({
@@ -606,6 +613,9 @@ async fn harness(
                 "harnessId": harness,
                 "permissionMode": permission_mode.as_wire(),
             });
+            if let Some(event_id) = caused_by_event {
+                params["causedByEventId"] = json!(event_id);
+            }
             for (field, value) in [
                 ("model", model),
                 ("provider", provider),
@@ -1709,6 +1719,10 @@ async fn bot(
         })
     };
     match action {
+        // Routed to its own user-lane flow before this function is reached.
+        BotAction::WatchPullRequest { .. } => {
+            unreachable!("watch-pr is served by bot_watch_pull_request")
+        }
         BotAction::Provision { bot, workspace } => {
             let call = client
                 .call(
@@ -2163,6 +2177,147 @@ async fn bot(
 /// call preflights the `bot.secrets.v1` capability. Grant and revoke are
 /// audited server-side with the granting user named; revocation takes
 /// effect on the Bot's NEXT monitor tick.
+/// `bot watch-pr`: stage a `github_pr.v1` watch on the USER lane
+/// (`bot.monitor_create`), where the rule's project is the project
+/// workspace the Bot lives in — so the session this watch releases opens a
+/// worktree of that project, not of the Bot's home. `--approve` arms the
+/// exact rule hash in the same command; without it the watch stays parked.
+async fn bot_watch_pull_request(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &BotAction,
+) -> Result<RunOutcome, CliError> {
+    let status = capability_preflight(client, request_id, "bot.self.v1", "bot").await?;
+    let BotAction::WatchPullRequest {
+        bot,
+        workspace,
+        repo,
+        filter,
+        login,
+        harness,
+        skills,
+        secret_ref,
+        api_base,
+        cron,
+        manual,
+        disabled,
+        approve,
+        responsibility_id,
+        responsibility_name,
+        instructions,
+    } = action
+    else {
+        unreachable!("bot_watch_pull_request is only called for WatchPullRequest")
+    };
+    let mut params = json!({
+        "botId": bot,
+        "workspaceId": workspace,
+        "hostId": status.host_id,
+        // Same wire tag as `drogon_core::bots::monitors::rule::RULE_KIND_GITHUB_PR`
+        // (the CLI has no drogon-core dependency; the daemon re-validates the
+        // kind and refuses an unknown tag).
+        "kind": "github_pr.v1",
+        "repo": repo,
+        "filter": filter.as_deref().unwrap_or("opened"),
+    });
+    if let Some(login) = login {
+        params["login"] = json!(login);
+    }
+    if let Some(harness) = harness {
+        params["harness"] = json!(harness);
+    }
+    if !skills.is_empty() {
+        params["skills"] = json!(skills);
+    }
+    if let Some(secret_ref) = secret_ref {
+        params["secretRefs"] = json!([secret_ref]);
+    }
+    if let Some(api_base) = api_base {
+        params["apiBase"] = json!(api_base);
+    }
+    // The USER lane spells its cadence as plain `cron`/`manual` fields (the
+    // self lane's `trigger` object is a different shape and is refused here
+    // by name); sending the wrong one would stage nothing at all.
+    if *manual {
+        params["manual"] = json!(true);
+    } else {
+        params["cron"] = json!(cron.as_deref().unwrap_or("* * * * *"));
+    }
+    if *disabled {
+        params["enabled"] = json!(false);
+    }
+    if let Some(id) = responsibility_id {
+        params["responsibilityId"] = json!(id);
+    }
+    if let Some(name) = responsibility_name {
+        params["responsibilityName"] = json!(name);
+    }
+    if let Some(text) = instructions {
+        params["instructions"] = json!(text);
+    }
+    let call = client
+        .call("bot.monitor_create", params, request_id, DEFAULT_TIMEOUT)
+        .await?;
+    let monitor_id = call
+        .result
+        .get("monitorId")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if monitor_id.is_empty() {
+        return Err(CliError::local(
+            drogon_protocol::RpcError::new(
+                "unverifiable",
+                "bot.monitor_create returned no monitorId",
+            ),
+            request_id,
+        ));
+    }
+    if !*approve {
+        return emit(
+            call,
+            json,
+            || {
+                format!(
+                    "staged pull-request watch {monitor_id} (parked at needs-approval); \
+                     approve it with `drogon-cli rpc bot.monitor_approve --params \
+                     '{{\"botId\":\"{bot}\",\"workspaceId\":\"{workspace}\",\"hostId\":\"{host}\",\"monitorId\":\"{monitor_id}\"}}'`",
+                    host = status.host_id
+                )
+            },
+            0,
+            None,
+        );
+    }
+    let approval = client
+        .call(
+            "bot.monitor_approve",
+            json!({
+                "botId": bot,
+                "workspaceId": workspace,
+                "hostId": status.host_id,
+                "monitorId": monitor_id,
+            }),
+            &format!("{request_id}-approve"),
+            DEFAULT_TIMEOUT,
+        )
+        .await?;
+    let approval_hash = approval
+        .result
+        .get("approvalHash")
+        .and_then(Value::as_str)
+        .unwrap_or("?")
+        .to_string();
+    emit(
+        approval,
+        json,
+        || format!("pull-request watch {monitor_id} armed (approval {approval_hash})"),
+        0,
+        None,
+    )
+}
+
 async fn bot_secret_grants(
     client: &Client,
     request_id: &str,

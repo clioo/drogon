@@ -25,6 +25,12 @@ export function SessionDetailsPanel({
           <dd className="path">{terminal.hostId}</dd>
           <dt>Session ID</dt>
           <dd className="path">{terminal.id}</dd>
+          {terminal.causedByEventId ? (
+            <>
+              <dt>Caused by</dt>
+              <dd className="path">Monitor event {terminal.causedByEventId}</dd>
+            </>
+          ) : null}
         </dl>
       ) : (
         <p>Select a terminal to see its execution details.</p>

@@ -107,8 +107,8 @@ mod tests {
     #[test]
     fn project_dir_name_replaces_every_non_alphanumeric_byte() {
         assert_eq!(
-            claude_project_dir_name(Path::new("/Users/carlos/Documents/Drogon-rewrite")),
-            "-Users-carlos-Documents-Drogon-rewrite"
+            claude_project_dir_name(Path::new("/Users/example/Documents/Drogon-rewrite")),
+            "-Users-example-Documents-Drogon-rewrite"
         );
         assert_eq!(
             claude_project_dir_name(Path::new("/private/var/folders/x/T/tmp.4mnHQS")),
