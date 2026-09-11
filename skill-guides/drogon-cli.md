@@ -66,7 +66,8 @@ for agent-state fields on sessions, `browser.relay.v1` for the browser
 commands below (which additionally need a connected Drogon desktop),
 `automation.v1` for the cron automation verbs, `bot.self.v1` for the Bot
 self-management verbs, `bot.secrets.v1` for the secret verbs, and
-`mentu.v1` for the Mentu recipe verbs below.
+`mentu.v1` for the Mentu recipe verbs below, and `graph.v1` for the
+work-graph verbs.
 
 Run `drogon-cli status --json` first, then the narrowest command for the
 job. Before promising a Mentu recipe, run
@@ -335,6 +336,47 @@ When a recipe is worth writing, its steps should be independently
 verifiable: give each step a `shell` command whose exit code means
 something, then run it and read the evidence back rather than asserting
 success.
+
+### Resume And Retry A Recipe Run
+
+An in-flight or failed run can be continued without starting over.
+`drogon-cli mentu resume --run <RUN-ID> --follow` relaunches the run in
+its SAME run directory, rerunning only the steps that did not succeed (a
+still-running prior run is refused until it settles). Retry one step with
+`drogon-cli mentu retry-step --run <RUN-ID> --step <LABEL> --follow` —
+the graph compiler emits each node id as its step label, so a graph node
+retries with its node id, and succeeded steps are never redone. Exit
+status follows the same truth table as `mentu run`.
+
+## Work Graphs
+
+A workspace can own a work graph: `<workspace>/.drogon/graph.json`
+describes nodes with dependencies, and the daemon compiles it into Mentu
+recipes. These verbs need the service capability `graph.v1`.
+
+Read the graph with `drogon-cli graph read --workspace <ID> --json` —
+each node's status is projected from real observation (`running` requires
+a confirmed live process; loss of contact is `unverifiable`, never
+failed), or inspect one node with
+`drogon-cli graph node-state --workspace <ID> --node <ID>`. Write your
+graph INTENT with
+`drogon-cli graph write-intent --workspace <ID> --file graph-intent.json`
+(intent only: a payload carrying `state` is refused, and a newer file
+version is refused rather than rewritten).
+
+Compile a node and its dependencies into a validated recipe with
+`drogon-cli graph compile --workspace <ID> --node <ID>` (or
+`--nodes <ID,ID>`; `--output` overrides the emitted path). Compilation
+validates with the runtime's own check and doctor — it runs nothing —
+and findings are attributed to the node that caused them.
+
+Run the compiled node with
+`drogon-cli graph run --workspace <ID> --node <ID> --follow`: the daemon
+mints the approval for the exact compiled bytes and executes through the
+Mentu run path, so there is no second engine. Resume or retry follow the
+same seams as above (`graph resume` reruns every non-succeeded step,
+`graph retry-step` reruns one), and `--follow` polls until the run
+settles with the same exit-status truth table.
 
 ## Skill Topics
 
