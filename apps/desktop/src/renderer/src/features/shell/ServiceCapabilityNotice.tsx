@@ -1,5 +1,9 @@
+/** Feature names the notice can name. `Meetings` is additive: the notes
+ *  surface gates on meetings.v1 like the others. */
+export type ServiceCapabilityFeature = "Bots" | "Agent settings" | "Meetings";
+
 export function ServiceCapabilityNotice({ feature, connected = true }: {
-  feature: "Bots" | "Agent settings";
+  feature: ServiceCapabilityFeature;
   connected?: boolean;
 }): React.JSX.Element {
   return (

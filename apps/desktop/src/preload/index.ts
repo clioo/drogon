@@ -24,6 +24,8 @@ import { botBridgeExtras } from "./bot";
 import { appMenu } from "./app-menu";
 import { ui } from "./workspace-ui-preferences";
 import { skills } from "./skills";
+// Meetings (additive): read-only Write That Down notes namespace.
+import { meetings } from "./meetings";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -123,5 +125,7 @@ Object.assign(
   { appMenu },
   { filesWatch },
   { ui, skills },
+  // Additive: meetings (read-only notes index).
+  { meetings },
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

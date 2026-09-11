@@ -1467,6 +1467,35 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
         ),
         entry(
+            "meeting list",
+            &["meeting", "list"],
+            "List indexed meeting notes, newest first",
+            "drogon-cli meeting list [--limit <N>] [--offset <N>]",
+            &["limit", "offset"],
+            &[],
+            &["drogon-cli meeting list --limit 10 --json"],
+            &[
+                "Requires meetings.v1. Reads Write That Down's own Markdown notes from this host: no API, no OAuth, no credential.",
+                "Always reports where the notes folder came from (default, the tool's config.json, or WTD_OUTPUT_DIR) and its state (readable, missing, unreadable), so an empty list is never mistaken for 'no meetings'.",
+                "Read-only: Drogon never edits, moves or deletes a note. A file that fails to parse is listed as failed with the reason and its path.",
+            ],
+        ),
+        entry(
+            "meeting read",
+            &["meeting", "read"],
+            "Read one meeting transcript by id",
+            "drogon-cli meeting read --id <ID> [--max-bytes <N>]",
+            &["id", "max-bytes"],
+            &[],
+            &[
+                "drogon-cli meeting read --id write-that-down:/Users/me/Transcripts/2026-09-10/08-05_42min.md --json",
+            ],
+            &[
+                "Requires meetings.v1. The id is the one `meeting list` printed; an id outside the resolved notes folder is refused.",
+                "--max-bytes bounds the returned content (default and maximum 5242880); a truncated prefix is cut on a UTF-8 boundary and flagged with truncated:true.",
+            ],
+        ),
+        entry(
             "graph node-state",
             &["graph", "node-state"],
             "Read one node's observed state",

@@ -6,10 +6,10 @@ use base64::engine::general_purpose::STANDARD;
 
 use crate::client::{
     AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, BrowserSnapshot,
-    BrowserTab, BrowserTabsList, HarnessCatalog, MentuApproval, MentuOpenResult, MentuRun,
-    MentuRunsResult, MentuStepRun, MethodResult, Project, ProjectList, ReadResult, Removed,
-    Session, SessionList, StatusResult, Workspace, WorkspaceList, Worktree, WorktreeList,
-    WriteResult,
+    BrowserTab, BrowserTabsList, HarnessCatalog, MeetingList, MeetingRead, MeetingTranscript,
+    MentuApproval, MentuOpenResult, MentuRun, MentuRunsResult, MentuStepRun, MethodResult, Project,
+    ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Workspace, WorkspaceList,
+    Worktree, WorktreeList, WriteResult,
 };
 use drogon_protocol::graph::{Graph, GraphCompileResult, GraphNodeState};
 
@@ -780,6 +780,154 @@ pub enum RenderContext {
     SessionResized,
     SessionClosed,
     SentTo(String),
+}
+
+/// `meeting list`: when there is nothing to show, the first line has to be
+/// the truth about the notes folder — never a bare "no meetings". When there
+/// is something to show, the folder provenance is still printed first so a
+/// reader always knows which directory those meetings came from.
+pub fn meeting_list(list: &MeetingList) -> String {
+    let availability = &list.availability;
+    let mut lines = vec![meeting_folder_line(list)];
+    if list.meetings.is_empty() {
+        lines.push(match availability.reason.as_str() {
+            "unsupported-platform" => format!(
+                "Write That Down is macOS-only; this host reports platform {}.",
+                availability.platform
+            ),
+            "not-installed" => format!(
+                "Write That Down is not installed. Install it at /Applications/WriteThatDown.app to record new meetings; Drogon will still list compatible notes in {}.",
+                availability.transcript_root
+            ),
+            "invalid-configuration" => format!(
+                "Write That Down's configuration could not be read safely ({}). Existing notes are untouched.",
+                availability.config_path
+            ),
+            "transcript-root-missing" => format!(
+                "The notes folder does not exist: {}. This is not the same as having no meetings.",
+                availability.transcript_root
+            ),
+            "transcript-root-unreadable" => format!(
+                "The notes folder exists but cannot be read: {}.",
+                availability.transcript_root
+            ),
+            "empty" => format!(
+                "The notes folder is empty: {}.",
+                availability.transcript_root
+            ),
+            _ => "No transcripts to show.".to_string(),
+        });
+        if availability.reason == "not-installed"
+            && availability.transcript_root_state != "readable"
+        {
+            lines.push(format!(
+                "The notes folder is {}: {}.",
+                availability.transcript_root_state, availability.transcript_root
+            ));
+        }
+        return lines.join("\n");
+    }
+    lines.push(format!(
+        "{} meeting{} (showing {}..{}):",
+        list.total,
+        if list.total == 1 { "" } else { "s" },
+        list.offset,
+        list.offset as usize + list.meetings.len()
+    ));
+    lines.extend(list.meetings.iter().map(meeting_line));
+    if list.has_more {
+        lines.push(format!(
+            "More meetings available: rerun with --offset {}.",
+            list.offset as usize + list.meetings.len()
+        ));
+    }
+    if list.scan_truncated {
+        lines.push(
+            "The notes directory was only partially indexed (the scan budget stopped the walk), so this count is a lower bound."
+                .to_string(),
+        );
+    }
+    let failed = list
+        .meetings
+        .iter()
+        .filter(|meeting| meeting.status == "failed")
+        .count();
+    if failed > 0 {
+        lines.push(format!(
+            "{failed} file{} failed to parse; each line above names its file and reason.",
+            if failed == 1 { "" } else { "s" }
+        ));
+    }
+    lines.join("\n")
+}
+
+fn meeting_folder_line(list: &MeetingList) -> String {
+    let availability = &list.availability;
+    format!(
+        "Notes folder ({}): {} [{}]",
+        availability.transcript_root_source,
+        availability.transcript_root,
+        availability.transcript_root_state
+    )
+}
+
+fn meeting_line(meeting: &MeetingTranscript) -> String {
+    let started = meeting.started_at.as_deref().unwrap_or("unknown time");
+    let duration = match (meeting.status.as_str(), meeting.duration_minutes) {
+        ("recording", _) => "in progress".to_string(),
+        (_, Some(minutes)) => format!("{minutes} min"),
+        _ => "unknown duration".to_string(),
+    };
+    let failure = meeting
+        .failure_reason
+        .as_deref()
+        .map(|reason| format!(" ({reason})"))
+        .unwrap_or_default();
+    format!(
+        "{} [{}] {} · {}{}\n    {}\n    {}",
+        started,
+        meeting.status,
+        meeting.title,
+        duration,
+        failure,
+        meeting.relative_path,
+        meeting.id
+    )
+}
+
+/// `meeting read`: path, metadata, then the note itself, exactly as the file
+/// has it. The bytes Drogon printed are the bytes on disk; nothing is
+/// rewritten, summarised or trimmed except the explicit `--max-bytes` cap,
+/// which is always announced.
+pub fn meeting_read(read: &MeetingRead) -> String {
+    let meeting = &read.meeting;
+    let duration = match (meeting.status.as_str(), meeting.duration_minutes) {
+        ("recording", _) => "in progress".to_string(),
+        (_, Some(minutes)) => format!("{minutes} min"),
+        _ => "unknown duration".to_string(),
+    };
+    let mut lines = vec![
+        format!("# {}", meeting.title),
+        meeting
+            .started_at
+            .as_deref()
+            .unwrap_or("unknown time")
+            .to_string(),
+        format!("{} ({duration}, {})", meeting.relative_path, meeting.status),
+    ];
+    if let Some(reason) = &meeting.failure_reason {
+        lines.push(format!("Failed to parse: {reason}."));
+    }
+    if read.truncated {
+        lines.push(format!(
+            "Showing the first {} of {} bytes (--max-bytes).",
+            read.content.len(),
+            read.size
+        ));
+    }
+    lines.push(String::new());
+    lines.push(read.content.trim_end().to_string());
+    lines.join("\n")
 }
 
 #[cfg(test)]

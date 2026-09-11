@@ -233,6 +233,42 @@ review grants with `drogon-cli bot list-grants --bot <ID> --workspace <ID>
 --json`, and revoke with `drogon-cli bot revoke-secret --bot <ID>
 --workspace <ID> --secret-ref <NAME>`.
 
+## Meetings
+
+The owner's meeting notes come from **Write That Down**, a local-first macOS
+meeting copilot that saves each finished conversation as plain Markdown
+under `~/Transcripts/<YYYY-MM-DD>/<HH-MM>_<n>min.md`. There is no API, no
+OAuth and no credential anywhere in this path: the notes are files, so
+discover them with `drogon-cli meeting list --json` (newest first, with each
+note's date, duration, path and id) and read one with `drogon-cli meeting
+read --id <ID> --json`. Both require the service capability `meetings.v1`.
+
+`meeting list` always reports where the folder came from and what state it
+is in, as `availability.transcriptRoot`, `transcriptRootSource`
+(`default` = `~/Transcripts`, `config` = the tool's own `config.json`, or
+`environment` = `WTD_OUTPUT_DIR`) and `transcriptRootState` (`readable`,
+`missing` or `unreadable`). Read `availability.reason` before you conclude
+anything: `not-installed`, `transcript-root-missing` and
+`transcript-root-unreadable` mean you cannot see the notes, which is NOT the
+same as `empty` (the folder is readable and truly has no transcripts). A
+file that fails to parse is still listed, as `status: "failed"` with its
+`failureReason` and `filePath`, so name the file instead of skipping it.
+
+Read-only by construction: Drogon indexes and displays these notes and
+never edits, moves or deletes them (the wire says `readOnly: true`). Use
+`--limit <N>` and `--offset <N>` to page (1..=200 per page; `hasMore` tells
+you whether to keep going, and `scanTruncated` means the index stopped
+early so `total` is a lower bound). `meeting read` refuses any id outside
+the resolved notes folder, and `--max-bytes <N>` caps the returned content.
+
+A typical Bot flow — a morning brief of yesterday's meetings with
+recommended actions — is one automation whose prompt tells the harness to
+run `drogon-cli meeting list --limit 20 --json`, filter the dates it cares
+about, `drogon-cli meeting read --id <ID>` those notes, and deliver the brief
+the Bot already knows how to deliver. Nothing in that chain needs a new
+integration: the meetings come from the CLI and the schedule comes from the
+`bot create-automation` verb.
+
 ## Secrets
 
 `drogon-cli secrets set --kind <KIND> --name <NAME>` seals one integration

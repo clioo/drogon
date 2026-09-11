@@ -11,19 +11,20 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::{
     AutomationAction, BotAction, BrowserAction, Cli, Command, GraphAction, HarnessAction,
-    InternalAction, MentuAction, ProjectAction, SecretsAction, TerminalAction, WaitFor,
-    WorkspaceAction, WorktreeAction,
+    InternalAction, MeetingAction, MentuAction, ProjectAction, SecretsAction, TerminalAction,
+    WaitFor, WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
-    BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, MentuOpenResult,
-    MentuPendingApprovalResult, MentuRecipesResult, MentuRun, MentuRunResult, MentuRunStatus,
-    MentuRunsResult, MentuRuntimeInfo, MentuRuntimeResult, Project, ProjectList, ReadResult,
-    Removed, Session, SessionList, StatusResult, Verdict, Workspace, WorkspaceList, Worktree,
-    WorktreeList, WriteResult, check_automation, check_automation_history, check_automation_list,
-    check_automation_run_now, check_browser_snapshot, check_browser_tab, check_browser_tabs,
-    check_harness_catalog, check_mentu_open, check_mentu_pending_approval, check_mentu_recipes,
-    check_mentu_run, check_mentu_run_result, check_mentu_runs, check_mentu_runtime, check_project,
+    BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, MeetingList,
+    MeetingRead, MentuOpenResult, MentuPendingApprovalResult, MentuRecipesResult, MentuRun,
+    MentuRunResult, MentuRunStatus, MentuRunsResult, MentuRuntimeInfo, MentuRuntimeResult, Project,
+    ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Verdict, Workspace,
+    WorkspaceList, Worktree, WorktreeList, WriteResult, check_automation, check_automation_history,
+    check_automation_list, check_automation_run_now, check_browser_snapshot, check_browser_tab,
+    check_browser_tabs, check_harness_catalog, check_meeting_list, check_meeting_read,
+    check_mentu_open, check_mentu_pending_approval, check_mentu_recipes, check_mentu_run,
+    check_mentu_run_result, check_mentu_runs, check_mentu_runtime, check_project,
     check_project_list, check_read, check_removed, check_session, check_status, check_workspace,
     check_workspace_list, check_worktree, check_worktree_list, check_write, partition_session_list,
 };
@@ -108,6 +109,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Graph { action } => graph(&client, &request_id, json, action).await,
         Command::Harness { action } => harness(&client, &request_id, json, action).await,
         Command::Automation { action } => automation(&client, &request_id, json, action).await,
+        Command::Meeting { action } => meeting(&client, &request_id, json, action).await,
         Command::Bot { action } => match action {
             // User-only secret-grant verbs: no Bot-actor scope is asserted
             // anywhere on this surface, and they preflight their own
@@ -1159,6 +1161,48 @@ async fn mentu(
                 );
             }
             mentu_follow(client, request_id, json, call, started.run, *timeout_ms).await
+        }
+    }
+}
+
+/// Meetings: the owner's own Write That Down notes. Both verbs are pure
+/// reads of the notes directory through the daemon, and both negotiate
+/// `meetings.v1` first so an older service says so instead of returning an
+/// empty list that would read as "you have had no meetings".
+async fn meeting(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &MeetingAction,
+) -> Result<RunOutcome, CliError> {
+    capability_preflight(client, request_id, "meetings.v1", "meetings").await?;
+    match action {
+        MeetingAction::List { limit, offset } => {
+            let mut params = json!({});
+            if let Some(limit) = limit {
+                params["limit"] = json!(limit);
+            }
+            if let Some(offset) = offset {
+                params["offset"] = json!(offset);
+            }
+            let call = client
+                .call("meeting.list", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let list: MeetingList =
+                Client::decode_checked(&call, "meeting.list", check_meeting_list)?;
+            emit(call, json, || output::meeting_list(&list), 0, None)
+        }
+        MeetingAction::Read { id, max_bytes } => {
+            let mut params = json!({ "id": id });
+            if let Some(max_bytes) = max_bytes {
+                params["maxBytes"] = json!(max_bytes);
+            }
+            let call = client
+                .call("meeting.read", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let read: MeetingRead =
+                Client::decode_checked(&call, "meeting.read", check_meeting_read)?;
+            emit(call, json, || output::meeting_read(&read), 0, None)
         }
     }
 }
