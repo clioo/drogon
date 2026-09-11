@@ -52,6 +52,16 @@ function bridgeFor(
 afterEach(cleanup);
 
 /**
+ * Switches the page's view. Radix `Tabs` activates on `mousedown` (automatic
+ * activation), so a bare `click` would not move the view.
+ */
+async function openActionsTab(): Promise<void> {
+  const tab = await screen.findByRole("tab", { name: /My actions/ });
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+}
+
+/**
  * Drives a Radix `Select` the way the product's other tests do: click the
  * trigger, then the option by its label.
  */
@@ -491,7 +501,7 @@ describe("Meetings page list and reader", () => {
     }));
     const bridge = fixturesBridge({ resolve, commitments });
     renderPage({ bridge });
-    fireEvent.click(await screen.findByRole("tab", { name: /My actions/ }));
+    await openActionsTab();
 
     expect(await screen.findByText("Fix the flaky login test")).toBeTruthy();
     // The row keeps the meeting it came from and the quote that supports it.
@@ -519,7 +529,7 @@ describe("Meetings page list and reader", () => {
       })),
     });
     renderPage({ bridge, renderTranscript: plainRenderer });
-    fireEvent.click(await screen.findByRole("tab", { name: /My actions/ }));
+    await openActionsTab();
     fireEvent.click(await screen.findByRole("button", { name: /Open transcript/ }));
     await waitFor(() =>
       expect(bridge.read).toHaveBeenCalledWith({ id: NOTE_ID }),

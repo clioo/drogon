@@ -18,6 +18,7 @@
 //   * the page has a second view, "My actions", for the commitments ledger.
 import { useCallback, useState } from "react";
 import { Button } from "../../components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { MessageSquareText, Sparkles } from "lucide-react";
 import type {
   MeetingAnalysisStatus,
@@ -192,41 +193,29 @@ export default function MeetingsPage({
 
           <MeetingsNotices page={page} error={controller.error} onOpenSetup={openSetup} />
 
-          <div
-            role="tablist"
-            aria-label="Meetings views"
-            className="flex items-center gap-1 border-b border-border/60"
+          {/* The product's own Tabs primitive (the same one the Mentu pane
+              uses), so the two views get the source's ARIA semantics and
+              arrow-key navigation instead of a hand-rolled tablist. */}
+          <Tabs
+            value={view}
+            onValueChange={(value) => setView(value as MeetingsView)}
+            className="min-h-0"
           >
-            {(
-              [
-                ["transcripts", "Transcripts"],
-                ["actions", "My actions"],
-              ] as Array<[MeetingsView, string]>
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                id={`meetings-tab-${value}`}
-                aria-selected={view === value}
-                aria-controls="meetings-tab-panel"
-                onClick={() => setView(value)}
-                className={
-                  view === value
-                    ? "-mb-px border-b-2 border-foreground px-3 py-2 text-sm font-medium text-foreground"
-                    : "-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground"
-                }
-              >
-                {label}
-                {value === "actions" && commitments.page && commitments.page.open > 0
+            <TabsList
+              variant="line"
+              aria-label="Meetings views"
+              className="w-fit justify-start border-b border-border/60"
+            >
+              <TabsTrigger value="transcripts">Transcripts</TabsTrigger>
+              <TabsTrigger value="actions">
+                My actions
+                {commitments.page && commitments.page.open > 0
                   ? ` (${commitments.page.open})`
                   : ""}
-              </button>
-            ))}
-          </div>
+              </TabsTrigger>
+            </TabsList>
 
-          <div id="meetings-tab-panel" role="tabpanel" aria-labelledby={`meetings-tab-${view}`}>
-            {view === "actions" ? (
+            <TabsContent value="actions" className="pt-3">
               <MeetingActionsPanel
                 page={commitments.page}
                 loading={commitments.loading}
@@ -240,7 +229,10 @@ export default function MeetingsPage({
                 onOpenMeeting={openFromLedger}
                 onResolve={commitments.resolve}
               />
-            ) : reading ? (
+            </TabsContent>
+
+            <TabsContent value="transcripts" className="pt-3">
+              {reading ? (
               <div className="space-y-4">
                 <MeetingTranscriptReader
                   transcript={controller.transcript}
@@ -369,8 +361,9 @@ export default function MeetingsPage({
                   </p>
                 ) : null}
               </section>
-            )}
-          </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </main>
