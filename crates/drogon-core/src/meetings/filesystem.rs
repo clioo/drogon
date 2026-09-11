@@ -33,6 +33,14 @@ pub trait MeetingFileSystem: Send + Sync {
     fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntryInfo>>;
     fn metadata(&self, path: &Path) -> io::Result<FileMetadata>;
     fn read_file(&self, path: &Path) -> io::Result<Vec<u8>>;
+    /// The first `max_bytes` of a file (or the whole file, when shorter).
+    ///
+    /// Indexing a 327-transcript folder must not pull 327 whole
+    /// conversations into memory to render a list: every field a row shows
+    /// — title, date, duration, status and a ~400-character excerpt — lives
+    /// in the file's own header, so the walk reads a bounded window and only
+    /// falls back to [`Self::read_file`] when the window cannot decide.
+    fn read_prefix(&self, path: &Path, max_bytes: u64) -> io::Result<Vec<u8>>;
 }
 
 /// The real filesystem. Reads only; `std::fs::read`/`read_dir`/`metadata`
@@ -73,6 +81,14 @@ impl MeetingFileSystem for RealMeetingFileSystem {
 
     fn read_file(&self, path: &Path) -> io::Result<Vec<u8>> {
         std::fs::read(path)
+    }
+
+    fn read_prefix(&self, path: &Path, max_bytes: u64) -> io::Result<Vec<u8>> {
+        use std::io::Read as _;
+        let file = std::fs::File::open(path)?;
+        let mut out = Vec::new();
+        file.take(max_bytes).read_to_end(&mut out)?;
+        Ok(out)
     }
 }
 
@@ -248,6 +264,14 @@ pub mod tests {
                 .cloned()
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "missing"))
         }
+
+        fn read_prefix(&self, path: &Path, max_bytes: u64) -> io::Result<Vec<u8>> {
+            let bytes = <Self as MeetingFileSystem>::read_file(self, path)?;
+            let limit = usize::try_from(max_bytes)
+                .unwrap_or(usize::MAX)
+                .min(bytes.len());
+            Ok(bytes[..limit].to_vec())
+        }
     }
 
     #[test]
@@ -300,6 +324,83 @@ pub mod tests {
             inspect_directory(&fs, Path::new("/root/Transcripts")),
             DirectoryState::Unreadable
         );
+    }
+
+    /// Counts what the index actually reads. The "never pull 327 files into
+    /// memory to render a list" guarantee is a property of the read
+    /// pattern, so it is asserted against the filesystem seam rather than
+    /// inferred from timings.
+    #[derive(Debug, Default)]
+    pub struct CountingFileSystem {
+        inner: FakeFileSystem,
+        pub full_reads: std::sync::Mutex<Vec<PathBuf>>,
+        pub prefix_reads: std::sync::Mutex<Vec<(PathBuf, u64)>>,
+    }
+
+    impl CountingFileSystem {
+        pub fn inner_mut(&mut self) -> &mut FakeFileSystem {
+            &mut self.inner
+        }
+
+        pub fn file_reads(&self) -> usize {
+            self.full_reads.lock().unwrap().len()
+        }
+
+        pub fn prefix_reads(&self) -> usize {
+            self.prefix_reads.lock().unwrap().len()
+        }
+
+        pub fn prefix_read_bytes(&self) -> u64 {
+            self.prefix_reads
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(_, bytes)| *bytes)
+                .sum()
+        }
+
+        pub fn paths_read_in_full(&self) -> Vec<PathBuf> {
+            self.full_reads.lock().unwrap().clone()
+        }
+    }
+
+    impl MeetingFileSystem for CountingFileSystem {
+        fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntryInfo>> {
+            self.inner.read_dir(path)
+        }
+
+        fn metadata(&self, path: &Path) -> io::Result<FileMetadata> {
+            self.inner.metadata(path)
+        }
+
+        fn read_file(&self, path: &Path) -> io::Result<Vec<u8>> {
+            self.full_reads.lock().unwrap().push(path.to_path_buf());
+            self.inner.read_file(path)
+        }
+
+        fn read_prefix(&self, path: &Path, max_bytes: u64) -> io::Result<Vec<u8>> {
+            self.prefix_reads
+                .lock()
+                .unwrap()
+                .push((path.to_path_buf(), max_bytes));
+            self.inner.read_prefix(path, max_bytes)
+        }
+    }
+
+    #[test]
+    fn read_prefix_returns_a_bounded_window() {
+        let mut fs = FakeFileSystem::default();
+        fs.insert_file(
+            "/root/Transcripts/2026-09-10/08-00_5min.md",
+            b"# Meeting\nbody",
+        );
+        let path = Path::new("/root/Transcripts/2026-09-10/08-00_5min.md");
+        assert_eq!(fs.read_prefix(path, 9).unwrap(), b"# Meeting");
+        assert_eq!(
+            fs.read_prefix(path, 4096).unwrap(),
+            b"# Meeting\nbody".to_vec()
+        );
+        assert!(fs.read_prefix(path, 0).unwrap().is_empty());
     }
 
     #[test]

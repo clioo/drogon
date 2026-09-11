@@ -13,10 +13,60 @@ use serde_json::Value;
 
 use crate::error;
 use crate::meetings::{
-    self, MAX_TRANSCRIPT_BYTES, MeetingEnvironment, MeetingReadSpecError, MeetingsParamError,
-    RealMeetingFileSystem,
+    self, AnalysisEnvironment, AnalysisError, MAX_TRANSCRIPT_BYTES, MeetingEnvironment,
+    MeetingFilters, MeetingReadSpecError, MeetingsParamError, RealMeetingFileSystem,
 };
+use crate::meetings::{CommitmentError, CommitmentFilter, CommitmentSource, CommitmentStatus};
 use drogon_protocol::RpcError;
+
+// Two rules are enforced here rather than in the UI: the run's model is the
+// free local one (a caller cannot name a provider or a model at all — the
+// parameters below have no such field), and a commitment is only stored when
+// its quote is found in the transcript it names.
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MeetingAnalyzeParams {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CommitmentListParams {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    open_only: Option<bool>,
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    limit: Option<u32>,
+    #[serde(default)]
+    offset: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CommitmentCreateParams {
+    meeting_id: String,
+    text: String,
+    #[serde(default)]
+    owner: Option<String>,
+    quote: String,
+    /// `suggested` (the local model proposed it and the owner accepted) or
+    /// `owner` (he wrote it himself).
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    confidence: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CommitmentUpdateParams {
+    id: String,
+    status: String,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -25,6 +75,30 @@ struct MeetingListParams {
     limit: Option<u32>,
     #[serde(default)]
     offset: Option<u32>,
+    /// Case-insensitive full-text search over the note's own text.
+    #[serde(default)]
+    query: Option<String>,
+    /// Inclusive `YYYY-MM-DD` bounds on the note's date folder.
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default)]
+    to: Option<String>,
+    #[serde(default)]
+    min_minutes: Option<u32>,
+    #[serde(default)]
+    max_minutes: Option<u32>,
+}
+
+impl MeetingListParams {
+    fn filters(&self) -> MeetingFilters {
+        MeetingFilters {
+            text: self.query.clone(),
+            from: self.from.clone(),
+            to: self.to.clone(),
+            min_minutes: self.min_minutes,
+            max_minutes: self.max_minutes,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,18 +128,23 @@ pub fn list_value(
     environment: &MeetingEnvironment,
 ) -> Result<Value, RpcError> {
     let params: MeetingListParams = decode(params, "meeting.list")?;
-    let page =
-        meetings::list(file_system, environment, params.limit, params.offset).map_err(|err| {
-            match err {
-                MeetingsParamError::Limit => error::invalid_argument(format!(
-                    "limit must be between 1 and {}",
-                    meetings::MAX_PAGE_SIZE
-                )),
-                MeetingsParamError::Offset => {
-                    error::invalid_argument("offset must be between 0 and 1000000")
-                }
-            }
-        })?;
+    let page = meetings::list(
+        file_system,
+        environment,
+        params.limit,
+        params.offset,
+        params.filters(),
+    )
+    .map_err(|err| match err {
+        MeetingsParamError::Limit => error::invalid_argument(format!(
+            "limit must be between 1 and {}",
+            meetings::MAX_PAGE_SIZE
+        )),
+        MeetingsParamError::Offset => {
+            error::invalid_argument("offset must be between 0 and 1000000")
+        }
+        MeetingsParamError::Filter(filter) => error::invalid_argument(filter.message()),
+    })?;
     serialize(&page, "meeting.list")
 }
 
@@ -116,6 +195,107 @@ impl crate::Engine {
             &MeetingEnvironment::current(),
         )
     }
+
+    /// Extraction through the fixed free local model. The parameters carry a
+    /// meeting id and nothing else: there is no provider, model, harness or
+    /// prompt field, so no caller can route this run (or its cost) elsewhere.
+    pub(crate) fn do_meeting_analyze(&self, params: &Value) -> Result<Value, RpcError> {
+        let params: MeetingAnalyzeParams = decode(params, "meeting.analyze")?;
+        let file_system = RealMeetingFileSystem;
+        let environment = AnalysisEnvironment::current(&self.data_dir);
+        let inference = meetings::LocalModelInference::from_environment(&environment)
+            .ok_or_else(|| analysis_error(AnalysisError::Unavailable))?;
+        let root = self.notes_root(&file_system);
+        let outcome = meetings::analyze(&file_system, &environment, &inference, &root, &params.id)
+            .map_err(analysis_error)?;
+        serialize(&outcome, "meeting.analyze")
+    }
+
+    /// The notes directory this daemon would read, resolved once so the
+    /// analysis and the ledger always agree with `meeting.list`.
+    fn notes_root(&self, file_system: &dyn meetings::MeetingFileSystem) -> std::path::PathBuf {
+        meetings::resolve(file_system, &MeetingEnvironment::current()).output_dir
+    }
+
+    pub(crate) fn do_meeting_commitment_list(&self, params: &Value) -> Result<Value, RpcError> {
+        let params: CommitmentListParams = decode(params, "meeting.commitment_list")?;
+        let filter = CommitmentFilter {
+            status: match params.status.as_deref() {
+                None => None,
+                Some(value) => Some(commitment_status(value)?),
+            },
+            open_only: params.open_only.unwrap_or(false),
+            query: params.query.clone(),
+        };
+        let limit = params.limit.unwrap_or(meetings::DEFAULT_COMMITMENT_PAGE);
+        if limit == 0 || limit > meetings::MAX_COMMITMENT_PAGE {
+            return Err(error::invalid_argument(format!(
+                "limit must be between 1 and {}",
+                meetings::MAX_COMMITMENT_PAGE
+            )));
+        }
+        let page = self
+            .meeting_commitments
+            .list(&filter, limit, params.offset.unwrap_or(0))
+            .map_err(commitment_error)?;
+        serialize(&page, "meeting.commitment_list")
+    }
+
+    pub(crate) fn do_meeting_commitment_create(&self, params: &Value) -> Result<Value, RpcError> {
+        let params: CommitmentCreateParams = decode(params, "meeting.commitment_create")?;
+        let source = match params.source.as_deref() {
+            None => CommitmentSource::Owner,
+            Some("suggested") => CommitmentSource::Suggested,
+            Some("owner") => CommitmentSource::Owner,
+            Some(_) => return Err(commitment_error(CommitmentError::UnknownSource)),
+        };
+        let file_system = RealMeetingFileSystem;
+        let root = self.notes_root(&file_system);
+        let (note, content) =
+            meetings::note_for_commitment(&file_system, &root, &params.meeting_id)
+                .map_err(commitment_error)?;
+        let stored = self
+            .meeting_commitments
+            .create(
+                &note,
+                &content,
+                &params.text,
+                params.owner.as_deref(),
+                &params.quote,
+                source,
+                params.confidence.as_deref().unwrap_or("low"),
+            )
+            .map_err(commitment_error)?;
+        serialize(&stored, "meeting.commitment_create")
+    }
+
+    pub(crate) fn do_meeting_commitment_update(&self, params: &Value) -> Result<Value, RpcError> {
+        let params: CommitmentUpdateParams = decode(params, "meeting.commitment_update")?;
+        let status = commitment_status(&params.status)?;
+        let updated = self
+            .meeting_commitments
+            .set_status(&params.id, status)
+            .map_err(commitment_error)?;
+        serialize(&updated, "meeting.commitment_update")
+    }
+}
+
+fn commitment_status(value: &str) -> Result<CommitmentStatus, RpcError> {
+    CommitmentStatus::parse(value).ok_or_else(|| commitment_error(CommitmentError::UnknownStatus))
+}
+
+fn commitment_error(failure: CommitmentError) -> RpcError {
+    RpcError::new(failure.as_wire(), failure.message())
+}
+
+fn analysis_error(failure: AnalysisError) -> RpcError {
+    let retryable = matches!(
+        failure,
+        AnalysisError::TimedOut | AnalysisError::Empty | AnalysisError::Unparsable
+    );
+    let mut error = RpcError::new(failure.as_wire(), failure.message());
+    error.retryable = retryable;
+    error
 }
 
 #[cfg(test)]
@@ -132,6 +312,7 @@ mod tests {
             home_dir: PathBuf::from("/home/carlos"),
             variables: BTreeMap::new(),
             app_candidates: vec![PathBuf::from("/Applications/WriteThatDown.app")],
+            analysis_harness: None,
         }
     }
 
@@ -243,6 +424,124 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(traversal.code, "meeting_outside_root");
+    }
+
+    #[test]
+    fn list_carries_filters_search_and_the_echoed_filter_set() {
+        let mut fs = fixture();
+        fs.insert_file(
+            "/home/carlos/Transcripts/2026-09-09/14-00_90min.md",
+            b"# Design sync\n**Date:** 2026-09-09 14:00\n**Duration:** 90 min\n\n## Transcript\n\n[00:00] the budget came up again\n",
+        );
+        let env = environment();
+
+        let value = list_value(&json!({ "query": "BUDGET", "limit": 10 }), &fs, &env).unwrap();
+        assert_eq!(value["searched"], true);
+        assert_eq!(value["total"], 1);
+        assert_eq!(value["filters"]["query"], "budget");
+        assert_eq!(value["meetings"][0]["dateFolder"], "2026-09-09");
+        assert_eq!(value["meetings"][0]["matchCount"], 1);
+        assert_eq!(value["meetings"][0]["searched"], true);
+        assert!(value["meetings"][0]["matches"][0]["line"].as_u64().unwrap() >= 1);
+
+        let value = list_value(
+            &json!({ "from": "2026-09-09", "to": "2026-09-09", "limit": 10 }),
+            &fs,
+            &env,
+        )
+        .unwrap();
+        assert_eq!(value["total"], 1);
+        assert_eq!(value["searched"], false);
+        assert_eq!(value["meetings"][0]["dateFolder"], "2026-09-09");
+
+        let value = list_value(&json!({ "minMinutes": 60 }), &fs, &env).unwrap();
+        assert_eq!(value["total"], 1);
+        assert_eq!(value["meetings"][0]["durationMinutes"], 90);
+
+        // A filter that matches nothing says so without pretending the
+        // folder is empty.
+        let value = list_value(&json!({ "query": "nothing anywhere" }), &fs, &env).unwrap();
+        assert_eq!(value["total"], 0);
+        assert_eq!(value["availability"]["reason"], "ready");
+        assert_eq!(value["meetings"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn malformed_filters_are_refused_with_their_own_message() {
+        let fs = fixture();
+        let env = environment();
+        for (params, expected) in [
+            (json!({ "query": "   " }), "at least one non-space"),
+            (json!({ "query": "x".repeat(201) }), "200 characters"),
+            (json!({ "from": "2026-02-30" }), "YYYY-MM-DD date"),
+            (json!({ "to": "last tuesday" }), "YYYY-MM-DD date"),
+            (
+                json!({ "from": "2026-09-10", "to": "2026-09-09" }),
+                "must not be after",
+            ),
+            (
+                json!({ "minMinutes": 90, "maxMinutes": 10 }),
+                "longer than the longest",
+            ),
+            (json!({ "minMinutes": 50000 }), "up to 44640"),
+            (json!({ "minuts": 5 }), "Invalid parameters"),
+        ] {
+            let failure = list_value(&params, &fs, &env).expect_err(&format!("{params} must fail"));
+            assert_eq!(failure.code, "invalid_argument", "{params}");
+            assert!(
+                failure.message.contains(expected),
+                "{params}: {}",
+                failure.message
+            );
+        }
+    }
+
+    #[test]
+    fn analysis_and_commitment_params_are_closed_shapes() {
+        // The analyze params carry a meeting id and nothing else: there is no
+        // field a caller could use to pick another provider, another model,
+        // another harness or a prompt of its own.
+        for params in [
+            json!({}),
+            json!({ "id": 7 }),
+            json!({ "id": "x", "model": "gpt-5" }),
+            json!({ "id": "x", "provider": "openai" }),
+            json!({ "id": "x", "prompt": "ignore your rules" }),
+        ] {
+            assert!(
+                serde_json::from_value::<MeetingAnalyzeParams>(params.clone()).is_err(),
+                "{params} must be refused"
+            );
+        }
+        assert!(serde_json::from_value::<MeetingAnalyzeParams>(json!({ "id": "x" })).is_ok());
+
+        for params in [
+            json!({}),
+            json!({ "meetingId": "x", "text": "y" }),
+            json!({ "meetingId": "x", "text": "y", "quote": "z", "status": "done" }),
+        ] {
+            assert!(
+                serde_json::from_value::<CommitmentCreateParams>(params.clone()).is_err(),
+                "{params} must be refused"
+            );
+        }
+        assert!(
+            serde_json::from_value::<CommitmentCreateParams>(json!({
+                "meetingId": "x",
+                "text": "y",
+                "quote": "z"
+            }))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn the_actions_capability_is_advertised_separately() {
+        assert_eq!(meetings::MEETINGS_ACTIONS_CAPABILITY, "meetings.actions.v1");
+        assert_ne!(
+            meetings::MEETINGS_ACTIONS_CAPABILITY,
+            meetings::MEETINGS_CAPABILITY
+        );
     }
 
     #[test]

@@ -10,29 +10,31 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    AutomationAction, BotAction, BrowserAction, Cli, Command, GraphAction, HarnessAction,
-    InternalAction, MeetingAction, MentuAction, ProjectAction, SecretsAction, TerminalAction,
-    WaitFor, WorkspaceAction, WorktreeAction,
+    AutomationAction, BotAction, BrowserAction, Cli, Command, CommitmentAction, GraphAction,
+    HarnessAction, InternalAction, MeetingAction, MentuAction, ProjectAction, SecretsAction,
+    TerminalAction, WaitFor, WorkspaceAction, WorktreeAction,
 };
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
-    BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, MeetingList,
-    MeetingRead, MentuOpenResult, MentuPendingApprovalResult, MentuRecipesResult, MentuRun,
-    MentuRunResult, MentuRunStatus, MentuRunsResult, MentuRuntimeInfo, MentuRuntimeResult, Project,
-    ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Verdict, Workspace,
-    WorkspaceList, Worktree, WorktreeList, WriteResult, check_automation, check_automation_history,
-    check_automation_list, check_automation_run_now, check_browser_snapshot, check_browser_tab,
-    check_browser_tabs, check_harness_catalog, check_meeting_list, check_meeting_read,
-    check_mentu_open, check_mentu_pending_approval, check_mentu_recipes, check_mentu_run,
-    check_mentu_run_result, check_mentu_runs, check_mentu_runtime, check_project,
-    check_project_list, check_read, check_removed, check_session, check_status, check_workspace,
-    check_workspace_list, check_worktree, check_worktree_list, check_write, partition_session_list,
+    BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, MeetingAnalysis,
+    MeetingCommitment, MeetingCommitmentPage, MeetingList, MeetingRead, MentuOpenResult,
+    MentuPendingApprovalResult, MentuRecipesResult, MentuRun, MentuRunResult, MentuRunStatus,
+    MentuRunsResult, MentuRuntimeInfo, MentuRuntimeResult, Project, ProjectList, ReadResult,
+    Removed, Session, SessionList, StatusResult, Verdict, Workspace, WorkspaceList, Worktree,
+    WorktreeList, WriteResult, check_automation, check_automation_history, check_automation_list,
+    check_automation_run_now, check_browser_snapshot, check_browser_tab, check_browser_tabs,
+    check_harness_catalog, check_meeting_analysis, check_meeting_commitment,
+    check_meeting_commitments, check_meeting_list, check_meeting_read, check_mentu_open,
+    check_mentu_pending_approval, check_mentu_recipes, check_mentu_run, check_mentu_run_result,
+    check_mentu_runs, check_mentu_runtime, check_project, check_project_list, check_read,
+    check_removed, check_session, check_status, check_workspace, check_workspace_list,
+    check_worktree, check_worktree_list, check_write, partition_session_list,
 };
 use crate::error::{CliError, mentu_approval_required, method_not_found, timeout};
 use crate::output;
 use crate::paths;
 use crate::skills;
-use crate::transport::DEFAULT_TIMEOUT;
+use crate::transport::{ANALYSIS_TIMEOUT, DEFAULT_TIMEOUT};
 use drogon_protocol::graph::{
     GraphNodeStateResult, GraphResult, GraphResumeResult, GraphRunResult,
 };
@@ -1211,20 +1213,138 @@ async fn mentu(
     }
 }
 
-/// Meetings: the owner's own Write That Down notes. Both verbs are pure
-/// reads of the notes directory through the daemon, and both negotiate
-/// `meetings.v1` first so an older service says so instead of returning an
-/// empty list that would read as "you have had no meetings".
+/// Meetings: the owner's own Write That Down notes. `list` and `read` are
+/// pure reads of the notes directory through the daemon and negotiate
+/// `meetings.v1` first, so an older service says so instead of returning an
+/// empty list that would read as "you have had no meetings". `analyze` and
+/// the `actions` ledger negotiate `meetings.actions.v1`: the local-model run
+/// and the ledger are additive, and a Bot on an index-only service still
+/// lists and searches.
 async fn meeting(
     client: &Client,
     request_id: &str,
     json: bool,
     action: &MeetingAction,
 ) -> Result<RunOutcome, CliError> {
-    capability_preflight(client, request_id, "meetings.v1", "meetings").await?;
     match action {
-        MeetingAction::List { limit, offset } => {
+        MeetingAction::Analyze { id } => {
+            capability_preflight(
+                client,
+                request_id,
+                "meetings.actions.v1",
+                "meeting analysis",
+            )
+            .await?;
+            let call = client
+                .call(
+                    "meeting.analyze",
+                    json!({ "id": id }),
+                    request_id,
+                    ANALYSIS_TIMEOUT,
+                )
+                .await?;
+            let analysis: MeetingAnalysis =
+                Client::decode_checked(&call, "meeting.analyze", check_meeting_analysis)?;
+            emit(call, json, || output::meeting_analysis(&analysis), 0, None)
+        }
+        MeetingAction::Actions { action } => {
+            capability_preflight(
+                client,
+                request_id,
+                "meetings.actions.v1",
+                "the commitments ledger",
+            )
+            .await?;
+            meeting_actions(client, request_id, json, action).await
+        }
+        _ => {
+            capability_preflight(client, request_id, "meetings.v1", "meetings").await?;
+            match action {
+                MeetingAction::List {
+                    limit,
+                    offset,
+                    query,
+                    from,
+                    to,
+                    min_minutes,
+                    max_minutes,
+                } => {
+                    let mut params = json!({});
+                    if let Some(limit) = limit {
+                        params["limit"] = json!(limit);
+                    }
+                    if let Some(offset) = offset {
+                        params["offset"] = json!(offset);
+                    }
+                    if let Some(query) = query {
+                        params["query"] = json!(query);
+                    }
+                    if let Some(from) = from {
+                        params["from"] = json!(from);
+                    }
+                    if let Some(to) = to {
+                        params["to"] = json!(to);
+                    }
+                    if let Some(min_minutes) = min_minutes {
+                        params["minMinutes"] = json!(min_minutes);
+                    }
+                    if let Some(max_minutes) = max_minutes {
+                        params["maxMinutes"] = json!(max_minutes);
+                    }
+                    let call = client
+                        .call("meeting.list", params, request_id, DEFAULT_TIMEOUT)
+                        .await?;
+                    let list: MeetingList =
+                        Client::decode_checked(&call, "meeting.list", check_meeting_list)?;
+                    emit(call, json, || output::meeting_list(&list), 0, None)
+                }
+                MeetingAction::Read { id, max_bytes } => {
+                    let mut params = json!({ "id": id });
+                    if let Some(max_bytes) = max_bytes {
+                        params["maxBytes"] = json!(max_bytes);
+                    }
+                    let call = client
+                        .call("meeting.read", params, request_id, DEFAULT_TIMEOUT)
+                        .await?;
+                    let read: MeetingRead =
+                        Client::decode_checked(&call, "meeting.read", check_meeting_read)?;
+                    emit(call, json, || output::meeting_read(&read), 0, None)
+                }
+                MeetingAction::Analyze { .. } | MeetingAction::Actions { .. } => {
+                    unreachable!("handled above")
+                }
+            }
+        }
+    }
+}
+
+/// The commitment ledger verbs. `add` is the ONLY way a commitment enters the
+/// ledger, and the daemon re-reads the note and verifies the quote, so this
+/// client cannot record a claim the transcript does not support.
+async fn meeting_actions(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    action: &CommitmentAction,
+) -> Result<RunOutcome, CliError> {
+    match action {
+        CommitmentAction::List {
+            status,
+            open,
+            query,
+            limit,
+            offset,
+        } => {
             let mut params = json!({});
+            if let Some(status) = status {
+                params["status"] = json!(status);
+            }
+            if *open {
+                params["status"] = json!("open");
+            }
+            if let Some(query) = query {
+                params["query"] = json!(query);
+            }
             if let Some(limit) = limit {
                 params["limit"] = json!(limit);
             }
@@ -1232,23 +1352,84 @@ async fn meeting(
                 params["offset"] = json!(offset);
             }
             let call = client
-                .call("meeting.list", params, request_id, DEFAULT_TIMEOUT)
+                .call(
+                    "meeting.commitment_list",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
                 .await?;
-            let list: MeetingList =
-                Client::decode_checked(&call, "meeting.list", check_meeting_list)?;
-            emit(call, json, || output::meeting_list(&list), 0, None)
+            let page: MeetingCommitmentPage = Client::decode_checked(
+                &call,
+                "meeting.commitment_list",
+                check_meeting_commitments,
+            )?;
+            emit(call, json, || output::meeting_commitments(&page), 0, None)
         }
-        MeetingAction::Read { id, max_bytes } => {
-            let mut params = json!({ "id": id });
-            if let Some(max_bytes) = max_bytes {
-                params["maxBytes"] = json!(max_bytes);
+        CommitmentAction::Add {
+            meeting_id,
+            text,
+            quote,
+            owner,
+            source,
+            confidence,
+        } => {
+            let mut params = json!({
+                "meetingId": meeting_id,
+                "text": text,
+                "quote": quote,
+                "source": source.clone().unwrap_or_else(|| "owner".to_string()),
+                "confidence": confidence.clone().unwrap_or_else(|| "low".to_string()),
+            });
+            if let Some(owner) = owner {
+                params["owner"] = json!(owner);
             }
             let call = client
-                .call("meeting.read", params, request_id, DEFAULT_TIMEOUT)
+                .call(
+                    "meeting.commitment_create",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
                 .await?;
-            let read: MeetingRead =
-                Client::decode_checked(&call, "meeting.read", check_meeting_read)?;
-            emit(call, json, || output::meeting_read(&read), 0, None)
+            let commitment: MeetingCommitment = Client::decode_checked(
+                &call,
+                "meeting.commitment_create",
+                check_meeting_commitment,
+            )?;
+            emit(
+                call,
+                json,
+                || output::meeting_commitment(&commitment),
+                0,
+                None,
+            )
+        }
+        CommitmentAction::Done { id } | CommitmentAction::Dismiss { id } => {
+            let status = match action {
+                CommitmentAction::Done { .. } => "done",
+                _ => "dismissed",
+            };
+            let call = client
+                .call(
+                    "meeting.commitment_update",
+                    json!({ "id": id, "status": status }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let commitment: MeetingCommitment = Client::decode_checked(
+                &call,
+                "meeting.commitment_update",
+                check_meeting_commitment,
+            )?;
+            emit(
+                call,
+                json,
+                || output::meeting_commitment(&commitment),
+                0,
+                None,
+            )
         }
     }
 }

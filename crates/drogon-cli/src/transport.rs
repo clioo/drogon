@@ -16,6 +16,10 @@ use crate::wire;
 
 /// Default bounded wait for a whole connect+write+read round trip.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+/// One local-model analysis can legitimately take minutes; the daemon kills
+/// its own run at 240 s, so the client waits past that and reports the
+/// daemon's own verdict rather than a client-side timeout of its own.
+pub const ANALYSIS_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Sends one request frame and waits for exactly one response frame.
 /// Every local failure (connect, write, read, timeout, protocol) carries the

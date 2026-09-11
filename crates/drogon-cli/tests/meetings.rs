@@ -44,6 +44,19 @@ const READY_TIMEOUT: Duration = Duration::from_secs(30);
 /// notes through the public CLI and prints a brief.
 const FIXTURE_HARNESS: &str = r#"#!/bin/sh
 set -eu
+# Analysis mode (`meeting analyze`): the daemon runs this same binary as its
+# one-shot local model, with the extraction prompt on `-p`. The fixture
+# answers with one quote copied OUT of the prompt it was handed (so the
+# daemon's verification finds it verbatim) and one invented quote (so the
+# discard path is exercised for real). No model, no network, no credential.
+case "$*" in
+  *"You extract commitments from ONE meeting transcript"*)
+    line=$(printf '%s' "$*" | grep -o '\[00:0[0-9]\].*' | head -1)
+    quote=$(printf '%s' "$line" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    printf '{"summary":"Fixture summary of the meeting.","decisions":[{"text":"Fixture decision from the note","quote":"%s"}],"actions":[{"text":"Fixture action the note states","owner":"Carlos","quote":"%s","confidence":"high"},{"text":"Invented migration action","quote":"I will migrate the database tonight","confidence":"high"}],"openQuestions":[]}\n' "$quote" "$quote"
+    exit 0
+    ;;
+esac
 cli="${DROGON_CLI_COMMAND:-drogon-cli}"
 meetings=$("$cli" --data-dir "$DROGON_DATA_DIR" --json meeting list --limit 20)
 count=$(printf '%s' "$meetings" | grep -c '"id": "write-that-down:' || true)
@@ -212,12 +225,13 @@ impl Fixture {
     }
 }
 
-impl Drop for Fixture {
-    fn drop(&mut self) {
+impl Fixture {
+    /// Stops the fixture daemon and does not come back until it is gone.
+    /// Shared by `Drop` and by the restart leg, so every path reaps the same
+    /// way: graceful SIGTERM, bounded wait, then a confirmed kill of only
+    /// this child.
+    fn stop_daemon(&mut self) {
         if let Some(mut child) = self.daemon.take() {
-            // Graceful first: the daemon shuts down on SIGTERM, which also
-            // reaps the fixture sessions it spawned. Bounded wait, then a
-            // confirmed kill of only this child.
             unsafe {
                 libc_kill(child.id() as i32, 15);
             }
@@ -236,6 +250,12 @@ impl Drop for Fixture {
                 }
             }
         }
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        self.stop_daemon();
         let _ = &self.root;
     }
 }
@@ -625,4 +645,392 @@ fn a_bot_discovers_meetings_and_ships_a_morning_brief() {
             .any(|entry| entry["id"].as_str() == Some(run_id.as_str())),
         "the run must appear in history: {history}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The working half: search and filters over the corpus, extraction through the
+// local model, and the commitment ledger — all through the real daemon and the
+// real CLI, with a fixture `pi` instead of a model.
+// ---------------------------------------------------------------------------
+
+/// Search and filters, against a corpus big enough that a reverse-chronological
+/// list on its own would be useless.
+#[test]
+fn a_large_corpus_is_searched_and_filtered_rather_than_scrolled() {
+    let mut fixture = Fixture::new();
+    // 40 real dates, so the date and duration filters have something to bite
+    // on, plus the two query targets.
+    for day in 1..=28 {
+        let date = format!("2026-08-{day:02}");
+        fixture.write_note(
+            &date,
+            "08-00",
+            "30 min",
+            &format!("Standup {day}"),
+            "[00:00] routine status",
+        );
+    }
+    for day in 1..=12 {
+        let date = format!("2026-09-{day:02}");
+        fixture.write_note(
+            &date,
+            "14-00",
+            "95 min",
+            &format!("Deep dive {day}"),
+            "[00:00] we agreed to ship the budget report\n[00:10] Raul owns MR 142",
+        );
+    }
+    fixture.start_daemon(&[]);
+
+    let all = fixture.cli_ok(&["meeting", "list", "--limit", "200", "--json"]);
+    assert_eq!(all["total"], 40);
+    assert_eq!(all["searched"], false);
+
+    let searched = fixture.cli_ok(&["meeting", "list", "--query", "budget", "--json"]);
+    assert_eq!(searched["searched"], true);
+    assert_eq!(searched["total"], 12);
+    assert_eq!(searched["filters"]["query"], "budget");
+    assert!(
+        searched["scanned"].as_u64().unwrap_or(0) >= 12,
+        "a search must report how many notes it read: {searched}"
+    );
+    let first = &searched["meetings"][0];
+    assert_eq!(first["dateFolder"], "2026-09-12");
+    assert!(first["matchCount"].as_u64().unwrap_or(0) >= 1);
+    let hit = &first["matches"][0];
+    // The line the match came from, verbatim, with its number in the note.
+    assert_eq!(hit["line"], 7);
+    assert_eq!(hit["text"], "[00:00] we agreed to ship the budget report");
+
+    let range = fixture.cli_ok(&[
+        "meeting",
+        "list",
+        "--from",
+        "2026-09-05",
+        "--to",
+        "2026-09-08",
+        "--json",
+    ]);
+    assert_eq!(range["total"], 4);
+    assert_eq!(range["meetings"][0]["dateFolder"], "2026-09-08");
+
+    let long = fixture.cli_ok(&["meeting", "list", "--min-minutes", "60", "--json"]);
+    assert_eq!(long["total"], 12);
+
+    let combined = fixture.cli_ok(&[
+        "meeting",
+        "list",
+        "--query",
+        "budget",
+        "--from",
+        "2026-09-10",
+        "--json",
+    ]);
+    assert_eq!(combined["total"], 3);
+
+    // A search that matches nothing is not an empty folder.
+    let nothing = fixture.cli_ok(&["meeting", "list", "--query", "zzz-nothing", "--json"]);
+    assert_eq!(nothing["total"], 0);
+    assert_eq!(nothing["availability"]["reason"], "ready");
+    assert!(
+        nothing["scanned"].as_u64().unwrap_or(0) >= 40,
+        "a fruitless search must report what it read: {nothing}"
+    );
+
+    // And the filters are refused, not clamped, when they are nonsense.
+    let failure = fixture
+        .cli(&["meeting", "list", "--from", "2026-02-30", "--json"])
+        .unwrap_err();
+    assert_eq!(failure.0, 1);
+    assert!(
+        failure.1.contains("YYYY-MM-DD"),
+        "the refusal must name the rule: {}",
+        failure.1
+    );
+}
+
+/// Extraction end to end: a real one-shot subprocess run through the daemon's
+/// own harness planner, verified quotes, a discarded invention, and nothing
+/// created.
+#[test]
+fn the_local_model_suggests_only_what_the_note_supports() {
+    let mut fixture = Fixture::new();
+    fixture.write_note(
+        "2026-09-10",
+        "08-05",
+        "42 min",
+        "Weekly sync",
+        "[00:00] we agreed to ship the budget report\n[00:10] Raul owns MR 142",
+    );
+    fixture.start_daemon(&[]);
+
+    let list = fixture.cli_ok(&["meeting", "list", "--json"]);
+    // The desktop surface reads this to decide whether to offer extraction at
+    // all; the CLI reports the same fact.
+    assert_eq!(list["availability"]["analysis"]["available"], true);
+    assert_eq!(list["availability"]["analysis"]["reason"], "ready");
+    assert_eq!(list["availability"]["analysis"]["harness"], "pi");
+    assert_eq!(
+        list["availability"]["analysis"]["model"],
+        "qwen3.8-flash-next-nvidia-nvfp4"
+    );
+    assert_eq!(list["availability"]["analysis"]["provider"], "dgx-spark");
+    assert_eq!(list["availability"]["analysis"]["freeLocalModel"], true);
+
+    let id = list["meetings"][0]["id"].as_str().unwrap().to_string();
+    let analysis = fixture.cli_ok(&["meeting", "analyze", "--id", &id, "--json"]);
+
+    // The run names the free local model and nothing else.
+    assert_eq!(analysis["model"], "qwen3.8-flash-next-nvidia-nvfp4");
+    assert_eq!(analysis["provider"], "dgx-spark");
+    assert_eq!(analysis["harness"], "pi");
+    assert_eq!(analysis["meeting"]["id"], id);
+
+    // One decision and one action were verified against the note...
+    assert_eq!(analysis["decisions"].as_array().unwrap().len(), 1);
+    assert_eq!(analysis["actions"].as_array().unwrap().len(), 1);
+    let decision = &analysis["decisions"][0];
+    assert_eq!(decision["line"], 7);
+    assert_eq!(
+        decision["quote"],
+        "[00:00] we agreed to ship the budget report"
+    );
+    assert_eq!(analysis["actions"][0]["owner"], "Carlos");
+    assert_eq!(analysis["actions"][0]["line"], 7);
+
+    // ...and the invented one was discarded, with its reason, rather than
+    // presented as a finding.
+    assert_eq!(analysis["discardedCount"], 1);
+    let discarded = &analysis["discarded"][0];
+    assert_eq!(discarded["reason"], "quote-not-found");
+    assert!(
+        discarded["text"]
+            .as_str()
+            .unwrap()
+            .contains("Invented migration action"),
+        "the discarded suggestion keeps its text so the owner can see it: {discarded}"
+    );
+    let actionable: Vec<&str> = analysis["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["text"].as_str())
+        .collect();
+    assert!(
+        !actionable.iter().any(|text| text.contains("Invented")),
+        "an unverifiable suggestion must never reach the findings: {actionable:?}"
+    );
+
+    // Nothing was created by the analysis: the ledger is still empty.
+    let ledger = fixture.cli_ok(&["meeting", "actions", "list", "--json"]);
+    assert_eq!(ledger["total"], 0);
+    assert!(!fixture.data_dir.join("meeting-commitments.json").exists());
+}
+
+/// The acceptance step: only an explicit, quote-verified act puts work in the
+/// ledger, and the ledger is Drogon's own file — the notes are untouched.
+#[test]
+fn accepting_a_suggestion_records_it_and_writes_nothing_to_the_notes() {
+    let mut fixture = Fixture::new();
+    fixture.write_note(
+        "2026-09-10",
+        "08-05",
+        "42 min",
+        "Weekly sync",
+        "[00:00] we agreed to ship the budget report\n[00:10] Raul owns MR 142",
+    );
+    fixture.write_note(
+        "2026-09-09",
+        "09-00",
+        "12 min",
+        "Yesterday retro",
+        "[00:00] I will write the migration notes",
+    );
+    fixture.start_daemon(&[]);
+    let before = tree_snapshot(&fixture.notes);
+
+    let list = fixture.cli_ok(&["meeting", "list", "--json"]);
+    let sync_id = list["meetings"][0]["id"].as_str().unwrap().to_string();
+    let retro_id = list["meetings"][1]["id"].as_str().unwrap().to_string();
+
+    // (1) A claim the transcript does not support is refused, and nothing is
+    // written — including when the owner types it himself.
+    let failure = fixture
+        .cli(&[
+            "meeting",
+            "actions",
+            "add",
+            "--meeting-id",
+            &sync_id,
+            "--text",
+            "Migrate the database tonight",
+            "--quote",
+            "I will migrate the database tonight",
+            "--json",
+        ])
+        .unwrap_err();
+    assert_eq!(failure.0, 1);
+    assert!(
+        failure.1.contains("commitment_quote_not_found"),
+        "the refusal must carry its own code: {}",
+        failure.1
+    );
+    assert!(!fixture.data_dir.join("meeting-commitments.json").exists());
+
+    // (2) An accepted suggestion is recorded with the line it came from.
+    let accepted = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "add",
+        "--meeting-id",
+        &sync_id,
+        "--text",
+        "Ship the budget report",
+        "--quote",
+        "we agreed to ship the budget report",
+        "--owner",
+        "Carlos",
+        "--source",
+        "suggested",
+        "--confidence",
+        "high",
+        "--json",
+    ]);
+    assert_eq!(accepted["status"], "open");
+    assert_eq!(accepted["source"], "suggested");
+    assert_eq!(accepted["confidence"], "high");
+    assert_eq!(accepted["line"], 7);
+    assert_eq!(
+        accepted["quote"],
+        "[00:00] we agreed to ship the budget report"
+    );
+    assert_eq!(accepted["meetingTitle"], "Weekly sync");
+    assert_eq!(accepted["meetingDate"], "2026-09-10");
+    let commitment_id = accepted["id"].as_str().unwrap().to_string();
+
+    // (3) A second, owner-written commitment from an older meeting.
+    let second = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "add",
+        "--meeting-id",
+        &retro_id,
+        "--text",
+        "Write the migration notes",
+        "--quote",
+        "I will write the migration notes",
+        "--source",
+        "owner",
+        "--json",
+    ]);
+    assert_eq!(second["confidence"], "low");
+    assert_eq!(second["line"], 7);
+
+    // (4) The ledger answers "what is still open" across the corpus.
+    let open = fixture.cli_ok(&["meeting", "actions", "list", "--open", "--json"]);
+    assert_eq!(open["total"], 2);
+    assert_eq!(open["open"], 2);
+    // Newest meeting first.
+    assert_eq!(open["commitments"][0]["id"], commitment_id);
+
+    let searched = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "list",
+        "--query",
+        "MIGRATION",
+        "--json",
+    ]);
+    assert_eq!(searched["total"], 1);
+
+    // (5) Closing one is an explicit state change, and done and dismissed are
+    // different answers.
+    let done = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "done",
+        "--id",
+        &commitment_id,
+        "--json",
+    ]);
+    assert_eq!(done["status"], "done");
+    assert!(done["resolvedAt"].is_string());
+    let dismissed = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "dismiss",
+        "--id",
+        second["id"].as_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(dismissed["status"], "dismissed");
+    assert_eq!(
+        fixture.cli_ok(&["meeting", "actions", "list", "--open", "--json"])["total"],
+        0
+    );
+    assert!(
+        fixture
+            .cli_ok(&["meeting", "actions", "list", "--query", "", "--json"])
+            .is_object(),
+        "an empty action search is a page, not an error"
+    );
+
+    // (6) The ledger is Drogon's own file, and the notes are byte-identical.
+    assert!(fixture.data_dir.join("meeting-commitments.json").is_file());
+    assert_eq!(tree_snapshot(&fixture.notes), before);
+
+    // (7) The ledger survives a daemon restart (it is a file, not memory).
+    fixture.stop_daemon();
+    fixture.start_daemon(&[]);
+    let reopened = fixture.cli_ok(&["meeting", "actions", "list", "--json"]);
+    assert_eq!(reopened["total"], 2);
+    assert_eq!(reopened["open"], 0);
+}
+
+/// The local model missing is a first-class state: the transcripts stay
+/// fully usable, and the extraction verb says why it cannot run instead of
+/// substituting a model.
+#[test]
+fn extraction_is_unavailable_without_the_local_model() {
+    let mut fixture = Fixture::new();
+    fixture.write_note(
+        "2026-09-10",
+        "08-05",
+        "42 min",
+        "Weekly sync",
+        "[00:00] we agreed to ship the budget report",
+    );
+    // A PATH without the fixture harness: the daemon cannot resolve `pi`.
+    fixture.start_daemon(&[("PATH", "/usr/bin:/bin")]);
+
+    let list = fixture.cli_ok(&["meeting", "list", "--json"]);
+    assert_eq!(list["availability"]["analysis"]["available"], false);
+    assert_eq!(
+        list["availability"]["analysis"]["reason"],
+        "harness-missing"
+    );
+    // The transcripts themselves are unaffected.
+    assert_eq!(list["total"], 1);
+    assert_eq!(list["availability"]["reason"], "ready");
+
+    let id = list["meetings"][0]["id"].as_str().unwrap().to_string();
+    let failure = fixture
+        .cli(&["meeting", "analyze", "--id", &id, "--json"])
+        .unwrap_err();
+    assert_eq!(failure.0, 1);
+    assert!(
+        failure.1.contains("meeting_analysis_unavailable"),
+        "the refusal must carry its own code: {}",
+        failure.1
+    );
+    assert!(
+        failure.1.contains("pi"),
+        "the refusal must name the missing harness: {}",
+        failure.1
+    );
+
+    // Reading and searching still work with no model at all.
+    let searched = fixture.cli_ok(&["meeting", "list", "--query", "budget", "--json"]);
+    assert_eq!(searched["total"], 1);
+    fixture.cli_ok(&["meeting", "read", "--id", &id, "--json"]);
 }

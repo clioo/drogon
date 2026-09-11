@@ -6,7 +6,8 @@ use base64::engine::general_purpose::STANDARD;
 
 use crate::client::{
     AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, BrowserSnapshot,
-    BrowserTab, BrowserTabsList, HarnessCatalog, MeetingList, MeetingRead, MeetingTranscript,
+    BrowserTab, BrowserTabsList, HarnessCatalog, MeetingAnalysis, MeetingCommitment,
+    MeetingCommitmentPage, MeetingList, MeetingRead, MeetingSuggestion, MeetingTranscript,
     MentuApproval, MentuOpenResult, MentuRun, MentuRunsResult, MentuStepRun, MethodResult, Project,
     ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Workspace, WorkspaceList,
     Worktree, WorktreeList, WriteResult,
@@ -788,6 +789,7 @@ pub enum RenderContext {
 /// reader always knows which directory those meetings came from.
 pub fn meeting_list(list: &MeetingList) -> String {
     let availability = &list.availability;
+    let filter_line = meeting_filter_line(list);
     let mut lines = vec![meeting_folder_line(list)];
     if list.meetings.is_empty() {
         lines.push(match availability.reason.as_str() {
@@ -815,6 +817,16 @@ pub fn meeting_list(list: &MeetingList) -> String {
                 "The notes folder is empty: {}.",
                 availability.transcript_root
             ),
+            _ if list.searched => format!(
+                "No transcript in {} matches this search. {} file{} were read; the folder itself is fine.",
+                availability.transcript_root,
+                list.scanned,
+                if list.scanned == 1 { "" } else { "s" }
+            ),
+            _ if filter_line.is_some() => format!(
+                "No transcript in {} matches these filters. The folder itself is fine.",
+                availability.transcript_root
+            ),
             _ => "No transcripts to show.".to_string(),
         });
         if availability.reason == "not-installed"
@@ -826,6 +838,9 @@ pub fn meeting_list(list: &MeetingList) -> String {
             ));
         }
         return lines.join("\n");
+    }
+    if let Some(filter_line) = &filter_line {
+        lines.push(filter_line.clone());
     }
     lines.push(format!(
         "{} meeting{} (showing {}..{}):",
@@ -846,6 +861,16 @@ pub fn meeting_list(list: &MeetingList) -> String {
             "The notes directory was only partially indexed (the scan budget stopped the walk), so this count is a lower bound."
                 .to_string(),
         );
+    }
+    if list.scanned > 0 {
+        lines.push(format!(
+            "Read {} transcript file{} for this search (one at a time, never the whole corpus at once).",
+            list.scanned,
+            if list.scanned == 1 { "" } else { "s" }
+        ));
+    }
+    if let Some(analysis) = availability_analysis_line(list) {
+        lines.push(analysis);
     }
     let failed = list
         .meetings
@@ -883,7 +908,7 @@ fn meeting_line(meeting: &MeetingTranscript) -> String {
         .as_deref()
         .map(|reason| format!(" ({reason})"))
         .unwrap_or_default();
-    format!(
+    let mut line = format!(
         "{} [{}] {} · {}{}\n    {}\n    {}",
         started,
         meeting.status,
@@ -892,6 +917,214 @@ fn meeting_line(meeting: &MeetingTranscript) -> String {
         failure,
         meeting.relative_path,
         meeting.id
+    );
+    // The transcript line a search matched, so the reader can check the hit
+    // before opening the note.
+    if meeting.searched {
+        line.push_str(&format!(
+            "\n    {} match{} in this note:",
+            meeting.match_count,
+            if meeting.match_count == 1 { "" } else { "es" }
+        ));
+        for hit in &meeting.matches {
+            line.push_str(&format!("\n      {}: {}", hit.line, hit.text));
+        }
+    }
+    line
+}
+
+/// The filter set that was actually applied, so a Bot reading the output
+/// never has to guess which of its inputs the daemon honoured.
+fn meeting_filter_line(list: &MeetingList) -> Option<String> {
+    let filters = &list.filters;
+    let mut parts = Vec::new();
+    if let Some(query) = &filters.query {
+        parts.push(format!("query {query:?}"));
+    }
+    if let Some(from) = &filters.from {
+        parts.push(format!("from {from}"));
+    }
+    if let Some(to) = &filters.to {
+        parts.push(format!("to {to}"));
+    }
+    if let Some(minutes) = filters.min_minutes {
+        parts.push(format!("at least {minutes} min"));
+    }
+    if let Some(minutes) = filters.max_minutes {
+        parts.push(format!("at most {minutes} min"));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!("Filters: {}.", parts.join(", ")))
+}
+
+/// Extraction availability, stated in the list output too: a Bot that cannot
+/// analyse should learn why from the same call that lists the meetings.
+fn availability_analysis_line(list: &MeetingList) -> Option<String> {
+    let analysis = &list.availability.analysis;
+    if analysis.available {
+        return None;
+    }
+    Some(format!(
+        "Extraction is off on this host: {}. The transcripts below are unaffected; install {} to enable `meeting analyze`.",
+        analysis.reason, analysis.harness
+    ))
+}
+
+/// `meeting analyze`: the summary, the verified findings with the line each
+/// came from, and — separately and explicitly — anything that was DISCARDED
+/// because its quote was not found in the note.
+pub fn meeting_analysis(analysis: &MeetingAnalysis) -> String {
+    let mut lines = vec![
+        format!("# {}", analysis.meeting.title),
+        format!(
+            "{} · {} ({}, {})",
+            analysis
+                .meeting
+                .started_at
+                .as_deref()
+                .unwrap_or("unknown time"),
+            analysis.meeting.relative_path,
+            analysis.model,
+            analysis.provider
+        ),
+        format!(
+            "Local model {} via {} answered in {} ms. Nothing was created; accept what you agree with using `meeting actions add`.",
+            analysis.model, analysis.harness, analysis.duration_ms
+        ),
+    ];
+    if analysis.transcript_truncated {
+        lines.push(format!(
+            "Only the first {} characters of the note were analysed (the prompt budget).",
+            analysis.transcript_chars
+        ));
+    }
+    lines.push(String::new());
+    lines.push(if analysis.summary.is_empty() {
+        "Summary: (the model returned none)".to_string()
+    } else {
+        format!("Summary: {}", analysis.summary)
+    });
+    for (title, items) in [
+        ("Decisions", &analysis.decisions),
+        ("Actions", &analysis.actions),
+        ("Open questions", &analysis.open_questions),
+    ] {
+        lines.push(String::new());
+        if items.is_empty() {
+            lines.push(format!("{title}: none stated."));
+            continue;
+        }
+        lines.push(format!("{title}:"));
+        lines.extend(items.iter().map(suggestion_line));
+    }
+    if analysis.discarded_count > 0 {
+        lines.push(String::new());
+        lines.push(format!(
+            "Discarded {} suggestion{} whose quote could not be found verbatim in the note (never shown as a finding):",
+            analysis.discarded_count,
+            if analysis.discarded_count == 1 { "" } else { "s" }
+        ));
+        lines.extend(analysis.discarded.iter().map(|item| {
+            format!(
+                "  - {} ({})",
+                if item.text.is_empty() {
+                    "(no text)"
+                } else {
+                    item.text.as_str()
+                },
+                item.reason
+            )
+        }));
+    }
+    lines.push(String::new());
+    lines.push(
+        "Every line above citing a transcript line was found verbatim in the note; a suggestion without one was dropped."
+            .to_string(),
+    );
+    lines.join("\n")
+}
+
+fn suggestion_line(suggestion: &MeetingSuggestion) -> String {
+    let mut suffix = Vec::new();
+    if let Some(owner) = &suggestion.owner {
+        suffix.push(format!("owner {owner}"));
+    }
+    if let Some(due) = &suggestion.due {
+        suffix.push(format!("due {due}"));
+    }
+    suffix.push(format!("confidence {}", suggestion.confidence));
+    format!(
+        "  - {} ({})\n      line {}: {}",
+        suggestion.text,
+        suffix.join(", "),
+        suggestion.line,
+        suggestion.quote
+    )
+}
+
+/// The ledger, one page at a time. The open count is printed even when the
+/// page shows something else, because "what is still open" is the question
+/// the ledger exists to answer.
+pub fn meeting_commitments(page: &MeetingCommitmentPage) -> String {
+    let mut lines = vec![format!(
+        "{} commitment{} ({} open) — showing {}..{}",
+        page.total,
+        if page.total == 1 { "" } else { "s" },
+        page.open,
+        page.offset,
+        page.offset as usize + page.commitments.len()
+    )];
+    if page.commitments.is_empty() {
+        lines.push(
+            "Nothing here yet. `meeting analyze --id <ID>` suggests work; `meeting actions add` records what you accept."
+                .to_string(),
+        );
+        return lines.join("\n");
+    }
+    lines.extend(page.commitments.iter().map(commitment_line));
+    if page.has_more {
+        lines.push(format!(
+            "More commitments available: rerun with --offset {}.",
+            page.offset as usize + page.commitments.len()
+        ));
+    }
+    lines.join("\n")
+}
+
+pub fn meeting_commitment(commitment: &MeetingCommitment) -> String {
+    format!(
+        "{} [{}] {}\n    {} · {}\n    line {}: {}\n    id {}",
+        commitment.status,
+        commitment.source,
+        commitment.text,
+        commitment.meeting_date,
+        commitment.meeting_title,
+        commitment.line,
+        commitment.quote,
+        commitment.id
+    )
+}
+
+fn commitment_line(commitment: &MeetingCommitment) -> String {
+    let owner = commitment
+        .owner
+        .as_deref()
+        .map(|owner| format!(" · owner {owner}"))
+        .unwrap_or_default();
+    format!(
+        "{} [{} {}] {}{}\n    {} · {} · line {}\n    {}\n    id {}",
+        commitment.status,
+        commitment.source,
+        commitment.confidence,
+        commitment.text,
+        owner,
+        commitment.meeting_date,
+        commitment.meeting_title,
+        commitment.line,
+        commitment.quote,
+        commitment.id
     )
 }
 

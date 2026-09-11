@@ -12,6 +12,9 @@
 // as read-only.
 import { ipcMain } from "electron";
 import {
+  meetingAnalysisSchema,
+  meetingCommitmentPageSchema,
+  meetingCommitmentSchema,
   meetingReadSchema,
   meetingsPageSchema,
   meetingsRequestSchema,
@@ -39,9 +42,14 @@ const invalid = (): Result<never> => ({
 /**
  * Answers one validated request. The response is re-validated against the
  * shared contract before it reaches the renderer: the page's honest states
- * depend on the availability taxonomy and on a failed transcript always
- * naming its reason, so a malformed daemon answer is refused instead of
+ * depend on the availability taxonomy, on every extracted suggestion
+ * carrying a verified quote, and on a commitment never being open and
+ * resolved at once — so a malformed daemon answer is refused instead of
  * rendered.
+ *
+ * `meeting.analyze` runs the free local model and can take minutes; that is
+ * the daemon's own bounded run (it kills its process group on timeout), so
+ * this bridge adds no second timeout of its own.
  */
 export async function dispatchMeetingsRequest(
   input: unknown,
@@ -50,17 +58,48 @@ export async function dispatchMeetingsRequest(
   const envelope = meetingsRequestSchema.safeParse(input);
   if (!envelope.success) return invalid();
   const { op, params } = envelope.data;
-  if (op === "list") {
-    const result = await call("meeting.list", params ?? {});
-    if (!result.ok) return result;
-    const checked = meetingsPageSchema.safeParse(result.result);
-    if (!checked.success) return contractViolation();
-    return { ok: true, result: checked.data };
+  switch (op) {
+    case "list": {
+      const result = await call("meeting.list", params ?? {});
+      if (!result.ok) return result;
+      return revalidate(result.result, meetingsPageSchema);
+    }
+    case "read": {
+      const result = await call("meeting.read", params);
+      if (!result.ok) return result;
+      return revalidate(result.result, meetingReadSchema);
+    }
+    case "analyze": {
+      const result = await call("meeting.analyze", params);
+      if (!result.ok) return result;
+      return revalidate(result.result, meetingAnalysisSchema);
+    }
+    case "commitments": {
+      const result = await call("meeting.commitment_list", params ?? {});
+      if (!result.ok) return result;
+      return revalidate(result.result, meetingCommitmentPageSchema);
+    }
+    case "accept": {
+      const result = await call("meeting.commitment_create", params);
+      if (!result.ok) return result;
+      return revalidate(result.result, meetingCommitmentSchema);
+    }
+    case "resolve": {
+      const result = await call("meeting.commitment_update", params);
+      if (!result.ok) return result;
+      return revalidate(result.result, meetingCommitmentSchema);
+    }
+    default:
+      return invalid();
   }
-  const result = await call("meeting.read", params);
-  if (!result.ok) return result;
-  const checked = meetingReadSchema.safeParse(result.result);
-  if (!checked.success) return contractViolation();
+}
+
+function revalidate<T>(
+  value: unknown,
+  schema: { safeParse: (input: unknown) => { success: boolean; data?: T } },
+): Result<unknown> {
+  const checked = schema.safeParse(value);
+  if (!checked.success || checked.data === undefined) return contractViolation();
   return { ok: true, result: checked.data };
 }
 

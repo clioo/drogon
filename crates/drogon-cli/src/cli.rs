@@ -200,10 +200,13 @@ pub enum Command {
 #[derive(Subcommand, Debug)]
 pub enum MeetingAction {
     /// List indexed meeting notes, newest first, with the folder they came
-    /// from and the honest reason when there are none
+    /// from and the honest reason when there are none. A corpus of hundreds
+    /// of meetings is searched rather than scrolled: `--query` is a
+    /// case-insensitive full-text search over each note, and `--from`/`--to`
+    /// plus `--min-minutes`/`--max-minutes` filter by date and duration.
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli meeting list [--limit <N>] [--offset <N>]\nValid flags: --data-dir, --help, --json, --limit, --offset, --request-id, --retry-request"
+        override_usage = "drogon-cli meeting list [--limit <N>] [--offset <N>] [--query <TEXT>] [--from <YYYY-MM-DD>] [--to <YYYY-MM-DD>] [--min-minutes <N>] [--max-minutes <N>]\nValid flags: --data-dir, --from, --help, --json, --limit, --limit, --max-minutes, --min-minutes, --offset, --query, --request-id, --retry-request, --to"
     )]
     List {
         /// Page size (1..=200, default 50)
@@ -212,6 +215,21 @@ pub enum MeetingAction {
         /// Skip this many meetings before the page starts
         #[arg(long, value_name = "N")]
         offset: Option<u32>,
+        /// Case-insensitive full-text search over the notes (<=200 chars)
+        #[arg(long, value_name = "TEXT")]
+        query: Option<String>,
+        /// Inclusive lower bound on the meeting date (YYYY-MM-DD)
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        from: Option<String>,
+        /// Inclusive upper bound on the meeting date (YYYY-MM-DD)
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        to: Option<String>,
+        /// Shortest duration to match, in minutes
+        #[arg(long, value_name = "N")]
+        min_minutes: Option<u32>,
+        /// Longest duration to match, in minutes
+        #[arg(long, value_name = "N")]
+        max_minutes: Option<u32>,
     },
     /// Read one transcript by the id `meeting list` printed
     #[command(
@@ -225,6 +243,98 @@ pub enum MeetingAction {
         /// Byte budget for the returned content (1..=5242880)
         #[arg(long, value_name = "N")]
         max_bytes: Option<u64>,
+    },
+    /// Extract suggested decisions, commitments and open questions from one
+    /// transcript with the FREE LOCAL model (`pi` / dgx-spark /
+    /// qwen3.8-flash-next-nvidia-nvfp4; no paid provider can be selected).
+    /// Every suggestion carries the transcript line it came from, and a
+    /// suggestion whose quote is not found in the note is DISCARDED and
+    /// reported separately rather than shown as a finding. Nothing is
+    /// created: read the answer and accept what you agree with through
+    /// `meeting actions add`.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli meeting analyze --id <ID>\nValid flags: --data-dir, --help, --id, --json, --request-id, --retry-request"
+    )]
+    Analyze {
+        /// Transcript id, exactly as printed by `meeting list`
+        #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+        id: String,
+    },
+    /// The commitment ledger: what the owner accepted out of a meeting, with
+    /// the quote that supports it, across the WHOLE corpus (`actions list
+    /// --open` answers "what did I promise and never close?"). Drogon's own
+    /// file under the data dir; the notes are only ever read.
+    Actions {
+        #[command(subcommand)]
+        action: CommitmentAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CommitmentAction {
+    /// List accepted commitments, newest meeting first
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli meeting actions list [--status <open|done|dismissed>] [--open] [--query <TEXT>] [--limit <N>] [--offset <N>]\nValid flags: --data-dir, --help, --json, --limit, --offset, --open, --query, --request-id, --retry-request, --status"
+    )]
+    List {
+        /// Only commitments in this state
+        #[arg(long, value_name = "open|done|dismissed")]
+        status: Option<String>,
+        /// Shorthand for `--status open`
+        #[arg(long)]
+        open: bool,
+        /// Case-insensitive search over the text, owner, quote and meeting
+        #[arg(long, value_name = "TEXT")]
+        query: Option<String>,
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
+        #[arg(long, value_name = "N")]
+        offset: Option<u32>,
+    },
+    /// Record a commitment the owner accepts. The quote is verified against
+    /// the transcript before anything is stored; an unsupported claim is
+    /// refused, not recorded.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli meeting actions add --meeting-id <ID> --text <TEXT> --quote <QUOTE> [--owner <NAME>] [--source <suggested|owner>] [--confidence <high|low>]\nValid flags: --confidence, --data-dir, --help, --json, --meeting-id, --owner, --quote, --request-id, --retry-request, --source, --text"
+    )]
+    Add {
+        /// The meeting this came from, exactly as `meeting list` printed it
+        #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+        meeting_id: String,
+        /// The commitment, in one line
+        #[arg(long, value_name = "TEXT")]
+        text: String,
+        /// The transcript line that proves it (>=12 characters)
+        #[arg(long, value_name = "QUOTE")]
+        quote: String,
+        #[arg(long, value_name = "NAME")]
+        owner: Option<String>,
+        /// `suggested` when the local model proposed it, `owner` when you wrote it
+        #[arg(long, value_name = "suggested|owner")]
+        source: Option<String>,
+        #[arg(long, value_name = "high|low")]
+        confidence: Option<String>,
+    },
+    /// Mark an accepted commitment done
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli meeting actions done --id <ID>\nValid flags: --data-dir, --help, --id, --json, --request-id, --retry-request"
+    )]
+    Done {
+        #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+        id: String,
+    },
+    /// Dismiss an accepted commitment without doing it
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli meeting actions dismiss --id <ID>\nValid flags: --data-dir, --help, --id, --json, --request-id, --retry-request"
+    )]
+    Dismiss {
+        #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+        id: String,
     },
 }
 
@@ -1344,11 +1454,19 @@ impl Cli {
                     validate_follow_timeout(*timeout_ms)?;
                 }
             },
-            // Meetings: `list` takes optional paging, `read` needs a
-            // non-empty id. Both bounds are refused here, before any
-            // transport work, so a typo never reaches the daemon.
+            // Meetings: `list` takes optional paging and filters, `read`
+            // and `analyze` need a non-empty id. Every bound is refused
+            // here, before any transport work, so a typo never reaches the
+            // daemon.
             Command::Meeting { action } => match action {
-                MeetingAction::List { limit, offset } => {
+                MeetingAction::List {
+                    limit,
+                    offset,
+                    query,
+                    min_minutes,
+                    max_minutes,
+                    ..
+                } => {
                     if let Some(limit) = limit
                         && (*limit == 0 || *limit > 200)
                     {
@@ -1361,6 +1479,20 @@ impl Cli {
                             "--offset must be between 0 and 1000000".into(),
                         ));
                     }
+                    if let Some(query) = query
+                        && query.chars().count() > 200
+                    {
+                        return Err(CliError::Usage(
+                            "--query is limited to 200 characters".into(),
+                        ));
+                    }
+                    for minutes in [min_minutes, max_minutes].into_iter().flatten() {
+                        if *minutes > 44_640 {
+                            return Err(CliError::Usage(
+                                "--min-minutes/--max-minutes are limited to 44640".into(),
+                            ));
+                        }
+                    }
                 }
                 MeetingAction::Read { id, max_bytes } => {
                     require_nonempty("id", id)?;
@@ -1372,6 +1504,76 @@ impl Cli {
                         ));
                     }
                 }
+                MeetingAction::Analyze { id } => {
+                    require_nonempty("id", id)?;
+                }
+                MeetingAction::Actions { action } => match action {
+                    CommitmentAction::List {
+                        status,
+                        query,
+                        limit,
+                        offset,
+                        ..
+                    } => {
+                        if let Some(status) = status
+                            && !["open", "done", "dismissed"].contains(&status.as_str())
+                        {
+                            return Err(CliError::Usage(
+                                "--status must be one of: open, done, dismissed".into(),
+                            ));
+                        }
+                        if let Some(query) = query
+                            && query.chars().count() > 200
+                        {
+                            return Err(CliError::Usage(
+                                "--query is limited to 200 characters".into(),
+                            ));
+                        }
+                        if let Some(limit) = limit
+                            && (*limit == 0 || *limit > 200)
+                        {
+                            return Err(CliError::Usage(
+                                "--limit must be between 1 and 200".into(),
+                            ));
+                        }
+                        if let Some(offset) = offset
+                            && *offset > 1_000_000
+                        {
+                            return Err(CliError::Usage(
+                                "--offset must be between 0 and 1000000".into(),
+                            ));
+                        }
+                    }
+                    CommitmentAction::Add {
+                        meeting_id,
+                        text,
+                        quote,
+                        source,
+                        confidence,
+                        ..
+                    } => {
+                        require_nonempty("meeting-id", meeting_id)?;
+                        require_nonempty("text", text)?;
+                        require_nonempty("quote", quote)?;
+                        if let Some(source) = source
+                            && !["suggested", "owner"].contains(&source.as_str())
+                        {
+                            return Err(CliError::Usage(
+                                "--source must be one of: suggested, owner".into(),
+                            ));
+                        }
+                        if let Some(confidence) = confidence
+                            && !["high", "low"].contains(&confidence.as_str())
+                        {
+                            return Err(CliError::Usage(
+                                "--confidence must be one of: high, low".into(),
+                            ));
+                        }
+                    }
+                    CommitmentAction::Done { id } | CommitmentAction::Dismiss { id } => {
+                        require_nonempty("id", id)?;
+                    }
+                },
             },
             Command::Automation { action } => match action {
                 AutomationAction::Create {

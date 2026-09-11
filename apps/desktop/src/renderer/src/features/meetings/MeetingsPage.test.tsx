@@ -5,83 +5,37 @@
    bridge is the only seam (it is the granted `window.drogon.meetings`
    namespace); the availability taxonomy, the paging arithmetic and the
    reader all run for real. */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type {
-  MeetingRead,
-  MeetingsBridge,
-  MeetingsPage as MeetingsPageData,
-  MeetingTranscript,
-} from "../../../../shared/meetings-contract";
+import type { MeetingRead, MeetingsBridge } from "../../../../shared/meetings-contract";
+import {
+  OLDER_NOTE_ID,
+  NOTE_ID,
+  availability,
+  bridgeFor as fixturesBridge,
+  commitment,
+  commitmentPage,
+  page,
+  transcript,
+} from "./meetings-test-fixtures";
 import MeetingsPage, { type MeetingsPageProps } from "./MeetingsPage";
 import { TooltipProvider } from "../../components/ui/tooltip";
+import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 
-afterEach(cleanup);
+beforeEach(installRadixJsdomStubs);
 
-/** App owns the single Tooltip.Provider in production; tests mount one. */
-function renderPage(props: MeetingsPageProps) {
-  return render(
-    <TooltipProvider>
-      <MeetingsPage {...props} />
-    </TooltipProvider>,
-  );
-}
-
-function transcript(overrides: Partial<MeetingTranscript> = {}): MeetingTranscript {
-  return {
-    id: "write-that-down:/home/carlos/Transcripts/2026-09-10/08-05_42min.md",
-    title: "Weekly sync",
-    fileName: "08-05_42min.md",
-    filePath: "/home/carlos/Transcripts/2026-09-10/08-05_42min.md",
-    relativePath: "2026-09-10/08-05_42min.md",
-    dateFolder: "2026-09-10",
-    startedAt: "2026-09-10 08:05",
-    durationMinutes: 42,
-    status: "saved",
-    excerpt: "[00:00] hola desde la reunion de hoy",
-    failureReason: null,
-    ...overrides,
-  };
-}
-
-function page(overrides: Partial<MeetingsPageData> = {}): MeetingsPageData {
-  const meetings = overrides.meetings ?? [transcript()];
-  return {
-    availability: {
-      status: "available",
-      reason: "ready",
-      platform: "macos",
-      supported: true,
-      installation: "installed",
-      configuration: "configured",
-      configured: true,
-      configPath: "/home/carlos/Library/Application Support/WriteThatDown/config.json",
-      configPresent: true,
-      transcriptRoot: "/home/carlos/Transcripts",
-      transcriptRootSource: "config",
-      transcriptRootState: "readable",
-      readOnly: true,
-    },
-    meetings,
-    total: meetings.length,
-    offset: 0,
-    limit: 50,
-    hasMore: false,
-    scanTruncated: false,
-    ...overrides,
-  };
-}
-
+/** The bridge every honest-state test drives, with per-test overrides. */
 function bridgeFor(
-  value: MeetingsPageData,
+  value: ReturnType<typeof page>,
   read: (input: { id: string }) => MeetingRead | Error = () => ({
     meeting: transcript(),
-    content: "# Weekly sync\n**Date:** 2026-09-10 08:05\n\n## Transcript\n\n[00:00] hola desde la reunion de hoy\n",
+    content:
+      "# Weekly sync\n**Date:** 2026-09-10 08:05\n\n## Transcript\n\n[00:00] hola desde la reunion de hoy\n",
     size: 100,
     truncated: false,
   }),
 ): MeetingsBridge {
-  return {
+  return fixturesBridge({
     list: vi.fn(async () => ({ ok: true as const, result: value })),
     read: vi.fn(async (input) => {
       const result = read(input);
@@ -92,7 +46,27 @@ function bridgeFor(
           }
         : { ok: true as const, result };
     }),
-  };
+  });
+}
+
+afterEach(cleanup);
+
+/**
+ * Drives a Radix `Select` the way the product's other tests do: click the
+ * trigger, then the option by its label.
+ */
+async function chooseOption(trigger: HTMLElement, option: string): Promise<void> {
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+
+/** App owns the single Tooltip.Provider in production; tests mount one. */
+function renderPage(props: MeetingsPageProps) {
+  return render(
+    <TooltipProvider>
+      <MeetingsPage {...props} />
+    </TooltipProvider>,
+  );
 }
 
 const plainRenderer = (read: MeetingRead): React.ReactNode => (
@@ -104,7 +78,7 @@ describe("Meetings page honest states", () => {
     const bridge = bridgeFor(
       page({
         availability: {
-          ...page().availability,
+          ...availability(),
           status: "unavailable",
           reason: "not-installed",
           installation: "not-installed",
@@ -129,7 +103,7 @@ describe("Meetings page honest states", () => {
     const bridge = bridgeFor(
       page({
         availability: {
-          ...page().availability,
+          ...availability(),
           status: "unavailable",
           reason: "transcript-root-missing",
           transcriptRootState: "missing",
@@ -148,7 +122,7 @@ describe("Meetings page honest states", () => {
   it("says the folder is empty only when the folder really is empty", async () => {
     const bridge = bridgeFor(
       page({
-        availability: { ...page().availability, reason: "empty" },
+        availability: { ...availability(), reason: "empty" },
         meetings: [],
         total: 0,
       }),
@@ -159,7 +133,7 @@ describe("Meetings page honest states", () => {
   });
 
   it("reports an unreadable bridge answer as a failure, never as zero meetings", async () => {
-    const bridge: MeetingsBridge = {
+    const bridge: MeetingsBridge = fixturesBridge({
       list: vi.fn(async () => ({
         ok: false as const,
         error: {
@@ -168,8 +142,7 @@ describe("Meetings page honest states", () => {
           retryable: true,
         },
       })),
-      read: vi.fn(),
-    };
+    });
     renderPage({bridge: bridge});
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("meetings.v1 capability is not advertised");
@@ -220,7 +193,7 @@ describe("Meetings page list and reader", () => {
     expect(screen.getByText("In progress")).toBeTruthy();
     expect(screen.getByText("[00:00] hola desde la reunion de hoy")).toBeTruthy();
     expect(screen.getByText("2 transcripts · Write That Down")).toBeTruthy();
-    expect(screen.getByText("Showing 2 of 2")).toBeTruthy();
+    expect(screen.getByText("Showing 1–2 of 2")).toBeTruthy();
   });
 
   it("opens a transcript and shows the note read-only, then goes back", async () => {
@@ -251,17 +224,19 @@ describe("Meetings page list and reader", () => {
     await waitFor(() => expect(bridge.read).toHaveBeenCalledTimes(2));
   });
 
-  it("pages with an explicit Load more and reports the scan budget", async () => {
+  it("pages the corpus one bounded page at a time and reports the scan budget", async () => {
+    // 120 transcripts at 50 rows a page: the list region holds one page of
+    // rows, never the whole corpus.
     const first = page({
       meetings: [transcript()],
-      total: 3,
+      total: 120,
       hasMore: true,
       scanTruncated: true,
     });
     const second = page({
       meetings: [
         transcript({
-          id: "write-that-down:/home/carlos/Transcripts/2026-09-09/09-00_12min.md",
+          id: OLDER_NOTE_ID,
           title: "Yesterday retro",
           fileName: "09-00_12min.md",
           relativePath: "2026-09-09/09-00_12min.md",
@@ -270,25 +245,285 @@ describe("Meetings page list and reader", () => {
           durationMinutes: 12,
         }),
       ],
-      total: 3,
-      offset: 1,
-      hasMore: false,
+      total: 120,
+      offset: 50,
+      hasMore: true,
     });
     const list = vi
       .fn()
       .mockResolvedValueOnce({ ok: true as const, result: first })
       .mockResolvedValueOnce({ ok: true as const, result: second });
-    const bridge: MeetingsBridge = { list, read: vi.fn() };
-    renderPage({bridge: bridge});
+    renderPage({ bridge: fixturesBridge({ list }) });
     expect(await screen.findByText("Weekly sync")).toBeTruthy();
     expect(screen.getByText(/only partially indexed/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Load more meetings/ }));
+    expect(screen.getByText("Showing 1–1 of 120")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Page 1" }).getAttribute("aria-current")).toBe(
+      "page",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     expect(await screen.findByText("Yesterday retro")).toBeTruthy();
-    // Both pages are shown as one continuous list.
+    // The previous page is gone, not appended: bounded DOM, bounded reads.
+    expect(screen.queryByText("Weekly sync")).toBeNull();
+    expect(list).toHaveBeenLastCalledWith({ limit: 50, offset: 50 });
+  });
+
+  it("asks the daemon to search and filter instead of filtering one page", async () => {
+    const list = vi.fn(async () => ({
+      ok: true as const,
+      result: page({
+        meetings: [
+          transcript({
+            searched: true,
+            matchCount: 2,
+            matches: [
+              { line: 7, text: "[00:00] we agreed to ship the budget report" },
+              { line: 8, text: "[00:10] the budget slides are ready" },
+            ],
+          }),
+        ],
+        total: 1,
+        searched: true,
+        scanned: 327,
+        filters: {
+          query: "budget",
+          from: "2026-09-01",
+          to: null,
+          minMinutes: null,
+          maxMinutes: null,
+        },
+      }),
+    }));
+    renderPage({ bridge: fixturesBridge({ list }) });
+    await screen.findByText("Weekly sync");
+
+    fireEvent.change(screen.getByLabelText("Search transcripts"), {
+      target: { value: "budget" },
+    });
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ query: "budget", limit: 50 }),
+      ),
+    );
+    // The matching transcript lines, with their numbers, are what the row
+    // shows — not an excerpt the page guessed at.
+    expect(
+      await screen.findByText("[00:00] we agreed to ship the budget report"),
+    ).toBeTruthy();
+    expect(screen.getByText("line 7")).toBeTruthy();
+    expect(screen.getByText("1 of the notes match · showing 1–1")).toBeTruthy();
+
+    await chooseOption(screen.getByLabelText("Meeting duration"), "Over 60 min");
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ query: "budget", minMinutes: 61 }),
+      ),
+    );
+
+    // A filter change starts the result set over rather than staying on page 4
+    // of the previous result set: no offset is sent with the new filters.
+    expect(list).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ offset: expect.anything() }),
+    );
+
+    // Search that matches nothing says the folder is readable and what it
+    // actually read, never "no meetings".
+    list.mockResolvedValue({
+      ok: true as const,
+      result: page({
+        meetings: [],
+        total: 0,
+        searched: true,
+        scanned: 327,
+        filters: {
+          query: "zzz",
+          from: null,
+          to: null,
+          minMinutes: null,
+          maxMinutes: null,
+        },
+      }),
+    });
+    fireEvent.change(screen.getByLabelText("Search transcripts"), {
+      target: { value: "zzz" },
+    });
+    expect(await screen.findByText("No meeting matches this view")).toBeTruthy();
+    expect(
+      screen.getByText(/No transcript in .* matches this search\. 327 files were read/),
+    ).toBeTruthy();
+    expect(screen.queryByText("No transcript artifacts found")).toBeNull();
+  });
+
+  it("clears every filter back to the unfiltered corpus", async () => {
+    const list = vi.fn(async () => ({ ok: true as const, result: page() }));
+    renderPage({ bridge: fixturesBridge({ list }) });
+    await screen.findByText("Weekly sync");
+    fireEvent.change(screen.getByLabelText("Search transcripts"), {
+      target: { value: "budget" },
+    });
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ query: "budget" })),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Clear" }));
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith({ limit: 50 }),
+    );
+    expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+  });
+
+  it("will not send a custom range it cannot mean", async () => {
+    const list = vi.fn(async () => ({ ok: true as const, result: page() }));
+    renderPage({ bridge: fixturesBridge({ list }) });
+    await screen.findByText("Weekly sync");
+    await chooseOption(screen.getByLabelText("Meeting date"), "Custom range…");
+    fireEvent.change(await screen.findByLabelText("Meetings from date"), {
+      target: { value: "2026-09-10" },
+    });
+    fireEvent.change(screen.getByLabelText("Meetings to date"), {
+      target: { value: "2026-09-01" },
+    });
+    expect(
+      await screen.findByText("The start date must not be after the end date."),
+    ).toBeTruthy();
+    // The reversed range never reaches the daemon.
+    expect(list).not.toHaveBeenCalledWith(
+      expect.objectContaining({ from: "2026-09-10", to: "2026-09-01" }),
+    );
+  });
+
+  it("keeps the actions view honest about the service it is talking to", async () => {
+    const bridge = fixturesBridge({
+      list: vi.fn(async () => ({
+        ok: true as const,
+        result: page({
+          availability: availability({
+            analysis: {
+              available: false,
+              reason: "harness-missing",
+              harness: "pi",
+              provider: "dgx-spark",
+              model: "qwen3.8-flash-next-nvidia-nvfp4",
+              freeLocalModel: true,
+            },
+          }),
+        }),
+      })),
+    });
+    renderPage({ bridge });
+    fireEvent.click(await screen.findByRole("button", { name: /Open transcript/ }));
+    const button = await screen.findByRole("button", {
+      name: /Suggest actions with the local model/,
+    });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByText(/Drogon could not find `pi` on this host's PATH/),
+    ).toBeTruthy();
+    expect(screen.getByText(/no paid provider is ever used/)).toBeTruthy();
+  });
+
+  it("shows the verified suggestions, the discarded ones, and accepts explicitly", async () => {
+    const accept = vi.fn(async () => ({ ok: true as const, result: commitment() }));
+    const bridge = fixturesBridge({ accept });
+    renderPage({ bridge, renderTranscript: plainRenderer });
+    fireEvent.click(await screen.findByRole("button", { name: /Open transcript/ }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Suggest actions with the local model/ }),
+    );
+
+    expect(await screen.findByText("Suggested from this transcript")).toBeTruthy();
+    // Every finding carries the transcript line it came from.
+    expect(screen.getByText("line 8")).toBeTruthy();
+    expect(
+      screen.getByText("[00:12] I will fix the flaky login test before the release."),
+    ).toBeTruthy();
+    // The invention is reported as discarded, with its reason, and is not in
+    // the findings.
+    expect(
+      screen.getByText(/1 suggestion discarded because the quote was not found/),
+    ).toBeTruthy();
+    expect(screen.getByText(/Migrate the database — quote-not-found/)).toBeTruthy();
+    // Nothing was recorded just by looking.
+    expect(accept).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Add to my actions/ }));
+    await waitFor(() =>
+      expect(accept).toHaveBeenCalledWith({
+        meetingId: NOTE_ID,
+        text: "Fix the flaky login test",
+        quote: "[00:12] I will fix the flaky login test before the release.",
+        owner: "Carlos",
+        source: "suggested",
+        confidence: "high",
+      }),
+    );
+    expect(await screen.findByText(/Added to my actions: Fix the flaky login test/)).toBeTruthy();
+  });
+
+  it("reports a refused acceptance instead of showing the action as recorded", async () => {
+    const accept = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: "commitment_quote_not_found",
+        message:
+          "This commitment's quote (12 characters or more) is not in the transcript, so it was NOT recorded.",
+        retryable: false,
+      },
+    }));
+    const bridge = fixturesBridge({ accept });
+    renderPage({ bridge, renderTranscript: plainRenderer });
+    fireEvent.click(await screen.findByRole("button", { name: /Open transcript/ }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Suggest actions with the local model/ }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Add to my actions/ }));
+    expect(await screen.findByText(/NOT recorded/)).toBeTruthy();
+    expect(screen.queryByText(/Added to my actions/)).toBeNull();
+  });
+
+  it("lists accepted actions across the corpus and resolves them explicitly", async () => {
+    const resolve = vi.fn(async () => ({
+      ok: true as const,
+      result: commitment({ status: "done", resolvedAt: "2026-09-11T11:00:00Z" }),
+    }));
+    const commitments = vi.fn(async () => ({
+      ok: true as const,
+      result: commitmentPage(),
+    }));
+    const bridge = fixturesBridge({ resolve, commitments });
+    renderPage({ bridge });
+    fireEvent.click(await screen.findByRole("tab", { name: /My actions/ }));
+
+    expect(await screen.findByText("Fix the flaky login test")).toBeTruthy();
+    // The row keeps the meeting it came from and the quote that supports it.
     expect(screen.getByText("Weekly sync")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Load more meetings/ })).toBeNull();
-    // The page leaves `limit` to the daemon's own default (50).
-    expect(list).toHaveBeenLastCalledWith({ offset: 1 });
+    expect(screen.getByText("line 8")).toBeTruthy();
+    expect(
+      screen.getByText("[00:12] I will fix the flaky login test before the release."),
+    ).toBeTruthy();
+    expect(screen.getByText(/1 action in this view · 1 still open/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark done/ }));
+    await waitFor(() =>
+      expect(resolve).toHaveBeenCalledWith({
+        id: "commitment-1",
+        status: "done",
+      }),
+    );
+  });
+
+  it("opens the transcript an action came from, for checking", async () => {
+    const bridge = fixturesBridge({
+      commitments: vi.fn(async () => ({
+        ok: true as const,
+        result: commitmentPage(),
+      })),
+    });
+    renderPage({ bridge, renderTranscript: plainRenderer });
+    fireEvent.click(await screen.findByRole("tab", { name: /My actions/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Open transcript/ }));
+    await waitFor(() =>
+      expect(bridge.read).toHaveBeenCalledWith({ id: NOTE_ID }),
+    );
   });
 });
 

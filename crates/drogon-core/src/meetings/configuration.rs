@@ -200,6 +200,7 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             app_candidates: Vec::new(),
+            analysis_harness: None,
         }
     }
 

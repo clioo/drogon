@@ -150,6 +150,12 @@ const CAPABILITIES: &[&str] = &[
     // Meetings (additive): read-only index of the owner's local Write That
     // Down Markdown notes, discoverable by Bots through `drogon-cli meeting`.
     meetings::MEETINGS_CAPABILITY,
+    // Meetings, the working half: extraction through the free LOCAL model
+    // (never a paid provider) and the commitment ledger the owner accepts
+    // suggestions into. Separate from `meetings.v1` on purpose, so a client
+    // that meets an index-only service still lists and searches instead of
+    // offering an action that cannot work.
+    meetings::MEETINGS_ACTIONS_CAPABILITY,
 ];
 
 pub(crate) fn now_rfc3339() -> String {
@@ -215,6 +221,9 @@ pub struct Engine {
     /// across its HTTP call or `jira.cancelSearchIssues` could not run on
     /// another connection until the search finished.
     jira: jira::JiraState,
+    /// Meetings: the commitment ledger the owner accepts suggestions into.
+    /// A JSON file under the data dir, never the notes folder.
+    meeting_commitments: meetings::CommitmentStore,
     /// Lifecycle admission gate for quiescent shutdown. Every mutating
     /// method (`Engine::mutating`) holds the *read* side across its whole
     /// ledger interaction — admission, the work itself (including PTY
@@ -302,6 +311,7 @@ impl Engine {
             worker_cli: None,
             worker_operations: Mutex::new(HashMap::new()),
             jira: jira::JiraState::new(data_dir),
+            meeting_commitments: meetings::CommitmentStore::new(data_dir),
             lifecycle_gate: RwLock::new(()),
             quiescent: AtomicBool::new(false),
             #[cfg(test)]
@@ -612,6 +622,18 @@ impl Engine {
             // neither arm can become a general-purpose file read.
             "meeting.list" => self.do_meeting_list(&request.params),
             "meeting.read" => self.do_meeting_read(&request.params),
+            // Meetings, the working half. `meeting.analyze` runs the free
+            // local model once (mutating, so a shutdown waits for the run and
+            // its process group); the `meeting.commitment_*` arms write only
+            // Drogon's own ledger file, never the owner's notes.
+            "meeting.analyze" => self.mutating(request, Self::do_meeting_analyze),
+            "meeting.commitment_list" => self.do_meeting_commitment_list(&request.params),
+            "meeting.commitment_create" => {
+                self.mutating(request, Self::do_meeting_commitment_create)
+            }
+            "meeting.commitment_update" => {
+                self.mutating(request, Self::do_meeting_commitment_update)
+            }
             // The work graph. `graph.read`/`graph.node_state`/`graph.compile`
             // are read-only projections (they write only the daemon-owned
             // `state` half or the compiled recipe); the rest mutate.

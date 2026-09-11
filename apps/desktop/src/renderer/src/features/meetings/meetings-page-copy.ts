@@ -6,12 +6,41 @@
 // notices have no counterpart here, and `empty` plus the always-present
 // folder line are additive).
 import type {
+  MeetingAnalysisStatus,
+  MeetingCommitmentStatus,
   MeetingStatus,
   MeetingsPage,
 } from "../../../../shared/meetings-contract";
 
+export { meetingsNoResultsCopy, meetingsResultSummary } from "./meetings-filters";
+
 export const WRITE_THAT_DOWN_SETUP_URL =
   "https://github.com/clioo/write-that-down-patrick";
+
+/**
+ * The extraction state, in the page's own words. `harness-missing` is not a
+ * failure of the transcripts: browsing and searching are unaffected, which
+ * the copy says rather than leaving the owner to guess.
+ */
+export function meetingsAnalysisUnavailableCopy(status: MeetingAnalysisStatus): {
+  title: string;
+  description: string;
+} {
+  if (status.reason === "harness-missing") {
+    return {
+      title: "Suggesting actions needs the local model",
+      description: `Drogon could not find \`${status.harness}\` on this host's PATH. Extraction runs the free local model (${status.provider}/${status.model}) and nothing else — no paid provider is ever used, so nothing is billed. Browsing, searching and reading the transcripts below are unaffected.`,
+    };
+  }
+  return {
+    title: "Suggesting actions is unavailable",
+    description: `Drogon could not reach the local model (${status.provider}/${status.model}). The transcripts below are unaffected.`,
+  };
+}
+
+export function meetingCommitmentStatusLabel(status: MeetingCommitmentStatus): string {
+  return status === "open" ? "Open" : status === "done" ? "Done" : "Dismissed";
+}
 
 export function meetingStatusLabel(status: MeetingStatus): string {
   return status === "recording"
@@ -132,10 +161,21 @@ export function meetingsEmptyCopy(page: MeetingsPage): {
  * The header line. `count` is null whenever the folder could not be read, and
  * then the header says so: "0 transcripts" for a folder Drogon never managed
  * to list would be the same false statement the list region refuses to make.
+ *
+ * `filtered` names what the number actually counts. A filtered or searched
+ * page reports matches, never the size of the notes folder — the two are
+ * different facts and the header must not conflate them.
  */
-export function meetingsCountLabel(count: number | null, loading = false): string {
+export function meetingsCountLabel(
+  count: number | null,
+  loading = false,
+  filtered = false,
+): string {
   if (count === null) {
     return loading ? "Reading the notes folder…" : "Notes folder could not be read";
+  }
+  if (filtered) {
+    return `${count} matching transcript${count === 1 ? "" : "s"} · Write That Down`;
   }
   return `${count} transcript${count === 1 ? "" : "s"} · Write That Down`;
 }

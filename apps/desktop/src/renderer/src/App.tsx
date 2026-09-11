@@ -235,6 +235,7 @@ import {
   MEETINGS_PAGE_HOST_TESTID,
   MEETINGS_ROUTE_ID,
   createGatedMeetingsBridge,
+  isMeetingsActionsAvailable,
   isMeetingsAvailable,
   windowMeetingsBridge,
 } from "./meetings-mount";
@@ -910,6 +911,9 @@ export function App() {
   const botsGateRef = useRef(false);
   const automationsGateRef = useRef(false);
   const meetingsGateRef = useRef(false);
+  // The working half of Meetings (extraction + the ledger) gates separately
+  // from the index: an index-only service still browses and searches.
+  const meetingsActionsGateRef = useRef(false);
   useEffect(() => {
     filesGateRef.current = isFilesAvailable(liveCapabilities);
     gitGateRef.current = isChangesAvailable(liveCapabilities);
@@ -917,6 +921,7 @@ export function App() {
     botsGateRef.current = isBotsAvailable(liveCapabilities);
     automationsGateRef.current = isAutomationsAvailable(liveCapabilities);
     meetingsGateRef.current = isMeetingsAvailable(liveCapabilities);
+    meetingsActionsGateRef.current = isMeetingsActionsAvailable(liveCapabilities);
     gatedSnapshotRef.current = gateSnapshot;
     setGateEpoch((epoch) => epoch + 1);
   }, [gateSnapshot]);
@@ -994,7 +999,11 @@ export function App() {
   const meetingsGatedBridge = useMemo(
     () =>
       meetingsStaticBridge
-        ? createGatedMeetingsBridge(meetingsStaticBridge, () => meetingsGateRef.current)
+        ? createGatedMeetingsBridge(
+            meetingsStaticBridge,
+            () => meetingsGateRef.current,
+            () => meetingsActionsGateRef.current,
+          )
         : null,
     [meetingsStaticBridge],
   );
@@ -4632,7 +4641,12 @@ export function App() {
                   (route === AUTOMATIONS_ROUTE_ID &&
                     automationsAlive &&
                     filesProps !== null) ||
-                  (route === TASKS_ROUTE_ID && tasksAlive)
+                  (route === TASKS_ROUTE_ID && tasksAlive) ||
+                  // Meetings is a full page too: it replaces the session view
+                  // (and the first-run landing) rather than sitting in a
+                  // column beside it, which is what made it read as a sidebar
+                  // panel.
+                  (route === MEETINGS_ROUTE_ID && meetingsAlive)
                     ? "none"
                     : undefined,
               }}
