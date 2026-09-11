@@ -8,9 +8,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import type { FileBridge, FileReadResult } from "../../../shared/file-contract";
-import type { Result } from "../../../shared/session-contract";
-import type { WorkGraphDocument } from "../../../shared/work-graph-contract";
+import type { FileBridge, FileReadResult } from "../../../../shared/file-contract";
+import type { Result } from "../../../../shared/session-contract";
+import type { WorkGraphDocument } from "../../../../shared/work-graph-contract";
 import { useWorkGraphSource } from "./work-graph-source";
 
 function fixtureDocument(state: WorkGraphDocument["state"]["nodes"]): WorkGraphDocument {
@@ -50,6 +50,7 @@ function fakeBridge(raw: string | null, options: { failWrite?: boolean } = {}): 
         result: {
           hostId: "host",
           workspaceId: "ws",
+          path: ".drogon/graph.json",
           content: raw,
           size: raw.length,
           mtime: "2026-09-11T12:00:00.000Z",
@@ -107,6 +108,7 @@ describe("useWorkGraphSource", () => {
           result: {
             hostId: "host",
             workspaceId: "ws",
+            path: ".drogon/graph.json",
             content: JSON.stringify(
               fixtureDocument([{ id: "n0", status: "running" }]),
             ),
@@ -120,6 +122,9 @@ describe("useWorkGraphSource", () => {
           throw new Error("not used");
         },
         fileRead: read,
+        fileWrite: async () => {
+          throw new Error("the work graph must never write");
+        },
       };
       render(
         <Harness bridge={bridge} />,
@@ -146,6 +151,7 @@ describe("useWorkGraphSource", () => {
           result: {
             hostId: "host",
             workspaceId: "ws",
+            path: ".drogon/graph.json",
             content: JSON.stringify(fixtureDocument([{ id: "n0", status: "succeeded" }])),
             size: 10,
             mtime: "2026-09-11T12:00:00.000Z",

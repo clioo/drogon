@@ -11,9 +11,9 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { FileBridge, FileReadResult } from "../../../shared/file-contract";
-import type { Result } from "../../../shared/session-contract";
-import type { WorkGraphDocument } from "../../../shared/work-graph-contract";
+import type { FileBridge, FileReadResult } from "../../../../shared/file-contract";
+import type { Result } from "../../../../shared/session-contract";
+import type { WorkGraphDocument } from "../../../../shared/work-graph-contract";
 import { WorkGraphPane } from "./WorkGraphPane";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -91,6 +91,7 @@ function bridgeWith(raw: string): FileBridge {
       result: {
         hostId: "host",
         workspaceId: "ws",
+        path: ".drogon/graph.json",
         content: raw,
         size: raw.length,
         mtime: "2026-09-11T12:00:00.000Z",
