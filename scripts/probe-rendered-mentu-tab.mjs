@@ -169,10 +169,10 @@ function failedBuildState(graph) {
               errorPath: ".drogon/runs/run-accept-2/n1.err",
               error: null,
             },
+            // Drift renders verbatim when the record carries it; the view
+            // never invents it.
+            drift: { expected: ["src/lib.rs"], created: ["src/lib.rs", "src/extra.rs"] },
           },
-          // Drift renders verbatim when the record carries it; the view
-          // never invents it.
-          drift: { expected: ["src/lib.rs"], created: ["src/lib.rs", "src/extra.rs"] },
         }
       : node,
   );
