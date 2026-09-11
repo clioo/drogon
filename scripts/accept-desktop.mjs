@@ -504,6 +504,15 @@ try {
     report.checks.push(...await probeChatLifecycle({ page, cli: packaged.cli, dataDir, output }));
   if (report.claudeKeyboardIsolation)
     report.checks.push(...await probeClaudeTerminalInput({ page, workspaceId: registered.id, output }));
+  // The keyboard-isolation probe replaced `bin/claude` with the real,
+  // network-denied binary. Every later Mentu journey (the tab probe and the
+  // sealed J9 journey) hands its prompt to a stub harness that answers by
+  // running `drogon-cli mentu run`, so restore the shared agent-settings
+  // stubs here, after the real Claude session is stopped.
+  if (packaged || withAgents || withSessions)
+    await writeAgentSettingsFixtures(fixtureBin, {
+      skip: withAgents || withSessions ? [] : ["pi"],
+    });
   await page
     .getByRole("button", { name: "New tab", exact: true })
     .last()
