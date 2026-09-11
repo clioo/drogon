@@ -64,11 +64,12 @@ export function retryAffordanceDisabled(input: {
 }
 
 /**
- * R16-AL2 (issue #228): identity for a per-session retry offer. The
- * incarnation is part of the key so an offer raised against a superseded
- * incarnation can never surface on the session that replaced it.
+ * Identity of a session incarnation for the recovery offer: the
+ * incarnation is part of the key so a dismissal recorded against a
+ * superseded incarnation can never hide the offer on the session that
+ * replaced it.
  */
-export function retryOfferKey(input: {
+export function recoveryOfferKey(input: {
   id: string;
   incarnation: string;
 }): string {
@@ -76,44 +77,28 @@ export function retryOfferKey(input: {
 }
 
 /**
- * After a user-initiated retry re-lists the sessions, which of the pending
- * sessions remain `unverifiable`: those are the ones whose "Retry
- * connection" click resolved nothing, so the pane may now offer the
- * fork's recovery overlay (Restart) instead of the retry button. A session
- * that came back `live` re-attaches on its own and must not be offered.
- */
-export function retryStillUnverifiable(
-  pendingKeys: ReadonlySet<string>,
-  sessions: readonly { id: string; incarnation: string; verdict: Verdict }[],
-): string[] {
-  return sessions
-    .filter(
-      (item) =>
-        item.verdict === "unverifiable" &&
-        pendingKeys.has(retryOfferKey(item)),
-    )
-    .map((item) => retryOfferKey(item));
-}
-
-/**
- * Whether the pane may show the recovery overlay for an `unverifiable`
- * session: only after the user clicked Retry and the fresh session list
- * confirmed the session is still unverifiable (the nonce advanced), only
- * while the daemon connection is up (a dead connection explains the loss
- * of contact on its own and the reconnect banner owns that state), and
- * never again after the user dismissed this offer. The overlay is an
- * offer with a Restart action — it never asserts the session exited.
+ * Whether the pane shows the recovery overlay for an `unverifiable`
+ * session. The verdict is the daemon's own statement that THIS instance
+ * holds no child for the id (a held, running child always reports
+ * `live`), so a session is offered the fork's recovery overlay (Restart /
+ * Close) as soon as the connection is up and the user has not dismissed
+ * this incarnation's offer. Waiting for an explicit Retry click — the
+ * pre-fix behaviour — left the owner's dead session as a blank pane with
+ * a cursor that looked live; the offer is the honest, non-blank state.
+ * While the connection is down the reconnect banner owns the state (loss
+ * of contact is never rewritten as exited), and the overlay never asserts
+ * an exit.
  */
 export function showRecoveryOverlay(input: {
   verdict: Verdict;
-  recoveryNonce: number;
-  dismissedNonce: number;
   connected: boolean;
+  offerKey: string;
+  dismissedKey: string | null;
 }): boolean {
   return (
     input.verdict === "unverifiable" &&
-    input.recoveryNonce > input.dismissedNonce &&
-    input.connected
+    input.connected &&
+    input.dismissedKey !== input.offerKey
   );
 }
 

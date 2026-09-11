@@ -310,8 +310,6 @@ import {
   assertCloseReplyFor,
   recoveryTabLabel,
   retryAffordanceDisabled,
-  retryOfferKey,
-  retryStillUnverifiable,
   SESSIONS_INVALIDATE_EVENT,
 } from "./session-recovery";
 import {
@@ -1685,14 +1683,10 @@ export function App() {
   );
   // R16-AL2 (issue #228): per-tab "Retry connection". `refresh` re-attaches
   // anything the service can still serve (a healed connection keeps its
-  // handles; those panes resume on their own). The pending set remembers
-  // which sessions were unverifiable when the click happened; when the
-  // fresh list lands, the ones STILL unverifiable advance
-  // `recoveryOfferNonce`, and their panes swap the inert retry loop for
-  // the recovery overlay (Restart). One bump serves every still-dead
-  // session — each pane gates on its own verdict and dismissed nonce.
-  const [recoveryOfferNonce, setRecoveryOfferNonce] = useState(0);
-  const retryOfferPendingRef = useRef<Set<string> | null>(null);
+  // handles; those panes resume on their own). A session the fresh list
+  // still reports `unverifiable` now shows its own recovery overlay (the
+  // pane gates on its verdict and connection), so the click is a plain
+  // re-list rather than bookkeeping for a later overlay.
   // R16-AJ2 follow-up (issue #221): Retry must relaunch a failed harness
   // launch with the SAME inputs (provider/model/prompt). The session
   // record carries only harnessId, so every launch App makes remembers
@@ -1722,11 +1716,6 @@ export function App() {
     return result;
   };
   const retryConnection = useCallback(() => {
-    retryOfferPendingRef.current = new Set(
-      sessionsRef.current
-        .filter((item) => item.verdict === "unverifiable")
-        .map((item) => retryOfferKey(item)),
-    );
     void agentSettingsState.load();
     void refresh();
   }, [refresh]);
@@ -1877,18 +1866,6 @@ export function App() {
           (item) => !isSessionDismissed(dismissed, item.hostId, item),
         );
         setSessions(visible);
-        // R16-AL2 (issue #228): a user-initiated Retry connection captured
-        // the then-unverifiable sessions before refreshing; whichever of
-        // them THIS fresh list still reports unverifiable resolved nothing
-        // by waiting, so their panes may offer the recovery overlay
-        // (Restart). Live-again sessions re-attach on their own and are
-        // never offered.
-        const pending = retryOfferPendingRef.current;
-        if (pending && pending.size > 0) {
-          retryOfferPendingRef.current = null;
-          if (retryStillUnverifiable(pending, visible).length > 0)
-            setRecoveryOfferNonce((value) => value + 1);
-        }
         setActive((value) =>
           visible.some((item) => item.id === value)
             ? value
@@ -4673,7 +4650,6 @@ export function App() {
                     revision={revision}
                     fontSize={terminalFontSize}
                     gpuMode={terminalGpuAcceleration}
-                    recoveryNonce={recoveryOfferNonce}
                     canSplit={Boolean(
                       selected && status && !busy && !loadingSessions,
                     )}
