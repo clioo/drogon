@@ -633,7 +633,7 @@ function sharedPrefs(overrides: Partial<WorkspaceUIPreferences> = {}): Workspace
     hideDetachedHeadWorkspaces: false,
     hideAutomationGeneratedWorkspaces: false,
     hideCliCreatedWorkspaces: false,
-    worktreeCardProperties: ["status", "unread", "issue", "linear-issue", "jira-issue", "pr", "automation", "cli", "comment", "ports", "inline-agents"],
+    worktreeCardProperties: ["status", "unread", "issue", "linear-issue", "jira-issue", "pr", "automation", "cli", "comment", "inline-agents"],
     agentActivityDisplayMode: "compact",
     workspaceStatuses: [],
     workspaceBoardOpacity: 1,

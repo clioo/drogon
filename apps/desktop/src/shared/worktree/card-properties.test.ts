@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   COMPACT_WORKTREE_CARD_PROPERTIES,
   DEFAULT_WORKTREE_CARD_PROPERTIES,
+  LEGACY_PORTS_ON_WORKTREE_CARD_PROPERTIES,
   TASK_WORKTREE_CARD_PROPERTIES,
+  WORKTREE_CARD_PROPERTIES,
   getWorktreeCardModeProperties,
   getWorktreeCardModeUpdates,
   isDefaultedCompactWorktreeCardProperties,
@@ -10,14 +12,31 @@ import {
 } from './card-properties'
 
 describe('worktree card properties', () => {
-  it('defines Default with inline agents and without branch', () => {
+  it('defines Default with inline agents, without branch, and without ports', () => {
     const props = getWorktreeCardModeProperties('Default')
 
     expect(props).toContain('inline-agents')
     expect(props).not.toContain('branch')
+    expect(props).not.toContain('ports')
     expect(props).toContain('pr')
     expect(props).toContain('automation')
     expect(props).toEqual(DEFAULT_WORKTREE_CARD_PROPERTIES)
+  })
+
+  it('names the source preset with default-on ports as the legacy payload', () => {
+    expect(LEGACY_PORTS_ON_WORKTREE_CARD_PROPERTIES).toContain('ports')
+    expect(LEGACY_PORTS_ON_WORKTREE_CARD_PROPERTIES.filter((id) => id !== 'ports')).toEqual(
+      DEFAULT_WORKTREE_CARD_PROPERTIES
+    )
+  })
+
+  it('keeps ports in the selectable domain so Show properties can re-enable it', () => {
+    expect(WORKTREE_CARD_PROPERTIES).toContain('ports')
+    expect(normalizeWorktreeCardProperties(['status', 'unread', 'ports'])).toEqual([
+      'status',
+      'unread',
+      'ports'
+    ])
   })
 
   it('defines Compact as the status-only quiet preset', () => {
