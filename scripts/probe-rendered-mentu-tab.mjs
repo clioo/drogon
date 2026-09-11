@@ -18,6 +18,7 @@
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
 import {
   captureThemeSurface,
@@ -91,6 +92,26 @@ export async function probeRenderedMentuTab({
   workspaceId: knownWorkspaceId = null,
 }) {
   const checks = [];
+  // The suite's CLI and data dir are needed well before the run step now:
+  // the Run Recipe control DELEGATES to the workspace's main agent session,
+  // so this probe has to start one (the shared sealed fixture) and wait for
+  // it to be idle before the click. Resolve the workspace id up front and
+  // reuse it for the later `mentu status`/`mentu open` calls.
+  const workspaceId =
+    knownWorkspaceId ??
+    (await page.evaluate(async (workspacePath) => {
+      const listed = await window.drogon.workspaces();
+      if (!listed.ok) return null;
+      // The daemon canonicalizes paths (a /var temp dir becomes /private/var),
+      // so match on the last segment instead of requiring byte equality.
+      const tail = workspacePath.split("/").filter(Boolean).pop();
+      return (
+        listed.result.workspaces.find((item) => item.path === workspacePath)?.id ??
+        listed.result.workspaces.find((item) => item.path.endsWith(`/${tail}`))?.id ??
+        null
+      );
+    }, workspace));
+  assert.ok(workspaceId, "the probe needs the workspace id for its CLI calls");
   // The strip already holds the workspace's terminal tab(s) by now.
   const before = await stripLabels(page);
   assert.ok(
@@ -176,6 +197,57 @@ export async function probeRenderedMentuTab({
   await panel.getByText("tab-step-two", { exact: true }).waitFor();
   checks.push("a-recipe-is-visible-in-the-mentu-tab");
 
+  // 4a. Run Recipe DELIVERS: the button no longer calls `mentu.run` itself,
+  //     it hands the workspace's MAIN agent session a deterministic prompt
+  //     and the agent orchestrates the run with `drogon-cli mentu run`.
+  //     Start a real harness session first — the shared sealed fixture
+  //     (probe-agent-settings.mjs) stands in for an agent that read the
+  //     drogon-cli skill and answers the prompt by invoking the documented
+  //     command. Without a live idle agent the click has no target and the
+  //     run can never start; this is what makes the journey prove the whole
+  //     button -> session -> agent -> CLI -> daemon -> run chain.
+  const fixtureAgent = await cliJson(cli, [
+    "--data-dir",
+    dataDir,
+    "--json",
+    "harness",
+    "start",
+    "--workspace",
+    workspaceId,
+    "--harness",
+    "claude",
+  ]);
+  assert.equal(fixtureAgent.ok, true, JSON.stringify(fixtureAgent));
+  const agentSessionId = fixtureAgent.result.id;
+  const agentDeadline = Date.now() + 30000;
+  for (;;) {
+    const listed = await cliJson(cli, [
+      "--data-dir",
+      dataDir,
+      "--json",
+      "terminal",
+      "list",
+      "--workspace",
+      workspaceId,
+    ]);
+    const agent = listed.result.sessions.find(
+      (session) => session.id === agentSessionId,
+    );
+    if (agent && agent.agentState === "idle") break;
+    if (Date.now() >= agentDeadline)
+      throw new Error(
+        `the main agent session never went idle: ${JSON.stringify(agent ?? null)}`,
+      );
+    await delay(500);
+  }
+  // The shell's own session list must have caught up before the click, or
+  // the controller still believes the workspace has no main session and
+  // refuses the delegation it was about to make.
+  await panel
+    .locator('[data-testid="mentu-main-session-hint"]')
+    .waitFor({ state: "hidden", timeout: 20000 });
+  checks.push("mentu-delegation-target-agent-session-idle");
+
   // 4b. The recipe RUNS from this tab against the pinned runtime and its
   //     evidence shows real per-step status and output. Deterministic shell
   //     steps, so this is the same proof the sealed J9 journey makes — now
@@ -253,21 +325,6 @@ export async function probeRenderedMentuTab({
 
   // 6. Reload: the strip (and the Mentu tab's membership) comes back with no
   //    clicks, exactly like the editor/browser tabs.
-  const workspaceId =
-    knownWorkspaceId ??
-    (await page.evaluate(async (workspacePath) => {
-      const listed = await window.drogon.workspaces();
-      if (!listed.ok) return null;
-      // The daemon canonicalizes paths (a /var temp dir becomes /private/var),
-      // so match on the last segment instead of requiring byte equality.
-      const tail = workspacePath.split("/").filter(Boolean).pop();
-      return (
-        listed.result.workspaces.find((item) => item.path === workspacePath)?.id ??
-        listed.result.workspaces.find((item) => item.path.endsWith(`/${tail}`))?.id ??
-        null
-      );
-    }, workspace));
-  assert.ok(workspaceId, "the probe needs the workspace id for its CLI calls");
   await page.reload();
   await page
     .getByRole("button", { name: "Reveal active workspace", exact: true })

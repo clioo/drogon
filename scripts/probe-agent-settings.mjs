@@ -41,9 +41,12 @@ export async function writeAgentSettingsFixtures(bin, { skip = [] } = {}) {
     '    *"mentu run"*)\n' +
     '      recipe=$(printf "%s" "$line" | sed -n \'s/.*--recipe \\([^ ]*\\).*/\\1/p\')\n' +
     '      workspace=$(printf "%s" "$line" | sed -n \'s/.*--workspace \\([^ ]*\\).*/\\1/p\')\n' +
-    '      [ -n "$workspace" ] || workspace="$DROGON_WORKSPACE_ID"\n' +
-    '      printf "fixture-mentu-run recipe=%s workspace=%s\\n" "$recipe" "$workspace"\n' +
-    '      drogon-cli mentu run --workspace "$workspace" --recipe "$recipe" --follow --timeout-ms 120000\n' +
+    '      approval=$(printf "%s" "$line" | sed -n \'s/.*--approval \\([^ ]*\\).*/\\1/p\')\n' +
+    '      if [ -n "$approval" ]; then\n' +
+    '        drogon-cli mentu run --workspace "$workspace" --recipe "$recipe" --approval "$approval" --follow --timeout-ms 120000\n' +
+    '      else\n' +
+    '        drogon-cli mentu run --workspace "$workspace" --recipe "$recipe" --follow --timeout-ms 120000\n' +
+    '      fi\n' +
     '      printf "fixture-mentu-exit=%s\\n" "$?"\n' +
     '      ;;\n' +
     '  esac\n' +
