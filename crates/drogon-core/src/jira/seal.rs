@@ -38,7 +38,6 @@ pub fn open_token(
     crate::integrations::seal::open_token(key, raw, "Jira")
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

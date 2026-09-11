@@ -60,6 +60,9 @@ pub(crate) struct SessionHandle {
     /// fork's `orchestration.parentPaneKey`. `None` for parentless
     /// (UI-spawned) sessions.
     pub(crate) parent_session_id: Option<String>,
+    /// The monitor event (`mev_…`) a delegation attributed this session to,
+    /// or `None` for every session nobody delegated.
+    pub(crate) caused_by_event_id: Option<String>,
     pub(crate) created_at: String,
     /// The PTY master, dropped once the child's exit has been positively
     /// observed *and* the reader thread finished draining output.
@@ -151,6 +154,7 @@ impl SessionHandle {
         args: Vec<String>,
         harness_id: Option<String>,
         parent_session_id: Option<String>,
+        caused_by_event_id: Option<String>,
         created_at: String,
         cols: u16,
         rows: u16,
@@ -168,6 +172,7 @@ impl SessionHandle {
             args,
             harness_id,
             parent_session_id,
+            caused_by_event_id,
             created_at,
             native: Mutex::new(Some(NativePty { master })),
             writer: Mutex::new(Some(writer)),
@@ -437,6 +442,7 @@ pub(crate) fn spawn(
     args: Vec<String>,
     harness_id: Option<String>,
     parent_session_id: Option<String>,
+    caused_by_event_id: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<(String, Arc<SessionHandle>, Value), RpcError> {
@@ -462,6 +468,7 @@ pub(crate) fn spawn(
             &args,
             harness_id,
             parent_session_id,
+            caused_by_event_id,
             cols,
             rows,
         )?;
@@ -1317,6 +1324,7 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         "args": handle.args,
         "harnessId": handle.harness_id,
         "parentSessionId": handle.parent_session_id,
+        "causedByEventId": handle.caused_by_event_id,
         "cols": cols,
         "rows": rows,
         "verdict": verdict,

@@ -80,7 +80,8 @@ fn rotate_key(key_path: &std::path::Path) -> std::result::Result<(), String> {
 
 fn write_key(key_path: &std::path::Path, key: &[u8; KEY_LEN]) -> std::result::Result<(), String> {
     if let Some(parent) = key_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("cannot create integration dir: {e}"))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create integration dir: {e}"))?;
     }
     write_file_600(key_path, key)
 }
@@ -196,7 +197,11 @@ pub fn open_token(
         }
         let secret = String::from_utf8(plain)
             .map_err(|_| CredentialDecryptionError(credential_decryption_message(service)))?;
-        return Ok(if secret.is_empty() { None } else { Some(secret) });
+        return Ok(if secret.is_empty() {
+            None
+        } else {
+            Some(secret)
+        });
     }
     // Legacy plaintext fallback (the fork's readPlaintextLegacyCredential):
     // printable UTF-8 only; a sealed-looking binary blob must never decode
@@ -241,7 +246,11 @@ mod tests {
         let sealed = seal_token(&key(), "tok-abc-123");
         let wrong = [1u8; KEY_LEN];
         let error = open_token(&wrong, &sealed, "Granola").unwrap_err();
-        assert!(error.0.starts_with("Granola credential could not be decrypted"));
+        assert!(
+            error
+                .0
+                .starts_with("Granola credential could not be decrypted")
+        );
     }
 
     #[test]

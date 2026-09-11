@@ -30,7 +30,9 @@ pub const MAX_KIND_CHARS: usize = 32;
 /// kind can never traverse out of `<data-dir>/integrations/`.
 pub fn validate_kind(kind: &str) -> Result<(), String> {
     if kind.is_empty() || kind.len() > MAX_KIND_CHARS {
-        return Err(format!("integration kind must be 1..={MAX_KIND_CHARS} bytes"));
+        return Err(format!(
+            "integration kind must be 1..={MAX_KIND_CHARS} bytes"
+        ));
     }
     let first = kind.as_bytes()[0];
     if !first.is_ascii_lowercase() {
@@ -279,7 +281,10 @@ mod tests {
             "jira ",
             &"x".repeat(33),
         ] {
-            assert!(SecretStore::new(tempfile::tempdir().unwrap().path(), bad).is_err(), "{bad:?}");
+            assert!(
+                SecretStore::new(tempfile::tempdir().unwrap().path(), bad).is_err(),
+                "{bad:?}"
+            );
         }
         for good in ["jira", "github", "granola", "custom-1", "a_b"] {
             let dir = tempfile::tempdir().unwrap();

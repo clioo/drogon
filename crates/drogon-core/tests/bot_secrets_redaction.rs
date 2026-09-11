@@ -149,9 +149,7 @@ fn dump_table(data_dir: &std::path::Path, table: &str) -> String {
             Ok(parts.join("\u{1}"))
         })
         .unwrap();
-    rows.collect::<Result<Vec<_>, _>>()
-        .unwrap()
-        .join("\u{1}\n")
+    rows.collect::<Result<Vec<_>, _>>().unwrap().join("\u{1}\n")
 }
 
 fn assert_absent_everywhere(data_dir: &std::path::Path, canary: &str, context: &str) {
@@ -228,8 +226,7 @@ fn resolved_secret_canary_is_absent_from_all_five_surfaces() {
     let tx = conn.unchecked_transaction().unwrap();
 
     // Positive control: the canary really is resolved into memory.
-    let direct =
-        resolve_for_bot_in_tx(&tx, &store, &bot_id, &secret_refs).expect("grant resolves");
+    let direct = resolve_for_bot_in_tx(&tx, &store, &bot_id, &secret_refs).expect("grant resolves");
     assert_eq!(
         direct,
         vec![("GITHUB_TOKEN_REF".to_string(), CANARY.to_string())]
@@ -241,21 +238,13 @@ fn resolved_secret_canary_is_absent_from_all_five_surfaces() {
     let spawned = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let spawned_for_closure = spawned.clone();
     let execution: Result<(String,), drogon_core::integrations::resolve::SecretResolutionError> =
-        with_resolved_secrets(
-            &tx,
-            &store,
-            &bot_id,
-            &secret_refs,
-            Err,
-            |resolved| {
-                spawned_for_closure.store(true, std::sync::atomic::Ordering::SeqCst);
-                // Surface 5, captured transcript: raw stderr holds the value…
-                let transcript =
-                    format!("gh: error validating token {CANARY}: bad credentials");
-                // …and scrub_for_persist is the only text that may leave.
-                Ok((scrub_for_persist(&transcript, resolved),))
-            },
-        );
+        with_resolved_secrets(&tx, &store, &bot_id, &secret_refs, Err, |resolved| {
+            spawned_for_closure.store(true, std::sync::atomic::Ordering::SeqCst);
+            // Surface 5, captured transcript: raw stderr holds the value…
+            let transcript = format!("gh: error validating token {CANARY}: bad credentials");
+            // …and scrub_for_persist is the only text that may leave.
+            Ok((scrub_for_persist(&transcript, resolved),))
+        });
     let (scrubbed_transcript,) = execution.unwrap();
     assert!(spawned.load(std::sync::atomic::Ordering::SeqCst));
     assert!(
@@ -271,12 +260,10 @@ fn resolved_secret_canary_is_absent_from_all_five_surfaces() {
     // branch of tick_bot_monitors): BEGIN IMMEDIATE + cas_write +
     // record_check, so the scrubbed text is what actually persists. ---
     drop(tx);
-    let (mut record, rev) = monitor_storage::get_monitor(
-        &rusqlite::Connection::open(&db_path).unwrap(),
-        &monitor_id,
-    )
-    .unwrap()
-    .unwrap();
+    let (mut record, rev) =
+        monitor_storage::get_monitor(&rusqlite::Connection::open(&db_path).unwrap(), &monitor_id)
+            .unwrap()
+            .unwrap();
     let result = MonitorCheckResult::error(
         &monitor_id,
         record.version,
@@ -309,15 +296,24 @@ fn resolved_secret_canary_is_absent_from_all_five_surfaces() {
     // row, proving those surfaces genuinely carried the scrubbed text.
     assert_absent_everywhere(&fx.data_dir, CANARY, "resolved-secret flow");
     let monitors_dump = dump_table(&fx.data_dir, "bot_monitors");
-    assert!(monitors_dump.contains(REDACTED), "monitor row carries the scrubbed text");
+    assert!(
+        monitors_dump.contains(REDACTED),
+        "monitor row carries the scrubbed text"
+    );
     let checks_dump = dump_table(&fx.data_dir, "bot_monitor_checks");
-    assert!(checks_dump.contains(REDACTED), "check row carries the scrubbed text");
+    assert!(
+        checks_dump.contains(REDACTED),
+        "check row carries the scrubbed text"
+    );
     let checks = monitor_storage::list_checks_for_monitor(
         &rusqlite::Connection::open(&db_path).unwrap(),
         &monitor_id,
     )
     .unwrap();
-    assert!(checks.iter().any(|c| c.result == result), "the check row persisted");
+    assert!(
+        checks.iter().any(|c| c.result == result),
+        "the check row persisted"
+    );
     let _ = MonitorRecord::validate(&record); // the persisted record stays shape-valid
 }
 
@@ -346,11 +342,12 @@ fn real_full_tick_never_persists_watched_file_contents() {
     // The surfaces were genuinely written: cursor advanced, a check row
     // exists, and the change produced exactly one durable outbox event.
     let conn = rusqlite::Connection::open(fx.data_dir.join(drogon_core::DB_FILE_NAME)).unwrap();
-    let (record, _) = monitor_storage::get_monitor(&conn, &monitor_id).unwrap().unwrap();
+    let (record, _) = monitor_storage::get_monitor(&conn, &monitor_id)
+        .unwrap()
+        .unwrap();
     assert!(record.cursor.is_some());
     assert!(record.last_event_id.is_some());
-    let checks =
-        monitor_storage::list_checks_for_monitor(&conn, &monitor_id).unwrap();
+    let checks = monitor_storage::list_checks_for_monitor(&conn, &monitor_id).unwrap();
     assert_eq!(checks.len(), 2, "one check-in per tick");
     let events: i64 = conn
         .query_row("SELECT COUNT(*) FROM bot_monitor_events", [], |r| r.get(0))
@@ -427,12 +424,10 @@ fn revoked_canary_flow_writes_an_unauthorized_checkin_without_spawn() {
     // value must still be nowhere).
     drop(tx);
     let now = 1_700_000_000_000.0;
-    let (mut record, rev) = monitor_storage::get_monitor(
-        &rusqlite::Connection::open(&db_path).unwrap(),
-        &monitor_id,
-    )
-    .unwrap()
-    .unwrap();
+    let (mut record, rev) =
+        monitor_storage::get_monitor(&rusqlite::Connection::open(&db_path).unwrap(), &monitor_id)
+            .unwrap()
+            .unwrap();
     let result = MonitorCheckResult::error(
         &monitor_id,
         record.version,

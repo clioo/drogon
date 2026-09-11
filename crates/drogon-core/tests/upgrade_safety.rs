@@ -23,7 +23,7 @@ type ComponentFixtures = &'static [(&'static str, i64)];
 /// version fails `every_component_fixture_migrates_to_current`.
 const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("bots", 3, &[("bots-v1", 1), ("bots-v2", 2)]),
-    ("bot_monitors", 2, &[("bot_monitors-v1", 1)]),
+    ("bot_monitors", 3, &[("bot_monitors-v1", 1)]),
     ("bot_self", 1, &[]),
     ("bot_delegation", 2, &[]),
     ("automations", 2, &[("automations-v1", 1)]),
@@ -206,8 +206,8 @@ fn bot_monitors_v1_row_revalidates_and_stays_approved_across_the_bump() {
     let conn = read_db(&dir);
     assert_eq!(
         version_of(&conn, "bot_monitors"),
-        2,
-        "the additive rule-kind bump records v2"
+        3,
+        "the additive rule-kind bumps record v3"
     );
     let payload: String = conn
         .query_row(

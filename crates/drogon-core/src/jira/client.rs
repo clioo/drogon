@@ -158,7 +158,7 @@ pub fn set_curl_bin_override(path: Option<PathBuf>) {
     *CURL_BIN_OVERRIDE.lock().unwrap() = path;
 }
 
-fn curl_bin() -> PathBuf {
+pub(crate) fn curl_bin() -> PathBuf {
     CURL_BIN_OVERRIDE
         .lock()
         .unwrap()

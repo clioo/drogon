@@ -168,6 +168,47 @@ that home), and read everything the Bot owns with `drogon-cli bot list
 --bot <ID> --workspace <ID> --json` (automations, monitors with their
 health and revisions, home profile, audit count).
 
+### Pull-request watches (the headline case)
+
+`drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME>`
+watches a GitHub repository for the pull requests you name (`--filter`
+`opened` (default), `assigned` or `review_requested`; the last two need
+`--login <LOGIN>`) and releases the Bot's action once per NEW pull request.
+Unlike a file monitor this is the USER
+lane (`bot.monitor_create` can spell `kind: github_pr.v1`), so the rule's
+project is the project workspace the Bot lives in and the released session
+opens a WORKTREE OF THAT PROJECT — not of the Bot's home.
+
+Two optional flags are the case's dispatch choices, and both ride inside
+the approval hash:
+
+- `--harness <ID>` — the harness the dispatched review session must use
+  (`codex`, `claude`, `pi`, `opencode`). Without it the Bot's own harness
+  policy decides.
+- `--skill <NAME>` (repeatable) — the skills the dispatched session must
+  use, so a frontend watch can say `--skill frontend-review` while a
+  backend watch names another set.
+
+The token is named by REFERENCE only: `--secret-ref GITHUB_TOKEN_REF`
+(store the value with `secrets set --kind github`, grant it with `bot
+grant-secret`). This watch goes through the network, so it is NEVER
+auto-approved: `--approve` arms the exact rule hash in the same command,
+and without it the watch stays parked at needs-approval and releases
+nothing. `--api-base <URL>` points at a GitHub Enterprise host (defaults to
+`https://api.github.com`).
+
+The same pull request never fires twice — dedupe is per pull NUMBER, not a
+digest of the response, so a comment on an already-reviewed PR is quiet —
+and a watch that was not running (its first check ever, or a gap wider than
+thirty minutes) SEEDS its baseline instead of replaying the backlog.
+
+When it fires, the prompt it releases tells the Bot to open a worktree
+named after the pull request, start the session with `--harness
+<your choice>` and `--caused-by-event <event id>`, and use the skills the
+watch names. The session that appears therefore carries the event id, so
+"why did this session appear?" has an answer in Session details and in the
+monitor's own firing history.
+
 ### Bot automations
 
 `drogon-cli bot create-automation --bot <ID> --workspace <ID> --name
@@ -434,6 +475,13 @@ optionally pinning the model and permission mode:
 The service resolves the host executable, so there is never a local binary
 to point at. A harness id is server-authoritative: pass it through
 verbatim as advertised by `harness list`.
+
+When a monitor event caused the session, say so: `--caused-by-event
+<mev_…>` records that monitor event id on the session, so anyone looking
+at it can see WHY it appeared (and cross-check the firing in `bot list` /
+the Bots page). The value must be a real event id (`mev_` plus 32 hex);
+anything else is refused. A delegated run passes this flag on both hops:
+the Bot's own run and the review session it dispatches.
 
 ## Liveness And Agent State
 

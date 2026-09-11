@@ -207,7 +207,7 @@ impl Fixture {
             host_id,
             bot_id,
             // Canonicalized: bot scopes stamp the canonical folder
-            // (/private/tmp/… on macOS), and history reads fence on it.
+            // (the /private-prefixed canonical path on macOS), and history reads fence on it.
             folder: std::fs::canonicalize(&folder)
                 .unwrap()
                 .to_string_lossy()

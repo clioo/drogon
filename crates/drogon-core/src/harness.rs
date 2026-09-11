@@ -265,6 +265,20 @@ impl Engine {
             }
             None => None,
         };
+        // Delegation attribution: the monitor event (`mev_…`) that caused
+        // this session, when a released run dispatched it. Shape-checked
+        // here so the tag can never carry arbitrary text into the UI.
+        let caused_by_event_id = match crate::optional_str(params, "causedByEventId")? {
+            Some(event_id) => {
+                if !crate::bots::monitors::result::is_valid_event_id(event_id) {
+                    return Err(crate::error::invalid_argument(
+                        "causedByEventId must be a monitor event id (mev_<32 hex>)",
+                    ));
+                }
+                Some(event_id.to_string())
+            }
+            None => None,
+        };
         let cwd = {
             let conn = self.db.lock().unwrap();
             crate::workspace::get_path(&conn, workspace_id)?
@@ -289,6 +303,7 @@ impl Engine {
                 &args,
                 Some(harness_id_wire(request.harness_id).to_string()),
                 parent_session_id,
+                caused_by_event_id,
                 cols,
                 rows,
             )?;

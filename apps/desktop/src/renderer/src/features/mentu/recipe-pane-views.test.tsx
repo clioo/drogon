@@ -380,7 +380,7 @@ describe("EmptyRecipeState", () => {
       <EmptyRecipeState
         invalidCount={0}
         directorySummary="No .mentu/recipes directory yet — this workspace has never had a recipe."
-        recipesPathLabel="/Users/carlos/Documents/mentu-ai/.mentu/recipes"
+        recipesPathLabel="/Users/example/Documents/mentu-ai/.mentu/recipes"
         nestedFindings={[
           {
             relativeDir: "mentu-recipes/.mentu/recipes",

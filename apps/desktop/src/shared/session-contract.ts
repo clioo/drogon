@@ -102,6 +102,16 @@ export type Session = {
    * the row set renders flat (the fork's unreachable-row normalization).
    */
   parentSessionId?: string | null;
+  /**
+   * Delegation attribution: the monitor event (`mev_…`) that caused this
+   * session, recorded by the daemon on both hops of a delegated run (the
+   * Bot's own headless run and the review session it dispatched). The
+   * daemon shape-checks it, so a non-null value is always a real event id;
+   * `null`/absent means nobody delegated this session. This is what lets
+   * Session details answer "why did this session appear?" with the event
+   * the user can find in the monitor's firing history.
+   */
+  causedByEventId?: string | null;
 };
 export type Status = {
   hostId: string;

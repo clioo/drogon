@@ -41,6 +41,7 @@ type AdmissionRow = (
     String,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 pub(crate) struct PreparedSession {
@@ -56,6 +57,9 @@ pub(crate) struct PreparedSession {
     /// inside a terminal reports its inherited `DROGON_SESSION_ID`), or
     /// `None` for parentless (UI-spawned) sessions.
     parent_session_id: Option<String>,
+    /// The monitor event (`mev_…`) that caused this session, when a
+    /// delegation dispatched it. `None` for every session nobody delegated.
+    caused_by_event_id: Option<String>,
     cols: u16,
     rows: u16,
     created_at: String,
@@ -220,6 +224,7 @@ pub(crate) fn reserve(
     args: &[String],
     harness_id: Option<String>,
     parent_session_id: Option<String>,
+    caused_by_event_id: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<PreparedSession, RpcError> {
@@ -239,13 +244,14 @@ pub(crate) fn reserve(
         args: args.to_vec(),
         harness_id,
         parent_session_id,
+        caused_by_event_id,
         cols,
         rows,
         created_at: crate::now_rfc3339(),
     };
     tx.execute(
-        "INSERT INTO sessions (id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, parent_session_id) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', NULL, ?9, ?10, ?11)",
+        "INSERT INTO sessions (id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, parent_session_id, caused_by_event_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', NULL, ?9, ?10, ?11, ?12)",
         rusqlite::params![
             plan.session_id,
             plan.workspace_id,
@@ -258,6 +264,7 @@ pub(crate) fn reserve(
             plan.created_at,
             plan.harness_id,
             plan.parent_session_id,
+            plan.caused_by_event_id,
         ],
     )
     .map_err(error::from_sqlite)?;
@@ -350,6 +357,7 @@ pub(crate) fn launch_reserved_with_cleanup(
                 plan.args.clone(),
                 plan.harness_id.clone(),
                 plan.parent_session_id.clone(),
+                plan.caused_by_event_id.clone(),
                 plan.created_at.clone(),
                 plan.cols,
                 plan.rows,
@@ -395,7 +403,7 @@ pub(crate) fn launch_reserved_with_cleanup(
 fn verify_committed(conn: &Connection, plan: &PreparedSession) -> Result<(), RpcError> {
     let row: Option<AdmissionRow> = conn
         .query_row(
-            "SELECT workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, created_at, harness_id, parent_session_id \
+            "SELECT workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, created_at, harness_id, parent_session_id, caused_by_event_id \
              FROM sessions WHERE id = ?1",
             [&plan.session_id],
             |r| {
@@ -411,6 +419,7 @@ fn verify_committed(conn: &Connection, plan: &PreparedSession) -> Result<(), Rpc
                     r.get(8)?,
                     r.get(9)?,
                     r.get(10)?,
+                    r.get(11)?,
                 ))
             },
         )
@@ -428,6 +437,7 @@ fn verify_committed(conn: &Connection, plan: &PreparedSession) -> Result<(), Rpc
         created_at,
         harness_id,
         parent_session_id,
+        caused_by_event_id,
     )) = row
     else {
         return Err(error::unverifiable(
@@ -450,6 +460,7 @@ fn verify_committed(conn: &Connection, plan: &PreparedSession) -> Result<(), Rpc
         || created_at != plan.created_at
         || harness_id != plan.harness_id
         || parent_session_id != plan.parent_session_id
+        || caused_by_event_id != plan.caused_by_event_id
     {
         return Err(error::internal_error("reservation does not match its plan"));
     }

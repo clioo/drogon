@@ -188,6 +188,7 @@ impl Engine {
             &plan.harness.args,
             None,
             None,
+            None,
             100,
             32,
         )?;

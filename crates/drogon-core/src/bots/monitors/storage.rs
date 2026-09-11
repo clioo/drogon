@@ -5,6 +5,13 @@
 //! `payload_json`; `id`/`host_id`/`project_id`/`bot_id` are indexed columns
 //! so scope listings never parse JSON.
 //!
+//! v3 adds `bot_monitor_github_seen`: one row per pull request a
+//! `github_pr.v1` watch has already released (or seeded as its baseline),
+//! so "the same PR never fires twice" is a set membership test and never a
+//! digest of response bytes (an unrelated comment on an already-released PR
+//! cannot re-release it). Metadata only — a number and a timestamp, never
+//! watched content.
+//!
 //! This module never implements an outbox: the caller's C05 delivery write
 //! and the cursor CAS below must commit in one caller-owned transaction.
 //! History rows are retained after disable/delete (orphaned evidence, like
@@ -18,7 +25,7 @@ use super::record::MonitorRecord;
 use super::result::MonitorCheckResult;
 
 pub const MONITORS_SCHEMA_COMPONENT: &str = "bot_monitors";
-pub const MONITORS_SCHEMA_VERSION: i64 = 2;
+pub const MONITORS_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -113,7 +120,13 @@ fn create_tables(tx: &Transaction) -> Result<()> {
             started_at REAL NOT NULL,
             payload_json TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS bot_monitor_checks_monitor_id ON bot_monitor_checks(monitor_id);",
+        CREATE INDEX IF NOT EXISTS bot_monitor_checks_monitor_id ON bot_monitor_checks(monitor_id);
+        CREATE TABLE IF NOT EXISTS bot_monitor_github_seen (
+            monitor_id TEXT NOT NULL,
+            pull_number INTEGER NOT NULL,
+            seen_at_ms REAL NOT NULL,
+            PRIMARY KEY (monitor_id, pull_number)
+        );",
     )?;
     Ok(())
 }
@@ -692,8 +705,8 @@ mod tests {
     }
 
     #[test]
-    fn schema_bump_records_v2_and_refuses_a_newer_build() {
-        // A v1 data dir migrates forward to v2 without touching rows.
+    fn schema_bump_records_v3_and_refuses_a_newer_build() {
+        // A v1 data dir migrates forward to v3 without touching rows.
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE schema_versions (component TEXT PRIMARY KEY, version INTEGER NOT NULL);

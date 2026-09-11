@@ -835,6 +835,19 @@ impl Engine {
         // touches the PTY at all, and reconciles the row's terminal state
         // (`live` vs. an already-observed `exited`) itself — see its doc
         // comment for why that ordering matters.
+        // Delegation attribution (same optional tag as `harness.start`):
+        // `None` for every session nobody delegated.
+        let caused_by_event_id = match optional_str(params, "causedByEventId")? {
+            Some(event_id) => {
+                if !crate::bots::monitors::result::is_valid_event_id(event_id) {
+                    return Err(error::invalid_argument(
+                        "causedByEventId must be a monitor event id (mev_<32 hex>)",
+                    ));
+                }
+                Some(event_id.to_string())
+            }
+            None => None,
+        };
         let (session_id, handle, session_json) = session::spawn(
             self.db.clone(),
             &self.data_dir,
@@ -845,6 +858,7 @@ impl Engine {
             args,
             None,
             parent_session_id,
+            caused_by_event_id,
             cols,
             rows,
         )?;
@@ -863,7 +877,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at FROM sessions ORDER BY created_at",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at, caused_by_event_id FROM sessions ORDER BY created_at",
             )
             .map_err(error::from_sqlite)?;
         let rows: Vec<_> = stmt
@@ -1001,7 +1015,7 @@ impl Engine {
         let conn = self.db.lock().unwrap();
         let row = conn
             .query_row(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at FROM sessions WHERE id = ?1",
+                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at, caused_by_event_id FROM sessions WHERE id = ?1",
                 [session_id],
                 row_to_session_json,
             )
@@ -1101,6 +1115,7 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "cacheIdleAt": null,
             "harnessId": r.get::<_, Option<String>>(11)?,
             "parentSessionId": r.get::<_, Option<String>>(13)?,
+            "causedByEventId": r.get::<_, Option<String>>(16)?,
         }),
     ))
 }

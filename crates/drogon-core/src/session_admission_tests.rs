@@ -77,7 +77,8 @@ fn open_fixture() -> Mutex<Connection> {
             exit_code INTEGER,
             created_at TEXT NOT NULL,
             harness_id TEXT,
-            parent_session_id TEXT
+            parent_session_id TEXT,
+            caused_by_event_id TEXT
         );",
     )
     .expect("sessions schema");
@@ -97,7 +98,7 @@ fn reserve_committed(
     let conn = db.lock().unwrap();
     let tx = begin_immediate(&conn);
     let plan = reserve(
-        &tx, "host-1", "ws-1", cwd, command, args, None, None, 80, 24,
+        &tx, "host-1", "ws-1", cwd, command, args, None, None, None, 80, 24,
     )
     .expect("reserve");
     tx.commit().expect("commit reservation");
@@ -171,7 +172,7 @@ fn pending_row_visible_only_after_commit() {
                 incarnation TEXT NOT NULL, command TEXT NOT NULL, args_json TEXT NOT NULL,
                 cols INTEGER NOT NULL, rows INTEGER NOT NULL, verdict TEXT NOT NULL,
                 exit_code INTEGER, created_at TEXT NOT NULL, harness_id TEXT,
-                parent_session_id TEXT
+                parent_session_id TEXT, caused_by_event_id TEXT
             );",
         )
         .expect("schema");
@@ -185,6 +186,7 @@ fn pending_row_visible_only_after_commit() {
         "/tmp",
         "/bin/echo",
         &[],
+        None,
         None,
         None,
         80,
@@ -221,6 +223,7 @@ fn rollback_reservation_spawns_no_child() {
             dir.path().to_str().expect("utf8"),
             "/bin/sh",
             &["-c".into(), format!("touch {}", marker.display())],
+            None,
             None,
             None,
             80,
@@ -330,6 +333,7 @@ fn default_spawn_matches_reserve_commit_launch() {
         "/tmp",
         "/bin/echo".into(),
         vec!["hello".into()],
+        None,
         None,
         None,
         80,
