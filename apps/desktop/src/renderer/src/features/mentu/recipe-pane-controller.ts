@@ -32,6 +32,7 @@ import {
   type MentuDispatchDeps,
 } from "./mentu-run-dispatch";
 import { buildRecipeGraph, type RecipeGraph } from "./recipe-graph";
+import { subscribeWorkspaceFilesChanged } from "../file-explorer/files-watch";
 import { useMentuState } from "./mentu-store";
 import { useHarnessCatalog } from "./mentu-harness-catalog";
 import type { MentuRuntimeMessageKind } from "./MentuRuntimeMessage";
@@ -310,6 +311,22 @@ export function useMentuPaneController(
   // a decorative spinner with nothing behind it.
   const [recipesGeneration, setRecipesGeneration] = useState(0);
   const refreshRecipes = useCallback(() => setRecipesGeneration((value) => value + 1), []);
+
+  // The catalog is a property of the DIRECTORY, never a snapshot of the
+  // moment this pane mounted. The right-sidebar Mentu panel is a keep-alive
+  // mount (App.tsx `mentuPanelAlive`): it is created as soon as the sidebar
+  // has a workspace, so a recipe written afterwards by a Bot, a terminal or
+  // another editor used to stay invisible in the selector until the app was
+  // reloaded — the owner's "I cannot see the recipe I just created". Main's
+  // watcher already reports WHICH workspace changed, debounced (R16-L #157,
+  // the same live path the Explorer and Source Control read), so this re-runs
+  // exactly the load the Refresh affordance runs.
+  useEffect(() => {
+    if (!workspaceId) return;
+    return subscribeWorkspaceFilesChanged(workspaceId, () =>
+      setRecipesGeneration((value) => value + 1),
+    );
+  }, [workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
