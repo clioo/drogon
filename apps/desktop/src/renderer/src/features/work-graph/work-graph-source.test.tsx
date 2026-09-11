@@ -1,51 +1,101 @@
 // @vitest-environment jsdom
 // MIT Copyright (c) 2026 Lovecast Inc.
-// Source-seam tests: the pane's only data path is fileRead of
-// `.drogon/graph.json`. The reader must surface missing/read-error/invalid
-// states honestly, poll fast while the daemon reports a live process and
-// slow otherwise, and NEVER write — the bridge fake throws on fileWrite so
-// any write fails the test.
+// The source hook's seam choice: when a graph bridge is present, reads go
+// through the daemon's projecting `graph.read` (the state half advances
+// with the run); without one, the raw files bridge parses the bytes. Both
+// paths must surface the daemon's refusals honestly and never invent a
+// document.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { FileBridge, FileReadResult } from "../../../../shared/file-contract";
+import type {
+  GraphBridge,
+  GraphResult,
+} from "../../../../shared/graph-contract";
 import type { Result } from "../../../../shared/session-contract";
-import type { WorkGraphDocument } from "../../../../shared/work-graph-contract";
 import { useWorkGraphSource } from "./work-graph-source";
 
-function fixtureDocument(state: WorkGraphDocument["state"]["nodes"]): WorkGraphDocument {
-  return {
+function ok<T>(result: T): Result<T> {
+  return { ok: true, result };
+}
+
+const GRAPH: GraphResult = {
+  graph: {
     version: 1,
     intent: {
       nodes: [
         {
-          id: "n0",
-          title: "Leader",
-          harness: "pi",
+          id: "n1",
+          title: "N one",
+          harness: "shell",
           model: "",
           dependsOn: [],
-          prompt: "",
+          prompt: "p",
           enabled: true,
         },
       ],
     },
-    state: { updatedAt: "2026-09-11T12:00:00.000Z", nodes: state },
-  };
-}
-
-function fakeBridge(raw: string | null, options: { failWrite?: boolean } = {}): FileBridge {
-  return {
-    fileList: async () => {
-      throw new Error("not used");
+    state: {
+      updatedAt: "2026-09-11T12:00:00.000Z",
+      nodes: [{ id: "n1", status: "succeeded" }],
     },
-    fileRead: async (): Promise<Result<FileReadResult>> => {
-      if (raw === null) {
-        return {
-          ok: false,
-          error: { code: "not_found", message: "file not found", retryable: false },
-        };
-      }
-      return {
+  },
+};
+
+describe("work-graph-source", () => {
+  afterEach(cleanup);
+
+  it("reads through graph.read when the graph bridge is present", async () => {
+    let graphReads = 0;
+    let fileReads = 0;
+    const graphBridge: GraphBridge = {
+      graphRead: async () => {
+        graphReads += 1;
+        return ok(GRAPH);
+      },
+      graphWriteIntent: async () => ({
+        ok: false as const,
+        error: { code: "x", message: "unused", retryable: false },
+      }),
+      graphCompile: async () => ({
+        ok: false as const,
+        error: { code: "x", message: "unused", retryable: false },
+      }),
+      graphRun: async () => ({
+        ok: false as const,
+        error: { code: "x", message: "unused", retryable: false },
+      }),
+    };
+    const fileBridge: FileBridge = {
+      fileRead: async () => {
+        fileReads += 1;
+        throw new Error("the files bridge must not be used when graph.v1 reads");
+      },
+    } as unknown as FileBridge;
+    const { result } = renderHook(() =>
+      useWorkGraphSource({
+        fileBridge,
+        graphBridge,
+        hostId: "host",
+        workspaceId: "ws",
+      }),
+    );
+    await waitFor(() => expect(result.current.source.kind).toBe("loaded"));
+    expect(graphReads).toBe(1);
+    expect(fileReads).toBe(0);
+    if (result.current.source.kind !== "loaded") throw new Error("unreachable");
+    expect(result.current.source.document.state.nodes[0]?.status).toBe("succeeded");
+    expect(result.current.source.fileUpdatedAt).toBe("2026-09-11T12:00:00.000Z");
+  });
+
+  it("falls back to the files bridge when no graph bridge exists", async () => {
+    const raw = JSON.stringify(GRAPH.graph);
+    const fileBridge: FileBridge = {
+      fileList: async () => {
+        throw new Error("not used");
+      },
+      fileRead: async (): Promise<Result<FileReadResult>> => ({
         ok: true,
         result: {
           hostId: "host",
@@ -55,123 +105,44 @@ function fakeBridge(raw: string | null, options: { failWrite?: boolean } = {}): 
           size: raw.length,
           mtime: "2026-09-11T12:00:00.000Z",
         },
-      };
-    },
-    fileWrite: async () => {
-      if (options.failWrite) throw new Error("the work graph must never write");
-      throw new Error("the work graph must never write");
-    },
-  };
-}
-
-let renderResult: { source: ReturnType<typeof useWorkGraphSource>["source"] } | null = null;
-
-function Harness({ bridge }: { bridge: FileBridge | null }) {
-  const { source } = useWorkGraphSource({
-    fileBridge: bridge,
-    hostId: "host",
-    workspaceId: "ws",
-  });
-  renderResult = { source };
-  return <div data-testid="harness" />;
-}
-
-describe("useWorkGraphSource", () => {
-  afterEach(cleanup);
-
-  it("loads a valid graph", async () => {
-    const document = fixtureDocument([{ id: "n0", status: "running" }]);
-    render(<Harness bridge={fakeBridge(JSON.stringify(document))} />);
-    await waitFor(() => expect(renderResult?.source.kind).toBe("loaded"));
-    if (renderResult?.source.kind !== "loaded") return;
-    expect(renderResult.source.document.state.nodes[0].status).toBe("running");
+      }),
+    } as unknown as FileBridge;
+    const { result } = renderHook(() =>
+      useWorkGraphSource({ fileBridge, hostId: "host", workspaceId: "ws" }),
+    );
+    await waitFor(() => expect(result.current.source.kind).toBe("loaded"));
+    if (result.current.source.kind !== "loaded") throw new Error("unreachable");
+    expect(result.current.source.document.intent.nodes).toHaveLength(1);
   });
 
-  it("renders a missing file as a normal empty state, not an error", async () => {
-    render(<Harness bridge={fakeBridge(null)} />);
-    await waitFor(() => expect(renderResult?.source.kind).toBe("missing"));
-  });
-
-  it("renders invalid JSON as an honest refusal with the parse detail", async () => {
-    render(<Harness bridge={fakeBridge("{broken")} />);
-    await waitFor(() => expect(renderResult?.source.kind).toBe("invalid"));
-    if (renderResult?.source.kind !== "invalid") return;
-    expect(renderResult.source.message).toContain("not valid JSON");
-  });
-
-  it("polls every second while a node is running and drops to ten when not", async () => {
-    vi.useFakeTimers();
-    try {
-      const read = vi.fn(
-        async (): Promise<Result<FileReadResult>> => ({
-          ok: true,
-          result: {
-            hostId: "host",
-            workspaceId: "ws",
-            path: ".drogon/graph.json",
-            content: JSON.stringify(
-              fixtureDocument([{ id: "n0", status: "running" }]),
-            ),
-            size: 10,
-            mtime: "2026-09-11T12:00:00.000Z",
-          },
-        }),
-      );
-      const bridge: FileBridge = {
-        fileList: async () => {
-          throw new Error("not used");
+  it("surfaces a graph.read refusal as read_error, never as fake success", async () => {
+    const graphBridge: GraphBridge = {
+      graphRead: async () => ({
+        ok: false as const,
+        error: {
+          code: "workspace_not_found",
+          message: "workspace not found",
+          retryable: false,
         },
-        fileRead: read,
-        fileWrite: async () => {
-          throw new Error("the work graph must never write");
-        },
-      };
-      render(
-        <Harness bridge={bridge} />,
-      );
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(10);
-      });
-      const initialCalls = read.mock.calls.length;
-      expect(initialCalls).toBeGreaterThan(0);
-
-      // Running: fast cadence — roughly one read per second.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(3_000);
-      });
-      const runningCalls = read.mock.calls.length - initialCalls;
-      expect(runningCalls).toBeGreaterThanOrEqual(2);
-      expect(runningCalls).toBeLessThanOrEqual(4);
-
-      // Daemon settles the node: one more fast read flips `running` off,
-      // then the cadence drops to the idle 10s.
-      read.mockImplementation(
-        async (): Promise<Result<FileReadResult>> => ({
-          ok: true,
-          result: {
-            hostId: "host",
-            workspaceId: "ws",
-            path: ".drogon/graph.json",
-            content: JSON.stringify(fixtureDocument([{ id: "n0", status: "succeeded" }])),
-            size: 10,
-            mtime: "2026-09-11T12:00:00.000Z",
-          },
-        }),
-      );
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1_000);
-      });
-      const settledCalls = read.mock.calls.length;
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(8_000);
-      });
-      expect(read.mock.calls.length - settledCalls).toBe(0);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(3_000);
-      });
-      expect(read.mock.calls.length - settledCalls).toBeGreaterThanOrEqual(1);
-    } finally {
-      vi.useRealTimers();
-    }
+      }),
+      graphWriteIntent: async () => ({
+        ok: false as const,
+        error: { code: "x", message: "unused", retryable: false },
+      }),
+      graphCompile: async () => ({
+        ok: false as const,
+        error: { code: "x", message: "unused", retryable: false },
+      }),
+      graphRun: async () => ({
+        ok: false as const,
+        error: { code: "x", message: "unused", retryable: false },
+      }),
+    };
+    const { result } = renderHook(() =>
+      useWorkGraphSource({ graphBridge, hostId: "host", workspaceId: "ws" }),
+    );
+    await waitFor(() => expect(result.current.source.kind).toBe("read_error"));
+    if (result.current.source.kind !== "read_error") throw new Error("unreachable");
+    expect(result.current.source.message).toContain("workspace not found");
   });
 });

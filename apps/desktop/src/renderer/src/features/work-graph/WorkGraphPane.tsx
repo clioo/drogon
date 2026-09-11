@@ -25,10 +25,12 @@
 //   - `running` appears only because the backend says a process is
 //     confirmed live.
 //
-// Phase 1 is read-only: this pane performs no writes of any kind, to
-// `state` or to `intent`. Per-node retry/resume and intent editing arrive
-// with the backend's graph.* RPCs (landed daemon-side in PR #444) behind
-// a preload bridge — never invented paths.
+// Phase 1 was read-only. The authoring canvas (WorkGraphDesigner) now owns
+// the WRITE half through the daemon's `graph.write_intent` (atomic,
+// intent-only, unknown fields merged forward) and the run through
+// `graph.compile`/`graph.run` — never through the files bridge, never a
+// second execution path. This pane itself stays the read-only projection:
+// it polls the file and renders exactly what the daemon records.
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -36,7 +38,6 @@ import {
   AlertCircle,
   ArrowRight,
   CheckCircle2,
-  Circle,
   CircleDashed,
   CircleHelp,
   FileJson,
@@ -44,6 +45,7 @@ import {
   Maximize,
   Minus,
   Network,
+  PenLine,
   Plus,
   RefreshCw,
 } from "lucide-react";
@@ -52,6 +54,7 @@ import type {
   MentuBridge,
   MentuRunEvidenceResult,
 } from "../../../../shared/mentu-contract";
+import type { GraphBridge } from "../../../../shared/graph-contract";
 import {
   intentModel,
   isShellHarness,
@@ -70,28 +73,13 @@ import {
   workGraphStatusLabel,
   workGraphStatusToneClass,
 } from "./work-graph-status";
+import { WorkGraphDesigner } from "./WorkGraphDesigner";
+import { WorkGraphStatusIcon } from "./work-graph-status-icon";
 
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 200;
 const ZOOM_STEP = 10;
 const ZOOM_DEFAULT = 100;
-
-/** The node's own observed status as a glyph — never a decorative
- *  always-green check. Unknown statuses get the neutral outline circle. */
-function WorkGraphStatusIcon({
-  status,
-}: {
-  status: string | undefined | null;
-}): React.JSX.Element {
-  const className = `size-4 shrink-0 ${workGraphStatusToneClass(status)}`;
-  if (status === "running")
-    return <Loader2 className={`${className} animate-spin motion-reduce:animate-none`} aria-hidden />;
-  if (status === "succeeded") return <CheckCircle2 className={className} aria-hidden />;
-  if (status === "failed") return <AlertCircle className={className} aria-hidden />;
-  if (status === "blocked") return <CircleDashed className={className} aria-hidden />;
-  if (status === "unverifiable") return <CircleHelp className={className} aria-hidden />;
-  return <Circle className={className} aria-hidden />;
-}
 
 function MetricCard({
   value,
@@ -552,6 +540,7 @@ function useGraphZoom(): {
 export function WorkGraphPane({
   fileBridge,
   mentuBridge = null,
+  graphBridge = null,
   hostId,
   workspaceId,
 }: {
@@ -560,25 +549,62 @@ export function WorkGraphPane({
    *  stdout/stderr through the existing `mentu.run_evidence` RPC. Optional;
    *  without it the streams report honestly as unavailable. */
   mentuBridge?: MentuBridge | null;
+  /** The gated graph bridge (`graph.write_intent`/`compile`/`run`): the
+   *  authoring canvas's ONLY write seam. Optional; without it the empty
+   *  state's primary action renders, but says honestly that this build
+   *  cannot save yet. */
+  graphBridge?: GraphBridge | null;
   hostId: string | null;
   workspaceId: string;
 }): React.JSX.Element {
+  const [mode, setMode] = useState<"view" | "design">("view");
+  // While DESIGNING, the read poll pauses (enabled=false): the canvas is
+  // authoritative over its own draft, and a poll can never clobber it.
   const { source, refresh, refreshing } = useWorkGraphSource({
     fileBridge,
+    graphBridge,
     hostId,
     workspaceId,
+    enabled: mode === "view",
   });
   const { zoom, zoomIn, zoomOut, fitToView } = useGraphZoom();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const document = source.kind === "loaded" ? source.document : null;
   const fileUpdatedAt = source.kind === "loaded" ? source.fileUpdatedAt : null;
+  // With the graph bridge, an untouched workspace reads as the EMPTY v1
+  // graph (the daemon's own answer) — the same honest empty state the
+  // files-only fallback renders for a missing file.
+  const isEmptyGraph =
+    document !== null &&
+    document.intent.nodes.length === 0 &&
+    document.state.nodes.length === 0;
   const layout = useMemo(
     () => buildWorkGraphLayout(document?.intent.nodes ?? []),
     [document],
   );
   const totals = useMemo(() => (document ? summarizeWorkGraph(document) : null), [document]);
   const runningCount = totals?.byStatus["running"] ?? 0;
+
+  if (mode === "design") {
+    return (
+      <div
+        className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
+        data-testid="work-graph-pane"
+      >
+        <WorkGraphDesigner
+          key="work-graph-designer"
+          graphBridge={graphBridge}
+          workspaceId={workspaceId}
+          document={document}
+          onDone={() => {
+            setMode("view");
+            refresh();
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -606,6 +632,16 @@ export function WorkGraphPane({
         <div className="ml-auto flex items-center gap-2">
           <Button
             type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setMode("design")}
+            data-testid="work-graph-design"
+          >
+            <PenLine className="size-3.5" aria-hidden />
+            Design graph
+          </Button>
+          <Button
+            type="button"
             size="icon-sm"
             variant="ghost"
             onClick={refresh}
@@ -620,7 +656,7 @@ export function WorkGraphPane({
         </div>
       </div>
 
-      {document && totals ? (
+      {document && totals && !isEmptyGraph ? (
         <>
           {/* Graph-level aggregate: the summary the old Metrics header
               provided, over the graph's own state records. */}
@@ -898,24 +934,46 @@ export function WorkGraphPane({
               <div className="h-16 animate-pulse rounded-md bg-muted motion-reduce:animate-none" />
               <div className="h-16 animate-pulse rounded-md bg-muted motion-reduce:animate-none" />
             </div>
-          ) : source.kind === "missing" ? (
+          ) : source.kind === "missing" || isEmptyGraph ? (
             <div
-              className="w-full max-w-md rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground"
+              className="w-full max-w-lg rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground"
               data-testid="work-graph-empty"
             >
               <FileJson className="mx-auto mb-2 block size-5" />
-              <p className="text-center font-medium text-foreground">{source.message}</p>
+              <p className="text-center font-medium text-foreground">
+                {source.kind === "missing"
+                  ? source.message
+                  : "The work graph is empty — no nodes designed yet."}
+              </p>
               <p className="mt-2 text-center text-xs">
-                The daemon writes this file as it observes work in this workspace: the{" "}
+                The file has two halves, and they have different owners: the{" "}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
                   intent
                 </code>{" "}
-                half is the plan, the{" "}
+                half is the plan — yours to author, not the daemon&apos;s — and the{" "}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
                   state
                 </code>{" "}
-                half is what actually happened.
+                half is what actually happened — only the daemon observes and writes that. Design
+                the plan here: add nodes, give each one its prompt, harness and model, draw what
+                waits on what, then save and run it.
               </p>
+              <div className="mt-4 flex flex-col items-center gap-2">
+                <Button
+                  type="button"
+                  onClick={() => setMode("design")}
+                  data-testid="work-graph-design-new"
+                >
+                  <PenLine className="size-4" aria-hidden />
+                  Design the graph
+                </Button>
+                {!graphBridge ? (
+                  <p className="text-center text-[11px]" data-testid="work-graph-design-unavailable">
+                    Saving is unavailable in this desktop build: it predates the graph bridge, so
+                    the canvas would have nothing to write through.
+                  </p>
+                ) : null}
+              </div>
             </div>
           ) : source.kind === "invalid" ? (
             <div

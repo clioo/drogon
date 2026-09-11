@@ -1,22 +1,25 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// The work graph's ONLY data seam: reading `<workspace>/.drogon/graph.json`
-// through the workspace files bridge (`files.v1`). Phase 1 is READ-ONLY —
-// this module exposes no write of any kind, and the pane's tests pin that
-// (the bridge fake fails the test if `fileWrite` is ever called, and a
-// source scan asserts no write call exists in features/work-graph).
+// The work graph's ONLY data seam. Two reads, one priority:
 //
-// When the backend worker's graph RPC lands, THIS is the one module that
-// swaps to it; the pane and tests above it stay stable.
+//   - `graph.read` through the gated GraphBridge when the live service
+//     advertises graph.v1: the daemon re-projects the state half from real
+//     observation ON EVERY READ (writing it back atomically when it
+//     changed), so the view advances with the run. This is the swap this
+//     module's original comment anticipated when the backend's graph RPCs
+//     landed.
+//   - the workspace files bridge (`files.v1`) otherwise: the raw bytes of
+//     `.drogon/graph.json`, parsed. A workspace whose graph is written by
+//     other tools still renders; the state half just stays whatever the
+//     last graph.* writer projected.
 //
-// Live updates: the daemon mirrors run progress into the state half as it
-// happens (the run mirror cadence landed in PR #441), so the pane polls —
-// every second while any node the daemon marks `running`, every ten
-// seconds otherwise, plus on window focus and on the explicit refresh
-// button. A poll never renders a half answer: the previous graph stays up
-// until the next read parses whole.
+// Live updates: the cadence is every second while any node the daemon
+// marks `running`, every ten seconds otherwise, plus on window focus and
+// on the explicit refresh button. A poll never renders a half answer: the
+// previous graph stays up until the next read completes.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FileBridge } from "../../../../shared/file-contract";
+import type { GraphBridge } from "../../../../shared/graph-contract";
 import {
   parseWorkGraphDocument,
   WORK_GRAPH_RELATIVE_PATH,
@@ -45,7 +48,10 @@ export type WorkGraphSource =
     };
 
 export type WorkGraphSourceOptions = {
-  fileBridge: FileBridge | null;
+  fileBridge?: FileBridge | null;
+  /** The gated graph bridge when graph.v1 is live: reads go through the
+   *  daemon's projecting `graph.read` instead of the raw file. */
+  graphBridge?: GraphBridge | null;
   hostId: string | null;
   workspaceId: string;
   /** Set true while the pane is mounted AND visible. */
@@ -62,6 +68,7 @@ function anyNodeRunning(document: WorkGraphDocument): boolean {
  */
 export function useWorkGraphSource({
   fileBridge,
+  graphBridge = null,
   hostId,
   workspaceId,
   enabled = true,
@@ -76,7 +83,45 @@ export function useWorkGraphSource({
   const generation = useRef(0);
 
   const read = useCallback(async (): Promise<void> => {
-    if (!fileBridge || !hostId || inFlight.current) return;
+    if (!hostId || inFlight.current) return;
+    if (graphBridge) {
+      // The daemon's projecting read: the state half is re-computed from
+      // real observation on every call.
+      inFlight.current = true;
+      setRefreshing(true);
+      const currentGeneration = ++generation.current;
+      try {
+        const result = await graphBridge.graphRead({ workspaceId });
+        if (generation.current !== currentGeneration) return;
+        if (!result.ok) {
+          setSource({ kind: "read_error", message: result.error.message });
+          return;
+        }
+        const graph = result.result.graph;
+        setSource({
+          kind: "loaded",
+          document: {
+            version: 1,
+            intent: graph.intent,
+            state: graph.state,
+          },
+          readAt: Date.now(),
+          fileUpdatedAt: graph.state.updatedAt || null,
+        });
+      } catch (error) {
+        if (generation.current === currentGeneration) {
+          setSource({
+            kind: "read_error",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } finally {
+        inFlight.current = false;
+        if (generation.current === currentGeneration) setRefreshing(false);
+      }
+      return;
+    }
+    if (!fileBridge) return;
     inFlight.current = true;
     setRefreshing(true);
     const currentGeneration = ++generation.current;
@@ -133,7 +178,7 @@ export function useWorkGraphSource({
       inFlight.current = false;
       if (generation.current === currentGeneration) setRefreshing(false);
     }
-  }, [fileBridge, hostId, workspaceId]);
+  }, [fileBridge, graphBridge, hostId, workspaceId]);
 
   // Initial read + re-read when the bridge or workspace changes.
   useEffect(() => {
