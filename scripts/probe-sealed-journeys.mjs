@@ -902,6 +902,15 @@ export async function probeMentuApproveRunEvidence({
     path.join(recipesDir, "acceptance-two-step.json"),
     JSON.stringify(MENTU_TWO_STEP_RECIPE, null, 2) + "\n",
   );
+  // Since the work-graph takeover the right-sidebar Mentu panel is
+  // keep-alive: earlier journeys in this acceptance may already have
+  // mounted it, and its recipe discovery runs on mount only (the panel has
+  // no refresh affordance). A reload remounts it fresh, so the recipe just
+  // written is discovered — the same state a fresh app open guarantees.
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor({ timeout: 30000 });
   // The Run Recipe control delegates the run to the workspace's MAIN agent
   // session: it must exist and be idle, because the UI never calls
   // `mentu.run` itself any more. The stub harness (writeAgentSettingsFixtures)
