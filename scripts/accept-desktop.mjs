@@ -461,6 +461,32 @@ try {
   await page.locator(".shell-project-row", { hasText: "folder" }).waitFor();
   await page.getByRole("button", { name: "Select folder" }).waitFor();
   report.checks.push("folder-project-renders-row-with-implicit-card");
+  // The project row's OWN "+" (project header create affordance): a folder
+  // row must carry it and open the composer preselected for that project.
+  // This is the control that silently disappeared when the sidebar rendered
+  // the project as a folder -- the reported regression. The row reveals it on
+  // hover (the source's max-w/opacity recipe), so hover first like a user.
+  const folderRow = page.locator(".shell-project-row", { hasText: "folder" });
+  await folderRow.hover();
+  await folderRow
+    .getByRole("button", { name: "Create workspace for folder", exact: true })
+    .click();
+  const folderRowComposer = page.getByRole("dialog", { name: "Create workspace" });
+  const folderRowProject = folderRowComposer.getByRole("combobox", { name: "Project" });
+  await folderRowProject.waitFor();
+  // The committed project paints over the transparent input, so read the
+  // field's own surface instead of the input's value.
+  assert.match(
+    (await folderRowComposer
+      .locator('[data-project-combobox-root="true"]')
+      .first()
+      .textContent()) ?? "",
+    /folder/,
+    "the folder row's + must preselect its own project",
+  );
+  await page.keyboard.press("Escape");
+  await folderRowComposer.waitFor({ state: "detached" });
+  report.checks.push("folder-project-header-create-control-opens-preselected-composer");
   // New-workspace composer (Projects header "+"): for a folder project
   // the composer opens the implicit workspace straight away. The project
   // picker is the fork's type-ahead combobox; "Blank Terminal" keeps the
@@ -776,6 +802,31 @@ try {
   await page.getByRole("button", { name: "Select demo-a" }).waitFor();
   await page.locator(".shell-project-row", { hasText: "repo" }).waitFor();
   report.checks.push("composer-creates-git-worktree-and-selects-it");
+  // …and the git project's own row "+" creates a real worktree for ITS
+  // project, so the header's entry point is functional end to end.
+  const gitProjectRow = page.locator(".shell-project-row", { hasText: "repo" });
+  await gitProjectRow.hover();
+  await gitProjectRow
+    .getByRole("button", { name: "Create new worktree for repo", exact: true })
+    .click();
+  const gitRowComposer = page.getByRole("dialog", { name: "Create worktree" });
+  await gitRowComposer.locator('[data-workspace-name-input="true"]').waitFor();
+  assert.match(
+    (await gitRowComposer
+      .locator('[data-project-combobox-root="true"]')
+      .first()
+      .textContent()) ?? "",
+    /repo/,
+    "the git row's + must preselect its own project",
+  );
+  await gitRowComposer.locator('[data-workspace-name-input="true"]').fill("row-plus-a");
+  await gitRowComposer
+    .locator('[data-agent-combobox-root="true"][role="combobox"]')
+    .click();
+  await page.getByRole("option", { name: "Blank Terminal" }).click();
+  await gitRowComposer.getByRole("button", { name: "Create worktree" }).click();
+  await page.getByRole("button", { name: "Select row-plus-a" }).waitFor();
+  report.checks.push("git-project-header-create-control-creates-worktree-in-its-project");
 
   // R16-BM2: exercise the source's Advanced rows on a disposable child:
   // explicit branch, same-project parent, note, local setup script and a

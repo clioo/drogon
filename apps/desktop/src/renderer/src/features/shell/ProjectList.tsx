@@ -59,6 +59,7 @@ import {
   ProjectActionsMenu,
 } from "./project-actions-menu";
 import { isProjectHeaderActionTarget } from "./project-header-drag-contract";
+import { getProjectHeaderCreateState } from "./project-header-create-state";
 import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import {
   filterGroupsBySelectedProjects,
@@ -1370,10 +1371,16 @@ function ProjectRow({
   cardLayout?: "comfortable" | "compact";
 }) {
   const project: Project = group.project;
-  const canCreate =
-    worktreesAvailable &&
-    project.kind === "git" &&
-    !project.id.startsWith("folder:");
+  // Kind decides the control's copy, never its presence (Orca's
+  // repo-header-create-state rule): a folder project -- including the ones
+  // the workspace-fallback projection synthesizes as `folder:<id>`, and a
+  // git path whose ownership was resolved as a folder at registration --
+  // keeps its "Create workspace for <project>" entry point.
+  const createState = getProjectHeaderCreateState({
+    project,
+    label: project.name,
+    worktreesAvailable,
+  });
   // The fork's repo-header collapse affordance is hidden while the section
   // is empty (showHeaderCollapseAffordance: row.count > 0).
   const showCollapseAffordance = group.worktrees.length > 0;
@@ -1442,23 +1449,21 @@ function ProjectRow({
               />
             </div>
           ) : null}
-          {canCreate && (
-            <button
-              type="button"
-              className={PROJECT_HEADER_ACTION_BUTTON_CLASS_NAME}
-              data-project-header-action=""
-              aria-label={`Create new worktree for ${project.name}`}
-              title={`Create new worktree for ${project.name}`}
-              disabled={disabled}
-              onClick={(event) => {
-                event.stopPropagation();
-                onNewWorktree();
-              }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              <Plus className="size-3.5" />
-            </button>
-          )}
+          <button
+            type="button"
+            className={PROJECT_HEADER_ACTION_BUTTON_CLASS_NAME}
+            data-project-header-action=""
+            aria-label={createState.ariaLabel}
+            title={createState.tooltip}
+            disabled={disabled || createState.disabled}
+            onClick={(event) => {
+              event.stopPropagation();
+              onNewWorktree();
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <Plus className="size-3.5" />
+          </button>
           <ProjectActionsMenu
             project={project}
             disabled={disabled}
