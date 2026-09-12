@@ -8,7 +8,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type { FileBridge } from "../../../../shared/file-contract";
-import type { GraphBridge } from "../../../../shared/graph-contract";
+import type {
+  GraphBridge,
+  GraphWritePolicyParams,
+} from "../../../../shared/graph-contract";
 import type { WorkGraphDocument } from "../../../../shared/work-graph-contract";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import { WorkGraphPane } from "./WorkGraphPane";
@@ -114,6 +117,61 @@ function mutableOrchestratorGraphBridge(policyDoc: WorkGraphDocument): {
 
 describe("WorkGraphPane durable orchestrator", () => {
   afterEach(cleanup);
+  it("saves policy changes without an invalid empty main node", async () => {
+    const document = graphWithAdversarialPolicy();
+    const { bridge } = mutableOrchestratorGraphBridge(document);
+    const write = vi.fn(async (input: GraphWritePolicyParams) => ({
+      ok: true as const,
+      result: {
+        graph: {
+          ...document,
+          intent: {
+            nodes: input.main ? [input.main] : [],
+            policy: input.policy,
+          },
+        },
+      },
+    }));
+    bridge.graphWritePolicy = write;
+    const fileBridge = {
+      fileRead: async () => ({
+        ok: false,
+        error: { code: "not_found", message: "missing", retryable: false },
+      }),
+    } as unknown as FileBridge;
+
+    render(
+      <WorkGraphPane
+        fileBridge={fileBridge}
+        graphBridge={bridge}
+        hostId="host"
+        workspaceId="ws"
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("textbox", {
+            name: "Main task",
+          }) as HTMLTextAreaElement
+        ).disabled,
+      ).toBe(false),
+    );
+
+    fireEvent.click(screen.getByTestId("adversarial-toggle"));
+
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    expect(write.mock.calls[0][0]).toMatchObject({
+      workspaceId: "ws",
+      policy: { adversarial: { enabled: false } },
+    });
+    expect(write.mock.calls[0][0]).not.toHaveProperty("main");
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("orchestrator-save-status").textContent,
+      ).toContain("Saved automatically"),
+    );
+  });
   it("retries the unsaved main task with the next policy edit before reporting Saved", async () => {
     const document = graphWithAdversarialPolicy();
     const { bridge } = mutableOrchestratorGraphBridge(document);

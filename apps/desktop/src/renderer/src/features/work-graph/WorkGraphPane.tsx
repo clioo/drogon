@@ -71,6 +71,7 @@ export function WorkGraphPane({
     enabled: true,
     dependsOn: [],
   };
+  const mainForPolicySave = configuredMain.prompt.trim() ? mainNode : undefined;
   const updateMainTask = (task: typeof configuredMain) => {
     setMainDraft({ workspaceId, task });
     subagentPolicy.save(subagentPolicy.policy, { ...mainNode, ...task });
@@ -143,7 +144,7 @@ export function WorkGraphPane({
         />
         <SubagentPolicyPanel
           policy={subagentPolicy.policy}
-          onChange={(policy) => subagentPolicy.save(policy, mainNode)}
+          onChange={(policy) => subagentPolicy.save(policy, mainForPolicySave)}
           interactive={subagentPolicy.interactive}
           mainTask={configuredMain}
           onMainTaskChange={updateMainTask}
