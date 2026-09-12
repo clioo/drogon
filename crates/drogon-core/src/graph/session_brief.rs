@@ -39,25 +39,47 @@ pub const CLAUDE_FILE_NAME: &str = "CLAUDE.md";
 const BLOCK_BEGIN: &str =
     "<!-- BEGIN DROGON SUBAGENT POLICY (generated at every session start; do not edit by hand) -->";
 const BLOCK_END: &str = "<!-- END DROGON SUBAGENT POLICY -->";
+const BLOCK_SEPARATOR: &str = "<!-- DROGON SUBAGENT POLICY BLOCK (managed) -->";
+const CREATED_FILE_HEADER: &str =
+    "<!-- DROGON CREATED THIS FILE BECAUSE A SUBAGENT POLICY IS CONFIGURED FOR THIS WORKSPACE. -->";
 
-/// Reads `workspace_root`'s `.drogon/graph.json` (a workspace nobody has
-/// configured a graph for yet reads back the default policy: delegate off,
-/// adversarial off, no approved runtimes -- so the brief is always present
-/// and always honest, never merely absent) and writes the current Subagent
-/// policy into a managed block inside `AGENTS.md`/`CLAUDE.md` at the
-/// workspace root, creating either file if it does not exist yet. Returns
-/// whether either file actually changed.
+/// A policy is configured only when it changes the zero-cost, single-node
+/// default. `max_iterations` is deliberately not part of this predicate:
+/// changing the bound while adversarial testing is off does not configure a
+/// policy, and an absent `intent.policy` therefore remains indistinguishable
+/// from an explicit default policy.
+fn policy_is_configured(policy: &GraphPolicy) -> bool {
+    policy.delegate
+        || policy.adversarial.enabled
+        || !policy.approved_runtimes.is_empty()
+        || policy.fallback_runtime.is_some()
+}
+
+/// Reads `workspace_root`'s `.drogon/graph.json`. A workspace with no
+/// configured policy is left alone, except that a managed block from an
+/// earlier configured policy is removed. A configured policy is written into
+/// a managed block inside `AGENTS.md`/`CLAUDE.md` at the workspace root;
+/// missing files are created with a header explaining why Drogon created
+/// them. Returns whether either file actually changed.
 pub fn write_session_policy_brief(
     workspace_root: &Path,
     workspace_id: &str,
 ) -> Result<bool, RpcError> {
     let graph = store::read_graph(workspace_root)?;
-    let section = render_policy_section(workspace_id, &graph.intent.policy);
-    let agents_changed = upsert_file(&workspace_root.join(AGENTS_FILE_NAME), &section)
-        .map_err(|e| error::io_error(format!("cannot write {AGENTS_FILE_NAME}: {e}")))?;
-    let claude_changed = upsert_file(&workspace_root.join(CLAUDE_FILE_NAME), &section)
-        .map_err(|e| error::io_error(format!("cannot write {CLAUDE_FILE_NAME}: {e}")))?;
-    Ok(agents_changed || claude_changed)
+    if policy_is_configured(&graph.intent.policy) {
+        let section = render_policy_section(workspace_id, &graph.intent.policy);
+        let agents_changed = upsert_file(&workspace_root.join(AGENTS_FILE_NAME), &section)
+            .map_err(|e| error::io_error(format!("cannot write {AGENTS_FILE_NAME}: {e}")))?;
+        let claude_changed = upsert_file(&workspace_root.join(CLAUDE_FILE_NAME), &section)
+            .map_err(|e| error::io_error(format!("cannot write {CLAUDE_FILE_NAME}: {e}")))?;
+        Ok(agents_changed || claude_changed)
+    } else {
+        let agents_changed = remove_file_brief(&workspace_root.join(AGENTS_FILE_NAME))
+            .map_err(|e| error::io_error(format!("cannot clean {AGENTS_FILE_NAME}: {e}")))?;
+        let claude_changed = remove_file_brief(&workspace_root.join(CLAUDE_FILE_NAME))
+            .map_err(|e| error::io_error(format!("cannot clean {CLAUDE_FILE_NAME}: {e}")))?;
+        Ok(agents_changed || claude_changed)
+    }
 }
 
 /// Renders the Subagent Policy section body (no markers): the same
@@ -101,49 +123,148 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
              runs after this session's work.\n",
         );
     }
-    if policy.approved_runtimes.is_empty() {
-        out.push_str(
+    let listed = policy
+        .approved_runtimes
+        .iter()
+        .map(|runtime| format!("{}/{}", runtime.harness, runtime.model))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match (
+        &policy.approved_runtimes.is_empty(),
+        &policy.fallback_runtime,
+    ) {
+        (true, None) => out.push_str(
             "- **Approved runtimes:** none configured -- subagent nodes run under the free \
              local `pi` model by default, so this never costs anything.\n",
-        );
-    } else {
-        let listed = policy
-            .approved_runtimes
-            .iter()
-            .map(|runtime| format!("{}/{}", runtime.harness, runtime.model))
-            .collect::<Vec<_>>()
-            .join(", ");
-        out.push_str(&format!(
-            "- **Approved runtimes, in failover order:** {listed}. Launch a subagent node \
-             through that exact order with `drogon-cli graph run-node-failover --workspace \
-             {workspace_id} --node <NODE_ID> --follow`; it tries each approved runtime and \
-             only reaches the fallback once every approved runtime has failed. The result \
-             names the runtime that actually ran, never a guess.\n"
-        ));
+        ),
+        (true, Some(fallback)) => out.push_str(&format!(
+            "- **Approved runtimes:** none configured, so the free local `pi` model is tried \
+             first. **Fallback runtime:** {}/{} is tried after that attempt fails.\n",
+            fallback.harness, fallback.model
+        )),
+        (false, fallback) => {
+            let fallback_text = fallback
+                .as_ref()
+                .map(|runtime| {
+                    format!(
+                        " The configured fallback is {}/{} and is tried only after every \
+                         approved runtime fails.",
+                        runtime.harness, runtime.model
+                    )
+                })
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "- **Approved runtimes, in failover order:** {listed}. Launch a subagent node \
+                 through that exact order with `drogon-cli graph run-node-failover --workspace \
+                 {workspace_id} --node <NODE_ID> --follow`; it tries each approved runtime and \
+                 only reaches the fallback once every approved runtime has failed. The result \
+                 names the runtime that actually ran, never a guess.{fallback_text}\n"
+            ));
+        }
     }
     out
 }
 
-/// Reads `path` (empty string when it does not exist yet), replaces or
-/// appends the managed block, and writes back only when the content actually
-/// changed. Atomic per file (temp file + rename), matching
-/// `bots::context_files::write_if_changed`, so a reader starting up never
-/// observes a half-written file.
+/// Reads `path`, replaces or appends the managed block, and writes back only
+/// when the content actually changed. Missing files are created only for a
+/// configured policy and carry [`CREATED_FILE_HEADER`] so a later reset can
+/// remove an otherwise empty Drogon-owned file. Atomic per file (temp file +
+/// rename), matching `bots::context_files::write_if_changed`, so a reader
+/// starting up never observes a half-written file.
 fn upsert_file(path: &Path, section: &str) -> io::Result<bool> {
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
-    let updated = upsert_managed_block(&existing, section);
+    let Some(existing) = read_existing(path)? else {
+        let updated = format!("{CREATED_FILE_HEADER}\n\n{}", file_block(section));
+        write_contents(path, &updated)?;
+        return Ok(true);
+    };
+    let updated = upsert_file_managed_block(&existing, section);
     if existing == updated {
         return Ok(false);
     }
-    let temporary = path.with_extension("md.drogon-tmp");
-    std::fs::write(&temporary, &updated)?;
-    std::fs::rename(&temporary, path)?;
+    write_contents(path, &updated)?;
     Ok(true)
+}
+
+/// Returns the existing UTF-8 text, distinguishing a missing file from an
+/// empty owner file. Other read failures are reported instead of being
+/// mistaken for an absent file and overwritten.
+fn read_existing(path: &Path) -> io::Result<Option<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn write_contents(path: &Path, contents: &str) -> io::Result<()> {
+    let temporary = path.with_extension("md.drogon-tmp");
+    std::fs::write(&temporary, contents)?;
+    std::fs::rename(&temporary, path)?;
+    Ok(())
+}
+
+/// Removes only the managed block. If the file was created by Drogon and the
+/// block was its only content, the file itself is removed; an owner file (or
+/// a Drogon-created file that gained owner content) stays in place.
+fn remove_file_brief(path: &Path) -> io::Result<bool> {
+    let Some(existing) = read_existing(path)? else {
+        return Ok(false);
+    };
+    let Some((start, end, _has_separator)) = find_file_block(&existing) else {
+        return Ok(false);
+    };
+    let mut updated = String::with_capacity(existing.len());
+    updated.push_str(&existing[..start]);
+    updated.push_str(&existing[end..]);
+    if updated
+        .strip_prefix(CREATED_FILE_HEADER)
+        .is_some_and(|rest| rest.trim().is_empty())
+    {
+        std::fs::remove_file(path)?;
+    } else {
+        write_contents(path, &updated)?;
+    }
+    Ok(true)
+}
+
+/// The on-disk block carries a managed separator inside its begin/end range
+/// so removing it can restore the owner's exact trailing bytes, including
+/// whether the owner ended with zero, one, or several newlines.
+fn file_block(section: &str) -> String {
+    format!("{BLOCK_BEGIN}\n{BLOCK_SEPARATOR}\n{section}\n{BLOCK_END}\n")
+}
+
+fn upsert_file_managed_block(existing: &str, section: &str) -> String {
+    let block = file_block(section);
+    match find_file_block(existing) {
+        Some((start, end, has_separator)) => {
+            let mut result = String::with_capacity(existing.len() + block.len());
+            result.push_str(&existing[..start]);
+            if has_separator && start > 0 {
+                // `find_file_block` includes the one newline inserted before
+                // the separator in `start`; put it back during replacement so
+                // a configured second launch is byte-identical.
+                result.push('\n');
+            }
+            result.push_str(&block);
+            result.push_str(&existing[end..]);
+            result
+        }
+        None => {
+            let mut result = existing.to_string();
+            if !result.is_empty() {
+                result.push('\n');
+            }
+            result.push_str(&block);
+            result
+        }
+    }
 }
 
 /// Replaces an existing managed block in place, or appends a new one
 /// separated from any existing content by exactly one blank line. Content
 /// outside the markers is never touched.
+#[cfg(test)]
 fn upsert_managed_block(existing: &str, section: &str) -> String {
     let block = format!("{BLOCK_BEGIN}\n{section}\n{BLOCK_END}\n");
     match find_block(existing) {
@@ -182,10 +303,31 @@ fn find_block(existing: &str) -> Option<(usize, usize)> {
     Some((start, end))
 }
 
+/// Finds the on-disk form used by `write_session_policy_brief`, including
+/// the separator and its one synthetic leading newline. The fallback to the
+/// raw marker keeps files written by the earlier brief implementation
+/// cleanable.
+fn find_file_block(existing: &str) -> Option<(usize, usize, bool)> {
+    let (begin, end) = find_block(existing)?;
+    let separator = format!("\n{BLOCK_SEPARATOR}\n");
+    let after_begin = begin + BLOCK_BEGIN.len();
+    if existing[after_begin..].starts_with(&separator) {
+        let start = if begin > 0 && existing.as_bytes()[begin - 1] == b'\n' {
+            begin - 1
+        } else {
+            begin
+        };
+        Some((start, end, true))
+    } else {
+        Some((begin, end, false))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use drogon_protocol::graph::{GraphAdversarialPolicy, GraphRuntimeRef};
+    use serde_json::json;
 
     fn policy_off() -> GraphPolicy {
         GraphPolicy::default()
@@ -350,34 +492,195 @@ mod tests {
         );
     }
 
-    #[test]
-    fn write_session_policy_brief_is_idempotent_and_honest_by_default() {
-        let root = tempfile::tempdir().unwrap();
-        // No graph.json at all: the default policy (delegate/adversarial
-        // off, no approved runtimes) must still be written, honestly.
-        let changed = write_session_policy_brief(root.path(), "ws-1").unwrap();
-        assert!(changed);
-        let agents = std::fs::read_to_string(root.path().join(AGENTS_FILE_NAME)).unwrap();
-        assert!(agents.contains("Delegate: OFF"));
-        let claude = std::fs::read_to_string(root.path().join(CLAUDE_FILE_NAME)).unwrap();
-        assert!(claude.contains("Delegate: OFF"));
+    fn configure_policy(root: &Path, policy: &GraphPolicy) {
+        store::write_intent(
+            root,
+            &json!({
+                "nodes": [],
+                "policy": serde_json::to_value(policy).unwrap(),
+            }),
+        )
+        .unwrap();
+    }
 
-        // A second launch with nothing changed on disk must be a no-op.
-        let changed_again = write_session_policy_brief(root.path(), "ws-1").unwrap();
-        assert!(!changed_again);
+    fn reset_policy(root: &Path) {
+        configure_policy(root, &GraphPolicy::default());
     }
 
     #[test]
-    fn write_session_policy_brief_never_touches_the_owners_existing_content() {
+    fn only_non_default_policy_is_configured() {
+        assert!(!policy_is_configured(&GraphPolicy::default()));
+        assert!(policy_is_configured(&GraphPolicy {
+            delegate: true,
+            ..GraphPolicy::default()
+        }));
+        assert!(policy_is_configured(&GraphPolicy {
+            adversarial: GraphAdversarialPolicy {
+                enabled: true,
+                ..GraphAdversarialPolicy::default()
+            },
+            ..GraphPolicy::default()
+        }));
+        assert!(policy_is_configured(&GraphPolicy {
+            approved_runtimes: vec![GraphRuntimeRef {
+                harness: "pi".into(),
+                model: "local".into(),
+            }],
+            ..GraphPolicy::default()
+        }));
+        assert!(policy_is_configured(&GraphPolicy {
+            fallback_runtime: Some(GraphRuntimeRef {
+                harness: "pi".into(),
+                model: "local".into(),
+            }),
+            ..GraphPolicy::default()
+        }));
+    }
+
+    #[test]
+    fn fallback_only_policy_is_rendered_as_configured() {
+        let rendered = render_policy_section(
+            "ws-1",
+            &GraphPolicy {
+                fallback_runtime: Some(GraphRuntimeRef {
+                    harness: "custom".into(),
+                    model: "qwen3-coder".into(),
+                }),
+                ..GraphPolicy::default()
+            },
+        );
+        assert!(rendered.contains("**Fallback runtime:** custom/qwen3-coder"));
+        assert!(!rendered.contains("none configured -- subagent nodes run under"));
+    }
+
+    #[test]
+    fn no_graph_or_default_policy_touches_no_files() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::write(
-            root.path().join(AGENTS_FILE_NAME),
-            "# Real Project\n\nDo not break the build.\n",
-        )
-        .unwrap();
-        write_session_policy_brief(root.path(), "ws-1").unwrap();
+        let before = std::fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert!(!write_session_policy_brief(root.path(), "ws-1").unwrap());
+        let after = std::fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(before, after);
+        assert!(!root.path().join(AGENTS_FILE_NAME).exists());
+        assert!(!root.path().join(CLAUDE_FILE_NAME).exists());
+
+        // An explicit default policy is equally unconfigured.
+        reset_policy(root.path());
+        let graph_before = std::fs::read(root.path().join(".drogon/graph.json")).unwrap();
+        assert!(!write_session_policy_brief(root.path(), "ws-1").unwrap());
+        assert_eq!(
+            graph_before,
+            std::fs::read(root.path().join(".drogon/graph.json")).unwrap()
+        );
+    }
+
+    #[test]
+    fn existing_owner_files_are_byte_identical_without_a_configured_policy() {
+        let root = tempfile::tempdir().unwrap();
+        let agents_before = b"# Real Project\n\nDo not break the build.\n";
+        let claude_before = b"# Claude instructions\nkeep this exact.\n";
+        std::fs::write(root.path().join(AGENTS_FILE_NAME), agents_before).unwrap();
+        std::fs::write(root.path().join(CLAUDE_FILE_NAME), claude_before).unwrap();
+        assert!(!write_session_policy_brief(root.path(), "ws-1").unwrap());
+        assert_eq!(
+            std::fs::read(root.path().join(AGENTS_FILE_NAME)).unwrap(),
+            agents_before
+        );
+        assert_eq!(
+            std::fs::read(root.path().join(CLAUDE_FILE_NAME)).unwrap(),
+            claude_before
+        );
+    }
+
+    #[test]
+    fn configured_policy_creates_marked_files_and_preserves_owner_content() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = b"# Real Project\n\nDo not break the build.\n";
+        std::fs::write(root.path().join(AGENTS_FILE_NAME), owner).unwrap();
+        configure_policy(
+            root.path(),
+            &GraphPolicy {
+                delegate: true,
+                ..GraphPolicy::default()
+            },
+        );
+
+        assert!(write_session_policy_brief(root.path(), "ws-1").unwrap());
         let agents = std::fs::read_to_string(root.path().join(AGENTS_FILE_NAME)).unwrap();
-        assert!(agents.starts_with("# Real Project\n\nDo not break the build.\n"));
-        assert!(agents.contains("Subagent Policy"));
+        assert_eq!(&agents.as_bytes()[..owner.len()], owner);
+        assert!(agents.contains("Delegate: ON"));
+        let claude = std::fs::read_to_string(root.path().join(CLAUDE_FILE_NAME)).unwrap();
+        assert!(claude.starts_with(CREATED_FILE_HEADER));
+        assert!(claude.contains("Delegate: ON"));
+
+        let agents_after = std::fs::read(root.path().join(AGENTS_FILE_NAME)).unwrap();
+        let claude_after = std::fs::read(root.path().join(CLAUDE_FILE_NAME)).unwrap();
+        assert!(!write_session_policy_brief(root.path(), "ws-1").unwrap());
+        assert_eq!(
+            agents_after,
+            std::fs::read(root.path().join(AGENTS_FILE_NAME)).unwrap()
+        );
+        assert_eq!(
+            claude_after,
+            std::fs::read(root.path().join(CLAUDE_FILE_NAME)).unwrap()
+        );
+    }
+
+    #[test]
+    fn resetting_policy_removes_blocks_and_only_deletes_empty_drogon_files() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = b"# Owner content survives\n";
+        std::fs::write(root.path().join(AGENTS_FILE_NAME), owner).unwrap();
+        configure_policy(
+            root.path(),
+            &GraphPolicy {
+                delegate: true,
+                ..GraphPolicy::default()
+            },
+        );
+        write_session_policy_brief(root.path(), "ws-1").unwrap();
+        assert!(root.path().join(CLAUDE_FILE_NAME).exists());
+
+        reset_policy(root.path());
+        assert!(write_session_policy_brief(root.path(), "ws-1").unwrap());
+        assert_eq!(
+            std::fs::read(root.path().join(AGENTS_FILE_NAME)).unwrap(),
+            owner
+        );
+        assert!(!root.path().join(CLAUDE_FILE_NAME).exists());
+
+        let agents_after = std::fs::read(root.path().join(AGENTS_FILE_NAME)).unwrap();
+        assert!(!write_session_policy_brief(root.path(), "ws-1").unwrap());
+        assert_eq!(
+            agents_after,
+            std::fs::read(root.path().join(AGENTS_FILE_NAME)).unwrap()
+        );
+    }
+
+    #[test]
+    fn resetting_policy_preserves_owner_trailing_bytes() {
+        for owner in ["owner", "owner\n", "owner\n\n"] {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(root.path().join(AGENTS_FILE_NAME), owner).unwrap();
+            configure_policy(
+                root.path(),
+                &GraphPolicy {
+                    delegate: true,
+                    ..GraphPolicy::default()
+                },
+            );
+            write_session_policy_brief(root.path(), "ws-1").unwrap();
+            reset_policy(root.path());
+            write_session_policy_brief(root.path(), "ws-1").unwrap();
+            assert_eq!(
+                std::fs::read_to_string(root.path().join(AGENTS_FILE_NAME)).unwrap(),
+                owner
+            );
+        }
     }
 }

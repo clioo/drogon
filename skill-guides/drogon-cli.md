@@ -539,9 +539,13 @@ settles with the same exit-status truth table.
 ### Subagent Policy And The Adversarial Loop
 
 A graph's intent can carry a Subagent policy at `intent.policy` (visible in
-`drogon-cli graph read --workspace <ID> --json`; a workspace nobody has
-configured yet reads back an empty policy — no approved runtimes,
-adversarial off, delegate off). Read it before deciding how to act:
+`drogon-cli graph read --workspace <ID> --json`). A workspace with no configured
+policy has no Drogon-managed policy block in `AGENTS.md`: no policy block in
+`AGENTS.md` means Delegate OFF, Adversarial OFF, and no approved runtimes. Read
+`.drogon/graph.json` via the `drogon-cli graph read --workspace <ID> --json` command
+to confirm before deciding how to act. A configured policy is delivered into the
+next session's managed block; returning to the default removes that block
+without touching owner content:
 
 - `policy.delegate: true` means plan and delegate instead of doing the
   work yourself: write intent nodes for the subtasks with
