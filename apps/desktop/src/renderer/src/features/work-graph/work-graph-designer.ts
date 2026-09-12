@@ -54,12 +54,6 @@ export type DesignerNode = {
   /** Canvas coordinates; undefined = never positioned (auto-layout will). */
   position: { x: number; y: number } | null;
   extra: Record<string, unknown>;
-  /** Renderer-local identity, assigned once when the node enters the
-   *  draft (created or loaded) and NEVER re-derived — unlike `id`, which a
-   *  provisional rename legitimately re-derives per keystroke. The UI keys
-   *  the focused editor on this so typing cannot remount it. Never
-   *  serialized: `toIntentPayload` lists its fields explicitly. */
-  uid: string;
   /** True while the node was added THIS session and never saved: its id
    *  may still be re-derived from the title. Cleared on save; a saved node
    *  keeps its id forever (the state half maps runs by id). */
@@ -96,13 +90,6 @@ const KNOWN_NODE_KEYS = new Set([
 
 export function emptyDraft(): WorkGraphDraft {
   return { nodes: [], preservedNodes: [], issues: [] };
-}
-
-/** Monotonic renderer-local counter; uid uniqueness only has to hold
- *  within one mounted designer. */
-let nextDesignerUid = 1;
-function freshDesignerUid(): string {
-  return `designer-node-${nextDesignerUid++}`;
 }
 
 /** Parses the intent nodes of the currently loaded document (or [] for a
@@ -151,7 +138,6 @@ export function draftFromIntentNodes(
       provider: value.provider ? { ...value.provider } : null,
       position: value.position ? { ...value.position } : null,
       extra,
-      uid: freshDesignerUid(),
       provisional: false,
     });
   }
@@ -208,7 +194,6 @@ export function addDesignerNode(
     provider: null,
     position: seed.position ?? null,
     extra: {},
-    uid: freshDesignerUid(),
     provisional: true,
   };
   return { draft: { ...draft, nodes: [...draft.nodes, node] }, node };
@@ -247,8 +232,6 @@ export function updateDesignerNode(
       if (candidate.id === id) {
         const next = { ...candidate, ...patch };
         if (derivedId !== null) next.id = derivedId;
-        // `uid` deliberately rides through the spread: a re-derived id is
-        // a new graph-level label for the SAME node, not a new node.
         return next;
       }
       if (derivedId !== null) {

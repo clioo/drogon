@@ -282,10 +282,8 @@ import {
 } from "./tasks-mount";
 import {
   MENTU_CAPABILITY,
-  MENTU_ROUTE_ID,
   createGatedMentuBridge,
   isMentuAvailable,
-  registerMentuRoute,
   windowMentuBridge,
 } from "./mentu-mount";
 import { MENTU_OPEN_TAB_EVENT, MentuPanel } from "./features/mentu/MentuPanel";
@@ -1108,36 +1106,33 @@ export function App() {
   const browserStaticBridge = useMemo(() => windowBrowserBridge(), []);
   const filesBaseRegistry = useMemo(
     () =>
-      registerMentuRoute(
-        registerAutomationsRoute(
-          registerChangesRoute(
-            registerFilesRoute(
-              createRouteRegistry({
-                capabilities: [
-                  FILES_CAPABILITY,
-                  BOTS_CAPABILITY,
-                  GIT_CAPABILITY,
-                  AUTOMATIONS_CAPABILITY,
-                  TASKS_CAPABILITY,
-                  MENTU_CAPABILITY,
-                ],
-                fallbackId: BOTS_ROUTE_ID,
-              }),
-              filesGatedBridge,
-              fileOpenCell,
-            ),
-            gitGatedBridge,
+      registerAutomationsRoute(
+        registerChangesRoute(
+          registerFilesRoute(
+            createRouteRegistry({
+              capabilities: [
+                FILES_CAPABILITY,
+                BOTS_CAPABILITY,
+                GIT_CAPABILITY,
+                AUTOMATIONS_CAPABILITY,
+                TASKS_CAPABILITY,
+                MENTU_CAPABILITY,
+              ],
+              fallbackId: BOTS_ROUTE_ID,
+            }),
+            filesGatedBridge,
+            fileOpenCell,
           ),
-          {
-            bridge: automationsGatedBridge,
-            listWorkspaces: () => window.drogon.workspaces(),
-            listHarnesses: () => window.drogon.harnesses(),
-            // #270: fork use-automations-page-escape — top-level Escape
-            // closes the page back to the view that opened it.
-            onClose: () => automationsCloseRef.current(),
-          },
+          gitGatedBridge,
         ),
-        mentuGatedBridge,
+        {
+          bridge: automationsGatedBridge,
+          listWorkspaces: () => window.drogon.workspaces(),
+          listHarnesses: () => window.drogon.harnesses(),
+          // #270: fork use-automations-page-escape — top-level Escape
+          // closes the page back to the view that opened it.
+          onClose: () => automationsCloseRef.current(),
+        },
       ),
     [
       filesGatedBridge,
@@ -5197,7 +5192,6 @@ export function App() {
                           <MentuPanel
                             bridge={mentuGatedBridge}
                             workspaceId={filesProps.workspace.id}
-                            variant="panel"
                             fileBridge={filesGatedBridge}
                             hostId={filesProps.status?.hostId ?? null}
                             workspacePath={filesProps.workspace.path}

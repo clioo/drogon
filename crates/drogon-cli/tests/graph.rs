@@ -194,6 +194,133 @@ async fn graph_compile_explicit_selection_sends_node_ids() {
     );
 }
 
+/// Regression for the QA finding "no command runs the whole graph":
+/// `graph run` accepted only `--node`. The whole-graph form must run every
+/// enabled node through the ONE existing `graph.run` path (the same call
+/// the desktop's Run graph button sends), never a second engine.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn graph_run_all_runs_every_enabled_node_through_the_one_run_path() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let service = MockService::start(
+        &dir.path().join("data"),
+        Arc::new(|request| {
+            let id = request["requestId"].as_str().unwrap_or("").to_string();
+            match request["method"].as_str() {
+                Some("status") => Action::Respond(ok_envelope(
+                    &id,
+                    json!({
+                        "hostId": "host-1", "serviceInstanceId": "svc-1", "protocol": 1,
+                        "capabilities": ["workspace.v1", "graph.v1", "mentu.v1"],
+                        "version": "0.1.0",
+                    }),
+                )),
+                Some("graph.read") => Action::Respond(ok_envelope(
+                    &id,
+                    json!({"graph": {
+                        "version": 1,
+                        "intent": {"nodes": [
+                            {"id": "n1", "title": "Build", "harness": "shell", "model": "",
+                             "dependsOn": [], "prompt": "echo n1", "enabled": true},
+                            {"id": "n2", "title": "Review", "harness": "shell", "model": "",
+                             "dependsOn": ["n1"], "prompt": "echo n2", "enabled": true},
+                            {"id": "n3", "title": "Retired", "harness": "shell", "model": "",
+                             "dependsOn": [], "prompt": "echo n3", "enabled": false},
+                        ]},
+                        "state": {"updatedAt": "2026-01-01T00:00:00Z", "nodes": []},
+                    }}),
+                )),
+                Some("graph.run") => Action::Respond(ok_envelope(
+                    &id,
+                    json!({ "run": run_result(), "compile": compile_result() }),
+                )),
+                _ => Action::Respond(error_envelope(
+                    &id,
+                    "method_not_found",
+                    "mock does not implement this method",
+                )),
+            }
+        }),
+    );
+
+    let output = common::run_cli(
+        &service.data_dir,
+        &["--json", "graph", "run", "--workspace", "ws-1", "--all"],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).expect("JSON envelope");
+    assert_eq!(envelope["result"]["run"]["id"], "run-1");
+    let request = last_graph_request(&service);
+    assert_eq!(request["method"], "graph.run");
+    assert_eq!(request["params"]["workspaceId"], "ws-1");
+    let node_ids: Vec<String> = request["params"]["nodeIds"]
+        .as_array()
+        .expect("nodeIds")
+        .iter()
+        .map(|value| value.as_str().expect("id").to_string())
+        .collect();
+    // Every enabled node, disabled nodes excluded, deps closed by the daemon.
+    assert_eq!(node_ids, vec!["n1", "n2"]);
+    assert!(request["params"].get("nodeId").is_none());
+}
+
+/// `--all` on a graph with nothing enabled refuses honestly instead of
+/// launching an empty recipe.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn graph_run_all_refuses_when_nothing_is_enabled() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let service = MockService::start(
+        &dir.path().join("data"),
+        Arc::new(|request| {
+            let id = request["requestId"].as_str().unwrap_or("").to_string();
+            match request["method"].as_str() {
+                Some("status") => Action::Respond(ok_envelope(
+                    &id,
+                    json!({
+                        "hostId": "host-1", "serviceInstanceId": "svc-1", "protocol": 1,
+                        "capabilities": ["workspace.v1", "graph.v1", "mentu.v1"],
+                        "version": "0.1.0",
+                    }),
+                )),
+                Some("graph.read") => Action::Respond(ok_envelope(
+                    &id,
+                    json!({"graph": {
+                        "version": 1,
+                        "intent": {"nodes": [
+                            {"id": "n3", "title": "Retired", "harness": "shell", "model": "",
+                             "dependsOn": [], "prompt": "echo n3", "enabled": false},
+                        ]},
+                        "state": {"updatedAt": "2026-01-01T00:00:00Z", "nodes": []},
+                    }}),
+                )),
+                _ => Action::Respond(error_envelope(
+                    &id,
+                    "method_not_found",
+                    "mock does not implement this method",
+                )),
+            }
+        }),
+    );
+
+    let output = common::run_cli(
+        &service.data_dir,
+        &["--json", "graph", "run", "--workspace", "ws-1", "--all"],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    // Under --json the failure envelope is the caller's parseable channel.
+    let envelope: Value = serde_json::from_str(&stdout(&output)).expect("JSON failure envelope");
+    assert_eq!(envelope["ok"], false);
+    let message = envelope["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("no enabled nodes"),
+        "the refusal must say why: {message}"
+    );
+    // Nothing reached graph.run.
+    assert!(service
+        .captured()
+        .iter()
+        .all(|request| request["method"] != "graph.run"));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn graph_run_sends_the_node_and_mentu_retry_step_sends_the_run_and_step() {
     let (_hold, service) = mock();

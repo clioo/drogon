@@ -178,6 +178,7 @@ pub fn compile(
     let mut steps: Vec<Value> = Vec::new();
     let mut providers = serde_json::Map::new();
     let mut nodes: Vec<CompiledNode> = Vec::new();
+    let mut findings: Vec<GraphFinding> = Vec::new();
 
     for id in order.iter().filter(|id| wanted.contains(id)) {
         let node = intent.node(id).expect("closure only contains known nodes");
@@ -188,10 +189,11 @@ pub fn compile(
                  Enable it in the graph, or remove it from the dependency path.",
             ));
         }
-        let (mut step, provider) = node_step(node, defaults)?;
+        let (mut step, provider, mut step_findings) = node_step(node, defaults)?;
         if let Some((name, binding)) = provider {
             providers.insert(name, binding);
         }
+        findings.append(&mut step_findings);
         // Dependencies are always a subset of the compiled set (the closure
         // guarantees it); keep the declared order.
         step["depends_on"] = json!(node.depends_on);
@@ -226,22 +228,69 @@ pub fn compile(
         recipe,
         content_hash: String::new(),
         nodes,
-        findings: Vec::new(),
+        findings,
     })
 }
 
-/// Emits one recipe step plus, for Pi, the provider-map entry. The backend
-/// mapping is explicit; an unsupported harness refuses with the node named.
+/// The ONE provider/model rule for the work graph — the same split the Bots
+/// model field applies (`buildBotRunHarness`): a `provider/model` string
+/// splits at the FIRST slash and everything after it is the exact id the
+/// server knows (so `nvidia/deepseek-ai/deepseek-v4-flash-0731` keeps
+/// `deepseek-ai/deepseek-v4-flash-0731`). A bare id — the model picker's
+/// catalog form — rides unchanged. A leading or trailing slash is neither
+/// form; it is refused by name, with the expected form stated, so a rejected
+/// id never surfaces as the opaque "Pi did not produce a successful
+/// structured completion".
+fn resolve_pi_model(node_id: &str, raw: &str) -> Result<(String, Option<GraphFinding>), RpcError> {
+    let trimmed = raw.trim();
+    let Some(slash) = trimmed.find('/') else {
+        return Ok((trimmed.to_string(), None));
+    };
+    let (provider, rest) = trimmed.split_at(slash);
+    let exact = &rest[1..];
+    if provider.is_empty() || exact.is_empty() {
+        return Err(node_error(
+            node_id,
+            format!(
+                "model id '{trimmed}' is not runnable: the {} side of the slash is empty, so \
+                 it is neither a bare exact id nor the `provider/model` form the product \
+                 teaches (e.g. dgx-spark/qwen3.8-flash-next-nvidia-nvfp4). Pass the exact id \
+                 the per-harness model catalog lists, or `provider/model`.",
+                if provider.is_empty() { "provider" } else { "model" }
+            ),
+        ));
+    }
+    Ok((
+        exact.to_string(),
+        Some(GraphFinding {
+            code: "pi_model_provider_prefix".into(),
+            severity: GraphFindingSeverity::Info,
+            node_id: Some(node_id.to_string()),
+            message: format!(
+                "model '{trimmed}' carries a provider prefix; the graph splits it at the \
+                 first slash, the same rule the Bots model field applies, and runs the exact \
+                 id '{exact}' through this node's pi provider binding."
+            ),
+            recommendation: None,
+        }),
+    ))
+}
+
+/// Emits one recipe step plus, for Pi, the provider-map entry and any
+/// compile-time finding (the provider/model split is surfaced, never
+/// silent). The backend mapping is explicit; an unsupported harness refuses
+/// with the node named.
 fn node_step(
     node: &GraphNodeIntent,
     defaults: &PiProviderDefaults,
-) -> Result<(Value, Option<(String, Value)>), RpcError> {
+) -> Result<(Value, Option<(String, Value)>, Vec<GraphFinding>), RpcError> {
     let mut step = json!({
         "label": node.id,
         "prompt": node.prompt,
         "timeout": AGENT_STEP_TIMEOUT_SECONDS,
     });
     let mut provider = None;
+    let mut findings: Vec<GraphFinding> = Vec::new();
     match node.harness.as_str() {
         "shell" => {
             step["backend"] = json!("shell");
@@ -253,6 +302,10 @@ fn node_step(
                     &node.id,
                     "a pi node needs an exact model id from the per-harness model catalog.",
                 ));
+            }
+            let (model, split) = resolve_pi_model(&node.id, &node.model)?;
+            if let Some(finding) = split {
+                findings.push(finding);
             }
             let (base_url, api_key_env) = match &node.provider {
                 Some(provider) => {
@@ -280,13 +333,13 @@ fn node_step(
             let binding = PiBinding {
                 name: name.clone(),
                 base_url,
-                model: node.model.clone(),
+                model: model.clone(),
                 api_key_env,
             };
             // The runtime executes `request.model ?? config.model`; keep both
             // exact and equal so no substitution can happen.
             step["backend"] = json!(name);
-            step["model"] = json!(node.model);
+            step["model"] = json!(model);
             provider = Some((name, binding.to_value()));
         }
         "claude" | "codex" => {
@@ -341,7 +394,7 @@ fn node_step(
     } else {
         step["verify"] = json!({ "commands": node.verify_commands });
     }
-    Ok((step, provider))
+    Ok((step, provider, findings))
 }
 
 /// The transitive dependency closure of `seeds`, including the seeds.
@@ -443,7 +496,9 @@ pub fn validate_and_persist(
         }
         None => {}
     }
-    compiled.findings = findings;
+    // Compile-time findings (e.g. the provider/model split) ride ahead of
+    // the runtime's own check/doctor verdicts.
+    compiled.findings.extend(findings);
     Ok(())
 }
 
@@ -701,6 +756,96 @@ mod tests {
         assert_eq!(step["verify"]["commands"], json!(["test -f out.txt"]));
         assert!(step.get("completion_keyword").is_none());
         assert_eq!(step["prompt"], "do n1");
+    }
+
+    /// Regression for the QA finding "the model syntax the product teaches
+    /// is the one the graph cannot run": the app documents
+    /// `dgx-spark/qwen3.8-flash-next-nvidia-nvfp4` (provider/model), the
+    /// Bots harness splits it at the first slash, but the compiler used to
+    /// pass the whole string through as the recipe's model — and the server
+    /// rejects the prefixed name, failing every Pi node in 0 s with the
+    /// opaque "Pi did not produce a successful structured completion".
+    /// The graph must accept the same string and split it the same way.
+    #[test]
+    fn a_prefixed_provider_model_splits_to_the_exact_id_the_server_knows() {
+        let mut n1 = node("n1", "pi", &[]);
+        n1.model = "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4".into();
+        let intent = GraphIntent { nodes: vec![n1] };
+        let compiled = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap();
+        let binding = &compiled.recipe["providers"]["drogon-pi-n1"];
+        assert_eq!(binding["model"], "qwen3.8-flash-next-nvidia-nvfp4");
+        // The runtime executes `request.model ?? config.model`; both must be
+        // the exact id or validate_pi_step refuses the disagreement.
+        assert_eq!(
+            compiled.recipe["steps"][0]["model"],
+            "qwen3.8-flash-next-nvidia-nvfp4"
+        );
+        // The split is surfaced as a finding, never silent.
+        let split = compiled
+            .findings
+            .iter()
+            .find(|finding| finding.code == "pi_model_provider_prefix")
+            .expect("the split must be surfaced as a finding");
+        assert_eq!(split.node_id.as_deref(), Some("n1"));
+        assert_eq!(split.severity, GraphFindingSeverity::Info);
+        assert!(split.message.contains("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"));
+        assert!(split.message.contains("qwen3.8-flash-next-nvidia-nvfp4"));
+    }
+
+    /// The failure must never be opaque again: a model id that cannot map
+    /// names the id, says why, and says what form is expected.
+    #[test]
+    fn a_malformed_provider_model_is_refused_by_name_with_the_expected_form() {
+        for bad in ["/qwen3.8-flash-next-nvidia-nvfp4", "dgx-spark/", "/"] {
+            let mut n1 = node("n1", "pi", &[]);
+            n1.model = bad.into();
+            let intent = GraphIntent { nodes: vec![n1] };
+            let err = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap_err();
+            assert_eq!(err.code, "invalid_argument");
+            assert!(
+                err.message.contains(bad.trim()),
+                "the refusal must name the id {bad:?}: {}",
+                err.message
+            );
+            assert!(
+                err.message.contains("provider/model"),
+                "the refusal must state the expected form: {}",
+                err.message
+            );
+            assert!(
+                err.message.contains("n1"),
+                "the refusal must name the node: {}",
+                err.message
+            );
+        }
+    }
+
+    /// A bare exact id (the picker's catalog form) rides unchanged, and a
+    /// provider part that itself contains a slash keeps everything after the
+    /// FIRST slash as the exact id — the same split rule the rest of the
+    /// product applies.
+    #[test]
+    fn bare_ids_and_multi_segment_ids_split_like_the_product_rule() {
+        let bare = node("n1", "pi", &[]);
+        let intent = GraphIntent { nodes: vec![bare] };
+        let compiled = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap();
+        assert_eq!(
+            compiled.recipe["providers"]["drogon-pi-n1"]["model"],
+            "qwen3.8-flash-next-nvidia-nvfp4"
+        );
+        assert!(compiled.findings.is_empty());
+
+        // A catalog id like nvidia's `deepseek-ai/deepseek-v4-flash-0731` is
+        // expressed as `nvidia/deepseek-ai/deepseek-v4-flash-0731`: the split
+        // at the FIRST slash keeps the full id.
+        let mut n2 = node("n2", "pi", &[]);
+        n2.model = "nvidia/deepseek-ai/deepseek-v4-flash-0731".into();
+        let intent = GraphIntent { nodes: vec![n2] };
+        let compiled = compile(&intent, &Selection::Target("n2".into()), &defaults()).unwrap();
+        assert_eq!(
+            compiled.recipe["providers"]["drogon-pi-n2"]["model"],
+            "deepseek-ai/deepseek-v4-flash-0731"
+        );
     }
 
     #[test]

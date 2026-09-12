@@ -1530,17 +1530,47 @@ async fn graph(
         GraphAction::Run {
             workspace,
             node,
+            all,
             follow,
             timeout_ms,
         } => {
             capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
+            let params = if *all {
+                // The whole-graph form: every enabled node, resolved through
+                // the daemon's own read so the selection is what the owner
+                // designed, then run through the ONE `graph.run` path.
+                let call = client
+                    .call(
+                        "graph.read",
+                        json!({ "workspaceId": workspace }),
+                        request_id,
+                        DEFAULT_TIMEOUT,
+                    )
+                    .await?;
+                let decoded: GraphResult = Client::decode(&call, "graph.read")?;
+                let ids: Vec<String> = decoded
+                    .graph
+                    .intent
+                    .nodes
+                    .iter()
+                    .filter(|node| node.enabled)
+                    .map(|node| node.id.clone())
+                    .collect();
+                if ids.is_empty() {
+                    return Err(CliError::local(
+                        crate::error::invalid_argument(format!(
+                            "graph run --all found no enabled nodes in workspace '{workspace}'; \
+                             enable at least one node in the graph first."
+                        )),
+                        request_id.to_string(),
+                    ));
+                }
+                json!({ "workspaceId": workspace, "nodeIds": ids })
+            } else {
+                json!({ "workspaceId": workspace, "nodeId": node })
+            };
             let call = client
-                .call(
-                    "graph.run",
-                    json!({ "workspaceId": workspace, "nodeId": node }),
-                    request_id,
-                    DEFAULT_TIMEOUT,
-                )
+                .call("graph.run", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
             let started: GraphRunResult = Client::decode(&call, "graph.run")?;
             if !follow {

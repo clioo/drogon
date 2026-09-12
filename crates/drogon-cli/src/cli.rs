@@ -527,18 +527,23 @@ pub enum GraphAction {
         output: Option<PathBuf>,
     },
     /// Compile and run a node's subgraph through the daemon's one execution
-    /// path (`mentu.run` on the approved, validated recipe). Refuses a graph
-    /// the runtime would not validate, and a node that already has a live
-    /// run.
+    /// path (`mentu.run` on the approved, validated recipe) — or, with
+    /// `--all`, every enabled node in the graph, the same whole-graph form
+    /// the desktop's Run graph button sends. Refuses a graph the runtime
+    /// would not validate, and a node that already has a live run.
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli graph run --workspace <ID> --node <ID> [--follow] [--timeout-ms <MS>]\nValid flags: --data-dir, --follow, --help, --json, --node, --request-id, --retry-request, --timeout-ms, --workspace"
+        override_usage = "drogon-cli graph run --workspace <ID> (--node <ID> | --all) [--follow] [--timeout-ms <MS>]\nValid flags: --all, --data-dir, --follow, --help, --json, --node, --request-id, --retry-request, --timeout-ms, --workspace"
     )]
     Run {
         #[arg(long, value_name = "ID")]
         workspace: String,
-        #[arg(long, value_name = "ID")]
-        node: String,
+        /// The node to run, closed over its transitive dependencies
+        #[arg(long, value_name = "ID", conflicts_with = "all")]
+        node: Option<String>,
+        /// Run every enabled node in the graph (disabled nodes stay off)
+        #[arg(long)]
+        all: bool,
         /// Poll until the run reaches a terminal status
         #[arg(long)]
         follow: bool,
@@ -1426,10 +1431,23 @@ impl Cli {
                 GraphAction::Run {
                     workspace,
                     node,
+                    all,
                     timeout_ms,
                     ..
+                } => {
+                    require_nonempty("workspace", workspace)?;
+                    match (node, all) {
+                        (Some(node), false) => require_nonempty("node", node)?,
+                        (None, true) => {}
+                        _ => {
+                            return Err(CliError::Usage(
+                                "graph run takes exactly one of --node or --all".into(),
+                            ));
+                        }
+                    }
+                    validate_follow_timeout(*timeout_ms)?;
                 }
-                | GraphAction::Resume {
+                GraphAction::Resume {
                     workspace,
                     node,
                     timeout_ms,

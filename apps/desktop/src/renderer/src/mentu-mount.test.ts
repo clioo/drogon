@@ -1,13 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { MENTU_CAPABILITY } from "../../shared/mentu-contract";
 import type { MentuBridge } from "../../shared/mentu-contract";
-import {
-  MENTU_ROUTE_ID,
-  createGatedMentuBridge,
-  isMentuAvailable,
-  registerMentuRoute,
-} from "./mentu-mount";
-import { createRouteRegistry, resolveRoute } from "./route-panel-contract";
+import { createGatedMentuBridge, isMentuAvailable } from "./mentu-mount";
 
 const passthrough: MentuBridge = {
   mentuRecipes: async () => {
@@ -151,18 +145,5 @@ describe("mentu mount", () => {
   test("gated bridge omits the recipe-save method when the source lacks it", () => {
     const gated = createGatedMentuBridge(passthrough, () => true);
     expect(gated.mentuRecipeSave).toBeUndefined();
-  });
-
-  test("registers the Mentu route gated on mentu.v1", () => {
-    const registry = registerMentuRoute(
-      createRouteRegistry({
-        capabilities: [MENTU_CAPABILITY],
-        fallbackId: MENTU_ROUTE_ID,
-      }),
-      passthrough,
-    );
-    const descriptor = resolveRoute(registry, MENTU_ROUTE_ID);
-    expect(descriptor.id).toBe(MENTU_ROUTE_ID);
-    expect(descriptor.capability).toBe(MENTU_CAPABILITY);
   });
 });

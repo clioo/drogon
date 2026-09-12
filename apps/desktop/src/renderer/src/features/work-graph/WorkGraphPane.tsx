@@ -68,6 +68,7 @@ import type {
 } from "../../../../shared/mentu-contract";
 import type { GraphBridge } from "../../../../shared/graph-contract";
 import {
+  WORK_GRAPH_RELATIVE_PATH,
   intentModel,
   isShellHarness,
   stateNodeFor,
@@ -588,6 +589,16 @@ export function WorkGraphPane({
 
   const document = source.kind === "loaded" ? source.document : null;
   const fileUpdatedAt = source.kind === "loaded" ? source.fileUpdatedAt : null;
+  // The designer seeds from the last read document; opening it when the
+  // graph could not be read would start an EMPTY canvas whose save would
+  // replace the real intent wholesale. Designing is only offered when the
+  // read tells us what is on disk (loaded, or honestly missing).
+  const designBlockedReason =
+    document === null && source.kind !== "missing"
+      ? source.kind === "too_large"
+        ? "The graph on disk is too large for this surface to read, so the designer cannot open: an empty canvas saved now would replace the real graph. Recover the read first."
+        : "The graph could not be read, so the designer cannot open: an empty canvas saved now would replace the real graph. Recover the read first."
+      : null;
   // With the graph bridge, an untouched workspace reads as the EMPTY v1
   // graph (the daemon's own answer) — the same honest empty state the
   // files-only fallback renders for a missing file.
@@ -737,7 +748,10 @@ export function WorkGraphPane({
             size="sm"
             variant="outline"
             onClick={() => setMode("design")}
+            disabled={designBlockedReason !== null}
+            title={designBlockedReason ?? undefined}
             data-testid="work-graph-design"
+            data-blocked-reason={designBlockedReason ?? undefined}
           >
             <PenLine className="size-3.5" aria-hidden />
             Design graph
@@ -1090,6 +1104,38 @@ export function WorkGraphPane({
                   {source.detail}
                 </pre>
               ) : null}
+            </div>
+          ) : source.kind === "too_large" ? (
+            // A graph the product itself lets the owner author (65,536-byte
+            // prompts across many nodes) can exceed the files bridge's
+            // per-read cap. This is a recoverable state, not a dead tab:
+            // name what happened, point at the intact file, keep refresh
+            // (header button and the poll both retry) so a fixed file
+            // re-renders without leaving the tab.
+            <div
+              className="w-full max-w-lg rounded-lg border border-amber-500/40 bg-card p-4 text-sm"
+              role="alert"
+              data-testid="work-graph-too-large"
+            >
+              <p className="font-medium">
+                This graph is too large for this surface to read — it is intact, nothing was
+                lost
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+                  {WORK_GRAPH_RELATIVE_PATH}
+                </code>{" "}
+                in this workspace is larger than the 65,536 bytes one files-bridge read can
+                return, so the pane cannot render it. The daemon&apos;s own graph reads have no
+                such cap — a desktop build whose service advertises graph.v1 renders this graph
+                as is.
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                To view it here again: connect a service that advertises graph.v1, or bring the
+                file under the cap (keep run evidence in the run records the graph references —
+                not as full streams inside prompts) and refresh.
+              </p>
+              <p className="mt-2 font-mono text-[11px] text-muted-foreground">{source.message}</p>
             </div>
           ) : source.kind === "read_error" ? (
             <div
