@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Session, Verdict } from "../../shared/session-contract";
 import {
   assertCloseReplyFor,
+  confirmCloseOrAlreadyAbsent,
   isRecoverableAfterReconnect,
   recoveryActionFor,
   recoveryOfferKey,
@@ -232,6 +233,56 @@ describe("assertCloseReplyFor (tab close path, issue #228)", () => {
   it("rejects a reply from a different host", () => {
     expect(() =>
       assertCloseReplyFor(replyFor({ hostId: "h2" }), target),
+    ).toThrow(/not for this session/);
+  });
+
+  it("treats not_found as confirmation that another client already closed the stale tab", () => {
+    expect(
+      confirmCloseOrAlreadyAbsent(
+        {
+          ok: false,
+          error: {
+            code: "not_found",
+            message: "session not found",
+            retryable: false,
+          },
+        },
+        target,
+      ),
+    ).toBe("already-absent");
+  });
+
+  it("keeps stale-incarnation and transport failures visible", () => {
+    expect(() =>
+      confirmCloseOrAlreadyAbsent(
+        {
+          ok: false,
+          error: {
+            code: "stale_incarnation",
+            message: "stale session incarnation",
+            retryable: false,
+          },
+        },
+        target,
+      ),
+    ).toThrow(/stale session incarnation/);
+  });
+
+  it("accepts and identity-checks a normal close reply", () => {
+    expect(
+      confirmCloseOrAlreadyAbsent(
+        {
+          ok: true,
+          result: replyFor({ verdict: "exited", exitCode: 0 }),
+        },
+        target,
+      ),
+    ).toBe("closed");
+    expect(() =>
+      confirmCloseOrAlreadyAbsent(
+        { ok: true, result: replyFor({ id: "other" }) },
+        target,
+      ),
     ).toThrow(/not for this session/);
   });
 });

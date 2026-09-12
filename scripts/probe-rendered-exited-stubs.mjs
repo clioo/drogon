@@ -277,30 +277,31 @@ export async function probeRenderedExitedStubs({
     0,
   );
 
-  // 2) Tab close: the exact listed stub is closed through the UI — the
-  // close forgets the record, so the tab disappears instead of persisting
-  // as a zombie. (Restart revived one of the two stubs, so whichever id
-  // is still listed is the one left to close.)
-  const remainingStubId =
-    revivedFromId === stubAId ? stubBId : stubAId;
-  await page
+  // 2) Tab close after an out-of-band close: another client forgets the
+  // exact listed stub first, reproducing a terminal closed through
+  // `drogon-cli` while its renderer tab is still mounted. Clicking that
+  // stale tab's X must accept the daemon's `not_found` as confirmation that
+  // the record is already absent, detach the tab, and show no error banner.
+  const remainingStubId = revivedFromId === stubAId ? stubBId : stubAId;
+  const remainingStub = listed.find((item) => item.id === remainingStubId);
+  assert.ok(remainingStub, "the second rendered stub must still be listed");
+  const externallyClosed = await bridgeClose(page, {
+    sessionId: remainingStub.id,
+    incarnation: remainingStub.incarnation,
+  });
+  assert.equal(externallyClosed.verdict, "unverifiable");
+  assertStubRecordsForgotten(await bridgeSessions(page, workspaceId), {
+    absentIds: [remainingStubId],
+  });
+  const staleTab = page.getByRole("tab", { name: new RegExp(remainingStubId) });
+  await staleTab.waitFor();
+  await staleTab
     .getByRole("button", {
       name: new RegExp(`Close .*${remainingStubId}.* session`),
     })
     .click();
-  await waitForBridgeObservation(
-    page,
-    async ({ id, b }) => {
-      const response = await window.drogon.sessions(id);
-      if (!response.ok) return false;
-      return !response.result.sessions.some((item) => item.id === b);
-    },
-    { id: workspaceId, b: remainingStubId },
-  );
-  // The native record disappears before React commits the acknowledged close.
-  await page
-    .getByRole("tab", { name: new RegExp(remainingStubId) })
-    .waitFor({ state: "detached" });
+  await staleTab.waitFor({ state: "detached" });
+  assert.equal(await page.getByText("session not found", { exact: true }).count(), 0);
 
   // 3) Kill all: a fresh live terminal plus the remaining stub-history
   // rows must ALL clear through Settings → Terminal → Kill all sessions.
