@@ -2,13 +2,14 @@
 // only when the packaged daemon refused to start because a newer Drogon
 // build already migrated the data dir forward. The main process forwards the
 // daemon's own refusal line plus the data dir through the renderer URL query
-// (`?dataDirRefusal=<json>`), so this component needs no new preload/IPC
-// surface. Copy is minimal and actionable: name the directory, keep using
-// the previous build (the installer keeps it at /Applications/Drogon.app.previous),
-// or restore a pre-migration backup; data is never touched by the refusal
-// itself (the refusing build exits before migrating anything).
+// (`?dataDirRefusal=<json>`). Copy is minimal and actionable: name the
+// directory, keep using the previous build (the installer keeps it at
+// /Applications/Drogon.app.previous), or restore a pre-migration backup with
+// the control below (install-resilience P6); data is never touched by the
+// refusal itself (the refusing build exits before migrating anything).
 import { AlertTriangle } from "lucide-react";
 import { Button } from "../../components/ui/button";
+import { BackupRestoreControl } from "./backup-restore-control";
 
 export type DataDirRefusal = {
   dataDir: string;
@@ -75,13 +76,11 @@ export function DataDirRefusalOverlay({
               {refusal.dataDir ? " to keep working" : ""}.
             </li>
             <li>
-              To recover, restore the newest folder under{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">
-                backups
-              </code>{" "}
-              in the data directory.
+              Or go back in time: restore one of the pre-migration backups
+              below, and this build will start normally.
             </li>
           </ol>
+          <BackupRestoreControl dataDir={refusal.dataDir} />
           <p className="break-all text-xs">
             Data directory:{" "}
             <code className="rounded bg-muted px-1 py-0.5">

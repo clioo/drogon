@@ -70,6 +70,11 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
     if let Command::AgentContext = &cli.command {
         return crate::agent_context::run(&request_id, json);
     }
+    // `backups` is local by design (see the module doc): a restore is
+    // wanted exactly when no daemon is serving the data directory.
+    if let Command::Backups { action } = &cli.command {
+        return crate::backups::run(&request_id, json, action, &data_dir);
+    }
     let client = Client::open(&data_dir, &request_id)?;
 
     match &cli.command {
@@ -141,6 +146,9 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         }
         Command::AgentContext => {
             unreachable!("agent-context is served locally before the client opens")
+        }
+        Command::Backups { .. } => {
+            unreachable!("backups commands are served locally before the client opens")
         }
         Command::Internal { action } => internal(&client, &request_id, json, action).await,
         Command::Rpc { method, params } => {

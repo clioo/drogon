@@ -7,10 +7,10 @@ description: >-
   browser pane (open, navigate, snapshot, click, fill, tabs), launch
   harnesses, create and run cron automations, manage Bots and their
   self-managed automations, monitors and monitor actions, seal and grant
-  integration secrets, and use the optional Mentu recipe environment
-  (status, open, run, follow, cancel). Use for terminal control, lightweight
-  prompts and shell commands. Use the orchestration guide for supervised
-  multi-agent coordination.
+  integration secrets, list and restore pre-migration backups, and use the
+  optional Mentu recipe environment (status, open, run, follow, cancel). Use
+  for terminal control, lightweight prompts and shell commands. Use the
+  orchestration guide for supervised multi-agent coordination.
 ---
 
 # Drogon CLI
@@ -366,6 +366,29 @@ what the owner confirms with `meeting actions add` and report the open ones
 with `meeting actions list --open`. Nothing in that chain needs a new
 integration: the meetings come from the CLI and the schedule comes from the
 `bot create-automation` verb.
+
+## Backups (pre-migration restore)
+
+Every forward schema migration snapshots the database first, into
+`<data-dir>/backups/pre-migration-<STAMP>/` (newest 3 kept). When an older
+Drogon build refuses a data directory that a newer build migrated forward
+(`drogond` exits with "is newer than ..."), these backups are the way back:
+
+```text
+drogon-cli backups list --data-dir <PATH> --json
+drogon-cli backups restore pre-migration-<STAMP> --data-dir <PATH>
+```
+
+`backups list` works with no daemon running and reports, per backup, the
+creation timestamp, size, component versions at backup time, and whether
+THIS build may restore it. A backup whose recorded schema is NEWER than this
+build is listed but refused on restore — restoring it would land in the same
+downgrade refusal. `backups restore` refuses while a daemon holds the data
+directory (code `runtime_busy`), refuses backups whose manifest does not
+match their contents (`invalid_argument`), and snapshots the current live
+database into a `backups/pre-restore-<STAMP>/` folder before overwriting
+anything, so a restore is itself reversible. After a successful restore,
+relaunch Drogon; the refusing build starts normally.
 
 ## Secrets
 

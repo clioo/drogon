@@ -33,6 +33,7 @@ pub fn run_on_cli_stack<T: Send + 'static>(
 }
 
 pub mod agent_context;
+pub mod backups;
 pub mod bundled_skill_guides;
 pub mod cli;
 pub mod client;

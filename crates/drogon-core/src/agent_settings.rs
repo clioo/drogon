@@ -11,8 +11,17 @@ use serde_json::{Value, json};
 
 use crate::{Engine, error};
 
+/// Unknown fields are tolerated on read (no `deny_unknown_fields`) and
+/// missing known fields fall back to the struct's own `Default` on purpose:
+/// this file has no schema_versions-style migration scaffolding, so the
+/// first time a newer build ever changes its shape, an owner rolling back
+/// must lose NOTHING — the reader keeps every field it knows, ignores the
+/// ones it does not, and defaults only what it cannot recover. The rewrite
+/// path pairs this with a backup-before-rewrite (see
+/// `do_agent_settings_update`) so even the fields a rewrite drops stay on
+/// disk in `agent-settings.json.previous`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(default, rename_all = "camelCase")]
 pub(crate) struct AgentSettings {
     pub default_tui_agent: Option<String>,
     pub disabled_tui_agents: Vec<String>,
@@ -187,10 +196,18 @@ impl Engine {
         }
         let envelope: Value = serde_json::from_slice(&bytes)
             .map_err(|_| error::invalid_argument("Invalid agent settings file"))?;
+        // A version this build does not know is refused SPECIFICALLY, not
+        // with the generic parse failure: the owner must be able to tell a
+        // rollback skew ("file is newer than this build") from corruption,
+        // the same distinction the schema refusal draws for the database.
+        // The file is left untouched; nothing rewrites it on a refused
+        // read, so no setting is lost while the newer build is away.
         if envelope["version"] != 1 {
-            return Err(error::invalid_argument(
-                "Unsupported agent settings version",
-            ));
+            return Err(error::invalid_argument(format!(
+                "Agent settings file is version {} but this build only supports version 1; \
+                 open it with the newer Drogon build it was written by",
+                envelope["version"]
+            )));
         }
         let settings = serde_json::from_value::<AgentSettings>(envelope["settings"].clone())
             .map_err(|_| error::invalid_argument("Invalid agent settings file"))?
@@ -257,6 +274,36 @@ impl Engine {
         {
             settings.default_tui_agent = None;
         }
+        let settings_path = self.data_dir.join("agent-settings.json");
+        // Back up the previous file before any rewrite: a future build may
+        // write a shape this build only partially understands, and the
+        // rewrite itself drops exactly what the tolerant reader ignored.
+        // `agent-settings.json.previous` keeps one full generation so the
+        // owner (or a newer build) can always recover it. A backup failure
+        // refuses the update — an unbacked rewrite is the one thing this
+        // file must never do.
+        if settings_path.exists() {
+            let backup_temp = self
+                .data_dir
+                .join(format!(".agent-settings-previous-{}", uuid::Uuid::new_v4()));
+            let backup_ok = std::fs::copy(&settings_path, &backup_temp).and_then(|_| {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(
+                        &backup_temp,
+                        std::fs::Permissions::from_mode(0o600),
+                    )?;
+                }
+                std::fs::rename(&backup_temp, self.data_dir.join("agent-settings.json.previous"))
+            });
+            if let Err(backup_error) = backup_ok {
+                let _ = std::fs::remove_file(&backup_temp);
+                return Err(error::io_error(format!(
+                    "Cannot back up the previous agent settings file: {backup_error}"
+                )));
+            }
+        }
         let payload = serde_json::to_vec(&json!({ "version": 1, "settings": settings })).unwrap();
         let temp = self
             .data_dir
@@ -273,7 +320,7 @@ impl Engine {
             let mut file = options.open(&temp)?;
             file.write_all(&payload)?;
             file.sync_all()?;
-            std::fs::rename(&temp, self.data_dir.join("agent-settings.json"))
+            std::fs::rename(&temp, settings_path)
         })();
         if saved.is_err() {
             let _ = std::fs::remove_file(&temp);

@@ -56,6 +56,8 @@ import { registerSettingsCliBridge } from "./settings-bridge";
 import { registerSkillsBridge } from "./skills-bridge";
 import { registerAgentSettingsBridge } from "./agent-settings-bridge";
 import { registerWorkspaceUIPreferencesBridge } from "./workspace-ui-preferences-bridge";
+// Install-resilience P6 (granted additive main-process seam).
+import { registerBackupsBridge } from "./backups-bridge";
 import { registerFontsBridge } from "./fonts";
 import { registerTasksBridge } from "./tasks-bridge";
 // R17-A additive wiring: jira data-layer bridge (granted main/jira-bridge.ts).
@@ -283,6 +285,10 @@ function registerBridge() {
   registerMentuBridge(() => window);
   registerGraphBridge(() => window);
   registerWorkspaceUIPreferencesBridge(() => window);
+  // Install-resilience P6 (granted additive): the downgrade-refusal
+  // overlay's restore executor — placed last, away from the P4+P5
+  // bootstrap/capabilities regions.
+  registerBackupsBridge(() => window);
   for (const [method, schema] of Object.entries(bridgeSchemas)) {
     ipcMain.handle(`drogon:${method}`, async (event, input: unknown) => {
       if (

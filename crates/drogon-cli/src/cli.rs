@@ -165,6 +165,16 @@ pub enum Command {
         #[command(subcommand)]
         action: SecretsAction,
     },
+    /// Pre-migration backups of this data directory: list them with their
+    /// manifests and restore one by id. Local — no daemon needed, by
+    /// design: a restore is wanted exactly when the daemon refuses to
+    /// start (or before deliberately going back in time). Restoring takes
+    /// the daemon's whole-lifetime data-dir lock, so it refuses while a
+    /// daemon is serving this directory.
+    Backups {
+        #[command(subcommand)]
+        action: BackupsAction,
+    },
     /// Native coordination (requires the service capability
     /// orchestration.native.v1; the preflight decides before any method)
     Orchestration {
@@ -731,6 +741,28 @@ pub enum AutomationAction {
 /// names the session, incarnation and event via flags). `event` is validated
 /// server-side against the known set for all four
 /// (`drogon_core::agent_state::classify_hook_event`).
+#[derive(Subcommand, Debug)]
+pub enum BackupsAction {
+    /// List pre-migration backups (and pre-restore snapshots) with their
+    /// manifests, sizes, and whether THIS build may restore each one
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli backups list\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    List,
+    /// Restore one backup by id (as shown by `backups list`). Snapshots the
+    /// current state first, refuses while a daemon holds the data directory,
+    /// and refuses backups newer than this build.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli backups restore <BACKUP_ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    Restore {
+        /// Backup id, e.g. pre-migration-1727359200000
+        backup_id: String,
+    },
+}
+
 #[derive(Subcommand, Debug)]
 pub enum InternalAction {
     HookEvent {
@@ -1978,6 +2010,12 @@ impl Cli {
             },
             Command::Status => {}
             Command::AgentContext => {}
+            Command::Backups { action } => match action {
+                BackupsAction::List => {}
+                BackupsAction::Restore { backup_id } => {
+                    require_nonempty("backup_id", backup_id)?;
+                }
+            },
         }
         Ok(())
     }

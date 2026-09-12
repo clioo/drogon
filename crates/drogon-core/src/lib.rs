@@ -42,6 +42,10 @@ mod meetings_rpc;
 pub mod session_authority;
 
 mod agent_state;
+// Install-resilience P6: validated listing + reversible restore of the
+// pre-migration backups db.rs already writes (plus the data-dir lock the
+// restore must hold while swapping the database file).
+pub mod backups;
 mod db;
 pub(crate) use desktop_relay_rpc::RelayState;
 mod agent_settings;
