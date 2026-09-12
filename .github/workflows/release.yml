@@ -74,6 +74,7 @@ jobs:
 
       - name: Build, notarize (when configured), and verify the release artifact
         env:
+          NODE_OPTIONS: --max-old-space-size=6144
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
