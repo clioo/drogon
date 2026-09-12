@@ -55,6 +55,10 @@ import {
 } from "../../components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import type { LoopLedger } from "./adversarial-loop";
+import {
+  loadLastKnownMainSession,
+  saveLastKnownMainSession,
+} from "./last-known-main-session";
 import { isTerminalPhase } from "./adversarial-loop";
 
 const ZOOM_MIN = 50;
@@ -359,19 +363,29 @@ export function OrchestratorCanvas({
   // The Main agent node is a live projection of the real session (Part 4),
   // but the daemon's session list drops a session once it is fully torn
   // down — `mainSession` itself goes back to null the moment a session
-  // exits and the workspace is reloaded. Losing that fact would silently
-  // regress the whole canvas to "never had a session" (the exact FINDING
-  // this guards against): remember the last OBSERVED session so the node
-  // can still say `exited`/`unverifiable` instead of vanishing. Reset the
-  // memory the moment the workspace changes so a fact from workspace A can
-  // never bleed into workspace B's honestly-never-had-one view.
+  // exits, EVEN WHILE this canvas stays mounted (confirmed empirically: an
+  // external `terminal close` never reaches this view without a reload,
+  // and the reload itself then wipes any in-memory-only fix). Losing that
+  // fact would silently regress the whole canvas to "never had a session"
+  // (the exact FINDING this guards against): remember the last OBSERVED
+  // session in-memory for the current mount AND in `localStorage` (see
+  // `last-known-main-session.ts`) so the node can still say
+  // `exited`/`unverifiable` across a real reload, not only within one
+  // render tree's lifetime. Reset the memory the moment the workspace
+  // changes so a fact from workspace A can never bleed into workspace B's
+  // honestly-never-had-one view.
   const lastKnownRef = useRef<{ workspaceId: string | undefined; session: Session } | null>(
     null,
   );
   if (mainSession) {
     lastKnownRef.current = { workspaceId, session: mainSession };
+    if (workspaceId) saveLastKnownMainSession(workspaceId, mainSession);
   } else if (lastKnownRef.current && lastKnownRef.current.workspaceId !== workspaceId) {
     lastKnownRef.current = null;
+  }
+  if (lastKnownRef.current === null && mainSession === null && workspaceId) {
+    const persisted = loadLastKnownMainSession(workspaceId);
+    if (persisted) lastKnownRef.current = { workspaceId, session: persisted };
   }
   const lastKnownSession = mainSession ? null : (lastKnownRef.current?.session ?? null);
   // Once the fresh record is gone we no longer have live confirmation —

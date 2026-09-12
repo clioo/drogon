@@ -58,7 +58,10 @@ function baseProps() {
 }
 
 describe("OrchestratorCanvas", () => {
-  beforeEach(installRadixJsdomStubs);
+  beforeEach(() => {
+    installRadixJsdomStubs();
+    window.localStorage.clear();
+  });
   afterEach(cleanup);
 
   it("disables the whole graph honestly when there is no session", () => {
@@ -311,6 +314,59 @@ describe("OrchestratorCanvas", () => {
     // never had a session must render honestly disabled, never a stale
     // fact carried over from ws1.
     rerender(
+      <OrchestratorCanvas
+        {...baseProps()}
+        mainSession={null}
+        policy={policyWithAdversarial(false)}
+        workspaceId="ws2"
+      />,
+    );
+    expect(screen.getByTestId("orchestrator-disabled")).toBeTruthy();
+    expect(screen.queryByTestId("orchestrator-main-agent")).toBeNull();
+  });
+
+  it("a session that exits survives an ACTUAL remount (a real reload, not just a re-render) via persisted last-known state", () => {
+    // A plain in-memory `useRef` would NOT survive this — confirmed
+    // empirically against the real packaged app: an externally-closed
+    // session never reaches an already-mounted canvas without a reload,
+    // and a reload wipes in-memory-only state exactly like the bug it
+    // would otherwise fix. `unmount()` + a brand-new `render()` reproduces
+    // that: no in-memory history at all, only `mainSession: null` and
+    // whatever localStorage remembers.
+    const first = render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        workspaceId="ws1"
+      />,
+    );
+    expect(
+      screen.getByTestId("orchestrator-main-agent").getAttribute("data-state"),
+    ).toBe("live");
+    first.unmount();
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        mainSession={null}
+        policy={policyWithAdversarial(false)}
+        workspaceId="ws1"
+      />,
+    );
+    expect(screen.queryByTestId("orchestrator-disabled")).toBeNull();
+    const node = screen.getByTestId("orchestrator-main-agent");
+    expect(node.getAttribute("data-state")).toBe("unverifiable");
+  });
+
+  it("a persisted session from one workspace never leaks into a different workspace after a remount", () => {
+    const first = render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        workspaceId="ws1"
+      />,
+    );
+    first.unmount();
+    render(
       <OrchestratorCanvas
         {...baseProps()}
         mainSession={null}
