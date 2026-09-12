@@ -13,7 +13,7 @@ without piecing together a dozen windows.
 
 Drogon is MIT-licensed. The desktop UI is ported component-by-component from the Orca
 source (MIT, © Lovecast Inc. — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)),
-and the Bots, Automations, and Mentu-recipe concepts come from the Drogon fork of
+and the Bots, Automations, and work-graph concepts come from the Drogon fork of
 Orca. This repository does not depend on Orca's runtime to execute anything.
 
 [Run locally](#run-locally) · [Install with Homebrew](#install-with-homebrew) · [Install the macOS preview](#install-the-macos-preview) · [Feature tour](#feature-tour-the-twelve-mvp-journeys) · [Use it with agents](#using-drogon-with-agents) · [Contribute](#contributing)
@@ -35,7 +35,7 @@ Your next step should be visible in the workspace—not buried in a meeting reca
 - **Review where the work happens.** Browse and edit files, inspect diffs, stage changes, commit, push, and create pull requests through GitHub CLI.
 - **Move from issue to workspace.** Browse GitHub Issues in Tasks and start a worktree and session from an issue.
 - **Preview without leaving the task.** Open the embedded browser alongside your work. Agents can navigate, inspect, click, and fill through `drogon-cli` while the desktop is connected.
-- **Make recurring work explicit.** Schedule automations, give bots responsibilities, and inspect their run history. Use Mentu recipes for approval-driven workflows with execution evidence and retry controls.
+- **Make recurring work explicit.** Schedule automations, give bots responsibilities and the monitors that wake them, and inspect every run. Design the work itself in the Work Graph: nodes with their own harness and model, an approved-runtime order to fall back through, and an optional bounded adversarial review before anything is called done.
 
 ## Feature tour: the twelve MVP journeys
 
@@ -51,11 +51,37 @@ Orca reference.
 5. **Palette and search.** `⌘K` command palette, `⌘P` quick open with file search in the daemon, and `⌘J` jump palette for workspaces, sessions, and browser tabs.
 6. **Tasks.** A page fed by GitHub Issues via `gh`: list, filter, paginate, a pull-request mode with review/checks/merge cells, and “start” creates a worktree and session from an issue or PR.
 7. **Automations.** A cron scheduler runs inside the daemon on top of the automation runner, with an editor, local-time schedules, a Runs dashboard, run detail, and history — including runs by a real coding agent.
-8. **Bots.** Create bots with presets, assign responsibilities (cron-backed), chat over visible `bot.run` execution, and browse per-bot history.
-9. **Mentu.** Choose a recipe, approve it by hash, execute it with the pinned Mentu runtime (provisioned at install, revision-locked), then inspect per-step evidence, metrics, cancel, and retry. Recipes are editable with daemon-side validation.
+8. **Bots.** Create bots with presets and give them responsibilities (cron-backed), chat over visible `bot.run` execution, and browse per-bot history. A bot owns its own **monitors** — a file digest, an HTTP poll, a script, or a `github_pr.v1` watch on a repository — and a monitor that fires can release real work: a watched pull request opens a worktree and starts a review session, with the firing evidence recorded and deduplicated by case.
+9. **Work Graph.** Design the work instead of describing it in prose: a canvas of nodes, each with its prompt, harness and model from the real host catalogs, and dependency edges between them. `.drogon/graph.json` keeps a strict split — `intent` is yours to author, `state` is what the daemon observed — and running a graph compiles it and records every attempt as evidence. The **Orchestrator** view adds the subagent policy: approved runtimes tried in order, a fallback used only after they all fail, an optional **Delegate** mode that tells the main agent to plan and hand work to the enabled nodes, and an optional **adversarial loop** (find failures, then review and verify the fixes) bounded by a maximum number of iterations.
 10. **Settings.** Theme (system/light/dark), default harness, rebindable shortcuts, notifications, and Git/GitHub auth panes — all persisted and taking effect immediately, including “Restart daemon”.
 11. **Packaging.** An ad-hoc-signed, sealed `Drogon.app` with verified build info, packaged acceptance against a disposable profile, and a per-user installer that preserves previous builds.
 12. **Status bar.** The Orca bottom bar: settings and help on the left, per-provider usage meters with refresh, and on the right awake on/off, memory, terminal and port counts, and the daemon connection segment.
+
+## What came after the MVP
+
+The twelve journeys were the scope. Three things grew out of using them.
+
+**Meetings became a section, not a sidebar.** Drogon indexes the Markdown transcripts
+written by a local note-taking tool — read-only, never edited or moved — and makes a
+corpus of hundreds usable: full-text search, date and duration filters, bounded reads
+instead of loading everything. From a transcript you can pull out commitments and turn
+one into a real Drogon task, with the line it came from shown next to it. Extraction is
+a suggestion until you accept it, and it runs on a free local model, so browsing your
+own meetings never costs anything.
+
+**Bots grew their own triggers.** A bot no longer waits to be asked. It owns monitors —
+a file digest, an HTTP poll, a script, or a watch on a repository's pull requests — and
+a monitor that fires releases real work rather than just a notification: a watched pull
+request opens a worktree and starts a review session in it. New watches park until you
+approve them, and every firing records what it saw.
+
+**The Work Graph replaced writing recipes by hand.** You design the work on a canvas,
+and the agent reads that design instead of being told in prose. The Orchestrator adds
+the policy around it: which runtimes subagents may use and in what order, what to fall
+back to when they all fail, whether the main agent should do the work or delegate it to
+the enabled nodes, and whether a bounded adversarial pass should try to break the result
+before it counts as done. The configured policy reaches the next session's brief, so a
+toggle in the UI changes how the agent actually behaves.
 
 ## A brief, not another meeting
 
@@ -71,7 +97,7 @@ _An example automation draft in the real preview UI. It was not saved or execute
 2. **Start a session.** Use your preferred installed coding harness or a plain shell.
 3. **Build and inspect.** Keep files, terminal output, browser previews, and changes within reach.
 4. **Review and ship.** Stage the intended changes, commit, and open a pull request.
-5. **Repeat what works.** Turn recurring work into an automation or an approved Mentu recipe.
+5. **Repeat what works.** Turn recurring work into an automation, a bot's monitor, or a node in the Work Graph.
 
 The goal is fewer “can we sync?” messages and more concrete changes to review.
 
@@ -88,8 +114,9 @@ Drogon is split so the desktop is a view, not the lifetime of your work.
 │  • xterm.js terminals      │         │    unverifiable / exited)     │
 │  • bridges: files, git,    │         │  • projects, worktrees, files │
 │    browser, bots, tasks,   │         │  • harness launches + hooks   │
-│    automations, mentu      │         │  • cron scheduler + runner    │
-└───────────┬────────────────┘         │  • bots, Mentu runtime lock   │
+│    automations, graph,     │         │  • cron scheduler + runner    │
+│    meetings                │         │  • work graph + failover      │
+└───────────┬────────────────┘         │  • bots, monitors, backups    │
             │ `drogon-cli`             │  • orchestration (tasks,      │
 ┌───────────▼────────────────┐         │    dispatch, ask/reply)       │
 │ drogon-cli (Rust)          │────────►└───────────────────────────────┘
@@ -98,7 +125,7 @@ Drogon is split so the desktop is a view, not the lifetime of your work.
 └────────────────────────────┘
 ```
 
-- **`crates/drogon-core`** — domain state: sessions/PTYs, workspaces, worktrees, files, git, bots, automations, Mentu, orchestration records.
+- **`crates/drogon-core`** — domain state: sessions/PTYs, workspaces, worktrees, files, git, bots and their monitors, automations, the work graph and its failover episodes, meetings, orchestration records. The graph is what you design; the pinned Mentu runtime (revision-locked, provisioned at install) is what executes a compiled graph.
 - **`crates/drogon-protocol`** — the versioned wire protocol; daemon and CLI negotiate it on connect.
 - **`crates/drogond`** — the daemon: owns runtime state, listens on a local Unix socket (Windows named pipe in progress), and survives desktop restarts.
 - **`crates/drogon-harness`** — discovery and launch of Claude Code, Pi, OpenCode, and plain shells, with state hooks that report `working` / `needs_input` from each harness.
@@ -123,6 +150,23 @@ drogon-cli worktree list --project <ID>
 drogon-cli browser open https://example.com
 drogon-cli browser snapshot         # accessibility tree of the embedded browser
 ```
+
+An agent can also read the design it is working inside, and act on the policy it finds:
+
+```sh
+drogon-cli graph read --workspace <ID>        # intent (yours) + state (observed)
+drogon-cli graph write-intent --workspace <ID> --file graph.json
+drogon-cli graph run --workspace <ID> --all   # compile and run the whole graph
+drogon-cli graph run-node-failover --workspace <ID> --node <ID> --follow
+drogon-cli bot watch-pr --repo <owner/name>   # a watch that releases a review session
+drogon-cli meeting list --limit 20            # the indexed transcripts, read-only
+drogon-cli backups list                       # pre-migration snapshots, restorable
+```
+
+When a workspace has a configured subagent policy, Drogon writes it into a managed block
+in that workspace's `AGENTS.md` and `CLAUDE.md` at session start, so the agent knows
+whether it should delegate or do the work itself. A workspace with no policy is left
+untouched — Drogon never creates those files on its own.
 
 The orchestration verbs (`run`, `task`, `dispatch`, `ask`, `check`, `reply`) mirror
 Orca's, so a worker agent can coordinate with a human supervisor without leaving the
@@ -257,5 +301,5 @@ Read [AGENTS.md](AGENTS.md) and the [current MVP scope and implementation status
 [MIT](LICENSE) © Carlos (clioo).
 
 - **Orca / Lovecast Inc.** — the desktop experience Drogon rewrites; ported UI components keep their `MIT Copyright (c) 2026 Lovecast Inc.` notices in the source. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full attribution and dependency licensing.
-- **The Drogon fork of Orca** — the source of the Bots, Automations, and Mentu recipes-and-evidence concepts ported here.
+- **The Drogon fork of Orca** — the source of the Bots, Automations, and the recipes-and-evidence execution model ported here (the authoring surface has since become the Work Graph).
 - Drogon is an independent rewrite, not affiliated with or endorsed by Orca or Lovecast Inc.

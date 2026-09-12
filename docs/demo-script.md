@@ -96,20 +96,42 @@ because the fixture leaves the terminal creation for this live part of the demo.
    **Manual demo review scheduled** responsibility. Its **Run Manual demo
    review** button is the manual trigger; it is intentionally not invoked in a
    no-inference rehearsal.
+4. Expand the bot's **Monitors**. A monitor is what wakes a bot without you: a
+   file digest, an HTTP poll, a script, or a watch on a repository's pull
+   requests. Say what the watch does when it fires — opens a worktree and starts
+   a review session on that PR — and that a new watch parks until approved, with
+   the approval shown right on the card.
 
 One sentence: “bots own recurring duties; automations own recurring prompts;
 both leave a trace you can inspect.”
 
-### 3:45–4:30 — Approval-driven work: Mentu (J9)
+### 3:45–4:30 — Design the work, then let it run: the Work Graph (J9)
 
-1. Open **Mentu** and choose **Drogon demo hello**. The three-node graph is
-   `write-greeting → check-page → verify-demo`, all local shell steps.
-2. Click **Review Run**. Show the content hash and **Runner: mentu-recipes
-   0.4.0**, then click **Approve & run**. The pinned runtime executes the
-   fixture's shell-only recipe without a model.
-3. Select **Evidence**. Point to the stdout/stderr paths for each succeeded
-   step. Mention cancel/retry: “Approval by hash: what you approved
-   is exactly what ran, and the evidence is attached.”
+This is the segment worth rehearsing; it is the part nobody else is showing.
+
+1. Open the **Work Graph** tab on the demo workspace. If no graph exists yet, the
+   empty state offers **Design the graph** — say the line out loud: “the plan is
+   mine to author; the state is what the daemon observed.”
+2. On the canvas, add two nodes, name them, give the second a dependency on the
+   first, and pick a harness and model on each from the real host catalog. Point
+   out that the model list is what this machine actually has — nothing invented.
+3. Switch to the **Orchestrator** view. In **Subagent policy**, show the approved
+   runtimes in order and the fallback marked **Not approved**: “these are tried in
+   order; the fallback only after every approved one fails, and each attempt is
+   recorded.”
+4. Toggle **Adversarial testing** on. The canvas grows the dashed loop —
+   **Adversarial test → Code review**, repeating up to the number in the stepper,
+   ending at **Ready to merge**. Two different briefs: one tries to break the
+   result, the other reviews the whole diff and verifies each fix.
+5. Toggle **Delegate** on and say what it changes: the next session in this
+   workspace is told to plan and hand work to the enabled nodes instead of doing
+   it itself. Drogon writes that policy into the workspace's `AGENTS.md` at
+   session start — only when a policy is configured.
+6. Click **Run workflow** on the shell-only fixture graph and open a node's
+   evidence: per-step stdout, and the failover attempts if one was made.
+
+One sentence: “you design the work once; the graph is the source of truth the
+agent reads, and every attempt it makes is evidence you can open.”
 
 ### 4:30–5:00 — Close and Q&A hooks
 
@@ -118,7 +140,7 @@ both leave a trace you can inspect.”
    Sessions come back with their state: “the daemon, not the window, owns the
    work.”
 2. Land on the license slide: MIT, attribution to Orca/Lovecast for the ported
-   UI, and Bots/Automations/Mentu concepts from the fork. Invite people to
+   UI, and the Bots/Automations/execution-evidence concepts from the fork. Invite people to
    `github.com/clioo/drogon`.
 
 ## Fallbacks
