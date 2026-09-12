@@ -7,10 +7,10 @@ description: >-
   browser pane (open, navigate, snapshot, click, fill, tabs), launch
   harnesses, create and run cron automations, manage Bots and their
   self-managed automations, monitors and monitor actions, seal and grant
-  integration secrets, and use the optional Mentu recipe environment
-  (status, open, run, follow, cancel). Use for terminal control, lightweight
-  prompts and shell commands. Use the orchestration guide for supervised
-  multi-agent coordination.
+  integration secrets, list and restore pre-migration backups, and use the
+  optional Mentu recipe environment (status, open, run, follow, cancel). Use
+  for terminal control, lightweight prompts and shell commands. Use the
+  orchestration guide for supervised multi-agent coordination.
 ---
 
 # Drogon CLI
