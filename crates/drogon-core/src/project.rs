@@ -1,6 +1,5 @@
 //! Project registration and storage. A Project is either a git repository or
-//! a plain folder that owns Worktrees (`docs/migration/rewrite-mvp-plan.md`
-//! J1). Mirrors `workspace.rs`'s canonicalize-and-classify shape, but never
+//! a plain folder that owns Worktrees (journey J1). Mirrors `workspace.rs`'s canonicalize-and-classify shape, but never
 //! reuses its table: a Project and a Workspace are different entities (a
 //! Project owns zero or more Worktrees, each of which registers its own
 //! Workspace so `session.start` works unchanged).

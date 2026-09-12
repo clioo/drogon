@@ -1,5 +1,5 @@
 //! Wire types for Projects: a git repository or a plain folder that owns
-//! Worktrees (`docs/migration/rewrite-mvp-plan.md` journey J1). Mirrors
+//! Worktrees (journey J1). Mirrors
 //! `apps/desktop/src/shared/session-contract.ts`'s `Project` type.
 
 use serde::{Deserialize, Deserializer, Serialize};

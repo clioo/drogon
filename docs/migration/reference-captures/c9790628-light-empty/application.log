@@ -1,3 +1,0 @@
-[skills] scan roots=24 present=0 walked=24 skills=0 ms=1 ids=home-codex,home-agents,home-claude,codex-plugin-cache,home-grok,home-opencode,home-pi,home-omp,home-hermes,home-prime-agent,home-gemini,home-antigravity
-Debugger ending on ws://127.0.0.1:62795/a243e385-cdac-43ad-b8bc-05a1084d8fca
-For help, see: https://nodejs.org/learn/getting-started/debugging

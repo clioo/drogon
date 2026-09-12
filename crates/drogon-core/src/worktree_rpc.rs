@@ -1,4 +1,4 @@
-//! Worktree RPCs (`docs/migration/rewrite-mvp-plan.md` J1): each Worktree of
+//! Worktree RPCs (journey J1): each Worktree of
 //! a git Project registers its own Workspace so `session.start` works
 //! unchanged. A folder Project has no separate worktree-creation step —
 //! `worktree.list` synthesizes its one implicit worktree from the Project
