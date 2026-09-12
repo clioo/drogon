@@ -342,6 +342,18 @@ export function SubagentPolicyPanel({
             }
             testIdPrefix="fallback-runtime"
           />
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            className="size-6 shrink-0"
+            disabled={!interactive || !fallback}
+            onClick={() => onChange({ ...policy, fallbackRuntime: null })}
+            aria-label="Remove fallback runtime"
+            data-testid="fallback-runtime-remove"
+          >
+            <X className="size-3.5" aria-hidden />
+          </Button>
         </div>
         <p className="mt-1.5 text-xs text-muted-foreground">
           Only after all approved runtimes fail.

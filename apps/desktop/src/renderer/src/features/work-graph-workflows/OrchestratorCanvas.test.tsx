@@ -8,10 +8,11 @@
 // failing instead of a fabricated one; Run workflow is disabled with a
 // reason when there is nothing automated to run.
 
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { GraphPolicy } from "../../../../shared/graph-contract";
 import type { Session } from "../../../../shared/session-contract";
+import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import type { LoopLedger } from "./adversarial-loop";
 import { OrchestratorCanvas } from "./OrchestratorCanvas";
 
@@ -57,6 +58,7 @@ function baseProps() {
 }
 
 describe("OrchestratorCanvas", () => {
+  beforeEach(installRadixJsdomStubs);
   afterEach(cleanup);
 
   it("disables the whole graph honestly when there is no session", () => {
@@ -197,5 +199,185 @@ describe("OrchestratorCanvas", () => {
     expect(status.textContent).toContain("Save failed");
     expect(status.textContent).toContain("workspace not found");
     expect(status.textContent).not.toContain("Saved automatically");
+  });
+
+  it("the repeat caption shows the in-flight ledger's bound, not a bumped live policy value (DISHONEST-2)", () => {
+    const ledger = {
+      phase: "reviewing",
+      maxCycles: 1,
+      message: "Reviewing… cycle 1 of 1.",
+    } as LoopLedger;
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(true, 4)}
+        loopLedger={ledger}
+      />,
+    );
+    const caption = screen.getByTestId("orchestrator-repeat-caption");
+    expect(caption.textContent).toContain("Repeat up to 1×");
+    expect(caption.textContent).not.toContain("Repeat up to 4×");
+    const pending = screen.getByTestId("orchestrator-repeat-pending");
+    expect(pending.textContent).toContain("4×");
+    expect(pending.textContent).toContain("next run");
+  });
+
+  it("the repeat caption reflects the live policy again once the loop reaches a terminal phase", () => {
+    const ledger = {
+      phase: "passed",
+      maxCycles: 1,
+      message: "Adversarial review passed on cycle 1.",
+    } as LoopLedger;
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(true, 4)}
+        loopLedger={ledger}
+      />,
+    );
+    expect(screen.getByTestId("orchestrator-repeat-caption").textContent).toBe(
+      "Repeat up to 4×",
+    );
+    expect(screen.queryByTestId("orchestrator-repeat-pending")).toBeNull();
+  });
+
+  it("a session that disappears from later reads still renders exited/unverifiable, never the no-session view (FINDING fix)", () => {
+    const { rerender } = render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        workspaceId="ws1"
+      />,
+    );
+    expect(
+      screen.getByTestId("orchestrator-main-agent").getAttribute("data-state"),
+    ).toBe("live");
+    // The daemon's session list drops a session once fully torn down: a
+    // later read reports `mainSession: null`, not an object with verdict
+    // "exited" — the exact repro from the adversarial audit's terminal
+    // close finding.
+    rerender(
+      <OrchestratorCanvas
+        {...baseProps()}
+        mainSession={null}
+        policy={policyWithAdversarial(false)}
+        workspaceId="ws1"
+      />,
+    );
+    expect(screen.queryByTestId("orchestrator-disabled")).toBeNull();
+    const node = screen.getByTestId("orchestrator-main-agent");
+    expect(node.getAttribute("data-state")).toBe("unverifiable");
+    expect(node.textContent).toContain("Contact with this session was lost");
+  });
+
+  it("a session already observed exited stays exited after it disappears from later reads", () => {
+    const exited: Session = { ...liveSession(), verdict: "exited" };
+    const { rerender } = render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        mainSession={exited}
+        policy={policyWithAdversarial(false)}
+        workspaceId="ws1"
+      />,
+    );
+    expect(
+      screen.getByTestId("orchestrator-main-agent").getAttribute("data-state"),
+    ).toBe("exited");
+    rerender(
+      <OrchestratorCanvas
+        {...baseProps()}
+        mainSession={null}
+        policy={policyWithAdversarial(false)}
+        workspaceId="ws1"
+      />,
+    );
+    const node = screen.getByTestId("orchestrator-main-agent");
+    expect(node.getAttribute("data-state")).toBe("exited");
+    expect(node.textContent).toContain("exited");
+  });
+
+  it("switching workspaces never inherits a different workspace's last-known session", () => {
+    const { rerender } = render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        workspaceId="ws1"
+      />,
+    );
+    expect(
+      screen.getByTestId("orchestrator-main-agent").getAttribute("data-state"),
+    ).toBe("live");
+    // Same component instance (no remount) — a DIFFERENT workspace that has
+    // never had a session must render honestly disabled, never a stale
+    // fact carried over from ws1.
+    rerender(
+      <OrchestratorCanvas
+        {...baseProps()}
+        mainSession={null}
+        policy={policyWithAdversarial(false)}
+        workspaceId="ws2"
+      />,
+    );
+    expect(screen.getByTestId("orchestrator-disabled")).toBeTruthy();
+    expect(screen.queryByTestId("orchestrator-main-agent")).toBeNull();
+  });
+
+  it("clicking a live Main agent node opens the inspector with the harness-locked and delete-refused rules, and Stop session invokes the callback (Scenario 7)", () => {
+    const onStop = vi.fn();
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        onStopMainSession={onStop}
+      />,
+    );
+    expect(screen.queryByTestId("main-agent-inspector")).toBeNull();
+    fireEvent.click(screen.getByTestId("orchestrator-main-agent"));
+    const inspector = screen.getByTestId("main-agent-inspector");
+    expect(inspector.textContent).toContain("claude");
+    expect(screen.getByTestId("main-agent-harness-locked")).toBeTruthy();
+    expect(screen.getByTestId("main-agent-delete-refused")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("main-agent-stop-session"));
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("the inspector drops the harness-locked/delete-refused rules once the session has exited", () => {
+    const exited: Session = { ...liveSession(), verdict: "exited" };
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        mainSession={exited}
+        policy={policyWithAdversarial(false)}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("orchestrator-main-agent"));
+    expect(screen.getByTestId("main-agent-inspector")).toBeTruthy();
+    expect(screen.queryByTestId("main-agent-harness-locked")).toBeNull();
+    expect(screen.queryByTestId("main-agent-delete-refused")).toBeNull();
+    expect(screen.queryByTestId("main-agent-stop-session")).toBeNull();
+  });
+
+  it("the inspector still refuses harness/delete while merely unverifiable (loss of contact never proves exit)", () => {
+    // isMentuMainSessionLive => false (agentState "exited"), but
+    // verdict !== "exited" => the honest state is "unverifiable", not
+    // "exited" — the gate must key off `!exited`, not the coarser `live`.
+    const unverifiable: Session = {
+      ...liveSession(),
+      verdict: "live",
+      agentState: "exited",
+    } as Session;
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        mainSession={unverifiable}
+        policy={policyWithAdversarial(false)}
+      />,
+    );
+    expect(
+      screen.getByTestId("orchestrator-main-agent").getAttribute("data-state"),
+    ).toBe("unverifiable");
+    fireEvent.click(screen.getByTestId("orchestrator-main-agent"));
+    expect(screen.getByTestId("main-agent-harness-locked")).toBeTruthy();
+    expect(screen.getByTestId("main-agent-delete-refused")).toBeTruthy();
   });
 });

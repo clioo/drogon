@@ -233,6 +233,32 @@ describe("SubagentPolicyPanel", () => {
     ]);
   });
 
+  it("removing the fallback runtime clears it and the summary drops to 0 fallback (FRAGILE fix)", () => {
+    stubDrogon();
+    let policy = design2Policy();
+    const handleChange = vi.fn((next: GraphPolicy) => {
+      policy = next;
+    });
+    const { rerender } = render(
+      <SubagentPolicyPanel policy={policy} interactive onChange={handleChange} />,
+    );
+    const remove = screen.getByTestId(
+      "fallback-runtime-remove",
+    ) as HTMLButtonElement;
+    expect(remove.disabled).toBe(false);
+    fireEvent.click(remove);
+    expect(handleChange).toHaveBeenCalledTimes(1);
+    expect(policy.fallbackRuntime).toBeNull();
+    rerender(<SubagentPolicyPanel policy={policy} interactive onChange={handleChange} />);
+    expect(screen.getByTestId("subagent-policy-summary").textContent).toBe(
+      "3 approved · 0 fallback · 2 optional subagents",
+    );
+    // Nothing left to remove: the control disables rather than no-oping.
+    expect(
+      (screen.getByTestId("fallback-runtime-remove") as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it("toggling adversarial testing on reveals the max-iterations stepper, bounded", () => {
     stubDrogon();
     let policy = emptyPolicy();
