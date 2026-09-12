@@ -172,7 +172,17 @@ async function main() {
 
   // 1. Start the daemon this probe owns and register the workspace. No
   //    session yet — the Orchestrator must render honestly disabled.
-  daemon = startAcceptanceProcess(drogon, ["--data-dir", dataDir], { stdio: "ignore" });
+  // Methodology correction (graph-e2e-adversarial audit): the DAEMON, not
+  // only the desktop process below, resolves and spawns harness
+  // executables for `harness.start` — an unstubbed daemon PATH can silently
+  // launch a REAL, possibly paid, catalog binary instead of the fixture.
+  // Stub it here identically to the desktop's PATH so every harness this
+  // probe launches (including the Delegate-brief checks below) is the
+  // fixture, never a real install.
+  daemon = startAcceptanceProcess(drogon, ["--data-dir", dataDir], {
+    stdio: "ignore",
+    env: { ...process.env, PATH: `${fixtureBin}:${process.env.PATH}` },
+  });
   const deadline = Date.now() + 30000;
   for (;;) {
     try {
@@ -318,6 +328,61 @@ async function main() {
   assert.equal(withPolicy.intent.policy.delegate, true);
   assert.equal(withPolicy.state.nodes.length, 0, "the policy write must never touch state");
   report.checks.push("subagent-policy-writes-through-graph-write-intent-only");
+
+  // 5b. DISHONEST-3 (Delegate must be delivered): flipping Delegate must
+  //     change what the NEXT session in this workspace actually receives —
+  //     not only `intent.policy.delegate` on disk and the skill guide's
+  //     prose. The session started in step 4 (already live before Delegate
+  //     was toggled) must be left alone; a freshly launched one must carry
+  //     the current policy in its own `AGENTS.md`, the exact seam every
+  //     harness reads in its own cwd at session start.
+  await cliJson(dataDir, [
+    "harness",
+    "start",
+    "--workspace",
+    workspaceRecord.id,
+    "--harness",
+    "claude",
+    "--permission-mode",
+    "unattended",
+  ]);
+  const agentsWithDelegateOn = await readFile(path.join(workspace, "AGENTS.md"), "utf8");
+  assert.match(agentsWithDelegateOn, /Delegate: ON/, agentsWithDelegateOn);
+  assert.ok(
+    agentsWithDelegateOn.includes(
+      `drogon-cli graph write-intent --workspace ${workspaceRecord.id} --file graph-intent.json`,
+    ),
+    `the Delegate brief must name the real, workspace-scoped write-intent verb: ${agentsWithDelegateOn}`,
+  );
+  report.checks.push("delegate-on-reaches-the-next-sessions-own-agents-md");
+
+  await policyPanel.locator('[data-testid="delegate-toggle"]').click();
+  await delay(400);
+  assert.equal((await readGraph(workspace)).intent.policy.delegate, false);
+  await cliJson(dataDir, [
+    "harness",
+    "start",
+    "--workspace",
+    workspaceRecord.id,
+    "--harness",
+    "claude",
+    "--permission-mode",
+    "unattended",
+  ]);
+  const agentsWithDelegateOff = await readFile(path.join(workspace, "AGENTS.md"), "utf8");
+  assert.match(agentsWithDelegateOff, /Delegate: OFF/, agentsWithDelegateOff);
+  assert.match(
+    agentsWithDelegateOff,
+    /Single node: do the work directly in this session\./,
+    agentsWithDelegateOff,
+  );
+  assert.ok(
+    !agentsWithDelegateOff.includes("Delegate: ON"),
+    `a stale Delegate-ON instruction must never survive the flip: ${agentsWithDelegateOff}`,
+  );
+  report.checks.push(
+    "delegate-off-reaches-the-next-sessions-own-agents-md-and-drops-the-stale-on-instruction",
+  );
 
   // 6. Design 1: adversarial off — screenshots light + dark, every width.
   const summary = policyPanel.locator('[data-testid="subagent-policy-summary"]');

@@ -4,6 +4,7 @@
 
 pub mod compiler;
 pub mod failover;
+pub mod session_brief;
 pub mod state;
 pub mod storage;
 pub mod store;
