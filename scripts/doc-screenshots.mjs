@@ -1191,7 +1191,7 @@ function renderManifest(captures) {
     "## Reproduce",
     "",
     "```sh",
-    "./scripts/build-main.sh && /Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/doc-screenshots.mjs",
+    "./scripts/build-main.sh && node scripts/doc-screenshots.mjs",
     "```",
   );
   return `${lines.join("\n")}\n`;
