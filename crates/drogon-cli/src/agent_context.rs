@@ -770,6 +770,33 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["Requires the service capability bot.secrets.v1."],
         ),
         entry(
+            "backups list",
+            &["backups", "list"],
+            "List pre-migration backups of this data directory with their manifests and whether this build may restore each",
+            "drogon-cli backups list",
+            &[],
+            &[],
+            &["drogon-cli backups list --data-dir /path/to/Drogon --json"],
+            &[
+                "Local: works with no daemon running, which is exactly the state a downgrade refusal leaves behind.",
+                "Restorable classification is against THIS build's schema versions; NEWER backups are listed and refused on restore.",
+            ],
+        ),
+        entry(
+            "backups restore",
+            &["backups", "restore"],
+            "Restore one pre-migration backup by id (snapshots the current state first; refuses while a daemon holds the data directory)",
+            "drogon-cli backups restore <BACKUP_ID>",
+            &[],
+            &["BACKUP_ID"],
+            &["drogon-cli backups restore pre-migration-1727000000000 --data-dir /path/to/Drogon --json"],
+            &[
+                "Refuses with runtime_busy while a daemon serves the data directory: quit Drogon first.",
+                "The current live database is snapshotted to backups/pre-restore-<STAMP> before anything is overwritten.",
+                "Relaunch Drogon after a successful restore.",
+            ],
+        ),
+        entry(
             "orchestration run-create",
             &["orchestration", "run-create"],
             "Create a run bound to a coordinator (initial generation is server-owned)",
