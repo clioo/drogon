@@ -389,6 +389,71 @@ fn interactive_open_session_stays_live_instead_of_exiting_like_a_headless_run() 
     assert_eq!(stopped["verdict"], "exited");
 }
 
+/// An explicit unattended override belongs to a headless Bot run, never its
+/// human-facing open session. The same PATH fixture proves both dispatches:
+/// interactive argv has no skip-permissions flag, while the one-shot argv
+/// retains it.
+#[test]
+fn open_session_forces_inherit_but_headless_run_remains_unattended() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_claude_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+
+    let mut open = fx.open_session_params_for("claude");
+    open["harness"]["permissionMode"] = json!("unattended");
+    let opened = ok(&fx.engine, "bot.run", "req-permission-open", open);
+    let open_session_id = opened["session"]["sessionId"].as_str().unwrap().to_string();
+    let open_incarnation = opened["session"]["incarnation"].as_str().unwrap().to_string();
+    let (open_output, _) = read_until(
+        &fx.engine,
+        &open_session_id,
+        &open_incarnation,
+        |text| text.contains("ARG:"),
+        Duration::from_secs(20),
+    );
+    assert!(!open_output.contains("--dangerously-skip-permissions"), "{open_output}");
+    assert_eq!(
+        ok(
+            &fx.engine,
+            "session.stop",
+            "req-permission-open-stop",
+            json!({"sessionId": open_session_id, "incarnation": open_incarnation}),
+        )["verdict"],
+        "exited"
+    );
+
+    let mut headless = fx.open_session_params_for("claude");
+    headless["interactive"] = json!(false);
+    headless["prompt"] = json!("fixture prompt");
+    headless["harness"]["permissionMode"] = json!("unattended");
+    let run = ok(&fx.engine, "bot.run", "req-permission-headless", headless);
+    let headless_session_id = run["session"]["sessionId"].as_str().unwrap().to_string();
+    let headless_incarnation = run["session"]["incarnation"].as_str().unwrap().to_string();
+    let (headless_output, _) = read_until(
+        &fx.engine,
+        &headless_session_id,
+        &headless_incarnation,
+        |text| text.contains("ARG:") && text.contains("--dangerously-skip-permissions"),
+        Duration::from_secs(20),
+    );
+    assert!(
+        headless_output.contains("--dangerously-skip-permissions"),
+        "headless run must remain unattended: {headless_output}"
+    );
+    assert_eq!(
+        ok(
+            &fx.engine,
+            "session.stop",
+            "req-permission-headless-stop",
+            json!({"sessionId": headless_session_id, "incarnation": headless_incarnation}),
+        )["verdict"],
+        "exited"
+    );
+}
+
 /// The isolation half of the fix: the interactive session's cwd must be the
 /// Bot's OWN provisioned home (`~/Drogon/bots/<handle>` in a real install),
 /// never the folder its record happens to be stored under -- that folder is

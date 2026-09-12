@@ -1021,10 +1021,16 @@ pub fn authorized_prepare(
                 None
             };
             let chat_request_id = format!("bot-open:{envelope_request_id}");
+            // An open session has a human at the TUI and must never inherit
+            // the daemon-only unattended permission mode from the Bot run
+            // request. The harness layer repeats this safety normalization
+            // for direct `harness.start` callers.
+            let mut interactive_harness_params = harness_params.clone();
+            interactive_harness_params.permission_mode = Some("inherit".to_string());
             let params = build_chat_harness_start_params(
                 &workspace_id,
                 None,
-                &harness_params,
+                &interactive_harness_params,
                 *resume,
                 identity.as_ref(),
             );
