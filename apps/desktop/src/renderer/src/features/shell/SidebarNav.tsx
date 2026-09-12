@@ -89,12 +89,12 @@ export function SidebarNav({
   const tasksActive = route === TASKS_ROUTE_ID;
   const automationsActive = route === AUTOMATIONS_ROUTE_ID;
   return (
-    <div className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
+    <div className="shell-sidebar-nav">
       <button
         type="button"
         onClick={onOpenPalette}
         aria-label="Search worktrees and browser tabs"
-        className="group flex w-full items-center gap-2 rounded-md bg-worktree-sidebar-foreground/5 px-2 py-1.5 text-left text-[13px] font-medium tracking-tight text-worktree-sidebar-foreground/60 transition-colors hover:bg-worktree-sidebar-foreground/8"
+        className="shell-nav-search group flex w-full items-center gap-2 rounded-md bg-worktree-sidebar-foreground/5 px-2 py-1.5 text-left text-[13px] font-medium tracking-tight text-worktree-sidebar-foreground/60 transition-colors hover:bg-worktree-sidebar-foreground/8"
       >
         <Search
           className="size-4 shrink-0 text-worktree-sidebar-foreground/30"
@@ -115,7 +115,7 @@ export function SidebarNav({
         </span>
       </button>
       {isDrogonProductSurfaceVisible("sessions") ? (
-        <div className="space-y-0.5">
+        <div className="shell-nav-links space-y-0.5">
           <ProductNavButton
             label="Sessions"
             active={sessionsActive}

@@ -151,7 +151,7 @@ export function Sidebar({
 
   return (
     <div
-      className="workspace-sidebar shell-sidebar relative min-h-0 flex-shrink-0 bg-worktree-sidebar flex flex-col overflow-hidden"
+      className="workspace-sidebar shell-sidebar relative min-h-0 flex-shrink-0 bg-sidebar flex flex-col overflow-hidden"
       style={open ? { width } : { width: 0, borderRightWidth: 0 }}
     >
       {open && (
@@ -163,6 +163,7 @@ export function Sidebar({
             showTasksButton={showTasksButton}
             showAutomationsButton={showAutomationsButton}
           />
+          <div className="shell-sidebar-divider" aria-hidden="true" />
           <div ref={scrollRef} className="shell-sidebar-scroll">
             <ProjectList
               groups={groups.filter((group) => !group.project.quickSession)}
