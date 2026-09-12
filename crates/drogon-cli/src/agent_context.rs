@@ -789,7 +789,9 @@ pub fn all_commands() -> Vec<AgentCommand> {
             "drogon-cli backups restore <BACKUP_ID>",
             &[],
             &["BACKUP_ID"],
-            &["drogon-cli backups restore pre-migration-1727000000000 --data-dir /path/to/Drogon --json"],
+            &[
+                "drogon-cli backups restore pre-migration-1727000000000 --data-dir /path/to/Drogon --json",
+            ],
             &[
                 "Refuses with runtime_busy while a daemon serves the data directory: quit Drogon first.",
                 "The current live database is snapshotted to backups/pre-restore-<STAMP> before anything is overwritten.",

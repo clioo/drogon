@@ -9,11 +9,11 @@
 
 use std::path::PathBuf;
 
+use drogon_core::Engine;
 use drogon_core::backups::{
     self, RestoreError, list_pre_migration_backups, list_pre_restore_snapshots,
     restore_pre_migration_backup,
 };
-use drogon_core::Engine;
 use drogon_protocol::{PROTOCOL_VERSION, Request};
 use rusqlite::Connection;
 use serde_json::json;
@@ -79,7 +79,10 @@ fn restore_recovers_the_backup_contents_and_snapshots_the_prior_state() {
     let engine = Engine::open(dir.path()).unwrap();
     let backups = list_pre_migration_backups(dir.path()).unwrap();
     assert_eq!(backups.len(), 1, "the real migration created one backup");
-    assert!(backups[0].restorable(), "a fresh pre-migration backup is restorable by the build that wrote it");
+    assert!(
+        backups[0].restorable(),
+        "a fresh pre-migration backup is restorable by the build that wrote it"
+    );
     assert!(backups[0].invalid_reason.is_none());
     assert!(backups[0].database_bytes.unwrap() > 0);
     let manifest = backups[0].manifest.clone().unwrap();
@@ -104,7 +107,9 @@ fn restore_recovers_the_backup_contents_and_snapshots_the_prior_state() {
 
     let report = restore_pre_migration_backup(dir.path(), &backup_id).unwrap();
     assert_eq!(report.restored_backup_id, backup_id);
-    let snapshot_id = report.pre_restore_snapshot_id.expect("the live db was snapshotted");
+    let snapshot_id = report
+        .pre_restore_snapshot_id
+        .expect("the live db was snapshotted");
     assert!(snapshot_id.starts_with("pre-restore-"), "{snapshot_id}");
 
     // Byte-for-byte: the live database file is now the backup's file.
@@ -124,16 +129,19 @@ fn restore_recovers_the_backup_contents_and_snapshots_the_prior_state() {
 
     // The restored CONTENT matches the backup's manifest: bots recorded at
     // the pre-migration version, and the post-migration mutation gone.
-    let conn = Connection::open_with_flags(
-        db_path(&dir),
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
+    let conn =
+        Connection::open_with_flags(db_path(&dir), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
     assert_eq!(version_of(&conn, "bots"), 1);
     let folder: String = conn
-        .query_row("SELECT folder FROM bots WHERE id = 'bot-seed'", [], |r| r.get(0))
+        .query_row("SELECT folder FROM bots WHERE id = 'bot-seed'", [], |r| {
+            r.get(0)
+        })
         .unwrap();
-    assert_eq!(folder, "/tmp/seed-folder", "everything recorded after the backup is gone");
+    assert_eq!(
+        folder, "/tmp/seed-folder",
+        "everything recorded after the backup is gone"
+    );
     // The stale WAL/SHM siblings of the replaced database were swept.
     assert!(!dir.path().join("drogon.sqlite3-wal").exists());
     assert!(!dir.path().join("drogon.sqlite3-shm").exists());
@@ -152,7 +160,9 @@ fn restore_recovers_the_backup_contents_and_snapshots_the_prior_state() {
     )
     .unwrap();
     let kept: String = snapshot_conn
-        .query_row("SELECT folder FROM bots WHERE id = 'bot-seed'", [], |r| r.get(0))
+        .query_row("SELECT folder FROM bots WHERE id = 'bot-seed'", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(
         kept, "/tmp/post-mutation",
@@ -176,7 +186,11 @@ fn a_restored_data_dir_reopens_cleanly_without_a_refusal() {
 
     let _engine = Engine::open(dir.path()).unwrap();
     let ids = backup_ids(&dir);
-    assert_eq!(ids.len(), 2, "reopen replays the migration and snapshots it again: {ids:?}");
+    assert_eq!(
+        ids.len(),
+        2,
+        "reopen replays the migration and snapshots it again: {ids:?}"
+    );
     assert_ne!(ids[0], backup_id);
 }
 
@@ -229,7 +243,11 @@ fn a_tampered_manifest_is_refused_with_the_reason() {
 
     // The live database was never touched by any refused restore.
     let conn = Connection::open(db_path(&dir)).unwrap();
-    assert_eq!(version_of(&conn, "bots"), 3, "live db stayed at its migrated version");
+    assert_eq!(
+        version_of(&conn, "bots"),
+        3,
+        "live db stayed at its migrated version"
+    );
 }
 
 /// A backup whose contents are NEWER than this build is listed as not
@@ -245,16 +263,26 @@ fn a_backup_newer_than_this_build_is_listed_and_refused() {
 
     // Simulate a backup written by a NEWER build: bump the snapshot's bots
     // component beyond what this build supports (current: 3).
-    let backup_db = dir.path().join("backups").join(&backup_id).join("drogon.sqlite3");
+    let backup_db = dir
+        .path()
+        .join("backups")
+        .join(&backup_id)
+        .join("drogon.sqlite3");
     Connection::open(&backup_db)
         .unwrap()
-        .execute("UPDATE schema_versions SET version = 4 WHERE component = 'bots'", [])
+        .execute(
+            "UPDATE schema_versions SET version = 4 WHERE component = 'bots'",
+            [],
+        )
         .unwrap();
 
     let entries = list_pre_migration_backups(dir.path()).unwrap();
     assert_eq!(entries.len(), 1);
     assert!(!entries[0].restorable());
-    assert!(entries[0].invalid_reason.is_none(), "the manifest is honest; the SCHEMA is newer");
+    assert!(
+        entries[0].invalid_reason.is_none(),
+        "the manifest is honest; the SCHEMA is newer"
+    );
     let reason = entries[0].not_restorable_reason.clone().unwrap();
     assert!(reason.contains("newer than"), "{reason}");
     assert!(reason.contains("bots"), "{reason}");
@@ -336,7 +364,11 @@ fn a_failed_snapshot_aborts_the_restore_without_touching_the_live_db() {
         matches!(error, RestoreError::SnapshotFailed(_)),
         "unexpected error: {error}"
     );
-    assert_eq!(std::fs::read(db_path(&dir)).unwrap(), before, "live db untouched");
+    assert_eq!(
+        std::fs::read(db_path(&dir)).unwrap(),
+        before,
+        "live db untouched"
+    );
     assert!(!dir.path().join("backups").join("pre-restore-1").exists());
 }
 

@@ -181,11 +181,10 @@ fn approve_from_the_app_global_page_resolves_the_owning_workspace() {
     let mut params = fixture.scope();
     params["workspaceId"] = json!("");
     params["monitorId"] = json!("mon-1");
-    let approved = ok(
-        fixture
+    let approved =
+        ok(fixture
             .engine
-            .dispatch(request("m-approve-global", "bot.monitor_approve", params)),
-    );
+            .dispatch(request("m-approve-global", "bot.monitor_approve", params)));
     assert_eq!(approved["approved"], true, "{approved:?}");
     // The echo names the RESOLVED workspace — a real id, never the sentinel.
     assert_eq!(approved["workspaceId"], fixture.workspace_id);

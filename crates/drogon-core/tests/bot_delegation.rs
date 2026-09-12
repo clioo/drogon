@@ -935,7 +935,10 @@ fn a_version_2_database_gains_the_firing_resource_column_in_place() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(version, drogon_core::bots::delegation::DELEGATION_SCHEMA_VERSION);
+    assert_eq!(
+        version,
+        drogon_core::bots::delegation::DELEGATION_SCHEMA_VERSION
+    );
     // The pre-upgrade row survives with a NULL resource — the view must
     // never fabricate a case for evidence written before the column.
     let resource: Option<String> = conn

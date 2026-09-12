@@ -37,6 +37,7 @@ import type {
   Worktree,
   Workspace,
 } from "../../shared/session-contract";
+import type { DaemonUpdateState } from "../../shared/daemon-contract";
 import { Button } from "./components/ui/button";
 import { Toaster } from "./components/ui/sonner";
 import {
@@ -46,6 +47,7 @@ import {
 } from "./dismissed-sessions";
 import { Sidebar } from "./features/shell/Sidebar";
 import { DaemonConnectionBanner } from "./features/shell/DaemonConnectionBanner";
+import { DaemonUpdateBanner } from "./features/shell/DaemonUpdateBanner";
 import {
   MENTU_TAB_ID,
   bulkCloseTargets,
@@ -564,6 +566,41 @@ export function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
+  // Install-resilience P5: what launch decided about a changed daemon
+  // binary ("Drogon updated; restarted its background service", or the
+  // honest "update pending" state with the restart action). While a state
+  // is showing it is re-pulled every few seconds: a restart from anywhere
+  // (this banner, Settings, another window) resolves the update in main,
+  // and a banner must never outlive the update it describes. Re-pulled
+  // immediately when the answering daemon's identity changes, too.
+  const [daemonUpdate, setDaemonUpdate] = useState<DaemonUpdateState | null>(
+    null,
+  );
+  const servingInstanceId = status?.serviceInstanceId ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const pull = () => {
+      void window.drogon.daemon
+        .updateState()
+        .then((state) => {
+          if (cancelled) return;
+          setDaemonUpdate(state);
+          if (state && timer === null)
+            timer = setInterval(pull, 3_000);
+          if (!state && timer !== null) {
+            clearInterval(timer);
+            timer = null;
+          }
+        })
+        .catch(() => undefined);
+    };
+    pull();
+    return () => {
+      cancelled = true;
+      if (timer !== null) clearInterval(timer);
+    };
+  }, [servingInstanceId]);
   const [inspector, setInspector] = useState(() =>
     resolveInspectorDefault(savedInspectorValue()),
   );
@@ -4425,6 +4462,18 @@ export function App() {
   return (
     <Tooltip.Provider delayDuration={400}>
       <div className="app-shell">
+        {/* Install-resilience P5: launch-decided update state renders on
+            every route (Landing included) — a restart decided before the
+            window existed, or a pending one, must never be missable. */}
+        {daemonUpdate ? (
+          <DaemonUpdateBanner
+            state={daemonUpdate}
+            onRestarted={() => {
+              setDaemonUpdate(null);
+              void refresh();
+            }}
+          />
+        ) : null}
         <div className="titlebar" data-testid="app-titlebar">
           {chrome.showChromeControls ? (
             <div

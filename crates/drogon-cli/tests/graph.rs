@@ -93,9 +93,7 @@ fn behavior() -> Behavior {
             Some("graph.resume_node") | Some("graph.retry_step") | Some("mentu.retry_step") => {
                 Action::Respond(ok_envelope(&id, json!({"run": run_result()})))
             }
-            Some("graph.run_node_failover") => {
-                Action::Respond(ok_envelope(&id, failover_result()))
-            }
+            Some("graph.run_node_failover") => Action::Respond(ok_envelope(&id, failover_result())),
             Some("graph.write_intent") => Action::Respond(ok_envelope(&id, graph_result())),
             _ => Action::Respond(error_envelope(
                 &id,
@@ -331,10 +329,12 @@ async fn graph_run_all_refuses_when_nothing_is_enabled() {
         "the refusal must say why: {message}"
     );
     // Nothing reached graph.run.
-    assert!(service
-        .captured()
-        .iter()
-        .all(|request| request["method"] != "graph.run"));
+    assert!(
+        service
+            .captured()
+            .iter()
+            .all(|request| request["method"] != "graph.run")
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -446,7 +446,10 @@ async fn graph_run_node_failover_sends_the_node_and_renders_the_winning_runtime_
     );
     assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
     let text = stdout(&output);
-    assert!(text.contains("pi/qwen3.8-flash-next-nvidia-nvfp4"), "{text}");
+    assert!(
+        text.contains("pi/qwen3.8-flash-next-nvidia-nvfp4"),
+        "{text}"
+    );
     assert!(text.contains("the fallback runtime"), "{text}");
     assert!(text.contains("opencode/claude-sonnet-4"), "{text}");
     assert!(text.contains("harness not installed"), "{text}");

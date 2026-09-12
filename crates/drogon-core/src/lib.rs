@@ -101,7 +101,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, RwLockWriteGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use drogon_protocol::{PROTOCOL_VERSION, Request, Response, RpcError};
@@ -261,6 +261,25 @@ pub struct Engine {
 /// `cfg(test)`.
 #[cfg(test)]
 type PreFreezeHook = Box<dyn Fn(&Engine) + Send>;
+
+/// Sha256 of this daemon process's own executable, computed once (install
+/// -resilience P5). `version` is frozen at `CARGO_PKG_VERSION`, so two
+/// different builds are indistinguishable through it alone; the binary
+/// digest is not. `None` only when the path or its bytes cannot be read
+/// (never fabricated), and the desktop treats that as "identity unknown"
+/// rather than claiming a match or a mismatch.
+fn daemon_artifact_sha256() -> Option<String> {
+    static DIGEST: OnceLock<Option<String>> = OnceLock::new();
+    DIGEST
+        .get_or_init(|| {
+            let exe = std::env::current_exe().ok()?;
+            let bytes = std::fs::read(exe).ok()?;
+            use sha2::{Digest, Sha256};
+            let digest = Sha256::digest(&bytes);
+            Some(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+        })
+        .clone()
+}
 
 impl Engine {
     pub fn open(data_dir: &Path) -> Result<Engine, RpcError> {
@@ -685,6 +704,14 @@ impl Engine {
             "protocol": PROTOCOL_VERSION,
             "capabilities": CAPABILITIES,
             "version": env!("CARGO_PKG_VERSION"),
+            // Install-resilience P4/P5 (additive, both nullable-safe for
+            // older readers): the monotonic wire-behavior floor this build
+            // admits, and the sha256 of this daemon's own binary so a
+            // freshly-installed desktop can detect a changed daemon behind
+            // a still-running detached process (version strings alone
+            // cannot distinguish two builds of the same CARGO_PKG_VERSION).
+            "featureProtocol": drogon_protocol::FEATURE_PROTOCOL_VERSION,
+            "daemonArtifactSha256": daemon_artifact_sha256(),
             // Kernel-observer correlation only, per
             // `service-quiescence-contract.md`: "not signaling authority."
             "processId": std::process::id(),

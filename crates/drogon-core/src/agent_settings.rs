@@ -290,12 +290,12 @@ impl Engine {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(
-                        &backup_temp,
-                        std::fs::Permissions::from_mode(0o600),
-                    )?;
+                    std::fs::set_permissions(&backup_temp, std::fs::Permissions::from_mode(0o600))?;
                 }
-                std::fs::rename(&backup_temp, self.data_dir.join("agent-settings.json.previous"))
+                std::fs::rename(
+                    &backup_temp,
+                    self.data_dir.join("agent-settings.json.previous"),
+                )
             });
             if let Err(backup_error) = backup_ok {
                 let _ = std::fs::remove_file(&backup_temp);

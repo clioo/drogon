@@ -323,8 +323,7 @@ impl Fixture {
     /// run row stays `running` (the watcher that would have finalized it
     /// died with the process). Direct SQL on this fixture's own data dir.
     fn seed_row_left_running_by_a_crash(&self, run_id: &str) {
-        let conn =
-            rusqlite::Connection::open(self.data_dir.join("drogon.sqlite3")).unwrap();
+        let conn = rusqlite::Connection::open(self.data_dir.join("drogon.sqlite3")).unwrap();
         let changed = conn
             .execute(
                 "UPDATE mentu_runs SET status = 'running', ended_at = NULL, error = NULL \

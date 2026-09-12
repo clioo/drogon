@@ -205,8 +205,10 @@ async function serving(call: NativeCall): Promise<boolean> {
  * endpoint itself to become absent before spawning the replacement: status
  * loss alone can race that final teardown, while making daemon startup wait
  * would make every second daemon invocation hang behind an owned directory.
+ * Exported for the install-resilience P5 auto-restart
+ * (`daemon-update-restart.ts`), which must not diverge from this handoff.
  */
-async function waitForEndpointAbsent(
+export async function waitForEndpointAbsent(
   deps: Pick<
     DaemonRestartDeps,
     "observeEndpoint" | "sleep" | "pollIntervalMs" | "shutdownWaitMs"
@@ -317,7 +319,8 @@ export async function handleDaemonRestart(
       );
   }
 
-  const outcome = await bootstrapNativeRuntime({
+  const restartDeadlineAt = Date.now() + deps.spawnDeadlineMs;
+  let outcome = await bootstrapNativeRuntime({
     // The flag gates spawning; reaching here means an explicit operator
     // restart with a known binary (packaged, or the dev seam), which is
     // the same operator intent the startup bootstrap honors when packaged.
@@ -334,6 +337,33 @@ export async function handleDaemonRestart(
     pollIntervalMs: deps.pollIntervalMs,
     deadlineMs: deps.spawnDeadlineMs,
   });
+  // A replacement that dies instantly has usually raced the old daemon's
+  // data-dir lock release: the endpoint frees before the process-lifetime
+  // flock does, so the replacement blocks on Engine::open and exits. The
+  // endpoint is free — wait for full teardown and try again, bounded.
+  for (
+    let attempt = 0;
+    attempt < 2 &&
+    (outcome.kind === "spawned-then-timed-out" || outcome.kind === "spawn-failed") &&
+    Date.now() < restartDeadlineAt;
+    attempt += 1
+  ) {
+    await deps.sleep(1_000);
+    outcome = await bootstrapNativeRuntime({
+      isPackaged: true,
+      platform: deps.platform,
+      binaryExists: () => deps.binaryExists(target.binaryPath),
+      checkStatus: (_signal) =>
+        deps.call("status", {}) as Promise<
+          import("../shared/session-contract").Result<Status>
+        >,
+      observeLocalEndpoint: deps.observeEndpoint,
+      spawnDaemon: () => deps.spawn(target.binaryPath, target.args, deps.env),
+      sleep: deps.sleep,
+      pollIntervalMs: deps.pollIntervalMs,
+      deadlineMs: deps.spawnDeadlineMs,
+    });
+  }
   if (outcome.kind === "spawned-then-healthy")
     return { restarted: true, managed: true, reason: null, stoppedSessions };
   if (outcome.kind === "already-healthy")
