@@ -7,7 +7,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use super::{compiler, failover, store};
-use crate::mentu::{execution, storage};
+use crate::mentu::{execution, run_record, storage};
 use crate::{Engine, error};
 use drogon_protocol::graph::{
     GraphFailoverAttemptRecord, GraphIntent, GraphNodeIntent, GraphOrchestratorRun as Run,
@@ -47,6 +47,61 @@ fn parse<T: serde::de::DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
     serde_json::from_value(value.clone()).map_err(|e| error::invalid_argument(e.to_string()))
 }
 
+/// Refuse only the ambiguous bare Pi ids the host's own model catalog can
+/// prove. Unavailable or non-enumerating catalogs remain honest but cannot
+/// establish ambiguity, so those selections stay manual-unverified.
+fn validate_pi_model_refs(engine: &Engine, refs: &[(&str, &str)]) -> Result<(), RpcError> {
+    if !refs.iter().any(|(harness, model)| {
+        *harness == "pi" && !model.trim().is_empty() && !model.contains('/')
+    }) {
+        return Ok(());
+    }
+    let response = engine.dispatch(Request {
+        protocol: drogon_protocol::PROTOCOL_VERSION,
+        request_id: uuid::Uuid::new_v4().to_string(),
+        auth: None,
+        method: "harness.models".into(),
+        params: json!({"harnessId": "pi"}),
+    });
+    if !response.ok {
+        return Err(response
+            .error
+            .unwrap_or_else(|| error::invalid_argument("Pi model catalog probe failed.")));
+    }
+    let catalog = &response
+        .result
+        .ok_or_else(|| error::invalid_argument("Pi model catalog probe returned no catalog."))?["catalog"];
+    if catalog.get("status").and_then(Value::as_str) != Some("enumerated") {
+        return Ok(());
+    }
+    for (harness, model) in refs {
+        if *harness == "pi" && !model.trim().is_empty() && !model.contains('/') {
+            reject_ambiguous_pi_model(catalog, model)?;
+        }
+    }
+    Ok(())
+}
+
+fn reject_ambiguous_pi_model(catalog: &Value, model: &str) -> Result<(), RpcError> {
+    let mut alternatives: Vec<String> = catalog
+        .get("entries")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry.get("id").and_then(Value::as_str) == Some(model))
+        .filter_map(|entry| Some(format!("{}/{}", entry.get("provider")?.as_str()?, model)))
+        .collect();
+    alternatives.sort();
+    alternatives.dedup();
+    if alternatives.len() > 1 {
+        return Err(error::invalid_argument(format!(
+            "Pi model '{model}' is ambiguous across providers; use one of the qualified forms: {}.",
+            alternatives.join(", ")
+        )));
+    }
+    Ok(())
+}
+
 impl Engine {
     fn save_orchestrator(&self, run: &mut Run) -> Result<(), RpcError> {
         run.updated_at = crate::now_rfc3339();
@@ -76,6 +131,19 @@ impl Engine {
         self.mutating(request, |engine, params| {
             let parsed: Policy = parse(params)?;
             parsed.policy.validate()?;
+            let mut model_refs: Vec<(&str, &str)> = parsed
+                .policy
+                .approved_runtimes
+                .iter()
+                .map(|runtime| (runtime.harness.as_str(), runtime.model.as_str()))
+                .collect();
+            if let Some(fallback) = parsed.policy.fallback_runtime.as_ref() {
+                model_refs.push((fallback.harness.as_str(), fallback.model.as_str()));
+            }
+            if let Some(main) = parsed.main.as_ref() {
+                model_refs.push((main.harness.as_str(), main.model.as_str()));
+            }
+            validate_pi_model_refs(engine, &model_refs)?;
             let _gate = engine.graph_orchestrator_gate.lock().unwrap();
             let path = engine.workspace_path(&parsed.workspace_id)?;
             let raw = store::read_raw(&path)?;
@@ -115,6 +183,16 @@ impl Engine {
             }
             let policy = store::read_graph(&path)?.intent.policy;
             policy.validate()?;
+            let mut model_refs: Vec<(&str, &str)> = policy
+                .approved_runtimes
+                .iter()
+                .map(|runtime| (runtime.harness.as_str(), runtime.model.as_str()))
+                .collect();
+            if let Some(fallback) = policy.fallback_runtime.as_ref() {
+                model_refs.push((fallback.harness.as_str(), fallback.model.as_str()));
+            }
+            model_refs.push((parsed.main.harness.as_str(), parsed.main.model.as_str()));
+            validate_pi_model_refs(engine, &model_refs)?;
             let now = crate::now_rfc3339();
             let mut run = Run {
                 id: uuid::Uuid::new_v4().simple().to_string(),
@@ -310,10 +388,26 @@ impl Engine {
                     return Ok(());
                 }
             }
+            let shell_adapter = step
+                .runtime
+                .as_ref()
+                .is_some_and(|runtime| matches!(runtime.harness.as_str(), "pi" | "opencode"));
+            let stderr_reason = if shell_adapter {
+                child.mentu_run_id.as_deref().and_then(|mentu_run_id| {
+                    run_record::read_run_json(&root, mentu_run_id)
+                        .ok()
+                        .flatten()
+                        .and_then(|run_json| {
+                            run_record::shell_step_stderr_tail(&root, mentu_run_id, &run_json)
+                        })
+                })
+            } else {
+                None
+            };
             if let Some(attempt) = step.attempts.last_mut() {
                 attempt.outcome = "failed".into();
                 attempt.reason =
-                    Some(child.error.unwrap_or_else(|| {
+                    Some(stderr_reason.or(child.error).unwrap_or_else(|| {
                         "Worker did not produce a valid evaluation result.".into()
                     }));
             }
@@ -612,6 +706,52 @@ pub fn spawn(engine: Arc<Engine>) -> Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ambiguous_pi_models_name_qualified_alternatives() {
+        let catalog = json!({
+            "status": "enumerated",
+            "entries": [
+                {"provider": "azure-openai-responses", "id": "gpt-5.6-luna"},
+                {"provider": "openai-codex", "id": "gpt-5.6-luna"},
+                {"provider": "openai-codex", "id": "unique"}
+            ]
+        });
+        let error = reject_ambiguous_pi_model(&catalog, "gpt-5.6-luna").unwrap_err();
+        assert!(error.message.contains("ambiguous across providers"));
+        assert!(
+            error
+                .message
+                .contains("azure-openai-responses/gpt-5.6-luna")
+        );
+        assert!(error.message.contains("openai-codex/gpt-5.6-luna"));
+        assert!(reject_ambiguous_pi_model(&catalog, "unique").is_ok());
+        assert!(reject_ambiguous_pi_model(&catalog, "openai-codex/gpt-5.6-luna").is_ok());
+    }
+
+    #[test]
+    fn shell_adapter_stderr_tail_preserves_cause_and_redacts_bearer_value() {
+        let root = tempfile::tempdir().unwrap();
+        let run_dir = root.path().join(".mentu/runs/run_fixture");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::write(
+            run_dir.join("step.stderr"),
+            "Model \\\"gpt-5.6-luna\\\" is ambiguous across providers: Bearer secret-value\\n",
+        )
+        .unwrap();
+        let run_json = json!({
+            "steps": [{
+                "backend": "shell",
+                "exit_code": 1,
+                "error_file": "step.stderr"
+            }]
+        });
+        let reason = run_record::shell_step_stderr_tail(root.path(), "run_fixture", &run_json)
+            .expect("stderr tail");
+        assert!(reason.contains("ambiguous across providers"));
+        assert!(!reason.contains("secret-value"));
+        assert!(reason.contains("[redacted]"));
+    }
 
     #[test]
     fn evaluations_require_a_valid_verdict_and_nonempty_evidence() {

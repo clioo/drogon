@@ -11,9 +11,11 @@ use sha2::{Digest, Sha256};
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
-    sync::Arc,
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
+
+static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 const SCRIPT: &str = r#"#!/bin/sh
 set -eu
@@ -159,6 +161,7 @@ impl Drop for Fixture {
 
 #[test]
 fn daemon_runs_off_mode_and_both_roles_with_snapshot_policy_and_fallback() {
+    let _lock = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
     let mut fixture = Fixture::new();
     let invalid = fixture.engine.dispatch(Request {
         protocol: PROTOCOL_VERSION,
@@ -283,4 +286,48 @@ fn daemon_runs_off_mode_and_both_roles_with_snapshot_policy_and_fallback() {
     let mut scheduler = orchestrator::spawn(fixture.engine.clone());
     assert_eq!(fixture.settled()["status"], "passed");
     scheduler.shutdown();
+}
+
+#[test]
+fn start_rejects_bare_ambiguous_pi_model_but_accepts_qualified_and_unique() {
+    let _lock = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    for model in ["shared-model", "p2/shared-model", "unique-model"] {
+        let fixture = Fixture::new();
+        let pi = fixture.root.path().join("pi-fixture");
+        fs::write(
+            &pi,
+            "#!/bin/sh\ncase \"$1\" in\n --version) echo 0.85.1;;\n --list-models) printf 'provider      model                context  max-out  thinking  images\\np1            shared-model         1K       1K       no        no\\np2            shared-model         1K       1K       no        no\\np1            unique-model         1K       1K       no        no\\n';;\n *) exit 2;;\nesac\n",
+        )
+        .unwrap();
+        fs::set_permissions(&pi, fs::Permissions::from_mode(0o755)).unwrap();
+        call(
+            &fixture.engine,
+            "agent.settings_update",
+            json!({"updates": {
+                "agentCmdOverrides": {"pi": pi},
+                "agentDefaultEnv": {"pi": {"PI_CODING_AGENT_DIR": "/nonexistent/drogon-graph-test-pi"}}
+            }}),
+        );
+        let response = fixture.engine.dispatch(Request {
+            protocol: PROTOCOL_VERSION,
+            request_id: uuid::Uuid::new_v4().to_string(),
+            auth: None,
+            method: "graph.orchestrator_start".into(),
+            params: json!({"workspaceId":fixture.workspace,"main":{"id":"main","title":"Task","harness":"pi","model":model,"prompt":"true","enabled":true}}),
+        });
+        if model == "shared-model" {
+            assert!(
+                !response.ok,
+                "bare ambiguous id must be refused: {response:?}"
+            );
+            let error = response.error.unwrap();
+            assert!(error.message.contains("p1/shared-model"), "{error:?}");
+            assert!(error.message.contains("p2/shared-model"), "{error:?}");
+        } else {
+            assert!(
+                response.ok,
+                "qualified and unique ids are admitted: {response:?}"
+            );
+        }
+    }
 }

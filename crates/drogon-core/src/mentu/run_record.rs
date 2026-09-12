@@ -182,6 +182,66 @@ pub fn parse_steps(run_json: &Value, mentu_run_id: &str) -> Vec<MentuStepRun> {
         .collect()
 }
 
+/// Returns the bounded stderr tail for a failed shell step. Shell-adapter
+/// failures are otherwise often represented only by Mentu's generic
+/// bookkeeping warning, which hides the harness's actual diagnosis.
+pub fn shell_step_stderr_tail(
+    workspace_root: &Path,
+    mentu_run_id: &str,
+    run_json: &Value,
+) -> Option<String> {
+    let step = run_json
+        .get("steps")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|step| {
+            step.get("backend").and_then(Value::as_str) == Some("shell")
+                && step
+                    .get("exit_code")
+                    .and_then(Value::as_i64)
+                    .is_some_and(|code| code != 0)
+        })?;
+    let error_file = step.get("error_file").and_then(Value::as_str)?;
+    if error_file.is_empty() || error_file.contains('/') || error_file.contains('\\') {
+        return None;
+    }
+    let path = run_dir(workspace_root, mentu_run_id).ok()?.join(error_file);
+    let stderr = fs::read_to_string(path).ok()?;
+    let stderr = stderr.trim();
+    if stderr.is_empty() {
+        return None;
+    }
+    let tail: String = stderr
+        .chars()
+        .rev()
+        .take(400)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    Some(scrub_diagnostic_tail(&tail))
+}
+
+/// Diagnostic text may contain credentials echoed by a CLI. Redact values
+/// after the common bearer/key markers before the text reaches a durable
+/// orchestrator attempt record.
+fn scrub_diagnostic_tail(text: &str) -> String {
+    let mut scrubbed = text.to_string();
+    for marker in ["Bearer ", "token=", "api_key=", "apikey=", "secret="] {
+        let mut search_from = 0;
+        while let Some(found) = scrubbed[search_from..].find(marker) {
+            let start = search_from + found + marker.len();
+            let end = scrubbed[start..]
+                .find(|character: char| character.is_whitespace() || ",;\"'".contains(character))
+                .map(|offset| start + offset)
+                .unwrap_or(scrubbed.len());
+            scrubbed.replace_range(start..end, "[redacted]");
+            search_from = start + "[redacted]".len();
+        }
+    }
+    scrubbed
+}
+
 /// The run's overall outcome string (`"ok"`/`"failed"`/...), mapped to this
 /// product's status enum. A run with no steps that ever failed is
 /// `succeeded` even if the top-level field is absent (older/partial
