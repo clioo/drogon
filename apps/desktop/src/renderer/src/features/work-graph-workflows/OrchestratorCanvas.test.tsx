@@ -93,6 +93,38 @@ describe("OrchestratorCanvas", () => {
     expect(screen.queryByTestId("orchestrator-flow")).toBeNull();
   });
 
+  it("ignores queued graph resize callbacks after switching to Evidence", () => {
+    const callbacks: ResizeObserverCallback[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          callbacks.push(callback);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+
+    const props = {
+      ...baseProps(),
+      policy: policyWithAdversarial(false),
+      onActiveViewChange: () => {},
+    };
+    const { rerender } = render(
+      <OrchestratorCanvas {...props} activeView="graph" />,
+    );
+    rerender(<OrchestratorCanvas {...props} activeView="evidence" />);
+
+    expect(() => {
+      for (const callback of callbacks) {
+        callback([], {} as ResizeObserver);
+      }
+    }).not.toThrow();
+    vi.unstubAllGlobals();
+  });
+
   it("refits when an off-mode run finishes after next-run testing was enabled", () => {
     installRadixJsdomStubs();
     const width = vi

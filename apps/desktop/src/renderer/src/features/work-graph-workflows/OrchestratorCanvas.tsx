@@ -471,7 +471,10 @@ export function OrchestratorCanvas({
     : policy.adversarial.enabled;
   useEffect(() => {
     if (!viewport.current) return;
-    const resize = () => setViewportWidth(viewport.current!.clientWidth);
+    const resize = () => {
+      const element = viewport.current;
+      if (element) setViewportWidth(element.clientWidth);
+    };
     const observer = new ResizeObserver(resize);
     observer.observe(viewport.current);
     resize();
@@ -479,18 +482,19 @@ export function OrchestratorCanvas({
   }, []);
   useEffect(() => {
     if (!fit || !viewport.current || !flow.current || !viewportWidth) return;
-    const fitToViewport = () =>
+    const fitToViewport = () => {
+      const content = flow.current;
+      if (!content) return;
       setZoom(
         Math.max(
           30,
           Math.min(
             100,
-            Math.floor(
-              ((viewportWidth - 48) / flow.current!.scrollWidth) * 100,
-            ),
+            Math.floor(((viewportWidth - 48) / content.scrollWidth) * 100),
           ),
         ),
       );
+    };
     const observer = new ResizeObserver(fitToViewport);
     observer.observe(flow.current);
     fitToViewport();

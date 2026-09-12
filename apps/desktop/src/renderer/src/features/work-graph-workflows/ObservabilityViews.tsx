@@ -173,7 +173,7 @@ export function UsageView({
           <Gauge className="size-4" aria-hidden />
           {snapshot.usage.length === 0
             ? "No agent has reported token usage yet. Missing usage is never counted as zero."
-            : `${snapshot.usage.length} measurements across ${agents || "unidentified"} agent${agents === 1 ? "" : "s"}.`}
+            : `${snapshot.usage.length} measurement${snapshot.usage.length === 1 ? "" : "s"} across ${agents || "unidentified"} agent${agents === 1 ? "" : "s"}.`}
         </div>
         {snapshot.usage.length > 0 ? (
           <div className="mt-4 overflow-hidden rounded-lg border border-border">

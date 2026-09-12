@@ -26,6 +26,9 @@
 //      "designed but never run" -> real-attempt distinction, not a
 //      fabricated success), and the canvas discloses which runtime would
 //      run and whether it is the free local default BEFORE the click.
+//   6. the top Graph / Evidence / Usage tabs read Drogon's native `.drogon`
+//      ledgers; recorded token totals come from exact CLI measurements and
+//      missing fields stay visibly not reported.
 //
 // Background window only: DROGON_BACKGROUND_WINDOW=1, its own
 // DROGON_DATA_DIR/DROGON_ELECTRON_PROFILE, no focus call of any kind.
@@ -68,7 +71,11 @@ const run = async (file, args, options) => {
 };
 
 const cliJson = async (dataDir, args, options = { timeout: 20000 }) => {
-  const { stdout } = await run(cli, ["--data-dir", dataDir, "--json", ...args], options);
+  const { stdout } = await run(
+    cli,
+    ["--data-dir", dataDir, "--json", ...args],
+    options,
+  );
   const envelope = JSON.parse(stdout);
   assert.equal(envelope.ok, true, `drogon-cli ${args.join(" ")}: ${stdout}`);
   return envelope.result;
@@ -86,7 +93,9 @@ async function pidsForDataDir() {
   const { stdout } = await run("/bin/ps", ["-axo", "pid=,command="]);
   return stdout
     .split("\n")
-    .filter((line) => line.includes(dataDir) && !line.includes("accept-orchestrator"))
+    .filter(
+      (line) => line.includes(dataDir) && !line.includes("accept-orchestrator"),
+    )
     .map((line) => Number.parseInt(line.trim().split(/\s+/)[0], 10))
     .filter((pid) => Number.isInteger(pid) && pid !== process.pid);
 }
@@ -126,7 +135,8 @@ async function cleanup() {
   if (daemon) await stopAcceptanceProcess(daemon);
   await stopOwnedByDataDir("daemon-or-runtime");
   const remaining = await pidsForDataDir();
-  if (remaining.length > 0) survivors.push(`post-cleanup survivors: ${remaining.join(",")}`);
+  if (remaining.length > 0)
+    survivors.push(`post-cleanup survivors: ${remaining.join(",")}`);
 }
 
 const startedAt = new Date().toISOString();
@@ -142,33 +152,53 @@ const report = {
 };
 
 async function shot(page, name) {
-  const file = path.join(report.output, name.endsWith(".png") ? name : `${name}.png`);
-  const png = await page.screenshot({ path: file, animations: "disabled", timeout: 15000 });
-  report.screenshots.push({ name, file, sha256: createHash("sha256").update(png).digest("hex") });
+  const file = path.join(
+    report.output,
+    name.endsWith(".png") ? name : `${name}.png`,
+  );
+  const png = await page.screenshot({
+    path: file,
+    animations: "disabled",
+    timeout: 15000,
+  });
+  report.screenshots.push({
+    name,
+    file,
+    sha256: createHash("sha256").update(png).digest("hex"),
+  });
   return file;
 }
 
 async function readGraph(workspace) {
-  return JSON.parse(await readFile(path.join(workspace, ".drogon", "graph.json"), "utf8"));
+  return JSON.parse(
+    await readFile(path.join(workspace, ".drogon", "graph.json"), "utf8"),
+  );
 }
 
 async function gitStatus(workspace) {
-  const { stdout } = await run("git", ["status", "--porcelain"], { cwd: workspace });
+  const { stdout } = await run("git", ["status", "--porcelain"], {
+    cwd: workspace,
+  });
   return stdout;
 }
 
 async function assertNoOverflow(page, label) {
   const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    () =>
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth,
   );
-  assert.ok(overflow <= 0, `${label} must not scroll horizontally (overflow ${overflow}px)`);
+  assert.ok(
+    overflow <= 0,
+    `${label} must not scroll horizontally (overflow ${overflow}px)`,
+  );
 }
 
 async function main() {
   const fixture = await mkdtemp(path.join(tmpdir(), "orch-"));
   dataDir = path.join(fixture, "data");
   report.dataDir = dataDir;
-  const workspace = path.join(fixture, "folder");
+  let workspace = path.join(fixture, "folder");
   report.output =
     process.env.ORCHESTRATOR_OUT ??
     path.join(root, ".preflight", "acceptance", `orchestrator-${Date.now()}`);
@@ -191,17 +221,17 @@ async function main() {
   // Turn the already-registered folder workspace into a disposable fixture
   // repo. Registering first keeps this journey's implicit folder workspace;
   // the graph brief itself is still exercised inside a real Git checkout.
-  await run(
-    "git",
-    [...gitIdentity, "init", "--initial-branch=main"],
-    { cwd: workspace },
-  );
+  await run("git", [...gitIdentity, "init", "--initial-branch=main"], {
+    cwd: workspace,
+  });
   // The graph store is an application file, not an owner change for this
   // fixture repository; keep it ignored so the policy reset can prove the
   // brief files themselves are gone and `git status --porcelain` is clean.
   await writeFile(path.join(workspace, ".gitignore"), ".drogon/\n");
   await run("git", [...gitIdentity, "add", ".gitignore"], { cwd: workspace });
-  await run("git", [...gitIdentity, "commit", "-m", "fixture"], { cwd: workspace });
+  await run("git", [...gitIdentity, "commit", "-m", "fixture"], {
+    cwd: workspace,
+  });
 
   // 1. Start the daemon this probe owns and register the workspace. No
   //    session yet — the Orchestrator must render honestly disabled.
@@ -226,27 +256,49 @@ async function main() {
       await delay(200);
     }
   }
-  const registered = await cliJson(dataDir, ["project", "add", workspace, "--name", "orch-a11y"]);
+  const registered = await cliJson(dataDir, [
+    "project",
+    "add",
+    workspace,
+    "--name",
+    "orch-a11y",
+  ]);
   report.projectId = registered.id;
-  // `project add` registers the project; its IMPLICIT workspace (the id
-  // `harness start` needs) is a separate id, found by matching the path.
-  const workspaceList = await cliJson(dataDir, ["workspace", "list"]);
-  const workspaceRecord = workspaceList.workspaces.find((w) => w.name === "orch-a11y");
-  assert.ok(workspaceRecord, `no workspace registered named orch-a11y: ${JSON.stringify(workspaceList)}`);
+  // The redesigned sidebar presents project worktrees, not a detached
+  // workspace registration. Create one real disposable worktree and use its
+  // workspace identity/path for every graph and harness assertion below.
+  const createdWorktree = await cliJson(dataDir, [
+    "worktree",
+    "create",
+    "--project",
+    registered.id,
+    "--name",
+    "orch-a11y",
+  ]);
+  workspace = createdWorktree.path;
+  report.workspace = workspace;
+  const workspaceRecord = {
+    id: createdWorktree.workspaceId,
+    name: "orch-a11y",
+  };
   report.workspaceId = workspaceRecord.id;
 
   // 2. Launch the real app in a background window and attach over CDP.
-  desktop = startAcceptanceProcess(electron, [appDir, "--remote-debugging-port=0"], {
-    stdio: ["ignore", "ignore", "pipe"],
-    env: {
-      ...process.env,
-      DROGON_DATA_DIR: dataDir,
-      DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
-      DROGON_BACKGROUND_WINDOW: "1",
-      SHELL: "/bin/sh",
-      PATH: `${fixtureBin}:${process.env.PATH}`,
+  desktop = startAcceptanceProcess(
+    electron,
+    [appDir, "--remote-debugging-port=0"],
+    {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: {
+        ...process.env,
+        DROGON_DATA_DIR: dataDir,
+        DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
+        DROGON_BACKGROUND_WINDOW: "1",
+        SHELL: "/bin/sh",
+        PATH: `${fixtureBin}:${process.env.PATH}`,
+      },
     },
-  });
+  );
   desktopPids.push(desktop.pid);
   report.desktopStderr = "";
   desktop.stderr.on("data", (bytes) => {
@@ -254,11 +306,16 @@ async function main() {
   });
   const endpoint = await new Promise((resolve, reject) => {
     let tail = "";
-    const timer = setTimeout(() => reject(new Error(`no debugging endpoint: ${tail}`)), 30000);
+    const timer = setTimeout(
+      () => reject(new Error(`no debugging endpoint: ${tail}`)),
+      30000,
+    );
     desktop.once("exit", () => reject(new Error(`electron exited: ${tail}`)));
     desktop.stderr.on("data", (bytes) => {
       tail = (tail + bytes.toString()).slice(-8192);
-      const match = tail.match(/DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/\S+)/);
+      const match = tail.match(
+        /DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/\S+)/,
+      );
       if (match) {
         clearTimeout(timer);
         resolve(match[1]);
@@ -284,39 +341,91 @@ async function main() {
     .waitFor({ timeout: 30000 });
   report.checks.push("app-launched-in-background-window");
 
-  await page.getByRole("button", { name: "Select orch-a11y" }).waitFor({ timeout: 30000 });
-  await page.getByRole("button", { name: "Select orch-a11y" }).click();
-  await page.getByRole("heading", { name: "Start a session" }).waitFor({ timeout: 20000 });
+  const workspaceCard = page.locator("[data-worktree-card-id]").first();
+  await workspaceCard.waitFor({ timeout: 30000 });
+  await workspaceCard.locator("button.shell-worktree-card-select").click();
+  await page
+    .getByRole("heading", { name: "Start a session" })
+    .waitFor({ timeout: 20000 });
   await page.getByRole("button", { name: "New tab", exact: true }).click();
   await page.getByRole("menuitem", { name: "Work Graph", exact: true }).click();
   await page.getByRole("tab", { name: "Work Graph", exact: true }).waitFor();
   const panel = page.locator('[data-testid="mentu-tab-panel"]');
 
-  // 3. No session yet: the Orchestrator button is reachable (an empty
-  //    graph is safe to start from) and the canvas shows the honest
-  //    disabled state, never a broken-looking empty canvas.
-  const orchestratorButton = panel.locator('[data-testid="work-graph-orchestrator"]');
-  await orchestratorButton.waitFor({ timeout: 15000 });
-  // A brand-new workspace's read starts as "loading" before settling to
-  // the honest "missing" (no graph.json yet) — the button is disabled only
-  // during that brief window, never once settled.
-  await page.waitForFunction(
-    () =>
-      document.querySelector('[data-testid="work-graph-orchestrator"]')?.getAttribute("disabled") === null,
-    undefined,
-    { timeout: 15000 },
-  );
-  await orchestratorButton.click();
+  // 3. Work Graph is the Orchestrator itself. With no session yet it still
+  //    shows the configurable Main agent preview, never an empty canvas.
   const canvas = panel.locator('[data-testid="orchestrator-canvas"]');
   await canvas.waitFor();
   const disabledState = panel.locator('[data-testid="orchestrator-disabled"]');
-  await disabledState.waitFor({ timeout: 10000 });
+  const mainPreview = panel.locator('[data-testid="orchestrator-main-agent"]');
+  await mainPreview.waitFor({ timeout: 10000 });
   assert.match(
-    (await disabledState.innerText()) ?? "",
-    /Start a session to enable the orchestrator/,
+    (await mainPreview.innerText()) ?? "",
+    /Configure the main task/,
   );
   await shot(page, "orchestrator-no-session-light-1440.png");
-  report.checks.push("orchestrator-honestly-disabled-with-no-session");
+  report.checks.push("orchestrator-main-task-preview-with-no-session");
+
+  // Native observability is independent of the Mentu runner. Write through
+  // the public CLI, then prove the real renderer polls and presents the same
+  // workspace files from its top-level tabs.
+  await cliJson(dataDir, [
+    "graph",
+    "evidence-add",
+    "--workspace",
+    workspaceRecord.id,
+    "--summary",
+    "Native checkpoint visible",
+    "--status",
+    "progress",
+    "--detail",
+    "Recorded directly by the lead agent.",
+    "--artifact",
+    "reports/native-check.txt",
+    "--agent",
+    "leader",
+  ]);
+  await cliJson(dataDir, [
+    "graph",
+    "usage-add",
+    "--workspace",
+    workspaceRecord.id,
+    "--input",
+    "120",
+    "--output",
+    "30",
+    "--agent",
+    "leader",
+    "--harness",
+    "pi",
+    "--model",
+    "fixture",
+  ]);
+  await panel.getByRole("tab", { name: /Evidence/ }).click();
+  try {
+    await panel
+      .getByText("Native checkpoint visible")
+      .waitFor({ timeout: 10000 });
+  } catch (error) {
+    report.observabilityPanelText = await panel.innerText();
+    await shot(page, "orchestrator-evidence-failed-light-1440.png");
+    throw error;
+  }
+  assert.match(await panel.innerText(), /reports\/native-check\.txt/);
+  await shot(page, "orchestrator-evidence-light-1440.png");
+  await panel.getByRole("tab", { name: "Usage", exact: true }).click();
+  await panel.getByText("120", { exact: true }).waitFor({ timeout: 10000 });
+  await panel.getByText("30", { exact: true }).waitFor();
+  assert.match(
+    await panel.innerText(),
+    /Missing usage is never counted as zero|1 measurement/,
+  );
+  await shot(page, "orchestrator-usage-light-1440.png");
+  await panel.getByRole("tab", { name: "Graph", exact: true }).click();
+  await mainPreview.waitFor();
+  report.checks.push("native-evidence-and-usage-tabs-read-drogon-ledgers");
+
+  if (process.env.ORCHESTRATOR_OBSERVABILITY_ONLY === "1") return;
 
   // 4. Start a real session (fixture harness, never paid inference). The
   //    daemon's own session list is what `pickMentuMainSession` reads —
@@ -332,10 +441,16 @@ async function main() {
     "unattended",
   ]);
   report.sessionId = session.id;
-  assert.equal(await gitStatus(workspace), "", "a no-policy session must leave the fixture repo clean");
+  assert.equal(
+    await gitStatus(workspace),
+    "",
+    "a no-policy session must leave the fixture repo clean",
+  );
   assert.ok(!(await readdir(workspace)).includes("AGENTS.md"));
   assert.ok(!(await readdir(workspace)).includes("CLAUDE.md"));
-  report.checks.push("no-policy-session-creates-no-brief-files-and-leaves-repo-clean");
+  report.checks.push(
+    "no-policy-session-creates-no-brief-files-and-leaves-repo-clean",
+  );
   await page.reload();
   await page
     .getByRole("button", { name: "Reveal active workspace", exact: true })
@@ -343,8 +458,6 @@ async function main() {
   await page.getByRole("button", { name: "New tab", exact: true }).click();
   await page.getByRole("menuitem", { name: "Work Graph", exact: true }).click();
   await page.getByRole("tab", { name: "Work Graph", exact: true }).waitFor();
-  await orchestratorButton.waitFor({ timeout: 15000 });
-  await orchestratorButton.click();
   await canvas.waitFor();
   const mainAgent = panel.locator('[data-testid="orchestrator-main-agent"]');
   await mainAgent.waitFor({ timeout: 15000 });
@@ -358,13 +471,19 @@ async function main() {
   //    files disappear rather than merely changing to an OFF paragraph.
   const policyPanel = panel.locator('[data-testid="subagent-policy-panel"]');
   await policyPanel.waitFor();
-  const summary = policyPanel.locator('[data-testid="subagent-policy-summary"]');
+  const summary = policyPanel.locator(
+    '[data-testid="subagent-policy-summary"]',
+  );
   await policyPanel.locator('[data-testid="delegate-toggle"]').click();
   await delay(400); // the save is fire-and-forget from a change handler
   const delegateOnPolicy = await readGraph(workspace);
   assert.equal(delegateOnPolicy.intent.policy.approvedRuntimes.length, 0);
   assert.equal(delegateOnPolicy.intent.policy.delegate, true);
-  assert.equal(delegateOnPolicy.state.nodes.length, 0, "the policy write must never touch state");
+  assert.equal(
+    delegateOnPolicy.state.nodes.length,
+    0,
+    "the policy write must never touch state",
+  );
   await cliJson(dataDir, [
     "harness",
     "start",
@@ -375,8 +494,14 @@ async function main() {
     "--permission-mode",
     "unattended",
   ]);
-  const agentsWithDelegateOn = await readFile(path.join(workspace, "AGENTS.md"), "utf8");
-  const claudeWithDelegateOn = await readFile(path.join(workspace, "CLAUDE.md"), "utf8");
+  const agentsWithDelegateOn = await readFile(
+    path.join(workspace, "AGENTS.md"),
+    "utf8",
+  );
+  const claudeWithDelegateOn = await readFile(
+    path.join(workspace, "CLAUDE.md"),
+    "utf8",
+  );
   assert.match(agentsWithDelegateOn, /Delegate: ON/, agentsWithDelegateOn);
   assert.match(claudeWithDelegateOn, /Delegate: ON/, claudeWithDelegateOn);
   assert.ok(
@@ -406,8 +531,14 @@ async function main() {
   ]);
   assert.ok(!(await readdir(workspace)).includes("AGENTS.md"));
   assert.ok(!(await readdir(workspace)).includes("CLAUDE.md"));
-  assert.equal(await gitStatus(workspace), "", "resetting the policy must clean the fixture repo");
-  report.checks.push("delegate-off-removes-the-managed-block-and-restores-a-clean-repo");
+  assert.equal(
+    await gitStatus(workspace),
+    "",
+    "resetting the policy must clean the fixture repo",
+  );
+  report.checks.push(
+    "delegate-off-removes-the-managed-block-and-restores-a-clean-repo",
+  );
 
   // Keep the existing policy-panel write-through coverage: once the reset
   // proof is complete, configure an approved runtime for the design and graph
@@ -416,9 +547,17 @@ async function main() {
   await policyPanel.locator('[data-testid="approved-runtime-row-0"]').waitFor();
   await delay(400);
   const withPolicy = await readGraph(workspace);
-  assert.equal(withPolicy.intent.policy.approvedRuntimes.length, 1, JSON.stringify(withPolicy.intent.policy));
+  assert.equal(
+    withPolicy.intent.policy.approvedRuntimes.length,
+    1,
+    JSON.stringify(withPolicy.intent.policy),
+  );
   assert.equal(withPolicy.intent.policy.delegate, false);
-  assert.equal(withPolicy.state.nodes.length, 0, "the policy write must never touch state");
+  assert.equal(
+    withPolicy.state.nodes.length,
+    0,
+    "the policy write must never touch state",
+  );
   report.checks.push("subagent-policy-writes-through-graph-write-intent-only");
 
   // 5c. FRAGILE fix: the fallback runtime can be both set AND removed.
@@ -431,9 +570,15 @@ async function main() {
     withFallback.intent.policy.fallbackRuntime,
     `fallback runtime must write through: ${JSON.stringify(withFallback.intent.policy)}`,
   );
-  const removeFallback = policyPanel.locator('[data-testid="fallback-runtime-remove"]');
+  const removeFallback = policyPanel.locator(
+    '[data-testid="fallback-runtime-remove"]',
+  );
   await removeFallback.waitFor();
-  assert.equal(await removeFallback.isDisabled(), false, "a configured fallback must be removable");
+  assert.equal(
+    await removeFallback.isDisabled(),
+    false,
+    "a configured fallback must be removable",
+  );
   await removeFallback.click();
   await delay(400);
   const withoutFallback = await readGraph(workspace);
@@ -456,29 +601,33 @@ async function main() {
   await mainAgent.click();
   // The inspector is a Popover, portaled to the document body — not a
   // descendant of `panel` — so it must be located page-wide.
-  const mainAgentInspector = page.locator('[data-testid="main-agent-inspector"]');
+  const mainAgentInspector = page.locator(
+    '[data-testid="main-agent-inspector"]',
+  );
   await mainAgentInspector.waitFor({ timeout: 10000 });
-  await page.locator('[data-testid="main-agent-harness-locked"]').waitFor({ timeout: 5000 });
-  await page.locator('[data-testid="main-agent-delete-refused"]').waitFor({ timeout: 5000 });
+  await page
+    .locator('[data-testid="main-agent-harness-locked"]')
+    .waitFor({ timeout: 5000 });
+  await page
+    .locator('[data-testid="main-agent-delete-refused"]')
+    .waitFor({ timeout: 5000 });
   await shot(page, "orchestrator-main-agent-inspector-light-1440.png");
   await page.keyboard.press("Escape");
   await mainAgentInspector.waitFor({ state: "detached", timeout: 5000 });
-  report.checks.push("leader-node-inspector-exposes-harness-and-delete-refusal-rules");
+  report.checks.push(
+    "leader-node-inspector-exposes-harness-and-delete-refusal-rules",
+  );
 
   // 6. Design 1: adversarial off — screenshots light + dark, every width.
   await summary.waitFor();
   assert.match((await summary.innerText()) ?? "", /0 optional subagents/);
-  assert.equal(await panel.locator('[data-testid="orchestrator-test-node"]').count(), 0);
+  assert.equal(
+    await panel.locator('[data-testid="orchestrator-test-node"]').count(),
+    0,
+  );
   for (const theme of ["light", "dark"]) {
     await selectSettingsTheme(page, theme);
     await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
-    // The Settings detour remounts the Mentu surfaces (same as
-    // accept-workflow-adversarial.mjs's own note), so the pane is back in
-    // its default read-only view; re-enter the Orchestrator each time.
-    if ((await panel.locator('[data-testid="orchestrator-canvas"]').count()) === 0) {
-      await orchestratorButton.waitFor({ timeout: 15000 });
-      await orchestratorButton.click();
-    }
     await canvas.waitFor();
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
@@ -493,38 +642,44 @@ async function main() {
   //    the repeat caption, and the summary line update for real.
   await selectSettingsTheme(page, "light");
   await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
-  if ((await panel.locator('[data-testid="orchestrator-canvas"]').count()) === 0) {
-    await orchestratorButton.waitFor({ timeout: 15000 });
-    await orchestratorButton.click();
-  }
   await canvas.waitFor();
   await policyPanel.locator('[data-testid="adversarial-toggle"]').click();
-  await policyPanel.locator('[data-testid="adversarial-max-iterations"]').waitFor();
-  const maxIterationsValue = policyPanel.locator('[data-testid="adversarial-max-iterations-value"]');
-  for (let i = 0; i < 20 && (await maxIterationsValue.innerText()) !== "10"; i++) {
-    await policyPanel.locator('[data-testid="adversarial-max-iterations-increase"]').click();
+  await policyPanel
+    .locator('[data-testid="adversarial-max-iterations"]')
+    .waitFor();
+  const maxIterationsValue = policyPanel.locator(
+    '[data-testid="adversarial-max-iterations-value"]',
+  );
+  for (
+    let i = 0;
+    i < 20 && (await maxIterationsValue.innerText()) !== "10";
+    i++
+  ) {
+    await policyPanel
+      .locator('[data-testid="adversarial-max-iterations-increase"]')
+      .click();
     await delay(150);
   }
   assert.equal(await maxIterationsValue.innerText(), "10");
   await panel.locator('[data-testid="orchestrator-test-node"]').waitFor();
   await panel.locator('[data-testid="orchestrator-review-node"]').waitFor();
   assert.equal(
-    (await panel.locator('[data-testid="orchestrator-repeat-caption"]').innerText()) ?? "",
+    (await panel
+      .locator('[data-testid="orchestrator-repeat-caption"]')
+      .innerText()) ?? "",
     "Repeat up to 10×",
   );
   assert.match((await summary.innerText()) ?? "", /2 optional subagents/);
   const withAdversarial = await readGraph(workspace);
   assert.equal(withAdversarial.intent.policy.adversarial.enabled, true);
   assert.equal(withAdversarial.intent.policy.adversarial.maxIterations, 10);
-  report.checks.push("adversarial-toggle-and-max-iterations-write-through-and-render");
+  report.checks.push(
+    "adversarial-toggle-and-max-iterations-write-through-and-render",
+  );
 
   for (const theme of ["light", "dark"]) {
     await selectSettingsTheme(page, theme);
     await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
-    if ((await panel.locator('[data-testid="orchestrator-canvas"]').count()) === 0) {
-      await orchestratorButton.waitFor({ timeout: 15000 });
-      await orchestratorButton.click();
-    }
     await canvas.waitFor();
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
@@ -535,10 +690,6 @@ async function main() {
   }
   await selectSettingsTheme(page, "light");
   await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
-  if ((await panel.locator('[data-testid="orchestrator-canvas"]').count()) === 0) {
-    await orchestratorButton.waitFor({ timeout: 15000 });
-    await orchestratorButton.click();
-  }
   await canvas.waitFor();
   report.checks.push("design-2-screenshots-light-dark-no-overflow");
 
@@ -548,13 +699,26 @@ async function main() {
   //    (mirrors `FREE_DEFAULT_RUNTIME` in `shared/work-graph-contract.ts`),
   //    not assumed, since the approved runtime added in step 5 could be
   //    the catalog's default free pair or something else.
-  const FREE_DEFAULT = { harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4" };
+  const FREE_DEFAULT = {
+    harness: "pi",
+    model: "qwen3.8-flash-next-nvidia-nvfp4",
+  };
   const currentPolicy = (await readGraph(workspace)).intent.policy;
-  const firstRuntime = currentPolicy.approvedRuntimes[0] ?? currentPolicy.fallbackRuntime ?? FREE_DEFAULT;
-  const expectFree = firstRuntime.harness === FREE_DEFAULT.harness && firstRuntime.model === FREE_DEFAULT.model;
-  const disclosure = panel.locator('[data-testid="orchestrator-runtime-disclosure"]');
+  const firstRuntime =
+    currentPolicy.approvedRuntimes[0] ??
+    currentPolicy.fallbackRuntime ??
+    FREE_DEFAULT;
+  const expectFree =
+    firstRuntime.harness === FREE_DEFAULT.harness &&
+    firstRuntime.model === FREE_DEFAULT.model;
+  const disclosure = panel.locator(
+    '[data-testid="orchestrator-runtime-disclosure"]',
+  );
   await disclosure.waitFor({ timeout: 10000 });
-  assert.equal(await disclosure.getAttribute("data-free-default"), String(expectFree));
+  assert.equal(
+    await disclosure.getAttribute("data-free-default"),
+    String(expectFree),
+  );
   assert.match(
     (await disclosure.innerText()) ?? "",
     expectFree ? /free local model/ : /paid\/external/,
@@ -571,8 +735,11 @@ async function main() {
   //    real provider configured, so the honest, deterministic outcome is
   //    still a launch refusal once the episode is genuinely exhausted —
   //    never a fabricated "ready".
-  const repeatCaption = panel.locator('[data-testid="orchestrator-repeat-caption"]');
-  const boundBeforeRun = (await repeatCaption.innerText().catch(() => "")) ?? "";
+  const repeatCaption = panel.locator(
+    '[data-testid="orchestrator-repeat-caption"]',
+  );
+  const boundBeforeRun =
+    (await repeatCaption.innerText().catch(() => "")) ?? "";
   await panel.locator('[data-testid="orchestrator-run-workflow"]').click();
   // DISHONEST-2, exercised live and best-effort: bump the policy DOWN
   // immediately after the click, while the loop may still be in flight.
@@ -581,17 +748,27 @@ async function main() {
   // deterministic proof of this fix lives in OrchestratorCanvas.test.tsx;
   // this only records corroborating live evidence when the race
   // cooperates, and never fails the run when it does not.
-  await policyPanel.locator('[data-testid="adversarial-max-iterations-decrease"]').click();
-  const boundRightAfterBump = (await repeatCaption.innerText().catch(() => "")) ?? "";
+  await policyPanel
+    .locator('[data-testid="adversarial-max-iterations-decrease"]')
+    .click();
+  const boundRightAfterBump =
+    (await repeatCaption.innerText().catch(() => "")) ?? "";
   if (boundBeforeRun && boundRightAfterBump === boundBeforeRun) {
-    report.checks.push("dishonest2-in-flight-caption-held-the-running-bound-live");
+    report.checks.push(
+      "dishonest2-in-flight-caption-held-the-running-bound-live",
+    );
   } else {
-    report.dishonest2LiveRaceInconclusive = { boundBeforeRun, boundRightAfterBump };
+    report.dishonest2LiveRaceInconclusive = {
+      boundBeforeRun,
+      boundRightAfterBump,
+    };
   }
   const terminal = panel.locator('[data-testid="orchestrator-terminal"]');
   await page.waitForFunction(
     () => {
-      const node = document.querySelector('[data-testid="orchestrator-terminal"]');
+      const node = document.querySelector(
+        '[data-testid="orchestrator-terminal"]',
+      );
       return node?.getAttribute("data-state") !== "never-run";
     },
     undefined,
@@ -605,34 +782,50 @@ async function main() {
     /Waiting for the main agent's delegated turn to finish/,
     "Run workflow must not launch a review before dispatching to the main agent",
   );
-  report.checks.push("run-workflow-waits-on-the-dispatched-session-before-reviewing");
+  report.checks.push(
+    "run-workflow-waits-on-the-dispatched-session-before-reviewing",
+  );
   // Let the dispatch settle and the loop's own poll (every 2s) actually
   // attempt the launch, so the recorded evidence is the REAL attempt
   // outcome, not just "a ledger now exists".
-  await page.waitForFunction(
-    () => {
-      const node = document.querySelector('[data-testid="orchestrator-terminal"]');
-      return (
-        (node?.textContent ?? "").length > 0 &&
-        !/Waiting for the main agent's delegated turn to finish/.test(node.textContent)
-      );
-    },
-    undefined,
-    { timeout: 40000 },
-  ).catch(() => {});
+  await page
+    .waitForFunction(
+      () => {
+        const node = document.querySelector(
+          '[data-testid="orchestrator-terminal"]',
+        );
+        return (
+          (node?.textContent ?? "").length > 0 &&
+          !/Waiting for the main agent's delegated turn to finish/.test(
+            node.textContent,
+          )
+        );
+      },
+      undefined,
+      { timeout: 40000 },
+    )
+    .catch(() => {});
   const terminalState = await terminal.getAttribute("data-state");
-  assert.notEqual(terminalState, "ready", "an unconfigured dev daemon must never fabricate a pass");
+  assert.notEqual(
+    terminalState,
+    "ready",
+    "an unconfigured dev daemon must never fabricate a pass",
+  );
   report.observedTerminalState = terminalState;
   report.observedTerminalText = (await terminal.innerText()) ?? "";
   await shot(page, "orchestrator-run-workflow-outcome.png");
-  report.checks.push("run-workflow-goes-through-real-dispatch-and-failover-and-never-fabricates-success");
+  report.checks.push(
+    "run-workflow-goes-through-real-dispatch-and-failover-and-never-fabricates-success",
+  );
 
   // Return the policy to its default through the real controls, then launch
   // one final fixture session. This proves the acceptance itself leaves no
   // generated brief files or dirty repository behind.
   await policyPanel.locator('[data-testid="adversarial-toggle"]').click();
   await delay(400);
-  await policyPanel.locator('[data-testid="approved-runtime-0-remove"]').click();
+  await policyPanel
+    .locator('[data-testid="approved-runtime-0-remove"]')
+    .click();
   await delay(400);
   const finalPolicy = await readGraph(workspace);
   assert.equal(finalPolicy.intent.policy.delegate, false);
@@ -651,7 +844,11 @@ async function main() {
   ]);
   assert.ok(!(await readdir(workspace)).includes("AGENTS.md"));
   assert.ok(!(await readdir(workspace)).includes("CLAUDE.md"));
-  assert.equal(await gitStatus(workspace), "", "acceptance cleanup must leave the fixture repo clean");
+  assert.equal(
+    await gitStatus(workspace),
+    "",
+    "acceptance cleanup must leave the fixture repo clean",
+  );
   report.checks.push("acceptance-resets-policy-and-leaves-fixture-repo-clean");
 
   // 10. FINDING fix: closing the session and reloading must never collapse
@@ -670,9 +867,20 @@ async function main() {
   //    agent session this workspace has, not just the original one, so the
   //    canvas genuinely has none left — exactly the state a real user
   //    reaches by closing their last session, whichever it was.
-  const stillLive = (await cliJson(dataDir, ["terminal", "list", "--workspace", workspaceRecord.id]))
-    .sessions.filter((candidate) => candidate.harnessId && candidate.verdict === "live");
-  assert.ok(stillLive.length > 0, "expected at least one live session to close");
+  const stillLive = (
+    await cliJson(dataDir, [
+      "terminal",
+      "list",
+      "--workspace",
+      workspaceRecord.id,
+    ])
+  ).sessions.filter(
+    (candidate) => candidate.harnessId && candidate.verdict === "live",
+  );
+  assert.ok(
+    stillLive.length > 0,
+    "expected at least one live session to close",
+  );
   let closeResult = null;
   for (const candidate of stillLive) {
     closeResult = await cliJson(dataDir, [
@@ -692,15 +900,15 @@ async function main() {
   await page.getByRole("button", { name: "New tab", exact: true }).click();
   await page.getByRole("menuitem", { name: "Work Graph", exact: true }).click();
   await page.getByRole("tab", { name: "Work Graph", exact: true }).waitFor();
-  await orchestratorButton.waitFor({ timeout: 15000 });
-  await orchestratorButton.click();
   await canvas.waitFor();
   assert.equal(
     await panel.locator('[data-testid="orchestrator-disabled"]').count(),
     0,
     "an exited session must never collapse the canvas to the no-session view",
   );
-  const mainAgentAfterClose = panel.locator('[data-testid="orchestrator-main-agent"]');
+  const mainAgentAfterClose = panel.locator(
+    '[data-testid="orchestrator-main-agent"]',
+  );
   await mainAgentAfterClose.waitFor({ timeout: 10000 });
   // The renderer never observes a live push for an externally-closed
   // session (confirmed empirically: no `onStateChanged` event reaches an
@@ -717,9 +925,15 @@ async function main() {
     stateAfterClose === "exited" || stateAfterClose === "unverifiable",
     `expected exited or unverifiable, got ${stateAfterClose}`,
   );
-  assert.notEqual(stateAfterClose, "live", "a session with no fresh confirmation must never render as live");
+  assert.notEqual(
+    stateAfterClose,
+    "live",
+    "a session with no fresh confirmation must never render as live",
+  );
   await shot(page, "orchestrator-exited-session-after-reload-light-1440.png");
-  report.checks.push("exited-session-survives-a-reload-instead-of-collapsing-to-no-session");
+  report.checks.push(
+    "exited-session-survives-a-reload-instead-of-collapsing-to-no-session",
+  );
 }
 
 let failure = null;
@@ -740,8 +954,13 @@ report.finishedAt = new Date().toISOString();
 report.cleanup = { survivors, desktopPids };
 if (report.cleanupError && !failure) failure = new Error(report.cleanupError);
 if (survivors.length > 0 && !failure)
-  failure = new Error(`process cleanup left survivors: ${survivors.join("; ")}`);
-await writeFile(path.join(report.output, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
+  failure = new Error(
+    `process cleanup left survivors: ${survivors.join("; ")}`,
+  );
+await writeFile(
+  path.join(report.output, "report.json"),
+  `${JSON.stringify(report, null, 2)}\n`,
+);
 console.log(
   JSON.stringify(
     {
