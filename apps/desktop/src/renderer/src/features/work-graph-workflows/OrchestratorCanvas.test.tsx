@@ -61,6 +61,38 @@ function baseProps() {
 }
 
 describe("OrchestratorCanvas", () => {
+  it("uses top-level Graph, Evidence, and Usage tabs", () => {
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        activeView="evidence"
+        onActiveViewChange={() => {}}
+        observability={{
+          updatedAt: "now",
+          usage: [],
+          evidence: [
+            {
+              id: "e1",
+              timestamp: "2026-09-12T12:00:00Z",
+              status: "progress",
+              summary: "Checkpoint visible",
+              artifacts: [],
+            },
+          ],
+        }}
+        observabilityLoading={false}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "Graph" })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: /Evidence/ }).getAttribute("data-state"),
+    ).toBe("active");
+    expect(screen.getByRole("tab", { name: "Usage" })).toBeTruthy();
+    expect(screen.getByText("Checkpoint visible")).toBeTruthy();
+    expect(screen.queryByTestId("orchestrator-flow")).toBeNull();
+  });
+
   it("refits when an off-mode run finishes after next-run testing was enabled", () => {
     installRadixJsdomStubs();
     const width = vi

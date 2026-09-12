@@ -8,6 +8,12 @@ import type { GraphBridge } from "../shared/graph-contract";
  *  payload that carries the daemon-owned `state` half, so the renderer can
  *  never write what it may only observe. */
 export const graph: GraphBridge = {
+  graphObservabilityStatus: (value) =>
+    ipcRenderer.invoke("drogon:graphObservabilityStatus", value),
+  graphEvidenceAppend: (value) =>
+    ipcRenderer.invoke("drogon:graphEvidenceAppend", value),
+  graphUsageAppend: (value) =>
+    ipcRenderer.invoke("drogon:graphUsageAppend", value),
   graphOrchestratorStart: (value) =>
     ipcRenderer.invoke("drogon:graphOrchestratorStart", value),
   graphOrchestratorStatus: (value) =>

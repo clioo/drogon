@@ -589,6 +589,38 @@ retains completed roles and refuses an unverifiable run. The scheduler
 creates only depth-one roles; their briefs prohibit further delegation.
 This is not a sandbox restriction on arbitrary commands an agent can run.
 
+### Native Evidence And Usage
+
+The lead agent keeps human-readable progress in Drogon's native workspace
+ledgers, not in Mentu. Record a checkpoint after a meaningful result, finding,
+blocker, or completion (not after every tool call):
+
+```sh
+drogon-cli graph evidence-add --workspace <ID> --status progress \
+  --summary "Unit tests pass" --detail "Validated the policy save path." \
+  --artifact reports/unit.txt --agent leader --role implementation
+```
+
+Statuses are `progress`, `finding`, `blocked`, `completed`, and `failed`.
+Entries are stored in `.drogon/evidence.json`; the desktop Evidence tab and a
+plain text editor read the same file. Include only workspace-relative artifact
+references or concise external references—never credentials or provider
+transcripts.
+
+Every agent and subagent should report exact token counts when its harness
+provides them:
+
+```sh
+drogon-cli graph usage-add --workspace <ID> --input 1200 --output 340 \
+  --cache-read 800 --harness pi --model <MODEL> --agent <AGENT_ID> --role review
+```
+
+Each usage entry is an incremental measurement; do not submit a cumulative
+session total twice. Omit fields the harness did not report—missing usage is
+unknown, never zero. The native `.drogon/usage.json` ledger and Usage tab sum
+only reported values. Read both ledgers with
+`drogon-cli graph observability --workspace <ID> --json`.
+
 Work Graph opens the Orchestrator directly. The manual node designer and
 named-workflow desktop review flow are retired from the UI; the sidebar
 opens the same Work Graph tab. Existing graph and workflow files are preserved.

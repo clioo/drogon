@@ -53,6 +53,8 @@ pub struct GraphOrchestratorStep {
 /// The workspace-relative location of the graph file.
 pub const GRAPH_FILE_DIR: &str = ".drogon";
 pub const GRAPH_FILE_NAME: &str = "graph.json";
+pub const GRAPH_EVIDENCE_FILE_NAME: &str = "evidence.json";
+pub const GRAPH_USAGE_FILE_NAME: &str = "usage.json";
 
 /// The only file version this build reads or writes. A newer file is
 /// refused (downgrade guard), never silently rewritten.
@@ -64,6 +66,70 @@ pub const MAX_GRAPH_TITLE_BYTES: usize = 512;
 pub const MAX_GRAPH_PROMPT_BYTES: usize = 64 * 1024;
 pub const MAX_GRAPH_MODEL_BYTES: usize = 256;
 pub const MAX_GRAPH_DEPENDENCIES: usize = 64;
+pub const MAX_GRAPH_OBSERVABILITY_ENTRIES: usize = 5_000;
+pub const MAX_GRAPH_EVIDENCE_SUMMARY_BYTES: usize = 4 * 1024;
+pub const MAX_GRAPH_EVIDENCE_DETAIL_BYTES: usize = 64 * 1024;
+pub const MAX_GRAPH_ARTIFACTS: usize = 64;
+
+/// One lead-agent checkpoint stored in `<workspace>/.drogon/evidence.json`.
+/// Evidence is native Drogon data: it is not a Mentu run projection.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphEvidenceEntry {
+    pub id: String,
+    pub timestamp: String,
+    pub status: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+}
+
+/// One token measurement reported by an agent/harness. Every token field is
+/// optional so a provider can report only what it actually knows; callers may
+/// never turn missing values into zero.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphUsageEntry {
+    pub id: String,
+    pub timestamp: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphObservabilitySnapshot {
+    #[serde(default)]
+    pub evidence: Vec<GraphEvidenceEntry>,
+    #[serde(default)]
+    pub usage: Vec<GraphUsageEntry>,
+    #[serde(default)]
+    pub updated_at: String,
+}
 
 /// The node status vocabulary. Never a status the daemon cannot observe:
 /// `running` requires a confirmed live child, loss of contact is
