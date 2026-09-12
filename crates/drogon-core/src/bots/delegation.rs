@@ -825,7 +825,7 @@ pub fn build_delegation_prompt(input: &DelegationPromptInput) -> String {
          creating a second worktree. If it already exists from an earlier delivery \
          of this event, reuse it.\n\
          {pull_note}\
-         2. `drogon-cli harness start --workspace <workspace id> --harness {harness_flag} \
+         2. `drogon-cli harness start --workspace <id> --harness {harness_flag} \
          --permission-mode unattended --caused-by-event {event_id} --prompt \"<task>\" --json` \
          to open a worker session on that worktree. Read `.result.id` and \
          `.result.incarnation` from the response. The `--caused-by-event` tag is \
@@ -1064,8 +1064,8 @@ pub fn drain_delegation_events<S: DispatchSeam>(
             return summary;
         }
     };
-    // Bots that already tripped the cap this drain: their remaining events
-    // stay queued (another bot's events still drain normally).
+    // Bots that already tripped the cap this drain: their remaining peeked
+    // events are settled immediately (another bot's events still drain normally).
     let mut capped: HashSet<String> = HashSet::new();
     for peeked in &events {
         summary.claimed += 1;
