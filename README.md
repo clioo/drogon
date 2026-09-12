@@ -234,6 +234,24 @@ test windows stay inactive and never steal focus. Surfaces are compared against 
 own recorded baselines, pixel- and accessibility-tree-level; every reported difference
 becomes a tracked fix.
 
+## Install it in one command
+
+`make install` packages this checkout, replaces the installed app, and brings
+both halves back up — the daemon it ships and the desktop:
+
+```sh
+make install                 # build, replace /Applications/Drogon.app, restart
+make install-main            # the same, from a fresh origin/main build
+make install BUNDLE=<path>   # install an already-packaged Drogon.app
+make install FLAGS=--no-restart
+```
+
+It quits the running app, stops its detached daemon through that bundle's own
+scoped `drogon-stop-daemon`, swaps the bundle with two renames (keeping the
+previous build beside it for rollback), relaunches, and then reports whether the
+new service actually came back. Packaging refuses a dirty checkout, so commit
+first. The lower-level flow below stays available and is what a release uses.
+
 ## Install the macOS preview
 
 From a clean checkout on `main`, build the release binaries and an ad-hoc-signed,
