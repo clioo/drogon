@@ -116,6 +116,12 @@ export type BotRunReceipt = {
   error: string | null;
   observedAt: number | null;
   recordedAt: number;
+  /** Honest recovery notice (the adversarial report: a missing Bot home
+   *  was a permanent dead end): set by the daemon when an open-session
+   *  dispatch found the Bot's pinned home directory MISSING and recreated
+   *  it -- the previous files in it are gone, and the UI must say so
+   *  instead of silently pretending nothing was lost. Null otherwise. */
+  homeNotice: string | null;
 };
 
 export type BotHistoryInput = BotScope & { botId: string; limit?: number };
@@ -357,11 +363,15 @@ export type BotLiveSession = {
  *    session with the harness's resume mechanism so the conversation
  *    continues.
  *  - `open`: there is no recorded session at all; a fresh session is the
- *    correct, honest behavior.
+ *    correct, honest behavior. The variant may carry a `notice`: the
+ *    recorded link was a PHANTOM (`recordedSessionMissing`) -- the daemon
+ *    positively holds no live child and no durable row for it -- so the
+ *    fresh session is safe and the notice says the previous session is
+ *    gone instead of refusing with advice that can never work.
  *  - `unknown`: a recorded session exists but its liveness cannot be
- *    established (daemon build without the projection, or the snapshot has
- *    not loaded). NEVER dispatch a new session here -- that is the
- *    duplicate-creating bug; the caller refuses honestly instead. */
+ *    established (daemon build without the projection). NEVER dispatch a
+ *    new session here -- that is the duplicate-creating bug; the caller
+ *    refuses honestly and names a control that actually works. */
 export type BotSessionResolution =
   | { kind: "focus"; session: BotLiveSession }
   | {
@@ -378,8 +388,25 @@ export type BotSessionResolution =
        */
       resumeByIdentity?: "session" | "bot-record" | null;
     }
-  | { kind: "open" }
-  | { kind: "unknown" };
+  | {
+      kind: "open";
+      /** Set when the recorded link is a PHANTOM the daemon positively
+       *  cannot resolve (it reports `recordedSessionMissing`: no live
+       *  child and no durable session row). The open is fresh and safe --
+       *  there is no live Drogon session to duplicate -- and the notice
+       *  says what happened instead of refusing with advice that can
+       *  never work. Absent for a plain first open. */
+      notice?: string;
+    }
+  | {
+      /** Recorded but liveness not established by a daemon that COULD have
+       *  established it is refused: an old daemon build (no projection at
+       *  all) may still hold a live session this renderer cannot see, so
+       *  opening a second one could duplicate it. The refusal must name a
+       *  control that actually works (the card's "New session" button),
+       *  never a refresh that cannot change the answer. */
+      kind: "unknown";
+    };
 
 export type BotsPanelTrigger =
   | { kind: "reactive"; event: string | null }
@@ -425,6 +452,14 @@ export type BotsPanelSession = {
   workspaceId?: string;
   incarnation?: string;
   verdict?: "live" | "unverifiable" | "exited";
+  /** The daemon positively resolved the recorded link and found NOTHING:
+   *  no live child in its registry and no durable session row. The link is
+   *  a phantom (the tab was closed, or any wiped state), a refresh can
+   *  never change this (the lookup already ran), and there is no live
+   *  Drogon session a second open could duplicate. Absent = the daemon
+   *  build predates this projection, so liveness stays genuinely unknown
+   *  and the conservative refusal stands. */
+  recordedSessionMissing?: boolean;
   /** The provider-native conversation this Bot session is, as the harness
    *  itself reported it (Claude/Codex `session_id`, ...), latched onto the
    *  record when the daemon learned it. This is what a reopen names, and it

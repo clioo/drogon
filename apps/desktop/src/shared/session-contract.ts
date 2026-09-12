@@ -130,13 +130,17 @@ export type Session = {
   agentSessionTranscriptPath?: string | null;
   /**
    * Additive, `harness.start` replies only: how the resume request actually
-   * landed. `resumed` = the launch named the recorded provider conversation;
-   * `continued` = no recorded identity, so the CLI's own most-recent entrypoint
-   * was used; `fresh` = the daemon declined to resume (nothing to resume) and
-   * started a NEW conversation. Absent on `session.list` rows (a list read is
-   * not a launch) — and `fresh` must never be presented as a restore.
+   * landed. `resumed` = the launch named the recorded provider conversation
+   * and the daemon VERIFIED it (its persisted transcript exists);
+   * `continued` = no recorded identity, so the CLI's own most-recent
+   * entrypoint was used; `fresh` = the daemon declined to resume (nothing to
+   * resume) and started a NEW conversation; `resume-unverified` = an id-only
+   * locator the daemon could not verify before launch -- the harness's own
+   * output is the only honest confirmation, so the pane withholds the
+   * restored banner. Absent on `session.list` rows (a list read is not a
+   * launch) — and `fresh` must never be presented as a restore.
    */
-  agentResume?: "resumed" | "continued" | "fresh";
+  agentResume?: "resumed" | "continued" | "fresh" | "resume-unverified";
 };
 /**
  * Install-resilience P4/P5 (additive, both optional so an older daemon's

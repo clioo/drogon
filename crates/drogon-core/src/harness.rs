@@ -167,6 +167,7 @@ impl Engine {
         // for the same conversation instead of the most recent one in the
         // directory. A row that recorded no identity leaves the explicit
         // locator unset and the launch degrades exactly as before.
+        let mut locator_from_row = false;
         if let Some(prior) = crate::optional_str(params, "resumeSessionId")? {
             let recorded = {
                 let conn = self.db.lock().unwrap();
@@ -177,36 +178,71 @@ impl Engine {
                 if request.agent_session_transcript_path.is_none() {
                     request.agent_session_transcript_path = identity.transcript_path;
                 }
+                locator_from_row = true;
             }
         }
-        // Resume degrade (Defect 2 safety): a reopen with no recorded
-        // provider id asks the harness to continue its most recent
-        // conversation in this session's cwd. When the harness's own store
-        // positively holds no conversation there -- a Bot home provisioned
-        // moments ago, or one whose earlier sessions never persisted a
-        // transcript -- `claude --continue` refuses to start and exits
-        // instead of opening a fresh interactive session. Degrade to a normal
-        // start rather than boot nothing; an unmodeled harness layout returns
-        // `None` and keeps the caller's request. The degrade is reported back
-        // (`agentResume: "fresh"`) so the pane can say it started fresh
-        // instead of implying a continuation. An EXPLICIT locator skips this
-        // check entirely: the harness's own reported id is authoritative, and
-        // a stale id is the harness's own error to report, never something to
-        // second-guess from a directory listing.
+        // Resume honesty (owner rule: "a fresh start must say it started
+        // fresh"): the pane's banner must report what ACTUALLY happened,
+        // never the intention the argv encodes.
+        //
+        // - Non-explicit resume (no recorded locator): the CLI's own
+        //   most-recent entrypoint is requested and the harness's own store
+        //   decides (Defect 2 safety) -- a positive absence degrades to a
+        //   normal start.
+        // - Explicit locator: when the daemon resolved it from a durable
+        //   row (`resumeSessionId`), the persisted transcript path (from
+        //   the harness's own hook payload) is verified before anything may
+        //   claim a restoration. A recorded transcript that no longer
+        //   exists means the conversation is gone: the launch degrades to
+        //   fresh (the real CLI answers a stale id with "No conversation
+        //   found with session ID: <id>" and exit 1 -- it never starts a
+        //   new conversation on its own).
+        // - An id-only locator (no transcript path to check) is
+        //   unverifiable at launch: the argv keeps the harness's own resume
+        //   verb, but the result reports `resume-unverified` so the pane
+        //   withholds the restored banner -- the harness's own output is
+        //   the only honest confirmation left.
+        //
+        // The existence check applies ONLY to a locator the daemon resolved
+        // itself from a durable session row (`resumeSessionId`): there the
+        // transcript path came from the hook payload of THAT row, in the cwd
+        // the session actually ran in, so a missing file means the recorded
+        // conversation is really gone. A locator that arrived directly on
+        // the params (the Bot open-session flow, relayed from the Bot
+        // record) must NOT be second-guessed this way: its hook-reported
+        // transcript path names the session's ORIGINAL project directory,
+        // while the harness's own store -- the only authority on whether
+        // `--resume <id>` can be served -- lives wherever the CLI keeps it
+        // now. Gating that on a file check declined legitimate resumes (the
+        // owner's 10/10 baseline caught exactly this); the unverified
+        // locator launches and the harness's own output confirms or
+        // refuses, visibly, above no restored banner at all.
         let mut declined_resume = false;
-        if request.resume && !request.headless && !explicit_resume_is_usable(&request) {
-            let cwd = {
-                let conn = self.db.lock().unwrap();
-                crate::workspace::get_path(&conn, workspace_id)?
-            };
-            if drogon_harness::resumable_conversation_exists(
-                request.harness_id,
-                std::path::Path::new(&cwd),
-                None,
-            ) == Some(false)
-            {
-                request.resume = false;
-                declined_resume = true;
+        if request.resume && !request.headless {
+            if explicit_resume_is_usable(&request) {
+                if locator_from_row
+                    && request
+                        .agent_session_transcript_path
+                        .as_deref()
+                        .is_some_and(|path| !std::path::Path::new(path).is_file())
+                {
+                    request.resume = false;
+                    declined_resume = true;
+                }
+            } else {
+                let cwd = {
+                    let conn = self.db.lock().unwrap();
+                    crate::workspace::get_path(&conn, workspace_id)?
+                };
+                if drogon_harness::resumable_conversation_exists(
+                    request.harness_id,
+                    std::path::Path::new(&cwd),
+                    None,
+                ) == Some(false)
+                {
+                    request.resume = false;
+                    declined_resume = true;
+                }
             }
         }
         // C01 consumer (C01-QA-1): the explicit selection is validated
@@ -494,7 +530,21 @@ impl Engine {
         let agent_resume = if declined_resume || !request.resume {
             "fresh"
         } else if explicit_resume_is_usable(&request) {
-            "resumed"
+            // A verified locator claims restoration; anything else -- an
+            // id-only locator, or one relayed from a Bot record whose
+            // transcript path the daemon cannot vouch for -- reports
+            // `resume-unverified` so the pane withholds the banner and the
+            // harness's own output is the confirmation.
+            if locator_from_row
+                && request
+                    .agent_session_transcript_path
+                    .as_deref()
+                    .is_some_and(|path| std::path::Path::new(path).is_file())
+            {
+                "resumed"
+            } else {
+                "resume-unverified"
+            }
         } else {
             "continued"
         };

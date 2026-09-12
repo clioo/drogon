@@ -249,17 +249,71 @@ fn uppercase_handle_normalizes_to_lowercase_dir() {
 fn case_variant_second_provision_is_denied_no_alias_dir() {
     let fx = Fx::new();
     let a = fx.create_bot("c1", "Upper", Some("Watcher"));
-    let b = fx.create_bot("c2", "Lower", Some("watcher"));
     let aid = a["id"].as_str().unwrap();
-    let bid = b["id"].as_str().unwrap();
     let pa = fx.provision("p1", aid);
     assert_eq!(pa["handle"], "watcher");
-    // Same canonical handle: collision, never a second aliased home.
+
+    // The create-time contract (the adversarial report on the Bots data
+    // model): a case-variant duplicate handle that could never boot is
+    // rejected HERE, with the real reason naming the live owner, instead
+    // of being accepted and failing forever at first open.
+    let refused = fx.call(
+        "c2",
+        "bot.create",
+        json!({
+            "workspaceId": fx.workspace_id,
+            "hostId": fx.host_id,
+            "body": bot_body("Lower", Some("watcher")),
+        }),
+    );
+    assert!(!refused.ok, "{refused:?}");
+    let error = refused.error.unwrap();
+    assert_eq!(error.code, "invalid_argument");
+    assert!(
+        error.message.contains("already owned by bot") && error.message.contains(aid),
+        "the refusal must name the real owner and the real reason: {error:?}"
+    );
+    let bot_rows: i64 = fx
+        .conn()
+        .query_row("SELECT COUNT(*) FROM bots WHERE id != ?1", [aid], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(bot_rows, 0, "a refused create leaves no bot row");
+
+    // A LEGACY case-variant pair (a data dir written before create-time
+    // rejection existed, seeded straight into storage to simulate it) is
+    // still denied at PROVISION time: same canonical handle means a
+    // collision, never a second aliased home.
+    let legacy = drogon_core::bots::records::Bot {
+        id: "legacy-lower".to_string(),
+        character_preset: "none".to_string(),
+        display_identity: drogon_core::bots::records::DisplayIdentity {
+            display_name: "Lower".to_string(),
+            handle: Some("watcher".to_string()),
+            title: None,
+        },
+        harness_policy: drogon_core::bots::records::HarnessModelPolicy {
+            default_harness: "codex".to_string(),
+            explicit_model: None,
+        },
+        instructions: "Guard the realm.".to_string(),
+        memories: Vec::new(),
+        responsibilities: Vec::new(),
+        current_session: None,
+        created_at: 0.0,
+        updated_at: 0.0,
+    };
+    let folder: String = fx
+        .conn()
+        .query_row("SELECT folder FROM bots WHERE id = ?1", [aid], |r| r.get(0))
+        .unwrap();
+    drogon_core::bots::storage::create_bot(&fx.conn(), &fx.host_id, &folder, &legacy).unwrap();
     assert_eq!(
         code_of(fx.call(
             "p2",
             "bot.self_provision",
-            json!({"botId": bid, "actorBotId": bid}),
+            json!({"botId": "legacy-lower", "actorBotId": "legacy-lower"}),
         )),
         "invalid_argument"
     );
@@ -267,7 +321,7 @@ fn case_variant_second_provision_is_denied_no_alias_dir() {
         .conn()
         .query_row(
             "SELECT COUNT(*) FROM bot_homes WHERE bot_id = ?1",
-            [bid],
+            ["legacy-lower"],
             |r| r.get(0),
         )
         .unwrap();

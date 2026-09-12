@@ -55,13 +55,19 @@ fn character_guidance(preset: &str) -> Option<&'static str> {
 fn identity_lines(bot: &Bot) -> String {
     let mut lines = vec![format!(
         "Persistent Drogon Bot identity\nName: {}",
-        bot.display_identity.display_name
+        super::context_files::document_identity_text(&bot.display_identity.display_name)
     )];
     if let Some(title) = &bot.display_identity.title {
-        lines.push(format!("Role: {title}"));
+        lines.push(format!(
+            "Role: {}",
+            super::context_files::document_identity_text(title)
+        ));
     }
     if let Some(handle) = &bot.display_identity.handle {
-        lines.push(format!("Handle: @{handle}"));
+        lines.push(format!(
+            "Handle: @{}",
+            super::context_files::document_identity_text(handle)
+        ));
     }
     lines.join("\n")
 }

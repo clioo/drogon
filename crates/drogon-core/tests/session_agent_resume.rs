@@ -161,7 +161,13 @@ fn the_reported_provider_session_id_survives_a_daemon_restart_and_names_the_resu
             // Two Engine instances over ONE data dir = the daemon restart.
             let data_dir = tempfile::tempdir().unwrap();
             let provider_id = "9f8d1c2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f";
-            let transcript = "/tmp/nowhere/9f8d1c2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f.jsonl";
+            // The transcript the harness's hook reported: a REAL file that
+            // survives the restart (the verified-locator contract -- a
+            // resume whose transcript is gone degrades to fresh).
+            let transcript_root = tempfile::tempdir().unwrap();
+            let transcript = transcript_root.path().join(format!("{provider_id}.jsonl"));
+            std::fs::write(&transcript, "{}\n").unwrap();
+            let transcript = transcript.to_string_lossy().to_string();
             let (workspace_id, session_id, incarnation) = {
                 let engine = Engine::open(data_dir.path()).unwrap();
                 let workspace_id = registered(&engine, project.path());
@@ -473,4 +479,298 @@ fn an_older_data_dir_gains_the_agent_session_columns() {
     assert_eq!(legacy["verdict"], "unverifiable");
     assert_eq!(legacy["agentSessionId"], Value::Null);
     assert_eq!(legacy["agentSessionTranscriptPath"], Value::Null);
+}
+
+/// Adversarial-report regression ("SESSION RESTORED" when nothing was
+/// restored): the session row latches a provider conversation whose
+/// transcript has since been deleted from the harness's store. The real CLI
+/// answers `--resume <stale-id>` with "No conversation found with session
+/// ID: <id>" and exit 1 -- it does NOT silently start a new conversation.
+///
+/// The daemon persists `agent_session_transcript_path`, so it can verify
+/// the locator BEFORE claiming a restoration: a locator whose transcript is
+/// gone must degrade to a fresh start and say `agentResume: "fresh"`,
+/// never `"resumed"`. This FAILS on unmodified main, which reports
+/// `resumed` from the argv it built and leaves the pane's restored banner
+/// standing above the harness's own refusal.
+#[test]
+fn a_resume_naming_a_deleted_transcript_degrades_to_fresh_instead_of_claiming_restoration() {
+    let fixture_dir = fake_harness_dir("claude");
+    let config_root = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let transcript_root = tempfile::tempdir().unwrap();
+    with_env(
+        &[
+            ("PATH", Some(fixture_dir.as_path())),
+            ("CLAUDE_CONFIG_DIR", Some(config_root.path())),
+        ],
+        || {
+            let restore_path = with_fixture_path(&fixture_dir);
+            let data_dir = tempfile::tempdir().unwrap();
+            let provider_id = "9f8d1c2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f";
+            let transcript = transcript_root.path().join(format!("{provider_id}.jsonl"));
+            std::fs::write(&transcript, "{}\n").unwrap();
+            let transcript_str = transcript.to_string_lossy().to_string();
+            let (workspace_id, session_id, _incarnation) = {
+                let engine = Engine::open(data_dir.path()).unwrap();
+                let workspace_id = registered(&engine, project.path());
+                let launched = ok(
+                    &engine,
+                    &unique("harness-start"),
+                    "harness.start",
+                    json!({
+                        "workspaceId": workspace_id,
+                        "harnessId": "claude",
+                        "permissionMode": "inherit",
+                    }),
+                );
+                // The harness's own hook payload records the conversation
+                // AND the transcript the daemon can later verify against.
+                ok(
+                    &engine,
+                    &unique("hook"),
+                    "session.hook_event",
+                    json!({
+                        "sessionId": launched["id"],
+                        "incarnation": launched["incarnation"],
+                        "event": "SessionStart",
+                        "agentSessionId": provider_id,
+                        "agentSessionTranscriptPath": transcript_str,
+                    }),
+                );
+                (
+                    workspace_id,
+                    launched["id"].as_str().unwrap().to_string(),
+                    launched["incarnation"].as_str().unwrap().to_string(),
+                )
+            };
+
+            // The daemon restarts over the same data dir (the row's verdict
+            // becomes unverifiable), and the transcript is deleted
+            // underneath: the recorded conversation is gone.
+            std::fs::remove_file(&transcript).unwrap();
+            let engine = Engine::open(data_dir.path()).unwrap();
+            let recovered = record_of(&engine, &session_id);
+            assert_eq!(recovered["verdict"], "unverifiable");
+            assert_eq!(recovered["agentSessionId"], provider_id);
+
+            let resumed = ok(
+                &engine,
+                &unique("resume"),
+                "harness.start",
+                json!({
+                    "workspaceId": workspace_id,
+                    "harnessId": "claude",
+                    "permissionMode": "inherit",
+                    "resume": true,
+                    "resumeSessionId": session_id,
+                }),
+            );
+            assert_eq!(
+                resumed["agentResume"], "fresh",
+                "a locator whose transcript is gone must be reported as a \
+                 fresh start, never as a restoration: {resumed:?}"
+            );
+            assert!(
+                !resumed["args"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|arg| arg == "--resume"),
+                "a declined resume must not carry a resume flag the CLI \
+                 would refuse: {resumed:?}"
+            );
+            for row in listed(&engine) {
+                ok(
+                    &engine,
+                    &unique("stop"),
+                    "session.stop",
+                    json!({"sessionId": row["id"], "incarnation": row["incarnation"]}),
+                );
+            }
+            restore_path();
+        },
+    );
+}
+
+/// The verified-locator counterpart: when the persisted transcript still
+/// exists on disk, the resume is the real thing and keeps reporting
+/// `resumed` (the pane's restored banner stays truthful).
+#[test]
+fn a_resume_whose_transcript_still_exists_keeps_the_verified_restored_claim() {
+    let fixture_dir = fake_harness_dir("claude");
+    let config_root = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let transcript_root = tempfile::tempdir().unwrap();
+    with_env(
+        &[
+            ("PATH", Some(fixture_dir.as_path())),
+            ("CLAUDE_CONFIG_DIR", Some(config_root.path())),
+        ],
+        || {
+            let restore_path = with_fixture_path(&fixture_dir);
+            let data_dir = tempfile::tempdir().unwrap();
+            let provider_id = "9f8d1c2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f";
+            let transcript = transcript_root.path().join(format!("{provider_id}.jsonl"));
+            std::fs::write(&transcript, "{}\n").unwrap();
+            let transcript_str = transcript.to_string_lossy().to_string();
+            let (workspace_id, session_id, _incarnation) = {
+                let engine = Engine::open(data_dir.path()).unwrap();
+                let workspace_id = registered(&engine, project.path());
+                let launched = ok(
+                    &engine,
+                    &unique("harness-start"),
+                    "harness.start",
+                    json!({
+                        "workspaceId": workspace_id,
+                        "harnessId": "claude",
+                        "permissionMode": "inherit",
+                    }),
+                );
+                ok(
+                    &engine,
+                    &unique("hook"),
+                    "session.hook_event",
+                    json!({
+                        "sessionId": launched["id"],
+                        "incarnation": launched["incarnation"],
+                        "event": "SessionStart",
+                        "agentSessionId": provider_id,
+                        "agentSessionTranscriptPath": transcript_str,
+                    }),
+                );
+                (
+                    workspace_id,
+                    launched["id"].as_str().unwrap().to_string(),
+                    launched["incarnation"].as_str().unwrap().to_string(),
+                )
+            };
+            let engine = Engine::open(data_dir.path()).unwrap();
+            let resumed = ok(
+                &engine,
+                &unique("resume"),
+                "harness.start",
+                json!({
+                    "workspaceId": workspace_id,
+                    "harnessId": "claude",
+                    "permissionMode": "inherit",
+                    "resume": true,
+                    "resumeSessionId": session_id,
+                }),
+            );
+            assert_eq!(
+                resumed["agentResume"], "resumed",
+                "a locator whose transcript is verifiably present is a real \
+                 restoration: {resumed:?}"
+            );
+            assert!(
+                resumed["args"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|arg| arg == "--resume"),
+                "the verified resume must name the conversation: {resumed:?}"
+            );
+            for row in listed(&engine) {
+                ok(
+                    &engine,
+                    &unique("stop"),
+                    "session.stop",
+                    json!({"sessionId": row["id"], "incarnation": row["incarnation"]}),
+                );
+            }
+            restore_path();
+        },
+    );
+}
+
+/// An id-only locator (a row whose transcript path was never persisted) has
+/// nothing the daemon can verify, so the launch keeps the harness's own
+/// resume argv but must NOT claim a restoration up front: `agentResume` is
+/// reported as `resume-unverified`, which the pane renders as NO banner
+/// (the harness's own output is the only honest confirmation left). This
+/// FAILS on unmodified main, which reports `resumed` for the same launch.
+#[test]
+fn an_id_only_locator_is_reported_unverified_not_restored() {
+    let fixture_dir = fake_harness_dir("claude");
+    let config_root = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    with_env(
+        &[
+            ("PATH", Some(fixture_dir.as_path())),
+            ("CLAUDE_CONFIG_DIR", Some(config_root.path())),
+        ],
+        || {
+            let restore_path = with_fixture_path(&fixture_dir);
+            let data_dir = tempfile::tempdir().unwrap();
+            let provider_id = "9f8d1c2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f";
+            let (workspace_id, session_id, _incarnation) = {
+                let engine = Engine::open(data_dir.path()).unwrap();
+                let workspace_id = registered(&engine, project.path());
+                let launched = ok(
+                    &engine,
+                    &unique("harness-start"),
+                    "harness.start",
+                    json!({
+                        "workspaceId": workspace_id,
+                        "harnessId": "claude",
+                        "permissionMode": "inherit",
+                    }),
+                );
+                // Only the id is reported; no transcript path is persisted.
+                ok(
+                    &engine,
+                    &unique("hook"),
+                    "session.hook_event",
+                    json!({
+                        "sessionId": launched["id"],
+                        "incarnation": launched["incarnation"],
+                        "event": "SessionStart",
+                        "agentSessionId": provider_id,
+                    }),
+                );
+                (
+                    workspace_id,
+                    launched["id"].as_str().unwrap().to_string(),
+                    launched["incarnation"].as_str().unwrap().to_string(),
+                )
+            };
+            let engine = Engine::open(data_dir.path()).unwrap();
+            let resumed = ok(
+                &engine,
+                &unique("resume"),
+                "harness.start",
+                json!({
+                    "workspaceId": workspace_id,
+                    "harnessId": "claude",
+                    "permissionMode": "inherit",
+                    "resume": true,
+                    "resumeSessionId": session_id,
+                }),
+            );
+            assert_eq!(
+                resumed["agentResume"], "resume-unverified",
+                "an id-only locator cannot be verified before launch and must \
+                 not be claimed as restored: {resumed:?}"
+            );
+            assert!(
+                resumed["args"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|arg| arg == "--resume"),
+                "the harness's own resume argv stays; the harness is the \
+                 authority on whether the conversation exists: {resumed:?}"
+            );
+            for row in listed(&engine) {
+                ok(
+                    &engine,
+                    &unique("stop"),
+                    "session.stop",
+                    json!({"sessionId": row["id"], "incarnation": row["incarnation"]}),
+                );
+            }
+            restore_path();
+        },
+    );
 }

@@ -121,6 +121,7 @@ const runReceipt = {
   error: null,
   observedAt: null,
   recordedAt: 1,
+  homeNotice: null,
 };
 describe("Bot run bridge", () => {
   it("passes a workspace-scoped turn through and demands the exact echo", async () => {

@@ -179,18 +179,114 @@ describe("resolveBotSession", () => {
       harnessId: "claude",
       resumeByIdentity: "bot-record",
     });
-    // A record with no identity keeps the honest refusal.
+    // A record with no identity and NO missing-row marker keeps the honest
+    // refusal: without the daemon's positive fact this could still be an
+    // older daemon build holding a live session the renderer cannot see.
     expect(resolveBotSession({ bot: bot(record()), observed: null, hostId: "host-1" })).toEqual({
       kind: "unknown",
     });
   });
 
   test("a recorded session with no projected verdict is UNKNOWN, never a fresh dispatch", () => {
-    // An older daemon build (or a snapshot that has not loaded) cannot prove
-    // liveness. The whole fix: this must not fall through to "open a new one".
+    // Without the daemon's positive missing-row fact this is genuinely
+    // ambiguous (an older daemon build cannot prove liveness either). The
+    // whole fix: this must not fall through to "open a new one".
     expect(
       resolveBotSession({ bot: bot(record()), observed: null, hostId: "host-1" }),
     ).toEqual({ kind: "unknown" });
+  });
+
+  test("a recorded link the daemon positively resolved to NOTHING opens fresh with an honest notice", () => {
+    // Finding 6 (the owner's dead end): after the daemon restart, the Bot
+    // record still names a session whose ROW is gone, so the projection
+    // yields no verdict at all -- and the old answer was a refusal whose
+    // "refresh and retry in a moment" advice could never succeed (the
+    // lookup already ran; a refresh re-reads the same absence forever).
+    // `recordedSessionMissing` is the daemon's positive fact: no live
+    // child, no durable row. There is no live Drogon session a second open
+    // could duplicate, so the fresh session is safe and the notice says
+    // what happened.
+    const resolution = resolveBotSession({
+      bot: bot(record({ recordedSessionMissing: true })),
+      observed: null,
+      hostId: "host-1",
+    });
+    expect(resolution.kind).toBe("open");
+    if (resolution.kind === "open" && resolution.notice) {
+      expect(resolution.notice).toContain("previous session is gone");
+      expect(resolution.notice).toContain("Starting a new conversation");
+      // The advice-never-works rule: no "retry"/"refresh" in the notice.
+      expect(resolution.notice.toLowerCase()).not.toContain("refresh");
+      expect(resolution.notice.toLowerCase()).not.toContain("retry");
+    }
+    // Even a daemon-positive phantom must not invent a resume: the notice
+    // travels on the OPEN variant, never a reopen claim.
+    expect(resolution).not.toEqual(expect.objectContaining({ kind: "reopen" }));
+  });
+
+  test("a stale renderer-side copy of the phantom cannot shadow the daemon's positive missing fact", () => {
+    // The acceptance run caught this: the tab-strip/host-wide poll still
+    // listed the recorded session (verdict unverifiable/exited -- the old
+    // daemon's last observation, or the exit a close left behind), and the
+    // observed-first rule turned the phantom into a `reopen` whose notice
+    // ("will reopen its most recent conversation") described an intention
+    // the daemon had already positively refuted. The daemon OWNS liveness:
+    // when it positively says the recorded row is gone, no local copy may
+    // shadow that fact into a resume claim.
+    const stale = {
+      id: "sess-gone",
+      workspaceId: "ws-home",
+      hostId: "host-1",
+      incarnation: "inc-1",
+      harnessId: "claude",
+    } as unknown as Session;
+    for (const verdict of ["unverifiable", "exited", "live"] as const) {
+      const resolution = resolveBotSession({
+        bot: bot(record({ recordedSessionMissing: true })),
+        observed: { ...stale, verdict },
+        hostId: "host-1",
+      });
+      expect(resolution.kind).toBe("open");
+      if (resolution.kind === "open") {
+        expect(resolution.notice).toContain("previous session is gone");
+      }
+    }
+  });
+
+  test("a latched harness conversation beats the missing-fact: the bot-record-alone resume survives", () => {
+    // The owner's 10/10 baseline caught this ordering mistake: with the
+    // durable row gone (closed, or a daemon restart) and ONLY the Bot
+    // record left, the record still carries the harness-reported provider
+    // conversation -- the bot-record-alone recovery. The daemon-positive
+    // missing fact must NOT downgrade that into a fresh start: a reopen
+    // naming THAT conversation can never duplicate a live session (worst
+    // case: the same conversation comes back). Precedence: latched
+    // conversation id > daemon-positive missing > stale local copies.
+    const resolution = resolveBotSession({
+      bot: bot(
+        record({
+          recordedSessionMissing: true,
+          agentSessionId: "conv-1",
+        }),
+      ),
+      // Even a stale local copy of the dead row must not change the
+      // answer: the named conversation is the one thing that is safe.
+      observed: {
+        id: "sess-gone",
+        verdict: "unverifiable",
+        workspaceId: "ws-home",
+        hostId: "host-1",
+        incarnation: "inc-1",
+        harnessId: "claude",
+      } as unknown as Session,
+      hostId: "host-1",
+    });
+    expect(resolution).toEqual({
+      kind: "reopen",
+      sessionId: "sess-1",
+      harnessId: "claude",
+      resumeByIdentity: "bot-record",
+    });
   });
 
   test("a live verdict missing the facts needed to focus is UNKNOWN", () => {

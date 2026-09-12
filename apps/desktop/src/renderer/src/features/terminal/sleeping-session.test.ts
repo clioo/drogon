@@ -113,9 +113,16 @@ describe("restoredBannerReason", () => {
     expect(restoredBannerReason("fresh")).toBe("resume-unavailable");
   });
 
-  test("a named or continued resume raises the restored banner", () => {
+  test("only a daemon-verified resume raises the restored banner", () => {
+    // `resumed` is the daemon's verified claim: its persisted transcript
+    // exists on disk, so the restoration is real before the banner shows.
     expect(restoredBannerReason("resumed")).toBe("restored");
-    expect(restoredBannerReason("continued")).toBe("restored");
+    // `continued` (the CLI's own most-recent entrypoint after a degraded
+    // resume) and `resume-unverified` (an id-only locator the daemon could
+    // not check) must NOT claim a restoration the daemon cannot confirm --
+    // the harness's own output is the only honest confirmation left.
+    expect(restoredBannerReason("continued")).toBeNull();
+    expect(restoredBannerReason("resume-unverified")).toBeNull();
   });
 
   test("a launch that was not a resume raises nothing", () => {

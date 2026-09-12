@@ -284,6 +284,17 @@ impl Fixture {
         self.open_session_params_for("pi")
     }
 
+    /// The Bot's provisioned home directory
+    /// (`<data_dir>/bots/<handle>`, `~/Drogon/bots/<handle>` in a real
+    /// install) -- the directory the adversarial probe deletes.
+    fn home_dir(&self) -> std::path::PathBuf {
+        self._root
+            .path()
+            .join("data")
+            .join("bots")
+            .join("arya-stark")
+    }
+
     /// Same open-session shape for a specific harness, so the resume-degrade
     /// tests can exercise the Claude Code store without changing the rest of
     /// the fixture's Pi-based coverage.
@@ -441,6 +452,133 @@ fn interactive_open_session_runs_in_the_bots_own_home_not_the_record_folder() {
         &fx.engine,
         "session.stop",
         "req-stop",
+        json!({"sessionId": session_id, "incarnation": incarnation}),
+    );
+}
+
+/// Finding 6: a Bot record whose recorded session link points at a session
+/// the daemon positively does not have (no live child, no durable row -- a
+/// closed tab, or any wiped state) must be MARKED as such on the snapshot
+/// (`currentSession.recordedSessionMissing = true`). The renderer turns
+/// that phantom into a fresh open with an honest notice instead of a
+/// refusal whose "refresh and retry" advice can never succeed: the lookup
+/// that would find the row already ran on this very snapshot, so a refresh
+/// re-reads the same absence forever. A live or durably-recorded session
+/// must NOT carry the marker.
+#[test]
+fn snapshot_marks_a_recorded_session_whose_row_is_gone() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_pi_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+
+    // A second Bot whose record names a session that does not exist: the
+    // exact on-disk shape after the row behind a recorded link disappears.
+    let conn = rusqlite::Connection::open(fx._root.path().join("data").join(DB_FILE_NAME)).unwrap();
+    let folder: String = conn
+        .query_row("SELECT folder FROM bots WHERE id = 'bot-1'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let phantom = Bot {
+        id: "bot-phantom".to_string(),
+        character_preset: "none".to_string(),
+        display_identity: DisplayIdentity {
+            display_name: "Phantom".to_string(),
+            handle: None,
+            title: None,
+        },
+        harness_policy: HarnessModelPolicy {
+            default_harness: DEFAULT_DROGON_BOT_HARNESS.to_string(),
+            explicit_model: None,
+        },
+        instructions: String::new(),
+        memories: Vec::new(),
+        responsibilities: Vec::new(),
+        current_session: Some(drogon_core::bots::records::BotSession {
+            session_id: "sess-gone".to_string(),
+            harness: "pi".to_string(),
+            model: None,
+            started_at: 0.0,
+            rotated_at: None,
+            agent_session_id: None,
+            agent_session_transcript_path: None,
+        }),
+        created_at: 0.0,
+        updated_at: 0.0,
+    };
+    bstorage::create_bot(&conn, &fx.host, &folder, &phantom).unwrap();
+    drop(conn);
+
+    let snapshot = ok(
+        &fx.engine,
+        "bot.snapshot",
+        "req-snapshot-phantom",
+        json!({"workspaceId": "", "hostId": fx.host, "locale": "en-US"}),
+    );
+    let phantom_row = snapshot["bots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "bot-phantom")
+        .expect("the phantom bot is in the snapshot")
+        .clone();
+    assert_eq!(
+        phantom_row["currentSession"]["sessionId"],
+        json!("sess-gone"),
+        "the recorded link is projected: {phantom_row:?}"
+    );
+    assert_eq!(
+        phantom_row["currentSession"]["recordedSessionMissing"],
+        json!(true),
+        "the daemon must positively mark the resolved-to-nothing link: \
+         {phantom_row:?}"
+    );
+    assert!(
+        phantom_row["currentSession"]["verdict"].is_null(),
+        "a gone row has no verdict: {phantom_row:?}"
+    );
+
+    // A bot with a REAL live session carries no marker.
+    let receipt = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-real",
+        fx.open_session_params(),
+    );
+    let session_id = receipt["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let incarnation = receipt["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let live_snapshot = ok(
+        &fx.engine,
+        "bot.snapshot",
+        "req-snapshot-live",
+        json!({"workspaceId": "", "hostId": fx.host, "locale": "en-US"}),
+    );
+    let live_row = live_snapshot["bots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "bot-1")
+        .unwrap()
+        .clone();
+    assert_eq!(live_row["currentSession"]["verdict"], json!("live"));
+    assert!(
+        live_row["currentSession"]["recordedSessionMissing"].is_null(),
+        "a live recorded session is never marked missing: {live_row:?}"
+    );
+
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-real",
         json!({"sessionId": session_id, "incarnation": incarnation}),
     );
 }
@@ -1421,4 +1559,111 @@ fn resume_is_rejected_outside_an_open_session_dispatch() {
     });
     let error = parse_bot_run_request(&bad_type).expect_err("non-boolean resume must be rejected");
     assert_eq!(error.code, "invalid_argument");
+}
+
+/// Adversarial-report regression: a Bot whose home directory disappeared
+/// (deleted by hand, or any partial state) must not be a permanent dead
+/// end. `ensure_home_for_bot` reused the pinned path WITHOUT recreating it,
+/// so Open Session failed forever with `cannot write the Bot identity
+/// context files: No such file or directory (os error 2)`.
+///
+/// The name says `ensure_home`; it must ensure. The pinned directory is
+/// recreated when it is missing, the session boots, the identity files are
+/// rewritten from the CURRENT Bot record, and the receipt says out loud
+/// what happened (the home was missing and was recreated; previous files
+/// in it are gone).
+///
+/// FAILS on unmodified main -- the second open returns
+/// `cannot write the Bot identity context files: No such file or directory`.
+#[test]
+fn a_missing_bot_home_is_recreated_and_the_receipt_says_so() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_pi_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+
+    let first = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-first",
+        fx.open_session_params(),
+    );
+    assert_eq!(first["outcome"], "dispatched", "{first:?}");
+    assert!(
+        first["homeNotice"].is_null(),
+        "a first provision is not a recreation: {first:?}"
+    );
+    let first_id = first["session"]["sessionId"].as_str().unwrap().to_string();
+    let first_inc = first["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    read_until(
+        &fx.engine,
+        &first_id,
+        &first_inc,
+        |text| text.contains("CWD="),
+        Duration::from_secs(20),
+    );
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-first",
+        json!({"sessionId": first_id, "incarnation": first_inc}),
+    );
+
+    // The home directory disappears underneath (deleted by hand).
+    let home = fx.home_dir();
+    assert!(
+        home.is_dir(),
+        "the first open must have provisioned {home:?}"
+    );
+    std::fs::remove_dir_all(&home).unwrap();
+    assert!(!home.exists());
+
+    let second = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-recreated",
+        fx.open_session_params(),
+    );
+    assert_eq!(
+        second["outcome"], "dispatched",
+        "a missing home must be recreated, not a permanent dead end: {second:?}"
+    );
+    assert_eq!(
+        second["homeNotice"],
+        json!(
+            "The Bot's home directory was missing and Drogon recreated it. Previous files in it are gone."
+        ),
+        "the receipt must say plainly what happened: {second:?}"
+    );
+    let second_id = second["session"]["sessionId"].as_str().unwrap().to_string();
+    let second_inc = second["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (output, verdict) = read_until(
+        &fx.engine,
+        &second_id,
+        &second_inc,
+        |text| text.contains("CWD="),
+        Duration::from_secs(20),
+    );
+    assert_eq!(
+        verdict, "live",
+        "the recreated-home session must actually boot: {output:?}"
+    );
+    assert!(
+        home.join("AGENTS.md").is_file() && home.join("CLAUDE.md").is_file(),
+        "the identity files must be rewritten from the current record"
+    );
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-recreated",
+        json!({"sessionId": second_id, "incarnation": second_inc}),
+    );
 }

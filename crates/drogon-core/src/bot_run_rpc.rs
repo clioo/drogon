@@ -308,6 +308,12 @@ pub struct ChatPlan {
     /// prior conversation (`--continue`, `codex resume --last`) rather than
     /// start blank. Always false for a plain chat turn.
     pub resume: bool,
+    /// Set when the open-session dispatch found the Bot's pinned home
+    /// directory MISSING and recreated it: the receipt carries the honest
+    /// notice ([`crate::bot_self_mgmt::HOME_RECREATED_NOTICE`]) instead of
+    /// silently pretending nothing was lost. Never set for a plain chat
+    /// turn (which runs in the caller's workspace, not the home).
+    pub home_notice: Option<String>,
 }
 
 /// Bound on the raw chat message: generous enough for a real conversational
@@ -632,6 +638,7 @@ pub fn build_receipt(
     error: Value,
     observed_at: Option<f64>,
     recorded_at: f64,
+    home_notice: Value,
 ) -> Value {
     json!({
         "requestId": request_id,
@@ -647,6 +654,7 @@ pub fn build_receipt(
         "error": error,
         "observedAt": observed_at,
         "recordedAt": recorded_at,
+        "homeNotice": home_notice,
     })
 }
 
@@ -976,6 +984,7 @@ pub fn authorized_prepare(
                     attempt_at,
                     open_session: false,
                     resume: false,
+                    home_notice: None,
                 },
                 workspace_id,
             })
@@ -1028,6 +1037,7 @@ pub fn authorized_prepare(
                     attempt_at,
                     open_session: true,
                     resume: *resume,
+                    home_notice: None,
                 },
                 workspace_id,
             })
@@ -1190,21 +1200,21 @@ fn ensure_bot_home_workspace(
     host_id: &str,
     bot_id: &str,
     origin_workspace_id: &str,
-) -> Result<(String, String), RpcError> {
+) -> Result<(String, String, bool), RpcError> {
     let folder = bots_storage::folder_for_bot_id(tx, host_id, bot_id)
         .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
         .ok_or_else(|| not_found_bot(bot_id))?;
     let bot = bots_storage::get_bot(tx, host_id, &folder, bot_id)
         .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
         .ok_or_else(|| not_found_bot(bot_id))?;
-    let home = crate::bot_self_mgmt::ensure_home_for_bot(
+    let (home, recreated) = crate::bot_self_mgmt::ensure_home_for_bot(
         tx,
         data_dir,
         host_id,
         &bot,
         origin_workspace_id,
     )?;
-    Ok((home.home_workspace_id, home.path))
+    Ok((home.home_workspace_id, home.path, recreated))
 }
 
 fn not_found_bot(bot_id: &str) -> RpcError {
@@ -1401,15 +1411,23 @@ impl crate::Engine {
                         .as_object_mut()
                         .expect("chat harness.start params is always a JSON object")
                         .remove("headless");
-                    let (home_workspace_id, _home_path) = ensure_bot_home_workspace(
-                        tx,
-                        &data_dir,
-                        &derived_host_id,
-                        &parsed.bot_id,
-                        workspace_id,
-                    )?;
+                    let (home_workspace_id, _home_path, home_recreated) =
+                        ensure_bot_home_workspace(
+                            tx,
+                            &data_dir,
+                            &derived_host_id,
+                            &parsed.bot_id,
+                            workspace_id,
+                        )?;
                     plan.params["workspaceId"] = json!(home_workspace_id);
                     *workspace_id = home_workspace_id;
+                    if home_recreated {
+                        // The home was missing and Drogon recreated it: the
+                        // receipt tells the user what happened instead of
+                        // silently pretending nothing was lost.
+                        plan.home_notice =
+                            Some(crate::bot_self_mgmt::HOME_RECREATED_NOTICE.to_string());
+                    }
                 }
                 Ok((attempt_at, prepared))
             },
@@ -1432,6 +1450,7 @@ impl crate::Engine {
                     Value::String(error),
                     None,
                     attempt_at,
+                    Value::Null,
                 )),
                 BotRunPrepare::Unsupported {
                     workspace_id,
@@ -1451,6 +1470,7 @@ impl crate::Engine {
                     Value::String(error),
                     None,
                     attempt_at,
+                    Value::Null,
                 )),
                 BotRunPrepare::ReadyResponsibility { plan, workspace_id } => {
                     let outcome = execute(&plan, &seam);
@@ -1476,6 +1496,7 @@ impl crate::Engine {
                             Value::Null,
                             Some(observed_at),
                             attempt_at,
+                            Value::Null,
                         ),
                         RunnerOutcome::ObservationFailed {
                             session_id,
@@ -1495,6 +1516,7 @@ impl crate::Engine {
                             Value::String(error.to_string()),
                             Some(observed_at),
                             attempt_at,
+                            Value::Null,
                         ),
                         RunnerOutcome::DispatchFailed(error) => build_receipt(
                             &request_id,
@@ -1510,6 +1532,7 @@ impl crate::Engine {
                             Value::String(error.to_string()),
                             None,
                             attempt_at,
+                            Value::Null,
                         ),
                     };
                     outcome_slot.set(Some(PreparedOutcome::Responsibility(
@@ -1546,6 +1569,7 @@ impl crate::Engine {
                             Value::Null,
                             Some(observed_at),
                             attempt_at,
+                            json!(plan.home_notice),
                         ),
                         RunnerOutcome::ObservationFailed {
                             session_id,
@@ -1565,6 +1589,7 @@ impl crate::Engine {
                             Value::String(error.to_string()),
                             Some(observed_at),
                             attempt_at,
+                            json!(plan.home_notice),
                         ),
                         RunnerOutcome::DispatchFailed(error) => build_receipt(
                             &request_id,
@@ -1580,6 +1605,7 @@ impl crate::Engine {
                             Value::String(error.to_string()),
                             None,
                             attempt_at,
+                            json!(plan.home_notice),
                         ),
                     };
                     outcome_slot.set(Some(PreparedOutcome::Chat(

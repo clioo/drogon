@@ -170,6 +170,24 @@ pub(crate) fn create_in_connection(
         None => uuid::Uuid::new_v4().to_string(),
     };
     let bot = build_bot(&bot_id, &request.body, now_ms)?;
+    // A handle that could never boot is rejected HERE, with the real
+    // reason, instead of being accepted and failing forever at first open
+    // (adversarial report): "Arya" and "arya" canonicalize to the SAME
+    // directory handle on a case-insensitive filesystem, so the second
+    // create must not be admitted. Handles with no canonical directory
+    // form (unicode, spaces, over-long) keep today's behaviour exactly:
+    // they are accepted and their home falls back to `bot-<id8>` at
+    // provision time.
+    if let Some(handle) = bot.display_identity.handle.as_deref()
+        && let Ok(canonical) = crate::bot_self_mgmt::validate_bot_handle(handle)
+        && let Some(owner) = crate::bot_self_mgmt::live_handle_owner(conn, &canonical)
+            .map_err(|e| storage_error(format!("bot handle ownership probe failed: {e}")))?
+        && owner != bot.id
+    {
+        return Err(invalid_argument(format!(
+            "bot handle {canonical:?} is already owned by bot {owner:?}"
+        )));
+    }
     bots_storage::create_bot(conn, derived_host_id, &folder, &bot)
         .map_err(|e| storage_error(format!("failed to create bot: {e}")))?;
     serde_json::to_value(&bot).map_err(|e| storage_error(format!("created bot unreadable: {e}")))
@@ -548,6 +566,14 @@ fn delete_bot_in_connection(
     let Some(deleted) = deleted else {
         return Err(not_found(format!("bot {} not found", params.bot_id)));
     };
+    // Handle release (adversarial report): a Bot's name must not die with
+    // the Bot. The bot_homes row goes away in the SAME transaction as the
+    // bots row, so a successor Bot can claim the same handle and open a
+    // session. The home DIRECTORY stays on disk untouched (deleting a Bot
+    // must not silently destroy its files); the successor's first open
+    // rewrites AGENTS.md/CLAUDE.md from the successor's own record.
+    crate::bot_self_mgmt::release_home_in_tx(tx, &params.bot_id)
+        .map_err(crate::bot_self_mgmt::self_storage_error)?;
     let result = BotDeleteResult {
         host_id: host_id.to_string(),
         workspace_id: params.workspace_id.clone(),
