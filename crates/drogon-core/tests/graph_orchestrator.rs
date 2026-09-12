@@ -43,7 +43,15 @@ run_id="run_fixture_$$"
 run_dir="$workspace/.mentu/runs/$run_id"
 mkdir -p "$run_dir"
 touch "$run_dir/out" "$run_dir/err"
-printf '{"run_id":"%s","recipe_name":"fixture","started_at":"2026-01-01T00:00:00Z","ended_at":"2026-01-01T00:00:01Z","outcome":"ok","cloud_mode":"local-only","steps":[{"label":"%s","backend":"shell","outcome":"ok","exit_code":0,"duration_seconds":0,"attempts":1,"output_file":"out","error_file":"err"}],"hooks":[]}' "$run_id" "$label" > "$run_dir/run.json"
+bookkeeping=''
+case "$label" in
+ *-1-test)
+  if ! grep -q '"expected_changes"' "$recipe"; then
+   bookkeeping=',"warnings":["role evidence was not declared"],"drift":{"created_paths":[".drogon/evaluations/'"$label"'.json"],"expected_paths":[],"unexpected_paths":[".drogon/evaluations/'"$label"'.json"]}'
+  fi
+  ;;
+esac
+printf '{"run_id":"%s","recipe_name":"fixture","started_at":"2026-01-01T00:00:00Z","ended_at":"2026-01-01T00:00:01Z","outcome":"ok","cloud_mode":"local-only","steps":[{"label":"%s","backend":"shell","outcome":"ok","exit_code":0,"duration_seconds":0,"attempts":1,"output_file":"out","error_file":"err"%s}],"hooks":[]}' "$run_id" "$label" "$bookkeeping" > "$run_dir/run.json"
 echo "Run record: $run_dir/run.json"
 "#;
 
@@ -186,6 +194,7 @@ fn daemon_runs_off_mode_and_both_roles_with_snapshot_policy_and_fallback() {
     assert_eq!(on["status"], "passed", "{on}");
     let steps = on["steps"].as_array().unwrap();
     assert_eq!(steps.len(), 5, "main, test, review, test, review");
+    assert_eq!(steps[1]["status"], "succeeded");
     assert_eq!(steps[1]["verdict"], "findings");
     assert_eq!(steps[2]["phase"], "review");
     assert_eq!(steps[4]["phase"], "review");
