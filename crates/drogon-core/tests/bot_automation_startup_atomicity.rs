@@ -397,7 +397,13 @@ fn two_concurrent_engine_open_calls_against_the_same_data_dir_both_succeed_consi
         final_snapshot.schema_versions,
         vec![
             ("automations".to_string(), 2),
-            ("bot_delegation".to_string(), 2),
+            // Derived from the component's own constant, not a hardcoded
+            // number: an additive version bump (like 2 → 3 for the
+            // firing-resource column) must not break this pin.
+            (
+                "bot_delegation".to_string(),
+                drogon_core::bots::delegation::DELEGATION_SCHEMA_VERSION,
+            ),
             ("bot_monitors".to_string(), 3),
             ("bot_secrets".to_string(), 1),
             ("bot_self".to_string(), 1),

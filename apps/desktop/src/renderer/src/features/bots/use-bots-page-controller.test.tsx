@@ -581,6 +581,7 @@ describe("use-bots-page-controller: design column side reads", () => {
       trigger: { kind: "scheduled", cron: "*/5 * * * *" },
       consecutiveErrors: 0,
       lastError: null,
+    lastNotice: null,
       failureThreshold: 3,
       lastCheckAtMs: null,
       lastCheckOutcome: null,

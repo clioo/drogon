@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  dispatchBotMonitorApprove,
   dispatchBotMonitorList,
   dispatchBotRun,
   dispatchBotSnapshot,
@@ -250,6 +251,7 @@ describe("Bot monitor list bridge", () => {
     trigger: { kind: "scheduled", cron: "*/5 * * * *" },
     consecutiveErrors: 0,
     lastError: null,
+    lastNotice: null,
     failureThreshold: 3,
     lastCheckAtMs: null,
     lastCheckOutcome: null,
@@ -331,6 +333,78 @@ describe("Bot monitor list bridge", () => {
       (
         await dispatchBotMonitorList(
           { hostId: "", workspaceId: "", botId: "" },
+          call,
+        )
+      ).ok,
+    ).toBe(false);
+    expect(call).not.toHaveBeenCalled();
+  });
+});
+
+describe("Bot monitor approval bridge", () => {
+  const approveInput = {
+    hostId: "host",
+    workspaceId: "",
+    botId: "bot-1",
+    monitorId: "mon-1",
+  };
+
+  it("admits the app-global '' request, echoes the resolved scope and demands a confirmed approval", async () => {
+    const result = {
+      hostId: "host",
+      botId: "bot-1",
+      workspaceId: "resolved-ws",
+      monitorId: "mon-1",
+      approved: true,
+      approvalHash: "a".repeat(64),
+    };
+    const call = vi.fn(async () => ({ ok: true as const, result }));
+    expect(await dispatchBotMonitorApprove(approveInput, call)).toEqual({
+      ok: true,
+      result,
+    });
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      "bot.monitor_approve",
+      approveInput,
+    );
+  });
+
+  it("rejects an echo of '', a foreign bot/monitor id, or an unconfirmed approval", async () => {
+    const cases: Array<{
+      botId: string;
+      workspaceId: string;
+      monitorId: string;
+      approved: boolean;
+    }> = [
+      { ...approveInput, workspaceId: "", approved: true },
+      { ...approveInput, botId: "bot-other", approved: true },
+      { ...approveInput, monitorId: "mon-other", approved: true },
+      { ...approveInput, approved: false },
+    ];
+    for (const override of cases) {
+      const call = vi.fn(async () => ({
+        ok: true as const,
+        result: {
+          hostId: "host",
+          botId: override.botId,
+          workspaceId: override.workspaceId === "" ? "" : "resolved-ws",
+          monitorId: override.monitorId,
+          approved: override.approved,
+          approvalHash: "a".repeat(64),
+        },
+      }));
+      expect((await dispatchBotMonitorApprove(approveInput, call)).ok).toBe(
+        false,
+      );
+    }
+  });
+
+  it("refuses malformed requests before the native call", async () => {
+    const call = vi.fn();
+    expect(
+      (
+        await dispatchBotMonitorApprove(
+          { hostId: "", workspaceId: "", botId: "", monitorId: "" },
           call,
         )
       ).ok,

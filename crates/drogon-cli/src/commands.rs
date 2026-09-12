@@ -2350,7 +2350,32 @@ async fn bot(
                     DEFAULT_TIMEOUT,
                 )
                 .await?;
-            emit(call, json, || format!("deleted monitor {monitor}"), 0, None)
+            let result = call.result.clone();
+            emit(
+                call,
+                json,
+                || {
+                    let abandoned = result
+                        .get("abandonedEvents")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0);
+                    if abandoned == 0 {
+                        format!("deleted monitor {monitor}")
+                    } else {
+                        // The owner is told AT THE DECISION MOMENT that
+                        // something queued was abandoned and why — the
+                        // daemon settled each event with a durable
+                        // `orphaned` firing row before the delete.
+                        format!(
+                            "deleted monitor {monitor}; settled {abandoned} queued event(s) \
+                             that can never be dispatched now (recorded as orphaned: \
+                             monitor deleted before dispatch)"
+                        )
+                    }
+                },
+                0,
+                None,
+            )
         }
         BotAction::TestMonitor {
             bot,
@@ -2498,7 +2523,9 @@ async fn bot_watch_pull_request(
             || {
                 format!(
                     "staged pull-request watch {monitor_id} (parked at needs-approval); \
-                     approve it with `drogon-cli rpc bot.monitor_approve --params \
+                     approve it from the Bots page in the app (the parked card's Approve \
+                     control arms this exact rule text) or with `drogon-cli rpc \
+                     bot.monitor_approve --params \
                      '{{\"botId\":\"{bot}\",\"workspaceId\":\"{workspace}\",\"hostId\":\"{host}\",\"monitorId\":\"{monitor_id}\"}}'`",
                     host = status.host_id
                 )

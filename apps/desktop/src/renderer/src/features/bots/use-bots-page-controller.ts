@@ -108,6 +108,17 @@ export type BotsPageControllerDeps = {
     ok: boolean;
     result?: { monitors: BotMonitorView[]; workspaceId: string };
   }>;
+  /** Parked-watch approval (the redesigned MONITORS column's real
+   *  affordance): arms the monitor's CURRENT rule text through the
+   *  daemon's hash-bound `bot.monitor_approve` — the only approval path,
+   *  never a second one. Absent means the column shows the parked state
+   *  without a button (an honest unavailable, never a disabled promise). */
+  monitorApprove?: (input: {
+    hostId: string;
+    workspaceId: string;
+    botId: string;
+    monitorId: string;
+  }) => Promise<{ ok: boolean; error?: { message: string } }>;
 };
 
 function mintRequestId(prefix: string): string {
@@ -132,6 +143,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     resolveBotSession,
     automationList,
     monitorList,
+    monitorApprove,
   } = deps;
 
   const [localSnapshot, setLocalSnapshot] =
@@ -421,6 +433,45 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     [bridge, scope, busy, load],
   );
 
+  // Parked-watch approval (the product path a `bot watch-pr` monitor
+  // needs): arms the monitor's CURRENT rule text through the daemon's
+  // hash-bound `bot.monitor_approve` — the same approval the CLI sends,
+  // never a second path. The reload refreshes the monitor column so the
+  // parked card flips to its armed state with the daemon's own health.
+  const approveMonitor = useCallback(
+    async (botId: string, monitorId: string): Promise<void> => {
+      if (busy) {
+        return;
+      }
+      if (!monitorApprove || !scope) {
+        setActionError(
+          "Monitor approval is unavailable in this session — the daemon bridge does not expose it.",
+        );
+        return;
+      }
+      setBusy(true);
+      setActionError(null);
+      try {
+        const response = await monitorApprove({
+          hostId: scope.hostId,
+          workspaceId: scope.workspaceId,
+          botId,
+          monitorId,
+        });
+        if (!response.ok) {
+          setActionError(response.error?.message ?? "Monitor approval failed.");
+          return;
+        }
+        await load();
+      } catch (approvalFailure) {
+        setActionError(errorMessage(approvalFailure));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [monitorApprove, scope, busy, load],
+  );
+
   // Manual run (R16-S): resolves the harness from the LIVE snapshot (never
   // the mount-time one, which predates in-panel mutations), awaits the
   // mount's `bot.run` call, then reloads so the new history row appears --
@@ -686,6 +737,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     deleteBot,
     runResponsibility,
     launchBot,
+    approveMonitor,
     automationSummaries,
     monitorsByBotId,
     expandedOverrides,

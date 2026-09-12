@@ -16,12 +16,14 @@
  * the bot's own self API, not callable from the UI. */
 
 import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import type { BotMonitorView } from "../../../../shared/bot-contract";
 import {
   monitorActionLabel,
   monitorHealthPill,
   monitorLastCheck,
   monitorLastFiring,
+  monitorSourceLabel,
   monitorTitle,
   monitorTriggerLabel,
 } from "./bots-page-model";
@@ -48,18 +50,39 @@ export function BotMonitorCardItem({
   monitor,
   responsibilityName = null,
   now = Date.now(),
+  onApprove,
+  approving = false,
+  botDisplayName = null,
 }: {
   monitor: BotMonitorView;
   /** The bound responsibility's display name, resolved by the parent
    *  from the bot's own responsibilities; null falls back to the id. */
   responsibilityName?: string | null;
   now?: number;
+  /** The parked-watch approval path: arms the monitor's CURRENT rule
+   *  text through the daemon's hash-bound `bot.monitor_approve` (the
+   *  same approval the CLI uses — no second path). The disclosure above
+   *  the button names exactly what is being approved. */
+  onApprove?: () => void;
+  approving?: boolean;
+  /** The owning bot's display name, for the approval disclosure. */
+  botDisplayName?: string | null;
 }) {
   const pill = monitorHealthPill(monitor.health);
   const lastCheck = monitorLastCheck(monitor, now);
   const lastFiring = monitorLastFiring(monitor, now);
   const supported = monitorRuleKindSupported(monitor.ruleKind);
   const actionLabel = monitorActionLabel(monitor, responsibilityName);
+  const sourceLabel = monitorSourceLabel(monitor);
+  const pendingApproval = supported && !monitor.approved;
+  const filter =
+    typeof monitor.filter === "string" && monitor.filter
+      ? monitor.filter
+      : null;
+  const login =
+    typeof monitor.login === "string" && monitor.login ? monitor.login : null;
+  const repo =
+    typeof monitor.repo === "string" && monitor.repo ? monitor.repo : null;
   return (
     <div
       data-testid={`bot-monitor-${monitor.monitorId}`}
@@ -91,9 +114,44 @@ export function BotMonitorCardItem({
           Last error: {monitor.lastError}
         </p>
       ) : null}
+      {monitor.lastNotice ? (
+        // An informational note (the baseline seed, for example) is NOT
+        // an error: normal operation must never read as a red failure.
+        <p className="mt-2 truncate text-xs text-muted-foreground" role="status">
+          {monitor.lastNotice}
+        </p>
+      ) : null}
+      {pendingApproval ? (
+        <div
+          className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2"
+          data-testid={`monitor-approval-${monitor.monitorId}`}
+        >
+          <p className="text-xs text-foreground">
+            Parked at needs-approval. Approving arms the CURRENT rule text
+            (hash-bound, the same approval the CLI uses):{" "}
+            {monitor.ruleKind === "github_pr.v1"
+              ? `a pull-request watch on ${repo ?? "the recorded repository"}${filter ? ` (${filter}${login ? `, ${login}` : ""})` : ""}`
+              : `a ${monitor.ruleKind} watch`}
+            {" "}
+            {monitor.responsibilityId
+              ? `for ${botDisplayName ?? "this bot"} — when it fires it will dispatch ${responsibilityName ?? monitor.responsibilityId}.`
+              : `for ${botDisplayName ?? "this bot"} — it observes and records only.`}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            disabled={approving}
+            data-testid={`monitor-approve-${monitor.monitorId}`}
+            onClick={onApprove}
+          >
+            {approving ? "Approving…" : "Approve this watch"}
+          </Button>
+        </div>
+      ) : null}
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
         <GridCell label="Source">
-          <span className="font-mono text-xs">{monitorTitle(monitor)}</span>
+          <span className="font-mono text-xs">{sourceLabel}</span>
         </GridCell>
         <GridCell label="Trigger">
           <span className="font-mono text-xs">
@@ -141,7 +199,9 @@ export function BotMonitorCardItem({
                     : "truncate"
                 }
               >
-                {lastFiring.label} · {lastFiring.ageLabel}
+                {lastFiring.label}
+                {lastFiring.caseLabel ? ` · ${lastFiring.caseLabel}` : ""} ·{" "}
+                {lastFiring.ageLabel}
               </span>
               {lastFiring.detail ? (
                 <span className="truncate text-xs text-muted-foreground">

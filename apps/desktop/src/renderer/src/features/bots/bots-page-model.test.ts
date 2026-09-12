@@ -17,6 +17,7 @@ import {
   isResponsibilityFormReady,
   monitorHealthPill,
   monitorLastCheck,
+  monitorSourceLabel,
   monitorTitle,
   monitorTriggerLabel,
 } from "./bots-page-model";
@@ -339,6 +340,56 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
     expect(monitorTitle({ ruleKind: "http_poll.v1" } as never)).toBe(
       "http_poll.v1",
     );
+  });
+
+  it("titles a github_pr.v1 watch with the repository it watches, never the rule kind", () => {
+    expect(
+      monitorTitle({
+        ruleKind: "github_pr.v1",
+        repo: "clioo/drogon",
+      } as never),
+    ).toBe("clioo/drogon");
+    // A record genuinely missing its repo stays fail-closed.
+    expect(
+      monitorTitle({ ruleKind: "github_pr.v1", repo: "" } as never),
+    ).toBe("github_pr.v1");
+  });
+
+  it("renders the SOURCE cell per kind: repo + case, path, script, sealed URL", () => {
+    expect(
+      monitorSourceLabel({
+        ruleKind: "github_pr.v1",
+        repo: "clioo/drogon",
+        filter: "assigned",
+        login: "clioo",
+      } as never),
+    ).toBe("clioo/drogon · case: assigned (clioo)");
+    expect(
+      monitorSourceLabel({
+        ruleKind: "github_pr.v1",
+        repo: "clioo/drogon",
+        filter: "opened",
+      } as never),
+    ).toBe("clioo/drogon · case: opened");
+    expect(
+      monitorSourceLabel({ ruleKind: "local_file_digest.v1", resource: "notes/a.md" } as never),
+    ).toBe("notes/a.md");
+    expect(
+      monitorSourceLabel({ ruleKind: "script_command.v1", scriptPath: "s.sh" } as never),
+    ).toBe("s.sh");
+    // The http poll's URL is sealed daemon-side: honest words, never the
+    // bare hash presented as a URL, never the bare rule kind.
+    const poll = monitorSourceLabel({
+      ruleKind: "http_poll.v1",
+      urlHash: "cd3f9a11cd3f9a11cd3f9a11cd3f9a11",
+    } as never);
+    expect(poll).toContain("URL sealed by the daemon");
+    expect(poll).toContain("cd3f9a11");
+    expect(poll).not.toContain("http_poll.v1");
+    // Unknown kinds stay the raw token (fail-closed).
+    expect(
+      monitorSourceLabel({ ruleKind: "future_kind.v9" } as never),
+    ).toBe("future_kind.v9");
   });
 
   it("renders LAST CHECK only from a real check row, with honest age", () => {

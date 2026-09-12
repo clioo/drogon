@@ -116,6 +116,7 @@ export function BotResponsibilityCard({
   onRunResponsibility,
   onLaunch,
   onLaunchNew,
+  onApproveMonitor,
 }: {
   bot: BotsPanelBot;
   history: BotsPanelHistoryEntry[];
@@ -140,6 +141,10 @@ export function BotResponsibilityCard({
   /** Gap 2: explicit "start a fresh session", shown only when the Bot has
    *  a recorded session that "Open session" would otherwise resume. */
   onLaunchNew?: () => void;
+  /** Parked-watch approval: arms the monitor's CURRENT rule text through
+   *  the daemon's hash-bound `bot.monitor_approve` (the only approval
+   *  path — never a second one). */
+  onApproveMonitor?: (monitorId: string) => void;
 }): React.JSX.Element {
   const botHistory = history.filter((entry) => entry.run.botId === bot.id);
   const scheduled = bot.responsibilities.filter(
@@ -502,6 +507,13 @@ export function BotResponsibilityCard({
                       (responsibility) =>
                         responsibility.id === monitor.responsibilityId,
                     )?.name ?? null
+                  }
+                  botDisplayName={bot.displayIdentity.displayName}
+                  approving={busy}
+                  onApprove={
+                    onApproveMonitor
+                      ? () => onApproveMonitor(monitor.monitorId)
+                      : undefined
                   }
                 />
               ))

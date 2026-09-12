@@ -25,7 +25,7 @@ const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("bots", 3, &[("bots-v1", 1), ("bots-v2", 2)]),
     ("bot_monitors", 3, &[("bot_monitors-v1", 1)]),
     ("bot_self", 1, &[]),
-    ("bot_delegation", 2, &[]),
+    ("bot_delegation", 3, &[("bot_delegation-v2", 2)]),
     ("automations", 2, &[("automations-v1", 1)]),
     ("projects", 5, &[("projects-v1", 1)]),
     ("mentu", 1, &[]),
@@ -51,6 +51,7 @@ fn fixture_sql(fixture: &str) -> &'static str {
         "bots-v2" => include_str!("fixtures/upgrades/bots-v2.sql"),
         "automations-v1" => include_str!("fixtures/upgrades/automations-v1.sql"),
         "bot_monitors-v1" => include_str!("fixtures/upgrades/bot_monitors-v1.sql"),
+        "bot_delegation-v2" => include_str!("fixtures/upgrades/bot_delegation-v2.sql"),
         "projects-v1" => include_str!("fixtures/upgrades/projects-v1.sql"),
         "main-schema-v1" => include_str!("fixtures/upgrades/main-schema-v1.sql"),
         "workspaces-only-pre-projects" => {
@@ -154,6 +155,27 @@ fn bots_rows_survive_v2_to_v3_migration() {
         })
         .unwrap();
     assert_eq!(rev, 7, "a non-default rev must never be rewritten");
+}
+
+#[test]
+fn delegation_firing_rows_survive_v2_to_v3_with_an_honest_null_resource() {
+    let (dir, _engine) = open_seeded("delegation-v2", "bot_delegation-v2");
+    let conn = read_db(&dir);
+    // The 2→3 step adds the released case's `resource` column in place;
+    // the pre-upgrade firing row survives untouched, its resource NULL —
+    // the product must never fabricate a case for evidence written
+    // before the column existed.
+    let (outcome, run_id, resource): (String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT outcome, run_id, resource FROM bot_monitor_firings
+             WHERE event_id = 'mev_legacy'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(outcome, "dispatched");
+    assert_eq!(run_id.as_deref(), Some("run-legacy"));
+    assert_eq!(resource, None);
 }
 
 #[test]

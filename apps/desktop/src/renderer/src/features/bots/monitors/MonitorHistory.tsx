@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui
 import {
   monitorActionsEnabled,
   monitorOutcomeLabel,
+  monitorResourceLabel,
   monitorStatusLabel,
   visibleMonitorChecks,
 } from "./monitor-model";
@@ -66,7 +67,7 @@ export function MonitorCard({
       <CardHeader className="border-b">
         <div className="flex items-start justify-between gap-3">
           <CardTitle className="text-sm">
-            {supported ? monitor.resource : monitor.ruleKind}
+            {supported ? monitorResourceLabel(monitor) : monitor.ruleKind}
             <span className="ml-2 font-normal text-muted-foreground">
               v{monitor.version}
             </span>

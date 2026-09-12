@@ -3,6 +3,7 @@ import type {
   BotCreateInput,
   BotDeleteInput,
   BotHistoryInput,
+  BotMonitorApproveInput,
   BotMonitorListInput,
   BotResponsibilityCreateInput,
   BotResponsibilityDeleteInput,
@@ -30,4 +31,9 @@ export const botBridgeExtras = {
    *  monitor state behind the redesigned page's MONITORS column. */
   botMonitorList: (value: BotMonitorListInput) =>
     ipcRenderer.invoke("drogon:botMonitorList", value),
+  /** Bots-page parked-watch approval (`bot.monitor_approve`): arms the
+   *  monitor's CURRENT rule text through the daemon's hash-bound
+   *  approval — the same call the CLI sends, never a second path. */
+  botMonitorApprove: (value: BotMonitorApproveInput) =>
+    ipcRenderer.invoke("drogon:botMonitorApprove", value),
 };

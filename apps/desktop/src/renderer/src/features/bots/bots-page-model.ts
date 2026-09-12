@@ -347,8 +347,16 @@ export function monitorHealthPill(health: BotMonitorHealth): MonitorHealthPill {
 /** Card title for a monitor: the watched resource when the rule kind
  *  carries one, else the rule kind itself (fail-closed, like the
  *  renderer's own MonitorCard). Never a fabricated name — monitors have
- *  no name field in the store. */
+ *  no name field in the store. A `github_pr.v1` watch names the
+ *  repository it watches (the daemon flattens `repo` into the view);
+ *  that is the owner's headline case and must never render as a bare
+ *  internal token. */
 export function monitorTitle(view: BotMonitorView): string {
+  if (view.ruleKind === "github_pr.v1") {
+    return typeof view.repo === "string" && view.repo.length > 0
+      ? view.repo
+      : view.ruleKind;
+  }
   const resource =
     typeof view.resource === "string" && view.resource
       ? view.resource
@@ -356,6 +364,52 @@ export function monitorTitle(view: BotMonitorView): string {
         ? view.scriptPath
         : null;
   return resource ?? view.ruleKind;
+}
+
+/**
+ * The SOURCE cell, honest per rule kind — never the bare rule kind for a
+ * kind this build renders:
+ * - a `github_pr.v1` watch shows the repository it watches and its case
+ *   (the filter, with the login it compares against);
+ * - a file watch shows its path; a script watch shows its script path;
+ * - an http poll's URL text is sealed daemon-side (only its hash
+ *   travels), so the cell says that in words instead of printing the
+ *   hash as if it were the URL;
+ * - an unknown kind keeps the fail-closed raw-token fallback.
+ */
+export function monitorSourceLabel(view: BotMonitorView): string {
+  switch (view.ruleKind) {
+    case "github_pr.v1": {
+      const repo =
+        typeof view.repo === "string" && view.repo ? view.repo : null;
+      const filter =
+        typeof view.filter === "string" && view.filter ? view.filter : null;
+      const login =
+        typeof view.login === "string" && view.login ? view.login : null;
+      if (!repo) return view.ruleKind;
+      const caseText = filter
+        ? login
+          ? `case: ${filter} (${login})`
+          : `case: ${filter}`
+        : null;
+      return caseText ? `${repo} · ${caseText}` : repo;
+    }
+    case "local_file_digest.v1":
+      return typeof view.resource === "string" && view.resource
+        ? view.resource
+        : view.ruleKind;
+    case "script_command.v1":
+      return typeof view.scriptPath === "string" && view.scriptPath
+        ? view.scriptPath
+        : view.ruleKind;
+    case "http_poll.v1": {
+      const hash = typeof view.urlHash === "string" ? view.urlHash : "";
+      const prefix = hash.slice(0, 8);
+      return `URL sealed by the daemon${prefix ? ` (hash ${prefix}…)` : ""}`;
+    }
+    default:
+      return view.ruleKind;
+  }
 }
 
 export type MonitorLastCheck = {
@@ -421,6 +475,11 @@ export type MonitorLastFiring = {
   adverse: boolean;
   /** The honest refusal reason, when the daemon recorded one. */
   detail: string | null;
+  /** The released case's own resource (`pull/42` for a pull-request
+   *  watch, the watched path for a file watch) — WHAT the firing
+   *  released. Null on evidence rows written before the daemon's
+   *  delegation schema version 3. */
+  caseLabel: string | null;
   /** Relative age of the firing, e.g. "8m ago". */
   ageLabel: string;
 };
@@ -459,6 +518,7 @@ export function monitorLastFiring(
     label: wording.label,
     adverse: wording.adverse,
     detail: view.firing.lastDetail,
+    caseLabel: view.firing.lastResource,
     ageLabel,
   };
 }

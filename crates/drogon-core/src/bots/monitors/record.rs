@@ -101,6 +101,14 @@ pub struct MonitorRecord {
     pub last_event_id: Option<String>,
     pub last_success_at_ms: Option<f64>,
     pub last_error: Option<String>,
+    /// An informational note about the newest committed check — most
+    /// notably the first-observation baseline seed ("baseline seeded; the
+    /// backlog is never replayed"). Deliberately NOT `last_error`: a seed
+    /// is normal operation, and storing it in `last_error` painted a
+    /// routine first check as a failure in every consumer that trusts
+    /// that field. A real error replaces the notice.
+    #[serde(default)]
+    pub last_notice: Option<String>,
 }
 
 fn is_bad_id(value: &str, field: &str) -> Option<String> {
@@ -226,6 +234,7 @@ pub fn new_monitor(
         last_event_id: None,
         last_success_at_ms: None,
         last_error: None,
+        last_notice: None,
     };
     record.validate()?;
     if !record.is_approved() {
@@ -294,6 +303,7 @@ pub fn new_unapproved_monitor(
         last_event_id: None,
         last_success_at_ms: None,
         last_error: None,
+        last_notice: None,
     };
     record.validate()?;
     debug_assert!(!record.is_approved());
@@ -451,6 +461,7 @@ mod tests {
                     last_event_id: None,
                     last_success_at_ms: None,
                     last_error: None,
+                    last_notice: None,
                 }
             });
         record.interpreter = Some("sh".into());

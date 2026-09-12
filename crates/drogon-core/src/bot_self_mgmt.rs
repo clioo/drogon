@@ -1126,6 +1126,7 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
                 updated.next_eligible_at_ms = None;
                 updated.last_success_at_ms = Some(now_ms);
                 updated.last_error = None;
+                updated.last_notice = None;
                 updated.updated_at_ms = now_ms;
                 let check = monitor_storage::StoredCheck {
                     id: format!("chk_{}", uuid::Uuid::new_v4().to_string().replace('-', "")),
@@ -1207,6 +1208,7 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
                             Some(now_ms + backoff_ms(updated.consecutive_errors));
                         updated.last_error =
                             Some(outcome_error_text(&result).chars().take(512).collect());
+                        updated.last_notice = None;
                         updated.updated_at_ms = now_ms;
                         delivery = monitor_storage::DeliveryState::NotApplicable;
                         summary.errors += 1;
@@ -1371,6 +1373,7 @@ fn tick_github_monitor(
                     updated.next_eligible_at_ms = None;
                     updated.last_success_at_ms = Some(now_ms);
                     updated.last_error = None;
+                    updated.last_notice = None;
                     updated.updated_at_ms = now_ms;
                     let committed_seen = next_seen.clone();
                     let check = monitor_storage::StoredCheck {
@@ -1504,6 +1507,9 @@ fn commit_github_error(
     updated.consecutive_errors = updated.consecutive_errors.saturating_add(1);
     updated.next_eligible_at_ms = Some(now_ms + backoff_ms(updated.consecutive_errors));
     updated.last_error = Some(outcome_error_text(&result).chars().take(512).collect());
+    // A real error replaces the informational notice, never the other
+    // way around: the card must stay honest about the newest state.
+    updated.last_notice = None;
     updated.updated_at_ms = now_ms;
     let check = monitor_storage::StoredCheck {
         id: format!("chk_{}", uuid::Uuid::new_v4().to_string().replace('-', "")),
@@ -1556,7 +1562,11 @@ fn commit_github_seed(
     updated.consecutive_errors = 0;
     updated.next_eligible_at_ms = None;
     updated.last_success_at_ms = Some(now_ms);
-    updated.last_error = Some(reason.to_string());
+    // The first observation is normal operation, not a failure: the note
+    // rides `last_notice` (an informational field), never `last_error`,
+    // so health stays healthy and no consumer paints the seed red.
+    updated.last_error = None;
+    updated.last_notice = Some(reason.to_string());
     updated.updated_at_ms = now_ms;
     let result =
         MonitorCheckResult::no_change(&updated.id, updated.version, cursor.to_string(), now_ms);
@@ -2951,6 +2961,10 @@ pub(crate) fn firing_view(conn: &Connection, monitor_id: &str, now_ms: f64) -> V
             "lastOutcome": evidence.outcome,
             "lastRunId": evidence.run_id,
             "lastDetail": evidence.detail,
+            // The released case's own resource (`pull/<n>` for a
+            // pull-request watch): the UI names WHAT the firing
+            // released. NULL on rows written before schema version 3.
+            "lastResource": evidence.resource,
             "lastAtMs": evidence.at_ms,
             "countToday": evidence.count_today,
         }),
@@ -3383,6 +3397,23 @@ impl crate::Engine {
                         params.monitor_id
                     )));
                 }
+                // The bar (adversarial pass): a queued event must never
+                // sit where nothing will ever happen to it and nothing
+                // tells the owner so. Settle the deleted monitor's queued
+                // outbox events IN THIS TRANSACTION — one durable firing
+                // row each (`orphaned`, the honest reason) plus the delete
+                // — and report the settlement in the receipt so the owner
+                // is told at the decision moment, not by a silent row.
+                let abandoned = crate::bots::delegation::settle_events_of_deleted_monitor_in_tx(
+                    tx,
+                    &params.monitor_id,
+                    crate::now_unix_ms() as f64,
+                )
+                .map_err(|e| {
+                    storage_error(format!(
+                        "failed to settle the deleted monitor's queued events: {e}"
+                    ))
+                })?;
                 let at = crate::now_unix_ms() as f64;
                 audit(
                     tx,
@@ -3397,6 +3428,11 @@ impl crate::Engine {
                     "botId": scope.bot_id,
                     "monitorId": params.monitor_id,
                     "removed": true,
+                    // How many queued events the deletion settled, and
+                    // which ones — the owner can see that something
+                    // queued was abandoned and why.
+                    "abandonedEvents": abandoned.len(),
+                    "abandonedEventIds": abandoned,
                 }))
             },
         )

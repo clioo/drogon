@@ -58,6 +58,15 @@ export type BotsPanelHydrationProps = BotsPanelProps & {
     ok: boolean;
     result?: { monitors: BotMonitorView[]; workspaceId: string };
   }>;
+  /** Host-supplied monitor approval (the parked-watch affordance);
+   *  injectable so tests can pin it. Defaults to the gated bridge's
+   *  `botMonitorApprove` — the daemon's hash-bound approval path. */
+  monitorApprove?: (input: {
+    hostId: string;
+    workspaceId: string;
+    botId: string;
+    monitorId: string;
+  }) => Promise<{ ok: boolean; error?: { message: string } }>;
 };
 
 export function BotsPanel({
@@ -73,8 +82,10 @@ export function BotsPanel({
   observedLivenessByBotId,
   automationList: automationListProp,
   monitorList: monitorListProp,
+  monitorApprove: monitorApproveProp,
 }: BotsPanelHydrationProps) {
   const botMonitorList = bridge?.botMonitorList;
+  const botMonitorApprove = bridge?.botMonitorApprove;
   const controller = useBotsPageController({
     snapshot,
     bridge,
@@ -97,6 +108,9 @@ export function BotsPanel({
     monitorList:
       monitorListProp ??
       (botMonitorList ? (input) => botMonitorList(input) : undefined),
+    monitorApprove:
+      monitorApproveProp ??
+      (botMonitorApprove ? (input) => botMonitorApprove(input) : undefined),
   });
   const {
     effective,
@@ -120,6 +134,7 @@ export function BotsPanel({
     deleteBot,
     runResponsibility,
     launchBot,
+    approveMonitor,
     automationSummaries,
     monitorsByBotId,
     expandedOverrides,
@@ -273,6 +288,9 @@ export function BotsPanel({
                         onLaunch={() => void launchBot(bot)}
                         onLaunchNew={() =>
                           void launchBot(bot, { forceNew: true })
+                        }
+                        onApproveMonitor={(monitorId) =>
+                          void approveMonitor(bot.id, monitorId)
                         }
                       />
                     </div>

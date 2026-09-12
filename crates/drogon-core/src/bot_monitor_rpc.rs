@@ -435,7 +435,11 @@ pub(crate) fn approve_monitor_in_tx(
     params: &Value,
     now_ms: f64,
 ) -> Result<Value, RpcError> {
-    let scope = parse_scope(params, "bot.monitor_approve")?;
+    // Same relaxed workspace as the admission gate above: the app-global
+    // Bots page approves with the "" sentinel and the bot's OWNING
+    // workspace is resolved authoritatively (`resolve_bot_scope`). The
+    // hash-bound approval semantics are untouched.
+    let scope = parse_scope_relaxed_workspace(params, "bot.monitor_approve")?;
     let (_folder, workspace_id) = resolve_bot_scope(tx, derived_host_id, &scope)?;
     let monitor_id = params
         .as_object()
@@ -464,6 +468,10 @@ pub(crate) fn approve_monitor_in_tx(
     let approval_hash = approved.approved_rule_hash.clone();
     mstorage::cas_write(tx, &approved, rev).map_err(monitor_error)?;
     Ok(json!({
+        // Echo the resolved scope so an app-global ("") caller can verify
+        // what answered, exactly like `bot.monitor_list`.
+        "hostId": derived_host_id,
+        "workspaceId": workspace_id,
         "monitorId": monitor_id,
         "botId": scope.bot_id,
         "approved": true,
@@ -540,6 +548,7 @@ fn monitor_list_in_conn(
                 "trigger": trigger_view(&record.trigger),
                 "consecutiveErrors": record.consecutive_errors,
                 "lastError": record.last_error,
+                "lastNotice": record.last_notice,
                 "failureThreshold": crate::bot_self_mgmt::FAILURE_THRESHOLD,
                 "lastCheckAtMs": last_check_at_ms,
                 "lastCheckOutcome": last_check_outcome,
@@ -628,7 +637,15 @@ impl crate::Engine {
                         "service admission is frozen for shutdown",
                     ));
                 }
-                let scope = parse_scope(&params, "bot.monitor_approve")?;
+                // The app-global Bots page's approval carries the same ""
+                // sentinel the page's monitor READ carries (`bot.snapshot`
+                // #348): `workspaceId: ""` is admitted HERE ONLY and resolves
+                // to the bot's OWNING workspace — the same authoritative
+                // routing `bot.run` and `bot.monitor_list` use. The approval
+                // itself is unchanged: the hash is still derived from the
+                // monitor's CURRENT stored rule text, and the resolved scope
+                // is echoed so callers verify what answered.
+                let scope = parse_scope_relaxed_workspace(&params, "bot.monitor_approve")?;
                 authorize_bot_scope(tx, &host_id, &scope)
             },
             |tx| approve_monitor_in_tx(tx, &host_id, &params, crate::now_unix_ms() as f64),
