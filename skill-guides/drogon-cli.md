@@ -552,14 +552,12 @@ without touching owner content:
   `drogon-cli graph write-intent --workspace <ID> --file graph-intent.json`
   and let the graph's own execution path run them, rather than doing the
   work directly in this session.
-- `policy.adversarial.enabled: true` means the desktop runs a bounded
-  Adversarial-test / Code-review loop against a finished workflow, up to
-  `policy.adversarial.maxIterations` cycles: an adversarial-test pass that
-  tries to break the work, then an independent code-review pass that fixes
-  confirmed problems and verifies each fix. That loop is desktop-driven,
-  not something this CLI launches by hand — when it is on, leave the work
-  in a state with real, runnable checks, since those are what get
-  replayed.
+- `policy.adversarial.enabled: true` adds a bounded Adversarial-test /
+  Code-review loop to a durable orchestrator run, up to
+  `policy.adversarial.maxIterations` cycles. Both roles execute every cycle;
+  code review fixes confirmed problems and verifies corrections. Findings
+  are successful evaluations, not failed runtime launches. A cycle passes
+  only when both roles pass; corrections require another test cycle.
 - `policy.approvedRuntimes` (an ordered list) and `policy.fallbackRuntime`
   are the runtimes a subagent node may run under, in priority order.
   Launch a node through that exact order with
@@ -569,6 +567,31 @@ without touching owner content:
   `pi` model, so this never costs anything by default. The result names
   the runtime that actually ran, whether it was the fallback, and the full
   attempt history — never a guess at what "should" have run.
+
+The Orchestrator uses a main-task node (the normal `GraphNodeIntent` JSON
+shape: id, title, harness, model, prompt, enabled, and no dependencies).
+The desktop saves that task and the policy automatically. Run captures their
+configuration, executes the main task even with adversarial testing off,
+and schedules the optional test/review roles in the daemon. Closing a view
+does not stop its scheduling. The same workflow is available to agents:
+
+```sh
+drogon-cli graph orchestrator-start --workspace <ID> --file main-task.json
+drogon-cli graph orchestrator-status --workspace <ID> --json
+drogon-cli graph orchestrator-stop --workspace <ID> --run <RUN_ID>
+drogon-cli graph orchestrator-resume --workspace <ID> --run <RUN_ID>
+```
+
+Status includes the captured policy, iterations, evaluations and actual
+runtime attempts. Policy edits apply to the next run. Stop requests
+cancellation: wait for `stopped` before treating work as stopped. Resume
+retains completed roles and refuses an unverifiable run. The scheduler
+creates only depth-one roles; their briefs prohibit further delegation.
+This is not a sandbox restriction on arbitrary commands an agent can run.
+
+The legacy named-workflow graph runner retains its separate desktop-driven
+review flow. Use the Orchestrator commands above for durable test/review
+cycles and independent execution/evaluation results.
 
 ## Skill Topics
 

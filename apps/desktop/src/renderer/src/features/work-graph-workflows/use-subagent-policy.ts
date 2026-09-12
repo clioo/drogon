@@ -1,20 +1,11 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// The Orchestrator's ONLY write path for the Subagent policy panel:
-// `graph.write_intent` with the CURRENT nodes resent unchanged alongside
-// the edited policy (see `graph-contract.ts`'s doc on why a write that
-// silently dropped `nodes` would wipe the human's own graph). Tracks
-// whether the most recent save actually succeeded so the canvas's
-// "Saved automatically" label can be honest — never a checkmark for a
-// write that failed.
-
-import { useCallback, useRef, useState } from "react";
-import type {
-  GraphBridge,
-  GraphPolicy,
-} from "../../../../shared/graph-contract";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_GRAPH_POLICY,
   resolveGraphPolicy,
+  type GraphBridge,
+  type GraphPolicy,
+  type DesignableIntentNode,
 } from "../../../../shared/graph-contract";
 import type { WorkGraphDocument } from "../../../../shared/work-graph-contract";
 
@@ -30,67 +21,84 @@ export function useSubagentPolicy({
   graphBridge: GraphBridge | null;
   workspaceId: string;
   document: WorkGraphDocument | null;
-  /** True exactly when `document` is null because the workspace genuinely
-   *  has no `.drogon/graph.json` yet (`useWorkGraphSource`'s `"missing"`
-   *  read outcome) — safe to start `nodes: []` from. False for every other
-   *  reason `document` is null (an unreadable or too-large file): writing
-   *  `nodes: []` there would silently REPLACE real content the pane simply
-   *  could not read, exactly the trap `WorkGraphDesigner`'s own
-   *  `designBlockedReason` guards against — this hook applies the same
-   *  rule to the policy panel's writes. */
   allowEmptyStart?: boolean;
-  /** Called after a successful save so the caller can re-poll the graph. */
   onSaved?: () => void;
-}): {
-  policy: GraphPolicy;
-  saveStatus: SaveStatus;
-  saveError: string | null;
-  interactive: boolean;
-  save: (next: GraphPolicy) => void;
-} {
-  const policy = document
+}) {
+  const remote = document
     ? resolveGraphPolicy(document.intent)
     : DEFAULT_GRAPH_POLICY;
-  const canWrite = document !== null || allowEmptyStart;
+  const [draft, setDraft] = useState<{
+    workspaceId: string;
+    policy: GraphPolicy;
+  } | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
-  // Only the LATEST save's outcome matters for the status chip; an older
-  // in-flight write settling after a newer one must never overwrite it.
+  const queue = useRef(Promise.resolve(true));
   const generation = useRef(0);
-
+  const currentWorkspace = useRef(workspaceId);
+  currentWorkspace.current = workspaceId;
+  const canWrite = document !== null || allowEmptyStart;
+  useEffect(() => {
+    generation.current++;
+    setSaveStatus("idle");
+    setSaveError(null);
+  }, [workspaceId]);
   const save = useCallback(
-    (next: GraphPolicy) => {
-      if (!graphBridge || !canWrite) return;
-      const gen = (generation.current += 1);
+    (next: GraphPolicy, main?: DesignableIntentNode) => {
+      if (!graphBridge?.graphWritePolicy || !canWrite) return;
+      const gen = ++generation.current;
+      setDraft({ workspaceId, policy: next });
       setSaveStatus("saving");
       setSaveError(null);
-      void graphBridge
-        .graphWriteIntent({
-          workspaceId,
-          intent: {
-            nodes: (document?.intent.nodes ?? []) as unknown[],
-            policy: next,
-          },
-        })
-        .then((result) => {
-          if (generation.current !== gen) return;
-          if (!result.ok) {
-            setSaveStatus("error");
-            setSaveError(result.error.message);
-            return;
+      // Serialize edits; policy-only writes preserve concurrently added nodes.
+      queue.current = queue.current
+        .catch(() => false)
+        .then(async () => {
+          try {
+            const result = await graphBridge.graphWritePolicy!({
+              workspaceId,
+              policy: next,
+              main,
+            });
+            if (
+              currentWorkspace.current === workspaceId &&
+              generation.current === gen
+            ) {
+              setSaveStatus(result.ok ? "saved" : "error");
+              setSaveError(result.ok ? null : result.error.message);
+              if (result.ok) onSaved?.();
+            }
+            return result.ok;
+          } catch (error) {
+            if (
+              currentWorkspace.current === workspaceId &&
+              generation.current === gen
+            ) {
+              setSaveStatus("error");
+              setSaveError(
+                error instanceof Error ? error.message : String(error),
+              );
+            }
+            return false;
           }
-          setSaveStatus("saved");
-          onSaved?.();
         });
     },
-    [graphBridge, workspaceId, document, canWrite, onSaved],
+    [graphBridge, workspaceId, canWrite, onSaved],
   );
-
+  const flush = useCallback(async () => {
+    let pending;
+    do {
+      pending = queue.current;
+      await pending;
+    } while (pending !== queue.current);
+    return pending;
+  }, []);
   return {
-    policy,
+    policy: draft?.workspaceId === workspaceId ? draft.policy : remote,
     saveStatus,
     saveError,
-    interactive: Boolean(graphBridge && canWrite),
+    interactive: Boolean(graphBridge?.graphWritePolicy && canWrite),
     save,
+    flush,
   };
 }

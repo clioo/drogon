@@ -62,6 +62,7 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
     let engine = open_engine_naming_data_dir(data_dir)?;
     let engine = Arc::new(configure_worker_cli(engine)?);
+    let mut graph_scheduler = drogon_core::graph::orchestrator::spawn(engine.clone());
     // Daemon-owned automation tick loop (R2-B): a plain OS thread polling
     // every 15 s. It exits on engine quiescence or here on serve exit.
     let mut scheduler = drogon_core::automations::scheduler::spawn(
@@ -75,6 +76,7 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let result =
         server::accept_loop(listener, engine, Arc::from(token.as_str())).map_err(ServeError::Io);
     scheduler.shutdown();
+    graph_scheduler.shutdown();
     result?;
     // `_lock` is held for this entire call, released only on process exit
     // or an early `?` return above.
@@ -100,6 +102,7 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
     let engine = open_engine_naming_data_dir(data_dir)?;
     let engine = Arc::new(configure_worker_cli(engine)?);
+    let mut graph_scheduler = drogon_core::graph::orchestrator::spawn(engine.clone());
     // Daemon-owned automation tick loop (R2-B); see the Unix serve above.
     let mut scheduler = drogon_core::automations::scheduler::spawn(
         engine.clone(),
@@ -108,6 +111,7 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let result =
         server::accept_loop(listener, engine, Arc::from(token.as_str())).map_err(ServeError::Io);
     scheduler.shutdown();
+    graph_scheduler.shutdown();
     result?;
     Ok(())
 }

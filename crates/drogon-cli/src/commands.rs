@@ -1454,6 +1454,47 @@ async fn graph(
     action: &GraphAction,
 ) -> Result<RunOutcome, CliError> {
     match action {
+        GraphAction::OrchestratorStart { .. }
+        | GraphAction::OrchestratorStatus { .. }
+        | GraphAction::OrchestratorStop { .. }
+        | GraphAction::OrchestratorResume { .. } => {
+            capability_preflight(client, request_id, "graph.v1", "the orchestrator").await?;
+            let (method, params) = match action {
+                GraphAction::OrchestratorStart { workspace, file } => (
+                    "graph.orchestrator_start",
+                    json!({"workspaceId": workspace, "main": read_intent(request_id, file)?}),
+                ),
+                GraphAction::OrchestratorStatus { workspace } => (
+                    "graph.orchestrator_status",
+                    json!({"workspaceId": workspace}),
+                ),
+                GraphAction::OrchestratorStop { workspace, run } => (
+                    "graph.orchestrator_stop",
+                    json!({"workspaceId": workspace, "runId": run}),
+                ),
+                GraphAction::OrchestratorResume { workspace, run } => (
+                    "graph.orchestrator_resume",
+                    json!({"workspaceId": workspace, "runId": run}),
+                ),
+                _ => unreachable!(),
+            };
+            let call = client
+                .call(method, params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            #[derive(serde::Deserialize)]
+            struct Snapshot {
+                run: Option<drogon_protocol::graph::GraphOrchestratorRun>,
+            }
+            let snapshot: Snapshot = Client::decode(&call, method)?;
+            let text = match snapshot.run {
+                Some(run) => format!(
+                    "Workflow {}: {} ({}; iteration {}).",
+                    run.id, run.status, run.phase, run.iteration
+                ),
+                None => "No workflow run recorded for this workspace.".into(),
+            };
+            emit(call, json, || text, 0, None)
+        }
         GraphAction::Read { workspace } => {
             capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
             let call = client

@@ -21,6 +21,10 @@ import {
   graphRunNodeFailoverResultSchema,
   graphRunResultSchema,
   graphWriteIntentParamsSchema,
+  graphWritePolicyParamsSchema,
+  orchestratorResultSchema,
+  orchestratorStartParamsSchema,
+  orchestratorControlParamsSchema,
 } from "../shared/graph-contract";
 import { resultSchemas } from "../shared/result-validation";
 import type { Result } from "../shared/session-contract";
@@ -42,39 +46,64 @@ const invalid = {
 } as const;
 
 type GraphMethod =
+  | "graphOrchestratorStart"
+  | "graphOrchestratorStatus"
+  | "graphOrchestratorStop"
+  | "graphOrchestratorResume"
   | "graphRead"
   | "graphWriteIntent"
+  | "graphWritePolicy"
   | "graphCompile"
   | "graphRun"
   | "graphRunNodeFailover";
 
 const nativeMethodFor: Record<GraphMethod, string> = {
+  graphOrchestratorStart: "graph.orchestrator_start",
+  graphOrchestratorStatus: "graph.orchestrator_status",
+  graphOrchestratorStop: "graph.orchestrator_stop",
+  graphOrchestratorResume: "graph.orchestrator_resume",
   graphRead: "graph.read",
   graphWriteIntent: "graph.write_intent",
+  graphWritePolicy: "graph.write_policy",
   graphCompile: "graph.compile",
   graphRun: "graph.run",
   graphRunNodeFailover: "graph.run_node_failover",
 };
 
 const channelFor: Record<GraphMethod, string> = {
+  graphOrchestratorStart: "drogon:graphOrchestratorStart",
+  graphOrchestratorStatus: "drogon:graphOrchestratorStatus",
+  graphOrchestratorStop: "drogon:graphOrchestratorStop",
+  graphOrchestratorResume: "drogon:graphOrchestratorResume",
   graphRead: "drogon:graphRead",
   graphWriteIntent: "drogon:graphWriteIntent",
+  graphWritePolicy: "drogon:graphWritePolicy",
   graphCompile: "drogon:graphCompile",
   graphRun: "drogon:graphRun",
   graphRunNodeFailover: "drogon:graphRunNodeFailover",
 };
 
 const paramSchemas = {
+  graphOrchestratorStart: orchestratorStartParamsSchema,
+  graphOrchestratorStatus: graphReadParamsSchema,
+  graphOrchestratorStop: orchestratorControlParamsSchema,
+  graphOrchestratorResume: orchestratorControlParamsSchema,
   graphRead: graphReadParamsSchema,
   graphWriteIntent: graphWriteIntentParamsSchema,
+  graphWritePolicy: graphWritePolicyParamsSchema,
   graphCompile: graphCompileParamsSchema,
   graphRun: graphCompileParamsSchema,
   graphRunNodeFailover: graphNodeParamsSchema,
 } as const;
 
 const resultSchemasFor = {
+  graphOrchestratorStart: orchestratorResultSchema,
+  graphOrchestratorStatus: orchestratorResultSchema,
+  graphOrchestratorStop: orchestratorResultSchema,
+  graphOrchestratorResume: orchestratorResultSchema,
   graphRead: graphResultSchema,
   graphWriteIntent: graphResultSchema,
+  graphWritePolicy: graphResultSchema,
   graphCompile: graphCompileResultSchema,
   graphRun: graphRunResultSchema,
   graphRunNodeFailover: graphRunNodeFailoverResultSchema,
@@ -86,7 +115,8 @@ const resultSchemasFor = {
 // so an unregistered method would fail every call with a false "does not
 // match the expected contract".
 for (const [method, schema] of Object.entries(resultSchemasFor)) {
-  resultSchemas[nativeMethodFor[method as keyof typeof resultSchemasFor]] = schema;
+  resultSchemas[nativeMethodFor[method as keyof typeof resultSchemasFor]] =
+    schema;
 }
 
 export async function dispatchGraphRequest(
@@ -116,7 +146,9 @@ export async function dispatchGraphRequest(
  * sender/frame gate main/index.ts applies to its own bridge (see
  * `main/mentu-bridge.ts` for the identical precedent).
  */
-export function registerGraphBridge(getWindow: () => BrowserWindow | null): void {
+export function registerGraphBridge(
+  getWindow: () => BrowserWindow | null,
+): void {
   for (const method of Object.keys(channelFor) as GraphMethod[]) {
     ipcMain.handle(channelFor[method], async (event, input: unknown) => {
       const window = getWindow();

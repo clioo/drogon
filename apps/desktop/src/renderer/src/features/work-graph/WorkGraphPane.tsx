@@ -95,19 +95,12 @@ import { WorkflowBar } from "../work-graph-workflows/WorkflowBar";
 import { useWorkflowLibrary } from "../work-graph-workflows/use-workflow-library";
 import { useAdversarialLoop } from "../work-graph-workflows/use-adversarial-loop";
 import { findWorkflow } from "../work-graph-workflows/workflow-library";
-import {
-  buildOrchestratorBaseDispatchPrompt,
-  isTerminalPhase,
-} from "../work-graph-workflows/adversarial-loop";
+import { isTerminalPhase } from "../work-graph-workflows/adversarial-loop";
 import { SubagentPolicyPanel } from "../work-graph-workflows/SubagentPolicyPanel";
 import { OrchestratorCanvas } from "../work-graph-workflows/OrchestratorCanvas";
 import { useSubagentPolicy } from "../work-graph-workflows/use-subagent-policy";
-import {
-  defaultMentuDispatchDeps,
-  describeMentuDispatchFailure,
-  dispatchMentuRunPrompt,
-  type MentuDispatchDeps,
-} from "../mentu/mentu-run-dispatch";
+import { useOrchestratorRun } from "../work-graph-workflows/use-orchestrator-run";
+import { type MentuDispatchDeps } from "../mentu/mentu-run-dispatch";
 
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 200;
@@ -129,7 +122,11 @@ function MetricCard({
     <div className="w-44 shrink-0 rounded-md border border-border bg-card p-3 text-xs @2xl/work-graph-totals:w-auto @2xl/work-graph-totals:shrink">
       <p className="break-words font-medium">{value}</p>
       <Badge variant="outline" className="mt-2 text-[10px]">
-        {exact ? "Exact · state record" : partial ? "Partial · unknowns counted" : "Unavailable"}
+        {exact
+          ? "Exact · state record"
+          : partial
+            ? "Partial · unknowns counted"
+            : "Unavailable"}
       </Badge>
     </div>
   );
@@ -153,7 +150,11 @@ function EvidenceStream({
   ) {
     return null;
   }
-  if (output.content !== null && output.content !== undefined && output.content.length > 0) {
+  if (
+    output.content !== null &&
+    output.content !== undefined &&
+    output.content.length > 0
+  ) {
     const truncated = output.error === "content_truncated";
     return (
       <div className="mt-2 min-w-0">
@@ -168,7 +169,9 @@ function EvidenceStream({
           {output.content}
         </pre>
         {truncated && output.path ? (
-          <p className="mt-1 text-muted-foreground">Full output at {output.path}</p>
+          <p className="mt-1 text-muted-foreground">
+            Full output at {output.path}
+          </p>
         ) : null}
       </div>
     );
@@ -183,7 +186,9 @@ function EvidenceStream({
   return (
     <div className="mt-2 min-w-0">
       <p className="text-muted-foreground">{label} (no content recorded)</p>
-      {output.path ? <p className="mt-1 font-mono text-muted-foreground">{output.path}</p> : null}
+      {output.path ? (
+        <p className="mt-1 font-mono text-muted-foreground">{output.path}</p>
+      ) : null}
     </div>
   );
 }
@@ -204,31 +209,45 @@ function EvidenceDrift({
       <p className="text-muted-foreground">Drift (expected vs created)</p>
       <div className="mt-1 grid gap-2 @md/work-graph-inspector:grid-cols-2">
         <div className="min-w-0 rounded-md border border-border bg-card p-2">
-          <p className="text-[10px] tracking-wide text-muted-foreground uppercase">Expected</p>
+          <p className="text-[10px] tracking-wide text-muted-foreground uppercase">
+            Expected
+          </p>
           {drift.expected.length > 0 ? (
             <ul className="mt-1 space-y-0.5">
               {drift.expected.map((path) => (
-                <li key={`expected:${path}`} className="break-all font-mono text-[11px]">
+                <li
+                  key={`expected:${path}`}
+                  className="break-all font-mono text-[11px]"
+                >
                   {path}
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="mt-1 text-[11px] text-muted-foreground">none recorded</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              none recorded
+            </p>
           )}
         </div>
         <div className="min-w-0 rounded-md border border-border bg-card p-2">
-          <p className="text-[10px] tracking-wide text-muted-foreground uppercase">Created</p>
+          <p className="text-[10px] tracking-wide text-muted-foreground uppercase">
+            Created
+          </p>
           {drift.created.length > 0 ? (
             <ul className="mt-1 space-y-0.5">
               {drift.created.map((path) => (
-                <li key={`created:${path}`} className="break-all font-mono text-[11px]">
+                <li
+                  key={`created:${path}`}
+                  className="break-all font-mono text-[11px]"
+                >
                   {path}
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="mt-1 text-[11px] text-muted-foreground">none recorded</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              none recorded
+            </p>
           )}
         </div>
       </div>
@@ -245,7 +264,9 @@ function UnknownEvidence({
 }: {
   evidence: WorkGraphEvidence;
 }): React.JSX.Element | null {
-  const unknown = Object.keys(evidence).filter((key) => !KNOWN_EVIDENCE_KEYS.has(key));
+  const unknown = Object.keys(evidence).filter(
+    (key) => !KNOWN_EVIDENCE_KEYS.has(key),
+  );
   if (unknown.length === 0) return null;
   const raw: Record<string, unknown> = {};
   for (const key of unknown) raw[key] = evidence[key];
@@ -255,7 +276,8 @@ function UnknownEvidence({
       data-testid="work-graph-node-evidence-unknown"
     >
       <summary className="cursor-pointer text-[11px] text-muted-foreground">
-        {unknown.length} more evidence field{unknown.length === 1 ? "" : "s"} from the state record
+        {unknown.length} more evidence field{unknown.length === 1 ? "" : "s"}{" "}
+        from the state record
       </summary>
       <pre className="mt-1 max-h-40 overflow-auto font-mono text-[11px] whitespace-pre-wrap break-words">
         {JSON.stringify(raw, null, 2)}
@@ -280,7 +302,10 @@ function UsageLine({
     // Not applicable ≠ unavailable: a shell node HAS no model/token
     // fields by contract.
     return (
-      <p className="mt-2 text-muted-foreground" data-testid="work-graph-node-usage-na">
+      <p
+        className="mt-2 text-muted-foreground"
+        data-testid="work-graph-node-usage-na"
+      >
         Token metrics: not applicable (shell node)
       </p>
     );
@@ -294,7 +319,8 @@ function UsageLine({
   }
   return (
     <p className="mt-2" data-testid="work-graph-node-usage">
-      <span className="text-muted-foreground">Model:</span> {step?.model ?? "unavailable"}
+      <span className="text-muted-foreground">Model:</span>{" "}
+      {step?.model ?? "unavailable"}
       <br />
       <span className="text-muted-foreground">Input tokens:</span>{" "}
       {typeof usage.inputTokens === "number" && usage.usageKnown !== false
@@ -331,7 +357,10 @@ function useRunEvidence(
       return;
     }
     if (!mentuBridge?.mentuRunEvidence) {
-      setState({ kind: "error", message: "Evidence content is unavailable in this build." });
+      setState({
+        kind: "error",
+        message: "Evidence content is unavailable in this build.",
+      });
       return;
     }
     let cancelled = false;
@@ -373,7 +402,9 @@ function WorkGraphNodeInspector({
   nodeId: string | null;
   mentuBridge: MentuBridge | null;
 }): React.JSX.Element {
-  const intentNode = nodeId ? layout.nodes.find((node) => node.id === nodeId) ?? null : null;
+  const intentNode = nodeId
+    ? (layout.nodes.find((node) => node.id === nodeId) ?? null)
+    : null;
   const state = intentNode ? stateNodeFor(document, intentNode.id) : null;
   const step = state?.evidence?.step ?? null;
   const evidenceStreams = useRunEvidence(
@@ -397,7 +428,9 @@ function WorkGraphNodeInspector({
   const deps = dependencyTitles(layout, intentNode);
   const streams =
     evidenceStreams.kind === "resolved"
-      ? (evidenceStreams.result.evidence.find((entry) => entry.label === step?.label) ?? null)
+      ? (evidenceStreams.result.evidence.find(
+          (entry) => entry.label === step?.label,
+        ) ?? null)
       : null;
   return (
     <div
@@ -418,7 +451,9 @@ function WorkGraphNodeInspector({
             {intentNode.harness}
           </Badge>
           {intentModel(intentNode) ? (
-            <span className="font-mono text-[11px]">{intentModel(intentNode)}</span>
+            <span className="font-mono text-[11px]">
+              {intentModel(intentNode)}
+            </span>
           ) : (
             <span className="text-[11px]">
               {shell ? "no model (shell)" : "harness default model"}
@@ -446,7 +481,10 @@ function WorkGraphNodeInspector({
         </p>
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-3" data-testid="work-graph-node-run">
+      <div
+        className="rounded-lg border border-border bg-card p-3"
+        data-testid="work-graph-node-run"
+      >
         <p className="flex items-center gap-1.5 font-medium">
           <Activity className="size-3.5 text-muted-foreground" aria-hidden />
           Run record
@@ -456,12 +494,15 @@ function WorkGraphNodeInspector({
             <dl className="mt-2 space-y-1">
               <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                 <dt className="text-muted-foreground">Started</dt>
-                <dd className="min-w-0 break-all">{state.startedAt ?? "unavailable"}</dd>
+                <dd className="min-w-0 break-all">
+                  {state.startedAt ?? "unavailable"}
+                </dd>
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                 <dt className="text-muted-foreground">Ended</dt>
                 <dd className="min-w-0 break-all">
-                  {state.endedAt ?? (status === "running" ? "running" : "unavailable")}
+                  {state.endedAt ??
+                    (status === "running" ? "running" : "unavailable")}
                 </dd>
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-0.5">
@@ -474,9 +515,11 @@ function WorkGraphNodeInspector({
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                 <dt className="text-muted-foreground">Run</dt>
-                <dd className="min-w-0 break-all font-mono">{state.runId ?? "unavailable"}</dd>
+                <dd className="min-w-0 break-all font-mono">
+                  {state.runId ?? "unavailable"}
+                </dd>
               </div>
-              {state.mentuRunId ?? evidence?.mentuRunId ? (
+              {(state.mentuRunId ?? evidence?.mentuRunId) ? (
                 <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                   <dt className="text-muted-foreground">Runtime run</dt>
                   <dd className="min-w-0 break-all font-mono">
@@ -491,7 +534,9 @@ function WorkGraphNodeInspector({
                 <p className="mt-2">
                   Exit code:{" "}
                   <span className="font-mono">
-                    {typeof step?.exitCode === "number" ? step.exitCode : "unavailable"}
+                    {typeof step?.exitCode === "number"
+                      ? step.exitCode
+                      : "unavailable"}
                   </span>
                 </p>
                 <EvidenceDrift drift={evidence.drift ?? null} />
@@ -501,17 +546,23 @@ function WorkGraphNodeInspector({
                     <EvidenceStream label="stderr" output={streams.stderr} />
                   </>
                 ) : evidenceStreams.kind === "loading" ? (
-                  <p className="mt-2 text-muted-foreground">Loading stdout and stderr…</p>
+                  <p className="mt-2 text-muted-foreground">
+                    Loading stdout and stderr…
+                  </p>
                 ) : evidenceStreams.kind === "error" ? (
                   <p role="status" className="mt-2 text-muted-foreground">
                     Evidence content unavailable: {evidenceStreams.message}
                   </p>
                 ) : null}
                 {step?.outputPath ? (
-                  <p className="mt-1 font-mono text-muted-foreground">stdout: {step.outputPath}</p>
+                  <p className="mt-1 font-mono text-muted-foreground">
+                    stdout: {step.outputPath}
+                  </p>
                 ) : null}
                 {step?.errorPath ? (
-                  <p className="mt-1 font-mono text-muted-foreground">stderr: {step.errorPath}</p>
+                  <p className="mt-1 font-mono text-muted-foreground">
+                    stderr: {step.errorPath}
+                  </p>
                 ) : null}
                 <UnknownEvidence evidence={evidence} />
               </>
@@ -520,7 +571,7 @@ function WorkGraphNodeInspector({
                 No evidence recorded yet for this node.
               </p>
             )}
-            {state.lastError ?? step?.error ? (
+            {(state.lastError ?? step?.error) ? (
               <p role="alert" className="mt-2 text-destructive">
                 {state.lastError ?? step?.error}
               </p>
@@ -533,7 +584,8 @@ function WorkGraphNodeInspector({
         )}
       </div>
       <p className="text-[11px] text-muted-foreground">
-        Values come verbatim from .drogon/graph.json's state records. Drogon estimates nothing.
+        Values come verbatim from .drogon/graph.json's state records. Drogon
+        estimates nothing.
       </p>
     </div>
   );
@@ -565,7 +617,8 @@ function useGraphZoom(): {
   return {
     zoom,
     zoomIn: () => setZoom((current) => Math.min(ZOOM_MAX, current + ZOOM_STEP)),
-    zoomOut: () => setZoom((current) => Math.max(ZOOM_MIN, current - ZOOM_STEP)),
+    zoomOut: () =>
+      setZoom((current) => Math.max(ZOOM_MIN, current - ZOOM_STEP)),
     fitToView: () => setZoom(ZOOM_DEFAULT),
   };
 }
@@ -657,29 +710,47 @@ export function WorkGraphPane({
     () => buildWorkGraphLayout(document?.intent.nodes ?? []),
     [document],
   );
-  const totals = useMemo(() => (document ? summarizeWorkGraph(document) : null), [document]);
+  const totals = useMemo(
+    () => (document ? summarizeWorkGraph(document) : null),
+    [document],
+  );
   const runningCount = totals?.byStatus["running"] ?? 0;
 
   // --- workflows: multiple named, configurable graphs for this workspace,
   // and the bounded adversarial-review loop one of them can trigger. See
   // features/work-graph-workflows for the honesty rules; this component
   // only wires the I/O the hooks there need.
-  const workflowLibrary = useWorkflowLibrary({ fileBridge, hostId, workspaceId });
-  const library = workflowLibrary.state.kind === "ready" ? workflowLibrary.state.library : null;
-  const selectedWorkflow = library ? findWorkflow(library, library.selectedWorkflowId) : null;
-  const loopController = useAdversarialLoop({ graphBridge, workspaceId, pollMs: adversarialLoopPollMs });
+  const workflowLibrary = useWorkflowLibrary({
+    fileBridge,
+    hostId,
+    workspaceId,
+  });
+  const library =
+    workflowLibrary.state.kind === "ready"
+      ? workflowLibrary.state.library
+      : null;
+  const selectedWorkflow = library
+    ? findWorkflow(library, library.selectedWorkflowId)
+    : null;
+  const loopController = useAdversarialLoop({
+    graphBridge,
+    workspaceId,
+    pollMs: adversarialLoopPollMs,
+  });
 
   useEffect(() => {
     loopController.setPersist(
       selectedWorkflow
-        ? (nextLedger) => void workflowLibrary.saveLoopLedger(selectedWorkflow.id, nextLedger)
+        ? (nextLedger) =>
+            void workflowLibrary.saveLoopLedger(selectedWorkflow.id, nextLedger)
         : null,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedWorkflow?.id]);
 
   useEffect(() => {
-    if (selectedWorkflow) loopController.hydrate(selectedWorkflow.id, selectedWorkflow.lastLoop);
+    if (selectedWorkflow)
+      loopController.hydrate(selectedWorkflow.id, selectedWorkflow.lastLoop);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedWorkflow?.id]);
 
@@ -704,13 +775,18 @@ export function WorkGraphPane({
   );
 
   const handleCreateWorkflow = useCallback(
-    (name: string) => workflowLibrary.createWorkflow(name, (document?.intent.nodes ?? []) as unknown[]),
+    (name: string) =>
+      workflowLibrary.createWorkflow(
+        name,
+        (document?.intent.nodes ?? []) as unknown[],
+      ),
     [workflowLibrary, document],
   );
 
   const handleIntentSaved = useCallback(
     (nodes: Record<string, unknown>[]) => {
-      if (selectedWorkflow) void workflowLibrary.syncNodes(selectedWorkflow.id, nodes);
+      if (selectedWorkflow)
+        void workflowLibrary.syncNodes(selectedWorkflow.id, nodes);
     },
     [selectedWorkflow, workflowLibrary],
   );
@@ -763,85 +839,81 @@ export function WorkGraphPane({
   const orchestratorLoopInFlight = Boolean(
     loopController.ledger && !isTerminalPhase(loopController.ledger.phase),
   );
-  // DISHONEST-1: "Run workflow" must cause the Main agent's OWN session to
-  // do something before the loop reviews anything — never fire the review
-  // against whatever happens to already sit in the workspace. Delivers a
-  // real, visible prompt through the exact seam the Mentu Run Recipe
-  // dispatch already uses (the session's PTY echoes it), then starts the
-  // loop watching THAT session (via `baseSessionId`) rather than an empty
-  // `baseNodeIds` — the reducer's `awaiting_base` gate stays genuinely
-  // gated until this session settles (see the effect below).
-  const handleRunOrchestratorWorkflow = useCallback(() => {
-    const baseRunId = `orchestrator-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const maxCycles = subagentPolicy.policy.adversarial.maxIterations;
+  const durableOrchestrator = useOrchestratorRun(
+    graphBridge,
+    workspaceId,
+    adversarialLoopPollMs,
+  );
+  const [mainDraft, setMainDraft] = useState<{
+    workspaceId: string;
+    task: { harness: string; model: string; prompt: string };
+  } | null>(null);
+  const savedMain = document?.intent.nodes.find(
+    (node) => node.id === "orchestrator-main",
+  );
+  const configuredMain = (mainDraft?.workspaceId === workspaceId
+    ? mainDraft.task
+    : savedMain) ?? {
+    harness: mainSession?.harnessId ?? "pi",
+    model: "",
+    prompt: "",
+  };
+  const updateMainTask = (task: typeof configuredMain) => {
+    setMainDraft({ workspaceId, task });
+    subagentPolicy.save(subagentPolicy.policy, {
+      ...task,
+      id: "orchestrator-main",
+      title: "Main agent",
+      enabled: true,
+      dependsOn: [],
+    });
+  };
+  const startDurableOrchestrator = () => {
     void (async () => {
-      const dispatched = await dispatchMentuRunPrompt(mentuDispatchDeps ?? defaultMentuDispatchDeps(), {
-        workspaceId,
-        activeSessionId: mainSession?.id ?? null,
-        prompt: buildOrchestratorBaseDispatchPrompt({ baseRunId }),
-      });
-      if (!dispatched.ok) {
-        loopController.startFailedDispatch({
-          workflowId: "__orchestrator__",
-          baseRunId,
-          maxCycles,
-          message: `Run workflow could not reach the main agent: ${describeMentuDispatchFailure(dispatched.failure)}`,
-        });
-        return;
-      }
-      loopController.startForRun({
-        workflowId: "__orchestrator__",
-        baseRunId,
-        baseNodeIds: [],
-        baseSessionId: dispatched.sessionId,
-        maxCycles,
+      if (!(await subagentPolicy.flush())) return;
+      await durableOrchestrator.start({
+        id: "orchestrator-main",
+        title: "Main agent",
+        ...configuredMain,
+        enabled: true,
+        dependsOn: [],
       });
     })();
-  }, [
-    loopController,
-    subagentPolicy.policy.adversarial.maxIterations,
-    mainSession,
-    workspaceId,
-    mentuDispatchDeps,
-  ]);
-  const orchestratorLedger = loopController.ledger;
-  useEffect(() => {
-    if (!orchestratorLedger || orchestratorLedger.phase !== "awaiting_base") return;
-    const awaitedSessionId = orchestratorLedger.baseSessionId;
-    if (!awaitedSessionId) return;
-    const dispatched = sessions.find((session) => session.id === awaitedSessionId);
-    if (!dispatched) return; // No positive evidence either way yet — keep waiting.
-    if (dispatched.verdict === "exited" || dispatched.agentState === "exited") {
-      loopController.setBaseSessionObservation(awaitedSessionId, "exited");
-      return;
-    }
-    // Settled means a GENUINE idle transition since the dispatch, not
-    // merely "happens to read idle right now" (which could be stale from
-    // before the prompt was even sent).
-    const settled =
-      dispatched.agentState === "idle" &&
-      Boolean(dispatched.agentStateAt) &&
-      dispatched.agentStateAt! >= orchestratorLedger.startedAt;
-    loopController.setBaseSessionObservation(awaitedSessionId, settled ? "settled" : "pending");
-  }, [loopController, sessions, orchestratorLedger]);
-  const orchestratorRunDisabledReason = !mainSession
-    ? "Start a session to enable the orchestrator."
-    : !subagentPolicy.policy.adversarial.enabled
-      ? "No optional subagents enabled — nothing to run automatically; the main agent does the work directly."
-      : orchestratorLoopInFlight
-        ? "A workflow is already running."
-        : !graphBridge
-          ? "Running a workflow is unavailable in this build."
-          : null;
+  };
+  const orchestratorRunDisabledReason = !configuredMain.prompt.trim()
+    ? "Describe the main task first."
+    : ["opencode", "pi"].includes(configuredMain.harness) &&
+        !configuredMain.model.trim()
+      ? "Choose a model for the main task."
+      : durableOrchestrator.run?.status === "unverifiable"
+        ? "Investigate the existing run: contact was lost and its processes may still be running."
+        : subagentPolicy.saveStatus === "error"
+          ? "Resolve the policy save error before running."
+          : durableOrchestrator.busy ||
+              durableOrchestrator.run?.status === "running" ||
+              durableOrchestrator.run?.status === "stopping" ||
+              orchestratorLoopInFlight
+            ? "A workflow is already running."
+            : !graphBridge?.graphOrchestratorStart
+              ? "Running a workflow is unavailable in this build."
+              : null;
 
   if (mode === "orchestrator") {
     return (
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-row" data-testid="work-graph-pane">
+      <div
+        className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-auto lg:flex-row"
+        data-testid="work-graph-pane"
+      >
         <OrchestratorCanvas
           policy={subagentPolicy.policy}
           mainSession={mainSession}
           loopLedger={loopController.ledger}
-          onRunWorkflow={handleRunOrchestratorWorkflow}
+          onRunWorkflow={startDurableOrchestrator}
+          configuredMain={configuredMain}
+          durableRun={durableOrchestrator.run}
+          runError={durableOrchestrator.error}
+          onStopRun={() => void durableOrchestrator.stop()}
+          onResumeRun={() => void durableOrchestrator.resume()}
           canRun={orchestratorRunDisabledReason === null}
           runDisabledReason={orchestratorRunDisabledReason}
           saveStatus={subagentPolicy.saveStatus}
@@ -853,8 +925,18 @@ export function WorkGraphPane({
         />
         <SubagentPolicyPanel
           policy={subagentPolicy.policy}
-          onChange={subagentPolicy.save}
+          onChange={(policy) =>
+            subagentPolicy.save(policy, {
+              ...configuredMain,
+              id: "orchestrator-main",
+              title: "Main agent",
+              enabled: true,
+              dependsOn: [],
+            })
+          }
           interactive={subagentPolicy.interactive}
+          mainTask={configuredMain}
+          onMainTaskChange={updateMainTask}
         />
       </div>
     );
@@ -892,7 +974,10 @@ export function WorkGraphPane({
       {/* Header: what this surface is, where the truth lives, how fresh. */}
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Network className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <Network
+            className="size-4 shrink-0 text-muted-foreground"
+            aria-hidden
+          />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-sm font-medium">Work Graph</h1>
@@ -975,8 +1060,14 @@ export function WorkGraphPane({
                         }`
                       : "Duration: unavailable"
                   }
-                  exact={totals.durationTotalMs !== null && totals.durationUnknownCount === 0}
-                  partial={totals.durationTotalMs !== null && totals.durationUnknownCount > 0}
+                  exact={
+                    totals.durationTotalMs !== null &&
+                    totals.durationUnknownCount === 0
+                  }
+                  partial={
+                    totals.durationTotalMs !== null &&
+                    totals.durationUnknownCount > 0
+                  }
                 />
                 <MetricCard
                   value={
@@ -986,12 +1077,18 @@ export function WorkGraphPane({
                             ? ` + ${totals.agentUsageUnavailableCount} unavailable`
                             : ""
                         }`
-                    : totals.shellNodeCount === totals.nodeCount
-                      ? "Input tokens: not applicable (shell nodes only)"
-                      : "Input tokens: unavailable"
+                      : totals.shellNodeCount === totals.nodeCount
+                        ? "Input tokens: not applicable (shell nodes only)"
+                        : "Input tokens: unavailable"
                   }
-                  exact={totals.inputTokens !== null && totals.agentUsageUnavailableCount === 0}
-                  partial={totals.inputTokens !== null && totals.agentUsageUnavailableCount > 0}
+                  exact={
+                    totals.inputTokens !== null &&
+                    totals.agentUsageUnavailableCount === 0
+                  }
+                  partial={
+                    totals.inputTokens !== null &&
+                    totals.agentUsageUnavailableCount > 0
+                  }
                 />
                 <MetricCard
                   value={
@@ -1001,41 +1098,56 @@ export function WorkGraphPane({
                             ? ` + ${totals.agentUsageUnavailableCount} unavailable`
                             : ""
                         }`
-                    : totals.shellNodeCount === totals.nodeCount
-                      ? "Output tokens: not applicable (shell nodes only)"
-                      : "Output tokens: unavailable"
+                      : totals.shellNodeCount === totals.nodeCount
+                        ? "Output tokens: not applicable (shell nodes only)"
+                        : "Output tokens: unavailable"
                   }
-                  exact={totals.outputTokens !== null && totals.agentUsageUnavailableCount === 0}
-                  partial={totals.outputTokens !== null && totals.agentUsageUnavailableCount > 0}
+                  exact={
+                    totals.outputTokens !== null &&
+                    totals.agentUsageUnavailableCount === 0
+                  }
+                  partial={
+                    totals.outputTokens !== null &&
+                    totals.agentUsageUnavailableCount > 0
+                  }
                 />
                 <MetricCard value="Cost: unavailable" exact={false} />
               </div>
             </div>
             <p className="mt-2 flex flex-nowrap items-center gap-1.5 overflow-x-auto text-xs text-muted-foreground @2xl/work-graph-totals:flex-wrap">
-              {(["running", "succeeded", "failed", "blocked", "unverifiable", "idle"] as const).map(
-                (status) =>
-                  (totals.byStatus[status] ?? 0) > 0 ? (
-                    <Badge
-                      key={status}
-                      variant="outline"
-                      className={`text-[10px] ${workGraphStatusToneClass(status)}`}
-                      data-testid={`work-graph-total-${status}`}
-                    >
-                      {totals.byStatus[status]} {workGraphStatusLabel(status)}
-                    </Badge>
-                  ) : null,
+              {(
+                [
+                  "running",
+                  "succeeded",
+                  "failed",
+                  "blocked",
+                  "unverifiable",
+                  "idle",
+                ] as const
+              ).map((status) =>
+                (totals.byStatus[status] ?? 0) > 0 ? (
+                  <Badge
+                    key={status}
+                    variant="outline"
+                    className={`text-[10px] ${workGraphStatusToneClass(status)}`}
+                    data-testid={`work-graph-total-${status}`}
+                  >
+                    {totals.byStatus[status]} {workGraphStatusLabel(status)}
+                  </Badge>
+                ) : null,
               )}
               <span className="shrink-0">
                 {totals.nodeCount} node{totals.nodeCount === 1 ? "" : "s"}
                 <span className="hidden @2xl/work-graph-totals:inline">
-                  {" "}· updates every second while a node runs
+                  {" "}
+                  · updates every second while a node runs
                 </span>
               </span>
             </p>
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
-                        {/* Stacked below lg: the two halves SPLIT the bounded height
+            {/* Stacked below lg: the two halves SPLIT the bounded height
                 (grid-rows-2) so each ScrollArea scrolls internally — the
                 canvas can never paint under the inspector or the status
                 bar, at any acceptance width. */}
@@ -1046,7 +1158,10 @@ export function WorkGraphPane({
                   paint nodes beneath the inspector and intercept the clicks
                   aimed at them at the acceptance's narrow widths. */}
               <ScrollArea className="min-h-0 flex-1 rounded-lg border border-border bg-card p-3">
-                <div className="relative min-w-0" data-testid="work-graph-canvas">
+                <div
+                  className="relative min-w-0"
+                  data-testid="work-graph-canvas"
+                >
                   <div
                     className="pointer-events-none absolute inset-0 -m-3 rounded-lg opacity-60 [background-image:radial-gradient(var(--border)_1px,transparent_1px)] [background-size:16px_16px] dark:opacity-30"
                     aria-hidden
@@ -1170,7 +1285,10 @@ export function WorkGraphPane({
                                       )}
                                     </div>
                                     <p className="mt-2 flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                                      <Badge variant="secondary" className="text-[10px]">
+                                      <Badge
+                                        variant="secondary"
+                                        className="text-[10px]"
+                                      >
                                         {node.harness}
                                       </Badge>
                                       {intentModel(node) ? (
@@ -1179,7 +1297,10 @@ export function WorkGraphPane({
                                         </span>
                                       ) : null}
                                       {!node.enabled ? (
-                                        <Badge variant="outline" className="text-[10px]">
+                                        <Badge
+                                          variant="outline"
+                                          className="text-[10px]"
+                                        >
                                           not to relaunch
                                         </Badge>
                                       ) : null}
@@ -1224,7 +1345,10 @@ export function WorkGraphPane({
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center p-6">
           {source.kind === "loading" ? (
-            <div className="w-full max-w-md space-y-2" data-testid="work-graph-loading">
+            <div
+              className="w-full max-w-md space-y-2"
+              data-testid="work-graph-loading"
+            >
               <div className="h-16 animate-pulse rounded-md bg-muted motion-reduce:animate-none" />
               <div className="h-16 animate-pulse rounded-md bg-muted motion-reduce:animate-none" />
             </div>
@@ -1244,13 +1368,15 @@ export function WorkGraphPane({
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
                   intent
                 </code>{" "}
-                half is the plan — yours to author, not the daemon&apos;s — and the{" "}
+                half is the plan — yours to author, not the daemon&apos;s — and
+                the{" "}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
                   state
                 </code>{" "}
-                half is what actually happened — only the daemon observes and writes that. Design
-                the plan here: add nodes, give each one its prompt, harness and model, draw what
-                waits on what, then save and run it.
+                half is what actually happened — only the daemon observes and
+                writes that. Design the plan here: add nodes, give each one its
+                prompt, harness and model, draw what waits on what, then save
+                and run it.
               </p>
               <div className="mt-4 flex flex-col items-center gap-2">
                 <Button
@@ -1262,9 +1388,13 @@ export function WorkGraphPane({
                   Design the graph
                 </Button>
                 {!graphBridge ? (
-                  <p className="text-center text-[11px]" data-testid="work-graph-design-unavailable">
-                    Saving is unavailable in this desktop build: it predates the graph bridge, so
-                    the canvas would have nothing to write through.
+                  <p
+                    className="text-center text-[11px]"
+                    data-testid="work-graph-design-unavailable"
+                  >
+                    Saving is unavailable in this desktop build: it predates the
+                    graph bridge, so the canvas would have nothing to write
+                    through.
                   </p>
                 ) : null}
               </div>
@@ -1275,8 +1405,12 @@ export function WorkGraphPane({
               role="alert"
               data-testid="work-graph-invalid"
             >
-              <p className="font-medium">The work graph could not be rendered</p>
-              <p className="mt-1 text-xs text-muted-foreground">{source.message}</p>
+              <p className="font-medium">
+                The work graph could not be rendered
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {source.message}
+              </p>
               {source.detail ? (
                 <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted/40 p-2 font-mono text-[11px] break-words whitespace-pre-wrap">
                   {source.detail}
@@ -1296,24 +1430,27 @@ export function WorkGraphPane({
               data-testid="work-graph-too-large"
             >
               <p className="font-medium">
-                This graph is too large for this surface to read — it is intact, nothing was
-                lost
+                This graph is too large for this surface to read — it is intact,
+                nothing was lost
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
                   {WORK_GRAPH_RELATIVE_PATH}
                 </code>{" "}
-                in this workspace is larger than the 65,536 bytes one files-bridge read can
-                return, so the pane cannot render it. The daemon&apos;s own graph reads have no
-                such cap — a desktop build whose service advertises graph.v1 renders this graph
-                as is.
+                in this workspace is larger than the 65,536 bytes one
+                files-bridge read can return, so the pane cannot render it. The
+                daemon&apos;s own graph reads have no such cap — a desktop build
+                whose service advertises graph.v1 renders this graph as is.
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
-                To view it here again: connect a service that advertises graph.v1, or bring the
-                file under the cap (keep run evidence in the run records the graph references —
-                not as full streams inside prompts) and refresh.
+                To view it here again: connect a service that advertises
+                graph.v1, or bring the file under the cap (keep run evidence in
+                the run records the graph references — not as full streams
+                inside prompts) and refresh.
               </p>
-              <p className="mt-2 font-mono text-[11px] text-muted-foreground">{source.message}</p>
+              <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+                {source.message}
+              </p>
             </div>
           ) : source.kind === "read_error" ? (
             <div
@@ -1322,7 +1459,9 @@ export function WorkGraphPane({
               data-testid="work-graph-read-error"
             >
               <p className="font-medium">Reading .drogon/graph.json failed</p>
-              <p className="mt-1 text-xs text-muted-foreground">{source.message}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {source.message}
+              </p>
             </div>
           ) : null}
         </div>

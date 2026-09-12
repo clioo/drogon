@@ -12,7 +12,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type {
   GraphBridge,
   GraphPolicy,
-  GraphWriteIntentParams,
+  GraphWritePolicyParams,
 } from "../../../../shared/graph-contract";
 import type { WorkGraphDocument } from "../../../../shared/work-graph-contract";
 import { useSubagentPolicy } from "./use-subagent-policy";
@@ -30,16 +30,19 @@ function doc(
 
 function makeBridge(
   respond: (
-    params: GraphWriteIntentParams,
+    params: GraphWritePolicyParams,
   ) => { ok: true } | { ok: false; message: string },
-): { bridge: GraphBridge; writes: GraphWriteIntentParams[] } {
-  const writes: GraphWriteIntentParams[] = [];
+): { bridge: GraphBridge; writes: GraphWritePolicyParams[] } {
+  const writes: GraphWritePolicyParams[] = [];
   const bridge: GraphBridge = {
     graphRead: async () => ({
       ok: false,
       error: { code: "x", message: "unused", retryable: false },
     }),
-    graphWriteIntent: async (params) => {
+    graphWriteIntent: async () => {
+      throw new Error("Policy edits must not replace nodes");
+    },
+    graphWritePolicy: async (params) => {
       writes.push(params);
       const outcome = respond(params);
       if (!outcome.ok)
@@ -56,7 +59,7 @@ function makeBridge(
         result: {
           graph: {
             version: 1,
-            intent: params.intent as never,
+            intent: { nodes: [], policy: params.policy },
             state: { updatedAt: "now", nodes: [] },
           },
         },
@@ -132,7 +135,7 @@ describe("useSubagentPolicy", () => {
     act(() => view.result.current.save(fixturePolicy()));
     await waitFor(() => expect(view.result.current.saveStatus).toBe("saved"));
     expect(writes).toHaveLength(1);
-    expect(writes[0].intent.nodes).toEqual([]);
+    expect(writes[0]).not.toHaveProperty("intent");
   });
 
   it("resolves the default policy when the document carries none", () => {
@@ -160,7 +163,7 @@ describe("useSubagentPolicy", () => {
     expect(view.result.current.policy.approvedRuntimes).toHaveLength(1);
   });
 
-  it("a save resends the current nodes unchanged alongside the new policy", async () => {
+  it("a save sends policy only and never resends a stale nodes snapshot", async () => {
     const { bridge, writes } = makeBridge(() => ({ ok: true }));
     const view = renderHook(() =>
       useSubagentPolicy({
@@ -172,10 +175,8 @@ describe("useSubagentPolicy", () => {
     act(() => view.result.current.save(fixturePolicy()));
     await waitFor(() => expect(view.result.current.saveStatus).toBe("saved"));
     expect(writes).toHaveLength(1);
-    expect(writes[0].intent.nodes).toEqual(NODES);
-    expect(
-      (writes[0].intent.policy as GraphPolicy).approvedRuntimes,
-    ).toHaveLength(1);
+    expect(writes[0]).not.toHaveProperty("nodes");
+    expect(writes[0].policy.approvedRuntimes).toHaveLength(1);
   });
 
   it("a failed save reports the error and never claims saved", async () => {
@@ -195,14 +196,17 @@ describe("useSubagentPolicy", () => {
     expect(view.result.current.saveError).toBe("workspace not found");
   });
 
-  it("a stale save settling after a newer one never overwrites its outcome", async () => {
+  it("serializes rapid edits and flush waits for the final persisted policy", async () => {
     let resolveFirst: (() => void) | null = null;
     const bridge: GraphBridge = {
       graphRead: async () => ({
         ok: false,
         error: { code: "x", message: "unused", retryable: false },
       }),
-      graphWriteIntent: (params) => {
+      graphWriteIntent: async () => {
+        throw new Error("Unexpected node write");
+      },
+      graphWritePolicy: (params) => {
         if (!resolveFirst) {
           return new Promise((resolve) => {
             resolveFirst = () =>
@@ -211,7 +215,7 @@ describe("useSubagentPolicy", () => {
                 result: {
                   graph: {
                     version: 1,
-                    intent: params.intent as never,
+                    intent: { nodes: [], policy: params.policy },
                     state: { updatedAt: "now", nodes: [] },
                   },
                 },
@@ -223,7 +227,7 @@ describe("useSubagentPolicy", () => {
           result: {
             graph: {
               version: 1,
-              intent: params.intent as never,
+              intent: { nodes: [], policy: params.policy },
               state: { updatedAt: "now", nodes: [] },
             },
           },
@@ -251,11 +255,13 @@ describe("useSubagentPolicy", () => {
     );
     act(() => view.result.current.save(fixturePolicy()));
     act(() => view.result.current.save({ ...fixturePolicy(), delegate: true }));
-    await waitFor(() => expect(view.result.current.saveStatus).toBe("saved"));
-    // The first (stale) write finally resolves — it must not flip the
-    // status back or otherwise disturb the newer, already-settled save.
+    await waitFor(() => expect(resolveFirst).not.toBeNull());
+    expect(view.result.current.saveStatus).toBe("saving");
+    expect(view.result.current.policy.delegate).toBe(true);
     act(() => resolveFirst?.());
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await act(async () => {
+      expect(await view.result.current.flush()).toBe(true);
+    });
     expect(view.result.current.saveStatus).toBe("saved");
   });
 });

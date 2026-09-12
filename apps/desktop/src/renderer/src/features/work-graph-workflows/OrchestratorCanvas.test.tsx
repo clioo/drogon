@@ -10,7 +10,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { GraphPolicy } from "../../../../shared/graph-contract";
+import type {
+  GraphPolicy,
+  OrchestratorRun,
+} from "../../../../shared/graph-contract";
 import type { Session } from "../../../../shared/session-contract";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import type { LoopLedger } from "./adversarial-loop";
@@ -58,6 +61,200 @@ function baseProps() {
 }
 
 describe("OrchestratorCanvas", () => {
+  it("refits when an off-mode run finishes after next-run testing was enabled", () => {
+    installRadixJsdomStubs();
+    const width = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockReturnValue(460);
+    const content = vi
+      .spyOn(HTMLElement.prototype, "scrollWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.querySelector('[data-testid="orchestrator-test-node"]')
+          ? 460
+          : 224;
+      });
+    const main = {
+      id: "orchestrator-main",
+      title: "Main agent",
+      harness: "pi",
+      model: "fixture",
+      prompt: "Task",
+      enabled: true,
+      dependsOn: [],
+    };
+    const run: OrchestratorRun = {
+      id: "r",
+      workspaceId: "ws",
+      main,
+      policy: policyWithAdversarial(false),
+      status: "running",
+      phase: "main",
+      iteration: 1,
+      startedAt: "now",
+      updatedAt: "now",
+      steps: [],
+    };
+    try {
+      const props = {
+        ...baseProps(),
+        configuredMain: main,
+        policy: policyWithAdversarial(true),
+      };
+      const view = render(<OrchestratorCanvas {...props} durableRun={run} />);
+      expect(screen.queryByTestId("orchestrator-test-node")).toBeNull();
+      expect(Number(screen.getByTestId("orchestrator-flow").style.zoom)).toBe(
+        1,
+      );
+      view.rerender(
+        <OrchestratorCanvas
+          {...props}
+          durableRun={{ ...run, status: "passed" }}
+        />,
+      );
+      expect(screen.getByTestId("orchestrator-test-node")).toBeTruthy();
+      expect(Number(screen.getByTestId("orchestrator-flow").style.zoom)).toBe(
+        0.89,
+      );
+    } finally {
+      width.mockRestore();
+      content.mockRestore();
+    }
+  });
+  it("labels the prior off-mode result as historical when previewing enabled QA", () => {
+    installRadixJsdomStubs();
+    const main = {
+      id: "orchestrator-main",
+      title: "Main agent",
+      harness: "pi",
+      model: "fixture",
+      prompt: "Task",
+      enabled: true,
+      dependsOn: [],
+    };
+    const run: OrchestratorRun = {
+      id: "r",
+      workspaceId: "ws",
+      main,
+      policy: policyWithAdversarial(false),
+      status: "passed",
+      phase: "main",
+      iteration: 1,
+      startedAt: "now",
+      updatedAt: "now",
+      steps: [],
+    };
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        configuredMain={main}
+        policy={policyWithAdversarial(true)}
+        durableRun={run}
+      />,
+    );
+    expect(screen.getByTestId("orchestrator-terminal").textContent).toBe(
+      "Last run: Completed",
+    );
+    expect(screen.getByTestId("orchestrator-test-node").dataset.active).toBe(
+      "false",
+    );
+  });
+  it("stacks the outer sequence in a narrow viewport while keeping test and review side by side", () => {
+    installRadixJsdomStubs();
+    const width = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockReturnValue(460);
+    const content = vi
+      .spyOn(HTMLElement.prototype, "scrollWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.querySelector('[data-direction="vertical"]') ? 460 : 1000;
+      });
+    try {
+      render(
+        <OrchestratorCanvas
+          {...baseProps()}
+          policy={policyWithAdversarial(true)}
+        />,
+      );
+      const sequence = screen.getByTestId("orchestrator-flow-sequence");
+      expect(sequence.dataset.direction).toBe("vertical");
+      expect(screen.getByTestId("orchestrator-test-node").parentElement).toBe(
+        screen.getByTestId("orchestrator-review-node").parentElement,
+      );
+      expect(
+        Number(screen.getByTestId("orchestrator-flow").style.zoom),
+      ).toBeGreaterThanOrEqual(0.85);
+    } finally {
+      width.mockRestore();
+      content.mockRestore();
+    }
+  });
+  it("keeps active QA nodes visible when the next-run policy disables testing", () => {
+    installRadixJsdomStubs();
+    const main = {
+      id: "orchestrator-main",
+      title: "Main agent",
+      harness: "pi",
+      model: "fixture",
+      prompt: "Task",
+      enabled: true,
+      dependsOn: [],
+    };
+    const run: OrchestratorRun = {
+      id: "r",
+      workspaceId: "ws",
+      main,
+      policy: policyWithAdversarial(true),
+      status: "running",
+      phase: "test",
+      iteration: 2,
+      startedAt: "now",
+      updatedAt: "now",
+      steps: [
+        {
+          nodeId: "test-2",
+          phase: "test",
+          iteration: 2,
+          status: "running",
+          runtime: { harness: "opencode", model: "provider/model" },
+          isFallback: true,
+          attempts: [],
+        },
+      ],
+    };
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        configuredMain={main}
+        policy={policyWithAdversarial(false)}
+        durableRun={run}
+      />,
+    );
+    expect(screen.getByTestId("orchestrator-test-node").textContent).toContain(
+      "provider/model",
+    );
+    expect(screen.getByTestId("orchestrator-test-node").textContent).toContain(
+      "Fallback",
+    );
+    expect(screen.getByTestId("orchestrator-review-node")).toBeTruthy();
+    expect(
+      screen.getByText(/Configuration changes apply to the next run/),
+    ).toBeTruthy();
+  });
+
+  it("shows saving until the last automatic write settles", () => {
+    installRadixJsdomStubs();
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        saveStatus="saving"
+      />,
+    );
+    expect(screen.getByTestId("orchestrator-save-status").textContent).toBe(
+      "Saving…",
+    );
+    expect(screen.queryByText("Saved automatically")).toBeNull();
+  });
   beforeEach(() => {
     installRadixJsdomStubs();
     window.localStorage.clear();
@@ -440,12 +637,22 @@ describe("OrchestratorCanvas", () => {
   // F0: before "Run workflow" launches anything, the canvas must disclose
   // which runtime will run and whether it is paid/external.
   it("shows no runtime disclosure at all when nothing automated is configured", () => {
-    render(<OrchestratorCanvas {...baseProps()} policy={policyWithAdversarial(false)} />);
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+      />,
+    );
     expect(screen.queryByTestId("orchestrator-runtime-disclosure")).toBeNull();
   });
 
   it("discloses the free local default honestly when no runtime is approved", () => {
-    render(<OrchestratorCanvas {...baseProps()} policy={policyWithAdversarial(true)} />);
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(true)}
+      />,
+    );
     const disclosure = screen.getByTestId("orchestrator-runtime-disclosure");
     expect(disclosure.getAttribute("data-free-default")).toBe("true");
     expect(disclosure.textContent).toContain("free local model");

@@ -53,14 +53,28 @@ export function createGatedGraphBridge(
         retryable: true,
       },
     });
-  const gate =
-    <A, T>(
-      call: (input: A) => Promise<Result<T>>,
-    ): ((input: A) => Promise<Result<T>>) =>
+  const gate = <A, T>(
+    call: (input: A) => Promise<Result<T>>,
+  ): ((input: A) => Promise<Result<T>>) =>
     ((input: A) => (isAllowed() ? call(input) : refused())) as (
       input: A,
     ) => Promise<Result<T>>;
   return {
+    ...(source.graphWritePolicy
+      ? { graphWritePolicy: gate(source.graphWritePolicy) }
+      : {}),
+    ...(source.graphOrchestratorStart
+      ? { graphOrchestratorStart: gate(source.graphOrchestratorStart) }
+      : {}),
+    ...(source.graphOrchestratorStatus
+      ? { graphOrchestratorStatus: gate(source.graphOrchestratorStatus) }
+      : {}),
+    ...(source.graphOrchestratorStop
+      ? { graphOrchestratorStop: gate(source.graphOrchestratorStop) }
+      : {}),
+    ...(source.graphOrchestratorResume
+      ? { graphOrchestratorResume: gate(source.graphOrchestratorResume) }
+      : {}),
     graphRead: gate(source.graphRead),
     graphWriteIntent: gate(source.graphWriteIntent),
     graphCompile: gate(source.graphCompile),
