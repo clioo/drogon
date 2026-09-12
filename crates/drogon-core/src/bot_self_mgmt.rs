@@ -614,10 +614,11 @@ pub const HOME_RECREATED_NOTICE: &str =
 /// `bot.self_*` actor, so this writes no `bot_audit` row -- P3 audit is for
 /// Bot-origin actions only, see this module's doc) can provision on demand
 /// too: opening an interactive Bot session (`bot_run_rpc`'s
-/// `RunTurn::Chat::interactive`) must run in the Bot's OWN home, never
-/// wherever its record happens to be stored (that folder is whatever
-/// project workspace was selected at `bot.create` time -- the caller's
-/// workspace, not the Bot's).
+/// `RunTurn::Chat::interactive`) runs in the Bot's OWN home. Monitor-released
+/// and scheduled sessions run in the Bot's record folder, the project
+/// workspace selected at `bot.create` time, because that is where the Bot's
+/// project work lives; interactive open-session runs are the exception and
+/// stay in the provisioned home.
 ///
 /// Returns the profile plus whether the pinned directory had to be
 /// RECREATED (it was missing on disk): `ensure` means ensure -- a dead end
@@ -1120,6 +1121,33 @@ pub const MAX_GITHUB_POLLS_PER_TICK: usize = 4;
 /// `curl` child's argv.
 pub const GITHUB_SECRET_KIND: &str = "github";
 
+/// Retain only bounded evidence for notification-only monitors. Check-in
+/// rows are the durable observation history and are deliberately untouched.
+fn retain_notification_events(conn: &Connection, now_ms: f64) -> rusqlite::Result<usize> {
+    conn.execute(
+        "WITH notification_events AS (
+             SELECT e.rowid AS event_rowid, e.at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY e.monitor_id
+                        ORDER BY e.at DESC, e.rowid DESC
+                    ) AS event_rank
+             FROM bot_monitor_events e
+             JOIN bot_monitors m ON m.id = e.monitor_id
+             WHERE json_extract(m.payload_json, '$.inferencePolicy.kind')
+                   = 'notification_only'
+         )
+         DELETE FROM bot_monitor_events
+         WHERE rowid IN (
+             SELECT event_rowid FROM notification_events
+             WHERE at < ?1 OR event_rank > ?2
+         )",
+        params![
+            now_ms - crate::bots::delegation::NOTIFICATION_EVENT_RETENTION_MS,
+            crate::bots::delegation::MAX_NOTIFICATION_EVENTS_PER_MONITOR as i64,
+        ],
+    )
+}
+
 /// Ticks every due Bot monitor: evaluate (no lock held during file IO),
 /// then commit cursor + check-in + outbox event in ONE transaction each.
 /// Best-effort per monitor — one bad row never aborts the tick — and
@@ -1387,6 +1415,13 @@ pub fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSumm
         .take(MAX_GITHUB_POLLS_PER_TICK)
     {
         tick_github_monitor(engine, &record, rev, now_ms, &mut summary);
+    }
+    // Notification-only rows are evidence for the local lane, not input to
+    // delegation. Prune them after all producers have committed this tick so
+    // the outbox cannot grow without bound or replay a bulk backlog later.
+    if let Err(e) = retain_notification_events(&engine.db.lock().unwrap(), now_ms) {
+        eprintln!("[bot-monitors] notification event retention failed: {e}");
+        summary.refused += 1;
     }
     summary
 }
@@ -3378,6 +3413,21 @@ impl crate::Engine {
                 // never parks a running monitor nor unparks a parked one.
                 let updated = bind_responsibility(record, responsibility_id.clone(), now_ms)
                     .map_err(invalid_argument)?;
+                // Binding changes the event lane. Any notification-only
+                // events already queued describe changes from before the
+                // action existed, so settle them instead of releasing a
+                // bulk catch-up on the first bound drain.
+                let abandoned = crate::bots::delegation::settle_queued_events_in_tx(
+                    tx,
+                    &params.monitor_id,
+                    "queued before the action was bound; never dispatched",
+                    now_ms,
+                )
+                .map_err(|e| {
+                    storage_error(format!(
+                        "failed to settle queued events before binding the monitor: {e}"
+                    ))
+                })?;
                 monitor_storage::cas_write(tx, &updated, params.expected_rev)
                     .map_err(monitor_storage_error)?;
                 let at = crate::now_unix_ms() as f64;
@@ -3397,6 +3447,8 @@ impl crate::Engine {
                     "approved": updated.is_approved(),
                     "health": monitor_health(&updated).as_str(),
                     "responsibilityId": responsibility_id,
+                    "abandonedEvents": abandoned.len(),
+                    "abandonedEventIds": abandoned,
                 }))
             },
         )

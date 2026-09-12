@@ -19,7 +19,8 @@ use drogon_core::Engine;
 use drogon_core::automations::runner::SessionObservation;
 use drogon_core::automations::runner::{DispatchSeam, DispatchSeamError, HarnessStarted};
 use drogon_core::bots::delegation::{
-    self, DELEGATION_GRACE_MS, MAX_DELEGATIONS_PER_BOT_PER_DAY, utc_day_number,
+    self, DELEGATION_GRACE_MS, MAX_DELEGATIONS_PER_BOT_PER_DAY,
+    MAX_NOTIFICATION_EVENTS_PER_MONITOR, NOTIFICATION_EVENT_RETENTION_MS, utc_day_number,
     worktree_name_for_event,
 };
 use drogon_core::bots::monitors::commit::{CommitDecision, CommitInput, RetainReason};
@@ -719,6 +720,203 @@ fn outbox_claim_is_delete_on_record_with_no_claim_column() {
 }
 
 // --- Policy gates: notification-only, disabled, orphaned -------------------
+
+#[test]
+fn notification_only_outbox_retains_newest_events_and_keeps_checks() {
+    let fixture = Fixture::with_monitor(json!({
+        "cron": "* * * * *",
+        "responsibilityName": null,
+        "instructions": null,
+    }));
+    let now = Fixture::now_ms();
+    // A real tick writes the monitor's first check-in. The outbox rows below
+    // model 250 subsequent changes without bypassing the real event writer.
+    drogon_core::bot_self_mgmt::tick_bot_monitors(&fixture._engine, now);
+    let checks_before: i64 = fixture
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM bot_monitor_checks WHERE monitor_id = ?1",
+            params![&fixture.monitor_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(checks_before > 0);
+    for event_no in 0..250 {
+        fixture.enqueue(event_no, now + event_no as f64);
+    }
+
+    drogon_core::bot_self_mgmt::tick_bot_monitors(&fixture._engine, now + 1_000.0);
+
+    let conn = fixture.conn();
+    let remaining: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM bot_monitor_events WHERE monitor_id = ?1",
+            params![&fixture.monitor_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(remaining, MAX_NOTIFICATION_EVENTS_PER_MONITOR as i64);
+    let checks_after: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM bot_monitor_checks WHERE monitor_id = ?1",
+            params![&fixture.monitor_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        checks_after >= checks_before,
+        "retention never deletes checks: before={checks_before}, after={checks_after}"
+    );
+    let oldest_remaining: f64 = conn
+        .query_row(
+            "SELECT MIN(at) FROM bot_monitor_events WHERE monitor_id = ?1",
+            params![&fixture.monitor_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        oldest_remaining,
+        now + 50.0,
+        "the newest event window remains"
+    );
+}
+
+#[test]
+fn notification_only_retention_deletes_old_rows_but_not_bound_rows() {
+    let fixture = Fixture::new();
+    let now = Fixture::now_ms();
+    let created = ok(fixture._engine.dispatch(request(
+        "m-old-unbound",
+        "bot.monitor_create",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+            "monitorId": "mon-old-unbound",
+            "resource": RESOURCE,
+            "manual": true,
+        }),
+    )));
+    assert_eq!(created["approved"], false);
+    ok(fixture._engine.dispatch(request(
+        "m-old-unbound-approve",
+        "bot.monitor_approve",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+            "monitorId": "mon-old-unbound",
+        }),
+    )));
+    let old = now - NOTIFICATION_EVENT_RETENTION_MS - 1.0;
+    fixture.enqueue_for("mon-old-unbound", 1, old);
+    let bound_event = fixture.enqueue(2, old);
+
+    drogon_core::bot_self_mgmt::tick_bot_monitors(&fixture._engine, now);
+
+    let conn = fixture.conn();
+    let unbound_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM bot_monitor_events WHERE monitor_id = 'mon-old-unbound'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(unbound_count, 0, "expired notification evidence is pruned");
+    let bound_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM bot_monitor_events WHERE event_id = ?1",
+            params![bound_event],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(bound_count, 1, "bound events remain delegation input");
+}
+
+#[test]
+fn binding_settles_queued_notification_events_before_they_can_dispatch() {
+    let fixture = Fixture::new();
+    provision_home(&fixture);
+    let created = ok(fixture._engine.dispatch(request(
+        "bind-backlog-create",
+        "bot.monitor_create",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+            "monitorId": "mon-bind-backlog",
+            "resource": RESOURCE,
+            "manual": true,
+        }),
+    )));
+    assert_eq!(created["approved"], false);
+    ok(fixture._engine.dispatch(request(
+        "bind-backlog-approve",
+        "bot.monitor_approve",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+            "monitorId": "mon-bind-backlog",
+        }),
+    )));
+    let now = Fixture::now_ms();
+    let event_ids: Vec<String> = (0..3)
+        .map(|n| fixture.enqueue_for("mon-bind-backlog", n, now))
+        .collect();
+    let rev: i64 = fixture
+        .conn()
+        .query_row(
+            "SELECT rev FROM bot_monitors WHERE id = 'mon-bind-backlog'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let receipt = ok(fixture._engine.dispatch(request(
+        "bind-backlog-bind",
+        "bot.self_bind_monitor_action",
+        json!({
+            "workspaceId": fixture.workspace_id,
+            "hostId": fixture.host_id,
+            "botId": fixture.bot_id,
+            "actorBotId": fixture.bot_id,
+            "monitorId": "mon-bind-backlog",
+            "expectedRev": rev,
+            "responsibilityName": "Handle new changes",
+        }),
+    )));
+    assert_eq!(receipt["abandonedEvents"], 3);
+    assert_eq!(receipt["abandonedEventIds"], json!(event_ids));
+    assert_eq!(fixture.outbox_len(), 0);
+
+    let conn = fixture.conn();
+    for event_id in &event_ids {
+        let row: (String, String) = conn
+            .query_row(
+                "SELECT outcome, detail FROM bot_monitor_firings WHERE event_id = ?1",
+                params![event_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, "orphaned");
+        assert_eq!(
+            row.1,
+            "queued before the action was bound; never dispatched"
+        );
+    }
+    let before = fixture.drain(now);
+    assert_eq!(before.claimed, 0);
+    assert_eq!(before.dispatched, 0);
+    assert_eq!(fixture.seam.dispatch_count(), 0);
+
+    fixture.enqueue_for("mon-bind-backlog", 99, now + 1.0);
+    let after = fixture.drain(now + 1.0);
+    assert_eq!(
+        after.dispatched, 1,
+        "a new event after binding still dispatches"
+    );
+    assert_eq!(fixture.seam.dispatch_count(), 1);
+}
 
 #[test]
 fn notification_only_monitors_are_never_claimed() {
