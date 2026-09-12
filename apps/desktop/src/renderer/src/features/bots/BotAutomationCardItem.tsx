@@ -40,7 +40,7 @@ function historyDetail(entry: BotsPanelHistoryEntry): string {
       : `${entry.automationName ?? "automation"} · ${ordinal}`;
   }
   if (entry.run.recipe?.runId) {
-    return `Mentu run ${entry.run.recipe.runId}`;
+    return `Work Graph run ${entry.run.recipe.runId}`;
   }
   return "Recorded";
 }

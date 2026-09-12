@@ -420,7 +420,7 @@ export function SelectedNodeInspector({
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-medium">Selected node</h2>
           <p className="text-xs text-muted-foreground">
-            Step edits are written back to the Mentu JSON.
+            Step edits are written back to the Work Graph JSON.
           </p>
         </div>
         {node && editStep ? (
@@ -481,7 +481,7 @@ export function SelectedNodeInspector({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={INHERIT_VALUE}>
-                      Inherit {inheritBackendLabel ?? "Mentu default"}
+                      Inherit {inheritBackendLabel ?? "Work Graph default"}
                     </SelectItem>
                     {registeredHarnesses.map((harness) => (
                       <SelectItem key={harness.harnessId} value={harness.harnessId}>

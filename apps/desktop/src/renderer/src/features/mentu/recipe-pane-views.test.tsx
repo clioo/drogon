@@ -400,7 +400,7 @@ describe("EmptyRecipeState", () => {
       screen.getByText("demo-tareas.json, claude-smoke.json, demo-parallel.json, +8 more"),
     ).toBeTruthy();
     expect(
-      screen.getByText(/Mentu reads only the workspace root path above/),
+      screen.getByText(/Work Graph reads only the workspace root path above/),
     ).toBeTruthy();
     // Without the shell reveal affordance the button hides instead of lying.
     expect(screen.queryByRole("button", { name: /Reveal/ })).toBeNull();

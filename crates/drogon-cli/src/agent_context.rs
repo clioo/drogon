@@ -1335,7 +1335,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "mentu open",
             &["mentu", "open"],
-            "Open (or focus) the workspace's Mentu tab in the connected Drogon desktop",
+            "Open (or focus) the workspace's Work Graph tab in the connected Drogon desktop",
             "drogon-cli mentu open --workspace <ID> [--recipe <ID>] [--timeout-ms <MS>]",
             &["recipe", "timeout-ms", "workspace"],
             &[],
@@ -1369,7 +1369,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "mentu run-status",
             &["mentu", "run-status"],
-            "Report one Mentu run's status and recorded steps",
+            "Report one Work Graph run's status and recorded steps",
             "drogon-cli mentu run-status --run <ID>",
             &["run"],
             &[],
@@ -1382,7 +1382,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "mentu runs",
             &["mentu", "runs"],
-            "List a workspace's Mentu runs, newest first",
+            "List a workspace's Work Graph runs, newest first",
             "drogon-cli mentu runs --workspace <ID> [--limit <N>]",
             &["limit", "workspace"],
             &[],
@@ -1394,7 +1394,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "mentu cancel",
             &["mentu", "cancel"],
-            "Cancel a running Mentu run by its daemon run id",
+            "Cancel a running Work Graph run by its daemon run id",
             "drogon-cli mentu cancel --run <ID>",
             &["run"],
             &[],
@@ -1416,7 +1416,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "drogon-cli mentu status",
             ],
             &[
-                "Requires the service capability mentu.v1; without it the daemon has no Mentu surface to report on.",
+                "Requires the service capability mentu.v1; without it the daemon has no Work Graph surface to report on.",
                 "verdict is installed, not_installed or partially_available — check it BEFORE promising a recipe, because the Mentu runtime is optional.",
                 "With --workspace the result also counts that workspace's .mentu/recipes entries and lists each invalid one's issue.",
             ],
@@ -1478,7 +1478,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "graph compile",
             &["graph", "compile"],
-            "Compile a node and its transitive dependencies into a Mentu recipe and validate it",
+            "Compile a node and its transitive dependencies into a recipe and validate it",
             "drogon-cli graph compile --workspace <ID> (--node <ID> | --nodes <ID,ID>) [--output <PATH>]",
             &["node", "nodes", "output", "workspace"],
             &[],

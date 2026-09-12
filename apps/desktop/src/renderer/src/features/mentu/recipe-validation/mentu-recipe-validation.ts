@@ -40,7 +40,7 @@ const TYPES = new Set<MentuRecipeType>(["sequence", "formula", "compound", "pipe
 
 export class MentuRecipeValidationError extends Error {
   constructor(readonly issues: MentuRecipeValidationIssue[]) {
-    super(issues[0] ? `${issues[0].path}: ${issues[0].message}` : "Invalid Mentu recipe");
+    super(issues[0] ? `${issues[0].path}: ${issues[0].message}` : "Invalid Work Graph recipe");
     this.name = "MentuRecipeValidationError";
   }
 }
@@ -52,7 +52,7 @@ export function parseMentuRecipeJson(input: unknown): MentuRecipeParseResult {
   const issues: MentuRecipeValidationIssue[] = [];
   const type = input.type === undefined || input.type === null ? "sequence" : input.type;
   if (!isMentuRecipeString(type) || !TYPES.has(type as MentuRecipeType)) {
-    issues.push({ path: "type", message: "must be a supported Mentu recipe type" });
+    issues.push({ path: "type", message: "must be a supported Work Graph recipe type" });
   }
   if (!isMentuRecipeString(input.name) || input.name.trim().length === 0) {
     issues.push({ path: "name", message: "must be a non-empty string" });

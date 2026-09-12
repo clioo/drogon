@@ -85,7 +85,7 @@ const STATIC_ENTRY_KEYWORDS: Record<
 > = {
   terminal: "terminal shell new terminal new shell",
   browser: "browser new browser browser tab web",
-  mentu: "mentu recipe workflow run steps",
+  mentu: "work graph mentu recipe workflow run steps",
   markdown: "markdown new file untitled",
 };
 
@@ -214,7 +214,7 @@ export function TabCreateMenu({
   );
   const mentuVisible =
     showMentu &&
-    matchesTabCreateQuery("Mentu", STATIC_ENTRY_KEYWORDS.mentu, query);
+    matchesTabCreateQuery("Work Graph", STATIC_ENTRY_KEYWORDS.mentu, query);
   const markdownVisible =
     showNewMarkdown &&
     matchesTabCreateQuery(
@@ -466,7 +466,7 @@ export function TabCreateMenu({
                   onSelect={() => onOpenMentu?.()}
                 >
                   <Network className="size-4 text-muted-foreground" />
-                  Mentu
+                  Work Graph
                 </DropdownMenu.Item>
               )}
               {markdownVisible && (

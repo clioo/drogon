@@ -69,7 +69,7 @@ export function settleMentuOpenTab(result: MentuOpenTabResult): boolean {
             code: result.code ?? "mentu_open_refused",
             message:
               result.message ??
-              "The Drogon window refused to open the Mentu tab.",
+              "The Drogon window refused to open the Work Graph tab.",
           },
         },
   );
@@ -91,7 +91,7 @@ export function openMentuTabInRenderer(
       ok: false,
       error: {
         code: "desktop_unavailable",
-        message: "No Drogon window is loaded to open the Mentu tab in.",
+        message: "No Drogon window is loaded to open the Work Graph tab in.",
       },
     } as const);
   }
@@ -103,7 +103,7 @@ export function openMentuTabInRenderer(
         ok: false,
         error: {
           code: "mentu_open_timeout",
-          message: `The Drogon window did not confirm the Mentu tab within ${ackTimeoutMs}ms.`,
+          message: `The Drogon window did not confirm the Work Graph tab within ${ackTimeoutMs}ms.`,
         },
       });
     }, ackTimeoutMs);
@@ -124,7 +124,7 @@ export function openMentuTabInRenderer(
         requestId,
         ok: false,
         code: "mentu_open_unsupported",
-        message: `The Drogon window could not receive the Mentu request: ${
+        message: `The Drogon window could not receive the Work Graph request: ${
           error instanceof Error ? error.message : String(error)
         }`,
       });

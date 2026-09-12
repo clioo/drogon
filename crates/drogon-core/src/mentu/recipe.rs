@@ -31,13 +31,17 @@ fn path_inside(root: &Path, candidate: &Path) -> bool {
 /// traversal and anything that canonicalizes outside the recipes root.
 pub fn resolve_recipe_path(workspace_root: &Path, recipe_id: &str) -> Result<PathBuf, RpcError> {
     if recipe_id.is_empty() || recipe_id.contains('\0') || recipe_id.starts_with('/') {
-        return Err(error::invalid_argument("Invalid Mentu recipe reference."));
+        return Err(error::invalid_argument(
+            "Invalid Work Graph recipe reference.",
+        ));
     }
     if recipe_id
         .split('/')
         .any(|segment| segment.is_empty() || segment == "." || segment == "..")
     {
-        return Err(error::invalid_argument("Invalid Mentu recipe reference."));
+        return Err(error::invalid_argument(
+            "Invalid Work Graph recipe reference.",
+        ));
     }
     let root = recipes_root(workspace_root);
     let relative = if recipe_id.to_ascii_lowercase().ends_with(".json") {
@@ -456,7 +460,7 @@ fn write_recipe_locked(path: &Path, content: &str) -> Result<(), RpcError> {
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?;
+        .ok_or_else(|| error::invalid_argument("Invalid Work Graph recipe reference."))?;
     // Exclusive temp creation: `fs::write` would truncate a colliding
     // name, silently merging two writers into one temp file.
     let mut tmp = None;
@@ -501,7 +505,7 @@ fn recipe_dir_and_name(path: &Path) -> Result<(&Path, String), RpcError> {
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?
+        .ok_or_else(|| error::invalid_argument("Invalid Work Graph recipe reference."))?
         .to_string();
     Ok((dir, file_name))
 }
@@ -567,7 +571,9 @@ pub fn save_compiled_recipe(
             .split('/')
             .any(|segment| segment.is_empty() || segment == "." || segment == "..")
     {
-        return Err(error::invalid_argument("Invalid Mentu recipe reference."));
+        return Err(error::invalid_argument(
+            "Invalid Work Graph recipe reference.",
+        ));
     }
     let value: Value = serde_json::from_str(content)
         .map_err(|e| error::invalid_argument(format!("Compiled recipe is not valid JSON: {e}")))?;
@@ -598,7 +604,7 @@ pub fn save_recipe_expected(
 ) -> Result<MentuRecipeDetail, RpcError> {
     if !valid_content_hash(expected_hash) {
         return Err(error::invalid_argument(
-            "Invalid Mentu recipe content hash.",
+            "Invalid Work Graph recipe content hash.",
         ));
     }
     if content.len() as u64 > MAX_RECIPE_SOURCE_BYTES {

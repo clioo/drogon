@@ -961,7 +961,7 @@ export async function probeMentuApproveRunEvidence({
     await delay(500);
   }
   await page
-    .locator('.right-sidebar-header-drag button[aria-label="Mentu"]')
+    .locator('.right-sidebar-header-drag button[aria-label="Work Graph"]')
     .click();
   const panel = page.locator('[data-testid="mentu-panel"]');
   await panel.waitFor();

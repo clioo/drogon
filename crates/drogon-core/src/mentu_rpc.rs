@@ -250,7 +250,7 @@ impl Engine {
         parsed.validate()?;
         let conn = self.db.lock().unwrap();
         let run = storage::get_run(&conn, &parsed.run_id)?
-            .ok_or_else(|| error::not_found("Mentu run not found."))?;
+            .ok_or_else(|| error::not_found("Work Graph run not found."))?;
         to_value(MentuRunResult { run })
     }
 
@@ -260,7 +260,7 @@ impl Engine {
         let (workspace_id, mentu_run_id) = {
             let conn = self.db.lock().unwrap();
             let run = storage::get_run(&conn, &parsed.run_id)?
-                .ok_or_else(|| error::not_found("Mentu run not found."))?;
+                .ok_or_else(|| error::not_found("Work Graph run not found."))?;
             (run.workspace_id, run.mentu_run_id)
         };
         let workspace_path = {
@@ -269,7 +269,7 @@ impl Engine {
         };
         let Some(mentu_run_id) = mentu_run_id else {
             return Err(error::invalid_argument(
-                "This run never produced a Mentu run id to retry.",
+                "This run never produced a Work Graph run id to retry.",
             ));
         };
         let workspace_root = PathBuf::from(workspace_path);
@@ -319,7 +319,7 @@ impl Engine {
         let (prior, workspace_path) = {
             let conn = self.db.lock().unwrap();
             let prior = storage::get_run(&conn, run_id)?
-                .ok_or_else(|| error::not_found("Mentu run not found."))?;
+                .ok_or_else(|| error::not_found("Work Graph run not found."))?;
             let path = workspace::get_path(&conn, &prior.workspace_id)?;
             (prior, path)
         };
@@ -329,7 +329,7 @@ impl Engine {
             ));
         }
         let mentu_run_id = prior.mentu_run_id.clone().ok_or_else(|| {
-            error::invalid_argument("This run never produced a Mentu run id to retry.")
+            error::invalid_argument("This run never produced a Work Graph run id to retry.")
         })?;
         let runtime_path = runtime::require_verified_runtime(self.data_dir())?;
         let invocation = match step {
@@ -400,7 +400,7 @@ impl Engine {
                 .map_err(error::from_sqlite)?;
         }
         let run = storage::get_run(&conn, &parsed.run_id)?
-            .ok_or_else(|| error::not_found("Mentu run not found."))?;
+            .ok_or_else(|| error::not_found("Work Graph run not found."))?;
         to_value(MentuCancelResult { run })
     }
 }

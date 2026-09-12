@@ -7,8 +7,9 @@
    aria-controls, data-tab-id, Enter/Space activation and the strip-level
    arrow/Home/End handler), because the strip and the CDP probes read the
    tabs through the tablist role; the fork's RecipeTab only carries
-   data-testid. There is no custom label store for the Mentu tab in this
-   build, so the label is always the fork's 'Mentu' fallback. */
+   data-testid. There is no custom label store for the Work Graph tab in
+   this build, so the label is always this constant (the fork's 'Mentu'
+   fallback, renamed to the feature's user-facing name). */
 import { Network, Pin, X } from "lucide-react";
 import type { DraggableSyntheticListeners } from "@dnd-kit/core";
 import { Tooltip } from "radix-ui";
@@ -22,9 +23,10 @@ import {
   type DropIndicator,
 } from "../tab-chrome";
 
-/** The fork's label fallback (RecipeTab.tsx); the create actions label a
- *  recipe tab 'Mentu' too, so this is the only title this build shows. */
-export const MENTU_TAB_LABEL = "Mentu";
+/** The fork's label fallback (RecipeTab.tsx), renamed to the feature's
+ *  user-facing name; the create action labels the tab the same, so this is
+ *  the only title this build shows. */
+export const MENTU_TAB_LABEL = "Work Graph";
 
 /**
  * One Mentu tab as a tab-strip tab. Selecting it shows the wide Mentu

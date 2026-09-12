@@ -143,7 +143,7 @@ const PAGES = [
   },
   {
     id: "mentu",
-    nav: { name: "Mentu" },
+    nav: { name: "Work Graph" },
     content: "[data-testid='mentu-panel']",
     ready: `(() => {
       const host = document.querySelector("[data-testid='mentu-panel']");

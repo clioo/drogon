@@ -79,10 +79,10 @@ describe("SelectedNodeInspector edit mode", () => {
   it("renders the fork's field affordances and no Save button", () => {
     renderInspector();
     expect(screen.getByText("Selected node")).toBeTruthy();
-    expect(screen.getByText("Step edits are written back to the Mentu JSON.")).toBeTruthy();
+    expect(screen.getByText("Step edits are written back to the Work Graph JSON.")).toBeTruthy();
     expect(screen.getByDisplayValue("30")).toBeTruthy();
     expect(screen.getByDisplayValue("test -f out.txt")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Save to Mentu JSON/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Save to Work Graph JSON/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
   });
 
@@ -261,7 +261,7 @@ describe("SelectedNodeInspector edit mode", () => {
         onCommit={okCommit()}
       />,
     );
-    expect(screen.queryByRole("button", { name: /Save to Mentu JSON/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Save to Work Graph JSON/ })).toBeNull();
     expect(screen.getByText(/draft source has errors/)).toBeTruthy();
   });
 });

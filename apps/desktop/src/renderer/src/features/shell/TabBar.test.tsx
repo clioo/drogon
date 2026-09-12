@@ -449,7 +449,7 @@ describe("Mentu as a strip tab (reported bug)", () => {
       mentuActive: true,
     });
     expect(tabIds()).toEqual(["a", "b", "mentu-tab"]);
-    const mentu = screen.getByRole("tab", { name: "Mentu" });
+    const mentu = screen.getByRole("tab", { name: "Work Graph" });
     expect(mentu.getAttribute("aria-selected")).toBe("true");
     expect(mentu.getAttribute("aria-controls")).toBe("mentu-tab-panel");
     expect(mentu.getAttribute("data-testid")).toBe("recipe-tab");
@@ -463,7 +463,7 @@ describe("Mentu as a strip tab (reported bug)", () => {
   it("is absent from the strip while closed", () => {
     renderStrip({ sessions: [session("a")], mentuOpen: false });
     expect(tabIds()).toEqual(["a"]);
-    expect(screen.queryByRole("tab", { name: "Mentu" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Work Graph" })).toBeNull();
   });
 
   it("selects on click and closes through its own affordance", () => {
@@ -475,10 +475,10 @@ describe("Mentu as a strip tab (reported bug)", () => {
       onSelectMentu,
       onCloseMentu,
     });
-    fireEvent.click(screen.getByRole("tab", { name: "Mentu" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Work Graph" }));
     expect(onSelectMentu).toHaveBeenCalled();
     fireEvent.click(
-      screen.getByRole("button", { name: "Close tab Mentu" }),
+      screen.getByRole("button", { name: "Close tab Work Graph" }),
     );
     expect(onCloseMentu).toHaveBeenCalled();
     // A session tab stays selected-looking while Mentu is not active.
@@ -491,7 +491,7 @@ describe("Mentu as a strip tab (reported bug)", () => {
     const terminal = screen.getByRole("tab", { name: /^Terminal 1/ });
     expect(terminal.getAttribute("aria-selected")).toBe("true");
     expect(
-      screen.getByRole("tab", { name: "Mentu" }).getAttribute("aria-selected"),
+      screen.getByRole("tab", { name: "Work Graph" }).getAttribute("aria-selected"),
     ).toBe("false");
   });
 });

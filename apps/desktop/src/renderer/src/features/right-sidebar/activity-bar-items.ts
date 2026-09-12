@@ -60,7 +60,7 @@ export function buildRightSidebarActivityItems(input: {
     {
       id: "mentu",
       icon: Network,
-      title: "Mentu",
+      title: "Work Graph",
       shortcut: "",
       workspaceOnly: true,
     },

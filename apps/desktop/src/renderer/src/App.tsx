@@ -4055,7 +4055,7 @@ export function App() {
       if (!mentuGateRef.current) {
         refuse(
           "mentu_unavailable",
-          "The running service does not advertise mentu.v1, so the Mentu tab cannot open.",
+          "The running service does not advertise mentu.v1, so the Work Graph tab cannot open.",
         );
         return;
       }
@@ -5188,7 +5188,7 @@ export function App() {
                           ref={mentuPanelSectionRef}
                           tabIndex={-1}
                           className="right-sidebar-panel"
-                          aria-label="Mentu"
+                          aria-label="Work Graph"
                         >
                           <MentuPanel
                             bridge={mentuGatedBridge}
