@@ -158,6 +158,13 @@ impl Engine {
         let workspace_id = require_str(params, "workspaceId")?;
         let mut request: HarnessLaunchRequest = serde_json::from_value(params.clone())
             .map_err(|_| error::invalid_argument("Invalid harness launch preferences"))?;
+        // Permission escalation is meaningful only for daemon-owned,
+        // headless runs. Normalize here before either settings-backed or
+        // PATH fallback planning so every interactive launch inherits the
+        // user's normal approval behavior.
+        if !request.headless {
+            request.permission_mode = drogon_harness::PermissionMode::Inherit;
+        }
         // Resume by identity (the owner's contract): `resumeSessionId` names
         // a durable Drogon session whose harness conversation should be
         // reopened. The provider-native id is read from THAT row (written by
