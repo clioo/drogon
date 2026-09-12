@@ -289,6 +289,80 @@ export const orchestratorControlParamsSchema = z
   .object({ workspaceId, runId: z.string().min(1) })
   .strict();
 
+export const graphEvidenceEntrySchema = z.object({
+  id: z.string(),
+  timestamp: z.string(),
+  status: z.enum(["progress", "finding", "blocked", "completed", "failed"]),
+  summary: z.string(),
+  detail: z.string().nullable().optional(),
+  artifacts: z.array(z.string()).optional().default([]),
+  runId: z.string().nullable().optional(),
+  agentId: z.string().nullable().optional(),
+  role: z.string().nullable().optional(),
+});
+
+export const graphUsageEntrySchema = z.object({
+  id: z.string(),
+  timestamp: z.string(),
+  runId: z.string().nullable().optional(),
+  agentId: z.string().nullable().optional(),
+  role: z.string().nullable().optional(),
+  harness: z.string().nullable().optional(),
+  model: z.string().nullable().optional(),
+  inputTokens: z.number().int().nonnegative().nullable().optional(),
+  outputTokens: z.number().int().nonnegative().nullable().optional(),
+  cacheReadTokens: z.number().int().nonnegative().nullable().optional(),
+  cacheWriteTokens: z.number().int().nonnegative().nullable().optional(),
+});
+
+export const graphObservabilitySnapshotSchema = z.object({
+  evidence: z.array(graphEvidenceEntrySchema),
+  usage: z.array(graphUsageEntrySchema),
+  updatedAt: z.string(),
+});
+export const graphObservabilityResultSchema = z.object({
+  observability: graphObservabilitySnapshotSchema,
+});
+export type GraphObservabilitySnapshot = z.infer<
+  typeof graphObservabilitySnapshotSchema
+>;
+
+export const graphEvidenceAppendParamsSchema = z
+  .object({
+    workspaceId,
+    status: graphEvidenceEntrySchema.shape.status,
+    summary: z.string().min(1).max(4096),
+    detail: z.string().max(65_536).optional(),
+    artifacts: z.array(z.string().min(1).max(4096)).max(64).optional(),
+    runId: z.string().min(1).max(4096).optional(),
+    agentId: z.string().min(1).max(4096).optional(),
+    role: z.string().min(1).max(4096).optional(),
+  })
+  .strict();
+
+export const graphUsageAppendParamsSchema = z
+  .object({
+    workspaceId,
+    runId: z.string().min(1).max(4096).optional(),
+    agentId: z.string().min(1).max(4096).optional(),
+    role: z.string().min(1).max(4096).optional(),
+    harness: z.string().min(1).max(4096).optional(),
+    model: z.string().min(1).max(4096).optional(),
+    inputTokens: z.number().int().nonnegative().optional(),
+    outputTokens: z.number().int().nonnegative().optional(),
+    cacheReadTokens: z.number().int().nonnegative().optional(),
+    cacheWriteTokens: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.inputTokens !== undefined ||
+      value.outputTokens !== undefined ||
+      value.cacheReadTokens !== undefined ||
+      value.cacheWriteTokens !== undefined,
+    { message: "Usage must include at least one token field." },
+  );
+
 /** Mirrors the daemon's `GraphRunNodeFailoverResult` exactly: which runtime
  *  this attempt used, whether it was the configured fallback, its position
  *  in the sequence, and the full attempt history for this failover episode
@@ -328,6 +402,15 @@ export type GraphFinding = z.infer<typeof graphFindingSchema>;
 // ---------------------------------------------------------------------------
 
 export interface GraphBridge {
+  graphObservabilityStatus?(
+    input: GraphReadParams,
+  ): Promise<Result<z.infer<typeof graphObservabilityResultSchema>>>;
+  graphEvidenceAppend?(
+    input: z.infer<typeof graphEvidenceAppendParamsSchema>,
+  ): Promise<Result<z.infer<typeof graphObservabilityResultSchema>>>;
+  graphUsageAppend?(
+    input: z.infer<typeof graphUsageAppendParamsSchema>,
+  ): Promise<Result<z.infer<typeof graphObservabilityResultSchema>>>;
   graphOrchestratorStart?(
     input: z.infer<typeof orchestratorStartParamsSchema>,
   ): Promise<Result<z.infer<typeof orchestratorResultSchema>>>;

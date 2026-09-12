@@ -45,6 +45,37 @@ const failoverResult = {
 };
 
 describe("graph bridge admission", () => {
+  it("routes native observability reads without Mentu", async () => {
+    const result = await dispatchGraphRequest(
+      "graphObservabilityStatus",
+      { workspaceId: "ws1" },
+      async (method) => {
+        expect(method).toBe("graph.observability_status");
+        return {
+          ok: true,
+          result: {
+            observability: { evidence: [], usage: [], updatedAt: "" },
+          },
+        };
+      },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses an empty usage measurement before IPC", async () => {
+    let called = false;
+    const result = await dispatchGraphRequest(
+      "graphUsageAppend",
+      { workspaceId: "ws1", agentId: "leader" },
+      async () => {
+        called = true;
+        throw new Error("Must not call daemon");
+      },
+    );
+    expect(result.ok).toBe(false);
+    expect(called).toBe(false);
+  });
+
   it("routes policy-only autosave without a nodes replacement", async () => {
     const input = {
       workspaceId: "ws1",

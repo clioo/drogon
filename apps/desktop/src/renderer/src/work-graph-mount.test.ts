@@ -3,6 +3,9 @@ import type { GraphBridge } from "../../shared/graph-contract";
 import { createGatedGraphBridge } from "./work-graph-mount";
 
 const methods = [
+  "graphObservabilityStatus",
+  "graphEvidenceAppend",
+  "graphUsageAppend",
   "graphWritePolicy",
   "graphOrchestratorStart",
   "graphOrchestratorStatus",

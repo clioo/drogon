@@ -1495,6 +1495,109 @@ async fn graph(
             };
             emit(call, json, || text, 0, None)
         }
+        GraphAction::Observability { workspace } => {
+            capability_preflight(client, request_id, "graph.v1", "Work Graph observability")
+                .await?;
+            let call = client
+                .call(
+                    "graph.observability_status",
+                    json!({"workspaceId": workspace}),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Snapshot {
+                observability: drogon_protocol::graph::GraphObservabilitySnapshot,
+            }
+            let snapshot: Snapshot = Client::decode(&call, "graph.observability_status")?;
+            let text = format!(
+                "Work Graph observability: {} evidence entries, {} usage measurements.",
+                snapshot.observability.evidence.len(),
+                snapshot.observability.usage.len()
+            );
+            emit(call, json, || text, 0, None)
+        }
+        GraphAction::EvidenceAdd {
+            workspace,
+            summary,
+            status,
+            detail,
+            artifact,
+            run,
+            agent,
+            role,
+        } => {
+            capability_preflight(client, request_id, "graph.v1", "Work Graph evidence").await?;
+            let mut params = json!({
+                "workspaceId": workspace,
+                "summary": summary,
+                "status": status,
+                "artifacts": artifact,
+            });
+            for (key, value) in [
+                ("detail", detail.as_ref()),
+                ("runId", run.as_ref()),
+                ("agentId", agent.as_ref()),
+                ("role", role.as_ref()),
+            ] {
+                if let Some(value) = value {
+                    params[key] = json!(value);
+                }
+            }
+            let call = client
+                .call("graph.evidence_append", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            let summary = summary.clone();
+            emit(
+                call,
+                json,
+                || format!("Evidence recorded: {summary}"),
+                0,
+                None,
+            )
+        }
+        GraphAction::UsageAdd {
+            workspace,
+            input,
+            output,
+            cache_read,
+            cache_write,
+            run,
+            agent,
+            role,
+            harness,
+            model,
+        } => {
+            capability_preflight(client, request_id, "graph.v1", "Work Graph usage").await?;
+            let mut params = json!({"workspaceId": workspace});
+            for (key, value) in [
+                ("inputTokens", *input),
+                ("outputTokens", *output),
+                ("cacheReadTokens", *cache_read),
+                ("cacheWriteTokens", *cache_write),
+            ] {
+                if let Some(value) = value {
+                    params[key] = json!(value);
+                }
+            }
+            for (key, value) in [
+                ("runId", run.as_ref()),
+                ("agentId", agent.as_ref()),
+                ("role", role.as_ref()),
+                ("harness", harness.as_ref()),
+                ("model", model.as_ref()),
+            ] {
+                if let Some(value) = value {
+                    params[key] = json!(value);
+                }
+            }
+            let call = client
+                .call("graph.usage_append", params, request_id, DEFAULT_TIMEOUT)
+                .await?;
+            emit(call, json, || "Usage measurement recorded.".into(), 0, None)
+        }
         GraphAction::Read { workspace } => {
             capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
             let call = client

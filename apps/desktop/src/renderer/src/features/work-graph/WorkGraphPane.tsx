@@ -8,6 +8,7 @@ import { Button } from "../../components/ui/button";
 import { OrchestratorCanvas } from "../work-graph-workflows/OrchestratorCanvas";
 import { SubagentPolicyPanel } from "../work-graph-workflows/SubagentPolicyPanel";
 import { useOrchestratorRun } from "../work-graph-workflows/use-orchestrator-run";
+import { useGraphObservability } from "../work-graph-workflows/use-graph-observability";
 import { useSubagentPolicy } from "../work-graph-workflows/use-subagent-policy";
 import { useWorkGraphSource } from "./work-graph-source";
 
@@ -49,6 +50,10 @@ export function WorkGraphPane({
     graphBridge,
     workspaceId,
     adversarialLoopPollMs,
+  );
+  const observability = useGraphObservability(graphBridge, workspaceId);
+  const [activeView, setActiveView] = useState<"graph" | "evidence" | "usage">(
+    "graph",
   );
   const [mainDraft, setMainDraft] = useState<{
     workspaceId: string;
@@ -141,6 +146,11 @@ export function WorkGraphPane({
           workspaceId={workspaceId}
           onStopMainSession={onStopMainSession}
           stoppingMainSession={stoppingMainSession}
+          activeView={activeView}
+          onActiveViewChange={setActiveView}
+          observability={observability.snapshot}
+          observabilityLoading={observability.loading}
+          observabilityError={observability.error}
         />
         <SubagentPolicyPanel
           policy={subagentPolicy.policy}

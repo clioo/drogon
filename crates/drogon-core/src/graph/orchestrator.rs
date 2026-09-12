@@ -504,6 +504,10 @@ fn node_for_step(run: &Run, candidate: &GraphRuntimeRef) -> GraphNodeIntent {
              for this snapshot. The daemon owns any enabled adversarial loop; do not launch duplicate \
              test/review workers yourself.", run.id, serde_json::to_string(&run.policy).expect("policy serializes")
         ));
+        node.prompt.push_str(&format!(
+            "\nRecord concise, meaningful progress checkpoints for the human with `drogon-cli graph evidence-add --workspace {} --run {} --agent leader`; use progress, finding, blocked, completed, or failed. Every agent must record exact incremental token usage with `graph usage-add` when its harness reports it. Omit unknown token fields; never estimate them. These native ledgers live under .drogon and do not depend on Mentu.",
+            run.workspace_id, run.id
+        ));
     }
     if run.phase != "main" {
         node.provider = None;
@@ -520,12 +524,16 @@ fn node_for_step(run: &Run, candidate: &GraphRuntimeRef) -> GraphNodeIntent {
             "Independently review code, read the adversarial test evidence for this iteration, fix findings, and verify corrections. Report findings if any remain or if you changed product code: the next iteration must retest it."
         };
         node.prompt = format!(
-            "{role}\nTask: {}\nIteration {} of {}. Read prior evidence in .drogon/evaluations/ for workflow {}. Do not spawn subagents: maximum depth is 1.\nWrite {} as JSON with verdict (exactly pass or findings) and evidence (what was tested/reviewed and findings). A findings verdict is a successful evaluation, not a process error. Exit normally after recording either verdict.",
+            "{role}\nTask: {}\nIteration {} of {}. Read prior evidence in .drogon/evaluations/ for workflow {}. Do not spawn subagents: maximum depth is 1.\nWrite {} as JSON with verdict (exactly pass or findings) and evidence (what was tested/reviewed and findings). Also append a concise human checkpoint with `drogon-cli graph evidence-add --workspace {} --run {} --agent {} --role {}` and exact incremental usage with `graph usage-add` if the harness reports tokens. A findings verdict is a successful evaluation, not a process error. Exit normally after recording either verdict.",
             run.main.prompt,
             run.iteration,
             run.policy.adversarial.max_iterations,
             run.id,
-            result_path(&node.id)
+            result_path(&node.id),
+            run.workspace_id,
+            run.id,
+            node.id,
+            run.phase
         );
     }
     node

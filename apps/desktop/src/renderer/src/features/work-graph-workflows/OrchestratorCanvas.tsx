@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import type {
   GraphPolicy,
+  GraphObservabilitySnapshot,
   OrchestratorRun,
 } from "../../../../shared/graph-contract";
 import type { Session } from "../../../../shared/session-contract";
@@ -36,6 +37,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "../../components/ui/popover";
+import { Tabs, TabsList, TabsTrigger } from "../../components/ui/tabs";
+import { EvidenceView, UsageView } from "./ObservabilityViews";
 import type { LoopLedger } from "./adversarial-loop";
 import {
   loadLastKnownMainSession,
@@ -47,6 +50,47 @@ const ZOOM_MIN = 50;
 const ZOOM_MAX = 200;
 const ZOOM_STEP = 10;
 const ZOOM_DEFAULT = 100;
+const EMPTY_OBSERVABILITY: GraphObservabilitySnapshot = {
+  evidence: [],
+  usage: [],
+  updatedAt: "",
+};
+
+function WorkGraphViewTabs({
+  activeView,
+  onActiveViewChange,
+  evidenceCount,
+}: {
+  activeView: "graph" | "evidence" | "usage";
+  onActiveViewChange: (view: "graph" | "evidence" | "usage") => void;
+  evidenceCount: number;
+}): React.JSX.Element {
+  return (
+    <Tabs
+      value={activeView}
+      onValueChange={(value) =>
+        onActiveViewChange(value as "graph" | "evidence" | "usage")
+      }
+    >
+      <TabsList className="h-8" aria-label="Work Graph views">
+        <TabsTrigger value="graph" className="h-7 text-xs">
+          Graph
+        </TabsTrigger>
+        <TabsTrigger value="evidence" className="h-7 text-xs">
+          Evidence
+          {evidenceCount > 0 ? (
+            <span className="ml-1 text-[10px] text-muted-foreground">
+              {evidenceCount}
+            </span>
+          ) : null}
+        </TabsTrigger>
+        <TabsTrigger value="usage" className="h-7 text-xs">
+          Usage
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
+  );
+}
 
 function Chip({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
@@ -372,6 +416,11 @@ export function OrchestratorCanvas({
   runError,
   onStopRun,
   onResumeRun,
+  activeView = "graph",
+  onActiveViewChange = () => {},
+  observability = EMPTY_OBSERVABILITY,
+  observabilityLoading = false,
+  observabilityError = null,
 }: {
   policy: GraphPolicy;
   mainSession: Session | null;
@@ -403,6 +452,11 @@ export function OrchestratorCanvas({
   runError?: string | null;
   onStopRun?: () => void;
   onResumeRun?: () => void;
+  activeView?: "graph" | "evidence" | "usage";
+  onActiveViewChange?: (view: "graph" | "evidence" | "usage") => void;
+  observability?: GraphObservabilitySnapshot;
+  observabilityLoading?: boolean;
+  observabilityError?: string | null;
 }): React.JSX.Element {
   const [zoom, setZoom] = useState(ZOOM_DEFAULT);
   const viewport = useRef<HTMLDivElement>(null);
@@ -417,7 +471,10 @@ export function OrchestratorCanvas({
     : policy.adversarial.enabled;
   useEffect(() => {
     if (!viewport.current) return;
-    const resize = () => setViewportWidth(viewport.current!.clientWidth);
+    const resize = () => {
+      const element = viewport.current;
+      if (element) setViewportWidth(element.clientWidth);
+    };
     const observer = new ResizeObserver(resize);
     observer.observe(viewport.current);
     resize();
@@ -425,18 +482,19 @@ export function OrchestratorCanvas({
   }, []);
   useEffect(() => {
     if (!fit || !viewport.current || !flow.current || !viewportWidth) return;
-    const fitToViewport = () =>
+    const fitToViewport = () => {
+      const content = flow.current;
+      if (!content) return;
       setZoom(
         Math.max(
           30,
           Math.min(
             100,
-            Math.floor(
-              ((viewportWidth - 48) / flow.current!.scrollWidth) * 100,
-            ),
+            Math.floor(((viewportWidth - 48) / content.scrollWidth) * 100),
           ),
         ),
       );
+    };
     const observer = new ResizeObserver(fitToViewport);
     observer.observe(flow.current);
     fitToViewport();
@@ -505,6 +563,43 @@ export function OrchestratorCanvas({
   const latestStep = (phase: "test" | "review") =>
     durableRun?.steps.filter((step) => step.phase === phase).at(-1);
 
+  if (activeView !== "graph") {
+    return (
+      <div
+        className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
+        data-testid="orchestrator-canvas"
+      >
+        <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3">
+          <h1 className="text-sm font-semibold">Work Graph</h1>
+          <WorkGraphViewTabs
+            activeView={activeView}
+            onActiveViewChange={onActiveViewChange}
+            evidenceCount={observability.evidence.length}
+          />
+          <span className="text-xs text-muted-foreground">
+            Native .drogon ledger
+          </span>
+        </div>
+        {observabilityError ? (
+          <p
+            className="border-b border-border px-4 py-2 text-xs text-destructive"
+            role="alert"
+          >
+            {observabilityError}
+          </p>
+        ) : null}
+        {activeView === "evidence" ? (
+          <EvidenceView
+            snapshot={observability}
+            loading={observabilityLoading}
+          />
+        ) : (
+          <UsageView snapshot={observability} loading={observabilityLoading} />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
@@ -512,6 +607,11 @@ export function OrchestratorCanvas({
     >
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3">
         <h1 className="text-sm font-semibold">Work Graph</h1>
+        <WorkGraphViewTabs
+          activeView={activeView}
+          onActiveViewChange={onActiveViewChange}
+          evidenceCount={observability.evidence.length}
+        />
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <span className="size-2 rounded-full bg-emerald-500" aria-hidden />
           Workflow preview
@@ -608,7 +708,6 @@ export function OrchestratorCanvas({
           </Button>
         </div>
       </div>
-
       {runError ? (
         <p className="px-4 py-2 text-xs text-destructive" role="alert">
           {runError}
