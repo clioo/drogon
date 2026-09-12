@@ -1243,6 +1243,12 @@ mod tests {
     }
 
     #[test]
+    fn stderr_tail_redacts_openai_token_prefix() {
+        let scrubbed = scrub_diagnostic_tail("provider returned sk-live-example");
+        assert!(!scrubbed.contains("sk-live-example"), "{scrubbed}");
+    }
+
+    #[test]
     fn stderr_tail_redacts_github_token_prefixes() {
         for secret in ["ghp_example", "gho_example", "github_pat_example"] {
             let scrubbed = scrub_diagnostic_tail(&format!("provider returned {secret}"));
