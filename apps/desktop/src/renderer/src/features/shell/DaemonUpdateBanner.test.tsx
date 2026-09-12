@@ -1,99 +1,120 @@
 // @vitest-environment jsdom
 // MIT Copyright (c) 2026 Lovecast Inc.
-// DaemonUpdateBanner (install-resilience P5): the user must SEE that a
-// restart happened and why; the pending state names the reason and offers
-// the restart action; the action reports failure honestly.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { Toaster, toast } from "sonner";
 import { DaemonUpdateBanner } from "./DaemonUpdateBanner";
 
-afterEach(cleanup);
+const pending = {
+  kind: "pending" as const,
+  revision: "0123456789ab",
+  reason: "runtime_busy",
+};
+afterEach(() => {
+  cleanup();
+  toast.dismiss();
+});
 
 describe("DaemonUpdateBanner", () => {
-  it("shows the updated notice naming the revision (never a silent restart)", () => {
-    render(
-      <DaemonUpdateBanner
-        state={{
-          kind: "updated",
-          revision: "0123456789ab",
-          note: "Drogon updated to 0123456789ab; restarting its background service.",
-        }}
-        onRestarted={() => {}}
-      />,
+  it("uses a dismissible toast without taking up shell space or repeating on refresh", async () => {
+    const view = render(
+      <>
+        <Toaster />
+        <DaemonUpdateBanner state={pending} onRestarted={() => {}} />
+      </>,
     );
+    expect(await screen.findByText("Service update pending")).toBeTruthy();
+    expect(view.container.querySelector(".daemon-update-banner")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close toast" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Service update pending")).toBeNull(),
+    );
+    view.rerender(
+      <>
+        <Toaster />
+        <DaemonUpdateBanner state={{ ...pending }} onRestarted={() => {}} />
+      </>,
+    );
+    expect(screen.queryByText("Service update pending")).toBeNull();
+    view.rerender(
+      <>
+        <Toaster />
+        <DaemonUpdateBanner
+          state={{ ...pending, revision: "new" }}
+          onRestarted={() => {}}
+        />
+      </>,
+    );
+    expect(await screen.findByText("Service update pending")).toBeTruthy();
+  });
+
+  it("makes successful updates dismissible too", async () => {
+    render(
+      <>
+        <Toaster />
+        <DaemonUpdateBanner
+          state={{ kind: "updated", revision: "done", note: "updated" }}
+          onRestarted={() => {}}
+        />
+      </>,
+    );
+    expect(await screen.findByText("Drogon updated")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close toast" })).toBeTruthy();
     expect(
-      screen.getByText(
-        "Drogon updated to 0123456789ab; restarting its background service.",
-      ),
-    ).toBeTruthy();
-    expect(screen.getByRole("status")).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+      screen.queryByRole("button", { name: "Restart service" }),
+    ).toBeNull();
   });
 
-  it("shows the honest pending state with the refusal reason and a restart action", async () => {
-    const onRestarted = vi.fn();
-    const restart = vi.fn().mockResolvedValue({
-      restarted: true,
-      managed: true,
-      reason: null,
-      stoppedSessions: 3,
-    });
-    const original = window.drogon;
-    // @ts-expect-error test seam
-    window.drogon = { daemon: { restart } };
-    try {
-      render(
-        <DaemonUpdateBanner
-          state={{
-            kind: "pending",
-            revision: "0123456789ab",
-            reason:
-              "The running service could not quiesce (runtime_busy): one or more sessions are pending, live or unverifiable",
-          }}
-          onRestarted={onRestarted}
-        />,
-      );
-      expect(screen.getByText(/update pending/)).toBeTruthy();
-      expect(
-        screen.getByText(/could not quiesce \(runtime_busy\)/),
-      ).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: "Restart service" }));
-      await waitFor(() => expect(onRestarted).toHaveBeenCalledTimes(1));
-      expect(restart).toHaveBeenCalledTimes(1);
-    } finally {
-      window.drogon = original;
-    }
-  });
-
-  it("keeps the banner and shows the reason when the user-chosen restart fails", async () => {
-    const onRestarted = vi.fn();
-    const restart = vi.fn().mockResolvedValue({
-      restarted: false,
-      managed: true,
-      reason: "The daemon did not stop; it was left running.",
-      stoppedSessions: 0,
-    });
-    const original = window.drogon;
-    // @ts-expect-error test seam
-    window.drogon = { daemon: { restart } };
-    try {
-      render(
-        <DaemonUpdateBanner
-          state={{
-            kind: "pending",
-            revision: null,
-            reason: "the old service stays attached",
-          }}
-          onRestarted={onRestarted}
-        />,
-      );
-      fireEvent.click(screen.getByRole("button", { name: "Restart service" }));
-      await waitFor(() =>
-        expect(screen.getByText(/daemon did not stop/)).toBeTruthy(),
-      );
-      expect(onRestarted).not.toHaveBeenCalled();
-    } finally {
-      window.drogon = original;
-    }
-  });
+  it.each([true, false, "throw"])(
+    "only restarts on request and reports outcome %s",
+    async (outcome) => {
+      const onRestarted = vi.fn();
+      const restart =
+        outcome === "throw"
+          ? vi.fn().mockRejectedValue(new Error("offline"))
+          : vi
+              .fn()
+              .mockResolvedValue({
+                restarted: outcome,
+                reason: "The daemon did not stop; it was left running.",
+              });
+      const original = window.drogon;
+      // @ts-expect-error test seam
+      window.drogon = { daemon: { restart } };
+      try {
+        render(
+          <>
+            <Toaster />
+            <DaemonUpdateBanner state={pending} onRestarted={onRestarted} />
+          </>,
+        );
+        const button = await screen.findByRole("button", {
+          name: "Restart service",
+        });
+        expect(restart).not.toHaveBeenCalled();
+        fireEvent.click(button);
+        await waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+        if (outcome === true) {
+          await waitFor(() => expect(onRestarted).toHaveBeenCalledTimes(1));
+        } else {
+          expect(
+            await screen.findByText(
+              outcome === false
+                ? "The daemon did not stop; it was left running."
+                : "The service could not be restarted from here.",
+            ),
+          ).toBeTruthy();
+          expect(onRestarted).not.toHaveBeenCalled();
+        }
+      } finally {
+        window.drogon = original;
+      }
+    },
+  );
 });

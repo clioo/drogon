@@ -128,7 +128,12 @@ fn is_control_key(name: &str) -> bool {
     upper.starts_with("ORCA_")
         || upper.starts_with("DROGON_")
         || upper == "PI_CODING_AGENT_DIR"
-        || upper == "NO_COLOR"
+        // Color overrides belong to the parent terminal/CI, not this PTY.
+        // In particular FORCE_COLOR=0 wins over TERM and COLORTERM in Node CLIs.
+        || matches!(
+            upper.as_str(),
+            "NO_COLOR" | "FORCE_COLOR" | "CLICOLOR" | "CLICOLOR_FORCE"
+        )
         || HARNESS_SESSION_ENV_KEYS.contains(&upper.as_str())
 }
 
@@ -470,6 +475,9 @@ mod tests {
             "CLAUDECODE",
             "CODEX_THREAD_ID",
             "NO_COLOR",
+            "FORCE_COLOR",
+            "CLICOLOR",
+            "CLICOLOR_FORCE",
         ];
         // Keep the poison out of the assertion path's own process state
         // afterwards (this test binary is shared with other tests).
