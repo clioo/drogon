@@ -224,7 +224,7 @@ The public cask installs the arm64 desktop, its bundled daemon, and `drogon-cli`
 
 ```sh
 brew tap clioo/drogon
-brew install --cask --no-quarantine clioo/drogon/drogon
+brew install --cask clioo/drogon/drogon
 DROGON_DATA_DIR=/tmp/drogon-dev drogon-cli --version
 ```
 
@@ -235,9 +235,12 @@ Homebrew stops the detached Drogon daemon before uninstall and upgrade; to recov
 a Homebrew-managed data directory after a downgrade refusal, use
 `brew reinstall --cask clioo/drogon/drogon` or install the previous cask version.
 
-> **Gatekeeper:** release bundles are currently ad-hoc signed, not notarized. Use
-> `--no-quarantine` as shown above (or macOS may report the app as damaged). The
-> cask caveat will be updated when Developer ID notarization is configured.
+> **Gatekeeper:** release bundles are currently ad-hoc signed, not notarized. On
+> Homebrew versions that still support it, install with
+> `brew install --cask --no-quarantine clioo/drogon/drogon`. Homebrew 6 removed
+> that option; install normally, try to open `Drogon.app`, then choose **Open
+> Anyway** in System Settings → Privacy & Security. The cask caveat will be
+> updated when Developer ID notarization is configured.
 
 > **Gatekeeper:** the preview is ad-hoc signed, not notarized. On first launch,
 > right-click `Drogon.app` and choose **Open** (or allow it in
