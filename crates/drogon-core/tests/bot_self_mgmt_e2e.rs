@@ -633,6 +633,38 @@ fn monitor_errors_wait_for_the_next_daily_cron_slot() {
 }
 
 #[test]
+fn daily_monitor_failed_before_its_first_attempt_waits_for_cron() {
+    let fx = Fx::new();
+    let bot = fx.create_bot("c1", "Watcher", Some("watcher"));
+    let bot_id = bot["id"].as_str().unwrap();
+    fx.provision("p1", bot_id);
+    let created = create_self_monitor_with_cron(&fx, "m1", bot_id, "notes.md", "0 9 * * *");
+    let monitor_id = created["monitorId"].as_str().unwrap().to_string();
+    let base = 1_700_000_000_000.0;
+
+    // The watched file is already absent when the monitor first runs, so the
+    // baseline attempt itself fails and must become the cron anchor.
+    drogon_core::automations::scheduler::tick_once(&fx.engine, base);
+    for offset_minutes in 5..=120 {
+        drogon_core::automations::scheduler::tick_once(
+            &fx.engine,
+            base + offset_minutes as f64 * 60_000.0,
+        );
+    }
+
+    let conn =
+        rusqlite::Connection::open(fx._root.path().join("data").join(drogon_core::DB_FILE_NAME))
+            .unwrap();
+    let checks =
+        drogon_core::bots::monitors::storage::list_checks_for_monitor(&conn, &monitor_id).unwrap();
+    assert_eq!(
+        checks.iter().filter(|check| check.result.is_error()).count(),
+        1,
+        "a failed first attempt must not retry on every backoff tick"
+    );
+}
+
+#[test]
 fn monitor_crud_fences_rev_and_keeps_approval_gate() {
     let fx = Fx::new();
     let bot = fx.create_bot("c1", "Watcher", Some("watcher"));
