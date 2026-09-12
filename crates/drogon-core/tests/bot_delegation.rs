@@ -637,21 +637,21 @@ fn capped_bot_backlog_cannot_starve_a_newer_bot_event() {
         fixture.enqueue(event_no, now + event_no as f64);
     }
     let second_bot_id = fixture.add_second_bound_bot();
-    fixture.enqueue_resource_for_bot(
-        "mon-2",
-        &second_bot_id,
-        1,
-        now + 100.0,
-        RESOURCE,
-    );
+    fixture.enqueue_resource_for_bot("mon-2", &second_bot_id, 1, now + 100.0, RESOURCE);
 
     let first = fixture.drain(now + 200.0);
-    assert_eq!(first.cap_exceeded, 12, "capped bot is settled wholesale: {first:?}");
+    assert_eq!(
+        first.cap_exceeded, 12,
+        "capped bot is settled wholesale: {first:?}"
+    );
     assert_eq!(first.dispatched, 0);
     assert_eq!(fixture.outbox_len(), 1);
 
     let second = fixture.drain(now + 201.0);
-    assert_eq!(second.dispatched, 1, "the other bot is not starved: {second:?}");
+    assert_eq!(
+        second.dispatched, 1,
+        "the other bot is not starved: {second:?}"
+    );
     assert_eq!(fixture.outbox_len(), 0);
 }
 

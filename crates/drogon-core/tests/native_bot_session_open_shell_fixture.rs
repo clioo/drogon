@@ -406,7 +406,10 @@ fn open_session_forces_inherit_but_headless_run_remains_unattended() {
     open["harness"]["permissionMode"] = json!("unattended");
     let opened = ok(&fx.engine, "bot.run", "req-permission-open", open);
     let open_session_id = opened["session"]["sessionId"].as_str().unwrap().to_string();
-    let open_incarnation = opened["session"]["incarnation"].as_str().unwrap().to_string();
+    let open_incarnation = opened["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let (open_output, _) = read_until(
         &fx.engine,
         &open_session_id,
@@ -414,7 +417,10 @@ fn open_session_forces_inherit_but_headless_run_remains_unattended() {
         |text| text.contains("ARG:"),
         Duration::from_secs(20),
     );
-    assert!(!open_output.contains("--dangerously-skip-permissions"), "{open_output}");
+    assert!(
+        !open_output.contains("--dangerously-skip-permissions"),
+        "{open_output}"
+    );
     assert_eq!(
         ok(
             &fx.engine,

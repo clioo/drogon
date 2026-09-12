@@ -1070,7 +1070,11 @@ fn monitor_cron_due(record: &MonitorRecord, now_ms: f64) -> bool {
     if scheduler::validate_cron(cron).is_err() {
         return false;
     }
-    if record.cursor.is_none() {
+    // A missing cursor means the baseline is due only before the first
+    // attempt. After an error, the last attempt is the cron anchor too;
+    // otherwise backoff ticks would repeatedly treat the failed baseline as
+    // never attempted.
+    if record.cursor.is_none() && record.last_check_at_ms.is_none() {
         return true;
     }
     let anchor = record
@@ -1633,6 +1637,7 @@ fn tick_github_monitor(
                                 check: &check,
                                 seen: None,
                                 now_ms,
+                                is_error: false,
                             },
                             summary,
                         );
@@ -1728,6 +1733,7 @@ fn commit_github_error(
             check: &check,
             seen: None,
             now_ms,
+            is_error: true,
         },
         summary,
     );
@@ -1788,6 +1794,7 @@ fn commit_github_seed(
             check: &check,
             seen: Some(seen),
             now_ms,
+            is_error: false,
         },
         summary,
     );
@@ -1801,6 +1808,7 @@ struct QuietCommit<'a> {
     check: &'a monitor_storage::StoredCheck,
     seen: Option<&'a std::collections::BTreeSet<u64>>,
     now_ms: f64,
+    is_error: bool,
 }
 
 fn commit_github_quiet(
@@ -1814,6 +1822,7 @@ fn commit_github_quiet(
         check,
         seen,
         now_ms,
+        is_error,
     } = commit;
     let conn = engine.db.lock().unwrap();
     let tx = match auto_storage::begin_immediate(&conn) {
@@ -1837,6 +1846,8 @@ fn commit_github_quiet(
         && tx.commit().is_ok();
     if !ok {
         summary.refused += 1;
+    } else if is_error {
+        summary.errors += 1;
     } else {
         summary.unchanged += 1;
     }
@@ -3854,5 +3865,87 @@ mod rule_kind_admission_tests {
             )
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod github_quiet_commit_tests {
+    use super::*;
+    use crate::bots::monitors::MonitorInferencePolicy;
+
+    #[test]
+    fn github_error_quiet_commit_counts_as_error_not_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        let engine = crate::Engine::open(&data_dir).unwrap();
+        let rule = crate::bots::monitors::rule::MonitorRule::LocalFileDigest(
+            crate::bots::monitors::rule::LocalFileRule {
+                host_id: "host-1".to_string(),
+                project_id: "project-1".to_string(),
+                resource: "notes.md".to_string(),
+                max_bytes: 1024,
+            },
+        );
+        let record = MonitorRecord {
+            id: "monitor-1".to_string(),
+            bot_id: Some("bot-1".to_string()),
+            version: 1,
+            approved_rule_hash: rule.approval_hash(),
+            rule,
+            interpreter: None,
+            argv: vec![],
+            secret_refs: vec![],
+            inference_policy: MonitorInferencePolicy::NotificationOnly,
+            trigger: MonitorTrigger::Scheduled {
+                cron: "0 9 * * *".to_string(),
+            },
+            cursor: Some(format!("v1:{}", "aa".repeat(32))),
+            enabled: true,
+            created_at_ms: 1_700_000_000_000.0,
+            updated_at_ms: 1_700_000_000_000.0,
+            consecutive_errors: 1,
+            next_eligible_at_ms: Some(1_700_000_001_000.0),
+            last_event_id: None,
+            last_success_at_ms: Some(1_700_000_000_000.0),
+            last_check_at_ms: Some(1_700_000_000_000.0),
+            last_error: Some("old error".to_string()),
+            last_notice: None,
+        };
+        let conn = engine.db.lock().unwrap();
+        monitor_storage::create_monitor(&conn, &record).unwrap();
+        drop(conn);
+
+        let now_ms = 1_700_000_010_000.0;
+        let mut updated = record.clone();
+        updated.updated_at_ms = now_ms;
+        let check = monitor_storage::StoredCheck {
+            id: "check-1".to_string(),
+            monitor_id: record.id.clone(),
+            monitor_version: record.version,
+            started_at_ms: now_ms,
+            result: MonitorCheckResult::error(
+                &record.id,
+                record.version,
+                MonitorErrorKind::IoError,
+                "token revoked",
+                now_ms,
+            ),
+            delivery: monitor_storage::DeliveryState::NotApplicable,
+        };
+        let mut summary = MonitorTickSummary::default();
+        commit_github_quiet(
+            &engine,
+            QuietCommit {
+                updated: &updated,
+                rev: 0,
+                check: &check,
+                seen: None,
+                now_ms,
+                is_error: true,
+            },
+            &mut summary,
+        );
+        assert_eq!(summary.errors, 1);
+        assert_eq!(summary.unchanged, 0);
     }
 }
