@@ -608,9 +608,7 @@ ledgers, not in Mentu. Record a checkpoint after a meaningful result, finding,
 blocker, or completion (not after every tool call):
 
 ```sh
-drogon-cli graph evidence-add --workspace <ID> --status progress \
-  --summary "Unit tests pass" --detail "Validated the policy save path." \
-  --artifact reports/unit.txt --agent leader --role implementation
+drogon-cli graph evidence-add --workspace <ID> --status progress --summary <SUMMARY> --detail <DETAIL> --artifact reports/unit.txt --agent leader --role implementation
 ```
 
 Statuses are `progress`, `finding`, `blocked`, `completed`, and `failed`.
@@ -623,8 +621,7 @@ Every agent and subagent should report exact token counts when its harness
 provides them:
 
 ```sh
-drogon-cli graph usage-add --workspace <ID> --input 1200 --output 340 \
-  --cache-read 800 --harness pi --model <MODEL> --agent <AGENT_ID> --role review
+drogon-cli graph usage-add --workspace <ID> --input 1200 --output 340 --cache-read 800 --harness pi --model <MODEL> --agent <AGENT_ID> --role review
 ```
 
 Each usage entry is an incremental measurement; do not submit a cumulative
