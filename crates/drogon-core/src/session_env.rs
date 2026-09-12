@@ -38,6 +38,12 @@
 //! transcript to resume) because the app inherited a parent Claude session's
 //! identity; the product must not depend on how it was launched.
 //!
+//! `NO_COLOR` is stripped as terminal control context as well. A daemon
+//! started from a shell or agent that disables ANSI output would otherwise
+//! pass that choice into the app's PTY, defeating the managed
+//! `xterm-256color`/truecolor terminal — most visibly when Claude Code is
+//! reopened with `--resume`.
+//!
 //! The daemon's auth token is a file under the data dir, never an
 //! environment variable, so there is no token variable to strip.
 
@@ -122,6 +128,7 @@ fn is_control_key(name: &str) -> bool {
     upper.starts_with("ORCA_")
         || upper.starts_with("DROGON_")
         || upper == "PI_CODING_AGENT_DIR"
+        || upper == "NO_COLOR"
         || HARNESS_SESSION_ENV_KEYS.contains(&upper.as_str())
 }
 
@@ -399,6 +406,8 @@ mod tests {
             "orca_terminal_handle",
             "PI_CODING_AGENT_DIR",
             "pi_coding_agent_dir",
+            "NO_COLOR",
+            "no_color",
         ] {
             assert!(
                 is_control_key(key),
@@ -460,6 +469,7 @@ mod tests {
             "CLAUDE_CODE_MESSAGING_TOKEN",
             "CLAUDECODE",
             "CODEX_THREAD_ID",
+            "NO_COLOR",
         ];
         // Keep the poison out of the assertion path's own process state
         // afterwards (this test binary is shared with other tests).
