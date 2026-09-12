@@ -102,12 +102,36 @@ export async function restartChangedDaemon(
     // Transport loss may already be the daemon going away; fall through to
     // the bounded endpoint wait, same as the manual restart path.
   }
-  if (!(await waitForEndpointAbsent(deps)))
-    return {
-      kind: "pending",
-      reason:
-        "The running service stopped answering but did not release its endpoint; it was left in place.",
-    };
+  if (!(await waitForEndpointAbsent(deps))) {
+    // The endpoint did not free within the wait. Re-classify instead of
+    // assuming: if the old instance still answers, it stays attached and
+    // the update is honestly pending (never killed under the user); if a
+    // different instance answers, verify it is the bundled build before
+    // claiming success; if nothing answers, the daemon died mid-teardown
+    // and the endpoint-free respawn below is exactly right. Bounded.
+    const probe = await deps.call("status", {});
+    if (probe.ok) {
+      const result = probe.result as {
+        serviceInstanceId?: string;
+        daemonArtifactSha256?: string | null;
+      };
+      const digest = result.daemonArtifactSha256 ?? null;
+      if (result.serviceInstanceId === fences.serviceInstanceId) {
+        return {
+          kind: "pending",
+          reason:
+            "The running service could not finish shutting down in time; it is still serving. Stop sessions, then use Restart service.",
+        };
+      }
+      if (digest !== null && digest === (await promisedBundleDigest(deps)))
+        return { kind: "restarted" };
+      return {
+        kind: "pending",
+        reason:
+          "A different service instance is answering and its binary identity does not match this install; it was left running.",
+      };
+    }
+  }
   return respawn(deps);
 }
 
