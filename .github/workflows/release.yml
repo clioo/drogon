@@ -1,0 +1,119 @@
+name: Release Drogon desktop
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  desktop:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install pinned tools
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup override set 1.98.0
+          npm install --global pnpm@11.19.0
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Secrets are optional. When all five are present, this creates an
+      # ephemeral keychain and exports the identity for release-desktop.mjs;
+      # otherwise the package stays explicitly ad-hoc and the release still
+      # succeeds. The P12 is never written to the repository or logged.
+      - name: Prepare optional Developer ID signing
+        env:
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/drogon-signing.keychain-db"
+          if [[ -z "$APPLE_DEVELOPER_ID_P12" || -z "$APPLE_DEVELOPER_ID_P12_PASSWORD" || -z "$APPLE_ID" || -z "$APPLE_TEAM_ID" || -z "$APPLE_APP_SPECIFIC_PASSWORD" ]]; then
+            echo "No complete Apple signing configuration; using local ad-hoc signing."
+            exit 0
+          fi
+          keychain_password="$(openssl rand -hex 24)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$APPLE_DEVELOPER_ID_P12" | base64 -D > "$RUNNER_TEMP/drogon-developer-id.p12"
+          security import "$RUNNER_TEMP/drogon-developer-id.p12" -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          identity="$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application:.*\)".*/\1/p' | head -n 1)"
+          if [[ -z "$identity" ]]; then
+            echo "The Apple P12 did not contain a Developer ID Application identity." >&2
+            exit 1
+          fi
+          {
+            echo "DROGON_SIGNING_IDENTITY=$identity"
+            echo "DROGON_RELEASE_SIGNING=developer-id-notarized"
+          } >> "$GITHUB_ENV"
+
+      - name: Build, notarize (when configured), and verify the release artifact
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          node scripts/release-desktop.mjs --tag "$GITHUB_REF_NAME" --output "$RUNNER_TEMP/drogon-release"
+          printf 'Release version: %s\n' "$version"
+
+      - name: Publish the GitHub pre-release (stable tags remain stable)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          archive="$RUNNER_TEMP/drogon-release/Drogon-${version}-darwin-arm64.zip"
+          checksum="$archive.sha256"
+          flags=(--title "Drogon ${version}" --generate-notes)
+          if [[ "$version" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" "$archive" "$checksum"
+
+      # A fine-grained HOMEBREW_TAP_TOKEN is optional because the tap also has
+      # a public-release polling fallback. When present this dispatch makes
+      # the cask bump immediate without asking a maintainer to edit it.
+      - name: Request Homebrew tap bump
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          checksum="$RUNNER_TEMP/drogon-release/Drogon-${version}-darwin-arm64.zip.sha256"
+          digest="$(awk '{print $1}' "$checksum")"
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "HOMEBREW_TAP_TOKEN is not configured; the tap's scheduled public-release bump will catch this release."
+            exit 0
+          fi
+          gh api --method POST "repos/clioo/homebrew-drogon/dispatches" \
+            -H "Accept: application/vnd.github+json" \
+            -f event_type=drogon-release \
+            -f "client_payload[version]=$version" \
+            -f "client_payload[sha256]=$digest"
+
+      - name: Remove temporary Apple signing material
+        if: ${{ always() }}
+        run: |
+          set +e
+          security delete-keychain "$RUNNER_TEMP/drogon-signing.keychain-db" >/dev/null 2>&1 || true
+          rm -f "$RUNNER_TEMP/drogon-developer-id.p12"
