@@ -319,6 +319,7 @@ async function main() {
   //    seam: add an approved runtime, edit the fallback, toggle Delegate.
   const policyPanel = panel.locator('[data-testid="subagent-policy-panel"]');
   await policyPanel.waitFor();
+  const summary = policyPanel.locator('[data-testid="subagent-policy-summary"]');
   await policyPanel.locator('[data-testid="add-approved-runtime"]').click();
   await policyPanel.locator('[data-testid="approved-runtime-row-0"]').waitFor();
   await policyPanel.locator('[data-testid="delegate-toggle"]').click();
@@ -384,8 +385,51 @@ async function main() {
     "delegate-off-reaches-the-next-sessions-own-agents-md-and-drops-the-stale-on-instruction",
   );
 
+  // 5c. FRAGILE fix: the fallback runtime can be both set AND removed.
+  await policyPanel.locator('[data-testid="fallback-runtime-harness"]').click();
+  // Whatever the real host catalog offers first — never a fabricated menu.
+  await page.getByRole("option").first().click();
+  await delay(400);
+  const withFallback = await readGraph(workspace);
+  assert.ok(
+    withFallback.intent.policy.fallbackRuntime,
+    `fallback runtime must write through: ${JSON.stringify(withFallback.intent.policy)}`,
+  );
+  const removeFallback = policyPanel.locator('[data-testid="fallback-runtime-remove"]');
+  await removeFallback.waitFor();
+  assert.equal(await removeFallback.isDisabled(), false, "a configured fallback must be removable");
+  await removeFallback.click();
+  await delay(400);
+  const withoutFallback = await readGraph(workspace);
+  assert.equal(
+    withoutFallback.intent.policy.fallbackRuntime,
+    null,
+    "Remove must clear the fallback runtime",
+  );
+  assert.match((await summary.innerText()) ?? "", /0 fallback/);
+  assert.equal(
+    await removeFallback.isDisabled(),
+    true,
+    "nothing left to remove — the control must disable, not no-op",
+  );
+  report.checks.push("fallback-runtime-remove-clears-and-summary-drops-to-0");
+
+  // 5d. Scenario 7: the Main agent node opens a real inspector exposing the
+  //     live-session honesty rules (harness-change refusal, delete/stop
+  //     refusal) with a genuine Stop-session action wired through.
+  await mainAgent.click();
+  // The inspector is a Popover, portaled to the document body — not a
+  // descendant of `panel` — so it must be located page-wide.
+  const mainAgentInspector = page.locator('[data-testid="main-agent-inspector"]');
+  await mainAgentInspector.waitFor({ timeout: 10000 });
+  await page.locator('[data-testid="main-agent-harness-locked"]').waitFor({ timeout: 5000 });
+  await page.locator('[data-testid="main-agent-delete-refused"]').waitFor({ timeout: 5000 });
+  await shot(page, "orchestrator-main-agent-inspector-light-1440.png");
+  await page.keyboard.press("Escape");
+  await mainAgentInspector.waitFor({ state: "detached", timeout: 5000 });
+  report.checks.push("leader-node-inspector-exposes-harness-and-delete-refusal-rules");
+
   // 6. Design 1: adversarial off — screenshots light + dark, every width.
-  const summary = policyPanel.locator('[data-testid="subagent-policy-summary"]');
   await summary.waitFor();
   assert.match((await summary.innerText()) ?? "", /0 optional subagents/);
   assert.equal(await panel.locator('[data-testid="orchestrator-test-node"]').count(), 0);
@@ -466,7 +510,23 @@ async function main() {
   //    daemon has no real provider configured, so the honest outcome is a
   //    launch refusal — the terminal must show it never reached "passed",
   //    not a fabricated success.
+  const repeatCaption = panel.locator('[data-testid="orchestrator-repeat-caption"]');
+  const boundBeforeRun = (await repeatCaption.innerText().catch(() => "")) ?? "";
   await panel.locator('[data-testid="orchestrator-run-workflow"]').click();
+  // DISHONEST-2, exercised live and best-effort: bump the policy DOWN
+  // immediately after the click, while the loop may still be in flight.
+  // The exact in-flight WINDOW is timing-dependent on this unconfigured
+  // dev daemon (a launch refusal can resolve within ~1 cycle) — the
+  // deterministic proof of this fix lives in OrchestratorCanvas.test.tsx;
+  // this only records corroborating live evidence when the race
+  // cooperates, and never fails the run when it does not.
+  await policyPanel.locator('[data-testid="adversarial-max-iterations-decrease"]').click();
+  const boundRightAfterBump = (await repeatCaption.innerText().catch(() => "")) ?? "";
+  if (boundBeforeRun && boundRightAfterBump === boundBeforeRun) {
+    report.checks.push("dishonest2-in-flight-caption-held-the-running-bound-live");
+  } else {
+    report.dishonest2LiveRaceInconclusive = { boundBeforeRun, boundRightAfterBump };
+  }
   const terminal = panel.locator('[data-testid="orchestrator-terminal"]');
   await page.waitForFunction(
     () => {
@@ -493,6 +553,73 @@ async function main() {
   report.observedTerminalText = (await terminal.innerText()) ?? "";
   await shot(page, "orchestrator-run-workflow-outcome.png");
   report.checks.push("run-workflow-goes-through-real-failover-and-never-fabricates-success");
+
+  // 9. FINDING fix: closing the session and reloading must never collapse
+  //    the canvas to the no-session view. Confirmed empirically before this
+  //    fix existed: `terminal close` never reaches an already-mounted
+  //    canvas without a reload (no live push for an externally closed
+  //    session), and the reload itself then dropped the session from
+  //    `terminal list` entirely — an in-memory-only fix would not survive
+  //    it, which is why the real fix persists the last-known session
+  //    (last-known-main-session.ts) rather than only holding it in a ref.
+  //
+  //    The DISHONEST-3 step above (5b) launched two MORE sessions in this
+  //    workspace (delegate-on/off) after the one captured in `session` —
+  //    `pickMentuMainSession` prefers the newest LIVE agent session, so the
+  //    canvas is now showing one of those, not `session`. Close every live
+  //    agent session this workspace has, not just the original one, so the
+  //    canvas genuinely has none left — exactly the state a real user
+  //    reaches by closing their last session, whichever it was.
+  const stillLive = (await cliJson(dataDir, ["terminal", "list", "--workspace", workspaceRecord.id]))
+    .sessions.filter((candidate) => candidate.harnessId && candidate.verdict === "live");
+  assert.ok(stillLive.length > 0, "expected at least one live session to close");
+  let closeResult = null;
+  for (const candidate of stillLive) {
+    closeResult = await cliJson(dataDir, [
+      "terminal",
+      "close",
+      "--session",
+      candidate.id,
+      "--incarnation",
+      candidate.incarnation,
+    ]);
+    assert.equal(closeResult.verdict, "exited", JSON.stringify(closeResult));
+  }
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor({ timeout: 30000 });
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Work Graph", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).waitFor();
+  await orchestratorButton.waitFor({ timeout: 15000 });
+  await orchestratorButton.click();
+  await canvas.waitFor();
+  assert.equal(
+    await panel.locator('[data-testid="orchestrator-disabled"]').count(),
+    0,
+    "an exited session must never collapse the canvas to the no-session view",
+  );
+  const mainAgentAfterClose = panel.locator('[data-testid="orchestrator-main-agent"]');
+  await mainAgentAfterClose.waitFor({ timeout: 10000 });
+  // The renderer never observes a live push for an externally-closed
+  // session (confirmed empirically: no `onStateChanged` event reaches an
+  // already-mounted canvas for a session closed from outside the app), so
+  // the persisted last-known record's own verdict is whatever was true the
+  // moment BEFORE the close — "live". The honest state to render from that
+  // is "unverifiable" (contact lost, not confirmed exited — AGENTS.md is
+  // explicit that loss of contact never proves exit), not a fabricated
+  // "exited". Either is an acceptable answer per the finding's own wording
+  // ("exited or unverifiable"); what must never happen is "live" or a
+  // collapse to "no session".
+  const stateAfterClose = await mainAgentAfterClose.getAttribute("data-state");
+  assert.ok(
+    stateAfterClose === "exited" || stateAfterClose === "unverifiable",
+    `expected exited or unverifiable, got ${stateAfterClose}`,
+  );
+  assert.notEqual(stateAfterClose, "live", "a session with no fresh confirmation must never render as live");
+  await shot(page, "orchestrator-exited-session-after-reload-light-1440.png");
+  report.checks.push("exited-session-survives-a-reload-instead-of-collapsing-to-no-session");
 }
 
 let failure = null;

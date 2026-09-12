@@ -130,6 +130,35 @@ export async function probeGraphDesigner({ page, workspace, output, cli, dataDir
   await designer.locator('[data-testid="design-field-title"]').fill(NODE_TWO_TITLE);
   await designer.locator('[data-testid="design-field-prompt"]').fill(NODE_TWO_PROMPT);
 
+  // 2b-bis. BROKEN-1 regression: type a THROWAWAY node's Name one real key
+  // event at a time — never `.fill()`, which sets the whole value in one
+  // shot and would hide the reversed-keystroke bug completely (that is
+  // exactly how the original adversarial audit found it). Deleted before
+  // the edge drag below so the rest of this probe still sees exactly the
+  // two named nodes it expects.
+  await designer.locator('[data-testid="design-add-node"]').click();
+  const throwawayTitle = designer.locator('[data-testid="design-field-title"]');
+  await throwawayTitle.waitFor();
+  await throwawayTitle.fill("");
+  await throwawayTitle.click();
+  await page.keyboard.type("ABCDEFGHIJ", { delay: 60 });
+  assert.equal(
+    await throwawayTitle.inputValue(),
+    "ABCDEFGHIJ",
+    "typing a node's Name key by key must preserve order, not reverse it",
+  );
+  // Also insert in the MIDDLE of the existing text, not just append.
+  await throwawayTitle.evaluate((el, pos) => el.setSelectionRange(pos, pos), 5);
+  await page.keyboard.type("X", { delay: 60 });
+  assert.equal(
+    await throwawayTitle.inputValue(),
+    "ABCDEXFGHIJ",
+    "a keystroke typed mid-name must insert at the caret, not remount the field",
+  );
+  await designer.locator('[data-testid="design-delete"]').click();
+  await designer.locator('[data-testid="design-inspector-empty"]').waitFor();
+  checks.push("graph-designer-name-field-preserves-keystroke-order-and-caret");
+
   // 2c. Draw the dependency by dragging node one's port onto node two.
   const portBox = await page
     .getByTestId("design-node-port-discover-the-repo")

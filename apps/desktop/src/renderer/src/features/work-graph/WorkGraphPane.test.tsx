@@ -462,6 +462,12 @@ function liveSession(): Session {
 
 describe("WorkGraphPane orchestrator entry point", () => {
   afterEach(cleanup);
+  // OrchestratorCanvas persists the last-known main session per workspace
+  // (last-known-main-session.ts) so the exited/unverifiable fact survives a
+  // reload; every test here reuses the same literal workspaceId "ws", so
+  // that store must not leak between tests the way a real per-workspace
+  // UUID never would.
+  afterEach(() => window.localStorage.clear());
 
   it("switches to the Orchestrator canvas and threads the real main session through", async () => {
     const fileBridge = {
