@@ -755,7 +755,11 @@ pub fn graph_run_node_failover(
         } else {
             format!("/{}", runtime.model)
         },
-        if is_fallback { ", the fallback runtime" } else { "" },
+        if is_fallback {
+            ", the fallback runtime"
+        } else {
+            ""
+        },
     )];
     for attempt in attempts {
         let target = if attempt.model.is_empty() {

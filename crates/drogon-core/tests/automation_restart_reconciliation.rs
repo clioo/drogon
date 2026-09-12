@@ -50,7 +50,11 @@ fn ensure_fixture_harness_on_path() {
             std::env::temp_dir().join(format!("drogon-automation-fixture-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pi = dir.join("pi");
-        std::fs::write(&pi, "#!/bin/sh\nprintf 'reconcile-fixture-output\\n'\nexit 0\n").unwrap();
+        std::fs::write(
+            &pi,
+            "#!/bin/sh\nprintf 'reconcile-fixture-output\\n'\nexit 0\n",
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -149,7 +153,13 @@ fn a_dispatched_run_orphaned_by_a_restart_reconciles_and_reruns() {
     let created = create_automation(&engine, "rec-auto", &workspace_id);
     let automation_id = created["id"].as_str().unwrap().to_string();
 
-    seed_dispatched_run(&dir, &automation_id, "rec-run-ghost", "sess-ghost", "inc-ghost");
+    seed_dispatched_run(
+        &dir,
+        &automation_id,
+        "rec-run-ghost",
+        "sess-ghost",
+        "inc-ghost",
+    );
 
     // The repro (Finding 2): before the restart the row honestly reports
     // dispatched; a fresh daemon used to keep reporting exactly this
@@ -208,7 +218,13 @@ fn a_dispatched_run_whose_session_recorded_its_exit_replays_completion() {
     let created = create_automation(&engine, "rec-exit", &workspace_id);
     let automation_id = created["id"].as_str().unwrap().to_string();
 
-    seed_dispatched_run(&dir, &automation_id, "rec-run-exit", "sess-real", "inc-real");
+    seed_dispatched_run(
+        &dir,
+        &automation_id,
+        "rec-run-exit",
+        "sess-real",
+        "inc-real",
+    );
     {
         let conn = rusqlite::Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
         conn.execute(
@@ -241,7 +257,13 @@ fn live_bot_turns_and_responsibility_runs_do_not_survive_a_restart_as_live() {
     let created = create_automation(&engine, "rec-bot", &workspace_id);
     let automation_id = created["id"].as_str().unwrap().to_string();
 
-    seed_dispatched_run(&dir, &automation_id, "rec-run-bot", "sess-ghost", "inc-ghost");
+    seed_dispatched_run(
+        &dir,
+        &automation_id,
+        "rec-run-bot",
+        "sess-ghost",
+        "inc-ghost",
+    );
     {
         let conn = rusqlite::Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
         // A chat turn claiming `live` for the same ghost session.
@@ -409,7 +431,13 @@ fn an_exited_session_without_a_code_is_loss_of_contact_not_completion() {
     let created = create_automation(&engine, "rec-nocode", &workspace_id);
     let automation_id = created["id"].as_str().unwrap().to_string();
 
-    seed_dispatched_run(&dir, &automation_id, "rec-run-nocode", "sess-nocode", "inc-nocode");
+    seed_dispatched_run(
+        &dir,
+        &automation_id,
+        "rec-run-nocode",
+        "sess-nocode",
+        "inc-nocode",
+    );
     {
         let conn = rusqlite::Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
         conn.execute(

@@ -396,8 +396,7 @@ impl Engine {
         let tracked = execution::cancel(&parsed.run_id);
         let conn = self.db.lock().unwrap();
         if !tracked {
-            storage::reconcile_untracked_run(&conn, &parsed.run_id)
-                .map_err(error::from_sqlite)?;
+            storage::reconcile_untracked_run(&conn, &parsed.run_id).map_err(error::from_sqlite)?;
         }
         let run = storage::get_run(&conn, &parsed.run_id)?
             .ok_or_else(|| error::not_found("Work Graph run not found."))?;

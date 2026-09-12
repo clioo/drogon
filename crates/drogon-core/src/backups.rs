@@ -187,14 +187,18 @@ impl std::fmt::Display for RestoreError {
         match self {
             Self::LockHeld(e) => write!(f, "data directory is locked by a running daemon: {e}"),
             Self::UnknownBackup(id) => {
-                write!(f, "no pre-migration backup named {id} exists in this data directory")
+                write!(
+                    f,
+                    "no pre-migration backup named {id} exists in this data directory"
+                )
             }
             Self::InvalidBackup(reason) => write!(f, "backup refused: {reason}"),
             Self::NewerThanThisBuild(reason) => {
                 write!(f, "backup refused: {reason}")
             }
             Self::SnapshotFailed(reason) => write!(
-                f, "restore refused before touching anything: the current database could not be snapshotted ({reason})"
+                f,
+                "restore refused before touching anything: the current database could not be snapshotted ({reason})"
             ),
             Self::Io(e) => write!(f, "{e}"),
             Self::Sqlite(e) => write!(f, "sqlite error: {e}"),
@@ -256,7 +260,11 @@ fn list_backup_dirs(
     let mut entries = Vec::new();
     for entry in read {
         let path = entry?.path();
-        let Some(id) = path.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
+        let Some(id) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+        else {
             continue;
         };
         if !id.starts_with(prefix) {
@@ -345,15 +353,15 @@ fn parse_manifest(
     database_file: &str,
     dir: &Path,
 ) -> Result<BackupManifest, String> {
-    let obj = value.as_object().ok_or("manifest.json is not a JSON object")?;
+    let obj = value
+        .as_object()
+        .ok_or("manifest.json is not a JSON object")?;
     let kind = obj
         .get("kind")
         .and_then(|v| v.as_str())
         .ok_or("manifest is missing its kind")?;
     if kind != expected_kind {
-        return Err(format!(
-            "manifest kind is {kind:?}, not {expected_kind:?}"
-        ));
+        return Err(format!("manifest kind is {kind:?}, not {expected_kind:?}"));
     }
     let created_at = obj
         .get("created_at")
@@ -370,7 +378,8 @@ fn parse_manifest(
             "manifest names database file {manifest_database_file:?} but the directory carries {database_file:?}"
         ));
     }
-    let header = std::fs::read(dir.join(database_file)).map_err(|e| format!("cannot read the backup database: {e}"))?;
+    let header = std::fs::read(dir.join(database_file))
+        .map_err(|e| format!("cannot read the backup database: {e}"))?;
     if header.len() < 16 || &header[..16] != b"SQLite format 3\0" {
         return Err("backup database file is not a SQLite database".to_string());
     }
@@ -389,11 +398,15 @@ fn parse_manifest(
                 let recorded_version = item
                     .get("recorded_version")
                     .and_then(|v| v.as_i64())
-                    .ok_or_else(|| "a pending_migrations entry is missing recorded_version".to_string())?;
+                    .ok_or_else(|| {
+                        "a pending_migrations entry is missing recorded_version".to_string()
+                    })?;
                 let migrating_to = item
                     .get("migrating_to")
                     .and_then(|v| v.as_i64())
-                    .ok_or_else(|| "a pending_migrations entry is missing migrating_to".to_string())?;
+                    .ok_or_else(|| {
+                        "a pending_migrations entry is missing migrating_to".to_string()
+                    })?;
                 Ok(PendingMigrationRecord {
                     component,
                     recorded_version,
@@ -428,9 +441,7 @@ fn parse_manifest(
 fn classify_against_this_build(backup_db: &Path) -> Result<(), String> {
     match classify_read(backup_db) {
         Ok(()) => Ok(()),
-        Err(ClassifyFailure::Sqlite(e)) => {
-            Err(format!("backup database cannot be inspected: {e}"))
-        }
+        Err(ClassifyFailure::Sqlite(e)) => Err(format!("backup database cannot be inspected: {e}")),
         Err(ClassifyFailure::Newer(reason)) => Err(reason),
     }
 }
@@ -534,7 +545,8 @@ pub fn restore_pre_migration_backup(
     let manifest = entry.manifest.expect("validated entry carries a manifest");
 
     let live_db = data_dir.join(manifest.database_file.clone());
-    let snapshot_id = snapshot_live_db(&live_db, backup_id).map_err(RestoreError::SnapshotFailed)?;
+    let snapshot_id =
+        snapshot_live_db(&live_db, backup_id).map_err(RestoreError::SnapshotFailed)?;
 
     // Stage the replacement inside the data directory (same filesystem, so
     // the later rename is atomic) and prove it opens clean BEFORE the live
@@ -622,14 +634,13 @@ fn snapshot_live_db(live_db: &Path, backup_id: &str) -> Result<Option<String>, S
         let _ = std::fs::remove_dir_all(&dir);
         e
     };
-    let vacuum = Connection::open_with_flags(live_db, OpenFlags::SQLITE_OPEN_READ_ONLY).map(
-        |conn| {
+    let vacuum =
+        Connection::open_with_flags(live_db, OpenFlags::SQLITE_OPEN_READ_ONLY).map(|conn| {
             conn.execute(
                 "VACUUM INTO ?1",
                 [dir.join(DB_FILE_NAME).to_string_lossy().as_ref()],
             )
-        },
-    );
+        });
     let method = match vacuum {
         Ok(Ok(_)) => "vacuum-into",
         Ok(Err(_)) | Err(_) => {
@@ -647,7 +658,9 @@ fn snapshot_live_db(live_db: &Path, backup_id: &str) -> Result<Option<String>, S
                 }
             }
             if !copied {
-                return Err(rollback("live database disappeared while snapshotting".into()));
+                return Err(rollback(
+                    "live database disappeared while snapshotting".into(),
+                ));
             }
             "file-copy"
         }

@@ -46,11 +46,7 @@ mod tests {
 
     #[test]
     fn feature_floors_never_exceed_the_current_version() {
-        const {
-            assert!(
-                FEATURE_PROTOCOL_VERSION >= BOT_RUN_INTERACTIVE_FIELD_PROTOCOL
-            );
-        }
+        const { assert!(FEATURE_PROTOCOL_VERSION >= BOT_RUN_INTERACTIVE_FIELD_PROTOCOL) }
     }
 
     #[test]

@@ -25,17 +25,20 @@ pub fn run(
 ) -> Result<RunOutcome, CliError> {
     match action {
         BackupsAction::List => list(request_id, json, data_dir),
-        BackupsAction::Restore { backup_id } => {
-            restore(request_id, json, data_dir, backup_id)
-        }
+        BackupsAction::Restore { backup_id } => restore(request_id, json, data_dir, backup_id),
     }
 }
 
 fn list(request_id: &str, json: bool, data_dir: &Path) -> Result<RunOutcome, CliError> {
     let backups = list_pre_migration_backups(data_dir)
         .map_err(|e| local(request_id, "io_error", format!("cannot list backups: {e}")))?;
-    let snapshots = list_pre_restore_snapshots(data_dir)
-        .map_err(|e| local(request_id, "io_error", format!("cannot list snapshots: {e}")))?;
+    let snapshots = list_pre_restore_snapshots(data_dir).map_err(|e| {
+        local(
+            request_id,
+            "io_error",
+            format!("cannot list snapshots: {e}"),
+        )
+    })?;
     if json {
         let payload = json!({
             "dataDir": data_dir.to_string_lossy(),
@@ -50,7 +53,11 @@ fn list(request_id: &str, json: bool, data_dir: &Path) -> Result<RunOutcome, Cli
         });
         Ok(RunOutcome {
             stdout: serde_json::to_string_pretty(&payload).map_err(|err| {
-                local(request_id, "internal_error", format!("cannot encode response: {err}"))
+                local(
+                    request_id,
+                    "internal_error",
+                    format!("cannot encode response: {err}"),
+                )
             })?,
             exit_code: 0,
             stderr_note: None,
@@ -128,7 +135,11 @@ fn restore(
         });
         Ok(RunOutcome {
             stdout: serde_json::to_string_pretty(&payload).map_err(|err| {
-                local(request_id, "internal_error", format!("cannot encode response: {err}"))
+                local(
+                    request_id,
+                    "internal_error",
+                    format!("cannot encode response: {err}"),
+                )
             })?,
             exit_code: 0,
             stderr_note: None,
@@ -151,11 +162,12 @@ fn restore(
 }
 
 fn entry_json(entry: &BackupEntry) -> serde_json::Value {
-    let (restorable, invalid_reason, not_restorable_reason) = match (&entry.invalid_reason, &entry.not_restorable_reason) {
-        (None, None) => (true, None, None),
-        (Some(reason), _) => (false, Some(reason.clone()), None),
-        (None, Some(reason)) => (false, None, Some(reason.clone())),
-    };
+    let (restorable, invalid_reason, not_restorable_reason) =
+        match (&entry.invalid_reason, &entry.not_restorable_reason) {
+            (None, None) => (true, None, None),
+            (Some(reason), _) => (false, Some(reason.clone()), None),
+            (None, Some(reason)) => (false, None, Some(reason.clone())),
+        };
     json!({
         "id": entry.id,
         "createdAt": entry.manifest.as_ref().map(|m| m.created_at.clone()),

@@ -869,8 +869,7 @@ completion; its outcome is unknown. Run again to re-dispatch.";
             .session_id
             .as_deref()
             .and_then(|sid| session_evidence(conn, sid));
-        let (observation, _code) =
-            reconciliation_target(message.incarnation.as_deref(), evidence);
+        let (observation, _code) = reconciliation_target(message.incarnation.as_deref(), evidence);
         if message.host_observation == Some(observation)
             || message.host_observation == Some(HostObservation::Exited)
         {
