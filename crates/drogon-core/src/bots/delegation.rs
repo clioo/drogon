@@ -41,7 +41,9 @@
 //!   another lane's retained evidence: the peek join admits only bound
 //!   monitors, so unbound rows are never claimed, never dispatched, and
 //!   never deleted here. Inference runs only for an explicitly bound
-//!   responsibility.
+//!   responsibility. Interactive open-session runs use the Bot's provisioned
+//!   home; monitor-released and scheduled runs use the Bot's record folder so
+//!   work happens in the project that owns the Bot.
 //! - Never floods: [`MAX_DELEGATIONS_PER_BOT_PER_DAY`] bounds one bot, and
 //!   [`MAX_DRAIN_PER_TICK`] bounds one tick. A tripped cap deletes the
 //!   excess event and counts it (`cap_exceeded`); the durable daily-count
@@ -79,6 +81,11 @@ pub const DELEGATION_SCHEMA_VERSION: i64 = 3;
 /// be a catch-up storm after an outage. Mirrors the scheduler's
 /// missed-run-grace shape (`scheduler::fire_due`).
 pub const DELEGATION_GRACE_MS: f64 = 30.0 * 60.0 * 1000.0;
+/// Notification-only event rows older than this are discarded; check-in rows
+/// remain the durable evidence for the monitor's observation history.
+pub const NOTIFICATION_EVENT_RETENTION_MS: f64 = 7.0 * 24.0 * 60.0 * 60.0 * 1000.0;
+/// A notification-only monitor retains at most its newest event rows.
+pub const MAX_NOTIFICATION_EVENTS_PER_MONITOR: usize = 200;
 
 /// Anti-flood bound: one flapping monitor may delegate at most this many
 /// runs per bot per UTC day. Excess events are dropped with an honest
@@ -449,19 +456,14 @@ fn record_firing(
     Ok(())
 }
 
-/// Settle every queued outbox event of a monitor being deleted: one
-/// durable firing row per event (outcome `orphaned`, the honest reason)
-/// and the outbox rows deleted, all inside the caller's transaction.
-/// The bar: an event must never sit where nothing will ever happen to it
-/// and nothing tells the owner so — deletion settles its events AT DELETE
-/// TIME with a recorded reason, and the drain's own orphaned path covers
-/// the reverse race (an event queued after the monitor row is gone).
-/// Returns the settled event ids for the delete receipt. Tolerant of a
-/// missing outbox table (databases that predate the component) and of
-/// unparseable payloads (still settled: the row id is enough evidence).
-pub fn settle_events_of_deleted_monitor_in_tx(
+/// Settle queued outbox events for a monitor: one durable firing row per
+/// event (outcome `orphaned`, the supplied honest reason) and the outbox rows
+/// deleted, all inside the caller's transaction. Tolerant of a missing outbox
+/// table and of unparseable payloads (the row id is enough evidence).
+pub fn settle_queued_events_in_tx(
     tx: &Transaction,
     monitor_id: &str,
+    detail: &str,
     now_ms: f64,
 ) -> Result<Vec<String>> {
     let has_table = tx
@@ -512,7 +514,7 @@ pub fn settle_events_of_deleted_monitor_in_tx(
             &firing_event,
             None,
             None,
-            Some("monitor deleted before its queued event could be dispatched"),
+            Some(detail),
             DeleteBucket::Orphaned.outcome_str(),
             now_ms,
         )?;
@@ -520,6 +522,22 @@ pub fn settle_events_of_deleted_monitor_in_tx(
         settled.push(event_id);
     }
     Ok(settled)
+}
+
+/// Settle every queued outbox event of a monitor being deleted at delete time.
+/// The drain's orphaned path covers the reverse race (an event queued after
+/// the monitor row is gone), so neither path leaves a silent orphan.
+pub fn settle_events_of_deleted_monitor_in_tx(
+    tx: &Transaction,
+    monitor_id: &str,
+    now_ms: f64,
+) -> Result<Vec<String>> {
+    settle_queued_events_in_tx(
+        tx,
+        monitor_id,
+        "monitor deleted before its queued event could be dispatched",
+        now_ms,
+    )
 }
 
 /// Firing evidence for one monitor, for `bot.monitor_list` and the

@@ -9,7 +9,10 @@
 //!
 //! Rule edits invalidate approval: [`staged_rule_edit`] bumps `version`
 //! and leaves `approved_rule_hash` behind so [`is_approved`] fails until
-//! an explicit [`approve_rule`] call. Secret values never appear here.
+//! an explicit [`approve_rule`] call. The self-management lane is the
+//! intentional exception for in-scope file edits: [`crate::bot_self_mgmt::Engine::bot_self_update_monitor`]
+//! re-approves those edits after enforcing the Bot-home scope. Secret values
+//! never appear here.
 
 use serde::{Deserialize, Serialize};
 

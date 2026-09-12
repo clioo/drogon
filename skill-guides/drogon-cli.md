@@ -232,7 +232,8 @@ create-monitor --bot <ID> --workspace <ID> --resource <PATH>`, adding
 `--max-bytes <N>` for the size bound, `--cron <EXPR>` (default every
 minute) or `--manual` for the trigger, and `--disabled` to stage it
 paused. File-digest monitors self-approve; an edit re-approves only while
-the watched file stays in the home.
+the watched file stays in the home. No human approval is involved in that
+self-lane edit loop.
 
 A monitor observes by default — it records events and releases nothing.
 Declare the ACTION it releases with --responsibility-name (plus optional
@@ -243,7 +244,9 @@ makes the daemon dispatch a headless run of that responsibility: the
 prompt is a template of event metadata plus the responsibility's standing
 instructions (the watched file's bytes never enter it), the run is
 idempotent per event (a replay joins the existing run instead of opening
-a second one), and a bot-wide per-day cap bounds flood. The same binding
+a second one), and a bot-wide per-day cap bounds flood. The released monitor session
+runs in the Bot's record-folder project workspace, while interactive Bot
+sessions run in the provisioned home. The same binding
 is available after creation:
 
 ```text

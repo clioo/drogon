@@ -467,8 +467,9 @@ impl Fixture {
             .to_string()
     }
 
-    /// The workspace row that owns the Bot's provisioned home folder.
-    fn home_workspace_id(&self) -> String {
+    /// The workspace row for the Bot's record folder (the project workspace
+    /// where monitor-released sessions run), not its provisioned home.
+    fn bot_folder_workspace_id(&self) -> String {
         let conn = self.db();
         let folder: String = conn
             .query_row(
@@ -821,7 +822,7 @@ fn an_assigned_pull_request_releases_a_review_session_in_the_project() {
         "the firing names the released case, never the bare rule kind: {view:?}"
     );
 
-    let home = fx.home_workspace_id();
+    let home = fx.bot_folder_workspace_id();
     let home_sessions = fx.sessions_in(&home);
     assert_eq!(home_sessions.len(), 1, "one delegated run, one session");
     let delegated = &home_sessions[0];
@@ -984,7 +985,7 @@ fn a_replayed_event_joins_the_existing_run_instead_of_a_second_session() {
     fx.github
         .set_pulls(&[pull(41, &[LOGIN], &[]), pull(42, &[LOGIN], &[])]);
     fx.tick(t0 + 61_000.0);
-    let home = fx.home_workspace_id();
+    let home = fx.bot_folder_workspace_id();
     let after_first = fx.sessions_in(&home);
     assert_eq!(after_first.len(), 1, "one release, one session");
     let event_id = fx.monitor_view()["firing"]["lastEventId"]
@@ -1151,7 +1152,7 @@ fn two_watches_releasing_the_same_pull_request_dispatch_one_session() {
 
     // ONE session: the second release joined the first run instead of
     // racing it for the same worktree name.
-    let home = fx.home_workspace_id();
+    let home = fx.bot_folder_workspace_id();
     let sessions = fx.sessions_in(&home);
     assert_eq!(
         sessions.len(),
@@ -1217,7 +1218,7 @@ fn two_repositories_sharing_a_pull_number_never_collapse_into_one_worktree() {
         .set_pulls(&[pull(41, &[LOGIN], &[]), pull(42, &[LOGIN], &[])]);
     fx.tick(t0 + 61_000.0);
 
-    let home = fx.home_workspace_id();
+    let home = fx.bot_folder_workspace_id();
     let sessions = fx.sessions_in(&home);
     assert_eq!(sessions.len(), 2, "two cases, two sessions: {sessions:?}");
     let mut names: Vec<String> = sessions
