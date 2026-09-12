@@ -101,26 +101,49 @@ jobs:
           if [[ "$version" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" "${flags[@]}" "$archive" "$checksum"
 
-      # A fine-grained HOMEBREW_TAP_TOKEN is optional because the tap also has
-      # a public-release polling fallback. When present this dispatch makes
-      # the cask bump immediate without asking a maintainer to edit it.
-      - name: Request Homebrew tap bump
+      # A fine-grained HOMEBREW_TAP_TOKEN is optional for local/release
+      # bootstrap, but when configured this step opens the cask PR directly.
+      # The tap's updater owns the cask formatting and signing caveat, so no
+      # maintainer needs to hand-edit the version or checksum.
+      - name: Open Homebrew tap bump PR
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          checksum="$RUNNER_TEMP/drogon-release/Drogon-${version}-darwin-arm64.zip.sha256"
-          digest="$(awk '{print $1}' "$checksum")"
           if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "HOMEBREW_TAP_TOKEN is not configured; the tap's scheduled public-release bump will catch this release."
+            echo "HOMEBREW_TAP_TOKEN is not configured; skipping the optional tap PR."
             exit 0
           fi
-          gh api --method POST "repos/clioo/homebrew-drogon/dispatches" \
-            -H "Accept: application/vnd.github+json" \
-            -f event_type=drogon-release \
-            -f "client_payload[version]=$version" \
-            -f "client_payload[sha256]=$digest"
+          version="${GITHUB_REF_NAME#v}"
+          archive="$RUNNER_TEMP/drogon-release/Drogon-${version}-darwin-arm64.zip"
+          checksum="$archive.sha256"
+          digest="$(awk '{print $1}' "$checksum")"
+          signed="$(unzip -p "$archive" 'Drogon.app/Contents/Resources/build-info.json' | jq -er '.signed // "false"')"
+          tap="$RUNNER_TEMP/homebrew-drogon"
+          gh auth setup-git
+          gh repo clone clioo/homebrew-drogon "$tap"
+          cd "$tap"
+          ruby scripts/update-cask.rb "$version" "$digest" "$signed"
+          if git diff --quiet -- Casks/drogon.rb; then
+            echo "The tap already carries Drogon ${version}."
+            exit 0
+          fi
+          branch="automation/drogon-${version}"
+          if [[ "$(gh pr list --repo clioo/homebrew-drogon --head "$branch" --state open --json number --jq 'length')" != "0" ]]; then
+            echo "An update PR for ${version} is already open."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add Casks/drogon.rb
+          git commit -m "chore: update Drogon to ${version}"
+          git push --set-upstream origin "$branch"
+          gh pr create --repo clioo/homebrew-drogon \
+            --base main \
+            --head "$branch" \
+            --title "chore: update Drogon to ${version}" \
+            --body "Automated update from the Drogon GitHub pre-release. The version, archive checksum, and signing caveat come from the published release metadata."
 
       - name: Remove temporary Apple signing material
         if: ${{ always() }}
