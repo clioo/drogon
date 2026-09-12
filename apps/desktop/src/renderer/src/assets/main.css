@@ -3180,3 +3180,208 @@ footer[data-testid="status-bar"] {
   height: 14px;
   color: var(--muted-foreground);
 }
+
+/* Sidebar redesign: the reference uses the app sidebar surface for one quiet,
+   continuous column, with navigation and content separated by rhythm rather
+   than competing panels. Keep the existing worktree tokens as local aliases
+   so card states remain unchanged outside this surface. */
+.workspace-sidebar {
+  --worktree-sidebar: var(--sidebar);
+  --worktree-sidebar-foreground: var(--sidebar-foreground);
+  --worktree-sidebar-accent: var(--sidebar-accent);
+  --worktree-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --worktree-sidebar-border: var(--sidebar-border);
+  --worktree-sidebar-ring: var(--sidebar-ring);
+  background: var(--sidebar);
+  color: var(--sidebar-foreground);
+}
+
+.titlebar-left {
+  background: var(--sidebar);
+  box-shadow: inset 0 -1px 0 var(--sidebar-border);
+}
+
+.titlebar-left.titlebar-left-floating {
+  background: var(--bg-titlebar, var(--card));
+}
+
+.shell-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 14px 14px 10px;
+}
+
+.shell-nav-search {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--sidebar-accent);
+  color: color-mix(in srgb, var(--sidebar-foreground) 62%, transparent);
+}
+
+.shell-nav-search:hover {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-foreground);
+}
+
+.shell-nav-search svg {
+  width: 15px;
+  height: 15px;
+  color: color-mix(in srgb, var(--sidebar-foreground) 62%, transparent);
+}
+
+.shell-nav-links button:not([aria-current="page"]) svg {
+  color: color-mix(in srgb, var(--sidebar-foreground) 62%, transparent);
+}
+
+.shell-nav-links button[aria-current="page"] svg {
+  color: var(--sidebar-foreground);
+}
+
+.shell-nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 10px;
+}
+
+.shell-nav-links button {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.shell-sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--sidebar-foreground) 22%, transparent) transparent;
+}
+
+.shell-projects {
+  padding-bottom: 10px;
+}
+
+.shell-sidebar-divider {
+  height: 1px;
+  flex-shrink: 0;
+  margin: 2px 14px 12px;
+  background: var(--sidebar-border);
+}
+
+.shell-projects-header {
+  height: 26px;
+  margin: 0 14px 6px;
+  padding: 4px 0 6px;
+}
+
+.shell-projects-header [data-sidebar-section-title],
+.shell-chats-header [data-sidebar-section-title] {
+  padding-left: 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--sidebar-foreground) 45%, transparent);
+}
+
+.shell-projects-header .shell-icon-button,
+.shell-chats-header .shell-icon-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--sidebar-foreground) 55%, transparent);
+}
+
+.shell-projects-header > div:last-child button {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--sidebar-foreground) 55%, transparent);
+}
+
+.shell-projects-header .shell-icon-button:hover:not(:disabled),
+.shell-projects-header > div:last-child button:hover:not(:disabled),
+.shell-chats-header .shell-icon-button:hover:not(:disabled) {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-foreground);
+}
+
+.shell-project {
+  margin-bottom: 6px;
+}
+
+.shell-project-row {
+  height: 30px;
+  padding: 0 10px;
+  gap: 8px;
+  border-radius: 8px;
+}
+
+.shell-project-name {
+  font-size: 12.5px;
+}
+
+.shell-project-cards {
+  gap: 1px;
+}
+
+.shell-worktree-card {
+  margin-left: 0;
+  width: 100%;
+  padding: 8px 10px 8px 16px;
+  border-radius: 8px;
+}
+
+.shell-worktree-card-main {
+  gap: 4px;
+}
+
+.shell-worktree-card-select {
+  gap: 4px;
+}
+
+.shell-worktree-card[data-active="true"] {
+  border-color: color-mix(in srgb, var(--sidebar-foreground) 42%, transparent);
+  background: color-mix(in srgb, var(--sidebar-foreground) 14%, transparent);
+  box-shadow: none;
+}
+
+.shell-worktree-card[data-active="true"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--sidebar-foreground) 16%, transparent);
+}
+
+.shell-chats {
+  margin-top: 14px;
+  padding-bottom: 10px;
+}
+
+.shell-chats-header {
+  height: 30px;
+  margin: 0 14px 6px;
+  padding: 4px 0 6px;
+}
+
+.shell-chat-bot-sessions .compact-agent-row {
+  height: 32px;
+  padding: 0 10px;
+  gap: 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.shell-sidebar-footer {
+  border-top-color: var(--sidebar-border);
+}
+
+.shell-sidebar-footer > div {
+  padding: 8px 12px;
+  border-top-color: var(--sidebar-border);
+}
+
+.shell-sidebar-footer .size-6 {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
