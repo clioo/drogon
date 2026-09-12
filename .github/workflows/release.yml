@@ -71,6 +71,8 @@ jobs:
       # cache explicitly so a fresh GitHub runner can still package offline.
       - name: Fetch locked Rust dependencies
         run: cargo fetch --locked
+      - name: Install Playwright browser for icon verification
+        run: pnpm exec playwright install chromium
 
       - name: Build, notarize (when configured), and verify the release artifact
         env:
