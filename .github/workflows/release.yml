@@ -67,6 +67,11 @@ jobs:
             echo "DROGON_RELEASE_SIGNING=developer-id-notarized"
           } >> "$GITHUB_ENV"
 
+      # package-desktop intentionally builds with --offline; populate Cargo's
+      # cache explicitly so a fresh GitHub runner can still package offline.
+      - name: Fetch locked Rust dependencies
+        run: cargo fetch --locked
+
       - name: Build, notarize (when configured), and verify the release artifact
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
