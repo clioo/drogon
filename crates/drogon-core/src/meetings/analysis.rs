@@ -1030,11 +1030,15 @@ mod tests {
 
         #[test]
         fn a_run_that_never_answers_is_killed_and_reported() {
-            // The timeout is generous about the child's own start-up (a
-            // fixture shell on a loaded host can take a few hundred
-            // milliseconds to reach its first line) and tight about the
-            // 30-second sleep it then performs, so the assertion is about
-            // the kill, not about scheduling luck.
+            // The timeout is generous about the child's own start-up and
+            // tight about the 30-second sleep it then performs, so the
+            // assertion is about the kill, not about scheduling luck. The
+            // budget must absorb whole-host exec storms measured under a
+            // full `cargo test --workspace` run (a fresh script's first
+            // exec is scanned by macOS, and a spawn-stormed `sh` has been
+            // observed taking over a second to reach its first write); the
+            // run still never answers, so the budget remains the only way
+            // it can end and the kill path is still the thing under test.
             let dir = tempfile::tempdir().expect("temp dir");
             let data_dir = dir.path().join("data");
             std::fs::create_dir_all(&data_dir).expect("data dir");
@@ -1046,17 +1050,36 @@ mod tests {
                 dir.path(),
                 "pi",
                 &format!(
-                    "#!/bin/sh\nsleep 30 &\necho \"$$ $!\" > '{}'\nwait\n",
+                    "#!/bin/sh\nif [ \"$1\" = \"--warm\" ]; then exit 0; fi\nsleep 30 &\necho \"$$ $!\" > '{}'\nwait\n",
                     pid_file.display()
                 ),
             );
+            // Pay the fixture's one-time first-exec scan here, bounded, so
+            // the real run's start-up is plain fork/exec: the deadline must
+            // never expire before the fixture recorded its pids, or the
+            // product would honestly kill a run that has not started yet.
+            let mut warm = std::process::Command::new(&executable)
+                .arg("--warm")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("warm the fixture once");
+            let warm_deadline = Instant::now() + Duration::from_secs(5);
+            while warm.try_wait().ok().flatten().is_none() && Instant::now() < warm_deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            if warm.try_wait().ok().flatten().is_none() {
+                let _ = warm.kill();
+            }
+            let _ = warm.wait();
             let fs = fixture();
             let environment = env_for(&executable, &data_dir);
 
             let failure = analyze(
                 &fs,
                 &environment,
-                &inference(&executable, Duration::from_secs(3), &data_dir),
+                &inference(&executable, Duration::from_secs(10), &data_dir),
                 Path::new(ROOT),
                 &transcript_id(Path::new(NOTE)),
             )
@@ -1064,7 +1087,10 @@ mod tests {
             assert_eq!(failure, AnalysisError::TimedOut);
             // The killed child AND its grandchild are gone, not merely
             // abandoned. The fixture records both pids first, so this is an
-            // identity check rather than a guess from a process listing.
+            // identity check rather than a guess from a process listing. A
+            // killed pid can still appear in ps for the short window before
+            // launchd reaps it, so the disappearance is polled within a
+            // bounded bound — and still fails the moment it persists.
             let recorded = std::fs::read_to_string(&pid_file)
                 .expect("the fixture records its pids")
                 .trim()
@@ -1072,12 +1098,22 @@ mod tests {
             let pids: Vec<&str> = recorded.split_whitespace().collect();
             assert_eq!(pids.len(), 2, "the fixture records the run and its child");
             for pid in pids {
-                let alive = std::process::Command::new("ps")
-                    .args(["-p", pid, "-o", "pid="])
-                    .output()
-                    .map(|output| !output.stdout.is_empty())
-                    .unwrap_or(false);
-                assert!(!alive, "the analysis process {pid} must be reaped");
+                let gone_deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    let alive = std::process::Command::new("ps")
+                        .args(["-p", pid, "-o", "pid="])
+                        .output()
+                        .map(|output| !output.stdout.is_empty())
+                        .unwrap_or(false);
+                    if !alive {
+                        break;
+                    }
+                    assert!(
+                        Instant::now() < gone_deadline,
+                        "the analysis process {pid} must be reaped"
+                    );
+                    std::thread::sleep(Duration::from_millis(25));
+                }
             }
         }
 

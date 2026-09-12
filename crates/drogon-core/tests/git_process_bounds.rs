@@ -210,10 +210,12 @@ fn spawn_and_capture_bounded_reports_capture_unfinished_when_a_grandchild_holds_
         "--nocapture",
         "--test-threads=1",
     ]);
-    // Long enough to reliably outlast `READER_DRAIN_GRACE` (200ms) so this
-    // test is not flaky under load; short enough to keep the orphaned
-    // grandchild's lifetime bounded and unobtrusive.
-    cmd.env("DROGON_TEST_HOLD_PIPE_GRANDCHILD_SLEEP_MS", "1500");
+    // Long enough to reliably outlast `READER_DRAIN_GRACE` (5s) so this
+    // test is not flaky under load AND so the grandchild cannot close the
+    // pipe inside the grace and flip the outcome to a (bogus here)
+    // trusted exit; short enough to keep the orphaned grandchild's
+    // lifetime bounded and unobtrusive.
+    cmd.env("DROGON_TEST_HOLD_PIPE_GRANDCHILD_SLEEP_MS", "7000");
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());

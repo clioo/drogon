@@ -767,7 +767,18 @@ fn apply_platform_spawn_flags(_cmd: &mut Command) {}
 
 const READ_CHUNK_BYTES: usize = 64 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
-const READER_DRAIN_GRACE: Duration = Duration::from_millis(200);
+/// Post-decision wait for reader EOF proof. This is a scheduling bound,
+/// not a semantic one: once the child's fate is decided (exited/killed)
+/// and no grandchild holds the pipe, the kernel delivers EOF to the
+/// reader immediately and only reader-thread starvation delays it. A
+/// full `cargo test --workspace` run under a parallel rebuild storm has
+/// been measured starving a reader past the previous 200ms, turning a
+/// fully-captured capture into a false `CaptureUnfinished`; 5s keeps
+/// ~25x headroom over that observed worst case while every verdict and
+/// the grandchild-pipe containment below stay exactly as documented —
+/// a pipe genuinely held open past this grace still lands on
+/// `CaptureUnfinished`, never a trusted success.
+const READER_DRAIN_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 pub(crate) enum SpawnOutcome {

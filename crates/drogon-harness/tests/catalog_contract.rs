@@ -563,8 +563,32 @@ fn parse_identity_lines(text: &str) -> (Vec<LedgerEntry>, Vec<String>) {
     (entries, malformed)
 }
 
+/// One bounded read of a parent/child-read channel with a short retry
+/// for TRANSIENT open failures (ENFILE/EMFILE under full-suite spawn
+/// storms make even existing files briefly unopenable, which once turned
+/// a healthy declaration channel into a false "lost channel" fail-closed
+/// verdict). ENOENT returns immediately: "missing" is a distinct,
+/// meaningful outcome for every caller (a never-written channel, an
+/// absent report) and must never be retried into a different verdict.
+fn read_channel(path: &Path) -> std::io::Result<String> {
+    let mut last: Option<std::io::Error> = None;
+    for attempt in 0..3 {
+        match std::fs::read_to_string(path) {
+            Ok(text) => return Ok(text),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Err(err),
+            Err(err) => {
+                last = Some(err);
+                if attempt < 2 {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+    }
+    Err(last.expect("loop ran at least once"))
+}
+
 fn read_ledger(dir: &Path) -> (Vec<LedgerEntry>, Vec<String>) {
-    let Ok(content) = std::fs::read_to_string(dir.join(LEDGER_FILE)) else {
+    let Ok(content) = read_channel(&dir.join(LEDGER_FILE)) else {
         return (Vec::new(), Vec::new());
     };
     parse_identity_lines(&content)
@@ -579,7 +603,7 @@ fn read_report(dir: &Path) -> (Option<serde_json::Value>, Option<String>) {
     if !path.exists() {
         return (None, None);
     }
-    match std::fs::read_to_string(&path) {
+    match read_channel(&path) {
         Err(err) => (None, Some(format!("unreadable ({err})"))),
         Ok(text) => match serde_json::from_str(&text) {
             Err(err) => (None, Some(format!("malformed ({err})"))),
@@ -597,7 +621,7 @@ fn read_seal(dir: &Path) -> (Option<Seal>, Option<String>) {
     if !path.exists() {
         return (None, None);
     }
-    match std::fs::read_to_string(&path) {
+    match read_channel(&path) {
         Err(err) => (None, Some(format!("unreadable ({err})"))),
         Ok(text) => match parse_seal(&text) {
             Err(reason) => (None, Some(format!("malformed ({reason})"))),
@@ -627,7 +651,7 @@ fn read_acks(dir: &Path) -> Vec<LedgerEntry> {
         else {
             continue;
         };
-        let content = std::fs::read_to_string(file.path()).ok();
+        let content = read_channel(&file.path()).ok();
         // Content shape is `"<birth> alive|gone"`: recover the birth the
         // same way the registrar matches it. Coverage is still exact:
         // an ACK only covers a ledger identity with the same pid AND
@@ -653,7 +677,7 @@ fn read_acks(dir: &Path) -> Vec<LedgerEntry> {
 /// the two sources cross-check identity-for-identity.
 #[cfg(unix)]
 fn read_declarations(dir: &Path) -> (Vec<LedgerEntry>, Vec<String>, bool) {
-    match std::fs::read_to_string(dir.join(DECLARED_FILE)) {
+    match read_channel(&dir.join(DECLARED_FILE)) {
         Ok(content) => {
             let (entries, malformed) = parse_identity_lines(&content);
             (entries, malformed, false)
@@ -1352,6 +1376,40 @@ struct ChildRun {
     unreaped_helpers: Vec<std::process::Child>,
 }
 
+/// Drains one captured runner pipe to EOF on a thread, handing the bytes
+/// to a channel so neither the supervise loop nor the final evidence
+/// write can block on a pipe a descendant still holds.
+#[cfg(unix)]
+fn drain_pipe<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = std::io::Read::read_to_end(&mut pipe, &mut bytes);
+        }
+        let _ = sender.send(bytes);
+    });
+    receiver
+}
+
+/// Bounded collection of one drained pipe: after the bound the reader
+/// thread is abandoned (a leaked reader at process exit is harmless; a
+/// stalled supervise loop is not).
+#[cfg(unix)]
+fn collect_pipe(receiver: std::sync::mpsc::Receiver<Vec<u8>>, wait: Duration) -> Vec<u8> {
+    receiver.recv_timeout(wait).unwrap_or_default()
+}
+
+/// The tail of a captured runner stream, lossily decoded, for evidence.
+#[cfg(unix)]
+fn output_tail(bytes: &[u8]) -> String {
+    const CAP: usize = 8 * 1024;
+    let start = bytes.len().saturating_sub(CAP);
+    String::from_utf8_lossy(&bytes[start..]).into_owned()
+}
+
 /// Spawn this test binary in child mode under a fresh parent-owned
 /// fixture directory, bound the whole run, then clean up strictly.
 #[cfg(unix)]
@@ -1371,14 +1429,28 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
     let mut runner_command =
         std::process::Command::new(std::env::current_exe().expect("current_exe"));
     runner_command
-        .args(["--exact", test_name, "--nocapture"])
+        .args(["--exact", test_name])
         .env(CHILD_MODE_ENV, "1")
         .env(FIXTURE_DIR_ENV, &fixture_path);
+    // The runner's own output - its harness verdict lines in particular -
+    // must never reach the suite terminal: a live "test ... FAILED" from
+    // an intentionally-failing child is indistinguishable from a real
+    // suite failure when the output is scanned (this exact misreading
+    // made supervisor_child_failure look like a load flake when the
+    // parent's own assertions had passed). Both pipes are captured and
+    // their tails kept as failure evidence; nothing in the contract
+    // reads the runner's stdout/stderr.
+    runner_command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     {
         use std::os::unix::process::CommandExt;
         runner_command.process_group(0);
     }
     let mut child = runner_command.spawn().expect("spawn supervised child");
+    let runner_stdout = drain_pipe(child.stdout.take());
+    let runner_stderr = drain_pipe(child.stderr.take());
     // Own process group: deadline escalation can signal the whole group
     // (runner plus every descendant it started), and the group id equals
     // the runner pid while the runner leads it. The group is never the
@@ -1986,15 +2058,25 @@ fn supervise(test_name: &str, overall: Duration, plan: ExpectedPlan) -> ChildRun
         }
         unverifiable.extend(settle_notes);
     }
+    // Collect the captured runner output with a short bound: EOF arrived
+    // for every contained run long ago; a descendant still holding the
+    // pipe must never stall the run, so the reader is abandoned instead.
+    let runner_out = collect_pipe(runner_stdout, Duration::from_secs(2));
+    let runner_err = collect_pipe(runner_stderr, Duration::from_secs(2));
     // Persist owned-identity evidence with the retained directory — pid,
     // exit/group state and the full unverifiable record — so a failure
     // never rests on memory alone. Written only when the directory is
     // retained (unverifiable non-empty), which is exactly when the
-    // evidence matters.
+    // evidence matters. The runner's own captured output rides along: a
+    // child-mode assertion failure is precisely the diagnosis the
+    // retained evidence should carry.
     if !unverifiable.is_empty() {
         let evidence = format!(
             "runner pid={runner_pid} status={status:?} killed_by_parent={killed_by_parent}\n\
-             resolutions={resolutions:?}\nunverifiable={unverifiable:?}\n"
+             resolutions={resolutions:?}\nunverifiable={unverifiable:?}\n\
+             runner stdout (tail): {}\nrunner stderr (tail): {}\n",
+            output_tail(&runner_out),
+            output_tail(&runner_err)
         );
         if let Err(err) = std::fs::write(fixture_path.join("SUPERVISION_EVIDENCE"), evidence) {
             unverifiable.push(format!("evidence write failed: {err}"));
@@ -2556,7 +2638,7 @@ fn child_probe_and_report(pi_script: &str, budget: Duration) {
     // from the identity ledger the parent also reads. Neither side
     // derives one count from the other's source. An unreadable channel
     // is failure evidence, never a silent zero.
-    let declared = match std::fs::read_to_string(dir.join(DECLARED_FILE)) {
+    let declared = match read_channel(&dir.join(DECLARED_FILE)) {
         Ok(text) => text.lines().filter(|line| !line.trim().is_empty()).count(),
         Err(err) => {
             registration_failures.push(format!("declaration channel unreadable: {err}"));
@@ -2591,13 +2673,20 @@ fn timed_out_probe_is_killed_within_its_budget() {
             ),
             // Total budget as work PLUS the reserved cleanup: a short
             // work window that still starts the fixture (kill-path
-            // coverage), never a pre-spawn refusal. One second comfortably
-            // covers a warmed version probe plus the fixture handshake
-            // round-trip (parent tick, identity check, ACK poll) while
-            // the infinite/sleeping producer still always exceeds it;
-            // 300ms proved too tight once macOS first-exec scan and
-            // scheduling latency stack up.
-            Duration::from_secs(1) + PROBE_RESERVED_CLEANUP,
+            // coverage), never a pre-spawn refusal. The work window must
+            // absorb the version probe AND the fixture handshake
+            // round-trip (parent tick, identity check, ACK poll) under a
+            // fully loaded host: a full `cargo test --workspace` run has
+            // been measured pushing a single fixture `sh` exec past one
+            // whole second (first-exec scan plus spawn storm), which made
+            // the previous 1s budget expire during the version probe - the
+            // product then correctly refused to spawn the enumeration, the
+            // fixture never declared, and the run honestly failed closed
+            // on its own plan. 12s keeps ten-fold headroom over that
+            // measured worst case while staying strictly finite: the
+            // producer (sleep 60) always exceeds it, so the deadline kill
+            // path remains the only way the probe can end.
+            Duration::from_secs(12) + PROBE_RESERVED_CLEANUP,
         );
         return;
     }
@@ -2968,13 +3057,20 @@ fn continuous_producer_respects_the_deadline_and_is_fully_reaped() {
             ),
             // Total budget as work PLUS the reserved cleanup: a short
             // work window that still starts the fixture (kill-path
-            // coverage), never a pre-spawn refusal. One second comfortably
-            // covers a warmed version probe plus the fixture handshake
-            // round-trip (parent tick, identity check, ACK poll) while
-            // the infinite/sleeping producer still always exceeds it;
-            // 300ms proved too tight once macOS first-exec scan and
-            // scheduling latency stack up.
-            Duration::from_secs(1) + PROBE_RESERVED_CLEANUP,
+            // coverage), never a pre-spawn refusal. The work window must
+            // absorb the version probe AND the fixture handshake
+            // round-trip (parent tick, identity check, ACK poll) under a
+            // fully loaded host: a full `cargo test --workspace` run has
+            // been measured pushing a single fixture `sh` exec past one
+            // whole second (first-exec scan plus spawn storm), which made
+            // the previous 1s budget expire during the version probe - the
+            // product then correctly refused to spawn the enumeration, the
+            // fixture never declared, and the run honestly failed closed
+            // on its own plan. 12s keeps ten-fold headroom over that
+            // measured worst case while staying strictly finite: the
+            // producer (busy loop) always exceeds it, so the deadline kill
+            // path remains the only way the probe can end.
+            Duration::from_secs(12) + PROBE_RESERVED_CLEANUP,
         );
         return;
     }
