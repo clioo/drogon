@@ -58,7 +58,7 @@ export function useSubagentPolicy({
             const result = await graphBridge.graphWritePolicy!({
               workspaceId,
               policy: next,
-              main,
+              ...(main ? { main } : {}),
             });
             if (
               currentWorkspace.current === workspaceId &&
