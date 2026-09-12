@@ -1,7 +1,14 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-export type BuildInfo = { revision: string; builtAt: string; version: string };
+export type BuildInfo = {
+  revision: string;
+  builtAt: string;
+  version: string;
+  /** `release` is the Homebrew distribution channel; old previews omit it. */
+  channel?: "preview" | "release";
+  signed?: "local-ad-hoc-not-notarized" | "developer-id-notarized" | false;
+};
 
 const BUILD_INFO_FILE = "build-info.json";
 
@@ -11,7 +18,14 @@ function isBuildInfo(value: unknown): value is BuildInfo {
   return (
     typeof v.revision === "string" &&
     typeof v.builtAt === "string" &&
-    typeof v.version === "string"
+    typeof v.version === "string" &&
+    (v.channel === undefined ||
+      v.channel === "preview" ||
+      v.channel === "release") &&
+    (v.signed === undefined ||
+      v.signed === false ||
+      v.signed === "local-ad-hoc-not-notarized" ||
+      v.signed === "developer-id-notarized")
   );
 }
 

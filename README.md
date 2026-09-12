@@ -16,7 +16,7 @@ source (MIT, © Lovecast Inc. — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTIC
 and the Bots, Automations, and Mentu-recipe concepts come from the Drogon fork of
 Orca. This repository does not depend on Orca's runtime to execute anything.
 
-[Run locally](#run-locally) · [Install the macOS preview](#install-the-macos-preview) · [Feature tour](#feature-tour-the-twelve-mvp-journeys) · [Use it with agents](#using-drogon-with-agents) · [Contribute](#contributing)
+[Run locally](#run-locally) · [Install with Homebrew](#install-with-homebrew) · [Install the macOS preview](#install-the-macos-preview) · [Feature tour](#feature-tour-the-twelve-mvp-journeys) · [Use it with agents](#using-drogon-with-agents) · [Contribute](#contributing)
 
 ![Drogon workspace in the light theme: project sidebar with a worktree card, a persistent terminal session, and the file explorer](docs/screenshots/workspace-light.png)
 
@@ -217,6 +217,27 @@ node scripts/install-preview.mjs --bundle <path-to-Drogon.app> --report <path-to
 The installer links `~/Applications/Drogon.app` to an immutable, verified build under
 `~/Applications/.drogon-builds/`, preserves earlier builds, and does not stop a running
 daemon. The installed preview uses `~/Library/Application Support/Drogon` for its data.
+
+### Install with Homebrew
+
+The public cask installs the arm64 desktop, its bundled daemon, and `drogon-cli`:
+
+```sh
+brew tap clioo/drogon
+brew install --cask --no-quarantine clioo/drogon/drogon
+DROGON_DATA_DIR=/tmp/drogon-dev drogon-cli --version
+```
+
+Drogon currently publishes Apple Silicon releases only (Intel is not built). The
+cask declares macOS Sonoma or newer: Electron 44 itself requires macOS Ventura
+(13) or newer, but Sonoma is the supported release floor for this arm64 cask.
+Homebrew stops the detached Drogon daemon before uninstall and upgrade; to recover
+a Homebrew-managed data directory after a downgrade refusal, use
+`brew reinstall --cask clioo/drogon/drogon` or install the previous cask version.
+
+> **Gatekeeper:** release bundles are currently ad-hoc signed, not notarized. Use
+> `--no-quarantine` as shown above (or macOS may report the app as damaged). The
+> cask caveat will be updated when Developer ID notarization is configured.
 
 > **Gatekeeper:** the preview is ad-hoc signed, not notarized. On first launch,
 > right-click `Drogon.app` and choose **Open** (or allow it in

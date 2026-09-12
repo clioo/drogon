@@ -7,6 +7,7 @@
 // /Applications/Drogon.app.previous), or restore a pre-migration backup with
 // the control below (install-resilience P6); data is never touched by the
 // refusal itself (the refusing build exits before migrating anything).
+import { useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { BackupRestoreControl } from "./backup-restore-control";
@@ -15,6 +16,19 @@ export type DataDirRefusal = {
   dataDir: string;
   reason: string;
 };
+
+export type RollbackChannel = "manual" | "homebrew";
+
+/** Release bundles are distributed through Homebrew; preview bundles keep the manual rollback promise. */
+export function rollbackChannelFromBuildInfo(
+  buildInfo: unknown,
+): RollbackChannel {
+  return typeof buildInfo === "object" &&
+    buildInfo !== null &&
+    (buildInfo as { channel?: unknown }).channel === "release"
+    ? "homebrew"
+    : "manual";
+}
 
 /** Parses the `dataDirRefusal` query param; null when absent or malformed. */
 export function readDataDirRefusalFromLocation(
@@ -43,6 +57,26 @@ export function DataDirRefusalOverlay({
 }: {
   refusal: DataDirRefusal;
 }): React.JSX.Element {
+  const [rollbackChannel, setRollbackChannel] =
+    useState<RollbackChannel>("manual");
+  useEffect(() => {
+    // Legacy preloads have no build-info channel. Keep their manual copy
+    // rather than showing a Homebrew command that may not apply.
+    const readBuildInfo = window.drogon?.buildInfo;
+    if (typeof readBuildInfo !== "function") return;
+    let mounted = true;
+    void readBuildInfo()
+      .then((info) => {
+        if (mounted) setRollbackChannel(rollbackChannelFromBuildInfo(info));
+      })
+      .catch(() => {
+        // An unavailable build-info reader is the manual/legacy channel.
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+  const homebrew = rollbackChannel === "homebrew";
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-6"
@@ -67,13 +101,25 @@ export function DataDirRefusalOverlay({
         >
           <p>{refusal.reason}</p>
           <p>
-            Your projects, sessions and settings are safe — this build
-            stopped before changing anything.
+            Your projects, sessions and settings are safe — this build stopped
+            before changing anything.
           </p>
           <ol className="list-decimal space-y-1.5 pl-5">
             <li>
-              Quit Drogon and reopen your previous build
-              {refusal.dataDir ? " to keep working" : ""}.
+              {homebrew ? (
+                <>
+                  Quit Drogon and run{" "}
+                  <code className="rounded bg-muted px-1 py-0.5">
+                    brew reinstall --cask drogon
+                  </code>
+                  ; to roll back, install the previous cask version.
+                </>
+              ) : (
+                <>
+                  Quit Drogon and reopen your previous build
+                  {refusal.dataDir ? " to keep working" : ""}.
+                </>
+              )}
             </li>
             <li>
               Or go back in time: restore one of the pre-migration backups
