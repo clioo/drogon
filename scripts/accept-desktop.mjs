@@ -35,6 +35,7 @@ import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
 import { probeRenderedMentuTab } from "./probe-rendered-mentu-tab.mjs";
 import { probeGraphDesigner } from "./probe-graph-designer.mjs";
 import { probeRenderedDaemonRestart } from "./probe-rendered-daemon-restart.mjs";
+import { probeRenderedChangedDaemonBinary } from "./probe-rendered-changed-daemon-binary.mjs";
 import {
   probeRenderedBrowserTabsAcrossDaemonRestart,
 } from "./probe-rendered-browser-tabs-restart.mjs";
@@ -624,6 +625,41 @@ try {
     // The fixture handle intentionally pins one service identity. A managed
     // restart creates a new identity, so capture a fresh handle before the
     // final quiescent cleanup rather than weakening that ownership check.
+    fixtureDaemon = packagedFixtureDaemon(packaged.daemon, packaged.cli, dataDir);
+    await fixtureDaemon.capture();
+    // Install-resilience P5: a changed `drogond` behind the still-running
+    // detached daemon must never be a silent mismatched attach. Runs after
+    // the daemon-restart probe (all sessions exited) so phase 1 exercises
+    // the graceful auto-restart; phase 2 manufactures its own live session
+    // for the cannot-quiesce path. Leaves the bundled daemon serving; the
+    // handle below is re-captured fresh for that new identity.
+    report.checks.push(
+      ...(await probeRenderedChangedDaemonBinary({
+        page,
+        workspaceId: registered.id,
+        cli: packaged.cli,
+        dataDir,
+        daemonBinary: packaged.daemon,
+        output,
+        fixture,
+        relaunch: async () => {
+          await browser.close();
+          browser = null;
+          const stopped = await stopOwned(
+            desktop,
+            "changed-binary probe app instance",
+          );
+          assert.equal(stopped.verdict, "exited");
+          assert.equal(
+            stopped.forced,
+            false,
+            "changed-binary probe relaunch must not require force",
+          );
+          await launchDesktop();
+          return page;
+        },
+      })),
+    );
     fixtureDaemon = packagedFixtureDaemon(packaged.daemon, packaged.cli, dataDir);
     await fixtureDaemon.capture();
     // Issue #309 regression: QA r9's pair of persisted local browser tabs

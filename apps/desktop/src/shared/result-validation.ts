@@ -96,6 +96,10 @@ export const resultSchemas: Record<string, z.ZodType> = {
     protocol: z.literal(1),
     capabilities: z.array(z.string()),
     version: z.string(),
+    // Install-resilience P4/P5 (additive): an older daemon replies without
+    // either field — still a valid status, with identity simply unknown.
+    featureProtocol: z.number().int().optional(),
+    daemonArtifactSha256: z.string().nullable().optional(),
   }),
   "workspace.register": workspace,
   "workspace.list": z.object({ workspaces: z.array(workspace) }),

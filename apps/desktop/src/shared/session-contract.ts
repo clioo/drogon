@@ -138,12 +138,24 @@ export type Session = {
    */
   agentResume?: "resumed" | "continued" | "fresh";
 };
+/**
+ * Install-resilience P4/P5 (additive, both optional so an older daemon's
+ * reply — which carries neither — still validates): `featureProtocol` is
+ * the daemon's monotonic wire-behavior floor
+ * (crates/drogon-protocol/src/feature_protocol.rs), and
+ * `daemonArtifactSha256` is the sha256 of the answering process's own
+ * binary, letting a freshly-installed desktop detect a changed `drogond`
+ * behind a still-running detached process. Absent/null = identity unknown;
+ * callers must treat that as "cannot verify", never as a match.
+ */
 export type Status = {
   hostId: string;
   serviceInstanceId: string;
   protocol: 1;
   capabilities: string[];
   version: string;
+  featureProtocol?: number;
+  daemonArtifactSha256?: string | null;
 };
 export type Identity = { sessionId: string; incarnation: string };
 export type HarnessId = "claude" | "pi" | "opencode" | "antigravity" | "codex";

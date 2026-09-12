@@ -15,6 +15,22 @@ export const daemonRestartInputSchema = z.union([
   z.undefined(),
   z.object({ probe: z.boolean().optional() }),
 ]);
+/** What the renderer is told about an update seen at launch (the type is
+ *  shared with the preload contract; `daemon-update.ts` owns the decision
+ *  and `index.ts` the wiring). `revision` is the freshly-installed build's
+ *  revision (short form), null when the bundle predates build-info. */
+export type DaemonUpdateState =
+  | {
+      kind: "updated";
+      revision: string | null;
+      note: string;
+    }
+  | {
+      kind: "pending";
+      revision: string | null;
+      reason: string;
+    };
+
 export type DaemonRestartInput = { probe?: boolean };
 
 /**
@@ -33,6 +49,10 @@ export type DaemonRestartResult = {
 
 export interface DaemonBridge {
   restart(input?: DaemonRestartInput): Promise<DaemonRestartResult>;
+  /** Install-resilience P5: the launch-time update state main observed
+   *  ("Drogon updated; restarted its background service" or the honest
+   *  "update pending" state), or null when this launch saw no change. */
+  updateState(): Promise<DaemonUpdateState | null>;
 }
 
 declare module "./session-contract" {

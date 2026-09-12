@@ -15,6 +15,7 @@ import type {
   BotsPanelBot,
 } from "./bots-panel-contracts";
 import { buildBotRunHarness } from "./bots-page-model";
+import { daemonSkewRefusalMessage } from "../../daemon-capabilities";
 
 /** The exact `bot.run` input for an open-session dispatch. `resume`
  *  (Defect 2) is set only when the Bot's recorded session is known to have
@@ -41,7 +42,11 @@ export function buildOpenBotSessionTurn(input: {
 
 /** Dispatches the open-session turn, or `null` when the bridge has no
  *  `botRun` (capability withheld) so the caller reports an honest error
- *  instead of a silent no-op. */
+ *  instead of a silent no-op. A skew refusal (daemon older than the
+ *  `interactive` field this build sends — install-resilience P4) is
+ *  classified HERE, the single choke point for both entry points, so the
+ *  user is directed to restart the service instead of reading the raw
+ *  serde text. */
 export async function dispatchOpenBotSession(input: {
   bridge?: Pick<BotBridge, "botRun">;
   scope: BotScope & { locale: string };
@@ -51,5 +56,14 @@ export async function dispatchOpenBotSession(input: {
 }): Promise<Result<BotRunReceipt> | null> {
   const botRun = input.bridge?.botRun;
   if (!botRun) return null;
-  return botRun(buildOpenBotSessionTurn(input));
+  const result = await botRun(buildOpenBotSessionTurn(input));
+  if (!result.ok) {
+    const skewMessage = daemonSkewRefusalMessage(result.error);
+    if (skewMessage)
+      return {
+        ok: false,
+        error: { ...result.error, message: skewMessage },
+      };
+  }
+  return result;
 }

@@ -43,6 +43,14 @@ import {
   zoomLevelToFactor,
 } from "./window/window-chrome";
 import { readBuildInfo } from "./build-info";
+import { fileSha256Hex } from "./daemon-artifact";
+import {
+  classifyDaemonUpdate,
+  shortRevision,
+  updatedNotice,
+  type DaemonUpdateState,
+} from "./daemon-update";
+import { restartChangedDaemon } from "./daemon-update-restart";
 import { isolateSessionList } from "./session-bridge";
 import { registerAutomationIpc } from "./automation-bridge";
 // Meetings (additive): read-only index of the owner's Write That Down notes.
@@ -682,6 +690,82 @@ async function bootstrapDaemon(): Promise<void> {
       console.warn(
         `[drogon] native runtime bootstrap: attached to an already-healthy service missing ${JSON.stringify(missing)} — some features stay unavailable until it is restarted with the bundled build.`,
       );
+    // Install-resilience P5: the daemon is detached and survives bundle
+    // replaces, so an already-healthy attach must first prove the running
+    // service IS this install's build; a changed `drogond` gets a graceful
+    // restart (never session-destructive — a busy daemon stays attached and
+    // the renderer shows the honest "update pending" state instead).
+    await maybeRestartUpdatedDaemon(dataDir, binaryPath);
+  }
+}
+
+/** Set once per launch by `maybeRestartUpdatedDaemon`; the renderer pulls it
+ *  through `drogon:daemon:updateState` so a restart decided before the
+ *  window existed is still seen, and never silently missed. */
+let daemonUpdateState: DaemonUpdateState | null = null;
+
+/** Install-resilience P5 trigger: classify the running daemon's binary
+ *  identity against this freshly-installed bundle's, and on a changed
+ *  binary run the graceful `restartChangedDaemon` before attaching. Every
+ *  outcome is observable (console + renderer state); an unknown identity
+ *  attaches unchanged — a mismatch is claimed only when proven. */
+async function maybeRestartUpdatedDaemon(
+  dataDir: string,
+  binaryPath: string,
+): Promise<void> {
+  try {
+    const status = (await callNative("status", {})) as Result<Status>;
+    if (!status.ok) return; // Nothing attachable; bootstrap already reported why.
+    const buildInfo = readBuildInfo(process.resourcesPath);
+    const revision = shortRevision(buildInfo?.revision ?? null);
+    const decision = classifyDaemonUpdate({
+      bundleDigest: await fileSha256Hex(binaryPath),
+      daemonDigest: status.result.daemonArtifactSha256 ?? null,
+    });
+    if (decision.kind === "identity-unknown") {
+      console.warn(
+        `[drogon] install update: cannot verify the running service's build (${decision.reason}); attaching unchanged.`,
+      );
+      return;
+    }
+    if (decision.kind === "up-to-date") return;
+    console.warn(
+      `[drogon] install update: ${decision.reason} Requesting a graceful service restart before attaching (bundle ${revision ?? "unknown"}).`,
+    );
+    const outcome = await restartChangedDaemon({
+      platform: process.platform,
+      target: { binaryPath, args: ["--data-dir", dataDir] },
+      env: {
+        ...process.env,
+        PATH: buildDaemonPath(process.env.PATH, process.platform, homedir()),
+      },
+      binaryExists: existsSync,
+      call: (method, params) => callNative(method, params),
+      observeEndpoint: (signal) => observeDataDirEndpoint(dataDir, signal),
+      spawn: (nextBinaryPath, args, env) =>
+        spawnDetachedDaemon(nextBinaryPath, args, env).then(() => undefined),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      pollIntervalMs: 250,
+      shutdownWaitMs: 12_000,
+      spawnDeadlineMs: 10_000,
+    });
+    if (outcome.kind === "restarted") {
+      const note = updatedNotice(revision);
+      daemonUpdateState = { kind: "updated", revision, note };
+      console.log(`[drogon] install update: ${note} The bundled service now answers.`);
+      return;
+    }
+    const reason = outcome.reason;
+    daemonUpdateState = { kind: "pending", revision, reason };
+    console.warn(
+      `[drogon] install update: update pending — the old service stays attached until Drogon's service is restarted. ${reason}`,
+    );
+  } catch (error) {
+    console.error(
+      `[drogon] install update: identity check failed; attaching unchanged: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }
 
@@ -715,7 +799,7 @@ function registerDaemonRestart() {
     }
     const binaryName = process.platform === "win32" ? "drogond.exe" : "drogond";
     const seam = process.env.DROGON_DAEMON_BIN;
-    return handleDaemonRestart(input, {
+    const result = await handleDaemonRestart(input, {
       isPackaged: app.isPackaged,
       platform: process.platform,
       dataDir,
@@ -736,6 +820,29 @@ function registerDaemonRestart() {
       shutdownWaitMs: 12_000,
       spawnDeadlineMs: 10_000,
     });
+    // Install-resilience P5: a user-chosen restart that succeeded resolves
+    // a pending update — clear the state so the banner does not outlive it.
+    if (result.restarted) daemonUpdateState = null;
+    return result;
+  });
+}
+
+/**
+ * Install-resilience P5: one read-only pull channel so the renderer can
+ * show what launch decided about an update ("Drogon updated; restarted its
+ * background service" or the honest "update pending" state) — including a
+ * decision made before the window existed. Null when this launch saw no
+ * change. Same trusted-renderer gate as every other channel.
+ */
+function registerDaemonUpdateStatePull() {
+  ipcMain.handle("drogon:daemon:updateState", (event) => {
+    if (
+      !window ||
+      event.sender !== window.webContents ||
+      event.senderFrame !== window.webContents.mainFrame
+    )
+      return null;
+    return daemonUpdateState;
   });
 }
 
@@ -809,6 +916,7 @@ if (!holdsSingleInstanceLock) {
     registerAppMenuIpc();
     registerBridge();
     registerDaemonRestart();
+    registerDaemonUpdateStatePull();
     registerNativeThemeBridge();
     registerAutomationIpc(
       (event) =>

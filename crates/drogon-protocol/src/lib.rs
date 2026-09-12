@@ -5,6 +5,7 @@ use std::fmt;
 pub mod automation;
 pub mod bot;
 pub mod browser;
+pub mod feature_protocol;
 pub mod git;
 pub mod graph;
 pub mod harness_catalog;
@@ -25,6 +26,11 @@ pub mod worktree;
 pub mod worktree_issues;
 
 pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Re-exported for `daemon.status`'s `featureProtocol` field (install
+/// -resilience P4): the monotonic wire-behavior floor from the additive
+/// `feature_protocol` module. The envelope handshake above stays at 1.
+pub use feature_protocol::FEATURE_PROTOCOL_VERSION;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Deserialize, Serialize)]

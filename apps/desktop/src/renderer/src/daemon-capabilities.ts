@@ -79,3 +79,66 @@ export function shouldGateLaunchOnAgentSettingsReadiness(
 ): boolean {
   return !hasConnectedStatus || isAgentSettingsAvailable(capabilities);
 }
+
+/* ------------------------------------------------------------------
+ * Install-resilience P4: the general "the daemon is older than this
+ * request" policy. The two hand-patched capability gates above were
+ * reactive, one feature at a time; this section is the systemic layer
+ * they feed into.
+ *
+ * Wire-behavior floors mirror the read-only Orca reference
+ * `src/main/daemon/daemon-protocol-version.ts` (currently 36; principle:
+ * "daemons survive app updates, so wire behavior must be version-gated").
+ * The daemon reports its floor as `status.featureProtocol`
+ * (crates/drogon-protocol/src/feature_protocol.rs); `null`/absent means
+ * the connected daemon predates reporting and CANNOT be verified — the
+ * gates below then fail closed (never claim support), and the UI keeps
+ * the restart affordance available.
+ * ------------------------------------------------------------------ */
+
+/** Feature-protocol version at which `bot.run` admitted the `interactive`
+ *  field (bot_run_rpc.rs's hand-parsed allowlist). Mirrored from
+ *  drogon_protocol::feature_protocol::BOT_RUN_INTERACTIVE_FIELD_PROTOCOL. */
+export const BOT_RUN_INTERACTIVE_FIELD_PROTOCOL = 2;
+
+/** Live feature detection against the connected daemon's reported floor.
+ *  Unknown (null/undefined — daemon predates reporting) never claims
+ *  support: callers gate fail-closed. */
+export function daemonSupportsFeatureProtocol(
+  featureProtocol: number | null | undefined,
+  floor: number,
+): boolean {
+  return typeof featureProtocol === "number" && featureProtocol >= floor;
+}
+
+/** The raw serde/refusal shapes that mean "the daemon build is older than
+ *  this renderer's request", as opposed to a malformed request this build
+ *  itself produced. The desktop's typed bridge only ever constructs
+ *  methods and fields from its own build, so a daemon refusing one as
+ *  unknown is positive evidence of skew — classify it instead of showing
+ *  the raw serde text. These are exactly `bot_run_rpc.rs`'s
+ *  `unknown field {key}` and the router's `method_not_found`, plus the
+ *  serde-generated `unknown field \`x\`, expected one of …` /
+ *  `unknown variant \`x\`` shapes deny_unknown_fields structs produce. */
+export function isDaemonSkewError(error: {
+  code: string;
+  message: string;
+}): boolean {
+  if (error.code === "method_not_found") return true;
+  if (error.code === "unsupported_protocol") return true;
+  if (error.code !== "invalid_argument") return false;
+  return /^unknown (field|method|variant)\s+`?/i.test(error.message.trim());
+}
+
+/** The user-directed message that replaces a raw skew refusal. Names the
+ *  situation and the recovery path; never the serde text. Returns null for
+ *  anything that is NOT skew, so callers keep their verbatim errors. */
+export function daemonSkewRefusalMessage(
+  error: { code: string; message: string },
+): string | null {
+  if (!isDaemonSkewError(error)) return null;
+  return (
+    "This Drogon build is newer than its background service, which refused the request. " +
+    "Restart Drogon's service (Settings → Manage sessions → Restart daemon) to finish the update, then try again."
+  );
+}
