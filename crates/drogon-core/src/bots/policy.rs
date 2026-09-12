@@ -41,6 +41,7 @@ use super::records::{Bot, Responsibility, ResponsibilityTrigger};
 use super::storage::{self as bots_storage, StorageError};
 use crate::automations::execution::{self, DispatchAttempt, DispatchRefusal, InvocationReason};
 use crate::automations::records::Automation;
+use crate::automations::runner::headless_permission_mode;
 
 /// A Bot's stored [`Bot::harness_policy`] resolved into the harness launch
 /// overrides a daemon dispatch should run with (issue #188).
@@ -58,12 +59,10 @@ pub struct BotHarnessOverrides {
 /// overrides an explicit `bot.run` does. The stored `explicit_model` is
 /// the create form's `provider/model` string: split on the first slash;
 /// no slash (or an empty side) means a bare model id, which Pi also
-/// accepts; null/blank means no model overrides. `permission_mode` is
-/// `unattended` for Pi only: a daemon run is headless with no
-/// approval-answer affordance (an inherited prompt would stall it at
-/// `needs_input` forever), and Pi's flag trusts only the run's project
-/// files -- other harnesses keep inherited prompts rather than silently
-/// escalating theirs.
+/// accepts; null/blank means no model overrides. Every daemon run is
+/// headless with no approval-answer affordance, so every harness uses the
+/// shared unattended permission mode rather than inheriting a prompt that
+/// would stall at `needs_input` forever.
 pub fn harness_overrides(bot: &Bot) -> BotHarnessOverrides {
     let stored = bot
         .harness_policy
@@ -83,8 +82,7 @@ pub fn harness_overrides(bot: &Bot) -> BotHarnessOverrides {
         harness_id: bot.harness_policy.default_harness.clone(),
         model,
         provider,
-        permission_mode: (bot.harness_policy.default_harness == "pi")
-            .then(|| "unattended".to_string()),
+        permission_mode: headless_permission_mode(),
     }
 }
 

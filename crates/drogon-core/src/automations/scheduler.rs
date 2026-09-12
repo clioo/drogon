@@ -60,7 +60,7 @@ use super::direct::{
 };
 use super::execution::InvocationReason;
 use super::records::{Automation, AutomationRunStatus, AutomationRunTrigger};
-use super::runner::{EngineDispatchSeam, HarnessLaunchParams, RunRefusal, RunUnsupported};
+use super::runner::{self, EngineDispatchSeam, HarnessLaunchParams, RunRefusal, RunUnsupported};
 use crate::Engine;
 
 /// Production tick period: due automations are evaluated this often.
@@ -233,7 +233,7 @@ fn harness_for(automation: &Automation) -> HarnessLaunchParams {
         model: automation.model.clone(),
         effort: None,
         provider: automation.provider.clone(),
-        permission_mode: None,
+        permission_mode: runner::headless_permission_mode(),
         // Scheduler fires are headless daemon runs (issue #186).
         headless: true,
     }

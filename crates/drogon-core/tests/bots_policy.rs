@@ -644,18 +644,24 @@ fn harness_overrides_keep_a_bare_model_without_provider() {
 }
 
 #[test]
-fn harness_overrides_leave_non_pi_harnesses_inherited() {
-    let resolved = policy::harness_overrides(&bot_with_policy(
-        "claude",
-        Some("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
-    ));
-    assert_eq!(resolved.harness_id, "claude");
-    assert_eq!(resolved.provider.as_deref(), Some("dgx-spark"));
-    assert_eq!(
-        resolved.model.as_deref(),
-        Some("qwen3.8-flash-next-nvidia-nvfp4")
-    );
-    assert_eq!(resolved.permission_mode, None);
+fn harness_overrides_make_every_admitted_harness_unattended() {
+    for harness in ["claude", "pi", "opencode", "antigravity", "codex"] {
+        let resolved = policy::harness_overrides(&bot_with_policy(
+            harness,
+            Some("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
+        ));
+        assert_eq!(resolved.harness_id, harness);
+        assert_eq!(resolved.provider.as_deref(), Some("dgx-spark"));
+        assert_eq!(
+            resolved.model.as_deref(),
+            Some("qwen3.8-flash-next-nvidia-nvfp4")
+        );
+        assert_eq!(
+            resolved.permission_mode.as_deref(),
+            Some("unattended"),
+            "headless harness {harness} must not inherit an approval prompt"
+        );
+    }
 }
 
 #[test]

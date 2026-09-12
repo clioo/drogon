@@ -79,7 +79,7 @@ describe("bots-page-model", () => {
     ).toBeNull();
   });
 
-  it("splits a provider/model string into bot.run overrides, unattended for Pi and Codex", () => {
+  it("splits a provider/model string into unattended bot.run overrides for every harness", () => {
     expect(
       buildBotRunHarness("pi", "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
     ).toEqual({
@@ -99,17 +99,16 @@ describe("bots-page-model", () => {
       harnessId: "pi",
       permissionMode: "unattended",
     });
-    expect(buildBotRunHarness("codex", null)).toEqual({
-      harnessId: "codex",
-      permissionMode: "unattended",
-    });
-    // Other harnesses keep inherited prompts (no silent escalation).
-    expect(buildBotRunHarness("claude", null)).toEqual({
-      harnessId: "claude",
-    });
+    for (const harnessId of ["claude", "opencode", "antigravity"] as const) {
+      expect(buildBotRunHarness(harnessId, null)).toEqual({
+        harnessId,
+        permissionMode: "unattended",
+      });
+    }
     expect(buildBotRunHarness("claude", "sonnet")).toEqual({
       harnessId: "claude",
       model: "sonnet",
+      permissionMode: "unattended",
     });
   });
 
