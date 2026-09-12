@@ -474,13 +474,23 @@ fn self_api_denies_unknown_fields_and_bad_schedules() {
 // --- P2/P4 monitors ---
 
 fn create_self_monitor(fx: &Fx, req: &str, bot_id: &str, resource: &str) -> Value {
+    create_self_monitor_with_cron(fx, req, bot_id, resource, "* * * * *")
+}
+
+fn create_self_monitor_with_cron(
+    fx: &Fx,
+    req: &str,
+    bot_id: &str,
+    resource: &str,
+    cron: &str,
+) -> Value {
     success(fx.self_call(
         req,
         "bot.self_create_monitor",
         json!({
             "botId": bot_id, "actorBotId": bot_id,
             "resource": resource,
-            "trigger": {"kind": "scheduled", "cron": "* * * * *"},
+            "trigger": {"kind": "scheduled", "cron": cron},
         }),
     ))
 }
@@ -580,6 +590,45 @@ fn monitor_errors_backoff_fail_open_incident_and_recover() {
     assert!(
         incidents[0].recovered_at_ms.is_some(),
         "first later success closes the incident"
+    );
+}
+
+#[test]
+fn monitor_errors_wait_for_the_next_daily_cron_slot() {
+    let fx = Fx::new();
+    let bot = fx.create_bot("c1", "Watcher", Some("watcher"));
+    let bot_id = bot["id"].as_str().unwrap();
+    let provisioned = fx.provision("p1", bot_id);
+    let home_path = provisioned["path"].as_str().unwrap().to_string();
+    std::fs::write(home_path.clone() + "/notes.md", "v1").unwrap();
+
+    let created = create_self_monitor_with_cron(&fx, "m1", bot_id, "notes.md", "0 9 * * *");
+    let monitor_id = created["monitorId"].as_str().unwrap().to_string();
+    let base = 1_700_000_000_000.0;
+    drogon_core::automations::scheduler::tick_once(&fx.engine, base);
+    std::fs::remove_file(home_path + "/notes.md").unwrap();
+
+    let first_daily_fire =
+        drogon_core::automations::scheduler::next_fire_ms("0 9 * * *", base).unwrap() as f64;
+    for offset in (0..=120).step_by(5) {
+        drogon_core::automations::scheduler::tick_once(
+            &fx.engine,
+            first_daily_fire + offset as f64 * 60_000.0,
+        );
+    }
+
+    let conn =
+        rusqlite::Connection::open(fx._root.path().join("data").join(drogon_core::DB_FILE_NAME))
+            .unwrap();
+    let checks =
+        drogon_core::bots::monitors::storage::list_checks_for_monitor(&conn, &monitor_id).unwrap();
+    assert_eq!(
+        checks
+            .iter()
+            .filter(|check| check.result.is_error())
+            .count(),
+        1,
+        "a daily error retries at the next cron slot, not every backoff tick"
     );
 }
 

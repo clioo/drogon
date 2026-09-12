@@ -100,6 +100,10 @@ pub struct MonitorRecord {
     pub next_eligible_at_ms: Option<f64>,
     pub last_event_id: Option<String>,
     pub last_success_at_ms: Option<f64>,
+    /// Last attempted check, whether it succeeded or failed. This anchors
+    /// cron scheduling after errors without making backoff state disappear.
+    #[serde(default)]
+    pub last_check_at_ms: Option<f64>,
     pub last_error: Option<String>,
     /// An informational note about the newest committed check — most
     /// notably the first-observation baseline seed ("baseline seeded; the
@@ -233,6 +237,7 @@ pub fn new_monitor(
         next_eligible_at_ms: None,
         last_event_id: None,
         last_success_at_ms: None,
+        last_check_at_ms: None,
         last_error: None,
         last_notice: None,
     };
@@ -302,6 +307,7 @@ pub fn new_unapproved_monitor(
         next_eligible_at_ms: None,
         last_event_id: None,
         last_success_at_ms: None,
+        last_check_at_ms: None,
         last_error: None,
         last_notice: None,
     };
@@ -460,6 +466,7 @@ mod tests {
                     next_eligible_at_ms: None,
                     last_event_id: None,
                     last_success_at_ms: None,
+                    last_check_at_ms: None,
                     last_error: None,
                     last_notice: None,
                 }

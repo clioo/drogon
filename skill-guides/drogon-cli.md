@@ -201,7 +201,9 @@ nothing. `--api-base <URL>` points at a GitHub Enterprise host (defaults to
 The same pull request never fires twice — dedupe is per pull NUMBER, not a
 digest of the response, so a comment on an already-reviewed PR is quiet —
 and a watch that was not running (its first check ever, or a gap wider than
-thirty minutes) SEEDS its baseline instead of replaying the backlog.
+the greater of thirty minutes and twice its own cron interval) SEEDS its
+baseline instead of replaying the backlog. Manual-trigger watches use the
+thirty-minute grace.
 
 When it fires, the prompt it releases tells the Bot to open a worktree
 named after the pull request, start the session with `--harness

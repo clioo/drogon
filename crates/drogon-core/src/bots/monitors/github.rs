@@ -15,12 +15,13 @@
 //!   (`bot_monitor_github_seen`), never a digest of the response bytes: an
 //!   unrelated comment on PR #41 cannot re-release it.
 //! - **An outage is never a catch-up storm.** A watch that was not
-//!   watching (first ever check, or a gap wider than
-//!   [`GITHUB_CATCH_UP_GRACE_MS`]) SEEDS: it records the pull requests it
-//!   can see as already seen and releases nothing. The delegation drain's
-//!   own stale-grace then applies to the change that was observed while the
-//!   daemon was down — the same "never caught up" rule as the scheduler's
-//!   missed-run grace.
+//!   watching (first ever check, or a gap wider than the greater of
+//!   [`GITHUB_CATCH_UP_GRACE_MS`] and twice its cron interval) SEEDS: it
+//!   records the pull requests it can see as already seen and releases
+//!   nothing. Manual-trigger monitors use the plain catch-up grace. The
+//!   delegation drain's own stale-grace then applies to the change that was
+//!   observed while the daemon was down — the same "never caught up" rule as
+//!   the scheduler's missed-run grace.
 //!
 //! Transport: the platform `curl` binary (the daemon has no HTTP client
 //! dependency; see `crate::jira::client`, whose bounded-curl discipline this
@@ -505,9 +506,12 @@ pub struct PersistedWatch<'a> {
     /// Pull numbers this watch already released (or seeded).
     pub seen: &'a BTreeSet<u64>,
     /// The monitor's last successful check, which decides whether this tick
-    /// seeds (first check, or a gap wider than [`GITHUB_CATCH_UP_GRACE_MS`])
-    /// or releases.
+    /// seeds (first check, or a gap wider than the configured catch-up
+    /// threshold) or releases.
     pub last_success_at_ms: Option<f64>,
+    /// Two successive fires of the monitor's cron, used to avoid treating a
+    /// naturally sparse schedule as an outage. `None` uses the plain grace.
+    pub expected_interval_ms: Option<f64>,
 }
 
 /// The full evaluation of one due `github_pr.v1` monitor, with the token
@@ -576,8 +580,17 @@ pub fn evaluate_with_token(
     let seed_baseline = match persisted.last_success_at_ms {
         // First ever successful check: today's open pulls are the baseline.
         None => true,
-        // A gap wider than the outage grace is a world nobody was watching.
-        Some(last) => now_ms - last > GITHUB_CATCH_UP_GRACE_MS,
+        // A gap wider than the outage grace (or twice this watch's cadence)
+        // is a world nobody was watching. Long cron schedules therefore get
+        // their full interval before they are treated as an outage.
+        Some(last) => {
+            let grace = persisted
+                .expected_interval_ms
+                .map(|interval| 2.0 * interval)
+                .unwrap_or(0.0)
+                .max(GITHUB_CATCH_UP_GRACE_MS);
+            now_ms - last > grace
+        }
     };
     let decision = decide(monitor_id, &numbers, seen, seed_baseline);
     result_for(

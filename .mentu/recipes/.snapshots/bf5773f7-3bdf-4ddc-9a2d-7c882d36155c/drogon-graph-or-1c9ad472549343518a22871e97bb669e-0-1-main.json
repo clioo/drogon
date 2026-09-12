@@ -1,0 +1,15 @@
+{
+  "description": "Compiled from the work graph (or-1c9ad472549343518a22871e97bb669e-0-1-main); edit .drogon/graph.json and recompile, never this file.",
+  "name": "drogon-graph-or-1c9ad472549343518a22871e97bb669e-0-1-main",
+  "steps": [
+    {
+      "backend": "shell",
+      "completion_keyword": "DROGON_NODE_OR_1C9AD472549343518A22871E97BB669E_0_1_MAIN_DONE",
+      "depends_on": [],
+      "label": "or-1c9ad472549343518a22871e97bb669e-0-1-main",
+      "prompt": "drogon_output=$(mktemp) || exit 1\ntrap 'rm -f \"$drogon_output\"' EXIT\ntrap 'exit 129' HUP\ntrap 'exit 130' INT\ntrap 'exit 143' TERM\npi --print --model 'gpt-5.6-luna' -- 'Task:\nYou are a Drogon WORKER on a fix task. Your working directory is the git worktree /Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/fix-github-watch-cadence (branch fix-github-watch-cadence), already cut from origin/main. First run: cd '\\''/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/fix-github-watch-cadence'\\'' && cat .preflight/spec.md -- that file is your COMPLETE task: how you run (headless, one hour of wall clock, commit and push often), the findings to fix with file:line references, the regression tests to add, the gates, the hard constraints from AGENTS.md, and how to open and merge the PR against main. Follow it literally and do not widen its scope. Start now.\n\nDrogon run 1c9ad472549343518a22871e97bb669e: immutable Subagent policy snapshot\n{\"approvedRuntimes\":[{\"harness\":\"pi\",\"model\":\"gpt-5.6-luna\"}],\"fallbackRuntime\":null,\"adversarial\":{\"enabled\":true,\"maxIterations\":4},\"delegate\":false}\nIf you delegate, use Drogon graph CLI declared nodes (see `drogon-cli graph --help`) and explicit harness/model pairs from this snapshot. Try approved pairs in their configured order; use fallback only after every approved runtime fails to execute. Findings are successful evaluations and do not trigger runtime failover. Do not use native ungoverned subagent spawns. Maximum subagent depth is one: children must not delegate further. Workspace policy edits apply to future runs; do not substitute them for this snapshot. The daemon owns any enabled adversarial loop; do not launch duplicate test/review workers yourself.\n\nWhen this task is complete, end your final message with exactly this line:\nDROGON_NODE_OR_1C9AD472549343518A22871E97BB669E_0_1_MAIN_DONE\n' >\"$drogon_output\"\ndrogon_status=$?\ncat \"$drogon_output\"\n[ \"$drogon_status\" -eq 0 ] || exit \"$drogon_status\"\nawk -v expected='DROGON_NODE_OR_1C9AD472549343518A22871E97BB669E_0_1_MAIN_DONE' '/^[[:space:]]*```/ { fence = !fence } NF { last = $0; fenced = fence } END { exit !(last == expected && !fenced) }' \"$drogon_output\"",
+      "timeout": 3600
+    }
+  ],
+  "type": "sequence"
+}

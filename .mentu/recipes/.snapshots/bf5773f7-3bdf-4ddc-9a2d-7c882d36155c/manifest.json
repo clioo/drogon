@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "recipeId": "drogon-graph-or-1c9ad472549343518a22871e97bb669e-0-1-main",
+  "contentHash": "d156b5ebec52b200500ffdd85ccc769d0d95a033d6e37a5d842884fbca23dc67",
+  "runId": "bf5773f7-3bdf-4ddc-9a2d-7c882d36155c",
+  "createdAt": "2026-09-12T20:56:37Z",
+  "cwd": "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/fix-github-watch-cadence",
+  "recipePath": "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/fix-github-watch-cadence/.mentu/recipes/.snapshots/bf5773f7-3bdf-4ddc-9a2d-7c882d36155c/drogon-graph-or-1c9ad472549343518a22871e97bb669e-0-1-main.json",
+  "workspaceRoot": "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/fix-github-watch-cadence",
+  "runtime": {
+    "version": "0.5.0",
+    "revision": "c82ccfa0ebbe77d62193e068821ba6e74f87a8d3"
+  },
+  "argv": [
+    "/Users/carlos/Library/Application Support/Drogon/mentu/runtime/bin/mentu-recipes",
+    "run",
+    "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/fix-github-watch-cadence/.mentu/recipes/.snapshots/bf5773f7-3bdf-4ddc-9a2d-7c882d36155c/drogon-graph-or-1c9ad472549343518a22871e97bb669e-0-1-main.json",
+    "--workspace",
+    "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/fix-github-watch-cadence"
+  ],
+  "steps": [],
+  "resources": [],
+  "skippedResources": []
+}

@@ -1072,11 +1072,27 @@ fn monitor_cron_due(record: &MonitorRecord, now_ms: f64) -> bool {
     if record.cursor.is_none() {
         return true;
     }
-    let anchor = record.last_success_at_ms.unwrap_or(record.created_at_ms);
+    let anchor = record
+        .last_check_at_ms
+        .or(record.last_success_at_ms)
+        .unwrap_or(record.created_at_ms);
     match scheduler::next_fire_ms(cron, anchor) {
         Some(next) => now_ms >= next as f64,
         None => false,
     }
+}
+
+/// Derive one interval from two successive fires of the monitor's own cron.
+/// GitHub uses this to distinguish a normal long cadence from an outage;
+/// manual-trigger monitors have no interval and use the plain catch-up grace.
+fn monitor_cron_interval_ms(record: &MonitorRecord) -> Option<f64> {
+    let MonitorTrigger::Scheduled { cron } = &record.trigger else {
+        return None;
+    };
+    let first = scheduler::next_fire_ms(cron, record.created_at_ms)? as f64;
+    let second = scheduler::next_fire_ms(cron, first)? as f64;
+    let interval = second - first;
+    (interval.is_finite() && interval > 0.0).then_some(interval)
 }
 
 /// Outcome counts for one monitor tick, for tests and operator logs.
@@ -1236,6 +1252,7 @@ pub fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSumm
                 updated.consecutive_errors = 0;
                 updated.next_eligible_at_ms = None;
                 updated.last_success_at_ms = Some(now_ms);
+                updated.last_check_at_ms = Some(now_ms);
                 updated.last_error = None;
                 updated.last_notice = None;
                 updated.updated_at_ms = now_ms;
@@ -1309,6 +1326,7 @@ pub fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSumm
                         updated.consecutive_errors = 0;
                         updated.next_eligible_at_ms = None;
                         updated.last_success_at_ms = Some(now_ms);
+                        updated.last_check_at_ms = Some(now_ms);
                         updated.last_error = None;
                         updated.updated_at_ms = now_ms;
                         summary.unchanged += 1;
@@ -1317,6 +1335,7 @@ pub fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSumm
                         updated.consecutive_errors = updated.consecutive_errors.saturating_add(1);
                         updated.next_eligible_at_ms =
                             Some(now_ms + backoff_ms(updated.consecutive_errors));
+                        updated.last_check_at_ms = Some(now_ms);
                         updated.last_error =
                             Some(outcome_error_text(&result).chars().take(512).collect());
                         updated.last_notice = None;
@@ -1408,6 +1427,7 @@ fn tick_github_monitor(
         cursor: record.cursor.as_deref(),
         seen: &seen,
         last_success_at_ms: record.last_success_at_ms,
+        expected_interval_ms: monitor_cron_interval_ms(record),
     };
     let outcome = crate::bots::monitors::github::evaluate_with_token(
         &rule,
@@ -1483,6 +1503,7 @@ fn tick_github_monitor(
                     updated.consecutive_errors = 0;
                     updated.next_eligible_at_ms = None;
                     updated.last_success_at_ms = Some(now_ms);
+                    updated.last_check_at_ms = Some(now_ms);
                     updated.last_error = None;
                     updated.last_notice = None;
                     updated.updated_at_ms = now_ms;
@@ -1547,7 +1568,40 @@ fn tick_github_monitor(
                     }
                 }
                 CommitDecision::Retain { reason } => match reason {
-                    RetainReason::NoChange | RetainReason::DuplicateTick => summary.unchanged += 1,
+                    RetainReason::NoChange | RetainReason::DuplicateTick => {
+                        let mut updated = record.clone();
+                        updated.consecutive_errors = 0;
+                        updated.next_eligible_at_ms = None;
+                        updated.last_success_at_ms = Some(now_ms);
+                        updated.last_check_at_ms = Some(now_ms);
+                        updated.last_error = None;
+                        // Keep an earlier seed notice until a later release
+                        // or error replaces it; a quiet poll is not a new
+                        // informational state.
+                        updated.updated_at_ms = now_ms;
+                        let check = monitor_storage::StoredCheck {
+                            id: format!(
+                                "chk_{}",
+                                uuid::Uuid::new_v4().to_string().replace('-', "")
+                            ),
+                            monitor_id: updated.id.clone(),
+                            monitor_version: updated.version,
+                            started_at_ms: now_ms,
+                            result: result.clone(),
+                            delivery: monitor_storage::DeliveryState::NotApplicable,
+                        };
+                        commit_github_quiet(
+                            engine,
+                            QuietCommit {
+                                updated: &updated,
+                                rev,
+                                check: &check,
+                                seen: None,
+                                now_ms,
+                            },
+                            summary,
+                        );
+                    }
                     RetainReason::Disabled => summary.skipped += 1,
                     // A github evaluation never routes here (an HTTP failure
                     // is an explicit Error outcome); count it rather than
@@ -1617,6 +1671,7 @@ fn commit_github_error(
     let mut updated = record.clone();
     updated.consecutive_errors = updated.consecutive_errors.saturating_add(1);
     updated.next_eligible_at_ms = Some(now_ms + backoff_ms(updated.consecutive_errors));
+    updated.last_check_at_ms = Some(now_ms);
     updated.last_error = Some(outcome_error_text(&result).chars().take(512).collect());
     // A real error replaces the informational notice, never the other
     // way around: the card must stay honest about the newest state.
@@ -1673,6 +1728,7 @@ fn commit_github_seed(
     updated.consecutive_errors = 0;
     updated.next_eligible_at_ms = None;
     updated.last_success_at_ms = Some(now_ms);
+    updated.last_check_at_ms = Some(now_ms);
     // The first observation is normal operation, not a failure: the note
     // rides `last_notice` (an informational field), never `last_error`,
     // so health stays healthy and no consumer paints the seed red.
@@ -2006,6 +2062,7 @@ pub(crate) fn monitor_view(
         "consecutiveErrors": record.consecutive_errors,
         "nextEligibleAtMs": record.next_eligible_at_ms,
         "lastSuccessAtMs": record.last_success_at_ms,
+        "lastCheckAtMs": record.last_check_at_ms,
         "lastError": record.last_error,
         "lastNotice": record.last_notice,
         "lastEventId": record.last_event_id,
