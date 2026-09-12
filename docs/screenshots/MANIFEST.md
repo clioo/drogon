@@ -36,5 +36,5 @@ The authoring-canvas surface is not present in the packaged build: `WorkGraphPan
 ## Reproduce
 
 ```sh
-./scripts/build-main.sh && /Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/doc-screenshots.mjs
+./scripts/build-main.sh && node scripts/doc-screenshots.mjs
 ```
