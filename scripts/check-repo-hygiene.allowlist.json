@@ -8,26 +8,6 @@
     },
     {
       "rule": "owner-path",
-      "pathPrefix": "docs/migration/",
-      "reason": "frozen project history (pre-submission working notes); judges read README/docs, not the migration log"
-    },
-    {
-      "rule": "orchestration-id",
-      "pathPrefix": "docs/migration/",
-      "reason": "frozen worker specs quote dispatch/message ids as coordination evidence"
-    },
-    {
-      "rule": "email",
-      "pathPrefix": "docs/migration/",
-      "reason": "frozen history quotes git-author and bot-trailer addresses"
-    },
-    {
-      "rule": "reference-cdp",
-      "pathPrefix": "docs/migration/",
-      "reason": "coordinator-owned plan documents the read-only reference CDP; rewording is the coordinator's call"
-    },
-    {
-      "rule": "owner-path",
       "pathPrefix": "tests/parity/",
       "reason": "frozen source-parity evidence and baselines are byte-exact by design; editing them voids the oracle"
     },

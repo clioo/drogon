@@ -4,17 +4,18 @@
 
 **An open-source desktop workspace for developers who hate meetings and love building.**
 
-Drogon is a from-zero rewrite of the [Orca](https://github.com/LovecastAI) desktop
-experience: a **Rust core** with a `drogond` daemon and a `drogon-cli` client, plus an
+Drogon is a **Rust core** with a `drogond` daemon and a `drogon-cli` client, plus an
 **Electron/React desktop** on top. Coding agents, Git worktrees, persistent terminals,
 code review, and repeatable workflows live in one place. Give each task its own
 workspace, keep long-running sessions close to the code, and review what changed
 without piecing together a dozen windows.
 
-Drogon is MIT-licensed. The desktop UI is ported component-by-component from the Orca
-source (MIT, © Lovecast Inc. — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)),
-and the Bots, Automations, and work-graph concepts come from the Drogon fork of
-Orca. This repository does not depend on Orca's runtime to execute anything.
+Drogon is MIT-licensed. Its desktop UI began as a component-by-component port of the
+[Orca](https://github.com/LovecastAI) source (MIT, © Lovecast Inc. — see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)), and the Bots and Automations concepts
+came from the Drogon fork of Orca. It has since grown its own surfaces — the Work Graph
+and its Orchestrator, self-waking Bots, Meetings — and depends on no other runtime to
+execute anything.
 
 [Run locally](#run-locally) · [Install with Homebrew](#install-with-homebrew) · [Install the macOS preview](#install-the-macos-preview) · [Feature tour](#feature-tour-the-twelve-mvp-journeys) · [Use it with agents](#using-drogon-with-agents) · [Contribute](#contributing)
 
@@ -39,10 +40,8 @@ Your next step should be visible in the workspace—not buried in a meeting reca
 
 ## Feature tour: the twelve MVP journeys
 
-The MVP scope ([docs/migration/rewrite-mvp-plan.md](docs/migration/rewrite-mvp-plan.md), section 2)
-is organized as twelve journeys. Each one is implemented end to end, with automated
-acceptance and a source-anchored fidelity oracle comparing the render against the
-Orca reference.
+Drogon grew as twelve end-to-end journeys. Each one ships with automated acceptance;
+the packaged build is validated as a whole before every release.
 
 1. **Backbone.** Add a repository or folder as a project, create a Git worktree, open a tab with a coding harness (Claude Code, Pi, OpenCode) or a plain shell, and watch agent state (working, idle, waiting for input) in the sidebar and tab strip. Native notifications fire when an agent asks for input. Sessions persist across renderer and daemon restarts.
 2. **Review.** Files and a Monaco editor, a diff viewer, and a Source Control panel with diff, stage, commit, push, and pull-request creation through `gh`.
@@ -230,11 +229,10 @@ pnpm --filter @drogon/desktop build     # production bundle catches CSS/bundler 
 node scripts/accept-desktop.mjs --files # rendered acceptance over CDP (expects PASSED)
 ```
 
-The **fidelity oracle** (`scripts/fidelity/compare-surfaces.mjs`) renders the app and
-diffs named UI surfaces against the Orca reference, both pixel- and
-accessibility-tree-level; every reported difference becomes a tracked fix. Rendered
-checks run through Playwright over CDP with `DROGON_BACKGROUND_WINDOW=1` so test
-windows stay inactive and never steal focus.
+Rendered checks run through Playwright over CDP with `DROGON_BACKGROUND_WINDOW=1` so
+test windows stay inactive and never steal focus. Surfaces are compared against their
+own recorded baselines, pixel- and accessibility-tree-level; every reported difference
+becomes a tracked fix.
 
 ## Install the macOS preview
 
@@ -294,12 +292,12 @@ a Homebrew-managed data directory after a downgrade refusal, use
 
 Bug reports, focused pull requests, and reproducible workflow feedback are welcome. For UI issues, include a screenshot and the steps that led to it; never include credentials or raw provider transcripts.
 
-Read [AGENTS.md](AGENTS.md) and the [current MVP scope and implementation status](docs/migration/rewrite-mvp-plan.md) before making changes. The [changelog](CHANGELOG.md) lists every merged PR by area.
+Read [AGENTS.md](AGENTS.md) before making changes. The [changelog](CHANGELOG.md) lists every merged PR by area.
 
 ## License and credits
 
 [MIT](LICENSE) © Carlos (clioo).
 
-- **Orca / Lovecast Inc.** — the desktop experience Drogon rewrites; ported UI components keep their `MIT Copyright (c) 2026 Lovecast Inc.` notices in the source. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full attribution and dependency licensing.
+- **Orca / Lovecast Inc.** — the desktop experience Drogon's UI was originally ported from; those components keep their `MIT Copyright (c) 2026 Lovecast Inc.` notices in the source. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full attribution and dependency licensing.
 - **The Drogon fork of Orca** — the source of the Bots, Automations, and the recipes-and-evidence execution model ported here (the authoring surface has since become the Work Graph).
-- Drogon is an independent rewrite, not affiliated with or endorsed by Orca or Lovecast Inc.
+- Drogon is an independent project, not affiliated with or endorsed by Orca or Lovecast Inc.

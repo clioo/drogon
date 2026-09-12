@@ -93,9 +93,6 @@ binary changed instead of silently attaching to the old one.
 
 Remote SSH targets, Linear/Jira/GitLab integrations, voice,
 computer use, emulator, mobile, AI Vault, plugins and cloud are outside the
-MVP. The binding scope reference is
-[docs/migration/rewrite-mvp-plan.md](migration/rewrite-mvp-plan.md) §2
-("MVP acordado") and §7 (continuous QA): every shipped journey is covered by
-automated acceptance plus a source-anchored fidelity oracle that renders the
-app and diffs named UI surfaces against the Orca reference. Feature history
+MVP. Every shipped journey is covered by automated acceptance, plus a rendered oracle
+that diffs named UI surfaces against their recorded baselines. Feature history
 is in [CHANGELOG.md](../CHANGELOG.md), one line per merged PR.

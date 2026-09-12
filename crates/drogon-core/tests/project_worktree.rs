@@ -1,5 +1,5 @@
 //! Integration tests for Project/Worktree lifecycle and Session agent-state
-//! transitions (`docs/migration/rewrite-mvp-plan.md` J1), against a real
+//! transitions (journey J1), against a real
 //! `Engine`, a real SQLite file, real temp git repositories and a real PTY
 //! child. Unix-only (`/bin/sh`), same scope as `engine.rs`.
 #![cfg(unix)]

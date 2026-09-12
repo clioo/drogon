@@ -2,10 +2,9 @@
 
 All notable changes to Drogon, grouped by area. Entries are generated from the
 titles of merged pull requests in [clioo/drogon](https://github.com/clioo/drogon),
-one line per PR with its number. The repository is young: releases are not
-tagged yet, so history is organized by the twelve MVP journeys (J1–J12, see
-[docs/migration/rewrite-mvp-plan.md](docs/migration/rewrite-mvp-plan.md)) plus
-supporting areas.
+one line per PR with its number. History is organized by the twelve journeys
+Drogon grew as (J1–J12) plus supporting areas. Pre-releases are tagged from
+`v0.1.0-rc.1` onward.
 
 ### Core runtime & daemon
 

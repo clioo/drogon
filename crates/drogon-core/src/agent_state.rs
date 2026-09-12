@@ -1,5 +1,5 @@
 //! Pure agent-state derivation for a Session's PTY activity plus the harness
-//! hook signal. `docs/migration/rewrite-mvp-plan.md` J1: "estado del agente
+//! hook signal. journey J1: "estado del agente
 //! (trabajando, inactivo, esperando)". `session.rs` owns observing the
 //! actual facts (PTY output timing, exit, hook events); this module only
 //! classifies them, so the 3s window and the exited/needs-input precedence
