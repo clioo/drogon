@@ -7,6 +7,7 @@
 use drogon_core::Engine;
 use drogon_protocol::{PROTOCOL_VERSION, Request, Response, RpcError};
 use serde_json::{Value, json};
+use std::sync::Mutex;
 
 fn request(id: &str, method: &str, params: Value) -> Request {
     Request {
@@ -27,6 +28,9 @@ fn err(response: Response) -> RpcError {
     assert!(!response.ok, "expected error, got {response:?}");
     response.error.unwrap()
 }
+
+/// Serializes tests that mutate the process-global harness `PATH`.
+static PATH_LOCK: Mutex<()> = Mutex::new(());
 
 struct Fixture {
     _dir: tempfile::TempDir,
@@ -326,6 +330,34 @@ fn ensure_fixture_harness_on_path() {
     });
 }
 
+/// A Claude fixture that refuses the test if the daemon forgets the native
+/// unattended flag. It is a shell stub, never a model invocation.
+fn ensure_claude_fixture_harness_on_path() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = std::env::temp_dir()
+            .join(format!("drogon-delegation-claude-fixture-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let claude = dir.join("claude");
+        std::fs::write(
+            &claude,
+            "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"--dangerously-skip-permissions\" ]; then\n    echo \"claude-delegation-fixture-output ARGS:$@\"\n    exit 0\n  fi\ndone\nexit 3\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let old = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![dir.into_os_string()];
+        paths.extend(std::env::split_paths(&old).map(|p| p.into_os_string()));
+        unsafe {
+            std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        }
+    });
+}
+
 fn history_len(fixture: &Fixture) -> usize {
     let snap = ok(fixture.engine.dispatch(request(
         "snap",
@@ -341,6 +373,7 @@ fn history_len(fixture: &Fixture) -> usize {
 /// dispatches exactly once more.
 #[test]
 fn scheduler_tick_delegates_file_changes_to_bot_runs() {
+    let _path_guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     ensure_fixture_harness_on_path();
     let fixture = Fixture::with_harness("pi");
     let created = fixture.create(
@@ -399,6 +432,71 @@ fn scheduler_tick_delegates_file_changes_to_bot_runs() {
         .unwrap();
     assert!(used == 1 || used == 2, "used today: {used}");
     assert!(listed["monitors"][0]["lastEventId"].as_str().is_some());
+}
+
+/// The Claude stub exits 3 unless the daemon records the harness's native
+/// unattended permission flag. The argv assertion catches the old Pi-only
+/// policy even though dispatch itself can otherwise appear successful.
+#[test]
+fn scheduler_tick_delegates_claude_with_unattended_permissions() {
+    let _path_guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    ensure_claude_fixture_harness_on_path();
+    let fixture = Fixture::with_harness("claude");
+    let created = fixture.create(
+        "m-claude-create",
+        json!({
+            "monitorId": "mon-claude",
+            "resource": "notes/status.md",
+            "responsibilityName": "triage",
+            "instructions": "Triage the change.",
+        }),
+    );
+    assert_eq!(created["approved"], false);
+    fixture.approve("m-claude-approve", "mon-claude");
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64;
+    let summary = drogon_core::automations::scheduler::tick_once(&fixture.engine, now);
+    assert_eq!(summary.monitor_events, 1);
+    assert_eq!(summary.delegations, 1);
+
+    let listed = ok(fixture.engine.dispatch(request(
+        "claude-sessions",
+        "session.list",
+        json!({"workspaceId": fixture.workspace_id}),
+    )));
+    let sessions = listed["sessions"].as_array().unwrap();
+    assert_eq!(
+        sessions.len(),
+        1,
+        "expected one delegated session: {listed:?}"
+    );
+    let args: Vec<&str> = sessions[0]["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(
+        args.contains(&"--dangerously-skip-permissions"),
+        "Claude daemon runs must be unattended: {args:?}"
+    );
+    assert!(
+        args.contains(&"-p"),
+        "Claude daemon runs must be headless: {args:?}"
+    );
+
+    let closed = fixture.engine.dispatch(request(
+        "claude-session-close",
+        "session.close",
+        json!({
+            "sessionId": sessions[0]["id"],
+            "incarnation": sessions[0]["incarnation"],
+        }),
+    ));
+    assert!(closed.ok, "session.close: {closed:?}");
 }
 
 #[test]

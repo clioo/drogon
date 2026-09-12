@@ -58,6 +58,13 @@ pub struct HarnessLaunchParams {
     pub headless: bool,
 }
 
+/// Daemon runs are headless by definition, so they must never inherit an
+/// approval prompt. Keep the permission choice in one place for every
+/// automation and Bot dispatch path.
+pub(crate) fn headless_permission_mode() -> Option<String> {
+    Some("unattended".to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HarnessStarted {
     pub session_id: String,

@@ -729,7 +729,7 @@ impl crate::Engine {
                         model: automation.model.clone(),
                         effort: None,
                         provider: automation.provider.clone(),
-                        permission_mode: None,
+                        permission_mode: runner::headless_permission_mode(),
                         // `automation.run_now` is a headless daemon run
                         // (issue #186).
                         headless: true,
