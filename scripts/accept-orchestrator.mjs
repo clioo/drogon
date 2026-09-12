@@ -8,11 +8,12 @@
 //      empty canvas that looks broken;
 //   2. a real session (a fixture harness, never paid inference) makes the
 //      Main agent node show its REAL harness, live;
-//   3. the Subagent policy panel: adding an approved runtime, editing the
-//      fallback, and toggling Delegate all write through the real
-//      `graph.write_intent` seam — the probe reads `.drogon/graph.json`
-//      from disk and proves the exact policy landed, with the `state`
-//      half untouched;
+//   3. A no-policy session leaves a fixture repo clean; toggling Delegate on
+//      writes a managed brief for the next session, and toggling Delegate back
+//      off removes the files. Adding an approved runtime and enabling
+//      adversarial mode still write through the real `graph.write_intent`
+//      seam — the probe reads `.drogon/graph.json` from disk and proves the
+//      exact policy landed, with the `state` half untouched;
 //   4. screenshots of BOTH designs (adversarial off / on) in light AND
 //      dark at 1440/1100/900/760, no horizontal overflow, plus the
 //      no-session disabled state;
@@ -32,7 +33,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -151,6 +152,11 @@ async function readGraph(workspace) {
   return JSON.parse(await readFile(path.join(workspace, ".drogon", "graph.json"), "utf8"));
 }
 
+async function gitStatus(workspace) {
+  const { stdout } = await run("git", ["status", "--porcelain"], { cwd: workspace });
+  return stdout;
+}
+
 async function assertNoOverflow(page, label) {
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -168,11 +174,34 @@ async function main() {
     path.join(root, ".preflight", "acceptance", `orchestrator-${Date.now()}`);
   await mkdir(report.output, { recursive: true });
   await mkdir(workspace, { recursive: true });
+  const gitIdentity = [
+    "-c",
+    "user.email=acceptance@drogon.local",
+    "-c",
+    "user.name=Drogon Acceptance",
+    "-c",
+    "init.defaultBranch=main",
+  ];
   const fixtureBin = path.join(fixture, "bin");
   await mkdir(fixtureBin, { recursive: true });
   await writeAgentSettingsFixtures(fixtureBin);
   report.fixture = fixture;
   report.workspace = workspace;
+
+  // Turn the already-registered folder workspace into a disposable fixture
+  // repo. Registering first keeps this journey's implicit folder workspace;
+  // the graph brief itself is still exercised inside a real Git checkout.
+  await run(
+    "git",
+    [...gitIdentity, "init", "--initial-branch=main"],
+    { cwd: workspace },
+  );
+  // The graph store is an application file, not an owner change for this
+  // fixture repository; keep it ignored so the policy reset can prove the
+  // brief files themselves are gone and `git status --porcelain` is clean.
+  await writeFile(path.join(workspace, ".gitignore"), ".drogon/\n");
+  await run("git", [...gitIdentity, "add", ".gitignore"], { cwd: workspace });
+  await run("git", [...gitIdentity, "commit", "-m", "fixture"], { cwd: workspace });
 
   // 1. Start the daemon this probe owns and register the workspace. No
   //    session yet — the Orchestrator must render honestly disabled.
@@ -303,6 +332,10 @@ async function main() {
     "unattended",
   ]);
   report.sessionId = session.id;
+  assert.equal(await gitStatus(workspace), "", "a no-policy session must leave the fixture repo clean");
+  assert.ok(!(await readdir(workspace)).includes("AGENTS.md"));
+  assert.ok(!(await readdir(workspace)).includes("CLAUDE.md"));
+  report.checks.push("no-policy-session-creates-no-brief-files-and-leaves-repo-clean");
   await page.reload();
   await page
     .getByRole("button", { name: "Reveal active workspace", exact: true })
@@ -319,28 +352,19 @@ async function main() {
   assert.match((await mainAgent.innerText()) ?? "", /claude/);
   report.checks.push("main-agent-node-reflects-the-real-live-session");
 
-  // 5. The Subagent policy panel writes through the real graph.write_intent
-  //    seam: add an approved runtime, edit the fallback, toggle Delegate.
+  // 5. DISHONEST-3 (Delegate must be delivered): a policy toggle changes
+  //    what the NEXT session in this workspace actually receives. Start with
+  //    the empty/default policy so the reset below proves that the managed
+  //    files disappear rather than merely changing to an OFF paragraph.
   const policyPanel = panel.locator('[data-testid="subagent-policy-panel"]');
   await policyPanel.waitFor();
   const summary = policyPanel.locator('[data-testid="subagent-policy-summary"]');
-  await policyPanel.locator('[data-testid="add-approved-runtime"]').click();
-  await policyPanel.locator('[data-testid="approved-runtime-row-0"]').waitFor();
   await policyPanel.locator('[data-testid="delegate-toggle"]').click();
   await delay(400); // the save is fire-and-forget from a change handler
-  const withPolicy = await readGraph(workspace);
-  assert.equal(withPolicy.intent.policy.approvedRuntimes.length, 1, JSON.stringify(withPolicy.intent.policy));
-  assert.equal(withPolicy.intent.policy.delegate, true);
-  assert.equal(withPolicy.state.nodes.length, 0, "the policy write must never touch state");
-  report.checks.push("subagent-policy-writes-through-graph-write-intent-only");
-
-  // 5b. DISHONEST-3 (Delegate must be delivered): flipping Delegate must
-  //     change what the NEXT session in this workspace actually receives —
-  //     not only `intent.policy.delegate` on disk and the skill guide's
-  //     prose. The session started in step 4 (already live before Delegate
-  //     was toggled) must be left alone; a freshly launched one must carry
-  //     the current policy in its own `AGENTS.md`, the exact seam every
-  //     harness reads in its own cwd at session start.
+  const delegateOnPolicy = await readGraph(workspace);
+  assert.equal(delegateOnPolicy.intent.policy.approvedRuntimes.length, 0);
+  assert.equal(delegateOnPolicy.intent.policy.delegate, true);
+  assert.equal(delegateOnPolicy.state.nodes.length, 0, "the policy write must never touch state");
   await cliJson(dataDir, [
     "harness",
     "start",
@@ -352,18 +376,24 @@ async function main() {
     "unattended",
   ]);
   const agentsWithDelegateOn = await readFile(path.join(workspace, "AGENTS.md"), "utf8");
+  const claudeWithDelegateOn = await readFile(path.join(workspace, "CLAUDE.md"), "utf8");
   assert.match(agentsWithDelegateOn, /Delegate: ON/, agentsWithDelegateOn);
+  assert.match(claudeWithDelegateOn, /Delegate: ON/, claudeWithDelegateOn);
   assert.ok(
     agentsWithDelegateOn.includes(
       `drogon-cli graph write-intent --workspace ${workspaceRecord.id} --file graph-intent.json`,
     ),
     `the Delegate brief must name the real, workspace-scoped write-intent verb: ${agentsWithDelegateOn}`,
   );
-  report.checks.push("delegate-on-reaches-the-next-sessions-own-agents-md");
+  report.checks.push("delegate-on-reaches-the-next-sessions-own-brief-files");
 
   await policyPanel.locator('[data-testid="delegate-toggle"]').click();
   await delay(400);
-  assert.equal((await readGraph(workspace)).intent.policy.delegate, false);
+  const defaultPolicy = await readGraph(workspace);
+  assert.equal(defaultPolicy.intent.policy.delegate, false);
+  assert.equal(defaultPolicy.intent.policy.approvedRuntimes.length, 0);
+  assert.equal(defaultPolicy.intent.policy.fallbackRuntime, null);
+  assert.equal(defaultPolicy.intent.policy.adversarial.enabled, false);
   await cliJson(dataDir, [
     "harness",
     "start",
@@ -374,20 +404,22 @@ async function main() {
     "--permission-mode",
     "unattended",
   ]);
-  const agentsWithDelegateOff = await readFile(path.join(workspace, "AGENTS.md"), "utf8");
-  assert.match(agentsWithDelegateOff, /Delegate: OFF/, agentsWithDelegateOff);
-  assert.match(
-    agentsWithDelegateOff,
-    /Single node: do the work directly in this session\./,
-    agentsWithDelegateOff,
-  );
-  assert.ok(
-    !agentsWithDelegateOff.includes("Delegate: ON"),
-    `a stale Delegate-ON instruction must never survive the flip: ${agentsWithDelegateOff}`,
-  );
-  report.checks.push(
-    "delegate-off-reaches-the-next-sessions-own-agents-md-and-drops-the-stale-on-instruction",
-  );
+  assert.ok(!(await readdir(workspace)).includes("AGENTS.md"));
+  assert.ok(!(await readdir(workspace)).includes("CLAUDE.md"));
+  assert.equal(await gitStatus(workspace), "", "resetting the policy must clean the fixture repo");
+  report.checks.push("delegate-off-removes-the-managed-block-and-restores-a-clean-repo");
+
+  // Keep the existing policy-panel write-through coverage: once the reset
+  // proof is complete, configure an approved runtime for the design and graph
+  // assertions below. The final cleanup launches one more default session.
+  await policyPanel.locator('[data-testid="add-approved-runtime"]').click();
+  await policyPanel.locator('[data-testid="approved-runtime-row-0"]').waitFor();
+  await delay(400);
+  const withPolicy = await readGraph(workspace);
+  assert.equal(withPolicy.intent.policy.approvedRuntimes.length, 1, JSON.stringify(withPolicy.intent.policy));
+  assert.equal(withPolicy.intent.policy.delegate, false);
+  assert.equal(withPolicy.state.nodes.length, 0, "the policy write must never touch state");
+  report.checks.push("subagent-policy-writes-through-graph-write-intent-only");
 
   // 5c. FRAGILE fix: the fallback runtime can be both set AND removed.
   await policyPanel.locator('[data-testid="fallback-runtime-harness"]').click();
@@ -594,6 +626,33 @@ async function main() {
   report.observedTerminalText = (await terminal.innerText()) ?? "";
   await shot(page, "orchestrator-run-workflow-outcome.png");
   report.checks.push("run-workflow-goes-through-real-dispatch-and-failover-and-never-fabricates-success");
+
+  // Return the policy to its default through the real controls, then launch
+  // one final fixture session. This proves the acceptance itself leaves no
+  // generated brief files or dirty repository behind.
+  await policyPanel.locator('[data-testid="adversarial-toggle"]').click();
+  await delay(400);
+  await policyPanel.locator('[data-testid="approved-runtime-0-remove"]').click();
+  await delay(400);
+  const finalPolicy = await readGraph(workspace);
+  assert.equal(finalPolicy.intent.policy.delegate, false);
+  assert.equal(finalPolicy.intent.policy.adversarial.enabled, false);
+  assert.equal(finalPolicy.intent.policy.approvedRuntimes.length, 0);
+  assert.equal(finalPolicy.intent.policy.fallbackRuntime, null);
+  await cliJson(dataDir, [
+    "harness",
+    "start",
+    "--workspace",
+    workspaceRecord.id,
+    "--harness",
+    "claude",
+    "--permission-mode",
+    "unattended",
+  ]);
+  assert.ok(!(await readdir(workspace)).includes("AGENTS.md"));
+  assert.ok(!(await readdir(workspace)).includes("CLAUDE.md"));
+  assert.equal(await gitStatus(workspace), "", "acceptance cleanup must leave the fixture repo clean");
+  report.checks.push("acceptance-resets-policy-and-leaves-fixture-repo-clean");
 
   // 10. FINDING fix: closing the session and reloading must never collapse
   //    the canvas to the no-session view. Confirmed empirically before this

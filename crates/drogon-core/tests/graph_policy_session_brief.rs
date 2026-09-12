@@ -186,12 +186,12 @@ impl Fixture {
 }
 
 /// The core regression proof (fails on unmodified `origin/main`, where
-/// nothing writes any context file for an ordinary workspace session): with
-/// Delegate ON, a freshly launched session's own `AGENTS.md`/`CLAUDE.md` --
-/// read by the harness itself, not merely present on disk -- names the
+/// context files are always created and a reset leaves stale policy text):
+/// with Delegate ON, a freshly launched session's own `AGENTS.md`/`CLAUDE.md`
+/// -- read by the harness itself, not merely present on disk -- names the
 /// delegate instruction and a real, existing `drogon-cli` verb. With
-/// Delegate OFF, a later session instead receives the honest single-node
-/// instruction, and the delegate instruction is gone.
+/// Delegate OFF, a later session removes the managed block and Drogon-created
+/// files, leaving the workspace clean.
 #[test]
 fn delegate_toggle_reaches_the_next_sessions_own_brief() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -218,63 +218,86 @@ fn delegate_toggle_reaches_the_next_sessions_own_brief() {
     fx.set_delegate(false);
     let with_delegate_off = fx.launch_and_capture();
     assert!(
-        with_delegate_off.contains("Delegate: OFF"),
-        "the harness's own AGENTS.md snapshot must show Delegate OFF after the flip: \
-         {with_delegate_off:?}"
+        !with_delegate_off.contains("Subagent Policy"),
+        "the default policy must not be injected after the flip: {with_delegate_off:?}"
     );
     assert!(
-        with_delegate_off.contains("Single node: do the work directly in this session."),
-        "OFF must name the honest single-node instruction: {with_delegate_off:?}"
+        !fx.workspace_dir.join("AGENTS.md").exists(),
+        "Drogon-created AGENTS.md must be removed when policy returns to default"
     );
     assert!(
-        !with_delegate_off.contains("Delegate: ON"),
-        "a stale ON instruction must never survive the flip: {with_delegate_off:?}"
+        !fx.workspace_dir.join("CLAUDE.md").exists(),
+        "Drogon-created CLAUDE.md must be removed when policy returns to default"
     );
-
     restore_path(previous_path);
 }
 
-/// The brief must be present and honest even for a workspace that never
-/// touched the Work Graph feature at all: no `.drogon/graph.json` on disk
-/// yet still yields the default (delegate off) policy, never an absent or
-/// broken brief.
+/// A workspace that never touched the Work Graph feature at all must remain
+/// byte-for-byte clean after a session starts: no default policy block and no
+/// newly created `AGENTS.md`/`CLAUDE.md`.
 #[test]
-fn a_workspace_with_no_graph_configured_yet_still_gets_the_honest_default_brief() {
+fn a_workspace_with_no_graph_configured_yet_gets_no_policy_files() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let bin = tempfile::tempdir().unwrap();
     write_claude_fixture(bin.path());
     let previous_path = prepend_fixture_bin(bin.path());
 
     let fx = Fixture::new();
+    let marker = fx.workspace_dir.join("owner-file.txt");
+    std::fs::write(&marker, b"owner bytes stay unchanged\n").unwrap();
+    let marker_before = std::fs::read(&marker).unwrap();
+    let before = std::fs::read_dir(&fx.workspace_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
     assert!(!fx.workspace_dir.join(".drogon").join("graph.json").exists());
     let output = fx.launch_and_capture();
-    assert!(output.contains("Delegate: OFF"), "{output:?}");
+    assert!(!output.contains("Subagent Policy"), "{output:?}");
+    assert!(!fx.workspace_dir.join("AGENTS.md").exists());
+    assert!(!fx.workspace_dir.join("CLAUDE.md").exists());
+    let after = std::fs::read_dir(&fx.workspace_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(before, after);
+    assert_eq!(std::fs::read(&marker).unwrap(), marker_before);
 
     restore_path(previous_path);
 }
 
 /// A workspace is very often a real project that already has its own
-/// `AGENTS.md`: the generated Subagent-policy section must never destroy
-/// content the owner actually wrote there.
+/// `AGENTS.md`: configured policy delivery must never destroy content the
+/// owner actually wrote there, and resetting the policy must restore the
+/// exact owner bytes.
 #[test]
-fn a_real_projects_existing_agents_md_content_survives_the_write() {
+fn a_real_projects_existing_agents_md_content_survives_configure_and_reset() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let bin = tempfile::tempdir().unwrap();
     write_claude_fixture(bin.path());
     let previous_path = prepend_fixture_bin(bin.path());
 
     let fx = Fixture::new();
-    std::fs::write(
-        fx.workspace_dir.join("AGENTS.md"),
-        "# Real Project\n\nDo not break the build.\n",
-    )
-    .unwrap();
+    let owner_content = "# Real Project\n\nDo not break the build.\n";
+    std::fs::write(fx.workspace_dir.join("AGENTS.md"), owner_content).unwrap();
+    fx.set_delegate(true);
     let output = fx.launch_and_capture();
     assert!(
         output.contains("Do not break the build."),
         "the owner's own AGENTS.md content must survive: {output:?}"
     );
     assert!(output.contains("Subagent Policy"), "{output:?}");
+
+    fx.set_delegate(false);
+    let reset_output = fx.launch_and_capture();
+    assert!(
+        !reset_output.contains("Subagent Policy"),
+        "{reset_output:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fx.workspace_dir.join("AGENTS.md")).unwrap(),
+        owner_content
+    );
+    assert!(!fx.workspace_dir.join("CLAUDE.md").exists());
 
     restore_path(previous_path);
 }
