@@ -29,7 +29,7 @@ const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("automations", 2, &[("automations-v1", 1)]),
     ("projects", 5, &[("projects-v1", 1)]),
     ("mentu", 1, &[]),
-    ("graph", 1, &[]),
+    ("graph", 2, &[("graph-v1", 1)]),
     ("coordination_access", 1, &[]),
     ("orchestration_mail", 1, &[]),
     ("orchestration_attempts", 1, &[]),
@@ -52,6 +52,7 @@ fn fixture_sql(fixture: &str) -> &'static str {
         "automations-v1" => include_str!("fixtures/upgrades/automations-v1.sql"),
         "bot_monitors-v1" => include_str!("fixtures/upgrades/bot_monitors-v1.sql"),
         "bot_delegation-v2" => include_str!("fixtures/upgrades/bot_delegation-v2.sql"),
+        "graph-v1" => include_str!("fixtures/upgrades/graph-v1.sql"),
         "projects-v1" => include_str!("fixtures/upgrades/projects-v1.sql"),
         "main-schema-v1" => include_str!("fixtures/upgrades/main-schema-v1.sql"),
         "workspaces-only-pre-projects" => {
@@ -176,6 +177,33 @@ fn delegation_firing_rows_survive_v2_to_v3_with_an_honest_null_resource() {
     assert_eq!(outcome, "dispatched");
     assert_eq!(run_id.as_deref(), Some("run-legacy"));
     assert_eq!(resource, None);
+}
+
+#[test]
+fn graph_node_run_rows_survive_v1_to_v2_migration() {
+    let (dir, _engine) = open_seeded("graph-v1-rows", "graph-v1");
+    let conn = read_db(&dir);
+    // The pre-existing launch ledger row is untouched by the additive v2
+    // step.
+    let (node_id, run_id): (String, String) = conn
+        .query_row(
+            "SELECT node_id, run_id FROM graph_node_runs WHERE workspace_id = 'ws-legacy'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(node_id, "n1");
+    assert_eq!(run_id, "run-legacy");
+    // The v1→v2 step's new failover-attempts table exists and starts
+    // empty — a pre-existing node has no failover history to fabricate.
+    let attempts: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM graph_node_failover_attempts",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(attempts, 0);
 }
 
 #[test]

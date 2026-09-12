@@ -11,15 +11,16 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use drogon_protocol::graph::{
-    Graph, GraphCompileParams, GraphCompileResult, GraphIntent, GraphNodeParams,
-    GraphNodeStateResult, GraphResumeResult, GraphRetryStepParams, GraphRunResult, GraphState,
+    Graph, GraphCompileParams, GraphCompileResult, GraphFailoverAttemptRecord, GraphIntent,
+    GraphNodeParams, GraphNodeStateResult, GraphNodeStatus, GraphResumeResult,
+    GraphRetryStepParams, GraphRunNodeFailoverResult, GraphRunResult, GraphRuntimeRef, GraphState,
     GraphWorkspaceParams, GraphWriteIntentParams,
 };
-use drogon_protocol::mentu::MentuApproval;
+use drogon_protocol::mentu::{MentuApproval, MentuRunStatus};
 use drogon_protocol::{Request, RpcError};
 use serde_json::Value;
 
-use crate::graph::{compiler, state, storage, store};
+use crate::graph::{compiler, failover, state, storage, store};
 use crate::mentu::{execution, storage as mentu_storage};
 use crate::{Engine, error, workspace};
 
@@ -167,6 +168,248 @@ impl Engine {
             run,
             compile: compile_result(&mut compiled),
         })
+    }
+
+    /// Launches (or advances) ONE node's Subagent-policy failover episode:
+    /// tries the workspace's approved runtimes in order, then the fallback,
+    /// substituting each candidate for the node's OWN declared harness/model
+    /// — everything else about the node (its dependencies, prompt, id)
+    /// compiles exactly as authored. A candidate that fails to even COMPILE
+    /// (an unsupported harness, a missing Pi provider binding, a `check`/
+    /// `doctor` refusal) is recorded and skipped in the same call, since
+    /// nothing about it needs to be observed first. A candidate that
+    /// launches is recorded and returned; whether ITS run later succeeds or
+    /// fails is for the caller to observe and, on failure, call this same
+    /// method again to advance to the next candidate.
+    pub(crate) fn graph_run_node_failover(&self, request: &Request) -> Result<Value, RpcError> {
+        self.mutating(request, Self::do_graph_run_node_failover)
+    }
+
+    fn do_graph_run_node_failover(&self, params: &Value) -> Result<Value, RpcError> {
+        let parsed: GraphNodeParams = parse(params, "graph.run_node_failover")?;
+        parsed.validate()?;
+        let workspace_root = self.workspace_path(&parsed.workspace_id)?;
+        let graph = store::read_graph(&workspace_root)?;
+        graph.intent.node(&parsed.node_id).ok_or_else(|| {
+            error::not_found(format!("The graph has no node '{}'.", parsed.node_id))
+        })?;
+        let projected =
+            self.refresh_graph_state(&parsed.workspace_id, &workspace_root, &graph.intent)?;
+        let node_status = projected
+            .nodes
+            .iter()
+            .find(|node| node.id == parsed.node_id)
+            .map(|node| node.status)
+            .unwrap_or(GraphNodeStatus::Idle);
+        match node_status {
+            GraphNodeStatus::Running => {
+                return Err(error::invalid_argument(format!(
+                    "Node '{}' already has a live run; wait for it to settle before advancing \
+                     failover.",
+                    parsed.node_id
+                )));
+            }
+            GraphNodeStatus::Succeeded => {
+                return Err(error::invalid_argument(format!(
+                    "Node '{}' already succeeded; failover has nothing left to do.",
+                    parsed.node_id
+                )));
+            }
+            GraphNodeStatus::Blocked => {
+                return Err(error::invalid_argument(format!(
+                    "Node '{}' is blocked (disabled, or an unmet dependency); nothing to fail \
+                     over.",
+                    parsed.node_id
+                )));
+            }
+            GraphNodeStatus::Unverifiable => {
+                return Err(error::invalid_argument(format!(
+                    "Node '{}''s last attempt is unverifiable — contact with it was lost. \
+                     Nothing about pass or fail is claimed, so failover will not guess a next \
+                     runtime; investigate before retrying.",
+                    parsed.node_id
+                )));
+            }
+            GraphNodeStatus::Idle | GraphNodeStatus::Failed => {}
+        }
+
+        let policy = graph.intent.policy.clone();
+        let mut attempted = self.current_failover_episode(&parsed.workspace_id, &parsed.node_id)?;
+        loop {
+            let Some(candidate) = failover::next_runtime(&policy, &attempted) else {
+                let tried: Vec<String> = attempted
+                    .iter()
+                    .map(|r| format!("{}/{}", r.harness, r.model))
+                    .collect();
+                return Err(error::invalid_argument(format!(
+                    "Node '{}': every approved runtime{} was tried and none succeeded ({}). \
+                     Nothing left to try.",
+                    parsed.node_id,
+                    if policy.fallback_runtime.is_some() {
+                        " plus the fallback"
+                    } else {
+                        ""
+                    },
+                    tried.join(", ")
+                )));
+            };
+
+            let mut override_intent = graph.intent.clone();
+            {
+                let node = override_intent
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.id == parsed.node_id)
+                    .expect("presence already checked above");
+                node.harness = candidate.harness.clone();
+                node.model = candidate.model.clone();
+            }
+            let selection = compiler::Selection::Target(parsed.node_id.clone());
+            let attempt_outcome = compiler::compile(
+                &override_intent,
+                &selection,
+                &compiler::PiProviderDefaults::from_env(),
+            )
+            .and_then(|mut compiled| {
+                let runtime_path =
+                    crate::mentu::runtime::require_verified_runtime(self.data_dir())?;
+                compiler::validate_and_persist(
+                    runtime_path.as_path(),
+                    &workspace_root,
+                    &mut compiled,
+                )?;
+                match error_findings(&compiled.findings) {
+                    Some(refusal) => Err(error::invalid_argument(refusal)),
+                    None => Ok(compiled),
+                }
+            });
+
+            let mut compiled = match attempt_outcome {
+                Ok(compiled) => compiled,
+                Err(refusal) => {
+                    self.record_failover_attempt(
+                        &parsed.workspace_id,
+                        &parsed.node_id,
+                        &candidate,
+                        storage::FAILOVER_OUTCOME_LAUNCH_FAILED,
+                        Some(&refusal.message),
+                        None,
+                    )?;
+                    attempted.push(candidate);
+                    continue;
+                }
+            };
+
+            let node_ids = compiled.node_ids();
+            if let Some(busy) = self.running_node(&parsed.workspace_id, &node_ids)? {
+                return Err(error::invalid_argument(format!(
+                    "Node '{busy}' already has a live run; stop it or wait for it before \
+                     launching this subgraph again."
+                )));
+            }
+            let run = self.launch_compiled(&parsed.workspace_id, &node_ids, &mut compiled)?;
+            self.record_failover_attempt(
+                &parsed.workspace_id,
+                &parsed.node_id,
+                &candidate,
+                storage::FAILOVER_OUTCOME_LAUNCHED,
+                None,
+                Some(&run.id),
+            )?;
+            self.refresh_graph_state(&parsed.workspace_id, &workspace_root, &graph.intent)?;
+            let attempt_number = u32::try_from(attempted.len() + 1).unwrap_or(u32::MAX);
+            let attempts = self.failover_attempt_records(&parsed.workspace_id, &parsed.node_id)?;
+            return to_value(GraphRunNodeFailoverResult {
+                run,
+                is_fallback: failover::is_fallback(&policy, &candidate),
+                runtime: candidate,
+                attempt_number,
+                attempts,
+            });
+        }
+    }
+
+    /// The runtimes already tried in the node's CURRENT failover episode:
+    /// every recorded attempt since the most recent one that actually
+    /// succeeded (or every attempt ever, if none has). A node that has
+    /// never succeeded is one long episode; one that succeeded once and is
+    /// being run again fresh starts a new episode from empty.
+    fn current_failover_episode(
+        &self,
+        workspace_id: &str,
+        node_id: &str,
+    ) -> Result<Vec<GraphRuntimeRef>, RpcError> {
+        let all = {
+            let conn = self.db.lock().unwrap();
+            storage::failover_attempts_for_node(&conn, workspace_id, node_id)?
+        };
+        let mut boundary = 0usize;
+        for (index, attempt) in all.iter().enumerate() {
+            if attempt.outcome != storage::FAILOVER_OUTCOME_LAUNCHED {
+                continue;
+            }
+            let Some(run_id) = &attempt.run_id else {
+                continue;
+            };
+            let succeeded = {
+                let conn = self.db.lock().unwrap();
+                mentu_storage::get_run(&conn, run_id)?
+            }
+            .is_some_and(|run| run.status == MentuRunStatus::Succeeded);
+            if succeeded {
+                boundary = index + 1;
+            }
+        }
+        Ok(all[boundary..]
+            .iter()
+            .map(|attempt| GraphRuntimeRef {
+                harness: attempt.harness.clone(),
+                model: attempt.model.clone(),
+            })
+            .collect())
+    }
+
+    fn failover_attempt_records(
+        &self,
+        workspace_id: &str,
+        node_id: &str,
+    ) -> Result<Vec<GraphFailoverAttemptRecord>, RpcError> {
+        let conn = self.db.lock().unwrap();
+        Ok(
+            storage::failover_attempts_for_node(&conn, workspace_id, node_id)?
+                .into_iter()
+                .map(|attempt| GraphFailoverAttemptRecord {
+                    harness: attempt.harness,
+                    model: attempt.model,
+                    outcome: attempt.outcome,
+                    reason: attempt.reason,
+                })
+                .collect(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_failover_attempt(
+        &self,
+        workspace_id: &str,
+        node_id: &str,
+        runtime: &GraphRuntimeRef,
+        outcome: &str,
+        reason: Option<&str>,
+        run_id: Option<&str>,
+    ) -> Result<(), RpcError> {
+        let conn = self.db.lock().unwrap();
+        storage::record_failover_attempt(
+            &conn,
+            workspace_id,
+            node_id,
+            &runtime.harness,
+            &runtime.model,
+            outcome,
+            reason,
+            run_id,
+            &crate::now_rfc3339(),
+        )
     }
 
     pub(crate) fn graph_resume_node(&self, request: &Request) -> Result<Value, RpcError> {

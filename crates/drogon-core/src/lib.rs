@@ -642,6 +642,7 @@ impl Engine {
             "graph.compile" => self.graph_compile(&request.params),
             "graph.write_intent" => self.graph_write_intent(request),
             "graph.run" => self.graph_run(request),
+            "graph.run_node_failover" => self.graph_run_node_failover(request),
             "graph.resume_node" => self.graph_resume_node(request),
             "graph.retry_step" => self.graph_retry_step(request),
             "orchestration.runCreate"

@@ -671,6 +671,36 @@ pub struct GraphResumeResult {
     pub run: crate::mentu::MentuRun,
 }
 
+/// One entry in a node's failover history, as returned to a caller (a
+/// slimmer projection of the daemon's own ledger row — no internal ids).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphFailoverAttemptRecord {
+    pub harness: String,
+    pub model: String,
+    /// `launched`, `launch_failed`, or `failed` — see
+    /// `drogon_core::graph::storage::FailoverAttempt` for the exact meaning
+    /// of each.
+    pub outcome: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Result of `graph.run_node_failover`: which runtime this attempt used,
+/// whether it was the configured fallback, its position in the sequence,
+/// and the full attempt history for this failover episode so a caller never
+/// has to reconstruct it from separate reads.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRunNodeFailoverResult {
+    pub run: crate::mentu::MentuRun,
+    pub runtime: GraphRuntimeRef,
+    pub is_fallback: bool,
+    /// 1 for the first runtime tried this episode, 2 for the second, etc.
+    pub attempt_number: u32,
+    pub attempts: Vec<GraphFailoverAttemptRecord>,
+}
+
 /// A graph node id that is safe as a recipe step label and provider-map key.
 pub fn validate_graph_node_id(id: &str) -> Result<(), RpcError> {
     if id.is_empty()
