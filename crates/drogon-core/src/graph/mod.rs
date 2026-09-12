@@ -4,6 +4,7 @@
 
 pub mod compiler;
 pub mod failover;
+pub mod observability;
 pub mod orchestrator;
 pub mod session_brief;
 pub mod state;

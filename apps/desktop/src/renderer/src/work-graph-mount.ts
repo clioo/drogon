@@ -60,6 +60,15 @@ export function createGatedGraphBridge(
       input: A,
     ) => Promise<Result<T>>;
   return {
+    ...(source.graphObservabilityStatus
+      ? { graphObservabilityStatus: gate(source.graphObservabilityStatus) }
+      : {}),
+    ...(source.graphEvidenceAppend
+      ? { graphEvidenceAppend: gate(source.graphEvidenceAppend) }
+      : {}),
+    ...(source.graphUsageAppend
+      ? { graphUsageAppend: gate(source.graphUsageAppend) }
+      : {}),
     ...(source.graphWritePolicy
       ? { graphWritePolicy: gate(source.graphWritePolicy) }
       : {}),

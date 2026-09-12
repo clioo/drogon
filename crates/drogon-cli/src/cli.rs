@@ -501,6 +501,53 @@ pub enum GraphAction {
         #[arg(long, value_name = "ID")]
         workspace: String,
     },
+    /// Read native lead-agent evidence and token measurements from `.drogon`.
+    Observability {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+    },
+    /// Append one human-readable lead-agent checkpoint to `.drogon/evidence.json`.
+    EvidenceAdd {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "TEXT")]
+        summary: String,
+        #[arg(long, value_name = "STATUS", default_value = "progress")]
+        status: String,
+        #[arg(long, value_name = "TEXT")]
+        detail: Option<String>,
+        #[arg(long, value_name = "PATH")]
+        artifact: Vec<String>,
+        #[arg(long, value_name = "ID")]
+        run: Option<String>,
+        #[arg(long, value_name = "ID")]
+        agent: Option<String>,
+        #[arg(long, value_name = "NAME")]
+        role: Option<String>,
+    },
+    /// Append one provider-reported token measurement to `.drogon/usage.json`.
+    UsageAdd {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "N")]
+        input: Option<u64>,
+        #[arg(long, value_name = "N")]
+        output: Option<u64>,
+        #[arg(long, value_name = "N")]
+        cache_read: Option<u64>,
+        #[arg(long, value_name = "N")]
+        cache_write: Option<u64>,
+        #[arg(long, value_name = "ID")]
+        run: Option<String>,
+        #[arg(long, value_name = "ID")]
+        agent: Option<String>,
+        #[arg(long, value_name = "NAME")]
+        role: Option<String>,
+        #[arg(long, value_name = "ID")]
+        harness: Option<String>,
+        #[arg(long, value_name = "ID")]
+        model: Option<String>,
+    },
     /// Request cancellation of one durable workflow.
     OrchestratorStop {
         #[arg(long, value_name = "ID")]
@@ -1480,8 +1527,38 @@ impl Cli {
                     require_nonempty("workspace", workspace)?;
                     require_nonempty("file", file)?;
                 }
-                GraphAction::OrchestratorStatus { workspace } => {
+                GraphAction::OrchestratorStatus { workspace }
+                | GraphAction::Observability { workspace } => {
                     require_nonempty("workspace", workspace)?;
+                }
+                GraphAction::EvidenceAdd {
+                    workspace,
+                    summary,
+                    status,
+                    ..
+                } => {
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("summary", summary)?;
+                    require_nonempty("status", status)?;
+                }
+                GraphAction::UsageAdd {
+                    workspace,
+                    input,
+                    output,
+                    cache_read,
+                    cache_write,
+                    ..
+                } => {
+                    require_nonempty("workspace", workspace)?;
+                    if input.is_none()
+                        && output.is_none()
+                        && cache_read.is_none()
+                        && cache_write.is_none()
+                    {
+                        return Err(CliError::Usage(
+                            "graph usage-add needs at least one token value".into(),
+                        ));
+                    }
                 }
                 GraphAction::OrchestratorStop { workspace, run }
                 | GraphAction::OrchestratorResume { workspace, run } => {
@@ -3993,5 +4070,40 @@ mod mentu_tests {
                 .validate()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn graph_native_observability_commands_parse_and_validate() {
+        let evidence = parse(&[
+            "graph",
+            "evidence-add",
+            "--workspace",
+            "ws-1",
+            "--summary",
+            "Tests pass",
+            "--artifact",
+            "reports/unit.txt",
+        ])
+        .unwrap();
+        assert!(evidence.validate().is_ok());
+
+        let usage = parse(&[
+            "graph",
+            "usage-add",
+            "--workspace",
+            "ws-1",
+            "--input",
+            "120",
+            "--output",
+            "30",
+        ])
+        .unwrap();
+        assert!(usage.validate().is_ok());
+
+        let empty = parse(&["graph", "usage-add", "--workspace", "ws-1"]).unwrap();
+        assert!(matches!(empty.validate(), Err(CliError::Usage(_))));
+
+        let read = parse(&["graph", "observability", "--workspace", "ws-1"]).unwrap();
+        assert!(read.validate().is_ok());
     }
 }

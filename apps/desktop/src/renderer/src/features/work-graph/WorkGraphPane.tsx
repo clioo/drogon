@@ -8,6 +8,7 @@ import { Button } from "../../components/ui/button";
 import { OrchestratorCanvas } from "../work-graph-workflows/OrchestratorCanvas";
 import { SubagentPolicyPanel } from "../work-graph-workflows/SubagentPolicyPanel";
 import { useOrchestratorRun } from "../work-graph-workflows/use-orchestrator-run";
+import { useGraphObservability } from "../work-graph-workflows/use-graph-observability";
 import { useSubagentPolicy } from "../work-graph-workflows/use-subagent-policy";
 import { useWorkGraphSource } from "./work-graph-source";
 
@@ -50,6 +51,10 @@ export function WorkGraphPane({
     workspaceId,
     adversarialLoopPollMs,
   );
+  const observability = useGraphObservability(graphBridge, workspaceId);
+  const [activeView, setActiveView] = useState<"graph" | "evidence" | "usage">(
+    "graph",
+  );
   const [mainDraft, setMainDraft] = useState<{
     workspaceId: string;
     task: { harness: string; model: string; prompt: string };
@@ -71,6 +76,7 @@ export function WorkGraphPane({
     enabled: true,
     dependsOn: [],
   };
+  const mainForPolicySave = configuredMain.prompt.trim() ? mainNode : undefined;
   const updateMainTask = (task: typeof configuredMain) => {
     setMainDraft({ workspaceId, task });
     subagentPolicy.save(subagentPolicy.policy, { ...mainNode, ...task });
@@ -140,10 +146,15 @@ export function WorkGraphPane({
           workspaceId={workspaceId}
           onStopMainSession={onStopMainSession}
           stoppingMainSession={stoppingMainSession}
+          activeView={activeView}
+          onActiveViewChange={setActiveView}
+          observability={observability.snapshot}
+          observabilityLoading={observability.loading}
+          observabilityError={observability.error}
         />
         <SubagentPolicyPanel
           policy={subagentPolicy.policy}
-          onChange={(policy) => subagentPolicy.save(policy, mainNode)}
+          onChange={(policy) => subagentPolicy.save(policy, mainForPolicySave)}
           interactive={subagentPolicy.interactive}
           mainTask={configuredMain}
           onMainTaskChange={updateMainTask}

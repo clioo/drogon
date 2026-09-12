@@ -392,7 +392,7 @@ mod tests {
             ],
             "fallbackRuntime": {"harness": "custom", "model": "qwen3-coder"},
             "adversarial": {"enabled": true, "maxIterations": 10},
-            "delegate": true,
+            "delegate": false,
         });
         write_intent(
             dir.path(),
@@ -414,7 +414,7 @@ mod tests {
         );
         assert!(graph.intent.policy.adversarial.enabled);
         assert_eq!(graph.intent.policy.adversarial.max_iterations, 10);
-        assert!(graph.intent.policy.delegate);
+        assert!(!graph.intent.policy.delegate);
         assert_eq!(
             graph.intent.nodes.len(),
             2,
@@ -441,14 +441,14 @@ mod tests {
             dir.path(),
             &json!({
                 "nodes": [node("n1")],
-                "policy": {"delegate": true, "adversarial": {"enabled": true, "maxIterations": 5}},
+                "policy": {"delegate": true, "adversarial": {"enabled": false, "maxIterations": 5}},
             }),
         )
         .unwrap();
 
         let graph = read_graph(dir.path()).unwrap();
         assert!(graph.intent.policy.delegate);
-        assert!(graph.intent.policy.adversarial.enabled);
+        assert!(!graph.intent.policy.adversarial.enabled);
         assert_eq!(graph.intent.policy.adversarial.max_iterations, 5);
     }
 

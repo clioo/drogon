@@ -61,6 +61,70 @@ function baseProps() {
 }
 
 describe("OrchestratorCanvas", () => {
+  it("uses top-level Graph, Evidence, and Usage tabs", () => {
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        activeView="evidence"
+        onActiveViewChange={() => {}}
+        observability={{
+          updatedAt: "now",
+          usage: [],
+          evidence: [
+            {
+              id: "e1",
+              timestamp: "2026-09-12T12:00:00Z",
+              status: "progress",
+              summary: "Checkpoint visible",
+              artifacts: [],
+            },
+          ],
+        }}
+        observabilityLoading={false}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "Graph" })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: /Evidence/ }).getAttribute("data-state"),
+    ).toBe("active");
+    expect(screen.getByRole("tab", { name: "Usage" })).toBeTruthy();
+    expect(screen.getByText("Checkpoint visible")).toBeTruthy();
+    expect(screen.queryByTestId("orchestrator-flow")).toBeNull();
+  });
+
+  it("ignores queued graph resize callbacks after switching to Evidence", () => {
+    const callbacks: ResizeObserverCallback[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          callbacks.push(callback);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+
+    const props = {
+      ...baseProps(),
+      policy: policyWithAdversarial(false),
+      onActiveViewChange: () => {},
+    };
+    const { rerender } = render(
+      <OrchestratorCanvas {...props} activeView="graph" />,
+    );
+    rerender(<OrchestratorCanvas {...props} activeView="evidence" />);
+
+    expect(() => {
+      for (const callback of callbacks) {
+        callback([], {} as ResizeObserver);
+      }
+    }).not.toThrow();
+    vi.unstubAllGlobals();
+  });
+
   it("refits when an off-mode run finishes after next-run testing was enabled", () => {
     installRadixJsdomStubs();
     const width = vi
@@ -288,7 +352,8 @@ describe("OrchestratorCanvas", () => {
     expect(terminal.textContent).toContain("Ready to run");
     expect(
       screen.getByTestId("orchestrator-no-subagents-caption").textContent,
-    ).toBe("No optional subagents enabled");
+    ).toBe("Direct mode · main agent works without subagents");
+    expect(screen.queryByTestId("orchestrator-depth-one-workers")).toBeNull();
   });
 
   it("design-2: adversarial on shows the loop with both role nodes and the repeat caption", () => {
@@ -300,9 +365,24 @@ describe("OrchestratorCanvas", () => {
     );
     expect(screen.getByTestId("orchestrator-test-node")).toBeTruthy();
     expect(screen.getByTestId("orchestrator-review-node")).toBeTruthy();
+    expect(screen.getByTestId("orchestrator-depth-one-workers")).toBeTruthy();
     expect(screen.getByTestId("orchestrator-repeat-caption").textContent).toBe(
       "Repeat up to 10×",
     );
+  });
+
+  it("Delegate mode shows depth-one implementation workers without the adversarial loop", () => {
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={{ ...policyWithAdversarial(false), delegate: true }}
+      />,
+    );
+    expect(screen.getByTestId("orchestrator-depth-one-workers")).toBeTruthy();
+    expect(screen.queryByTestId("orchestrator-test-node")).toBeNull();
+    expect(
+      screen.getByTestId("orchestrator-no-subagents-caption").textContent,
+    ).toBe("Delegate mode · depth-1 implementation workers");
   });
 
   it("a never-run terminal renders dashed, not a fabricated green check", () => {

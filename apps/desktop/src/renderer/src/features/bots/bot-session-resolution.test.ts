@@ -90,6 +90,73 @@ describe("resolveBotSession", () => {
     }
   });
 
+  test("a LIVE recorded session is focused even once the record latched the harness conversation", () => {
+    // The owner's report: "ya tengo una sesión abierta de este bot [y]
+    // termina abriendome otra ventana [...] multiples ventanas apuntando a
+    // la misma sesión". The daemon latches `agentSessionId` as soon as the
+    // harness reports it, so ranking that latched conversation ABOVE the
+    // live verdict turned every click on a healthy Bot into a `reopen` --
+    // a new Drogon session (new row, new tab) resuming the conversation
+    // that was already on screen. Liveness leads; the latched id is the
+    // recovery for a session that is NOT live.
+    expect(
+      resolveBotSession({
+        bot: bot(
+          record({
+            verdict: "live",
+            workspaceId: "ws-home",
+            incarnation: "inc-1",
+            agentSessionId: "conv-1",
+          }),
+        ),
+        observed: null,
+        hostId: "host-1",
+      }),
+    ).toEqual({
+      kind: "focus",
+      session: {
+        sessionId: "sess-1",
+        incarnation: "inc-1",
+        workspaceId: "ws-home",
+        hostId: "host-1",
+        harnessId: "claude",
+      },
+    });
+
+    // Same with the host-wide list carrying the live entry: the freshest
+    // copy is focused, still never reopened.
+    const observedLive = resolveBotSession({
+      bot: bot(record({ agentSessionId: "conv-1" })),
+      observed: observedSession({ verdict: "live", incarnation: "inc-fresh" }),
+      hostId: "host-1",
+    });
+    expect(observedLive).toEqual({
+      kind: "focus",
+      session: {
+        sessionId: "sess-1",
+        incarnation: "inc-fresh",
+        workspaceId: "ws-home",
+        hostId: "host-1",
+        harnessId: "claude",
+      },
+    });
+  });
+
+  test("a live projection without the facts a focus needs never reopens the latched conversation", () => {
+    // A running session the renderer cannot address is still running: the
+    // refusal stands instead of dispatching a second live process on the
+    // same conversation.
+    expect(
+      resolveBotSession({
+        bot: bot(
+          record({ verdict: "live", workspaceId: "ws-home", agentSessionId: "conv-1" }),
+        ),
+        observed: null,
+        hostId: "host-1",
+      }),
+    ).toEqual({ kind: "unknown" });
+  });
+
   test("a closed session reopens with a resume, from the projection or the list", () => {
     expect(
       resolveBotSession({

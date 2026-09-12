@@ -119,9 +119,7 @@ const stepUsageSchema = z
     outputTokens: z.number().nullable().optional(),
     usageKnown: z.boolean().nullable().optional(),
     invalid: z
-      .array(
-        z.object({ field: z.string(), reason: z.string() }).passthrough(),
-      )
+      .array(z.object({ field: z.string(), reason: z.string() }).passthrough())
       .optional(),
   })
   .passthrough();
@@ -229,11 +227,17 @@ export const graphAdversarialPolicySchema = z
   })
   .strict();
 
-export type GraphAdversarialPolicy = z.infer<typeof graphAdversarialPolicySchema>;
+export type GraphAdversarialPolicy = z.infer<
+  typeof graphAdversarialPolicySchema
+>;
 
 export const graphPolicySchema = z
   .object({
-    approvedRuntimes: z.array(graphRuntimeRefSchema).max(MAX_POLICY_APPROVED_RUNTIMES).optional().default([]),
+    approvedRuntimes: z
+      .array(graphRuntimeRefSchema)
+      .max(MAX_POLICY_APPROVED_RUNTIMES)
+      .optional()
+      .default([]),
     fallbackRuntime: graphRuntimeRefSchema.nullable().optional().default(null),
     adversarial: graphAdversarialPolicySchema.optional().default({
       enabled: false,
@@ -241,7 +245,17 @@ export const graphPolicySchema = z
     }),
     delegate: z.boolean().optional().default(false),
   })
-  .strict();
+  .strict()
+  .superRefine((policy, ctx) => {
+    if (policy.delegate && policy.adversarial.enabled) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["delegate"],
+        message:
+          "Delegate and adversarial testing are mutually exclusive execution modes.",
+      });
+    }
+  });
 
 export type GraphPolicy = z.infer<typeof graphPolicySchema>;
 
@@ -250,28 +264,34 @@ export type GraphPolicy = z.infer<typeof graphPolicySchema>;
 export const DEFAULT_GRAPH_POLICY: GraphPolicy = Object.freeze({
   approvedRuntimes: [],
   fallbackRuntime: null,
-  adversarial: { enabled: false, maxIterations: DEFAULT_ADVERSARIAL_MAX_ITERATIONS },
+  adversarial: {
+    enabled: false,
+    maxIterations: DEFAULT_ADVERSARIAL_MAX_ITERATIONS,
+  },
   delegate: false,
 });
 
 /** A daemon build that predates this field omits `policy` from `graph.read`
  *  entirely; callers should read policy through this helper rather than
  *  reaching into `intent.policy` directly so that skew never crashes. */
-export function resolveGraphPolicy(intent: { policy?: GraphPolicy | null }): GraphPolicy {
+export function resolveGraphPolicy(intent: {
+  policy?: GraphPolicy | null;
+}): GraphPolicy {
   return intent.policy ?? DEFAULT_GRAPH_POLICY;
 }
 
-/** The exact "3 approved · 1 fallback · 0 optional subagents" line (Part 1).
- *  Pure and derived — never a separately-tracked value that could drift
- *  from the policy it summarizes. Delegate does not add canvas nodes by
- *  itself; only the adversarial loop's two role nodes count as "optional
- *  subagents" today. */
+/** Compact policy summary. The mode is more honest than a fabricated dynamic
+ *  worker count: Delegate and Adversarial can create a task-dependent number
+ *  of depth-one children, while Direct creates none. */
 export function deriveSubagentPolicySummary(policy: GraphPolicy): string {
   const approved = policy.approvedRuntimes.length;
   const fallback = policy.fallbackRuntime ? 1 : 0;
-  const optional = policy.adversarial.enabled ? ADVERSARIAL_OPTIONAL_SUBAGENT_COUNT : 0;
-  const subagentWord = optional === 1 ? "subagent" : "subagents";
-  return `${approved} approved · ${fallback} fallback · ${optional} optional ${subagentWord}`;
+  const mode = policy.adversarial.enabled
+    ? "Adversarial · Depth 1"
+    : policy.delegate
+      ? "Delegate · Depth 1"
+      : "Direct";
+  return `${approved} approved · ${fallback} fallback · ${mode}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -294,14 +314,22 @@ export const FREE_DEFAULT_RUNTIME: GraphRuntimeRef = Object.freeze({
 });
 
 export function isFreeDefaultRuntime(runtime: GraphRuntimeRef): boolean {
-  return runtime.harness === FREE_DEFAULT_RUNTIME.harness && runtime.model === FREE_DEFAULT_RUNTIME.model;
+  return (
+    runtime.harness === FREE_DEFAULT_RUNTIME.harness &&
+    runtime.model === FREE_DEFAULT_RUNTIME.model
+  );
 }
 
 /** The full ordered attempt sequence a failover episode would try for any
  *  node this policy governs — mirrors `failover::attempt_sequence` exactly. */
 export function policyAttemptSequence(policy: GraphPolicy): GraphRuntimeRef[] {
-  const sequence = policy.approvedRuntimes.length > 0 ? [...policy.approvedRuntimes] : [FREE_DEFAULT_RUNTIME];
-  return policy.fallbackRuntime ? [...sequence, policy.fallbackRuntime] : sequence;
+  const sequence =
+    policy.approvedRuntimes.length > 0
+      ? [...policy.approvedRuntimes]
+      : [FREE_DEFAULT_RUNTIME];
+  return policy.fallbackRuntime
+    ? [...sequence, policy.fallbackRuntime]
+    : sequence;
 }
 
 /** The FIRST runtime a "Run workflow" governed by this policy would try —
@@ -314,7 +342,9 @@ export function policyFirstRuntime(policy: GraphPolicy): GraphRuntimeRef {
  *  local default — i.e., whether a run this policy governs could spawn
  *  paid/external inference at some point in its failover episode. */
 export function policyMayRunPaidRuntime(policy: GraphPolicy): boolean {
-  return policyAttemptSequence(policy).some((runtime) => !isFreeDefaultRuntime(runtime));
+  return policyAttemptSequence(policy).some(
+    (runtime) => !isFreeDefaultRuntime(runtime),
+  );
 }
 
 const intentSection = z.object({
@@ -385,7 +415,9 @@ export function parseWorkGraphDocument(raw: string): WorkGraphParseResult {
       ok: false,
       failure: {
         kind: "invalid",
-        message: issue ? `${where}: ${issue.message}` : "structurally invalid graph",
+        message: issue
+          ? `${where}: ${issue.message}`
+          : "structurally invalid graph",
       },
     };
   }

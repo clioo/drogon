@@ -30,6 +30,35 @@ drogon-cli status --json
 `status` must advertise `orchestration.native.v1`. Every verb below is one
 RPC to the running daemon; prefer `--json` for agent-driven calls.
 
+## Read The Workspace Policy First
+
+Before a main agent creates a run or dispatches any worker, it MUST read the
+workspace's native Drogon state:
+
+```text
+drogon-cli graph read --workspace <WORKSPACE_ID> --json
+drogon-cli graph observability --workspace <WORKSPACE_ID> --json
+```
+
+Use `.drogon/graph.json` to choose the execution mode and approved/fallback
+runtimes. Use the Evidence and Usage ledgers to avoid repeating work already
+reported by agents. Do not infer policy from the UI or from memory.
+
+The execution modes are mutually exclusive:
+
+- Both Delegate and Adversarial OFF: work directly; do not create workers.
+- Delegate ON: the main agent is only planner/director. Dispatch implementation
+  workers as depth-one children, supervise them, and never implement their work
+  yourself. Do not add testers.
+- Adversarial ON: the main agent is also only planner/director. For every
+  depth-one implementation worker, dispatch a separate depth-one tester as soon
+  as that worker's final report arrives. Findings go to a sibling correction
+  worker and are retested up to the saved iteration bound. Do not wait for all
+  workers before testing the ones already complete.
+
+Every worker/tester brief must say that it cannot dispatch another worker. All
+implementation, testing, and correction workers are siblings at depth one.
+
 ## The Loop
 
 Create a run, create a task, dispatch a worker, wait for its report:

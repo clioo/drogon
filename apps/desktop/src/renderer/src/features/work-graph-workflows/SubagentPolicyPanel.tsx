@@ -390,7 +390,10 @@ export function SubagentPolicyPanel({
       </div>
 
       <div className="mt-6 border-t border-border pt-4">
-        <h3 className="text-sm font-medium">Optional modes</h3>
+        <h3 className="text-sm font-medium">Execution modes</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Choose at most one. With both off, the main agent works directly.
+        </p>
         <div className="mt-2 flex items-center justify-between gap-2">
           <div>
             <Label htmlFor="policy-adversarial-toggle" className="text-sm">
@@ -404,6 +407,7 @@ export function SubagentPolicyPanel({
             onCheckedChange={(enabled) =>
               onChange({
                 ...policy,
+                delegate: enabled ? false : policy.delegate,
                 adversarial: { ...policy.adversarial, enabled },
               })
             }
@@ -482,32 +486,36 @@ export function SubagentPolicyPanel({
         ) : null}
         <p className="mt-1.5 text-xs text-muted-foreground">
           {policy.adversarial.enabled
-            ? `Adds test and review subagents at depth 1.`
-            : "Adds testing and code review subagents when enabled."}
+            ? "The main agent directs depth-1 workers and starts a tester as each worker finishes."
+            : "Adds depth-1 implementation workers, paired testers, and final review."}
         </p>
 
-        <details className="mt-4">
-          <summary className="cursor-pointer text-xs text-muted-foreground">
-            Advanced options
-          </summary>
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <Label htmlFor="policy-delegate-toggle" className="text-sm">
-              Delegate
-            </Label>
-            <Switch
-              id="policy-delegate-toggle"
-              checked={policy.delegate}
-              disabled={!interactive}
-              onCheckedChange={(delegate) => onChange({ ...policy, delegate })}
-              data-testid="delegate-toggle"
-            />
-          </div>
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            {policy.delegate
-              ? "The NEXT session's main agent plans and delegates to the enabled nodes instead of doing the work itself. A session already running keeps the brief it already received."
-              : "Single node: the NEXT session's main agent does the work itself directly."}
-          </p>
-        </details>
+        <div className="mt-4 flex items-center justify-between gap-2 border-t border-border pt-4">
+          <Label htmlFor="policy-delegate-toggle" className="text-sm">
+            Delegate
+          </Label>
+          <Switch
+            id="policy-delegate-toggle"
+            checked={policy.delegate}
+            disabled={!interactive}
+            onCheckedChange={(delegate) =>
+              onChange({
+                ...policy,
+                delegate,
+                adversarial: {
+                  ...policy.adversarial,
+                  enabled: delegate ? false : policy.adversarial.enabled,
+                },
+              })
+            }
+            data-testid="delegate-toggle"
+          />
+        </div>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {policy.delegate
+            ? "The main agent only plans, directs, and reviews depth-1 workers. It does not implement the task itself."
+            : "Enable to make the main agent a planner and director without adversarial testing."}
+        </p>
       </div>
 
       <p

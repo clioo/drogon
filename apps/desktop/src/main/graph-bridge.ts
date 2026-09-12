@@ -22,6 +22,9 @@ import {
   graphRunResultSchema,
   graphWriteIntentParamsSchema,
   graphWritePolicyParamsSchema,
+  graphEvidenceAppendParamsSchema,
+  graphUsageAppendParamsSchema,
+  graphObservabilityResultSchema,
   orchestratorResultSchema,
   orchestratorStartParamsSchema,
   orchestratorControlParamsSchema,
@@ -46,6 +49,9 @@ const invalid = {
 } as const;
 
 type GraphMethod =
+  | "graphObservabilityStatus"
+  | "graphEvidenceAppend"
+  | "graphUsageAppend"
   | "graphOrchestratorStart"
   | "graphOrchestratorStatus"
   | "graphOrchestratorStop"
@@ -58,6 +64,9 @@ type GraphMethod =
   | "graphRunNodeFailover";
 
 const nativeMethodFor: Record<GraphMethod, string> = {
+  graphObservabilityStatus: "graph.observability_status",
+  graphEvidenceAppend: "graph.evidence_append",
+  graphUsageAppend: "graph.usage_append",
   graphOrchestratorStart: "graph.orchestrator_start",
   graphOrchestratorStatus: "graph.orchestrator_status",
   graphOrchestratorStop: "graph.orchestrator_stop",
@@ -71,6 +80,9 @@ const nativeMethodFor: Record<GraphMethod, string> = {
 };
 
 const channelFor: Record<GraphMethod, string> = {
+  graphObservabilityStatus: "drogon:graphObservabilityStatus",
+  graphEvidenceAppend: "drogon:graphEvidenceAppend",
+  graphUsageAppend: "drogon:graphUsageAppend",
   graphOrchestratorStart: "drogon:graphOrchestratorStart",
   graphOrchestratorStatus: "drogon:graphOrchestratorStatus",
   graphOrchestratorStop: "drogon:graphOrchestratorStop",
@@ -84,6 +96,9 @@ const channelFor: Record<GraphMethod, string> = {
 };
 
 const paramSchemas = {
+  graphObservabilityStatus: graphReadParamsSchema,
+  graphEvidenceAppend: graphEvidenceAppendParamsSchema,
+  graphUsageAppend: graphUsageAppendParamsSchema,
   graphOrchestratorStart: orchestratorStartParamsSchema,
   graphOrchestratorStatus: graphReadParamsSchema,
   graphOrchestratorStop: orchestratorControlParamsSchema,
@@ -97,6 +112,9 @@ const paramSchemas = {
 } as const;
 
 const resultSchemasFor = {
+  graphObservabilityStatus: graphObservabilityResultSchema,
+  graphEvidenceAppend: graphObservabilityResultSchema,
+  graphUsageAppend: graphObservabilityResultSchema,
   graphOrchestratorStart: orchestratorResultSchema,
   graphOrchestratorStatus: orchestratorResultSchema,
   graphOrchestratorStop: orchestratorResultSchema,

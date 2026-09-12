@@ -539,7 +539,11 @@ settles with the same exit-status truth table.
 ### Subagent Policy And The Adversarial Loop
 
 A graph's intent can carry a Subagent policy at `intent.policy` (visible in
-`drogon-cli graph read --workspace <ID> --json`). A workspace with no configured
+`drogon-cli graph read --workspace <ID> --json`). The main agent MUST read that
+result and `drogon-cli graph observability --workspace <ID> --json` before it
+plans or delegates. These are the native `.drogon` policy, evidence, and usage
+records: use them to avoid duplicating completed work and to choose the configured
+runtime order without guessing. A workspace with no configured
 policy has no Drogon-managed policy block in `AGENTS.md`: no policy block in
 `AGENTS.md` means Delegate OFF, Adversarial OFF, and no approved runtimes. Read
 `.drogon/graph.json` via the `drogon-cli graph read --workspace <ID> --json` command
@@ -547,17 +551,24 @@ to confirm before deciding how to act. A configured policy is delivered into the
 next session's managed block; returning to the default removes that block
 without touching owner content:
 
-- `policy.delegate: true` means plan and delegate instead of doing the
-  work yourself: write intent nodes for the subtasks with
+- `policy.delegate: true` and adversarial OFF means the main agent is only a
+  planner and director. It must not implement the task itself. Write intent nodes
+  for independent depth-one subtasks with
   `drogon-cli graph write-intent --workspace <ID> --file graph-intent.json`
-  and let the graph's own execution path run them, rather than doing the
-  work directly in this session.
-- `policy.adversarial.enabled: true` adds a bounded Adversarial-test /
-  Code-review loop to a durable orchestrator run, up to
-  `policy.adversarial.maxIterations` cycles. Both roles execute every cycle;
-  code review fixes confirmed problems and verifies corrections. Findings
-  are successful evaluations, not failed runtime launches. A cycle passes
-  only when both roles pass; corrections require another test cycle.
+  and supervise them through the graph execution path. Every child must be told
+  not to delegate. No automatic tester is added in this mode.
+- `policy.adversarial.enabled: true` is mutually exclusive with Delegate but
+  also makes the main agent a planner/director rather than an implementer.
+  Dispatch depth-one implementation workers. As EACH worker reports completion,
+  immediately dispatch a separate depth-one adversarial tester for that worker's
+  output; do not wait for all implementation workers. Route findings to a
+  depth-one correction worker and retest, up to
+  `policy.adversarial.maxIterations`. Workers, testers, and correction workers
+  are sibling children and none may delegate. Drogon then runs its final bounded
+  whole-workflow Adversarial-test / Code-review pass. Findings are successful
+  evaluations, not failed runtime launches.
+- When both flags are false, the main agent works directly and must not dispatch
+  subagents. A policy with both flags true is invalid and is refused.
 - `policy.approvedRuntimes` (an ordered list) and `policy.fallbackRuntime`
   are the runtimes a subagent node may run under, in priority order.
   Launch a node through that exact order with
@@ -586,8 +597,38 @@ Status includes the captured policy, iterations, evaluations and actual
 runtime attempts. Policy edits apply to the next run. Stop requests
 cancellation: wait for `stopped` before treating work as stopped. Resume
 retains completed roles and refuses an unverifiable run. The scheduler
-creates only depth-one roles; their briefs prohibit further delegation.
-This is not a sandbox restriction on arbitrary commands an agent can run.
+creates only depth-one roles; their briefs prohibit further delegation. The
+main agent must enforce the same limit in every authored child brief. This is
+not a sandbox restriction on arbitrary commands an agent can run.
+
+### Native Evidence And Usage
+
+The lead agent keeps human-readable progress in Drogon's native workspace
+ledgers, not in Mentu. Record a checkpoint after a meaningful result, finding,
+blocker, or completion (not after every tool call):
+
+```sh
+drogon-cli graph evidence-add --workspace <ID> --status progress --summary <SUMMARY> --detail <DETAIL> --artifact reports/unit.txt --agent leader --role implementation
+```
+
+Statuses are `progress`, `finding`, `blocked`, `completed`, and `failed`.
+Entries are stored in `.drogon/evidence.json`; the desktop Evidence tab and a
+plain text editor read the same file. Include only workspace-relative artifact
+references or concise external references—never credentials or provider
+transcripts.
+
+Every agent and subagent should report exact token counts when its harness
+provides them:
+
+```sh
+drogon-cli graph usage-add --workspace <ID> --input 1200 --output 340 --cache-read 800 --harness pi --model <MODEL> --agent <AGENT_ID> --role review
+```
+
+Each usage entry is an incremental measurement; do not submit a cumulative
+session total twice. Omit fields the harness did not report—missing usage is
+unknown, never zero. The native `.drogon/usage.json` ledger and Usage tab sum
+only reported values. Read both ledgers with
+`drogon-cli graph observability --workspace <ID> --json`.
 
 Work Graph opens the Orchestrator directly. The manual node designer and
 named-workflow desktop review flow are retired from the UI; the sidebar
