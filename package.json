@@ -1,7 +1,7 @@
 {
   "name": "drogon-workspace",
   "private": true,
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "license": "MIT",
   "author": "Carlos (clioo)",
   "packageManager": "pnpm@11.19.0",
