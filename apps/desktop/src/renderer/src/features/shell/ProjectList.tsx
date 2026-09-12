@@ -497,12 +497,19 @@ export function ProjectList({
         typeof localStorage !== "undefined"
       ) {
         const legacy = loadWorkspaceOptionsState(localStorage);
+        // The legacy localStorage shape has no migration stamp, so its
+        // `recent` value can only be the pre-stable default. Convert it
+        // while importing; a deliberate Recent selection is written to the
+        // shared store and therefore never reaches this untouched-store path.
+        const legacyForMigration = legacy.sortBy === "recent"
+          ? { ...legacy, sortBy: "manual" as const }
+          : legacy;
         if (
-          JSON.stringify(legacy) !== JSON.stringify(DEFAULT_WORKSPACE_OPTIONS_STATE)
+          JSON.stringify(legacyForMigration) !== JSON.stringify(DEFAULT_WORKSPACE_OPTIONS_STATE)
         ) {
           try {
             const migrated = await ui.set(
-              toSharedUIPreferences(legacy, fetched.worktreeCardProperties),
+              toSharedUIPreferences(legacyForMigration, fetched.worktreeCardProperties),
             );
             if (!cancelled) setSharedPrefs(migrated);
             return;

@@ -84,7 +84,9 @@ export type WorkspaceOptionsState = {
 
 export const DEFAULT_WORKSPACE_OPTIONS_STATE: WorkspaceOptionsState = {
   groupBy: "repo",
-  sortBy: "recent",
+  // Cards stay in their persisted manual order while agents report; Recent
+  // remains available as an explicit opt-in in Workspace options.
+  sortBy: "manual",
   projectOrderBy: "manual",
   cardLayout: "comfortable",
   showProperties: cardPropertiesToFlags(DEFAULT_WORKTREE_CARD_PROPERTIES),

@@ -504,7 +504,8 @@ describe("Workspace options: persistence", () => {
       "drogon:shell:workspace-options",
       JSON.stringify({
         groupBy: "none",
-        sortBy: "name",
+        // This is the pre-stable default from the legacy localStorage shape.
+        sortBy: "recent",
         projectOrderBy: "manual",
         cardLayout: "comfortable",
         showProperties: { branch: true, pr: true },
@@ -523,7 +524,7 @@ describe("Workspace options: persistence", () => {
     };
     mount({ groups });
     await waitFor(() => expect(store.current().groupBy).toBe("none"));
-    expect(store.current().sortBy).toBe("name");
+    expect(store.current().sortBy).toBe("manual");
   });
 });
 

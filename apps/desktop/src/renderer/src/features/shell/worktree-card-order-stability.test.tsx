@@ -4,10 +4,11 @@
    selected one to the top and hides the one below it".
 
    Root cause: App fed the sidebar its `selected`-scoped session list, so a
-   card for any other worktree saw zero sessions. ProjectList's default
+   card for any other worktree saw zero sessions. The historical default
    "Sort by: Recent" comparator (`latestWorktreeActivityAt(worktree,
    sessions)`) therefore fell back to `worktree.createdAt` for every
    non-selected card, and `WorktreeCard` rendered no nested rows for it.
+   The stable default is now Manual; Recent remains an explicit option.
 
    This file pins the two contracts that make the symptom impossible:
    1. card ORDER and each card's rows are a pure function of the `sessions`
@@ -194,7 +195,31 @@ describe("worktree card order and sibling visibility", () => {
     expect(active).toEqual(["wt-b"]);
   });
 
+  test("agent responses do not reorder cards in the stable default Manual mode", () => {
+    const view = mount([SESSION_A, SESSION_B], "ws-a");
+    expect(cardIds()).toEqual(["wt-a", "wt-b"]);
+
+    // Simulate the other task answering later: activity freshness changes,
+    // but the card order remains the persisted/manual order.
+    view.rerender(
+      list(
+        [
+          { ...SESSION_A, agentStateAt: "2026-09-10T13:00:00.000Z" },
+          { ...SESSION_B, agentStateAt: "2026-09-10T14:00:00.000Z" },
+        ],
+        "ws-a",
+      ),
+    );
+    expect(cardIds()).toEqual(["wt-a", "wt-b"]);
+  });
+
   test("a selection-scoped session list is what emptied the sibling (negative control)", () => {
+    // Keep the historical Recent mode explicit so this negative control
+    // continues to exercise the original activity-based ordering bug.
+    localStorage.setItem(
+      "drogon:shell:workspace-options",
+      JSON.stringify({ sortBy: "recent" }),
+    );
     // The pre-fix App input: only the selected workspace's own sessions.
     const scopedToB = [SESSION_B];
     mount(scopedToB, "ws-b");

@@ -26,9 +26,19 @@ const SORT_BY_VALUES = ["name", "smart", "recent", "repo", "manual"] as const;
 const PROJECT_ORDER_BY_VALUES = ["manual", "recent"] as const;
 const CARD_LAYOUT_VALUES = ["comfortable", "compact"] as const;
 
-export const DEFAULT_WORKSPACE_UI_PREFERENCES: WorkspaceUIPreferences = {
+// The old default was Recent, which made a card jump whenever one of its
+// sessions reported activity. Keep this stamp local to the main-process
+// persistence envelope so an old persisted default is migrated once without
+// changing the shared renderer contract. Explicit Recent selections made
+// after hydration remain untouched.
+const SORT_DEFAULT_MIGRATION_STAMP = "_workspaceSortDefaultMigrated" as const;
+type StoredWorkspaceUIPreferences = WorkspaceUIPreferences & {
+  [SORT_DEFAULT_MIGRATION_STAMP]: true;
+};
+
+export const DEFAULT_WORKSPACE_UI_PREFERENCES: StoredWorkspaceUIPreferences = {
   groupBy: "repo",
-  sortBy: "recent",
+  sortBy: "manual",
   projectOrderBy: "manual",
   cardLayout: "comfortable",
   hideSleepingWorkspaces: false,
@@ -55,6 +65,7 @@ export const DEFAULT_WORKSPACE_UI_PREFERENCES: WorkspaceUIPreferences = {
   _workspaceStatusesReorderedDefaultRepaired: true,
   _workspaceStatusesDefaultWorkflowMigrated: true,
   _workspaceStatusesDefaultVisualsMigrated: true,
+  [SORT_DEFAULT_MIGRATION_STAMP]: true,
 };
 
 function isBoolean(value: unknown): value is boolean {
@@ -97,8 +108,9 @@ function normalizeWorktreeCardProperties(value: unknown): WorktreeCardProperty[]
  * each stamp is set once it has had the chance to fire, exactly like the
  * reference's own hydration, never re-run once true.
  */
-export function normalizeWorkspaceUIPreferences(raw: unknown): WorkspaceUIPreferences {
+export function normalizeWorkspaceUIPreferences(raw: unknown): StoredWorkspaceUIPreferences {
   const state = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const sortDefaultMigrated = state[SORT_DEFAULT_MIGRATION_STAMP] === true;
   const limitedMenuProfile = state._expandedWorktreeCardPropertiesDefaulted !== true
     && Array.isArray(state.worktreeCardProperties)
     && state.worktreeCardProperties.every((id) => id === "branch" || id === "pr" || id === "issue");
@@ -132,7 +144,13 @@ export function normalizeWorkspaceUIPreferences(raw: unknown): WorkspaceUIPrefer
 
   return {
     groupBy: normalizeGroupBy(state.groupBy),
-    sortBy: normalizeSortBy(state.sortBy),
+    // Profiles written before the stable-order default shipped have no way
+    // to distinguish their implicit Recent from an explicit choice. Treat
+    // that old value as the old default once; the stamp makes later Recent
+    // selections durable.
+    sortBy: !sortDefaultMigrated && state.sortBy === "recent"
+      ? "manual"
+      : normalizeSortBy(state.sortBy),
     projectOrderBy: normalizeProjectOrderBy(state.projectOrderBy),
     cardLayout: normalizeCardLayout(state.cardLayout),
     agentActivityDisplayMode: state.agentActivityDisplayMode === "full" || state.agentActivityDisplayMode === "compact"
@@ -183,6 +201,7 @@ export function normalizeWorkspaceUIPreferences(raw: unknown): WorkspaceUIPrefer
     // or correctly found nothing to remove, so retrying it on a later
     // hydration would clobber a user's own opt-in.
     _worktreeCardPortsDefaultedOff: true,
+    [SORT_DEFAULT_MIGRATION_STAMP]: true,
   };
 }
 

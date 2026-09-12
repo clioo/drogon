@@ -46,7 +46,7 @@ describe("normalizeWorkspaceUIPreferences", () => {
       projectOrderBy: "nonsense",
     });
     expect(state.groupBy).toBe("repo");
-    expect(state.sortBy).toBe("recent");
+    expect(state.sortBy).toBe("manual");
     expect(state.projectOrderBy).toBe("manual");
   });
 
@@ -54,9 +54,16 @@ describe("normalizeWorkspaceUIPreferences", () => {
     for (const groupBy of ["none", "workspace-status", "repo", "pr-status"] as const) {
       expect(normalizeWorkspaceUIPreferences({ groupBy }).groupBy).toBe(groupBy);
     }
-    for (const sortBy of ["name", "smart", "recent", "repo", "manual"] as const) {
+    for (const sortBy of ["name", "smart", "repo", "manual"] as const) {
       expect(normalizeWorkspaceUIPreferences({ sortBy }).sortBy).toBe(sortBy);
     }
+    // Recent is still a supported explicit choice, but an unstamped Recent
+    // value is the old default and is migrated to stable manual ordering.
+    expect(normalizeWorkspaceUIPreferences({ sortBy: "recent" }).sortBy).toBe("manual");
+    expect(normalizeWorkspaceUIPreferences({
+      sortBy: "recent",
+      _workspaceSortDefaultMigrated: true,
+    }).sortBy).toBe("recent");
     for (const projectOrderBy of ["manual", "recent"] as const) {
       expect(normalizeWorkspaceUIPreferences({ projectOrderBy }).projectOrderBy).toBe(
         projectOrderBy,
@@ -108,6 +115,10 @@ describe("normalizeWorkspaceUIPreferences", () => {
     expect(
       normalizeWorkspaceUIPreferences({ workspaceBoardColumnWidth: 9999 }).workspaceBoardColumnWidth,
     ).toBe(520);
+  });
+
+  it("stamps the stable sort default migration after hydration", () => {
+    expect(normalizeWorkspaceUIPreferences({})._workspaceSortDefaultMigrated).toBe(true);
   });
 
   it("stamps all four _workspaceStatuses* migration flags true after hydration", () => {
@@ -169,6 +180,16 @@ describe("WorkspaceUIPreferencesStore", () => {
     expect(store.get()).toEqual(DEFAULT_WORKSPACE_UI_PREFERENCES);
   });
 
+  it("migrates a persisted unstamped Recent default to stable manual order", () => {
+    const file = tempFile();
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ sortBy: "recent" }), "utf8");
+
+    const store = new WorkspaceUIPreferencesStore(file);
+    expect(store.get().sortBy).toBe("manual");
+    expect(JSON.parse(readFileSync(file, "utf8"))._workspaceSortDefaultMigrated).toBe(true);
+  });
+
   it("persists a partial set field-by-field and survives a reopen", () => {
     const file = tempFile();
     const store = new WorkspaceUIPreferencesStore(file);
@@ -198,5 +219,12 @@ describe("WorkspaceUIPreferencesStore", () => {
     const store = new WorkspaceUIPreferencesStore(null);
     expect(store.get()).toEqual(DEFAULT_WORKSPACE_UI_PREFERENCES);
     expect(store.set({ sortBy: "smart" }).sortBy).toBe("smart");
+  });
+
+  it("preserves an explicit Recent choice after the default migration", () => {
+    const file = tempFile();
+    const store = new WorkspaceUIPreferencesStore(file);
+    expect(store.set({ sortBy: "recent" }).sortBy).toBe("recent");
+    expect(new WorkspaceUIPreferencesStore(file).get().sortBy).toBe("recent");
   });
 });

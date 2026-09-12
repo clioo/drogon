@@ -106,12 +106,12 @@ class FakeStorage implements Pick<Storage, "getItem" | "setItem"> {
 }
 
 describe("workspace options persistence", () => {
-  it("defaults to Repo grouping, recent sort, both properties shown, nothing hidden", () => {
+  it("defaults to Repo grouping, manual sort, both properties shown, nothing hidden", () => {
     expect(loadWorkspaceOptionsState(new FakeStorage())).toEqual(
       DEFAULT_WORKSPACE_OPTIONS_STATE,
     );
     expect(DEFAULT_WORKSPACE_OPTIONS_STATE.groupBy).toBe("repo");
-    expect(DEFAULT_WORKSPACE_OPTIONS_STATE.sortBy).toBe("recent");
+    expect(DEFAULT_WORKSPACE_OPTIONS_STATE.sortBy).toBe("manual");
   });
 
   it("round-trips a full state through save/load", () => {
@@ -625,7 +625,7 @@ describe("manualOrderRanksFromOrderedIds", () => {
 function sharedPrefs(overrides: Partial<WorkspaceUIPreferences> = {}): WorkspaceUIPreferences {
   return {
     groupBy: "repo",
-    sortBy: "recent",
+    sortBy: "manual",
     projectOrderBy: "manual",
     cardLayout: "comfortable",
     hideSleepingWorkspaces: false,
