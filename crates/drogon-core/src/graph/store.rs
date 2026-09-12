@@ -379,6 +379,77 @@ mod tests {
     }
 
     #[test]
+    fn policy_survives_an_intent_write_that_does_not_mention_it() {
+        let dir = workspace();
+        // The Subagent policy panel configures a real policy first.
+        let policy = json!({
+            "approvedRuntimes": [
+                {"harness": "opencode", "model": "claude-sonnet-4"},
+                {"harness": "codex", "model": "gpt-5.3-codex"},
+            ],
+            "fallbackRuntime": {"harness": "custom", "model": "qwen3-coder"},
+            "adversarial": {"enabled": true, "maxIterations": 10},
+            "delegate": true,
+        });
+        write_intent(
+            dir.path(),
+            &json!({"nodes": [node("n1")], "policy": policy}),
+        )
+        .unwrap();
+
+        // Later, the authoring canvas saves a plain node edit — a payload
+        // that names `nodes` only, exactly what `WorkGraphDesigner` sends
+        // today. The policy the panel configured must not vanish.
+        write_intent(dir.path(), &json!({"nodes": [node("n1"), node("n2")]})).unwrap();
+
+        let graph = read_graph(dir.path()).unwrap();
+        assert_eq!(graph.intent.policy.approved_runtimes.len(), 2);
+        assert_eq!(graph.intent.policy.approved_runtimes[0].harness, "opencode");
+        assert_eq!(
+            graph.intent.policy.fallback_runtime.as_ref().unwrap().model,
+            "qwen3-coder"
+        );
+        assert!(graph.intent.policy.adversarial.enabled);
+        assert_eq!(graph.intent.policy.adversarial.max_iterations, 10);
+        assert!(graph.intent.policy.delegate);
+        assert_eq!(
+            graph.intent.nodes.len(),
+            2,
+            "the node edit itself must still apply"
+        );
+    }
+
+    #[test]
+    fn policy_update_replaces_the_whole_policy_and_keeps_nodes_from_incoming() {
+        let dir = workspace();
+        write_intent(
+            dir.path(),
+            &json!({
+                "nodes": [node("n1")],
+                "policy": {"delegate": false, "adversarial": {"enabled": false, "maxIterations": 3}},
+            }),
+        )
+        .unwrap();
+
+        // The policy panel resends the CURRENT nodes verbatim plus its own
+        // new policy — the pattern the panel must follow so it never wipes
+        // nodes it did not intend to touch.
+        write_intent(
+            dir.path(),
+            &json!({
+                "nodes": [node("n1")],
+                "policy": {"delegate": true, "adversarial": {"enabled": true, "maxIterations": 5}},
+            }),
+        )
+        .unwrap();
+
+        let graph = read_graph(dir.path()).unwrap();
+        assert!(graph.intent.policy.delegate);
+        assert!(graph.intent.policy.adversarial.enabled);
+        assert_eq!(graph.intent.policy.adversarial.max_iterations, 5);
+    }
+
+    #[test]
     fn node_level_unknown_fields_survive_a_rewrite_but_removed_nodes_do_not() {
         let dir = workspace();
         let mut first = node("n1");
@@ -549,6 +620,7 @@ mod tests {
                 }),
                 verify_commands: vec![],
             }],
+            ..GraphIntent::default()
         };
         let value = serde_json::to_value(&intent).unwrap();
         write_intent(dir.path(), &value).unwrap();

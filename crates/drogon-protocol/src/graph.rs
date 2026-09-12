@@ -193,6 +193,124 @@ impl GraphNodeIntent {
 pub struct GraphIntent {
     #[serde(default)]
     pub nodes: Vec<GraphNodeIntent>,
+    /// The Subagent policy panel's whole state: additive, optional, defaults
+    /// to "nothing configured yet" for a graph written before this field
+    /// existed. Deliberately NOT listed in the store's known-intent-key set
+    /// (`crates/drogon-core/src/graph/store.rs`): a write that omits
+    /// `policy` (e.g. the authoring canvas saving a node edit) must leave
+    /// whatever policy is already on disk untouched, the same way an
+    /// unknown per-node field like the designer's `position` survives.
+    #[serde(default)]
+    pub policy: GraphPolicy,
+}
+
+/// One (harness, model) pair a subagent may run under. The exact model id
+/// from the per-harness catalog, or the compiler-level `provider/model`
+/// string the graph already accepts elsewhere — this type does not
+/// re-validate that split; `graph/compiler.rs` owns it.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRuntimeRef {
+    pub harness: String,
+    #[serde(default)]
+    pub model: String,
+}
+
+impl GraphRuntimeRef {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        validate_harness(&self.harness)?;
+        if self.model.len() > MAX_GRAPH_MODEL_BYTES || self.model.contains('\0') {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "A policy runtime model id is too long or carries NUL.",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// The bounded adversarial-review loop's own policy: whether it is enabled
+/// and how many test/review cycles it may run before stopping honestly.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphAdversarialPolicy {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_max_iterations")]
+    pub max_iterations: u32,
+}
+
+impl Default for GraphAdversarialPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_iterations: default_max_iterations(),
+        }
+    }
+}
+
+fn default_max_iterations() -> u32 {
+    DEFAULT_ADVERSARIAL_MAX_ITERATIONS
+}
+
+pub const MIN_ADVERSARIAL_MAX_ITERATIONS: u32 = 1;
+pub const MAX_ADVERSARIAL_MAX_ITERATIONS: u32 = 10;
+pub const DEFAULT_ADVERSARIAL_MAX_ITERATIONS: u32 = 3;
+pub const MAX_POLICY_APPROVED_RUNTIMES: usize = 32;
+
+impl GraphAdversarialPolicy {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        if self.max_iterations < MIN_ADVERSARIAL_MAX_ITERATIONS
+            || self.max_iterations > MAX_ADVERSARIAL_MAX_ITERATIONS
+        {
+            return Err(RpcError::new(
+                "invalid_argument",
+                format!(
+                    "Adversarial testing's maximum iterations must be between {MIN_ADVERSARIAL_MAX_ITERATIONS} \
+                     and {MAX_ADVERSARIAL_MAX_ITERATIONS}."
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// The Subagent policy panel's persisted state (`intent.policy`): every
+/// subagent node inherits the approved-runtime order and the fallback: try
+/// each approved runtime in order, only using the fallback once all of them
+/// have failed. `approvedRuntimes` is ordered — that order IS the failover
+/// order, so callers must never reorder it silently.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphPolicy {
+    #[serde(default)]
+    pub approved_runtimes: Vec<GraphRuntimeRef>,
+    #[serde(default)]
+    pub fallback_runtime: Option<GraphRuntimeRef>,
+    #[serde(default)]
+    pub adversarial: GraphAdversarialPolicy,
+    /// When true, the main agent's brief tells it to plan and delegate to
+    /// the enabled nodes instead of doing the work itself (Part 3).
+    #[serde(default)]
+    pub delegate: bool,
+}
+
+impl GraphPolicy {
+    pub fn validate(&self) -> Result<(), RpcError> {
+        if self.approved_runtimes.len() > MAX_POLICY_APPROVED_RUNTIMES {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "The Subagent policy panel carries too many approved runtimes.",
+            ));
+        }
+        for runtime in &self.approved_runtimes {
+            runtime.validate()?;
+        }
+        if let Some(fallback) = &self.fallback_runtime {
+            fallback.validate()?;
+        }
+        self.adversarial.validate()
+    }
 }
 
 impl GraphIntent {
@@ -205,6 +323,7 @@ impl GraphIntent {
                 "The graph carries too many nodes.",
             ));
         }
+        self.policy.validate()?;
         let mut seen: Vec<&str> = Vec::with_capacity(self.nodes.len());
         for node in &self.nodes {
             node.validate()?;
@@ -639,6 +758,7 @@ mod tests {
                 }),
                 verify_commands: vec!["test -f out.txt".into()],
             }],
+            ..GraphIntent::default()
         };
         let value = serde_json::to_value(&intent).unwrap();
         assert_eq!(value["nodes"][0]["dependsOn"], json!(["n0"]));
@@ -707,6 +827,7 @@ mod tests {
     fn validate_reports_unknown_dependency_duplicate_and_cycle() {
         let unknown = GraphIntent {
             nodes: vec![node("n1", &["missing"])],
+            ..GraphIntent::default()
         };
         assert!(
             unknown
@@ -717,6 +838,7 @@ mod tests {
         );
         let duplicate = GraphIntent {
             nodes: vec![node("n1", &[]), node("n1", &[])],
+            ..GraphIntent::default()
         };
         assert!(
             duplicate
@@ -727,6 +849,7 @@ mod tests {
         );
         let cycle = GraphIntent {
             nodes: vec![node("n1", &["n2"]), node("n2", &["n1"])],
+            ..GraphIntent::default()
         };
         assert!(cycle.validate().unwrap_err().message.contains("cycle"));
     }
@@ -735,6 +858,7 @@ mod tests {
     fn topological_order_is_dependency_first_and_deterministic() {
         let intent = GraphIntent {
             nodes: vec![node("n3", &["n1"]), node("n1", &[]), node("n2", &["n1"])],
+            ..GraphIntent::default()
         };
         assert_eq!(intent.validate().unwrap(), vec!["n1", "n2", "n3"]);
     }
@@ -834,5 +958,134 @@ mod tests {
         assert!(node.enabled);
         assert!(node.depends_on.is_empty());
         assert!(node.provider.is_none());
+    }
+
+    #[test]
+    fn policy_defaults_to_nothing_configured_when_absent_from_an_older_intent() {
+        // An intent written before `policy` existed has no such key at all;
+        // it must parse as "nothing configured" rather than refuse.
+        let intent: GraphIntent = serde_json::from_value(json!({"nodes": []})).unwrap();
+        assert_eq!(intent.policy, GraphPolicy::default());
+        assert!(intent.policy.approved_runtimes.is_empty());
+        assert!(intent.policy.fallback_runtime.is_none());
+        assert!(!intent.policy.adversarial.enabled);
+        assert_eq!(
+            intent.policy.adversarial.max_iterations,
+            DEFAULT_ADVERSARIAL_MAX_ITERATIONS
+        );
+        assert!(!intent.policy.delegate);
+        intent.validate().unwrap();
+    }
+
+    #[test]
+    fn policy_round_trips_with_exact_wire_keys() {
+        let intent = GraphIntent {
+            nodes: vec![],
+            policy: GraphPolicy {
+                approved_runtimes: vec![
+                    GraphRuntimeRef {
+                        harness: "opencode".into(),
+                        model: "claude-sonnet-4".into(),
+                    },
+                    GraphRuntimeRef {
+                        harness: "codex".into(),
+                        model: "gpt-5.3-codex".into(),
+                    },
+                ],
+                fallback_runtime: Some(GraphRuntimeRef {
+                    harness: "custom".into(),
+                    model: "qwen3-coder".into(),
+                }),
+                adversarial: GraphAdversarialPolicy {
+                    enabled: true,
+                    max_iterations: 10,
+                },
+                delegate: true,
+            },
+        };
+        intent.validate().unwrap();
+        let value = serde_json::to_value(&intent).unwrap();
+        assert_eq!(
+            value["policy"]["approvedRuntimes"][0]["harness"],
+            "opencode"
+        );
+        assert_eq!(value["policy"]["fallbackRuntime"]["model"], "qwen3-coder");
+        assert_eq!(value["policy"]["adversarial"]["maxIterations"], 10);
+        assert_eq!(value["policy"]["delegate"], true);
+        let back: GraphIntent = serde_json::from_value(value).unwrap();
+        assert_eq!(back, intent);
+    }
+
+    #[test]
+    fn policy_write_omitting_it_must_not_be_confused_with_clearing_it() {
+        // This is the store's job (merge_intent in graph/store.rs never
+        // lists `policy` as a known intent key so an omission preserves the
+        // existing on-disk policy), not this type's — but the type-level
+        // contract this depends on is that a payload with no `policy` key
+        // parses as the DEFAULT, never an error, so the store can tell "not
+        // sent" apart from "sent empty" at the raw-JSON level before this
+        // struct ever sees it.
+        let no_policy_key: GraphIntent =
+            serde_json::from_value(json!({"nodes": [{"id": "n1", "title": "t", "harness": "shell", "model": "", "prompt": "echo hi"}]}))
+                .unwrap();
+        assert_eq!(no_policy_key.policy, GraphPolicy::default());
+    }
+
+    #[test]
+    fn adversarial_max_iterations_bounds_are_enforced() {
+        let mut policy = GraphAdversarialPolicy {
+            enabled: true,
+            max_iterations: 0,
+        };
+        assert!(policy.validate().is_err());
+        policy.max_iterations = MAX_ADVERSARIAL_MAX_ITERATIONS + 1;
+        assert!(policy.validate().is_err());
+        policy.max_iterations = MIN_ADVERSARIAL_MAX_ITERATIONS;
+        policy.validate().unwrap();
+        policy.max_iterations = MAX_ADVERSARIAL_MAX_ITERATIONS;
+        policy.validate().unwrap();
+    }
+
+    #[test]
+    fn policy_rejects_too_many_approved_runtimes() {
+        let policy = GraphPolicy {
+            approved_runtimes: (0..=MAX_POLICY_APPROVED_RUNTIMES)
+                .map(|i| GraphRuntimeRef {
+                    harness: "shell".into(),
+                    model: format!("m{i}"),
+                })
+                .collect(),
+            ..GraphPolicy::default()
+        };
+        assert!(policy.validate().is_err());
+    }
+
+    #[test]
+    fn policy_runtime_rejects_an_invalid_harness_id() {
+        let bad = GraphRuntimeRef {
+            harness: "Not A Valid Harness!".into(),
+            model: String::new(),
+        };
+        assert!(bad.validate().is_err());
+        let good = GraphRuntimeRef {
+            harness: "opencode".into(),
+            model: "claude-sonnet-4".into(),
+        };
+        good.validate().unwrap();
+    }
+
+    #[test]
+    fn graph_intent_validate_surfaces_a_policy_error() {
+        let intent = GraphIntent {
+            nodes: vec![],
+            policy: GraphPolicy {
+                adversarial: GraphAdversarialPolicy {
+                    enabled: true,
+                    max_iterations: 0,
+                },
+                ..GraphPolicy::default()
+            },
+        };
+        assert_eq!(intent.validate().unwrap_err().code, "invalid_argument");
     }
 }
