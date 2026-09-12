@@ -479,43 +479,7 @@ pub(crate) fn approve_monitor_in_tx(
     }))
 }
 
-/// Wire outcome tag for one stored check row (the same vocabulary the
-/// renderer's `MonitorCheckView` uses; derived, never stored).
-fn check_outcome_str(result: &crate::bots::monitors::result::MonitorCheckResult) -> &'static str {
-    match result.outcome {
-        crate::bots::monitors::result::MonitorOutcome::NoChange { .. } => "no_change",
-        crate::bots::monitors::result::MonitorOutcome::Changed { .. } => "changed",
-        crate::bots::monitors::result::MonitorOutcome::Error { .. } => "error",
-    }
-}
-
-/// Durable evidence for the Bots page's monitor card: the newest check row
-/// (time + outcome) and the durable incident count, read from the same
-/// check rows `bot_self_mgmt::incidents_for_monitor` derives incidents
-/// from. All three are computed here so the UI never has to guess.
-fn monitor_check_evidence(conn: &Connection, monitor_id: &str) -> (Value, Value, i64) {
-    let checks = mstorage::list_checks_for_monitor(conn, monitor_id).unwrap_or_default();
-    let last = checks
-        .iter()
-        .max_by(|a, b| a.started_at_ms.total_cmp(&b.started_at_ms));
-    let (last_at, last_outcome) = match last {
-        Some(check) => (
-            json!(check.started_at_ms),
-            json!(check_outcome_str(&check.result)),
-        ),
-        None => (Value::Null, Value::Null),
-    };
-    let incident_count = crate::bot_self_mgmt::incidents_for_monitor(conn, monitor_id)
-        .map(|incidents| incidents.len() as i64)
-        .unwrap_or(0);
-    (last_at, last_outcome, incident_count)
-}
-
-/// `bot.monitor_list`: every monitor owned by the bot with its health,
-/// today's delegation budget (`delegationsToday: {used, max}`) — the
-/// honest state behind the cap — and the durable check evidence the Bots
-/// page renders (`failureThreshold`, `lastCheckAtMs`, `lastCheckOutcome`,
-/// `incidentCount`).
+/// `bot.monitor_list` delegates to the same projection as `bot.self_list`.
 fn monitor_list_in_conn(
     conn: &Connection,
     scope: &MonitorScope,
@@ -527,51 +491,14 @@ fn monitor_list_in_conn(
     let items: Vec<Value> = monitors
         .iter()
         .map(|record| {
-            let (_, project_id) = record.rule.scope();
-            let (last_check_at_ms, last_check_outcome, incident_count) =
-                monitor_check_evidence(conn, &record.id);
-            let mut view = json!({
-                "monitorId": record.id,
-                "version": record.version,
-                "ruleKind": record.rule.kind_str(),
-                "projectId": project_id,
-                "enabled": record.enabled,
-                "approved": record.is_approved(),
-                "responsibilityId": match &record.inference_policy {
-                    crate::bots::monitors::policy::MonitorInferencePolicy::ExplicitResponsibility { responsibility_id } =>
-                        Value::String(responsibility_id.clone()),
-                    _ => Value::Null,
-                },
-                "cursor": record.cursor,
-                "lastEventId": record.last_event_id,
-                "health": crate::bot_self_mgmt::monitor_health(record).as_str(),
-                "trigger": trigger_view(&record.trigger),
-                "consecutiveErrors": record.consecutive_errors,
-                "lastError": record.last_error,
-                "lastNotice": record.last_notice,
-                "failureThreshold": crate::bot_self_mgmt::FAILURE_THRESHOLD,
-                "lastCheckAtMs": last_check_at_ms,
-                "lastCheckOutcome": last_check_outcome,
-                "incidentCount": incident_count,
-                "delegationsToday": {
-                    "used": used,
-                    "max": crate::bots::delegation::MAX_DELEGATIONS_PER_BOT_PER_DAY,
-                },
-                // The monitor's own firing history: what its last change
-                // event did, with the honest outcome — or null when it has
-                // never released an action.
-                "firing": crate::bot_self_mgmt::firing_view(conn, &record.id, now_ms),
-            });
-            if let (Some(view), Some(rule_fields)) =
-                (view.as_object_mut(), record.rule.summary_json().as_object())
-            {
-                for (key, value) in rule_fields {
-                    view.insert(key.clone(), value.clone());
-                }
-            }
-            view
+            let (_, rev) = mstorage::get_monitor(conn, &record.id)
+                .map_err(monitor_error)?
+                .ok_or_else(|| not_found(format!("monitor {} not found", record.id)))?;
+            Ok(crate::bot_self_mgmt::monitor_view(
+                conn, record, rev, now_ms, used,
+            ))
         })
-        .collect();
+        .collect::<Result<_, RpcError>>()?;
     Ok(json!({ "monitors": items }))
 }
 

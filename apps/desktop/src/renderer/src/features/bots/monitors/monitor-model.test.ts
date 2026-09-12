@@ -130,27 +130,36 @@ describe("monitor-model", () => {
       ),
     );
     const source = readFileSync(ruleRs, "utf8");
-    const daemonKinds = [
-      ...source.matchAll(/pub const (RULE_KIND_[A-Z_]+): &str = "([^"]+)"/g),
-    ].map((match) => match[2]);
+    const kindConstants = new Map(
+      [...source.matchAll(/pub const (RULE_KIND_[A-Z_]+): &str = "([^"]+)"/g)].map(
+        (match) => [match[1], match[2]],
+      ),
+    );
+    const evaluatedBlock = source.match(
+      /pub const EVALUATED_RULE_KINDS: &\[&str\] = &\[(.*?)\];/s,
+    );
+    expect(evaluatedBlock).not.toBeNull();
+    const evaluatedNames = [
+      ...(evaluatedBlock?.[1].matchAll(/RULE_KIND_[A-Z_]+/g) ?? []),
+    ].map((match) => match[0]);
+    const daemonKinds = evaluatedNames.map((name) => kindConstants.get(name));
     expect(daemonKinds.length).toBeGreaterThanOrEqual(1);
+    expect(daemonKinds.every((kind): kind is string => kind !== undefined)).toBe(true);
     expect([...SUPPORTED_MONITOR_RULE_KINDS].sort()).toEqual(
       [...daemonKinds].sort(),
     );
   });
 
-  it("admits the script, http-poll and github-pr kinds the daemon ships", () => {
-    for (const ruleKind of [
-      MONITOR_RULE_KIND_SCRIPT,
-      MONITOR_RULE_KIND_HTTP_POLL,
-      MONITOR_RULE_KIND_GITHUB_PR,
-    ]) {
+  it("fails closed for admitted kinds without an evaluator", () => {
+    for (const ruleKind of [MONITOR_RULE_KIND_SCRIPT, MONITOR_RULE_KIND_HTTP_POLL]) {
       const view = record({ ruleKind, approved: false });
-      expect(monitorRuleKindSupported(view.ruleKind)).toBe(true);
-      expect(monitorActionsEnabled(view)).toBe(true);
-      // A parked watch of a supported kind reads as what it is: parked
-      // at needs-approval, never "Unsupported rule kind".
-      expect(monitorStatusLabel(view)).toBe("Needs approval");
+      expect(monitorRuleKindSupported(view.ruleKind)).toBe(false);
+      expect(monitorActionsEnabled(view)).toBe(false);
+      expect(monitorStatusLabel(view)).toBe("Unsupported rule kind");
     }
+    const github = record({ ruleKind: MONITOR_RULE_KIND_GITHUB_PR, approved: false });
+    expect(monitorRuleKindSupported(github.ruleKind)).toBe(true);
+    expect(monitorActionsEnabled(github)).toBe(true);
+    expect(monitorStatusLabel(github)).toBe("Needs approval");
   });
 });

@@ -51,6 +51,9 @@ pub const RULE_KIND_SCRIPT_COMMAND: &str = "script_command.v1";
 pub const RULE_KIND_HTTP_POLL: &str = "http_poll.v1";
 /// GitHub pull-request watch rule kind (v3).
 pub const RULE_KIND_GITHUB_PR: &str = "github_pr.v1";
+/// Rule kinds evaluated by the producer in this build. Schema-admitted kinds
+/// without an evaluator remain readable but are never runnable.
+pub const EVALUATED_RULE_KINDS: &[&str] = &[RULE_KIND_LOCAL_FILE_DIGEST, RULE_KIND_GITHUB_PR];
 /// Schema version of the rule shape itself.
 pub const RULE_SCHEMA_VERSION: u32 = 3;
 /// Longest admitted scope/path string in bytes (host, project, resource).

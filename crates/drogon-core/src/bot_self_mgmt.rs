@@ -74,7 +74,7 @@ use crate::bots::monitors::record::{
     MonitorRecord, MonitorTrigger, bind_responsibility, new_monitor as new_monitor_record,
     new_unapproved_monitor, staged_rule_edit as staged_monitor_rule_edit,
 };
-use crate::bots::monitors::result::{MonitorCheckResult, MonitorErrorKind};
+use crate::bots::monitors::result::{MonitorCheckResult, MonitorErrorKind, MonitorOutcome};
 use crate::bots::monitors::rule::{
     DEFAULT_HTTP_BODY_BYTES, DEFAULT_HTTP_TIMEOUT_MS, DEFAULT_SCRIPT_OUTPUT_BYTES,
     DEFAULT_SCRIPT_TIMEOUT_MS, GithubPrRule, HttpCursorSpec, HttpPollRule, LocalFileRule,
@@ -804,6 +804,7 @@ pub enum MonitorHealth {
     Failing,
     NeedsApproval,
     Disabled,
+    Unsupported,
 }
 
 impl MonitorHealth {
@@ -814,13 +815,25 @@ impl MonitorHealth {
             Self::Failing => "failing",
             Self::NeedsApproval => "needs_approval",
             Self::Disabled => "disabled",
+            Self::Unsupported => "unsupported",
         }
     }
+}
+
+/// Whether this build has a producer-side evaluator for a monitor rule.
+fn has_evaluator(rule: &MonitorRule) -> bool {
+    matches!(
+        rule,
+        MonitorRule::LocalFileDigest(_) | MonitorRule::GithubPr(_)
+    )
 }
 
 pub fn monitor_health(record: &MonitorRecord) -> MonitorHealth {
     if !record.enabled {
         return MonitorHealth::Disabled;
+    }
+    if !has_evaluator(&record.rule) {
+        return MonitorHealth::Unsupported;
     }
     if !record.is_approved() {
         return MonitorHealth::NeedsApproval;
@@ -1095,7 +1108,7 @@ pub const GITHUB_SECRET_KIND: &str = "github";
 /// then commit cursor + check-in + outbox event in ONE transaction each.
 /// Best-effort per monitor — one bad row never aborts the tick — and
 /// silent when there is nothing to do.
-pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSummary {
+pub fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSummary {
     struct Candidate {
         record: MonitorRecord,
         rev: i64,
@@ -1130,9 +1143,10 @@ pub(crate) fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorT
                 summary.skipped += 1;
                 continue;
             }
-            // P1 admits script/http rules and their approval, but execution
-            // arrives with the bounded runner (P2). Skip honestly instead of
-            // fabricating a file read for a kind that has no file to read.
+            if !has_evaluator(&record.rule) {
+                summary.skipped += 1;
+                continue;
+            }
             // `github_pr.v1` has its own evaluator (Phase D below).
             if let Some(github_rule) = record.rule.github_pr() {
                 if github_rule.host_id != engine.host_id {
@@ -1943,16 +1957,42 @@ fn responsibility_view(bot_id: &str, tx: &Transaction, bot: &Bot) -> Vec<Value> 
         .collect()
 }
 
-fn monitor_view(record: &MonitorRecord) -> Value {
-    // Kind-specific fields (resource/maxBytes for the file kind;
-    // scriptPath/scriptHash/interpreter/argv/... for the script kind;
-    // urlHash/cursorSpec/... for the http kind) come from the rule itself.
-    // `ruleKind` lets the renderer fail closed on a kind it does not know.
-    // `responsibilityId` names the action this monitor releases when it
-    // fires (null: an honest observes-only monitor).
+/// Shared monitor projection used by both Bot list surfaces. Keep the
+/// surface-specific aliases (`id`/`monitorId`, `rev`) together so the two
+/// callers cannot drift apart again.
+pub(crate) fn monitor_view(
+    conn: &Connection,
+    record: &MonitorRecord,
+    rev: i64,
+    now_ms: f64,
+    delegations_used_today: i64,
+) -> Value {
+    let checks = monitor_storage::list_checks_for_monitor(conn, &record.id).unwrap_or_default();
+    let last = checks
+        .iter()
+        .max_by(|a, b| a.started_at_ms.total_cmp(&b.started_at_ms));
+    let (last_check_at_ms, last_check_outcome) = match last {
+        Some(check) => (
+            json!(check.started_at_ms),
+            json!(match check.result.outcome {
+                MonitorOutcome::NoChange { .. } => "no_change",
+                MonitorOutcome::Changed { .. } => "changed",
+                MonitorOutcome::Error { .. } => "error",
+            }),
+        ),
+        None => (Value::Null, Value::Null),
+    };
+    let incident_count = incidents_for_monitor(conn, &record.id)
+        .map(|incidents| incidents.len() as i64)
+        .unwrap_or(0);
+    let (_, project_id) = record.rule.scope();
     let mut view = json!({
         "id": record.id,
+        "monitorId": record.id,
         "version": record.version,
+        "rev": rev,
+        "ruleKind": record.rule.kind_str(),
+        "projectId": project_id,
         "enabled": record.enabled,
         "approved": record.is_approved(),
         "health": monitor_health(record).as_str(),
@@ -1961,13 +2001,24 @@ fn monitor_view(record: &MonitorRecord) -> Value {
             crate::bots::monitors::policy::MonitorInferencePolicy::ExplicitResponsibility { responsibility_id } => json!(responsibility_id),
             crate::bots::monitors::policy::MonitorInferencePolicy::NotificationOnly => json!(null),
         },
+        "cursor": record.cursor,
+        "hasCursor": record.cursor.is_some(),
         "consecutiveErrors": record.consecutive_errors,
         "nextEligibleAtMs": record.next_eligible_at_ms,
         "lastSuccessAtMs": record.last_success_at_ms,
         "lastError": record.last_error,
+        "lastNotice": record.last_notice,
         "lastEventId": record.last_event_id,
-        "hasCursor": record.cursor.is_some(),
         "secretRefs": record.secret_refs,
+        "failureThreshold": FAILURE_THRESHOLD,
+        "lastCheckAtMs": last_check_at_ms,
+        "lastCheckOutcome": last_check_outcome,
+        "incidentCount": incident_count,
+        "delegationsToday": {
+            "used": delegations_used_today,
+            "max": crate::bots::delegation::MAX_DELEGATIONS_PER_BOT_PER_DAY,
+        },
+        "firing": firing_view(conn, &record.id, now_ms),
     });
     if let (Some(view), Some(rule_fields)) =
         (view.as_object_mut(), record.rule.summary_json().as_object())
@@ -2069,13 +2120,14 @@ impl crate::Engine {
             .map_err(bots_storage_error)?
             .unwrap_or(0);
         let automations = responsibility_view(&bot.id, &tx, &bot);
-        let mut monitors = Vec::new();
-        for (record, rev) in monitors_for_bot(&tx, &bot.id).map_err(monitor_storage_error)? {
-            let mut view = monitor_view(&record);
-            view["rev"] = json!(rev);
-            view["firing"] = firing_view(&tx, &record.id, crate::now_unix_ms() as f64);
-            monitors.push(view);
-        }
+        let now_ms = crate::now_unix_ms() as f64;
+        let delegations_used_today =
+            crate::bots::delegation::delegations_used_today(&tx, &bot.id, now_ms).unwrap_or(0);
+        let monitors = monitors_for_bot(&tx, &bot.id)
+            .map_err(monitor_storage_error)?
+            .into_iter()
+            .map(|(record, rev)| monitor_view(&tx, &record, rev, now_ms, delegations_used_today))
+            .collect::<Vec<_>>();
         let audit_count = audit_count_for_bot(&tx, &bot.id).map_err(self_storage_error)?;
         Ok(json!({
             "hostId": self.host_id,
@@ -2612,6 +2664,7 @@ struct SelfTriggerWire {
     cron: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SelfCreateMonitor {
@@ -2872,6 +2925,7 @@ fn build_self_rule(
 /// caller (P4) hashes the approved script bytes; this function never reads
 /// or writes the script file.
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub(crate) fn build_self_script_rule(
     host_id: &str,
     home_workspace_id: &str,
@@ -2917,6 +2971,7 @@ pub(crate) fn build_self_script_rule(
 /// Server-resolved admission for `http_poll.v1`: scope is derived and the
 /// URL is supplied only as its approved sha256 hash (the sealed URL row is
 /// P0). Method is GET by construction; there is no method field to set.
+#[allow(dead_code)]
 pub(crate) fn build_self_http_rule(
     host_id: &str,
     home_workspace_id: &str,
@@ -3083,6 +3138,11 @@ fn build_self_rule_from_wire(
         .as_deref()
         .unwrap_or(rule_kinds::RULE_KIND_LOCAL_FILE_DIGEST);
     match kind {
+        rule_kinds::RULE_KIND_SCRIPT_COMMAND | rule_kinds::RULE_KIND_HTTP_POLL => {
+            Err(invalid_argument(format!(
+                "rule kind {kind} is admitted by the schema but has no evaluator in this build; it would never run"
+            )))
+        }
         rule_kinds::RULE_KIND_LOCAL_FILE_DIGEST => {
             let resource = params
                 .resource
@@ -3090,61 +3150,6 @@ fn build_self_rule_from_wire(
                 .ok_or_else(|| invalid_argument("resource is required for local_file_digest.v1"))?;
             let max_bytes = admit_self_max_bytes(params.max_bytes)?;
             build_self_rule(host_id, home_workspace_id, resource, max_bytes)
-        }
-        rule_kinds::RULE_KIND_SCRIPT_COMMAND => {
-            let script_path = params
-                .script_path
-                .as_deref()
-                .ok_or_else(|| invalid_argument("scriptPath is required for script_command.v1"))?;
-            let script_hash = params
-                .script_hash
-                .as_deref()
-                .ok_or_else(|| invalid_argument("scriptHash is required for script_command.v1"))?;
-            let interpreter = match params.interpreter.as_deref() {
-                Some("gh_api") => ScriptInterpreter::GhApi,
-                Some(other) => ScriptInterpreter::Unsupported(other.to_string()),
-                None => {
-                    return Err(invalid_argument(
-                        "interpreter is required for script_command.v1",
-                    ));
-                }
-            };
-            let argv = params
-                .argv
-                .clone()
-                .ok_or_else(|| invalid_argument("argv is required for script_command.v1"))?;
-            let secret_refs = params.secret_refs.clone().unwrap_or_default();
-            build_self_script_rule(
-                host_id,
-                home_workspace_id,
-                script_path,
-                script_hash,
-                interpreter,
-                argv,
-                params.timeout_ms,
-                params.max_output_bytes,
-                secret_refs,
-            )
-        }
-        rule_kinds::RULE_KIND_HTTP_POLL => {
-            let url_hash = params
-                .url_hash
-                .as_deref()
-                .ok_or_else(|| invalid_argument("urlHash is required for http_poll.v1"))?;
-            let cursor_spec = params
-                .cursor_spec
-                .clone()
-                .ok_or_else(|| invalid_argument("cursorSpec is required for http_poll.v1"))?;
-            let secret_refs = params.secret_refs.clone().unwrap_or_default();
-            build_self_http_rule(
-                host_id,
-                home_workspace_id,
-                url_hash,
-                params.timeout_ms,
-                params.max_body_bytes,
-                cursor_spec,
-                secret_refs,
-            )
         }
         other => Err(invalid_argument(format!(
             "unknown monitor rule kind {other:?}"
@@ -3569,6 +3574,17 @@ impl crate::Engine {
                 "health": monitor_health(&record).as_str(),
             }));
         }
+        if !has_evaluator(&record.rule) {
+            return Ok(json!({
+                "hostId": self.host_id,
+                "botId": scope.bot_id,
+                "monitorId": record.id,
+                "eligible": false,
+                "reason": "unsupported_rule_kind",
+                "ruleKind": record.rule.kind_str(),
+                "health": monitor_health(&record).as_str(),
+            }));
+        }
         if !record.is_approved() {
             return Ok(json!({
                 "hostId": self.host_id,
@@ -3579,9 +3595,6 @@ impl crate::Engine {
                 "health": monitor_health(&record).as_str(),
             }));
         }
-        // A script/http dry run has no evaluator in this build (P2 owns
-        // execution); report that honestly rather than reading a file for a
-        // rule that names none.
         let Some(rule) = file_rule else {
             return Ok(json!({
                 "hostId": self.host_id,
