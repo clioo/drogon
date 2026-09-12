@@ -83,7 +83,10 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          node scripts/release-desktop.mjs --tag "$GITHUB_REF_NAME" --output "$RUNNER_TEMP/drogon-release"
+          # The full packaged acceptance suite needs the maintainer's installed
+          # Claude TUI; run it in local preflight and keep release CI focused
+          # on producing/verifying the sealed artifact on a clean runner.
+          node scripts/release-desktop.mjs --tag "$GITHUB_REF_NAME" --output "$RUNNER_TEMP/drogon-release" --skip-acceptance
           printf 'Release version: %s\n' "$version"
 
       - name: Publish the GitHub pre-release (stable tags remain stable)
