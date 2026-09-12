@@ -12,6 +12,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+
 use drogon_protocol::RpcError;
 use drogon_protocol::mentu::{
     MAX_MENTU_EVIDENCE_BYTES, MENTU_EVIDENCE_CONTENT_TRUNCATED, MENTU_EVIDENCE_OUTSIDE_RUN_DIR,
@@ -180,6 +183,247 @@ pub fn parse_steps(run_json: &Value, mentu_run_id: &str) -> Vec<MentuStepRun> {
             })
         })
         .collect()
+}
+
+/// Returns the bounded stderr tail for a failed shell step. Shell-adapter
+/// failures are otherwise often represented only by Mentu's generic
+/// bookkeeping warning, which hides the harness's actual diagnosis.
+pub fn shell_step_stderr_tail(
+    workspace_root: &Path,
+    mentu_run_id: &str,
+    run_json: &Value,
+) -> Option<String> {
+    let step = run_json
+        .get("steps")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|step| {
+            step.get("backend").and_then(Value::as_str) == Some("shell")
+                && step
+                    .get("exit_code")
+                    .and_then(Value::as_i64)
+                    .is_some_and(|code| code != 0)
+        })?;
+    let error_file = step.get("error_file").and_then(Value::as_str)?;
+    if error_file.is_empty() || error_file.contains('/') || error_file.contains('\\') {
+        return None;
+    }
+    let canonical_run_dir = run_dir(workspace_root, mentu_run_id)
+        .ok()?
+        .canonicalize()
+        .ok()?;
+    let path = canonical_run_dir.join(error_file);
+    if !path.starts_with(&canonical_run_dir)
+        || !fs::symlink_metadata(&path).ok()?.file_type().is_file()
+    {
+        return None;
+    }
+    let resolved = path.canonicalize().ok()?;
+    if !resolved.starts_with(&canonical_run_dir)
+        || !fs::metadata(&resolved).ok()?.file_type().is_file()
+    {
+        return None;
+    }
+    // Keep the lexical/canonical checks above for containment and reject a
+    // replacement symlink at open time as well (the record is untrusted).
+    let mut file = {
+        #[cfg(unix)]
+        {
+            fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&resolved)
+                .ok()?
+        }
+        #[cfg(not(unix))]
+        {
+            fs::File::open(&resolved).ok()?
+        }
+    };
+    use std::io::Read as _;
+    let mut stderr = String::new();
+    file.read_to_string(&mut stderr).ok()?;
+    let stderr = stderr.trim();
+    if stderr.is_empty() {
+        return None;
+    }
+    let tail: String = stderr
+        .chars()
+        .rev()
+        .take(400)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    Some(scrub_diagnostic_tail(&tail))
+}
+
+/// Finds an ASCII marker without allowing case differences to bypass it.
+fn find_ascii_case_insensitive(text: &str, needle: &str, from: usize) -> Option<usize> {
+    let text_bytes = text.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    if needle_bytes.is_empty()
+        || needle_bytes.len() > text_bytes.len()
+        || from > text_bytes.len() - needle_bytes.len()
+    {
+        return None;
+    }
+    (from..=text_bytes.len() - needle_bytes.len()).find(|&index| {
+        text_bytes[index..index + needle_bytes.len()]
+            .iter()
+            .zip(needle_bytes)
+            .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
+    })
+}
+
+fn diagnostic_value_range(text: &str, start: usize) -> Option<(usize, usize)> {
+    let start = text[start..]
+        .char_indices()
+        .find(|(_, character)| !character.is_ascii_whitespace())
+        .map(|(offset, _)| start + offset)
+        .unwrap_or(text.len());
+    if start == text.len() {
+        return None;
+    }
+    let first = text[start..].chars().next()?;
+    if first == '\"' || first == '\'' {
+        let content_start = start + first.len_utf8();
+        let end = text[content_start..]
+            .find(first)
+            .map(|offset| content_start + offset)
+            .unwrap_or(text.len());
+        return (content_start < end).then_some((content_start, end));
+    }
+    let end = text[start..]
+        .char_indices()
+        .find(|(_, character)| character.is_whitespace() || ",;\"'".contains(*character))
+        .map(|(offset, _)| start + offset)
+        .unwrap_or(text.len());
+    (start < end).then_some((start, end))
+}
+
+/// Diagnostic text may contain credentials echoed by a CLI. Redact values
+/// after sensitive assignments and common credential prefixes before the text
+/// reaches a durable orchestrator attempt record.
+fn scrub_diagnostic_tail(text: &str) -> String {
+    let mut ranges = Vec::new();
+    let mut redact_value = |start: usize| {
+        if let Some(range) = diagnostic_value_range(text, start) {
+            ranges.push(range);
+        }
+    };
+
+    // Handle both environment-style `NAME=value` and diagnostic-style
+    // `Name: value` assignments. The value after `Authorization: token ...`
+    // starts after the marker, preserving the useful label while removing the
+    // credential itself.
+    for (delimiter, character) in text.char_indices() {
+        if character != '=' && character != ':' {
+            continue;
+        }
+        let name_end = text[..delimiter]
+            .trim_end_matches(|candidate: char| candidate.is_ascii_whitespace())
+            .len();
+        let mut name_start = name_end;
+        while let Some((candidate_start, candidate)) = text[..name_start].char_indices().next_back()
+        {
+            if candidate.is_ascii_alphanumeric() || "_-.".contains(candidate) {
+                name_start = candidate_start;
+            } else {
+                break;
+            }
+        }
+        let name = &text[name_start..name_end];
+        let name_is_sensitive = [
+            "key",
+            "token",
+            "secret",
+            "password",
+            "passwd",
+            "auth",
+            "credential",
+            "bearer",
+        ]
+        .iter()
+        .any(|marker| name.to_ascii_lowercase().contains(marker));
+        if !name_is_sensitive {
+            continue;
+        }
+
+        let value_start = delimiter + character.len_utf8();
+        let first_value = text[value_start..]
+            .char_indices()
+            .find(|(_, candidate)| !candidate.is_ascii_whitespace())
+            .map(|(offset, _)| value_start + offset)
+            .unwrap_or(text.len());
+        let marker_end = ["bearer", "token"].iter().find_map(|marker| {
+            let end = first_value.saturating_add(marker.len());
+            (end <= text.len()
+                && text[first_value..end].eq_ignore_ascii_case(marker)
+                && text[end..]
+                    .chars()
+                    .next()
+                    .is_some_and(|candidate| candidate.is_ascii_whitespace()))
+            .then_some(end)
+        });
+        redact_value(marker_end.unwrap_or(value_start));
+    }
+
+    // Preserve the old standalone `Bearer value` behaviour, but make it
+    // case-insensitive. Assignment markers above cover token=, api_key=,
+    // apikey= and secret= (also case-insensitively).
+    let mut search_from = 0;
+    while let Some(start) = find_ascii_case_insensitive(text, "bearer ", search_from) {
+        redact_value(start + "bearer ".len());
+        search_from = start + "bearer ".len();
+    }
+
+    // Redact recognizable provider credentials even when a CLI omitted the
+    // assignment label. Require a token boundary so prose such as `task-...`
+    // is not changed by the `sk-` prefix.
+    for prefix in [
+        "sk-",
+        "ghp_",
+        "gho_",
+        "github_pat_",
+        "xoxa-",
+        "xoxb-",
+        "xoxp-",
+        "AKIA",
+    ] {
+        let mut search_from = 0;
+        while let Some(start) = find_ascii_case_insensitive(text, prefix, search_from) {
+            let boundary = start == 0
+                || text[..start].chars().next_back().is_some_and(|character| {
+                    !character.is_ascii_alphanumeric() && character != '_'
+                });
+            if boundary {
+                redact_value(start);
+            }
+            search_from = start + prefix.len();
+        }
+    }
+
+    ranges.sort_unstable_by_key(|(start, _)| *start);
+    let mut merged = Vec::with_capacity(ranges.len());
+    for (start, end) in ranges {
+        if let Some((_, previous_end)) = merged.last_mut()
+            && start <= *previous_end
+        {
+            *previous_end = (*previous_end).max(end);
+        } else {
+            merged.push((start, end));
+        }
+    }
+    let mut scrubbed = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for (start, end) in merged {
+        scrubbed.push_str(&text[cursor..start]);
+        scrubbed.push_str(crate::integrations::resolve::REDACTED);
+        cursor = end;
+    }
+    scrubbed.push_str(&text[cursor..]);
+    scrubbed
 }
 
 /// The run's overall outcome string (`"ok"`/`"failed"`/...), mapped to this
@@ -964,6 +1208,70 @@ mod tests {
             output.error.as_deref(),
             Some(MENTU_EVIDENCE_OUTSIDE_RUN_DIR)
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stderr_tail_does_not_follow_symlink_outside_run_dir() {
+        let workspace = tempfile::tempdir().unwrap();
+        let run_dir = workspace
+            .path()
+            .join(".mentu")
+            .join("runs")
+            .join("run_stderr_symlink");
+        fs::create_dir_all(&run_dir).unwrap();
+        let outside = workspace.path().join("auth.json");
+        let secret = "synthetic-secret-that-must-not-escape";
+        fs::write(&outside, secret).unwrap();
+        std::os::unix::fs::symlink(&outside, run_dir.join("step.stderr")).unwrap();
+        let run_json = json!({
+            "steps": [{"backend": "shell", "exit_code": 1, "error_file": "step.stderr"}]
+        });
+
+        let tail = shell_step_stderr_tail(workspace.path(), "run_stderr_symlink", &run_json);
+
+        assert!(tail.is_none(), "refused stderr must use the generic reason");
+    }
+
+    #[test]
+    fn stderr_tail_redacts_common_raw_api_key_assignment() {
+        let text = "OPENAI_API_KEY=raw-api-key Authorization: token raw-token";
+        let scrubbed = scrub_diagnostic_tail(text);
+        assert!(!scrubbed.contains("raw-api-key"), "{scrubbed}");
+        assert!(!scrubbed.contains("raw-token"), "{scrubbed}");
+        assert!(scrubbed.contains("[redacted]"), "{scrubbed}");
+    }
+
+    #[test]
+    fn stderr_tail_redacts_openai_token_prefix() {
+        let scrubbed = scrub_diagnostic_tail("provider returned sk-live-example");
+        assert!(!scrubbed.contains("sk-live-example"), "{scrubbed}");
+    }
+
+    #[test]
+    fn stderr_tail_redacts_github_token_prefixes() {
+        for secret in ["ghp_example", "gho_example", "github_pat_example"] {
+            let scrubbed = scrub_diagnostic_tail(&format!("provider returned {secret}"));
+            assert!(!scrubbed.contains(secret), "{secret} leaked in {scrubbed}");
+        }
+    }
+
+    #[test]
+    fn stderr_tail_redacts_slack_token_prefix() {
+        let scrubbed = scrub_diagnostic_tail("SLACK_TOKEN=xoxb-example");
+        assert!(!scrubbed.contains("xoxb-example"), "{scrubbed}");
+    }
+
+    #[test]
+    fn stderr_tail_redacts_aws_access_key_prefix() {
+        let scrubbed = scrub_diagnostic_tail("AWS_AUTH=AKIAEXAMPLE");
+        assert!(!scrubbed.contains("AKIAEXAMPLE"), "{scrubbed}");
+    }
+
+    #[test]
+    fn stderr_tail_leaves_ordinary_diagnostics_untouched() {
+        let text = "cargo test failed: 3 tests";
+        assert_eq!(scrub_diagnostic_tail(text), text);
     }
 
     #[test]
