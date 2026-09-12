@@ -204,8 +204,9 @@ fn delegate_toggle_reaches_the_next_sessions_own_brief() {
     fx.set_delegate(true);
     let with_delegate_on = fx.launch_and_capture();
     assert!(
-        with_delegate_on.contains("Delegate: ON"),
-        "the harness's own AGENTS.md snapshot must show Delegate ON: {with_delegate_on:?}"
+        with_delegate_on
+            .contains("Mode: DELEGATE (Adversarial testing is mutually exclusive and OFF)"),
+        "the harness's own AGENTS.md snapshot must show the mutually exclusive Delegate mode: {with_delegate_on:?}"
     );
     assert!(
         with_delegate_on.contains(&format!(
