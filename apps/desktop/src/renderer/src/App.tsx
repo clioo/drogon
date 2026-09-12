@@ -2453,6 +2453,27 @@ export function App() {
       setStoppingBotSession(false);
     }
   };
+  const [stoppingMainSession, setStoppingMainSession] = useState(false);
+  // The Orchestrator canvas's leader-node danger zone (Scenario 7): the
+  // SAME generic `session.stop` every other Stop control uses, targeting
+  // whichever session `mentuDispatchContext` currently projects as this
+  // workspace's main agent — never a UI-only dismissal.
+  const stopMainSession = async () => {
+    const target = mentuDispatchContext.mainSession;
+    if (!target) return;
+    setStoppingMainSession(true);
+    try {
+      const result = await window.drogon.stop({
+        sessionId: target.id,
+        incarnation: target.incarnation,
+      });
+      if (result.ok) {
+        setSessions((items) => updateSessionProjection(items, result.result));
+      }
+    } finally {
+      setStoppingMainSession(false);
+    }
+  };
   tasksCloseRef.current = () => closePageRoute(TASKS_ROUTE_ID);
   automationsCloseRef.current = () => closePageRoute(AUTOMATIONS_ROUTE_ID);
   const goForwardViewHistory = () => {
@@ -4955,6 +4976,8 @@ export function App() {
                       hostId={status?.hostId ?? null}
                       workspaceId={current.id}
                       mainSession={mentuDispatchContext.mainSession}
+                      onStopMainSession={() => void stopMainSession()}
+                      stoppingMainSession={stoppingMainSession}
                     />
                   </div>
                 ) : null}

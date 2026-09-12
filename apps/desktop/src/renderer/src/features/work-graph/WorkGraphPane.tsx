@@ -568,6 +568,8 @@ export function WorkGraphPane({
   hostId,
   workspaceId,
   mainSession = null,
+  onStopMainSession,
+  stoppingMainSession,
 }: {
   fileBridge: FileBridge | null;
   /** The gated Mentu bridge, so a selected node can resolve its recorded
@@ -586,6 +588,12 @@ export function WorkGraphPane({
    *  node is a live projection of THIS — never an authored graph node
    *  (Part 4). `null`/absent renders the Orchestrator honestly disabled. */
   mainSession?: Session | null;
+  /** Real termination of `mainSession` (the same generic `session.stop`
+   *  App.tsx's `stopActiveBotSession` uses), passed straight through to the
+   *  Orchestrator's leader-node danger zone. Optional; without it the
+   *  refusal still renders, just with no action attached. */
+  onStopMainSession?: () => void;
+  stoppingMainSession?: boolean;
 }): React.JSX.Element {
   const [mode, setMode] = useState<"view" | "design" | "orchestrator">("view");
   // While DESIGNING, the read poll pauses (enabled=false): the canvas is
@@ -758,6 +766,9 @@ export function WorkGraphPane({
           saveStatus={subagentPolicy.saveStatus}
           saveError={subagentPolicy.saveError}
           onBack={() => setMode("view")}
+          workspaceId={workspaceId}
+          onStopMainSession={onStopMainSession}
+          stoppingMainSession={stoppingMainSession}
         />
         <SubagentPolicyPanel
           policy={subagentPolicy.policy}

@@ -9,12 +9,20 @@
 // at all — it is a live projection of the workspace's real main session
 // (`pickMentuMainSession`, the same primitive the Mentu dispatch seam
 // uses), because the main agent IS that interactive session, not a batch
-// recipe step. Consequences: no session → the whole graph is honestly
-// DISABLED (never an empty canvas that looks broken); a live session shows
-// its REAL harness; the session record carries no `model` field today (see
-// `shared/session-contract.ts`), so the model chip says so honestly
-// instead of fabricating one — a real product gap, not something this
-// view invents an answer for.
+// recipe step. Consequences: no session EVER observed → the whole graph is
+// honestly DISABLED (never an empty canvas that looks broken); a live
+// session shows its REAL harness; the session record carries no `model`
+// field today (see `shared/session-contract.ts`), so the model chip says
+// so honestly instead of fabricating one — a real product gap, not
+// something this view invents an answer for. The daemon's session list
+// drops a session once it is fully torn down, so a session that already
+// exited is remembered locally (`lastKnownRef`) rather than collapsing the
+// canvas back to "no session" and losing that fact — see `MainAgentNode`'s
+// `stale` handling. The node is clickable into a small inspector exposing
+// the same leader-node rules an authored node's `NodeInspector` already
+// enforces while live: harness-change refusal, and delete/stop refusal
+// with a real Stop-session action — never a model-next-launch badge, since
+// there is no model field to defer.
 //
 // "Run workflow" launches exactly the automated, non-interactive portion:
 // when Adversarial testing is on, the (real) adversarial loop; when it is
@@ -22,7 +30,7 @@
 // disabled with an honest reason — "Ready to run" means the main agent
 // alone is enough, not "click to run something".
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowLeft,
   Bot,
@@ -45,6 +53,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import type { LoopLedger } from "./adversarial-loop";
 import { isTerminalPhase } from "./adversarial-loop";
 
@@ -61,11 +70,37 @@ function Chip({ children }: { children: React.ReactNode }): React.JSX.Element {
   );
 }
 
+/** The Main agent node (Part 4/Scenario 7): a live projection of the real
+ *  session, clickable into a small inspector exposing the SAME three
+ *  leader-node honesty rules `WorkGraphDesigner`'s `NodeInspector` already
+ *  enforces for an authored node's live session — harness-change refusal,
+ *  and delete/stop refusal-with-a-real-stop-action. There is deliberately
+ *  no model-applies-next-launch row: `Session` carries no `model` field
+ *  today (see the top-of-file comment), so inventing a next-launch badge
+ *  for a field that does not exist would be its own dishonesty; "model not
+ *  tracked" stays the honest, unchanged readout.
+ *
+ *  The guard for all of this is `!exited`, not the coarser `live` alone:
+ *  an `unverifiable` session (contact lost, not confirmed exited — AGENTS.md
+ *  is explicit that loss of contact never proves exit) could otherwise be
+ *  treated as safely stoppable while a real process might still be
+ *  running. Only a CONFIRMED exit lifts the guard. */
 function MainAgentNode({
   mainSession,
+  stale,
+  onStopMainSession,
+  stoppingMainSession,
 }: {
   mainSession: Session | null;
+  /** True when `mainSession` is the last OBSERVED record, not a fresh
+   *  read (see `OrchestratorCanvas`'s `lastKnownRef`) — live can never be
+   *  claimed for a stale record, only a status already known to be
+   *  `exited` stays `exited`. */
+  stale: boolean;
+  onStopMainSession?: () => void;
+  stoppingMainSession?: boolean;
 }): React.JSX.Element {
+  const [open, setOpen] = useState(false);
   if (!mainSession) {
     return (
       <div
@@ -83,37 +118,101 @@ function MainAgentNode({
       </div>
     );
   }
-  const live = isMentuMainSessionLive(mainSession);
+  const live = !stale && isMentuMainSessionLive(mainSession);
   const exited = mainSession.verdict === "exited";
+  const guardActive = !exited;
+  const dataState = live ? "live" : exited ? "exited" : "unverifiable";
+  const guardReason = live
+    ? "This session is live"
+    : "Contact with this session was lost, so it cannot be assumed dead";
+
   return (
-    <div
-      className={`flex w-56 flex-col gap-1.5 rounded-lg border-2 p-3 ${
-        live
-          ? "border-purple-500 bg-purple-500/5 dark:bg-purple-500/10"
-          : "border-dashed border-amber-500/60 bg-amber-500/5"
-      }`}
-      data-testid="orchestrator-main-agent"
-      data-state={live ? "live" : exited ? "exited" : "unverifiable"}
-    >
-      <div className="flex items-center gap-2">
-        <Bot
-          className={`size-4 ${live ? "text-purple-600 dark:text-purple-400" : "text-amber-600 dark:text-amber-400"}`}
-          aria-hidden
-        />
-        <span className="text-sm font-medium">Main agent</span>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        <Chip>{mainSession.harnessId ?? "shell"}</Chip>
-        <Chip>model not tracked</Chip>
-      </div>
-      {!live ? (
-        <p className="text-[11px] text-amber-700 dark:text-amber-400">
-          {exited
-            ? "This session has exited."
-            : "Contact with this session was lost."}
-        </p>
-      ) : null}
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={`flex w-56 flex-col gap-1.5 rounded-lg border-2 p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
+            live
+              ? "border-purple-500 bg-purple-500/5 hover:bg-purple-500/10 dark:bg-purple-500/10"
+              : "border-dashed border-amber-500/60 bg-amber-500/5 hover:bg-amber-500/10"
+          }`}
+          data-testid="orchestrator-main-agent"
+          data-state={dataState}
+          aria-label={`Main agent, ${dataState}. Open inspector.`}
+        >
+          <div className="flex items-center gap-2">
+            <Bot
+              className={`size-4 ${live ? "text-purple-600 dark:text-purple-400" : "text-amber-600 dark:text-amber-400"}`}
+              aria-hidden
+            />
+            <span className="text-sm font-medium">Main agent</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <Chip>{mainSession.harnessId ?? "shell"}</Chip>
+            <Chip>model not tracked</Chip>
+          </div>
+          {!live ? (
+            <p className="text-[11px] text-amber-700 dark:text-amber-400">
+              {exited
+                ? "This session has exited. Start a new session to continue."
+                : "Contact with this session was lost."}
+            </p>
+          ) : null}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-72 space-y-3 text-xs"
+        data-testid="main-agent-inspector"
+      >
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">Harness</p>
+          <p className="mt-1 text-sm">{mainSession.harnessId ?? "shell"}</p>
+          {guardActive ? (
+            <p
+              className="mt-1 text-[11px] text-muted-foreground"
+              data-testid="main-agent-harness-locked"
+            >
+              {guardReason}, so its harness cannot change. Start a new session with a different
+              harness if you need one — the change would apply at the next launch, not now.
+            </p>
+          ) : null}
+        </div>
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">Model</p>
+          <p className="mt-1 text-sm text-muted-foreground">model not tracked</p>
+        </div>
+        <div className="border-t border-border pt-2">
+          <p className="text-xs font-medium text-muted-foreground">Danger zone</p>
+          {guardActive ? (
+            <>
+              <p
+                className="mt-1 text-[11px] text-muted-foreground"
+                data-testid="main-agent-delete-refused"
+              >
+                {guardReason}, so this is the workspace's main session and it cannot be deleted
+                from here. Stop it first — that is the honest action, not a silent removal.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                className="mt-2"
+                disabled={!onStopMainSession || stoppingMainSession}
+                onClick={() => onStopMainSession?.()}
+                data-testid="main-agent-stop-session"
+              >
+                {stoppingMainSession ? "Stopping…" : "Stop session"}
+              </Button>
+            </>
+          ) : (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              This session has already exited — there is nothing to stop.
+            </p>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -225,6 +324,9 @@ export function OrchestratorCanvas({
   saveStatus,
   saveError,
   onBack,
+  workspaceId,
+  onStopMainSession,
+  stoppingMainSession,
 }: {
   policy: GraphPolicy;
   mainSession: Session | null;
@@ -237,9 +339,52 @@ export function OrchestratorCanvas({
   /** Returns to the read-only Work Graph view. Optional so this component
    *  stays testable standalone. */
   onBack?: () => void;
+  /** Scopes the last-observed-session memory below to ONE workspace, so a
+   *  session that exited in a DIFFERENT workspace can never bleed into one
+   *  that has honestly never had a session at all. Optional so standalone
+   *  tests need not pass it (a missing id just means every render is
+   *  treated as the same workspace, which is correct for a component that
+   *  never switches workspaces in its own lifetime). */
+  workspaceId?: string;
+  /** Real termination of the Main agent's session — the same `session.stop`
+   *  every other Stop control in the app uses (App.tsx's
+   *  `stopActiveBotSession`), threaded down so the leader-node danger zone
+   *  below can refuse deletion honestly AND offer the one action that
+   *  actually resolves it. Optional so a host that cannot mutate sessions
+   *  renders the refusal without a broken button. */
+  onStopMainSession?: () => void;
+  stoppingMainSession?: boolean;
 }): React.JSX.Element {
   const [zoom, setZoom] = useState(ZOOM_DEFAULT);
-  const disabled = mainSession === null;
+  // The Main agent node is a live projection of the real session (Part 4),
+  // but the daemon's session list drops a session once it is fully torn
+  // down — `mainSession` itself goes back to null the moment a session
+  // exits and the workspace is reloaded. Losing that fact would silently
+  // regress the whole canvas to "never had a session" (the exact FINDING
+  // this guards against): remember the last OBSERVED session so the node
+  // can still say `exited`/`unverifiable` instead of vanishing. Reset the
+  // memory the moment the workspace changes so a fact from workspace A can
+  // never bleed into workspace B's honestly-never-had-one view.
+  const lastKnownRef = useRef<{ workspaceId: string | undefined; session: Session } | null>(
+    null,
+  );
+  if (mainSession) {
+    lastKnownRef.current = { workspaceId, session: mainSession };
+  } else if (lastKnownRef.current && lastKnownRef.current.workspaceId !== workspaceId) {
+    lastKnownRef.current = null;
+  }
+  const lastKnownSession = mainSession ? null : (lastKnownRef.current?.session ?? null);
+  // Once the fresh record is gone we no longer have live confirmation —
+  // even a session that was `live` a moment ago must never be claimed live
+  // now (`MainAgentNode` enforces this via `stale`); a session already
+  // observed `exited` keeps saying so, since that specific fact stays true
+  // forever.
+  const stale = mainSession === null && lastKnownSession !== null;
+  const displaySession = mainSession ?? lastKnownSession;
+  const disabled = displaySession === null;
+  const loopInFlight = loopLedger !== null && !isTerminalPhase(loopLedger.phase);
+  const repeatBound = loopInFlight ? loopLedger.maxCycles : policy.adversarial.maxIterations;
+  const repeatPending = loopInFlight && policy.adversarial.maxIterations !== loopLedger.maxCycles;
 
   return (
     <div
@@ -360,7 +505,12 @@ export function OrchestratorCanvas({
             data-testid="orchestrator-flow"
           >
             <div className="flex items-center gap-3">
-              <MainAgentNode mainSession={mainSession} />
+              <MainAgentNode
+                mainSession={displaySession}
+                stale={stale}
+                onStopMainSession={onStopMainSession}
+                stoppingMainSession={stoppingMainSession}
+              />
               <div className="h-px w-8 bg-border" aria-hidden />
               {policy.adversarial.enabled ? (
                 <div className="relative flex items-center gap-3 rounded-lg border-2 border-dashed border-border p-3 pt-6">
@@ -410,7 +560,15 @@ export function OrchestratorCanvas({
                 className="text-xs text-muted-foreground"
                 data-testid="orchestrator-repeat-caption"
               >
-                Repeat up to {policy.adversarial.maxIterations}×
+                Repeat up to {repeatBound}×
+                {repeatPending ? (
+                  <span
+                    className="ml-1 text-amber-600 dark:text-amber-400"
+                    data-testid="orchestrator-repeat-pending"
+                  >
+                    — {policy.adversarial.maxIterations}× applies to the next run
+                  </span>
+                ) : null}
               </p>
             ) : (
               <p
