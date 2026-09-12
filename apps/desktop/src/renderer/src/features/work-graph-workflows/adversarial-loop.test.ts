@@ -153,6 +153,62 @@ describe("advanceLoop: awaiting the base workflow", () => {
   });
 });
 
+// DISHONEST-1: when the base work is the Main agent's own live session
+// (`baseSessionId` set) rather than batch graph nodes, `awaiting_base` must
+// gate on the caller-observed session settlement instead — `baseNodeIds`
+// is irrelevant here, and `observed` (node statuses) is never consulted.
+describe("advanceLoop: awaiting a dispatched main-agent session (DISHONEST-1)", () => {
+  function sessionBase(): LoopLedger {
+    return startLedger({
+      workflowId: "__orchestrator__",
+      baseRunId: "orchestrator-run-1",
+      baseNodeIds: [],
+      baseSessionId: "s1",
+      maxCycles: 2,
+      now: NOW,
+    });
+  }
+
+  it("starts with an honest 'waiting on the main agent' message, distinct from the workflow-base one", () => {
+    const ledger = sessionBase();
+    expect(ledger.phase).toBe("awaiting_base");
+    expect(ledger.baseSessionId).toBe("s1");
+    expect(ledger.message).toContain("main agent's delegated turn");
+  });
+
+  it("does nothing while the session's turn is pending, even with an empty observed-nodes map", () => {
+    const ledger = sessionBase();
+    const { ledger: next, action } = advanceLoop(ledger, observed({}), NOW, "pending");
+    expect(next.phase).toBe("awaiting_base");
+    expect(action).toEqual({ kind: "none" });
+  });
+
+  it("treats an absent (undefined) observation exactly like pending — never a guess", () => {
+    const ledger = sessionBase();
+    const { ledger: next, action } = advanceLoop(ledger, observed({}), NOW);
+    expect(next.phase).toBe("awaiting_base");
+    expect(action).toEqual({ kind: "none" });
+  });
+
+  it("moves to base_failed, honestly, when the session exits before settling", () => {
+    const ledger = sessionBase();
+    const { ledger: next, action } = advanceLoop(ledger, observed({}), NOW, "exited");
+    expect(next.phase).toBe("base_failed");
+    expect(isTerminalPhase(next.phase)).toBe(true);
+    expect(next.message).toContain("exited");
+    expect(action).toEqual({ kind: "none" });
+  });
+
+  it("launches the first review once the session genuinely settles", () => {
+    const ledger = sessionBase();
+    const { ledger: next, action } = advanceLoop(ledger, observed({}), NOW, "settled");
+    expect(next.phase).toBe("reviewing");
+    expect(next.cycle).toBe(1);
+    expect(action.kind).toBe("launch_review");
+    if (action.kind === "launch_review") expect(action.nodeId).toBe(next.activeNodeId);
+  });
+});
+
 describe("advanceLoop: the full pass-first-try path", () => {
   it("passes on cycle 1 and stops (no fix is ever launched)", () => {
     let ledger = base();

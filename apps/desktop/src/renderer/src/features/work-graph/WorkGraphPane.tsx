@@ -95,10 +95,19 @@ import { WorkflowBar } from "../work-graph-workflows/WorkflowBar";
 import { useWorkflowLibrary } from "../work-graph-workflows/use-workflow-library";
 import { useAdversarialLoop } from "../work-graph-workflows/use-adversarial-loop";
 import { findWorkflow } from "../work-graph-workflows/workflow-library";
-import { isTerminalPhase } from "../work-graph-workflows/adversarial-loop";
+import {
+  buildOrchestratorBaseDispatchPrompt,
+  isTerminalPhase,
+} from "../work-graph-workflows/adversarial-loop";
 import { SubagentPolicyPanel } from "../work-graph-workflows/SubagentPolicyPanel";
 import { OrchestratorCanvas } from "../work-graph-workflows/OrchestratorCanvas";
 import { useSubagentPolicy } from "../work-graph-workflows/use-subagent-policy";
+import {
+  defaultMentuDispatchDeps,
+  describeMentuDispatchFailure,
+  dispatchMentuRunPrompt,
+  type MentuDispatchDeps,
+} from "../mentu/mentu-run-dispatch";
 
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 200;
@@ -570,6 +579,9 @@ export function WorkGraphPane({
   mainSession = null,
   onStopMainSession,
   stoppingMainSession,
+  sessions = [],
+  mentuDispatchDeps,
+  adversarialLoopPollMs,
 }: {
   fileBridge: FileBridge | null;
   /** The gated Mentu bridge, so a selected node can resolve its recorded
@@ -594,6 +606,17 @@ export function WorkGraphPane({
    *  refusal still renders, just with no action attached. */
   onStopMainSession?: () => void;
   stoppingMainSession?: boolean;
+  /** DISHONEST-1: the workspace's FULL session list (not just the current
+   *  `mainSession`) so the Orchestrator's loop can keep watching the
+   *  SPECIFIC session it dispatched the base work to, even if the shell's
+   *  own notion of "main" moves to a different session meanwhile. */
+  sessions?: readonly Session[];
+  /** Injectable for tests; defaults to the real `window.drogon` transport
+   *  the Mentu Run Recipe dispatch already uses. */
+  mentuDispatchDeps?: MentuDispatchDeps;
+  /** Test-only override for the adversarial loop's poll cadence; production
+   *  callers never pass this (the hook's own real-product default applies). */
+  adversarialLoopPollMs?: number;
 }): React.JSX.Element {
   const [mode, setMode] = useState<"view" | "design" | "orchestrator">("view");
   // While DESIGNING, the read poll pauses (enabled=false): the canvas is
@@ -644,7 +667,7 @@ export function WorkGraphPane({
   const workflowLibrary = useWorkflowLibrary({ fileBridge, hostId, workspaceId });
   const library = workflowLibrary.state.kind === "ready" ? workflowLibrary.state.library : null;
   const selectedWorkflow = library ? findWorkflow(library, library.selectedWorkflowId) : null;
-  const loopController = useAdversarialLoop({ graphBridge, workspaceId });
+  const loopController = useAdversarialLoop({ graphBridge, workspaceId, pollMs: adversarialLoopPollMs });
 
   useEffect(() => {
     loopController.setPersist(
@@ -705,24 +728,13 @@ export function WorkGraphPane({
     [selectedWorkflow, loopController],
   );
 
-  const workflowBar = (
-    <WorkflowBar
-      library={library}
-      selected={selectedWorkflow}
-      loop={loopController.ledger}
-      interactive={Boolean(graphBridge)}
-      onSelect={handleSelectWorkflow}
-      onCreate={handleCreateWorkflow}
-      onRename={workflowLibrary.renameWorkflow}
-      onDelete={workflowLibrary.deleteWorkflow}
-      onSettingsChange={workflowLibrary.updateSettings}
-    />
-  );
-
   // --- the Orchestrator (Part 1/2/4): the Subagent policy panel and the
   // policy-driven canvas. Reuses the SAME `loopController` instance the
   // WorkflowBar-triggered flow uses — never a second adversarial loop — so
   // a run started from either surface is the one and only loop in flight.
+  // Computed BEFORE `workflowBar` below: the workflow bar's own cost note
+  // (F0) must reflect this SAME policy — never a hardcoded claim that goes
+  // stale the moment any approved/fallback runtime is configured elsewhere.
   const subagentPolicy = useSubagentPolicy({
     graphBridge,
     workspaceId,
@@ -732,17 +744,86 @@ export function WorkGraphPane({
     allowEmptyStart: source.kind === "missing",
     onSaved: refresh,
   });
+
+  const workflowBar = (
+    <WorkflowBar
+      library={library}
+      selected={selectedWorkflow}
+      loop={loopController.ledger}
+      interactive={Boolean(graphBridge)}
+      policy={subagentPolicy.policy}
+      onSelect={handleSelectWorkflow}
+      onCreate={handleCreateWorkflow}
+      onRename={workflowLibrary.renameWorkflow}
+      onDelete={workflowLibrary.deleteWorkflow}
+      onSettingsChange={workflowLibrary.updateSettings}
+    />
+  );
+
   const orchestratorLoopInFlight = Boolean(
     loopController.ledger && !isTerminalPhase(loopController.ledger.phase),
   );
+  // DISHONEST-1: "Run workflow" must cause the Main agent's OWN session to
+  // do something before the loop reviews anything — never fire the review
+  // against whatever happens to already sit in the workspace. Delivers a
+  // real, visible prompt through the exact seam the Mentu Run Recipe
+  // dispatch already uses (the session's PTY echoes it), then starts the
+  // loop watching THAT session (via `baseSessionId`) rather than an empty
+  // `baseNodeIds` — the reducer's `awaiting_base` gate stays genuinely
+  // gated until this session settles (see the effect below).
   const handleRunOrchestratorWorkflow = useCallback(() => {
-    loopController.startForRun({
-      workflowId: "__orchestrator__",
-      baseRunId: `orchestrator-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      baseNodeIds: [],
-      maxCycles: subagentPolicy.policy.adversarial.maxIterations,
-    });
-  }, [loopController, subagentPolicy.policy.adversarial.maxIterations]);
+    const baseRunId = `orchestrator-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const maxCycles = subagentPolicy.policy.adversarial.maxIterations;
+    void (async () => {
+      const dispatched = await dispatchMentuRunPrompt(mentuDispatchDeps ?? defaultMentuDispatchDeps(), {
+        workspaceId,
+        activeSessionId: mainSession?.id ?? null,
+        prompt: buildOrchestratorBaseDispatchPrompt({ baseRunId }),
+      });
+      if (!dispatched.ok) {
+        loopController.startFailedDispatch({
+          workflowId: "__orchestrator__",
+          baseRunId,
+          maxCycles,
+          message: `Run workflow could not reach the main agent: ${describeMentuDispatchFailure(dispatched.failure)}`,
+        });
+        return;
+      }
+      loopController.startForRun({
+        workflowId: "__orchestrator__",
+        baseRunId,
+        baseNodeIds: [],
+        baseSessionId: dispatched.sessionId,
+        maxCycles,
+      });
+    })();
+  }, [
+    loopController,
+    subagentPolicy.policy.adversarial.maxIterations,
+    mainSession,
+    workspaceId,
+    mentuDispatchDeps,
+  ]);
+  const orchestratorLedger = loopController.ledger;
+  useEffect(() => {
+    if (!orchestratorLedger || orchestratorLedger.phase !== "awaiting_base") return;
+    const awaitedSessionId = orchestratorLedger.baseSessionId;
+    if (!awaitedSessionId) return;
+    const dispatched = sessions.find((session) => session.id === awaitedSessionId);
+    if (!dispatched) return; // No positive evidence either way yet — keep waiting.
+    if (dispatched.verdict === "exited" || dispatched.agentState === "exited") {
+      loopController.setBaseSessionObservation(awaitedSessionId, "exited");
+      return;
+    }
+    // Settled means a GENUINE idle transition since the dispatch, not
+    // merely "happens to read idle right now" (which could be stale from
+    // before the prompt was even sent).
+    const settled =
+      dispatched.agentState === "idle" &&
+      Boolean(dispatched.agentStateAt) &&
+      dispatched.agentStateAt! >= orchestratorLedger.startedAt;
+    loopController.setBaseSessionObservation(awaitedSessionId, settled ? "settled" : "pending");
+  }, [loopController, sessions, orchestratorLedger]);
   const orchestratorRunDisabledReason = !mainSession
     ? "Start a session to enable the orchestrator."
     : !subagentPolicy.policy.adversarial.enabled

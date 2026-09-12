@@ -34,6 +34,7 @@ import {
 } from "./workflow-library";
 import type { WorkflowMutationResult } from "./use-workflow-library";
 import { ADVERSARIAL_MODEL, isTerminalPhase, type LoopLedger } from "./adversarial-loop";
+import { policyMayRunPaidRuntime, type GraphPolicy } from "../../../../shared/work-graph-contract";
 
 function loopToneClass(phase: LoopLedger["phase"]): string {
   switch (phase) {
@@ -242,6 +243,7 @@ export function WorkflowBar({
   selected,
   loop,
   interactive,
+  policy,
   onSelect,
   onCreate,
   onRename,
@@ -255,6 +257,12 @@ export function WorkflowBar({
    *  what it knows, but every control that would write is disabled with an
    *  honest reason instead of silently doing nothing. */
   interactive: boolean;
+  /** F0: the workspace's Subagent policy — the ONLY thing that can make
+   *  this checkbox's loop spawn a paid/external runtime instead of the
+   *  free local default. The cost note below must reflect THIS, never a
+   *  hardcoded "never billed" claim that stops being true the moment any
+   *  approved/fallback runtime is configured elsewhere in the app. */
+  policy: GraphPolicy;
   onSelect: (id: string) => void;
   onCreate: (name: string) => Promise<WorkflowMutationResult>;
   onRename: (id: string, name: string) => Promise<WorkflowMutationResult>;
@@ -355,10 +363,21 @@ export function WorkflowBar({
             />
           </div>
           {selected.settings.adversarialReviewEnabled ? (
-            <span className="text-[10px] text-muted-foreground" data-testid="workflow-bar-cost-note">
-              Free local model only ({ADVERSARIAL_MODEL}) — never billed. The cap limits time, not
-              spend.
-            </span>
+            policyMayRunPaidRuntime(policy) ? (
+              <span
+                className="text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                data-testid="workflow-bar-cost-note"
+              >
+                This workspace's Subagent policy allows a paid/external runtime for this loop — it
+                is NOT free-local-only. Check the Orchestrator's Subagent policy panel for exactly
+                which ones. The cap limits time, not spend.
+              </span>
+            ) : (
+              <span className="text-[10px] text-muted-foreground" data-testid="workflow-bar-cost-note">
+                Free local model only ({ADVERSARIAL_MODEL}) — never billed. The cap limits time, not
+                spend.
+              </span>
+            )
           ) : null}
         </div>
       ) : null}

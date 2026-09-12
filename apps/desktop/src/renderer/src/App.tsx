@@ -4978,6 +4978,7 @@ export function App() {
                       mainSession={mentuDispatchContext.mainSession}
                       onStopMainSession={() => void stopMainSession()}
                       stoppingMainSession={stoppingMainSession}
+                      sessions={sessions}
                     />
                   </div>
                 ) : null}

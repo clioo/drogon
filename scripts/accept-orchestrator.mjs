@@ -16,11 +16,15 @@
 //   4. screenshots of BOTH designs (adversarial off / on) in light AND
 //      dark at 1440/1100/900/760, no horizontal overflow, plus the
 //      no-session disabled state;
-//   5. Run workflow goes through the real `graph.run_node_failover` path —
-//      this dev daemon has no real provider configured, so the honest,
-//      deterministic outcome is a launch refusal (proving the "designed
-//      but never run" -> real-attempt distinction, not a fabricated
-//      success).
+//   5. "Run workflow" DISPATCHES the base task to the Main agent's own
+//      live session first (a real, visible prompt through the same seam
+//      the Mentu Run Recipe dispatch uses) and only then goes through the
+//      real `graph.run_node_failover` path once that session's turn
+//      settles — this dev daemon has no real provider configured, so the
+//      honest, deterministic outcome is a launch refusal (proving the
+//      "designed but never run" -> real-attempt distinction, not a
+//      fabricated success), and the canvas discloses which runtime would
+//      run and whether it is the free local default BEFORE the click.
 //
 // Background window only: DROGON_BACKGROUND_WINDOW=1, its own
 // DROGON_DATA_DIR/DROGON_ELECTRON_PROFILE, no focus call of any kind.
@@ -506,10 +510,35 @@ async function main() {
   await canvas.waitFor();
   report.checks.push("design-2-screenshots-light-dark-no-overflow");
 
-  // 8. Run workflow: the real `graph.run_node_failover` path. This dev
-  //    daemon has no real provider configured, so the honest outcome is a
-  //    launch refusal — the terminal must show it never reached "passed",
-  //    not a fabricated success.
+  // 8. F0: BEFORE clicking "Run workflow", the canvas must disclose which
+  //    runtime would run and whether it is the free local default — never
+  //    a silent paid/external spawn. Computed the same way the app does
+  //    (mirrors `FREE_DEFAULT_RUNTIME` in `shared/work-graph-contract.ts`),
+  //    not assumed, since the approved runtime added in step 5 could be
+  //    the catalog's default free pair or something else.
+  const FREE_DEFAULT = { harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4" };
+  const currentPolicy = (await readGraph(workspace)).intent.policy;
+  const firstRuntime = currentPolicy.approvedRuntimes[0] ?? currentPolicy.fallbackRuntime ?? FREE_DEFAULT;
+  const expectFree = firstRuntime.harness === FREE_DEFAULT.harness && firstRuntime.model === FREE_DEFAULT.model;
+  const disclosure = panel.locator('[data-testid="orchestrator-runtime-disclosure"]');
+  await disclosure.waitFor({ timeout: 10000 });
+  assert.equal(await disclosure.getAttribute("data-free-default"), String(expectFree));
+  assert.match(
+    (await disclosure.innerText()) ?? "",
+    expectFree ? /free local model/ : /paid\/external/,
+  );
+  report.checks.push("run-workflow-discloses-the-runtime-before-launch");
+
+  // 9. "Run workflow" (DISHONEST-1): dispatches the base task to the Main
+  //    agent's OWN session first — the terminal must show it genuinely
+  //    waiting on that dispatch, never firing the review within the same
+  //    instant as the click. Only once the fixture session's turn settles
+  //    (its own generic agent-state heuristic sees a real busy quiet-again
+  //    transition from the dispatched write) does the real, BROKEN-2-fixed
+  //    `graph.run_node_failover` episode proceed. This dev daemon has no
+  //    real provider configured, so the honest, deterministic outcome is
+  //    still a launch refusal once the episode is genuinely exhausted —
+  //    never a fabricated "ready".
   const repeatCaption = panel.locator('[data-testid="orchestrator-repeat-caption"]');
   const boundBeforeRun = (await repeatCaption.innerText().catch(() => "")) ?? "";
   await panel.locator('[data-testid="orchestrator-run-workflow"]').click();
@@ -536,25 +565,37 @@ async function main() {
     undefined,
     { timeout: 30000 },
   );
-  // Let the loop's own poll (every 2s) actually attempt the launch and
-  // settle past the instant "awaiting_base" snapshot, so the recorded
-  // evidence is the REAL attempt outcome, not just "a ledger now exists".
+  // Immediately after the click, the ledger must be waiting on the main
+  // agent's session — never already past "awaiting_base" (that would mean
+  // the review fired without the dispatch ever settling).
+  assert.match(
+    (await terminal.innerText()) ?? "",
+    /Waiting for the main agent's delegated turn to finish/,
+    "Run workflow must not launch a review before dispatching to the main agent",
+  );
+  report.checks.push("run-workflow-waits-on-the-dispatched-session-before-reviewing");
+  // Let the dispatch settle and the loop's own poll (every 2s) actually
+  // attempt the launch, so the recorded evidence is the REAL attempt
+  // outcome, not just "a ledger now exists".
   await page.waitForFunction(
     () => {
       const node = document.querySelector('[data-testid="orchestrator-terminal"]');
-      return (node?.textContent ?? "").length > 0 && !/Waiting for the workflow/.test(node.textContent);
+      return (
+        (node?.textContent ?? "").length > 0 &&
+        !/Waiting for the main agent's delegated turn to finish/.test(node.textContent)
+      );
     },
     undefined,
-    { timeout: 20000 },
+    { timeout: 40000 },
   ).catch(() => {});
   const terminalState = await terminal.getAttribute("data-state");
   assert.notEqual(terminalState, "ready", "an unconfigured dev daemon must never fabricate a pass");
   report.observedTerminalState = terminalState;
   report.observedTerminalText = (await terminal.innerText()) ?? "";
   await shot(page, "orchestrator-run-workflow-outcome.png");
-  report.checks.push("run-workflow-goes-through-real-failover-and-never-fabricates-success");
+  report.checks.push("run-workflow-goes-through-real-dispatch-and-failover-and-never-fabricates-success");
 
-  // 9. FINDING fix: closing the session and reloading must never collapse
+  // 10. FINDING fix: closing the session and reloading must never collapse
   //    the canvas to the no-session view. Confirmed empirically before this
   //    fix existed: `terminal close` never reaches an already-mounted
   //    canvas without a reload (no live push for an externally closed

@@ -10,7 +10,9 @@
 
 use std::collections::HashMap;
 
-use drogon_protocol::graph::{GraphIntent, GraphNodeState, GraphNodeStatus, GraphState};
+use drogon_protocol::graph::{
+    GraphIntent, GraphNodeState, GraphNodeStatus, GraphRuntimeRef, GraphState,
+};
 use drogon_protocol::mentu::{MentuRun, MentuRunStatus, MentuStepRun};
 
 use super::storage::NodeRunMapping;
@@ -27,6 +29,7 @@ pub fn project(
     intent: &GraphIntent,
     mappings: &[NodeRunMapping],
     runs: &HashMap<String, MentuRun>,
+    runtimes: &HashMap<String, GraphRuntimeRef>,
     live: &dyn Fn(&str) -> bool,
     updated_at: &str,
 ) -> GraphState {
@@ -34,7 +37,14 @@ pub fn project(
     // Intent order first, so the state list mirrors the intent list.
     for node in &intent.nodes {
         let mapping = mappings.iter().find(|m| m.node_id == node.id);
-        nodes.push(project_node(&node.id, node.enabled, mapping, runs, live));
+        nodes.push(project_node(
+            &node.id,
+            node.enabled,
+            mapping,
+            runs,
+            runtimes,
+            live,
+        ));
     }
     // Orphaned nodes: not in intent any more, but whose run is still live (or
     // lost contact). Once the run settles the entry is dropped.
@@ -53,6 +63,7 @@ pub fn project(
             false,
             Some(mapping),
             runs,
+            runtimes,
             live,
         ));
     }
@@ -62,7 +73,30 @@ pub fn project(
     }
 }
 
+/// F0: attributes which runtime actually ran the node's latest launch onto
+/// whatever status `project_node_status_and_error` already decided — a node
+/// never launched carries no attribution at all (nothing to attribute),
+/// every other node does, regardless of its outcome.
 fn project_node(
+    node_id: &str,
+    enabled: bool,
+    mapping: Option<&NodeRunMapping>,
+    runs: &HashMap<String, MentuRun>,
+    runtimes: &HashMap<String, GraphRuntimeRef>,
+    live: &dyn Fn(&str) -> bool,
+) -> GraphNodeState {
+    let mut state = project_node_status_and_error(node_id, enabled, mapping, runs, live);
+    if mapping.is_some()
+        && let Some(runtime) = runtimes.get(node_id)
+    {
+        state.harness = Some(runtime.harness.clone());
+        state.model = Some(runtime.model.clone());
+        state.is_free_default_runtime = Some(*runtime == super::failover::default_free_runtime());
+    }
+    state
+}
+
+fn project_node_status_and_error(
     node_id: &str,
     enabled: bool,
     mapping: Option<&NodeRunMapping>,
@@ -87,6 +121,9 @@ fn project_node(
             } else {
                 Some("This node is disabled; it will not be launched.".into())
             },
+            harness: None,
+            model: None,
+            is_free_default_runtime: None,
         };
     };
     let Some(run) = runs.get(&mapping.run_id) else {
@@ -210,6 +247,9 @@ fn base(
         ended_at: run.as_ref().and_then(|run| run.ended_at.clone()),
         evidence: None,
         last_error: None,
+        harness: None,
+        model: None,
+        is_free_default_runtime: None,
     }
 }
 
@@ -297,7 +337,14 @@ mod tests {
 
     #[test]
     fn an_intent_node_with_no_run_is_idle() {
-        let state = project(&intent(&["n1"]), &[], &runs(vec![]), &live_always, "now");
+        let state = project(
+            &intent(&["n1"]),
+            &[],
+            &runs(vec![]),
+            &HashMap::new(),
+            &live_always,
+            "now",
+        );
         assert_eq!(state.nodes[0].status, GraphNodeStatus::Idle);
         assert!(state.nodes[0].run_id.is_none());
         assert_eq!(state.updated_at, "now");
@@ -318,6 +365,7 @@ mod tests {
                 MentuRunStatus::Running,
                 vec![step("n1", MentuRunStatus::Succeeded)],
             )]),
+            &HashMap::new(),
             &live_always,
             "now",
         );
@@ -341,6 +389,7 @@ mod tests {
                 MentuRunStatus::Running,
                 vec![step("n1", MentuRunStatus::Running)],
             )]),
+            &HashMap::new(),
             &live_never,
             "now",
         );
@@ -376,6 +425,7 @@ mod tests {
                 MentuRunStatus::Failed,
                 vec![step("n1", MentuRunStatus::Failed)],
             )]),
+            &HashMap::new(),
             &live_always,
             "now",
         );
@@ -408,6 +458,7 @@ mod tests {
                     step("n2", MentuRunStatus::Failed),
                 ],
             )]),
+            &HashMap::new(),
             &live_always,
             "now",
         );
@@ -447,6 +498,7 @@ mod tests {
             &intent(&["n1", "n2"]),
             &mappings,
             &runs(vec![failing]),
+            &HashMap::new(),
             &live_always,
             "now",
         );
@@ -483,6 +535,7 @@ mod tests {
             &intent(&["n2"]),
             &mappings,
             &runs(vec![failing]),
+            &HashMap::new(),
             &live_always,
             "now",
         );
@@ -512,6 +565,7 @@ mod tests {
                     step("n2", MentuRunStatus::Succeeded),
                 ],
             )]),
+            &HashMap::new(),
             &live_always,
             "now",
         );
@@ -522,7 +576,14 @@ mod tests {
     fn a_disabled_node_is_blocked_with_a_reason() {
         let mut graph = intent(&["n1"]);
         graph.nodes[0].enabled = false;
-        let state = project(&graph, &[], &runs(vec![]), &live_always, "now");
+        let state = project(
+            &graph,
+            &[],
+            &runs(vec![]),
+            &HashMap::new(),
+            &live_always,
+            "now",
+        );
         assert_eq!(state.nodes[0].status, GraphNodeStatus::Blocked);
         assert!(state.nodes[0].last_error.is_some());
     }
@@ -542,6 +603,7 @@ mod tests {
                 MentuRunStatus::Running,
                 vec![step("gone", MentuRunStatus::Running)],
             )]),
+            &HashMap::new(),
             &live_always,
             "now",
         );
@@ -558,6 +620,7 @@ mod tests {
                 MentuRunStatus::Succeeded,
                 vec![step("gone", MentuRunStatus::Succeeded)],
             )]),
+            &HashMap::new(),
             &live_always,
             "now",
         );
@@ -576,6 +639,7 @@ mod tests {
             &intent(&["n1"]),
             &[mapping],
             &runs(vec![]),
+            &HashMap::new(),
             &live_always,
             "now",
         );
@@ -597,6 +661,7 @@ mod tests {
                 MentuRunStatus::Cancelled,
                 vec![step("n1", MentuRunStatus::Failed)],
             )]),
+            &HashMap::new(),
             &live_always,
             "now",
         );

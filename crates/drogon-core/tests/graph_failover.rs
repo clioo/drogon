@@ -312,7 +312,21 @@ fn failover_tries_approved_runtimes_in_order_and_only_then_the_fallback() {
     assert_eq!(second["attemptNumber"], 3);
     let attempts = second["attempts"].as_array().unwrap();
     assert_eq!(attempts.len(), 3);
-    assert_eq!(attempts[1]["outcome"], "launched");
+    // BROKEN-2: the ledger recorded `launched` at launch time (the daemon
+    // could not yet know the outcome), but by now this run has genuinely
+    // settled failed — every attempt row must carry that real settlement,
+    // not "launched" forever.
+    assert_eq!(
+        attempts[1]["outcome"], "failed",
+        "a launched attempt whose run settled failed must be reported as failed, not stuck at launched"
+    );
+    assert!(
+        attempts[1]["reason"]
+            .as_str()
+            .is_some_and(|r| !r.is_empty()),
+        "a settled-failed attempt must carry a reason: {:?}",
+        attempts[1]["reason"]
+    );
     assert_eq!(attempts[2]["harness"], "pi");
     assert_eq!(attempts[2]["model"], "good-model");
     assert_eq!(attempts[2]["outcome"], "launched");
@@ -325,6 +339,172 @@ fn failover_tries_approved_runtimes_in_order_and_only_then_the_fallback() {
     assert!(
         done.contains("already succeeded"),
         "must refuse once the node has succeeded: {done}"
+    );
+}
+
+/// BROKEN-2's exact literal shape: three approved runtimes (a compile-time
+/// refusal, then two that launch for real and each settle failed) plus a
+/// fallback that finally succeeds — the episode must walk every one of them
+/// in order, never stopping early and never skipping ahead.
+#[test]
+fn failover_walks_every_approved_runtime_before_the_fallback() {
+    let fixture = Fixture::new();
+    fixture.write_intent(json!({
+        "nodes": [Fixture::pi_node("n1")],
+        "policy": {
+            "approvedRuntimes": [
+                {"harness": "mystery-unsupported", "model": "whatever"},
+                {"harness": "pi", "model": "bad-model-1"},
+                {"harness": "pi", "model": "bad-model-2"},
+            ],
+            "fallbackRuntime": {"harness": "pi", "model": "good-model"},
+            "adversarial": {"enabled": false, "maxIterations": 3},
+            "delegate": false,
+        },
+    }));
+
+    // Attempt 1: refuse-to-launch, skipped within this same call.
+    let first = fixture.run_failover("n1");
+    assert_eq!(first["runtime"]["model"], "bad-model-1");
+    assert_eq!(first["attemptNumber"], 2);
+    fixture.wait_node_status("n1", "failed");
+
+    // Attempt 2: launches for real, settles failed (launch-then-fail).
+    let second = fixture.run_failover("n1");
+    assert_eq!(second["runtime"]["model"], "bad-model-2");
+    assert_eq!(second["isFallback"], false);
+    assert_eq!(second["attemptNumber"], 3);
+    fixture.wait_node_status("n1", "failed");
+
+    // Attempt 3: the second real candidate also settles failed — only NOW
+    // does the episode reach the fallback, never before every approved
+    // runtime genuinely failed.
+    let third = fixture.run_failover("n1");
+    assert_eq!(third["runtime"]["model"], "good-model");
+    assert_eq!(third["isFallback"], true, "the fallback is used last");
+    assert_eq!(third["attemptNumber"], 4);
+    let attempts = third["attempts"].as_array().unwrap();
+    assert_eq!(
+        attempts.len(),
+        4,
+        "every approved runtime plus the fallback: {attempts:?}"
+    );
+    assert_eq!(attempts[0]["outcome"], "launch_failed");
+    assert_eq!(attempts[1]["model"], "bad-model-1");
+    assert_eq!(attempts[1]["outcome"], "failed");
+    assert_eq!(attempts[2]["model"], "bad-model-2");
+    assert_eq!(attempts[2]["outcome"], "failed");
+    assert_eq!(attempts[3]["model"], "good-model");
+    assert_eq!(attempts[3]["outcome"], "launched");
+
+    fixture.wait_node_status("n1", "succeeded");
+}
+
+/// A mid-episode reorder of the approved-runtime list must change which
+/// runtime is tried NEXT (position-based, read fresh from the live policy
+/// every call) while never rewriting an attempt already made.
+#[test]
+fn failover_honors_a_mid_episode_reorder_for_attempts_not_yet_made() {
+    let fixture = Fixture::new();
+    fixture.write_intent(json!({
+        "nodes": [Fixture::pi_node("n1")],
+        "policy": {
+            "approvedRuntimes": [
+                {"harness": "pi", "model": "bad-model-1"},
+                {"harness": "pi", "model": "bad-model-2"},
+            ],
+            "fallbackRuntime": {"harness": "pi", "model": "good-model"},
+            "adversarial": {"enabled": false, "maxIterations": 3},
+            "delegate": false,
+        },
+    }));
+
+    let first = fixture.run_failover("n1");
+    assert_eq!(first["runtime"]["model"], "bad-model-1");
+    fixture.wait_node_status("n1", "failed");
+
+    // Reorder the STILL-UNTRIED tail of the list (swap the fallback ahead of
+    // the second approved runtime) and re-write the intent — the first
+    // attempt already made must stay exactly as recorded.
+    fixture.write_intent(json!({
+        "nodes": [Fixture::pi_node("n1")],
+        "policy": {
+            "approvedRuntimes": [
+                {"harness": "pi", "model": "bad-model-1"},
+                {"harness": "pi", "model": "good-model"},
+            ],
+            "fallbackRuntime": {"harness": "pi", "model": "bad-model-2"},
+            "adversarial": {"enabled": false, "maxIterations": 3},
+            "delegate": false,
+        },
+    }));
+
+    let second = fixture.run_failover("n1");
+    assert_eq!(
+        second["runtime"]["model"], "good-model",
+        "the reordered list's new position-2 candidate must be tried next"
+    );
+    assert_eq!(second["isFallback"], false);
+    let attempts = second["attempts"].as_array().unwrap();
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(
+        attempts[0]["model"], "bad-model-1",
+        "the already-made first attempt must never be rewritten by a later reorder"
+    );
+    assert_eq!(attempts[0]["outcome"], "failed");
+
+    fixture.wait_node_status("n1", "succeeded");
+}
+
+/// F0: the daemon must attribute which runtime ACTUALLY ran a node's
+/// latest launch onto `state` itself — never leaving the persisted/read
+/// half showing the node's authored template harness/model regardless of
+/// which approved runtime failover actually substituted.
+#[test]
+fn state_attributes_the_actually_substituted_runtime_not_the_authored_template() {
+    let fixture = Fixture::new();
+    // The node's own AUTHORED harness/model ("pi"/"placeholder") is never
+    // what runs once a policy is configured — this proves `state` reports
+    // the SUBSTITUTED runtime, not this template.
+    fixture.write_intent(json!({
+        "nodes": [Fixture::pi_node("n1")],
+        "policy": {
+            "approvedRuntimes": [{"harness": "pi", "model": "good-model"}],
+            "fallbackRuntime": null,
+            "adversarial": {"enabled": false, "maxIterations": 3},
+            "delegate": false,
+        },
+    }));
+    fixture.run_failover("n1");
+    let settled = fixture.wait_node_status("n1", "succeeded");
+    assert_eq!(settled["harness"], "pi");
+    assert_eq!(settled["model"], "good-model");
+    assert_eq!(
+        settled["isFreeDefaultRuntime"], false,
+        "good-model is not this build's free local default"
+    );
+}
+
+/// F0, the zero-config half: launched via the same failover seam but with
+/// NO policy configured at all, `state` must attribute the free local
+/// default honestly (harness/model AND the `isFreeDefaultRuntime` flag) —
+/// even though this node settles failed (the free default's model is not
+/// "good-model", so the fixture never marks it a pass). A separate test
+/// (not a second `Fixture` in the test above) because `Fixture::new()`
+/// holds the process-global runtime-override lock for its whole lifetime;
+/// two live in one test body would self-deadlock, not just risk a stale
+/// policy surviving via the store's merge-forward.
+#[test]
+fn state_attributes_the_zero_config_free_default_runtime() {
+    let fixture = Fixture::new();
+    fixture.write_intent(json!({"nodes": [Fixture::pi_node("n1")]}));
+    fixture.run_failover("n1");
+    let settled = fixture.wait_node_status("n1", "failed");
+    assert_eq!(settled["harness"], "pi");
+    assert_eq!(settled["model"], "qwen3.8-flash-next-nvidia-nvfp4");
+    assert_eq!(
+        settled["isFreeDefaultRuntime"], true,
+        "the zero-config default runtime must be attributed as free"
     );
 }
 

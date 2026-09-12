@@ -62,7 +62,11 @@
 // the cap.
 
 import { z } from "zod";
-import type { WorkGraphStatus } from "../../../../shared/work-graph-contract";
+import {
+  graphRuntimeRefSchema,
+  type GraphRuntimeRef,
+  type WorkGraphStatus,
+} from "../../../../shared/work-graph-contract";
 
 /** The only harness/model the adversarial loop is ever allowed to launch,
  *  per AGENTS.md: free, local, never billed. */
@@ -101,6 +105,21 @@ export function failMarkerPath(token: string, cycle: number): string {
  *  check — never inferred by this app from the agent's prose. */
 export function reviewVerifyCommand(token: string, cycle: number): string {
   return `test -f ${passMarkerPath(token, cycle)}`;
+}
+
+/** DISHONEST-1: the ONE line delivered to the Main agent's live session
+ *  when the Orchestrator's "Run workflow" is clicked — the real base work
+ *  this loop's review is attributable to, instead of firing the review
+ *  against whatever happens to sit in the workspace. Deterministic per
+ *  triggering run, one line (PTY delivery: no embedded newline), well
+ *  under the dispatch seam's byte cap. */
+export function buildOrchestratorBaseDispatchPrompt(input: { baseRunId: string }): string {
+  return (
+    `Drogon Work Graph orchestrator run ${input.baseRunId}: the adversarial review loop is about ` +
+    `to review this workspace's current changes. If you have any work in progress, finish or ` +
+    `checkpoint it now; reply here (or just finish your current turn) once you are at a good ` +
+    `stopping point — nothing else is needed if there is nothing pending.`
+  );
 }
 
 /** The Adversarial-test role's brief: actively try to BREAK the work,
@@ -178,6 +197,14 @@ export function isTerminalPhase(phase: LoopPhase): boolean {
   return TERMINAL_PHASES.has(phase);
 }
 
+/** The Main agent's live session settlement, as OBSERVED by the caller
+ *  (never guessed by this reducer): `pending` while its dispatched turn is
+ *  still in flight (or not yet picked up), `settled` once it has genuinely
+ *  gone idle again since the dispatch, `exited` if the session ended
+ *  before finishing. `undefined` means "not yet read" — treated exactly
+ *  like `pending`. */
+export type BaseSessionObservation = "pending" | "settled" | "exited";
+
 export type LoopLedger = {
   workflowId: string;
   /** Short token derived from the triggering run; every review/fix node id
@@ -185,6 +212,12 @@ export type LoopLedger = {
   token: string;
   baseRunId: string;
   baseNodeIds: string[];
+  /** DISHONEST-1: set only for a run whose base work is the Main agent's
+   *  own live, interactive session (the Orchestrator's "Run workflow"),
+   *  never for a batch workflow run (those gate on `baseNodeIds` instead).
+   *  The session this loop dispatched the base task to and is waiting to
+   *  settle before reviewing. */
+  baseSessionId: string | null;
   maxCycles: number;
   /** 0 until the first review node is launched. */
   cycle: number;
@@ -200,6 +233,14 @@ export type LoopLedger = {
    *  `phase`/`cycle` — never computed separately by the UI so it can never
    *  drift from what this reducer actually decided. */
   message: string;
+  /** F0: the runtime `graph.run_node_failover` actually launched the most
+   *  recent cycle under, and whether it was the configured fallback — read
+   *  straight from the RPC's own response (never thrown away), so a paid/
+   *  external spawn is attributable here instead of only in the daemon's
+   *  own ledger a human has to query separately. `null` before any node in
+   *  this loop has launched. */
+  lastRuntime: GraphRuntimeRef | null;
+  lastRuntimeIsFallback: boolean;
 };
 
 export type LoopAction =
@@ -217,6 +258,9 @@ export function startLedger(input: {
   workflowId: string;
   baseRunId: string;
   baseNodeIds: string[];
+  /** DISHONEST-1: present only for the Orchestrator's live-session base
+   *  (mutually exclusive with a non-empty `baseNodeIds` in practice). */
+  baseSessionId?: string | null;
   maxCycles: number;
   now: string;
 }): LoopLedger {
@@ -225,6 +269,7 @@ export function startLedger(input: {
     token: runToken(input.baseRunId),
     baseRunId: input.baseRunId,
     baseNodeIds: [...input.baseNodeIds],
+    baseSessionId: input.baseSessionId ?? null,
     maxCycles: input.maxCycles,
     cycle: 0,
     phase: "awaiting_base",
@@ -233,7 +278,30 @@ export function startLedger(input: {
     activeNodeId: null,
     startedAt: input.now,
     updatedAt: input.now,
-    message: "Waiting for the workflow's run to finish before reviewing…",
+    message: input.baseSessionId
+      ? "Waiting for the main agent's delegated turn to finish before reviewing…"
+      : "Waiting for the workflow's run to finish before reviewing…",
+    lastRuntime: null,
+    lastRuntimeIsFallback: false,
+  };
+}
+
+/** A loop that never started because the base work itself could not be
+ *  dispatched to the Main agent's live session (DISHONEST-1: no session,
+ *  a session stuck mid-turn past the wait, or the write itself failed) —
+ *  terminal from the very first tick, exactly like `launch_refused` for a
+ *  node the graph itself refused to launch. */
+export function dispatchRefusedLedger(input: {
+  workflowId: string;
+  baseRunId: string;
+  maxCycles: number;
+  now: string;
+  message: string;
+}): LoopLedger {
+  return {
+    ...startLedger({ ...input, baseNodeIds: [] }),
+    phase: "launch_refused",
+    message: input.message,
   };
 }
 
@@ -244,34 +312,57 @@ function plural(count: number, word: string): string {
 /** Advances the ledger by exactly one decision, given the LATEST
  *  daemon-observed status for every node this ledger cares about (missing
  *  = not read yet, treated as still in flight — never as any particular
- *  outcome). Pure: no clock reads besides the caller-supplied `now`. */
+ *  outcome), plus the Main agent's live-session settlement when this
+ *  ledger's base work is a session dispatch rather than graph nodes
+ *  (`undefined`/absent is treated exactly like `"pending"`). Pure: no clock
+ *  reads besides the caller-supplied `now`. */
 export function advanceLoop(
   ledger: LoopLedger,
   observed: ReadonlyMap<string, WorkGraphStatus>,
   now: string,
+  baseSession?: BaseSessionObservation,
 ): { ledger: LoopLedger; action: LoopAction } {
   if (isTerminalPhase(ledger.phase)) return { ledger, action: { kind: "none" } };
 
   if (ledger.phase === "awaiting_base") {
-    const statuses = ledger.baseNodeIds.map((id) => observed.get(id));
-    if (statuses.some((status) => status === undefined)) return { ledger, action: { kind: "none" } };
-    const inFlight = ledger.baseNodeIds.find(
-      (id, index) => statuses[index] === "idle" || statuses[index] === "running",
-    );
-    if (inFlight) return { ledger, action: { kind: "none" } };
-    const bad = ledger.baseNodeIds.find((id, index) => statuses[index] !== "succeeded");
-    if (bad) {
-      const badStatus = observed.get(bad);
-      return {
-        ledger: {
-          ...ledger,
-          phase: "base_failed",
-          activeNodeId: null,
-          updatedAt: now,
-          message: `Adversarial review not started: node '${bad}' is ${badStatus}, not succeeded.`,
-        },
-        action: { kind: "none" },
-      };
+    if (ledger.baseSessionId) {
+      if (baseSession === "exited") {
+        return {
+          ledger: {
+            ...ledger,
+            phase: "base_failed",
+            activeNodeId: null,
+            updatedAt: now,
+            message:
+              "Adversarial review not started: the main agent's session exited before its delegated turn settled.",
+          },
+          action: { kind: "none" },
+        };
+      }
+      if (baseSession !== "settled") return { ledger, action: { kind: "none" } };
+      // Settled: fall through to launching cycle 1, exactly like a
+      // successful baseNodeIds wait below.
+    } else {
+      const statuses = ledger.baseNodeIds.map((id) => observed.get(id));
+      if (statuses.some((status) => status === undefined)) return { ledger, action: { kind: "none" } };
+      const inFlight = ledger.baseNodeIds.find(
+        (id, index) => statuses[index] === "idle" || statuses[index] === "running",
+      );
+      if (inFlight) return { ledger, action: { kind: "none" } };
+      const bad = ledger.baseNodeIds.find((id, index) => statuses[index] !== "succeeded");
+      if (bad) {
+        const badStatus = observed.get(bad);
+        return {
+          ledger: {
+            ...ledger,
+            phase: "base_failed",
+            activeNodeId: null,
+            updatedAt: now,
+            message: `Adversarial review not started: node '${bad}' is ${badStatus}, not succeeded.`,
+          },
+          action: { kind: "none" },
+        };
+      }
     }
     const cycle = 1;
     const nodeId = reviewNodeId(ledger.token, cycle);
@@ -455,6 +546,10 @@ export const loopLedgerSchema = z.object({
   token: z.string().min(1),
   baseRunId: z.string().min(1),
   baseNodeIds: z.array(z.string()),
+  // Absent on a ledger persisted before DISHONEST-1's fix — an older
+  // workflow-batch loop never had a session base, so `null` is the exact
+  // right default, not a guess.
+  baseSessionId: z.string().nullable().optional().default(null),
   maxCycles: z.number().int().min(1),
   cycle: z.number().int().min(0),
   phase: loopPhaseSchema,
@@ -464,6 +559,10 @@ export const loopLedgerSchema = z.object({
   startedAt: z.string(),
   updatedAt: z.string(),
   message: z.string(),
+  // Absent on a ledger persisted before F0's fix — nothing was attributed
+  // yet, so `null`/`false` is the exact right default, not a guess.
+  lastRuntime: graphRuntimeRefSchema.nullable().optional().default(null),
+  lastRuntimeIsFallback: z.boolean().optional().default(false),
 });
 
 /** Parses a persisted ledger for exactly one workflow. Never throws: an
