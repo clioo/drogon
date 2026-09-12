@@ -154,6 +154,13 @@ impl Fixture {
         )));
         let workspace_id = registered["id"].as_str().unwrap().to_string();
         let host_id = registered["hostId"].as_str().unwrap().to_string();
+        // Delegation resolves event.project_id as a workspace id, then
+        // requires the separately registered Project id for worktree.create.
+        ok(engine.dispatch(request(
+            "project-add",
+            "project.add",
+            json!({"path": folder}),
+        )));
         let bot = ok(engine.dispatch(request(
             "bot-create",
             "bot.create",
@@ -237,8 +244,18 @@ impl Fixture {
     }
 
     fn enqueue_for(&self, monitor_id: &str, event_no: u64, at: f64) -> String {
+        self.enqueue_resource_for(monitor_id, event_no, at, RESOURCE)
+    }
+
+    fn enqueue_resource_for(
+        &self,
+        monitor_id: &str,
+        event_no: u64,
+        at: f64,
+        resource: &str,
+    ) -> String {
         let digest = drogon_core::bots::monitors::eval::digest_bytes(
-            format!("payload {monitor_id} {event_no}").as_bytes(),
+            format!("payload {monitor_id} {event_no} {resource}").as_bytes(),
         );
         let cursor = drogon_core::bots::monitors::eval::cursor_for_digest(&digest);
         let event_id =
@@ -250,7 +267,7 @@ impl Fixture {
             "cursor": cursor,
             "hostId": self.host_id,
             "projectId": self.workspace_id,
-            "resource": RESOURCE,
+            "resource": resource,
             "botId": self.bot_id,
             "observedAtMs": at,
         });
@@ -337,7 +354,56 @@ fn one_event_produces_exactly_one_dispatch() {
     assert!(prompts[0].contains(&event_id));
     assert!(prompts[0].contains("drogon-cli worktree create"));
     assert!(prompts[0].contains("drogon-cli harness start"));
-    assert!(prompts[0].contains("drogon-cli terminal send"));
+    assert!(prompts[0].contains("--permission-mode unattended"));
+    assert!(prompts[0].contains("terminal wait --session <id>"));
+    assert!(prompts[0].contains("terminal read"));
+    assert!(!prompts[0].contains("terminal send"));
+}
+
+#[test]
+fn workspace_without_registered_project_is_refused_without_dispatch() {
+    let fixture = Fixture::new();
+    let now = Fixture::now_ms();
+    fixture
+        .conn()
+        .execute("DELETE FROM projects WHERE path = ?1", [&fixture.folder])
+        .unwrap();
+    fixture.enqueue(1, now);
+
+    let drained = fixture.drain(now);
+    assert_eq!(drained.refused, 1, "{drained:?}");
+    assert_eq!(fixture.seam.dispatch_count(), 0);
+    assert_eq!(fixture.outbox_len(), 0);
+    let evidence =
+        delegation::firing_evidence_for_monitor(&fixture.conn(), &fixture.monitor_id, now)
+            .expect("refusal is durable");
+    let detail = evidence.detail.expect("refusal detail");
+    assert!(detail.contains("drogon-cli project add"), "{detail}");
+    assert!(detail.contains(&fixture.workspace_id), "{detail}");
+}
+
+#[test]
+fn file_resource_named_pull_is_not_treated_as_a_pull_request_case() {
+    let fixture = Fixture::new();
+    let now = Fixture::now_ms();
+    fixture.enqueue_resource_for(&fixture.monitor_id, 17, now, "pull/17");
+
+    let event_id = fixture
+        .conn()
+        .query_row(
+            "SELECT event_id FROM bot_monitor_events LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap();
+    let drained = fixture.drain(now);
+    assert_eq!(drained.dispatched, 1, "{drained:?}");
+    let prompt = fixture.seam.prompts().pop().expect("prompt");
+    assert!(prompt.contains(&format!("deleg-{}", &event_id[4..12])));
+    assert!(
+        !prompt.contains("This case is pull request #17"),
+        "{prompt}"
+    );
 }
 
 // --- Second identical tick: no new dispatch --------------------------------
@@ -986,6 +1052,7 @@ fn outbox_row_with_unparseable_payload_is_orphaned_not_retried() {
     }
     let drained = fixture.drain(now);
     assert_eq!(drained.orphaned, 1, "{drained:?}");
+    assert_eq!(drained.claimed, 1);
     assert_eq!(drained.dispatched, 0);
     assert_eq!(fixture.outbox_len(), 0);
 }

@@ -745,6 +745,12 @@ pub fn delegation_request_id(
 /// one channel — the responsibility's own standing instructions.
 pub struct DelegationPromptInput<'a> {
     pub event: &'a DelegationEvent,
+    /// The registered Project id owning the event's workspace (not the
+    /// workspace id carried by `event.project_id`).
+    pub project_id: &'a str,
+    /// The registered Project path, shown so the worker can sanity-check the
+    /// id before creating a worktree.
+    pub project_path: &'a str,
     pub responsibility_name: &'a str,
     pub responsibility_instructions: &'a str,
     pub worktree_name: &'a str,
@@ -806,25 +812,27 @@ pub fn build_delegation_prompt(input: &DelegationPromptInput) -> String {
          \n\
          A watched change was observed:\n\
          - monitor: {monitor} (rule version {version})\n\
-         - project: {project}, resource: {resource}\n\
+         - project: {project} ({project_path}), resource: {resource}\n\
          - observed at: {observed_ms} ms epoch\n\
          {case_line}\
          Your responsibility: {resp_name}\n\
          {standing}\n\
          \n\
          Act now, using drogon-cli from your session:\n\
-         1. `drogon-cli worktree create --project {project} --name {worktree}` — \
-         this exact name is derived from the event id, so a redelivered event \
-         reuses it instead of creating a second worktree. If it already exists \
-         from an earlier delivery of this event, reuse it.\n\
+         1. `drogon-cli worktree create --project {project} --name {worktree} --json` — \
+         read the new workspace id from `.result.workspaceId`. This exact name is \
+         derived from the event id, so a redelivered event reuses it instead of \
+         creating a second worktree. If it already exists from an earlier delivery \
+         of this event, reuse it.\n\
          {pull_note}\
-         2. `drogon-cli harness start --workspace <the new workspace id> --harness {harness_flag} \
-         --caused-by-event {event_id} --prompt \"<task>\"` \
-         to open a worker session on that worktree. The `--caused-by-event` tag is \
+         2. `drogon-cli harness start --workspace <workspace id> --harness {harness_flag} \
+         --permission-mode unattended --caused-by-event {event_id} --prompt \"<task>\" --json` \
+         to open a worker session on that worktree. Read `.result.id` and \
+         `.result.incarnation` from the response. The `--caused-by-event` tag is \
          how the user sees WHY that session appeared: pass this event id unchanged.\n\
          {skills_line}\
-         3. Send the worker its task prompt with `drogon-cli terminal send`, \
-         and wait for it with `drogon-cli terminal wait`.\n\
+         3. `drogon-cli terminal wait --session <id> --incarnation <token> --for idle \
+         --timeout-ms 900000`, then read its output with `drogon-cli terminal read`.\n\
          \n\
          Rules: refer to the change by event id ({event_id}) only. The watched \
          content is never included in prompts — do not paste it.",
@@ -833,7 +841,8 @@ pub fn build_delegation_prompt(input: &DelegationPromptInput) -> String {
         max = input.max_per_day,
         monitor = event.monitor_id,
         version = event.monitor_version,
-        project = event.project_id,
+        project = input.project_id,
+        project_path = input.project_path,
         resource = event.resource,
         observed_ms = event.observed_at_ms,
         resp_name = input.responsibility_name,
@@ -906,6 +915,78 @@ fn workspace_id_for_folder(
             "SELECT id FROM workspaces WHERE path = ?1 AND host_id = ?2",
             params![folder, host_id],
             |r| r.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
+/// Resolve the workspace id carried by a monitor event to the separately
+/// registered Project row. Registration normally canonicalizes both paths,
+/// but the fallback also accepts equivalent paths when an older database has
+/// one spelling stored differently.
+fn project_for_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+    host_id: &str,
+) -> Result<Option<(String, String, String)>> {
+    let exact = conn
+        .query_row(
+            "SELECT p.id, p.path, w.path FROM projects p
+             JOIN workspaces w ON w.path = p.path
+             WHERE w.id = ?1 AND p.host_id = ?2",
+            params![workspace_id, host_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    if exact.is_some() {
+        return Ok(exact);
+    }
+
+    let workspace_path: Option<String> = conn
+        .query_row(
+            "SELECT path FROM workspaces WHERE id = ?1 AND host_id = ?2",
+            params![workspace_id, host_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(workspace_path) = workspace_path else {
+        return Ok(None);
+    };
+    let workspace_canonical = std::fs::canonicalize(&workspace_path)
+        .ok()
+        .and_then(|path| path.to_str().map(str::to_string));
+    let mut projects = conn.prepare("SELECT id, path FROM projects WHERE host_id = ?1")?;
+    let rows = projects
+        .query_map(params![host_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows.into_iter().find_map(|(project_id, project_path)| {
+        let project_canonical = std::fs::canonicalize(&project_path)
+            .ok()
+            .and_then(|path| path.to_str().map(str::to_string));
+        if project_path == workspace_path
+            || workspace_canonical
+                .as_deref()
+                .zip(project_canonical.as_deref())
+                .is_some_and(|(workspace, project)| workspace == project)
+        {
+            Some((project_id, project_path, workspace_path.clone()))
+        } else {
+            None
+        }
+    }))
+}
+
+fn workspace_path_for_id(
+    conn: &Connection,
+    workspace_id: &str,
+    host_id: &str,
+) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT path FROM workspaces WHERE id = ?1 AND host_id = ?2",
+            params![workspace_id, host_id],
+            |r| r.get(0),
         )
         .optional()?)
 }
@@ -991,7 +1072,6 @@ pub fn drain_delegation_events<S: DispatchSeam>(
         let event = match peeked {
             PeekedEvent::Event(event) => event,
             PeekedEvent::Poison(event_id) => {
-                summary.claimed += 1;
                 match delete_event(&db.lock().unwrap(), event_id) {
                     Ok(()) => summary.orphaned += 1,
                     Err(_) => summary.failed += 1,
@@ -1125,8 +1205,8 @@ fn drain_single_event<S: DispatchSeam>(
     let case_skills: &[String] = github_case
         .map(|rule| rule.skills.as_slice())
         .unwrap_or(&[]);
-    let case_pull_number =
-        crate::bots::monitors::github::pull_number_from_resource(&event.resource);
+    let case_pull_number = github_case
+        .and_then(|_| crate::bots::monitors::github::pull_number_from_resource(&event.resource));
     let identity = delegation_identity(event, case_repo, case_pull_number);
     // A pull-request case is keyed BY THE CASE (repository + PR number):
     // one bot, one PR, one review session — whatever watch (and whatever
@@ -1156,7 +1236,18 @@ fn drain_single_event<S: DispatchSeam>(
         }
     };
     if capped.contains(&bot_id) {
-        summary.cap_exceeded += 1;
+        settle_event(
+            db,
+            event,
+            Verdict {
+                responsibility_id: Some(&responsibility_id),
+                run_id: None,
+                detail: Some("per-day delegation cap already used"),
+            },
+            DeleteBucket::CapExceeded,
+            now_ms,
+            summary,
+        );
         return;
     }
     let folder_lookup =
@@ -1356,6 +1447,56 @@ fn drain_single_event<S: DispatchSeam>(
         );
         return;
     }
+    // Resolve the event's workspace to the separately registered Project.
+    // `event.project_id` is a workspace id; worktree.create requires the
+    // Project id. Keep the path alongside it so the prompt exposes both
+    // structured values and the worker can sanity-check the mapping.
+    let project_lookup = {
+        let conn = db.lock().unwrap();
+        project_for_workspace(&conn, &event.project_id, current_host_id)
+    };
+    let (project_id, project_path) = match project_lookup {
+        Ok(Some((project_id, project_path, _workspace_path))) => (project_id, project_path),
+        Ok(None) => {
+            let workspace_path = {
+                let conn = db.lock().unwrap();
+                workspace_path_for_id(&conn, &event.project_id, current_host_id)
+            };
+            let detail = match workspace_path {
+                Ok(Some(path)) => format!(
+                    "workspace {} ({path}) is not a registered Project; register it with `drogon-cli project add <path>` or watch a project workspace",
+                    event.project_id
+                ),
+                Ok(None) => format!(
+                    "workspace {} (<unknown path>) is not a registered Project; register it with `drogon-cli project add <path>` or watch a project workspace",
+                    event.project_id
+                ),
+                Err(e) => {
+                    eprintln!("[delegation] workspace path read failed: {e}");
+                    summary.failed += 1;
+                    return;
+                }
+            };
+            settle_event(
+                db,
+                event,
+                Verdict {
+                    responsibility_id: Some(&responsibility_id),
+                    run_id: None,
+                    detail: Some(&detail),
+                },
+                DeleteBucket::Refused,
+                now_ms,
+                summary,
+            );
+            return;
+        }
+        Err(e) => {
+            eprintln!("[delegation] project read failed: {e}");
+            summary.failed += 1;
+            return;
+        }
+    };
     // Resolve the run context from durable rows only: the bot's own
     // folder row names the workspace, the bot's stored policy names the
     // harness. Nothing is defaulted, nothing is fabricated.
@@ -1469,13 +1610,14 @@ fn drain_single_event<S: DispatchSeam>(
     // into one worktree, and a redelivery reuses the exact name.
     let worktree_name = match (case_repo, case_pull_number) {
         (Some(repo), Some(number)) => worktree_name_for_pr_case(number, repo),
-        (_, Some(number)) => worktree_name_for_pr_case(number, &event.project_id),
         _ => worktree_name_for_event(&event.event_id),
     };
     let operating = crate::bots::prompt::build_operating_prompt(
         &bot,
         &build_delegation_prompt(&DelegationPromptInput {
             event,
+            project_id: &project_id,
+            project_path: &project_path,
             responsibility_name: &responsibility.name,
             responsibility_instructions: &responsibility.instructions,
             worktree_name: &worktree_name,

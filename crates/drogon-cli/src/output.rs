@@ -94,8 +94,13 @@ pub fn project_list(list: &ProjectList) -> String {
 
 pub fn worktree_created(worktree: &Worktree) -> String {
     format!(
-        "Created worktree {} for project {} on branch {} -> {} (head {})",
-        worktree.id, worktree.project_id, worktree.branch, worktree.path, worktree.head
+        "Created worktree {} for project {} workspace={} on branch {} -> {} (head {})",
+        worktree.id,
+        worktree.project_id,
+        worktree.workspace_id,
+        worktree.branch,
+        worktree.path,
+        worktree.head
     )
 }
 
