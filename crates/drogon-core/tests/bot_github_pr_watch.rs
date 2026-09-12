@@ -220,6 +220,10 @@ impl Fixture {
     /// which is how the monitoring semantics are asserted without ever
     /// dispatching anything.
     fn new(review_action: bool) -> Self {
+        Self::new_with_cron(review_action, "* * * * *")
+    }
+
+    fn new_with_cron(review_action: bool, cron: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let stub = StubHarness::install(dir.path());
         let repo = dir.path().join("project");
@@ -295,7 +299,7 @@ impl Fixture {
             "secretRefs": [SECRET_REF],
             "harness": "codex",
             "skills": ["drogon-cli", "frontend-review"],
-            "cron": "* * * * *",
+            "cron": cron,
         });
         if review_action {
             params["responsibilityName"] = json!("Review assigned pull requests");
@@ -389,7 +393,9 @@ impl Fixture {
             )
             .unwrap();
         let mut value: Value = serde_json::from_str(&payload).unwrap();
-        value["lastSuccessAtMs"] = json!(Self::now_ms() - by_ms);
+        let backdated = Self::now_ms() - by_ms;
+        value["lastSuccessAtMs"] = json!(backdated);
+        value["lastCheckAtMs"] = json!(backdated);
         conn.execute(
             "UPDATE bot_monitors SET payload_json = ?1 WHERE id = ?2",
             rusqlite::params![serde_json::to_string(&value).unwrap(), &self.monitor_id],
@@ -612,7 +618,9 @@ impl Drop for StubHarness {
 #[test]
 fn a_watch_fires_once_per_new_pull_request_and_seeds_instead_of_catching_up() {
     let fx = Fixture::new(false);
-    let t0 = Fixture::now_ms();
+    // Align the synthetic clock to the minutely cron boundary so the 45s
+    // not-due assertion is independent of the wall-clock second.
+    let t0 = (Fixture::now_ms() / 60_000.0).floor() * 60_000.0;
 
     // First look: SEED. A watch that was not running must never replay the
     // backlog it finds on its first check.
@@ -635,7 +643,16 @@ fn a_watch_fires_once_per_new_pull_request_and_seeds_instead_of_catching_up() {
     // A pull request assigned to the Bot's login appears.
     fx.github
         .set_pulls(&[pull(41, &[LOGIN], &[]), pull(42, &[LOGIN], &[])]);
+    let before_quiet_gap = fx.github.requests().len();
+    fx.tick(t0 + 45_000.0);
+    assert_eq!(
+        fx.github.requests().len(),
+        before_quiet_gap,
+        "a 45-second quiet tick is not due for a minutely watch"
+    );
     fx.tick(t0 + 61_000.0);
+    assert_eq!(fx.github.requests().len(), before_quiet_gap + 1);
+    assert_eq!(fx.monitor_view()["lastCheckAtMs"], json!(t0 + 61_000.0));
     let events = fx.events();
     assert_eq!(
         events.len(),
@@ -654,7 +671,14 @@ fn a_watch_fires_once_per_new_pull_request_and_seeds_instead_of_catching_up() {
 
     // The same pull request again, unchanged and then edited by someone else
     // (a comment or a push bumps updated_at and the title) never fires twice.
+    let before_second_quiet = fx.github.requests().len();
     fx.tick(t0 + 122_000.0);
+    assert_eq!(
+        fx.github.requests().len(),
+        before_second_quiet + 1,
+        "a minutely watch polls once at the next cron fire"
+    );
+    assert_eq!(fx.monitor_view()["lastCheckAtMs"], json!(t0 + 122_000.0));
     assert_eq!(fx.events().len(), 1, "the same cursor is a no-change tick");
     fx.github.set_pulls(&[
         pull(41, &[LOGIN], &[]),
@@ -1009,6 +1033,52 @@ fn a_replayed_event_joins_the_existing_run_instead_of_a_second_session() {
 }
 
 // --- the adversarial fixes: seed honesty, case dedupe, distinct names ------
+
+#[test]
+fn quiet_polls_keep_a_watch_alive_past_the_catch_up_grace() {
+    let fx = Fixture::new(false);
+    let t0 = Fixture::now_ms();
+    fx.github.set_pulls(&[pull(41, &[LOGIN], &[])]);
+    fx.tick(t0);
+
+    for tick in 1..=45 {
+        fx.tick(t0 + tick as f64 * 61_000.0);
+    }
+    assert_eq!(fx.events().len(), 0, "quiet polls release nothing");
+
+    fx.github
+        .set_pulls(&[pull(41, &[LOGIN], &[]), pull(42, &[LOGIN], &[])]);
+    fx.tick(t0 + 46.0 * 61_000.0);
+    let events = fx.events();
+    assert_eq!(events.len(), 1, "a PR after 45 quiet polls is released");
+    assert_eq!(events[0]["resource"], "pull/42");
+    assert_eq!(fx.monitor_view()["lastNotice"], json!(null));
+}
+
+#[test]
+fn a_long_cron_watch_releases_on_schedule_but_seeds_after_a_real_hole() {
+    let fx = Fixture::new_with_cron(false, "0 * * * *");
+    let t0 = Fixture::now_ms();
+    fx.github.set_pulls(&[pull(41, &[LOGIN], &[])]);
+    fx.tick(t0);
+
+    fx.github
+        .set_pulls(&[pull(41, &[LOGIN], &[]), pull(42, &[LOGIN], &[])]);
+    fx.tick(t0 + 60.0 * 60.0 * 1000.0);
+    assert_eq!(fx.events().len(), 1, "the one-hour cron does not re-seed");
+    assert_eq!(fx.events()[0]["resource"], "pull/42");
+
+    // A genuine three-hour outage still crosses the two-interval threshold.
+    fx.backdate_last_success(3.0 * 60.0 * 60.0 * 1000.0);
+    fx.github.set_pulls(&[
+        pull(41, &[LOGIN], &[]),
+        pull(42, &[LOGIN], &[]),
+        pull(43, &[LOGIN], &[]),
+    ]);
+    fx.tick(t0 + 2.0 * 60.0 * 60.0 * 1000.0);
+    assert_eq!(fx.events().len(), 1, "the outage backlog is seeded");
+    assert_eq!(fx.seen_pulls(), vec![41, 42, 43]);
+}
 
 #[test]
 fn a_baseline_seed_is_an_informational_notice_never_a_red_error() {
