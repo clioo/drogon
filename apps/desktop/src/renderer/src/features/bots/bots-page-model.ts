@@ -336,6 +336,8 @@ export function monitorHealthPill(health: BotMonitorHealth): MonitorHealthPill {
       return { label: "Needs approval", tone: "warning" };
     case "disabled":
       return { label: "Paused", tone: "muted" };
+    case "unsupported":
+      return { label: "Not runnable", tone: "failing" };
   }
 }
 
@@ -429,7 +431,9 @@ export function monitorLastCheck(
         ? "Degraded"
         : view.health === "failing"
           ? "Failing"
-          : null;
+          : view.health === "unsupported"
+            ? "Not runnable"
+            : null;
   const deltaMs = Math.max(0, now - view.lastCheckAtMs);
   const minutes = Math.floor(deltaMs / 60_000);
   const ageLabel =

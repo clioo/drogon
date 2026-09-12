@@ -382,6 +382,7 @@ export const botMonitorListResultSchema = z.object({
           "failing",
           "needs_approval",
           "disabled",
+          "unsupported",
         ]),
         trigger: z.discriminatedUnion("kind", [
           z.object({ kind: z.literal("manual") }),

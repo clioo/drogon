@@ -326,6 +326,10 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
     expect(monitorHealthPill("failing").label).toBe("Failing");
     expect(monitorHealthPill("needs_approval").label).toBe("Needs approval");
     expect(monitorHealthPill("disabled").label).toBe("Paused");
+    expect(monitorHealthPill("unsupported")).toEqual({
+      label: "Not runnable",
+      tone: "failing",
+    });
   });
 
   it("titles monitors from the watched resource, never an invented name", () => {
@@ -413,6 +417,12 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
         now,
       )?.healthLabel,
     ).toBe("Checked");
+    expect(
+      monitorLastCheck(
+        { health: "unsupported", lastCheckAtMs: now - 30_000 } as never,
+        now,
+      )?.healthLabel,
+    ).toBe("Not runnable");
   });
 
   it("labels monitor triggers Manual or with the real cron", () => {

@@ -196,70 +196,103 @@ fn mixed_kind_monitor_table_ticks_without_error() {
 }
 
 #[test]
-fn self_staged_script_and_http_monitors_park_at_needs_approval() {
+fn self_create_refuses_script_and_http_without_evaluators() {
     let fx = Fx::new();
     let bot_id = fx.create_bot("c1", "Watcher");
     fx.provision("p1", &bot_id);
 
-    let scripted = success(fx.self_call(
-        "m-script",
-        "bot.self_create_monitor",
-        json!({
-            "botId": bot_id, "actorBotId": bot_id,
-            "kind": "script_command.v1",
-            "scriptPath": "scripts/watch.sh",
-            "scriptHash": "ab".repeat(32),
-            "interpreter": "gh_api",
-            "argv": ["repos/clioo/drogon/pulls"],
-            "secretRefs": ["GITHUB_TOKEN_REF"],
-            "trigger": {"kind": "manual"},
-        }),
-    ));
-    assert_eq!(scripted["ruleKind"], "script_command.v1");
-    assert_eq!(scripted["approved"], false);
-    assert_eq!(scripted["health"], "needs_approval");
-
-    let polled = success(fx.self_call(
-        "m-http",
-        "bot.self_create_monitor",
-        json!({
-            "botId": bot_id, "actorBotId": bot_id,
-            "kind": "http_poll.v1",
-            "urlHash": "cd".repeat(32),
-            "cursorSpec": {"kind": "etag"},
-            "secretRefs": ["GRANOLA_TOKEN"],
+    for (request_id, kind, extra) in [
+        (
+            "m-script",
+            "script_command.v1",
+            json!({
+                "scriptPath": "scripts/watch.sh",
+                "scriptHash": "ab".repeat(32),
+                "interpreter": "gh_api",
+                "argv": ["repos/clioo/drogon/pulls"],
+                "secretRefs": ["GITHUB_TOKEN_REF"],
+            }),
+        ),
+        (
+            "m-http",
+            "http_poll.v1",
+            json!({
+                "urlHash": "cd".repeat(32),
+                "cursorSpec": {"kind": "etag"},
+                "secretRefs": ["GRANOLA_TOKEN"],
+            }),
+        ),
+    ] {
+        let mut params = json!({
+            "botId": bot_id, "actorBotId": bot_id, "kind": kind,
             "trigger": {"kind": "scheduled", "cron": "*/5 * * * *"},
-        }),
-    ));
-    assert_eq!(polled["ruleKind"], "http_poll.v1");
-    assert_eq!(polled["approved"], false);
+        });
+        for (key, value) in extra.as_object().unwrap() {
+            params[key] = value.clone();
+        }
+        let message = failure(fx.self_call(request_id, "bot.self_create_monitor", params));
+        assert!(message.contains(kind), "{message}");
+        assert!(message.contains("has no evaluator"), "{message}");
+    }
 
-    // The list view exposes the rule kind and secret NAMES, never values.
     let home = success(fx.self_call(
         "list",
         "bot.self_list",
         json!({"botId": bot_id, "actorBotId": bot_id}),
     ));
-    let monitors = home["monitors"].as_array().unwrap();
-    let script_view = monitors
-        .iter()
-        .find(|m| m["ruleKind"] == "script_command.v1")
-        .unwrap();
-    assert_eq!(script_view["secretRefs"][0], "GITHUB_TOKEN_REF");
-    assert_eq!(script_view["interpreter"], "gh_api");
-    assert_eq!(script_view["approved"], false);
+    assert!(home["monitors"].as_array().unwrap().is_empty());
+}
 
-    // The scheduler must not tick a parked monitor across kinds.
-    scheduler::tick_once(&fx.engine, 1_700_000_000_000.0);
+#[test]
+fn preexisting_unsupported_monitor_lists_consistently_and_skips() {
+    let fx = Fx::new();
+    let bot_id = fx.create_bot("c1", "Watcher");
+    fx.provision("p1", &bot_id);
+    let rule = script_rule(&fx.host_id, &fx.workspace_id);
+    let record = new_monitor(
+        "legacy-script".to_string(),
+        Some(bot_id.clone()),
+        rule.clone(),
+        MonitorTrigger::Scheduled {
+            cron: "* * * * *".to_string(),
+        },
+        rule.approval_hash(),
+        1.0,
+    )
+    .unwrap();
     let conn = fx.db();
-    let checks: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM bot_monitor_checks WHERE monitor_id = ?1",
-            [script_view["id"].as_str().unwrap()],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(checks, 0, "a parked script monitor never runs");
+    storage::create_monitor(&conn, &record).unwrap();
+
+    let self_view = success(fx.self_call(
+        "self-list",
+        "bot.self_list",
+        json!({"botId": bot_id, "actorBotId": bot_id}),
+    ));
+    let user_view = success(fx.engine.dispatch(request(
+        "monitor-list",
+        "bot.monitor_list",
+        json!({
+            "workspaceId": fx.workspace_id,
+            "hostId": fx.host_id,
+            "botId": bot_id,
+        }),
+    )));
+    let self_monitor = &self_view["monitors"][0];
+    let user_monitor = &user_view["monitors"][0];
+    assert_eq!(self_monitor, user_monitor);
+    assert_eq!(self_monitor["health"], "unsupported");
+    assert_eq!(self_monitor["id"], "legacy-script");
+    assert_eq!(self_monitor["monitorId"], "legacy-script");
+
+    let summary = drogon_core::bot_self_mgmt::tick_bot_monitors(&fx.engine, 1_700_000_000_000.0);
+    assert_eq!(summary.skipped, 1);
+    assert_eq!(summary.errors, 0);
+    assert_eq!(
+        storage::list_checks_for_monitor(&conn, "legacy-script")
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -268,70 +301,33 @@ fn self_staged_rule_kinds_refuse_honest_errors() {
     let bot_id = fx.create_bot("c1", "Watcher");
     fx.provision("p1", &bot_id);
 
-    let base = |extra: Value| {
-        let mut params = json!({
-            "botId": bot_id, "actorBotId": bot_id,
-            "kind": "script_command.v1",
-            "scriptPath": "scripts/watch.sh",
-            "scriptHash": "ab".repeat(32),
-            "interpreter": "gh_api",
-            "argv": ["repos/clioo/drogon/pulls"],
-            "trigger": {"kind": "manual"},
-        });
-        if let (Some(base), Some(extra)) = (params.as_object_mut(), extra.as_object()) {
-            for (key, value) in extra {
-                base.insert(key.clone(), value.clone());
-            }
-        }
-        params
-    };
+    // Schema-admitted but non-evaluated kinds refuse before any executable
+    // fields are parsed, so malformed variants cannot create parked rows.
+    for (request_id, kind) in [("r1", "script_command.v1"), ("r2", "http_poll.v1")] {
+        let message = failure(fx.self_call(
+            request_id,
+            "bot.self_create_monitor",
+            json!({
+                "botId": bot_id,
+                "actorBotId": bot_id,
+                "kind": kind,
+                "trigger": {"kind": "manual"},
+            }),
+        ));
+        assert!(message.contains(kind), "{message}");
+        assert!(message.contains("has no evaluator"), "{message}");
+    }
 
-    // No pinned hash.
-    let message = failure(fx.self_call(
-        "r1",
-        "bot.self_create_monitor",
-        base(json!({"scriptHash": ""})),
-    ));
-    assert!(message.contains("scriptHash"), "{message}");
-
-    // Non-allowlisted interpreter.
-    let message = failure(fx.self_call(
-        "r2",
-        "bot.self_create_monitor",
-        base(json!({"interpreter": "bash"})),
-    ));
-    assert!(message.contains("not admitted"), "{message}");
-
-    // Oversized argv element.
+    // Unknown kind is still refused, never guessed.
     let message = failure(fx.self_call(
         "r3",
         "bot.self_create_monitor",
-        base(json!({"argv": ["a".repeat(513)]})),
-    ));
-    assert!(message.contains("argv"), "{message}");
-
-    // Control character in argv.
-    let message = failure(fx.self_call(
-        "r4",
-        "bot.self_create_monitor",
-        base(json!({"argv": ["api\u{0}rm"]})),
-    ));
-    assert!(message.contains("argv"), "{message}");
-
-    // More than 16 secret refs.
-    let refs: Vec<String> = (0..17).map(|i| format!("REF_{i}")).collect();
-    let message = failure(fx.self_call(
-        "r5",
-        "bot.self_create_monitor",
-        base(json!({"secretRefs": refs})),
-    ));
-    assert!(message.contains("secret references"), "{message}");
-
-    // Unknown kind is refused, never guessed.
-    let message = failure(fx.self_call(
-        "r6",
-        "bot.self_create_monitor",
-        base(json!({"kind": "shell.v1"})),
+        json!({
+            "botId": bot_id,
+            "actorBotId": bot_id,
+            "kind": "shell.v1",
+            "trigger": {"kind": "manual"},
+        }),
     ));
     assert!(message.contains("unknown monitor rule kind"), "{message}");
 }

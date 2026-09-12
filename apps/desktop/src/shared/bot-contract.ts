@@ -248,7 +248,8 @@ export type BotMonitorHealth =
   | "degraded"
   | "failing"
   | "needs_approval"
-  | "disabled";
+  | "disabled"
+  | "unsupported";
 
 export type BotMonitorView = {
   monitorId: string;
