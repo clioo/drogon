@@ -138,13 +138,14 @@ fn read_workspace_host_id(
 /// responsibilities; this composes that with the desktop's
 /// `buildBotRunHarness` split (ported as
 /// [`bots_policy::harness_overrides`]): `explicit_model` carries
-/// `provider/model`, and Pi daemon runs go unattended. Precedence: an
+/// `provider/model`, and headless daemon runs go unattended. Precedence: an
 /// explicit automation-row pin (#211) beats the bot policy, which beats
 /// bare harness defaults. Bot-free automations -- and a Bot row that no
 /// longer resolves (a stale `bot_id`) -- dispatch exactly as before: the
 /// row's own params stay the safe fallback, never a new refusal path
 /// downstream of the eligibility/ownership fences this module already
-/// evaluated.
+/// evaluated. Permission policy is only overlaid for headless daemon runs;
+/// interactive callers retain inherited permission behavior.
 fn resolve_dispatch_harness(
     conn: &Connection,
     automation: &Automation,
@@ -176,7 +177,11 @@ fn resolve_dispatch_harness(
         model: automation.model.clone().or(policy.model),
         effort: row.effort.clone(),
         provider: automation.provider.clone().or(policy.provider),
-        permission_mode: row.permission_mode.clone().or(policy.permission_mode),
+        permission_mode: if row.headless {
+            row.permission_mode.clone().or(policy.permission_mode)
+        } else {
+            row.permission_mode.clone()
+        },
         headless: row.headless,
     }
 }

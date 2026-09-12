@@ -1798,10 +1798,11 @@ fn explicit_automation_pins_beat_the_bot_policy() {
 
     let plan = prepare(&c, "a1", &row_harness_params(&automation, false));
     // Row pins win (#211 precedence); the bot policy only fills the gaps
-    // (permissionMode), and Pi stays Pi.
+    // for headless daemon runs. This test's non-headless row retains
+    // inherited permission behavior.
     assert_eq!(plan.params["provider"], json!("pinned-provider"));
     assert_eq!(plan.params["model"], json!("pinned-model"));
-    assert_eq!(plan.params["permissionMode"], json!("unattended"));
+    assert!(plan.params.get("permissionMode").is_none());
     assert_eq!(plan.params["harnessId"], json!("pi"));
 }
 
