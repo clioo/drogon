@@ -95,16 +95,19 @@ export function BackupRestoreControl({
     }
     bridge.list().then((outcome) => {
       if (cancelled) return;
-      if (!outcome.ok || !("list" in outcome)) {
-        setState({ kind: "error", message: outcome.error });
+      if (outcome.ok && "list" in outcome) {
+        const result = outcome.list;
+        setState(
+          result.backups.length === 0
+            ? { kind: "empty", dataDir: result.dataDir }
+            : { kind: "listing", dataDir: result.dataDir, result },
+        );
         return;
       }
-      const result = outcome.list;
-      setState(
-        result.backups.length === 0
-          ? { kind: "empty", dataDir: result.dataDir }
-          : { kind: "listing", dataDir: result.dataDir, result },
-      );
+      setState({
+        kind: "error",
+        message: "error" in outcome ? outcome.error : "The backups could not be read.",
+      });
     });
     return () => {
       cancelled = true;
@@ -120,7 +123,10 @@ export function BackupRestoreControl({
     );
     bridge.restore(entry.id)
       .then((outcome) => {
-        if (!outcome.ok || !("restore" in outcome)) throw new Error(outcome.error);
+        if (!(outcome.ok && "restore" in outcome))
+          throw new Error(
+            "error" in outcome ? outcome.error : "The restore was refused.",
+          );
         return bridge.relaunchApp().then((relaunchOutcome) => {
           if (!relaunchOutcome.ok) throw new Error(relaunchOutcome.error);
         });

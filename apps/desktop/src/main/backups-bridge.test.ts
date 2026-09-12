@@ -28,37 +28,33 @@ const deps = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const okListEnvelope = {
-  ok: true,
-  result: {
-    dataDir: "/tmp/Drogon",
-    backups: [
-      {
-        id: "pre-migration-1727000000000",
-        createdAt: "2026-09-12T00:00:00Z",
-        originalDataDir: "/tmp/Drogon",
-        writerBuildVersion: "0.1.0",
-        sizeBytes: 36864,
-        pendingMigrations: [
-          { component: "bots", recordedVersion: 1, migratingTo: 3 },
-        ],
-        restorable: true,
-        invalidReason: null,
-        notRestorableReason: null,
-      },
-    ],
-    preRestoreSnapshots: [],
-  },
+// The CLI's local verbs print their BARE payload on success (refusals are
+// the failure envelope) — the bridge tolerates the envelope shape too.
+const okList = {
+  dataDir: "/tmp/Drogon",
+  backups: [
+    {
+      id: "pre-migration-1727000000000",
+      createdAt: "2026-09-12T00:00:00Z",
+      originalDataDir: "/tmp/Drogon",
+      writerBuildVersion: "0.1.0",
+      sizeBytes: 36864,
+      pendingMigrations: [
+        { component: "bots", recordedVersion: 1, migratingTo: 3 },
+      ],
+      restorable: true,
+      invalidReason: null,
+      notRestorableReason: null,
+    },
+  ],
+  preRestoreSnapshots: [],
 };
 
-const okRestoreEnvelope = {
-  ok: true,
-  result: {
-    restoredBackupId: "pre-migration-1727000000000",
-    preRestoreSnapshotId: "pre-restore-1727000001000",
-    databaseFile: "/tmp/Drogon/drogon.sqlite3",
-    sizeBytes: 36864,
-  },
+const okRestore = {
+  restoredBackupId: "pre-migration-1727000000000",
+  preRestoreSnapshotId: "pre-restore-1727000001000",
+  databaseFile: "/tmp/Drogon/drogon.sqlite3",
+  sizeBytes: 36864,
 };
 
 describe("backups bridge", () => {
@@ -72,11 +68,11 @@ describe("backups bridge", () => {
   test("list runs the bundled CLI with the resolved data dir and validates the envelope", async () => {
     runCli.mockResolvedValue({
       code: 0,
-      stdout: JSON.stringify(okListEnvelope),
+      stdout: JSON.stringify(okList),
       stderr: "",
     });
     const result = await handleBackupsRequest({ op: "list" }, deps());
-    expect(result).toEqual({ ok: true, list: okListEnvelope.result });
+    expect(result).toEqual({ ok: true, list: okList });
     expect(runCli).toHaveBeenCalledWith("/bundle/cli/drogon-cli", [
       "backups",
       "list",
@@ -89,14 +85,22 @@ describe("backups bridge", () => {
   test("restore takes only a backup id and never a path", async () => {
     runCli.mockResolvedValue({
       code: 0,
-      stdout: JSON.stringify(okRestoreEnvelope),
+      stdout: JSON.stringify(okRestore),
       stderr: "",
     });
     const result = await handleBackupsRequest(
       { op: "restore", backupId: "pre-migration-1727000000000" },
       deps(),
     );
-    expect(result).toEqual({ ok: true, restore: okRestoreEnvelope.result });
+    expect(result).toEqual({ ok: true, restore: okRestore });
+    // The protocol envelope shape is tolerated too.
+    runCli.mockResolvedValue({
+      code: 0,
+      stdout: JSON.stringify({ ok: true, result: okList }),
+      stderr: "",
+    });
+    const wrapped = await handleBackupsRequest({ op: "list" }, deps());
+    expect(wrapped).toEqual({ ok: true, list: okList });
     expect(runCli).toHaveBeenCalledWith("/bundle/cli/drogon-cli", [
       "backups",
       "restore",
@@ -110,8 +114,9 @@ describe("backups bridge", () => {
       deps(),
     );
     expect(refused.ok).toBe(false);
-    // The id is refused at validation, before any CLI runs.
-    expect(runCli).toHaveBeenCalledTimes(1);
+    // The id is refused at validation, before any CLI runs: still only the
+    // one valid restore call from above (plus this test's wrapped-shape call).
+    expect(runCli).toHaveBeenCalledTimes(2);
   });
 
   test("the CLI's own refusal message is surfaced verbatim", async () => {

@@ -123,9 +123,12 @@ export async function runBackupsCli(
       error: `Could not run the Drogon CLI: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-  // The CLI prints exactly one JSON envelope on stdout under --json; human
-  // diagnostics live on stderr. A non-ok envelope IS the refusal reason, so
-  // surface it verbatim — the overlay must show the CLI's own words.
+  // The CLI prints exactly one JSON document on stdout under --json; human
+  // diagnostics live on stderr. A REFUSAL is the protocol failure envelope
+  // (`ok: false` + `error`), so surface its message verbatim — the overlay
+  // must show the CLI's own words. Successes are the verb's bare payload
+  // (the local verbs print their payload, not an envelope), tolerating the
+  // envelope shape too.
   let envelope: unknown;
   try {
     envelope = JSON.parse(result.stdout);
@@ -137,8 +140,8 @@ export async function runBackupsCli(
         "The Drogon CLI did not answer with a readable backups envelope.",
     };
   }
-  const record = envelope as { ok?: unknown; error?: { message?: unknown } };
-  if (record.ok !== true) {
+  const record = envelope as { ok?: unknown; result?: unknown; error?: unknown };
+  if (record.ok === false) {
     const message = record.error;
     return {
       ok: false,
@@ -150,8 +153,7 @@ export async function runBackupsCli(
           : "The Drogon CLI refused the backups request.",
     };
   }
-  // `drogon-cli --json` wraps results in `result` (the protocol envelope).
-  const payload = (envelope as { result?: unknown }).result ?? envelope;
+  const payload = record.result ?? envelope;
   return { ok: true, payload };
 }
 
