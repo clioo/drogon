@@ -95,8 +95,10 @@ async function openOrchestrator(page) {
     await page.getByRole("button", { name: "New tab", exact: true }).click();
     await page.getByRole("menuitem", { name: "Work Graph", exact: true }).click();
   } else await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
-  if (!(await page.getByTestId("orchestrator-canvas").count())) await page.getByTestId("work-graph-orchestrator").click();
   await page.getByTestId("orchestrator-canvas").waitFor();
+  assert.equal(await page.getByTestId("work-graph-orchestrator").count(), 0);
+  assert.equal(await page.getByRole("button", { name: "Add node", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "Save intent", exact: true }).count(), 0);
 }
 
 try {
@@ -164,6 +166,13 @@ console.log(prompt.match(/DROGON_NODE_[A-Z0-9_]+_DONE/g)?.at(-1) ?? 'fixture com
   await emulatePageFocus(page);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await openOrchestrator(page);
+  await page.getByRole("button", { name: /^Work Graph(?: \(|$)/ }).click();
+  await page.getByTestId("work-graph-panel").waitFor();
+  assert.equal(await page.getByTestId("mentu-panel").count(), 0);
+  await page.getByRole("button", { name: "Open Work Graph", exact: true }).click();
+  await page.getByTestId("orchestrator-canvas").waitFor();
+  assert.equal(await page.getByRole("tab", { name: "Work Graph", exact: true }).count(), 1);
+  report.checks.push("work-graph-opens-orchestrator-directly-from-tab-and-sidebar");
   await page.getByRole("textbox", { name: "Main task", exact: true }).fill("Implement the fixture task and preserve evidence");
   await until(async () => (await graph()).intent.nodes.find((n) => n.id === main.id)?.prompt.includes("preserve evidence"), "main task autosave");
   await selectSettingsTheme(page, "dark");

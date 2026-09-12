@@ -3,7 +3,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  ArrowLeft,
   ArrowRight,
   Bot,
   CheckCircle2,
@@ -84,8 +83,7 @@ function RuntimeDisclosure({
 
 /** The Main agent node (Part 4/Scenario 7): a live projection of the real
  *  session, clickable into a small inspector exposing the SAME three
- *  leader-node honesty rules `WorkGraphDesigner`'s `NodeInspector` already
- *  enforces for an authored node's live session — harness-change refusal,
+ *  leader-node honesty rules for a live session — harness-change refusal,
  *  and delete/stop refusal-with-a-real-stop-action. There is deliberately
  *  no model-applies-next-launch row: `Session` carries no `model` field
  *  today (see the top-of-file comment), so inventing a next-launch badge
@@ -366,7 +364,6 @@ export function OrchestratorCanvas({
   runDisabledReason,
   saveStatus,
   saveError,
-  onBack,
   workspaceId,
   onStopMainSession,
   stoppingMainSession,
@@ -386,7 +383,6 @@ export function OrchestratorCanvas({
   saveError: string | null;
   /** Returns to the read-only Work Graph view. Optional so this component
    *  stays testable standalone. */
-  onBack?: () => void;
   /** Scopes the last-observed-session memory below to ONE workspace, so a
    *  session that exited in a DIFFERENT workspace can never bleed into one
    *  that has honestly never had a session at all. Optional so standalone
@@ -515,19 +511,7 @@ export function OrchestratorCanvas({
       data-testid="orchestrator-canvas"
     >
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3">
-        {onBack ? (
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            onClick={onBack}
-            aria-label="Back to Work Graph"
-            data-testid="orchestrator-back"
-          >
-            <ArrowLeft className="size-4" aria-hidden />
-          </Button>
-        ) : null}
-        <h1 className="text-sm font-semibold">Orchestrator</h1>
+        <h1 className="text-sm font-semibold">Work Graph</h1>
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <span className="size-2 rounded-full bg-emerald-500" aria-hidden />
           Workflow preview

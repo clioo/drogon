@@ -289,7 +289,10 @@ import {
   isMentuAvailable,
   windowMentuBridge,
 } from "./mentu-mount";
-import { MENTU_OPEN_TAB_EVENT, MentuPanel } from "./features/mentu/MentuPanel";
+import {
+  MENTU_OPEN_TAB_EVENT,
+  WorkGraphPanel,
+} from "./features/work-graph/WorkGraphPanel";
 import { WorkGraphPane } from "./features/work-graph/WorkGraphPane";
 import {
   createGatedGraphBridge,
@@ -1003,7 +1006,7 @@ export function App() {
     () => createGatedMentuBridge(windowMentuBridge(), () => mentuGateRef.current),
     [],
   );
-  // Work-graph authoring (graph.v1): the designer's write/compile/run seam,
+  // Work Graph (graph.v1): policy autosave and durable orchestration,
   // gated fail-closed like every other namespace. The source may be absent
   // (an old preload has no graph namespace); WorkGraphPane then renders the
   // honest "unavailable in this build" notice instead of a broken canvas.
@@ -5031,13 +5034,8 @@ export function App() {
                   )
                 ) : null}
               </div>
-              {/* Mentu as a tab (fixes the reported bug): the tab area
-                  renders the WORK GRAPH — the tab's content the owner
-                  replaced (the recipe surface stays in the right-sidebar
-                  Mentu panel). The graph reads <workspace>/.drogon/graph.json
-                  through the files bridge: `intent` is the human's plan,
-                  `state` is what the daemon observed, and the pane is
-                  strictly read-only. The tab strip stays mounted and keeps
+              {/* Preserve the tab identity while Work Graph opens the
+                  orchestrator directly. The tab strip stays mounted and keeps
                   its membership exactly like the browser and editor panes.
                   Why overflow-hidden: the surface must never paint outside
                   this column — an overflowing child used to slide beneath
@@ -5057,14 +5055,12 @@ export function App() {
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                     <WorkGraphPane
                       fileBridge={filesGatedBridge}
-                      mentuBridge={mentuGatedBridge}
                       graphBridge={graphGatedBridge}
                       hostId={status?.hostId ?? null}
                       workspaceId={current.id}
                       mainSession={mentuDispatchContext.mainSession}
                       onStopMainSession={() => void stopMainSession()}
                       stoppingMainSession={stoppingMainSession}
-                      sessions={sessions}
                     />
                   </div>
                 ) : null}
@@ -5300,13 +5296,8 @@ export function App() {
                           className="right-sidebar-panel"
                           aria-label="Work Graph"
                         >
-                          <MentuPanel
-                            bridge={mentuGatedBridge}
+                          <WorkGraphPanel
                             workspaceId={filesProps.workspace.id}
-                            fileBridge={filesGatedBridge}
-                            hostId={filesProps.status?.hostId ?? null}
-                            workspacePath={filesProps.workspace.path}
-                            dispatchContext={mentuDispatchContext}
                           />
                         </section>
                       ),

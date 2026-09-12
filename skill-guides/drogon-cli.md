@@ -589,9 +589,11 @@ retains completed roles and refuses an unverifiable run. The scheduler
 creates only depth-one roles; their briefs prohibit further delegation.
 This is not a sandbox restriction on arbitrary commands an agent can run.
 
-The legacy named-workflow graph runner retains its separate desktop-driven
-review flow. Use the Orchestrator commands above for durable test/review
-cycles and independent execution/evaluation results.
+Work Graph opens the Orchestrator directly. The manual node designer and
+named-workflow desktop review flow are retired from the UI; the sidebar
+opens the same Work Graph tab. Existing graph and workflow files are preserved.
+Use the Orchestrator commands above for durable test/review cycles and
+independent execution/evaluation results.
 
 ## Skill Topics
 
