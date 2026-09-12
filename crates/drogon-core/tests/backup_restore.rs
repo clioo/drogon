@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use drogon_core::Engine;
 use drogon_core::backups::{
-    self, RestoreError, list_pre_migration_backups, list_pre_restore_snapshots,
+    RestoreError, list_pre_migration_backups, list_pre_restore_snapshots,
     restore_pre_migration_backup,
 };
 use drogon_protocol::{PROTOCOL_VERSION, Request};

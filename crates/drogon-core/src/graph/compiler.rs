@@ -280,6 +280,9 @@ fn resolve_pi_model(node_id: &str, raw: &str) -> Result<(String, Option<GraphFin
     ))
 }
 
+/// The emitted step, its optional provider entry, and compile-time findings.
+type NodeStepOutput = (Value, Option<(String, Value)>, Vec<GraphFinding>);
+
 /// Emits one recipe step plus, for Pi, the provider-map entry and any
 /// compile-time finding (the provider/model split is surfaced, never
 /// silent). The backend mapping is explicit; an unsupported harness refuses
@@ -287,7 +290,7 @@ fn resolve_pi_model(node_id: &str, raw: &str) -> Result<(String, Option<GraphFin
 fn node_step(
     node: &GraphNodeIntent,
     defaults: &PiProviderDefaults,
-) -> Result<(Value, Option<(String, Value)>, Vec<GraphFinding>), RpcError> {
+) -> Result<NodeStepOutput, RpcError> {
     let mut step = json!({
         "label": node.id,
         "prompt": node.prompt,
