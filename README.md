@@ -51,7 +51,7 @@ the packaged build is validated as a whole before every release.
 6. **Tasks.** A page fed by GitHub Issues via `gh`: list, filter, paginate, a pull-request mode with review/checks/merge cells, and “start” creates a worktree and session from an issue or PR.
 7. **Automations.** A cron scheduler runs inside the daemon on top of the automation runner, with an editor, local-time schedules, a Runs dashboard, run detail, and history — including runs by a real coding agent.
 8. **Bots.** Create bots with presets and give them responsibilities (cron-backed), chat over visible `bot.run` execution, and browse per-bot history. A bot owns its own **monitors** — a file digest, an HTTP poll, a script, or a `github_pr.v1` watch on a repository — and a monitor that fires can release real work: a watched pull request opens a worktree and starts a review session, with the firing evidence recorded and deduplicated by case.
-9. **Work Graph.** Design the work instead of describing it in prose: a canvas of nodes, each with its prompt, harness and model from the real host catalogs, and dependency edges between them. `.drogon/graph.json` keeps a strict split — `intent` is yours to author, `state` is what the daemon observed — and running a graph compiles it and records every attempt as evidence. The **Orchestrator** view adds the subagent policy: approved runtimes tried in order, a fallback used only after they all fail, an optional **Delegate** mode that tells the main agent to plan and hand work to the enabled nodes, and an optional **adversarial loop** (find failures, then review and verify the fixes) bounded by a maximum number of iterations.
+9. **Work Graph.** The Orchestrator is the graph's one interface: a **Main agent** bound to the workspace's live session, the **Implementation workers** it plans and supervises at depth 1, and — when you switch it on — a dashed **adversarial loop** (an *Adversarial test* node that tries to break the result, then a *Code review* node that fixes what is real and verifies each fix), repeating up to the iteration bound and ending at *Ready to merge*. The **Subagent policy** beside it decides what those workers may run on: approved runtimes tried in order, a fallback marked *Not approved* that is used only after every approved one fails, and the two execution modes — **Adversarial testing** and **Delegate** — of which you pick at most one; with both off the main agent works directly. `.drogon/graph.json` keeps a strict split: `intent` is yours, `state` is what the daemon observed, and every runtime attempt and pass/fail verdict shows on the node itself and in the *Evidence* tab.
 10. **Settings.** Theme (system/light/dark), default harness, rebindable shortcuts, notifications, and Git/GitHub auth panes — all persisted and taking effect immediately, including “Restart daemon”.
 11. **Packaging.** An ad-hoc-signed, sealed `Drogon.app` with verified build info, packaged acceptance against a disposable profile, and a per-user installer that preserves previous builds.
 12. **Status bar.** The Orca bottom bar: settings and help on the left, per-provider usage meters with refresh, and on the right awake on/off, memory, terminal and port counts, and the daemon connection segment.
@@ -74,13 +74,17 @@ a monitor that fires releases real work rather than just a notification: a watch
 request opens a worktree and starts a review session in it. New watches park until you
 approve them, and every firing records what it saw.
 
-**The Work Graph replaced writing recipes by hand.** You design the work on a canvas,
-and the agent reads that design instead of being told in prose. The Orchestrator adds
-the policy around it: which runtimes subagents may use and in what order, what to fall
-back to when they all fail, whether the main agent should do the work or delegate it to
-the enabled nodes, and whether a bounded adversarial pass should try to break the result
-before it counts as done. The configured policy reaches the next session's brief, so a
-toggle in the UI changes how the agent actually behaves.
+**The Work Graph replaced writing recipes by hand.** The Orchestrator is the plan the
+agent reads instead of being told in prose: which runtimes its workers may use and in
+what order, what to fall back to when they all fail, and one execution mode — either a
+bounded adversarial pass that tries to break the result before it counts as done, or
+Delegate, which makes the main agent a planner and director of depth-1 workers. The
+configured policy reaches the next session's brief, so a toggle in the UI changes how the
+agent actually behaves.
+
+![The Work Graph with adversarial testing on: Main agent, Implementation workers, the dashed Adversarial loop with per-iteration verdicts, Ready to merge, and the Subagent policy panel](docs/screenshots/orchestrator-adversarial-light.png)
+
+_Adversarial testing on, two iterations allowed, both passed — every node shows its own runtime attempts and verdict. Captured from a disposable fixture workspace; the runtimes are fakes._
 
 ## A brief, not another meeting
 
@@ -166,6 +170,14 @@ When a workspace has a configured subagent policy, Drogon writes it into a manag
 in that workspace's `AGENTS.md` and `CLAUDE.md` at session start, so the agent knows
 whether it should delegate or do the work itself. A workspace with no policy is left
 untouched — Drogon never creates those files on its own.
+
+![The Bots page with one bot expanded: responsibilities, a Release watch automation and a repository monitor](docs/screenshots/bots-expanded-light.png)
+
+_A bot, its scheduled responsibility, and the monitor that can wake it. Fixture names throughout._
+
+![Meetings: the transcript list with a search and a date filter applied](docs/screenshots/meetings-filtered-light.png)
+
+_Meetings indexed read-only from local Markdown transcripts, searched and filtered. Every image in this README is regenerated by `node scripts/doc-screenshots.mjs` against a fixture world; see [docs/screenshots/MANIFEST.md](docs/screenshots/MANIFEST.md)._
 
 The orchestration verbs (`run`, `task`, `dispatch`, `ask`, `check`, `reply`) mirror
 Orca's, so a worker agent can coordinate with a human supervisor without leaving the

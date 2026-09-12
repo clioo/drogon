@@ -109,26 +109,28 @@ both leave a trace you can inspect.”
 
 This is the segment worth rehearsing; it is the part nobody else is showing.
 
-1. Open the **Work Graph** tab on the demo workspace. If no graph exists yet, the
-   empty state offers **Design the graph** — say the line out loud: “the plan is
-   mine to author; the state is what the daemon observed.”
-2. On the canvas, add two nodes, name them, give the second a dependency on the
-   first, and pick a harness and model on each from the real host catalog. Point
-   out that the model list is what this machine actually has — nothing invented.
-3. Switch to the **Orchestrator** view. In **Subagent policy**, show the approved
-   runtimes in order and the fallback marked **Not approved**: “these are tried in
-   order; the fallback only after every approved one fails, and each attempt is
-   recorded.”
+1. Open the **Work Graph** tab on the demo workspace. The Orchestrator is the
+   whole interface: the **Main agent** node is bound to this workspace's live
+   session — say the line out loud: “the plan is mine to author; the state is
+   what the daemon observed.”
+2. In **Subagent policy**, show the approved runtimes in order and the fallback
+   marked **Not approved**: “these are tried in order; the fallback only after
+   every approved one fails, and each attempt is recorded.” Point at the pickers:
+   the harnesses and models are what this machine actually has — nothing invented.
+3. Point at **Execution modes** and read its own sentence: “choose at most one;
+   with both off, the main agent works directly.”
 4. Toggle **Adversarial testing** on. The canvas grows the dashed loop —
    **Adversarial test → Code review**, repeating up to the number in the stepper,
    ending at **Ready to merge**. Two different briefs: one tries to break the
    result, the other reviews the whole diff and verifies each fix.
-5. Toggle **Delegate** on and say what it changes: the next session in this
-   workspace is told to plan and hand work to the enabled nodes instead of doing
-   it itself. Drogon writes that policy into the workspace's `AGENTS.md` at
-   session start — only when a policy is configured.
-6. Click **Run workflow** on the shell-only fixture graph and open a node's
-   evidence: per-step stdout, and the failover attempts if one was made.
+5. Toggle it off and toggle **Delegate** on instead; the **Implementation workers**
+   node is the main agent's depth-1 crew. Say what changes: the next session in
+   this workspace is told to plan and direct instead of doing the work itself.
+   Drogon writes that policy into the workspace's `AGENTS.md` at session start —
+   only when a policy is configured, never into a repo that has none.
+6. Click **Run workflow** on the shell-only fixture graph and open the
+   **Evidence** tab: per-iteration verdicts and runtime attempts on each node,
+   the per-step stdout behind them.
 
 One sentence: “you design the work once; the graph is the source of truth the
 agent reads, and every attempt it makes is evidence you can open.”
