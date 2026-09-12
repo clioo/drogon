@@ -31,6 +31,11 @@ import { meetings } from "./meetings";
 // which the daemon gates behind the graph.v1 capability and its
 // ownership-enforcing store.
 import { graph } from "./graph";
+// Install-resilience P6 (additive): the backups namespace behind the
+// downgrade-refusal overlay's restore control. The daemon is dead in that
+// state, so this channel runs in main (main/backups-bridge.ts) through the
+// bundled CLI — never through the daemon socket.
+import { backups } from "./backups";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -134,5 +139,8 @@ Object.assign(
   { meetings },
   // Work-graph authoring (additive): the designer's graph.* namespace.
   { graph },
+  // Install-resilience P6 (additive): backups list/restore for the
+  // downgrade-refusal overlay; executed in main through the bundled CLI.
+  { backups },
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));

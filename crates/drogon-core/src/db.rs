@@ -245,6 +245,13 @@ const VERSIONED_COMPONENTS: &[(&str, i64)] = &[
     ),
 ];
 
+/// The build's own component/version table, for `backups.rs`' restore
+/// classification: a backup whose recorded versions exceed any of these
+/// would re-trigger the downgrade refusal this build must never lose.
+pub(crate) fn versioned_components() -> &'static [(&'static str, i64)] {
+    VERSIONED_COMPONENTS
+}
+
 /// One recorded component version a forward migration would advance.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct PendingMigration {

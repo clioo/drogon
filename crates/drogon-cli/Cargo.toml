@@ -9,6 +9,10 @@ description = "Command-line client for the Drogon runtime (protocol v1)"
 
 [dependencies]
 drogon-protocol = { workspace = true }
+# Install-resilience P6: `drogon-cli backups list/restore` runs the core
+# backup listing/restore (validated manifests, lock-held refusal, reversible
+# restore) against the data directory directly, no daemon needed.
+drogon-core = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

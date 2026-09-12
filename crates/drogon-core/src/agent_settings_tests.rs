@@ -307,3 +307,91 @@ fn real_pty_uses_command_arguments_environment_and_disabled_hooks() {
     );
     assert!(!refused.ok);
 }
+
+// Install-resilience Finding 8: the settings file must fail OPEN. Losing
+// every agent setting atomically because a newer build wrote one extra
+// field (or one version bump) is the exact failure this suite pins shut.
+
+/// A version-1 file carrying a field this build has never heard of must
+/// still read: the reader keeps every known setting and ignores the rest.
+/// Before the fix, `deny_unknown_fields` rejected the WHOLE file.
+#[test]
+fn unknown_fields_no_longer_reject_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let path = dir.path().join("agent-settings.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "settings": {
+                "defaultTuiAgent": "pi",
+                "agentDefaultArgs": {"pi": "--thinking high"},
+                "someFutureToggle": true,
+                "anotherFutureObject": {"nested": [1, 2, 3]}
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let settings = engine.read_agent_settings().unwrap().unwrap();
+    assert_eq!(settings.default_tui_agent.as_deref(), Some("pi"));
+    assert_eq!(settings.agent_default_args["pi"], "--thinking high");
+    assert!(settings.agent_status_hooks_enabled, "known defaults survive");
+}
+
+/// A file from a FUTURE version is refused with a specific, actionable
+/// message naming both versions — never the generic parse failure — and
+/// the file is left byte-identical on disk.
+#[test]
+fn a_future_version_is_refused_specifically_and_left_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let path = dir.path().join("agent-settings.json");
+    let future = serde_json::to_vec(&json!({
+        "version": 2,
+        "settings": {"defaultTuiAgent": "pi"}
+    }))
+    .unwrap();
+    std::fs::write(&path, &future).unwrap();
+    let error = engine.read_agent_settings().unwrap_err();
+    assert!(
+        error.message.contains("version 2") && error.message.contains("version 1"),
+        "the refusal must name the skew: {}",
+        error.message
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), future, "a refused read never rewrites");
+}
+
+/// Every rewrite backs up the previous file, so even the unknown fields a
+/// tolerant reader ignores stay recoverable on disk.
+#[test]
+fn rewriting_the_settings_file_backs_up_the_previous_generation() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let path = dir.path().join("agent-settings.json");
+    let previous = dir.path().join("agent-settings.json.previous");
+    assert!(!previous.exists(), "no backup before the first write");
+
+    assert!(invoke(
+        &engine,
+        "agent.settings_update",
+        json!({"updates": {"defaultTuiAgent": "pi"}})
+    )
+    .ok);
+    let first_generation = std::fs::read(&path).unwrap();
+
+    assert!(invoke(
+        &engine,
+        "agent.settings_update",
+        json!({"updates": {"defaultTuiAgent": "claude"}})
+    )
+    .ok);
+    let backup = std::fs::read(&previous).unwrap();
+    assert_eq!(
+        backup, first_generation,
+        "the backup holds exactly the previous generation"
+    );
+    let settings = engine.read_agent_settings().unwrap().unwrap();
+    assert_eq!(settings.default_tui_agent.as_deref(), Some("claude"));
+}
