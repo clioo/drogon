@@ -66,7 +66,10 @@ function fixtureDocument(): WorkGraphDocument {
                 invalid: [],
               },
             },
-            drift: { expected: ["src/a.rs"], created: ["src/a.rs", "src/b.rs"] },
+            drift: {
+              expected: ["src/a.rs"],
+              created: ["src/a.rs", "src/b.rs"],
+            },
           },
         },
         { id: "n1", status: "unverifiable", lastError: "contact lost" },
@@ -94,7 +97,7 @@ describe("parseWorkGraphDocument", () => {
       approvedRuntimes: [{ harness: "opencode", model: "claude-sonnet-4" }],
       fallbackRuntime: null,
       adversarial: { enabled: true, maxIterations: 5 },
-      delegate: true,
+      delegate: false,
     };
     const parsed = parseWorkGraphDocument(JSON.stringify(document));
     expect(parsed.ok).toBe(true);
@@ -102,14 +105,27 @@ describe("parseWorkGraphDocument", () => {
     const policy = resolveGraphPolicy(parsed.document.intent);
     expect(policy.approvedRuntimes).toHaveLength(1);
     expect(policy.adversarial).toEqual({ enabled: true, maxIterations: 5 });
-    expect(policy.delegate).toBe(true);
+    expect(policy.delegate).toBe(false);
+  });
+
+  it("rejects a persisted policy with both execution modes enabled", () => {
+    const document = fixtureDocument();
+    (document.intent as { policy?: unknown }).policy = {
+      approvedRuntimes: [],
+      fallbackRuntime: null,
+      adversarial: { enabled: true, maxIterations: 3 },
+      delegate: true,
+    };
+    expect(parseWorkGraphDocument(JSON.stringify(document)).ok).toBe(false);
   });
 
   it("resolves the default policy when the document predates the field", () => {
     const parsed = parseWorkGraphDocument(JSON.stringify(fixtureDocument()));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(resolveGraphPolicy(parsed.document.intent)).toEqual(DEFAULT_GRAPH_POLICY);
+    expect(resolveGraphPolicy(parsed.document.intent)).toEqual(
+      DEFAULT_GRAPH_POLICY,
+    );
   });
 
   it("keeps a recorded measured zero as zero (usageKnown true)", () => {
@@ -119,19 +135,30 @@ describe("parseWorkGraphDocument", () => {
         label: "n0",
         backend: "pi",
         status: "succeeded",
-        usage: { inputTokens: 0, outputTokens: 0, usageKnown: true, invalid: [] },
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          usageKnown: true,
+          invalid: [],
+        },
       },
     };
     const parsed = parseWorkGraphDocument(JSON.stringify(document));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const usage = parsed.document.state.nodes[0].evidence?.step?.usage;
-    expect(usage).toMatchObject({ inputTokens: 0, outputTokens: 0, usageKnown: true });
+    expect(usage).toMatchObject({
+      inputTokens: 0,
+      outputTokens: 0,
+      usageKnown: true,
+    });
   });
 
   it("preserves unknown evidence keys for display instead of dropping them", () => {
     const document = fixtureDocument();
-    (document.state.nodes[0].evidence as Record<string, unknown>)["futureField"] = {
+    (document.state.nodes[0].evidence as Record<string, unknown>)[
+      "futureField"
+    ] = {
       nested: true,
     };
     const parsed = parseWorkGraphDocument(JSON.stringify(document));
@@ -178,7 +205,8 @@ describe("parseWorkGraphDocument", () => {
 
   it("refuses a state status the contract does not define", () => {
     const document = fixtureDocument();
-    (document.state.nodes[1] as unknown as { status: string }).status = "kind-of-done";
+    (document.state.nodes[1] as unknown as { status: string }).status =
+      "kind-of-done";
     const parsed = parseWorkGraphDocument(JSON.stringify(document));
     expect(parsed.ok).toBe(false);
   });
@@ -193,7 +221,8 @@ describe("parseWorkGraphDocument", () => {
       "unverifiable",
     ]) {
       const document = fixtureDocument();
-      document.state.nodes[1].status = status as WorkGraphDocument["state"]["nodes"][number]["status"];
+      document.state.nodes[1].status =
+        status as WorkGraphDocument["state"]["nodes"][number]["status"];
       expect(parseWorkGraphDocument(JSON.stringify(document)).ok).toBe(true);
     }
   });

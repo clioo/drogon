@@ -108,7 +108,7 @@ describe("SubagentPolicyPanel", () => {
       />,
     );
     expect(screen.getByTestId("subagent-policy-summary").textContent).toBe(
-      "3 approved · 1 fallback · 2 optional subagents",
+      "3 approved · 1 fallback · Adversarial · Depth 1",
     );
   });
 
@@ -122,7 +122,7 @@ describe("SubagentPolicyPanel", () => {
       />,
     );
     expect(screen.getByTestId("subagent-policy-summary").textContent).toBe(
-      "0 approved · 0 fallback · 0 optional subagents",
+      "0 approved · 0 fallback · Direct",
     );
   });
 
@@ -240,7 +240,11 @@ describe("SubagentPolicyPanel", () => {
       policy = next;
     });
     const { rerender } = render(
-      <SubagentPolicyPanel policy={policy} interactive onChange={handleChange} />,
+      <SubagentPolicyPanel
+        policy={policy}
+        interactive
+        onChange={handleChange}
+      />,
     );
     const remove = screen.getByTestId(
       "fallback-runtime-remove",
@@ -249,13 +253,20 @@ describe("SubagentPolicyPanel", () => {
     fireEvent.click(remove);
     expect(handleChange).toHaveBeenCalledTimes(1);
     expect(policy.fallbackRuntime).toBeNull();
-    rerender(<SubagentPolicyPanel policy={policy} interactive onChange={handleChange} />);
+    rerender(
+      <SubagentPolicyPanel
+        policy={policy}
+        interactive
+        onChange={handleChange}
+      />,
+    );
     expect(screen.getByTestId("subagent-policy-summary").textContent).toBe(
-      "3 approved · 0 fallback · 2 optional subagents",
+      "3 approved · 0 fallback · Adversarial · Depth 1",
     );
     // Nothing left to remove: the control disables rather than no-oping.
     expect(
-      (screen.getByTestId("fallback-runtime-remove") as HTMLButtonElement).disabled,
+      (screen.getByTestId("fallback-runtime-remove") as HTMLButtonElement)
+        .disabled,
     ).toBe(true);
   });
 
@@ -348,7 +359,42 @@ describe("SubagentPolicyPanel", () => {
     );
     fireEvent.click(screen.getByTestId("delegate-toggle"));
     expect(latest!.delegate).toBe(true);
+    expect(latest!.adversarial.enabled).toBe(false);
     expect(latest!.approvedRuntimes).toEqual([]);
+  });
+
+  it("enabling adversarial testing turns Delegate off atomically", () => {
+    stubDrogon();
+    let latest: GraphPolicy | null = null;
+    render(
+      <SubagentPolicyPanel
+        policy={{ ...emptyPolicy(), delegate: true }}
+        interactive
+        onChange={(next) => {
+          latest = next;
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("adversarial-toggle"));
+    expect(latest!.adversarial.enabled).toBe(true);
+    expect(latest!.delegate).toBe(false);
+  });
+
+  it("enabling Delegate turns adversarial testing off atomically", () => {
+    stubDrogon();
+    let latest: GraphPolicy | null = null;
+    render(
+      <SubagentPolicyPanel
+        policy={design2Policy()}
+        interactive
+        onChange={(next) => {
+          latest = next;
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("delegate-toggle"));
+    expect(latest!.delegate).toBe(true);
+    expect(latest!.adversarial.enabled).toBe(false);
   });
 
   it("disables every control and shows an honest reason when not interactive", () => {
