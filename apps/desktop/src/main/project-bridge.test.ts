@@ -302,7 +302,8 @@ describe("dispatchProjectRequest", () => {
           sent.push({ channel, revision }),
       },
     };
-    // Baseline, rest, unreadable, move, rest: only the move pushes.
+    // First sighting, rest, unreadable, move, rest: the first sighting and
+    // the move push, nothing else does.
     const revisions: Array<string | null> = ["a", "a", null, "b", "b"];
     const watcher = startProjectRegistryWatcher({
       // The watcher only needs `isDestroyed`/`webContents.send`.
@@ -312,17 +313,47 @@ describe("dispatchProjectRequest", () => {
     });
     try {
       await watcher.tick();
-      expect(sent).toEqual([]);
-      await watcher.tick();
-      expect(sent).toEqual([]);
-      await watcher.tick();
-      expect(sent).toEqual([]);
-      await watcher.tick();
       expect(sent).toEqual([
-        { channel: PROJECTS_CHANGED_CHANNEL, revision: "b" },
+        { channel: PROJECTS_CHANGED_CHANNEL, revision: "a" },
       ]);
       await watcher.tick();
       expect(sent).toHaveLength(1);
+      await watcher.tick();
+      expect(sent).toHaveLength(1);
+      await watcher.tick();
+      expect(sent).toEqual([
+        { channel: PROJECTS_CHANGED_CHANNEL, revision: "a" },
+        { channel: PROJECTS_CHANGED_CHANNEL, revision: "b" },
+      ]);
+      await watcher.tick();
+      expect(sent).toHaveLength(2);
+    } finally {
+      watcher.stop();
+    }
+  });
+
+  test("a registry move before the watcher's first read still reaches a renderer that already drew the sidebar", async () => {
+    // The renderer loaded `project.list` at revision "loaded"; a
+    // `drogon-cli worktree create` then moved the registry to "moved"
+    // before the watcher ever read it. The watcher's first read is
+    // "moved" — with a silent baseline the renderer would keep showing
+    // the stale sidebar until some later, unrelated move.
+    const sent: string[] = [];
+    const window = {
+      isDestroyed: () => false,
+      webContents: { send: (_channel: string, revision: string) => sent.push(revision) },
+    };
+    const reads = ["moved", "moved"];
+    const watcher = startProjectRegistryWatcher({
+      getWindow: () => window as never,
+      readRevision: async () => reads.shift() ?? "moved",
+      pollIntervalMs: 60_000,
+    });
+    try {
+      await watcher.tick();
+      expect(sent).toEqual(["moved"]);
+      await watcher.tick();
+      expect(sent).toEqual(["moved"]);
     } finally {
       watcher.stop();
     }
@@ -351,7 +382,8 @@ describe("dispatchProjectRequest", () => {
       watcher.stop();
     }
     // A null window is equally silent: the baseline still advances so a
-    // later window is not spammed with a stale move.
+    // later window is not spammed with a stale move (a renderer created
+    // after the move reads the registry fresh on its own initial load).
     let reads = 0;
     const headless = startProjectRegistryWatcher({
       getWindow: () => null,

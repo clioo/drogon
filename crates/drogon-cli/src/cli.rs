@@ -924,7 +924,7 @@ pub enum WorktreeAction {
     /// Create a git worktree for a Project on branch NAME
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>]\nValid flags: --base, --base-branch, --data-dir, --help, --json, --name, --project, --request-id, --retry-request"
+        override_usage = "drogon-cli worktree create --project <ID> --name <NAME> [--base <REF>] [--parent <ID> | --no-parent]\nValid flags: --base, --base-branch, --data-dir, --help, --json, --name, --no-parent, --parent, --project, --request-id, --retry-request"
     )]
     Create {
         #[arg(long, value_name = "ID")]
@@ -936,6 +936,17 @@ pub enum WorktreeAction {
         /// flag; both spellings map to the one `baseRef` param.
         #[arg(long, visible_alias = "base-branch", value_name = "REF")]
         base: Option<String>,
+        /// Sidebar-nesting parent: the id or workspace id of another
+        /// worktree of the same Project. Omitted, the parent is inferred
+        /// from the calling Drogon session (`DROGON_WORKSPACE_ID`) or from
+        /// the worktree that contains the current directory, so a worktree
+        /// an agent creates from inside its session nests under it.
+        #[arg(long, value_name = "ID", conflicts_with = "no_parent")]
+        parent: Option<String>,
+        /// Create a top-level worktree even when called from inside a
+        /// Drogon session or a worktree directory.
+        #[arg(long)]
+        no_parent: bool,
     },
     /// List a Project's worktrees
     #[command(
@@ -1322,11 +1333,16 @@ impl Cli {
                     project,
                     name,
                     base,
+                    parent,
+                    ..
                 } => {
                     require_nonempty("project", project)?;
                     require_nonempty("name", name)?;
                     if let Some(base) = base {
                         require_nonempty("base", base)?;
+                    }
+                    if let Some(parent) = parent {
+                        require_nonempty("parent", parent)?;
                     }
                 }
                 WorktreeAction::List { project } => {
@@ -2470,6 +2486,8 @@ mod tests {
                     project,
                     name,
                     base,
+                    parent,
+                    no_parent,
                 },
         } = &cli.command
         else {
@@ -2478,6 +2496,8 @@ mod tests {
         assert_eq!(project, "p1");
         assert_eq!(name, "feature");
         assert_eq!(base.as_deref(), Some("main"));
+        assert_eq!(parent, &None, "no --parent means inference, not a value");
+        assert!(!no_parent);
         assert!(cli.validate().is_ok());
 
         let cli = parse(&["worktree", "list", "--project", "p1"]).unwrap();
@@ -2526,6 +2546,7 @@ mod tests {
                         project,
                         name,
                         base,
+                        ..
                     },
             } = &cli.command
             else {
@@ -2536,6 +2557,86 @@ mod tests {
             assert_eq!(base.as_deref(), Some("main"));
             assert!(cli.validate().is_ok());
         }
+    }
+
+    /// `--parent` and `--no-parent` are the two explicit lineage choices;
+    /// they exclude each other at the parser, and an empty `--parent` is a
+    /// usage error rather than "no parent".
+    #[test]
+    fn worktree_create_parent_flags_are_explicit_and_exclusive() {
+        let cli = parse(&[
+            "worktree",
+            "create",
+            "--project",
+            "p1",
+            "--name",
+            "fix",
+            "--parent",
+            "ws-9",
+        ])
+        .unwrap();
+        let Command::Worktree {
+            action: WorktreeAction::Create {
+                parent, no_parent, ..
+            },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(parent.as_deref(), Some("ws-9"));
+        assert!(!no_parent);
+        assert!(cli.validate().is_ok());
+
+        let cli = parse(&[
+            "worktree",
+            "create",
+            "--project",
+            "p1",
+            "--name",
+            "fix",
+            "--no-parent",
+        ])
+        .unwrap();
+        let Command::Worktree {
+            action: WorktreeAction::Create {
+                parent, no_parent, ..
+            },
+        } = &cli.command
+        else {
+            panic!("wrong subcommand");
+        };
+        assert_eq!(parent, &None);
+        assert!(no_parent);
+        assert!(cli.validate().is_ok());
+
+        let both = parse(&[
+            "worktree",
+            "create",
+            "--project",
+            "p1",
+            "--name",
+            "fix",
+            "--parent",
+            "ws-9",
+            "--no-parent",
+        ]);
+        assert!(both.is_err(), "--parent and --no-parent exclude each other");
+
+        let empty = parse(&[
+            "worktree",
+            "create",
+            "--project",
+            "p1",
+            "--name",
+            "fix",
+            "--parent",
+            "",
+        ])
+        .unwrap();
+        assert!(
+            empty.validate().is_err(),
+            "an empty --parent is a usage error"
+        );
     }
 
     #[test]

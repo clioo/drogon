@@ -9,10 +9,11 @@ mod common;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
+use std::path::Path;
 
 use common::{
-    Action, Behavior, MockService, error_envelope, ok_envelope, run_cli, run_cli_with, stderr,
-    stdout,
+    Action, Behavior, MockService, error_envelope, ok_envelope, run_cli, run_cli_in, run_cli_with,
+    stderr, stdout,
 };
 
 fn temp_data_dir(name: &str) -> tempfile::TempDir {
@@ -1730,6 +1731,10 @@ fn worktree_created_result(creator: &Value) -> Value {
 async fn worktree_create_always_tags_the_cli_creation_provenance() {
     let dir = temp_data_dir("wt-creator");
     let behavior: Behavior = std::sync::Arc::new(|request| match request["method"].as_str() {
+        Some("worktree.list") => Action::Respond(ok_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            json!({ "worktrees": [] }),
+        )),
         Some("worktree.create") => {
             assert_eq!(
                 request["params"]["creator"], "cli",
@@ -1755,8 +1760,263 @@ async fn worktree_create_always_tags_the_cli_creation_provenance() {
     );
     assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
 
-    let request = service.first_captured();
-    assert_eq!(request["method"], "worktree.create");
+    let request = captured_method(&service, "worktree.create");
     assert_eq!(request["params"]["creator"], "cli");
+    drop(service);
+}
+
+// --- Worktree lineage: a worktree created from inside a session nests under it ---
+
+fn captured_method(service: &MockService, method: &str) -> Value {
+    service
+        .captured()
+        .into_iter()
+        .find(|request| request["method"] == method)
+        .unwrap_or_else(|| panic!("mock never saw {method}"))
+}
+
+fn captured_methods(service: &MockService) -> Vec<String> {
+    service
+        .captured()
+        .iter()
+        .map(|request| request["method"].as_str().unwrap_or("").to_string())
+        .collect()
+}
+
+fn listed_worktree(id: &str, workspace_id: &str, path: &Path) -> Value {
+    json!({
+        "id": id,
+        "projectId": "p1",
+        "workspaceId": workspace_id,
+        "path": path.to_str().unwrap(),
+        "branch": id,
+        "head": "abc123",
+        "baseRef": null,
+        "createdAt": "2026-09-09T00:00:00Z",
+    })
+}
+
+/// A mock daemon owning two project-p1 worktrees on disk under `root`
+/// (`coord`, the coordinator's, and `other`), answering `worktree.list`
+/// with them and echoing whatever `parentWorktreeId` a create asked for.
+fn lineage_service(dir: &Path, root: &Path) -> MockService {
+    let coord = root.join("coord");
+    let other = root.join("other");
+    std::fs::create_dir_all(coord.join("src")).expect("coord worktree dir");
+    std::fs::create_dir_all(&other).expect("other worktree dir");
+    let coord = coord.canonicalize().unwrap();
+    let other = other.canonicalize().unwrap();
+    let behavior: Behavior = std::sync::Arc::new(move |request| match request["method"].as_str() {
+        Some("worktree.list") => {
+            assert_eq!(request["params"]["projectId"], "p1");
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                json!({ "worktrees": [
+                    listed_worktree("w-coord", "ws-coord", &coord),
+                    listed_worktree("w-other", "ws-other", &other),
+                ] }),
+            ))
+        }
+        Some("worktree.create") => {
+            let mut created = worktree_created_result(&request["params"]["creator"]);
+            if let Some(parent) = request["params"].get("parentWorktreeId") {
+                created["parentWorktreeId"] = parent.clone();
+            }
+            Action::Respond(ok_envelope(
+                request["requestId"].as_str().unwrap_or(""),
+                created,
+            ))
+        }
+        _ => Action::Respond(error_envelope(
+            request["requestId"].as_str().unwrap_or(""),
+            "method_not_found",
+            "unexpected",
+        )),
+    });
+    MockService::start(dir, behavior)
+}
+
+const CREATE: [&str; 6] = ["worktree", "create", "--project", "p1", "--name", "fix-a"];
+
+/// The user-visible bug: a coordinator session ran `worktree create` for
+/// each subagent and the sidebar showed the results as top-level
+/// strangers. Inside a session the daemon exports `DROGON_WORKSPACE_ID`;
+/// the CLI must turn that into the parent edge the sidebar nests by.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_inside_a_session_nests_under_the_calling_worktree() {
+    let dir = temp_data_dir("wt-lin-env");
+    let elsewhere = tempfile::tempdir().expect("cwd outside every worktree");
+    let service = lineage_service(dir.path(), dir.path());
+
+    let output = run_cli_in(
+        dir.path(),
+        elsewhere.path(),
+        &CREATE,
+        &[("DROGON_WORKSPACE_ID", "ws-coord")],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let create = captured_method(&service, "worktree.create");
+    assert_eq!(create["params"]["parentWorktreeId"], "w-coord");
+    assert_eq!(create["params"]["creator"], "cli");
+    assert!(
+        stdout(&output).contains("nested under w-coord"),
+        "human output names the parent: {}",
+        stdout(&output)
+    );
+    assert!(
+        stderr(&output).is_empty(),
+        "a resolved parent is not a warning: {}",
+        stderr(&output)
+    );
+    drop(service);
+}
+
+/// `--no-parent` is the explicit opt-out: no lookup, no parent, no note,
+/// even from inside a session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_no_parent_skips_the_lineage_lookup_entirely() {
+    let dir = temp_data_dir("wt-lin-np");
+    let service = lineage_service(dir.path(), dir.path());
+
+    let mut args = CREATE.to_vec();
+    args.push("--no-parent");
+    let output = run_cli_with(dir.path(), &args, &[("DROGON_WORKSPACE_ID", "ws-coord")]);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert_eq!(captured_methods(&service), vec!["worktree.create"]);
+    assert!(
+        captured_method(&service, "worktree.create")["params"]
+            .get("parentWorktreeId")
+            .is_none()
+    );
+    assert!(stderr(&output).is_empty(), "stderr: {}", stderr(&output));
+    drop(service);
+}
+
+/// `--parent` takes the id an agent already holds (the workspace id from
+/// `DROGON_WORKSPACE_ID`) as readily as the worktree id from `worktree list`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_explicit_parent_accepts_worktree_and_workspace_ids() {
+    let dir = temp_data_dir("wt-lin-x");
+    let service = lineage_service(dir.path(), dir.path());
+
+    for selector in ["ws-other", "w-other"] {
+        let mut args = CREATE.to_vec();
+        args.extend(["--parent", selector]);
+        // The explicit choice wins over the session context.
+        let output = run_cli_with(dir.path(), &args, &[("DROGON_WORKSPACE_ID", "ws-coord")]);
+        assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+        let create = service
+            .captured()
+            .into_iter()
+            .rev()
+            .find(|request| request["method"] == "worktree.create")
+            .expect("create request");
+        assert_eq!(
+            create["params"]["parentWorktreeId"], "w-other",
+            "selector {selector}"
+        );
+    }
+    drop(service);
+}
+
+/// An explicit parent that is not in the project is refused before the
+/// daemon is ever asked to check anything out: nothing to clean up, and
+/// the JSON envelope says why.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_explicit_parent_outside_the_project_refuses_before_creating() {
+    let dir = temp_data_dir("wt-lin-bad");
+    let service = lineage_service(dir.path(), dir.path());
+
+    let mut args = vec!["--json"];
+    args.extend(CREATE);
+    args.extend(["--parent", "ws-stranger"]);
+    let output = run_cli(dir.path(), &args);
+    assert_eq!(output.status.code(), Some(1), "stderr: {}", stderr(&output));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).expect("failure envelope");
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["error"]["code"], "invalid_argument");
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("ws-stranger"),
+        "{envelope}"
+    );
+    assert_eq!(captured_methods(&service), vec!["worktree.list"]);
+    drop(service);
+}
+
+/// A session whose workspace belongs to another project (or is not a
+/// worktree at all) still gets its worktree, top-level, and is told so:
+/// inference degrades, it never fails the create.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_from_a_foreign_session_creates_top_level_and_says_so() {
+    let dir = temp_data_dir("wt-lin-far");
+    let elsewhere = tempfile::tempdir().expect("cwd outside every worktree");
+    let service = lineage_service(dir.path(), dir.path());
+
+    let output = run_cli_in(
+        dir.path(),
+        elsewhere.path(),
+        &CREATE,
+        &[("DROGON_WORKSPACE_ID", "ws-stranger")],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(
+        captured_method(&service, "worktree.create")["params"]
+            .get("parentWorktreeId")
+            .is_none()
+    );
+    let note = stderr(&output);
+    assert!(
+        note.contains("without a parent") && note.contains("ws-stranger"),
+        "stderr: {note}"
+    );
+    drop(service);
+}
+
+/// Outside any session, standing inside a project worktree is the same
+/// signal Orca's `worktree create` uses: the new worktree nests under it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_from_a_worktree_directory_nests_under_it() {
+    let dir = temp_data_dir("wt-lin-cwd");
+    let service = lineage_service(dir.path(), dir.path());
+
+    let output = run_cli_in(
+        dir.path(),
+        &dir.path().join("coord").join("src"),
+        &CREATE,
+        &[("DROGON_WORKSPACE_ID", "")],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert_eq!(
+        captured_method(&service, "worktree.create")["params"]["parentWorktreeId"],
+        "w-coord"
+    );
+    assert!(stderr(&output).is_empty(), "stderr: {}", stderr(&output));
+    drop(service);
+}
+
+/// No session and a cwd outside every worktree: a top-level worktree with
+/// nothing to warn about, exactly the pre-existing behavior.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worktree_create_outside_any_context_sends_no_parent_and_no_note() {
+    let dir = temp_data_dir("wt-lin-none");
+    let elsewhere = tempfile::tempdir().expect("cwd outside every worktree");
+    let service = lineage_service(dir.path(), dir.path());
+
+    let output = run_cli_in(
+        dir.path(),
+        elsewhere.path(),
+        &CREATE,
+        &[("DROGON_WORKSPACE_ID", "")],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert!(
+        captured_method(&service, "worktree.create")["params"]
+            .get("parentWorktreeId")
+            .is_none()
+    );
+    assert!(stderr(&output).is_empty(), "stderr: {}", stderr(&output));
     drop(service);
 }

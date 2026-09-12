@@ -130,10 +130,18 @@ export type ProjectRegistryWatcherDeps = {
 
 /**
  * Polls the registry revision and pushes `drogon:projectsChanged` to the
- * renderer exactly when the registry moved (issue #146). Same posture as
- * the notifications watcher: the first sighting is the baseline rather
- * than a change, a failed read keeps the previous baseline so no move is
- * lost or double-reported, and the interval never keeps the app alive.
+ * renderer whenever the registry moved (issue #146). A failed read keeps
+ * the previous baseline so no move is lost or double-reported, and the
+ * interval never keeps the app alive.
+ *
+ * The first successful sighting is pushed as well, not silently taken as
+ * the baseline: the renderer may already have drawn the sidebar from an
+ * earlier `project.list`, and a registry move that lands between that
+ * draw and this watcher's first read (a `drogon-cli worktree create` run
+ * right after the app came up) would otherwise stay invisible until the
+ * next move — nothing else re-reads the registry. A push with no renderer
+ * listening yet is harmless, and a renderer that is listening pays one
+ * extra reload at startup.
  */
 export function startProjectRegistryWatcher(deps: ProjectRegistryWatcherDeps): {
   tick: () => Promise<void>;
@@ -149,10 +157,6 @@ export function startProjectRegistryWatcher(deps: ProjectRegistryWatcherDeps): {
       const revision = await deps.readRevision();
       // Unreadable keeps the baseline: the next tick diffs against it.
       if (revision === null) return;
-      if (baseline === null) {
-        baseline = revision;
-        return;
-      }
       if (revision === baseline) return;
       baseline = revision;
       const window = deps.getWindow();

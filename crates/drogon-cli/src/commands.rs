@@ -514,6 +514,8 @@ async fn worktree(
             project,
             name,
             base,
+            parent,
+            no_parent,
         } => {
             // Real, durable creation provenance (Workspace Options "Hide:
             // CLI-created"): every worktree this command creates really was
@@ -524,12 +526,36 @@ async fn worktree(
             if let Some(base) = base {
                 params["baseRef"] = json!(base);
             }
+            // Sidebar lineage: a worktree created from inside a Drogon
+            // session (or from a worktree directory) nests under that
+            // worktree unless the caller says otherwise, so a subagent's
+            // worktree shows up under its coordinator instead of as a
+            // stranger at the top level. The daemon still validates the
+            // parent (same project, no cycles); this only chooses it.
+            let lineage = resolve_worktree_lineage(
+                client,
+                request_id,
+                project,
+                parent.as_deref(),
+                *no_parent,
+                &WorktreeLineageContext::from_process(),
+            )
+            .await?;
+            if let Some(parent_id) = &lineage.parent_worktree_id {
+                params["parentWorktreeId"] = json!(parent_id);
+            }
             let call = client
                 .call("worktree.create", params, request_id, DEFAULT_TIMEOUT)
                 .await?;
             let worktree: Worktree =
                 Client::decode_checked(&call, "worktree.create", check_worktree)?;
-            emit(call, json, || output::worktree_created(&worktree), 0, None)
+            emit(
+                call,
+                json,
+                || output::worktree_created(&worktree),
+                0,
+                lineage.stderr_note,
+            )
         }
         WorktreeAction::List { project } => {
             let params = json!({ "projectId": project });
@@ -552,6 +578,158 @@ async fn worktree(
             emit(call, json, || output::worktree_removed(&removed), 0, None)
         }
     }
+}
+
+/// What `worktree create` knows about its caller when neither `--parent`
+/// nor `--no-parent` was passed: the calling Drogon session's own workspace
+/// (`DROGON_WORKSPACE_ID`, exported into every PTY the daemon spawns) and
+/// the current directory. Orca's `worktree create` infers lineage from the
+/// same two contexts in the same order (env workspace first, then cwd);
+/// the env is the stronger signal because it is the daemon's own record of
+/// which worktree the caller runs in, while cwd only says where it stands.
+pub(crate) struct WorktreeLineageContext {
+    pub(crate) env_workspace_id: Option<String>,
+    pub(crate) cwd: Option<PathBuf>,
+}
+
+impl WorktreeLineageContext {
+    fn from_process() -> Self {
+        WorktreeLineageContext {
+            env_workspace_id: std::env::var("DROGON_WORKSPACE_ID")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            cwd: std::env::current_dir().ok(),
+        }
+    }
+}
+
+pub(crate) struct WorktreeLineage {
+    pub(crate) parent_worktree_id: Option<String>,
+    /// Told to the caller on stderr when a parent context existed but did
+    /// not resolve, so a top-level worktree is never a silent surprise.
+    pub(crate) stderr_note: Option<String>,
+}
+
+/// The listed worktree whose checkout contains `dir` (component-wise, so
+/// `/a/b` never matches `/a/bc`); the deepest one when several nest.
+pub(crate) fn worktree_containing<'a>(
+    worktrees: &'a [Worktree],
+    dir: &Path,
+) -> Option<&'a Worktree> {
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    worktrees
+        .iter()
+        .filter(|worktree| {
+            let root = Path::new(&worktree.path);
+            let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+            dir.starts_with(&root)
+        })
+        .max_by_key(|worktree| worktree.path.len())
+}
+
+/// Picks the inferred parent among a project's worktrees: the calling
+/// session's workspace when it is one of them, else the worktree that
+/// contains the current directory, else none.
+pub(crate) fn infer_worktree_parent(
+    worktrees: &[Worktree],
+    context: &WorktreeLineageContext,
+) -> Option<String> {
+    if let Some(workspace_id) = &context.env_workspace_id
+        && let Some(worktree) = worktrees
+            .iter()
+            .find(|worktree| &worktree.workspace_id == workspace_id)
+    {
+        return Some(worktree.id.clone());
+    }
+    context
+        .cwd
+        .as_deref()
+        .and_then(|cwd| worktree_containing(worktrees, cwd))
+        .map(|worktree| worktree.id.clone())
+}
+
+/// Resolves the `parentWorktreeId` for `worktree create`. An explicit
+/// `--parent` may name the parent by worktree id or by workspace id (the
+/// id an agent already holds as `DROGON_WORKSPACE_ID`) and must resolve
+/// within the project, or the create is refused before anything is
+/// checked out. Inference never turns a valid create into a failure: when
+/// the project list cannot be read or nothing matches, the worktree is
+/// created top-level and the caller is told why on stderr.
+async fn resolve_worktree_lineage(
+    client: &Client,
+    request_id: &str,
+    project: &str,
+    explicit_parent: Option<&str>,
+    no_parent: bool,
+    context: &WorktreeLineageContext,
+) -> Result<WorktreeLineage, CliError> {
+    let top_level = |stderr_note: Option<String>| WorktreeLineage {
+        parent_worktree_id: None,
+        stderr_note,
+    };
+    if no_parent {
+        return Ok(top_level(None));
+    }
+    let explicit_parent = explicit_parent.map(str::trim);
+    if explicit_parent == Some("") {
+        return Err(CliError::Usage(
+            "--parent needs a worktree id or workspace id; pass --no-parent for a top-level worktree"
+                .into(),
+        ));
+    }
+    if explicit_parent.is_none() && context.env_workspace_id.is_none() && context.cwd.is_none() {
+        return Ok(top_level(None));
+    }
+    let listed = client
+        .call(
+            "worktree.list",
+            json!({ "projectId": project }),
+            request_id,
+            DEFAULT_TIMEOUT,
+        )
+        .await
+        .and_then(|call| {
+            Client::decode_checked::<WorktreeList>(&call, "worktree.list", check_worktree_list)
+        });
+    let list = match listed {
+        Ok(list) => list,
+        Err(err) if explicit_parent.is_none() => {
+            return Ok(top_level(Some(format!(
+                "Worktree created without a parent: the worktrees of project {project} could not be listed to resolve the calling context ({}). Pass --parent <ID> to nest it explicitly.",
+                err.rpc_error().message
+            ))));
+        }
+        Err(err) => return Err(err),
+    };
+    if let Some(selector) = explicit_parent {
+        return match list
+            .worktrees
+            .iter()
+            .find(|worktree| worktree.id == selector || worktree.workspace_id == selector)
+        {
+            Some(worktree) => Ok(WorktreeLineage {
+                parent_worktree_id: Some(worktree.id.clone()),
+                stderr_note: None,
+            }),
+            None => Err(CliError::local(
+                crate::error::invalid_argument(format!(
+                    "--parent {selector:?} is not a worktree of project {project}; pass an id or workspaceId from `drogon-cli worktree list --project {project} --json`, or --no-parent"
+                )),
+                request_id,
+            )),
+        };
+    }
+    if let Some(parent_worktree_id) = infer_worktree_parent(&list.worktrees, context) {
+        return Ok(WorktreeLineage {
+            parent_worktree_id: Some(parent_worktree_id),
+            stderr_note: None,
+        });
+    }
+    Ok(top_level(context.env_workspace_id.as_ref().map(|workspace_id| {
+        format!(
+            "Worktree created without a parent: the calling session's workspace {workspace_id} is not a worktree of project {project}. Pass --parent <ID> to nest it, or --no-parent to create it top-level on purpose."
+        )
+    })))
 }
 
 /// Relative workspace paths are resolved against the CLI process's own cwd
@@ -2977,6 +3155,91 @@ async fn secrets(
                 .await?;
             emit(call, json, || format!("deleted {kind}/{name}"), 0, None)
         }
+    }
+}
+
+#[cfg(test)]
+mod worktree_lineage_tests {
+    use super::*;
+
+    fn listed(id: &str, workspace_id: &str, path: &str) -> Worktree {
+        Worktree {
+            id: id.into(),
+            project_id: "p1".into(),
+            workspace_id: workspace_id.into(),
+            path: path.into(),
+            branch: id.into(),
+            head: "abc".into(),
+            base_ref: None,
+            parent_worktree_id: None,
+            created_at: "2026-09-09T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn cwd_matches_a_worktree_component_wise_and_prefers_the_deepest() {
+        let root = tempfile::tempdir().unwrap();
+        let a = root.path().join("a");
+        let nested = a.join("nested");
+        std::fs::create_dir_all(nested.join("deep")).unwrap();
+        std::fs::create_dir_all(root.path().join("ab")).unwrap();
+        let worktrees = [
+            listed("w-a", "ws-a", a.to_str().unwrap()),
+            listed("w-nested", "ws-nested", nested.to_str().unwrap()),
+            listed("w-ab", "ws-ab", root.path().join("ab").to_str().unwrap()),
+        ];
+        assert_eq!(
+            worktree_containing(&worktrees, &a).map(|w| w.id.as_str()),
+            Some("w-a"),
+            "the worktree root itself counts"
+        );
+        assert_eq!(
+            worktree_containing(&worktrees, &nested.join("deep")).map(|w| w.id.as_str()),
+            Some("w-nested"),
+            "the deepest containing worktree wins"
+        );
+        assert_eq!(
+            worktree_containing(&worktrees, &root.path().join("abc")).map(|w| w.id.as_str()),
+            None,
+            "`ab` is not a prefix of `abc` by components"
+        );
+        assert!(worktree_containing(&worktrees, root.path()).is_none());
+    }
+
+    #[test]
+    fn env_workspace_beats_cwd_and_cwd_is_the_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let a = root.path().join("a");
+        let b = root.path().join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let worktrees = [
+            listed("w-a", "ws-a", a.to_str().unwrap()),
+            listed("w-b", "ws-b", b.to_str().unwrap()),
+        ];
+        let both = WorktreeLineageContext {
+            env_workspace_id: Some("ws-a".into()),
+            cwd: Some(b.clone()),
+        };
+        assert_eq!(
+            infer_worktree_parent(&worktrees, &both).as_deref(),
+            Some("w-a"),
+            "the daemon's record of the caller's worktree outranks where it stands"
+        );
+        let foreign_env = WorktreeLineageContext {
+            env_workspace_id: Some("ws-elsewhere".into()),
+            cwd: Some(b.clone()),
+        };
+        assert_eq!(
+            infer_worktree_parent(&worktrees, &foreign_env).as_deref(),
+            Some("w-b"),
+            "an env workspace outside the project falls through to cwd"
+        );
+        let nothing = WorktreeLineageContext {
+            env_workspace_id: None,
+            cwd: Some(root.path().to_path_buf()),
+        };
+        assert_eq!(infer_worktree_parent(&worktrees, &nothing), None);
     }
 }
 
