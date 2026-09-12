@@ -842,8 +842,17 @@ fn an_assigned_pull_request_releases_a_review_session_in_the_project() {
     // The CASE, carried by the prompt: the project, the pull request and its
     // repository, the harness the case named (never "your harness"), the
     // skills, and the event id for attribution.
+    let project_id_from_prompt = delegated_prompt
+        .lines()
+        .find_map(|line| {
+            let marker = "worktree create --project ";
+            let project = line.split_once(marker)?.1.split_whitespace().next()?;
+            Some(project.trim_matches('`').to_string())
+        })
+        .expect("prompt contains the project id for worktree creation");
+    assert_eq!(project_id_from_prompt, fx.project_id, "{delegated_prompt}");
     assert!(
-        delegated_prompt.contains(&fx.workspace_id),
+        delegated_prompt.contains(&format!("- project: {} (", fx.project_id)),
         "{delegated_prompt}"
     );
     assert!(
@@ -889,7 +898,7 @@ fn an_assigned_pull_request_releases_a_review_session_in_the_project() {
     let worktree = ok(
         &fx.engine,
         "worktree.create",
-        json!({"projectId": fx.project_id, "name": "review-pr-42-clioo-drogon"}),
+        json!({"projectId": project_id_from_prompt, "name": "review-pr-42-clioo-drogon"}),
     );
     let review_workspace = worktree["workspaceId"].as_str().unwrap().to_string();
     assert_ne!(review_workspace, fx.workspace_id);

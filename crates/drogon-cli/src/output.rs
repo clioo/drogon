@@ -94,8 +94,13 @@ pub fn project_list(list: &ProjectList) -> String {
 
 pub fn worktree_created(worktree: &Worktree) -> String {
     format!(
-        "Created worktree {} for project {} on branch {} -> {} (head {})",
-        worktree.id, worktree.project_id, worktree.branch, worktree.path, worktree.head
+        "Created worktree {} for project {} workspace={} on branch {} -> {} (head {})",
+        worktree.id,
+        worktree.project_id,
+        worktree.workspace_id,
+        worktree.branch,
+        worktree.path,
+        worktree.head
     )
 }
 
@@ -1335,7 +1340,9 @@ mod tests {
             "createdAt": "2026-09-05T12:00:00Z"
         }))
         .unwrap();
-        assert!(worktree_created(&created).contains("feature"));
+        let created_text = worktree_created(&created);
+        assert!(created_text.contains("feature"));
+        assert!(created_text.contains("workspace=ws2"));
         assert!(
             worktree_removed(&Removed {
                 id: "w1".into(),
