@@ -323,6 +323,14 @@ impl Engine {
             let conn = self.db.lock().unwrap();
             crate::workspace::get_path(&conn, workspace_id)?
         };
+        // DISHONEST-3: the Work Graph's Subagent policy must reach the
+        // session it describes, not only `drogon-cli skills get`'s prose.
+        // Regenerated here, before every spawn, so a policy flip is honored
+        // starting with the NEXT session and never rewrites a live one.
+        crate::graph::session_brief::write_session_policy_brief(
+            std::path::Path::new(&cwd),
+            workspace_id,
+        )?;
         // Same reserve (admission) + commit + launch shape as
         // `session::spawn`, with the hook install written between commit
         // and spawn so its on-disk target exists (and its env values are

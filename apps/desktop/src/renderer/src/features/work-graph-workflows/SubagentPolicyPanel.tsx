@@ -471,8 +471,8 @@ export function SubagentPolicyPanel({
         </div>
         <p className="mt-1.5 text-xs text-muted-foreground">
           {policy.delegate
-            ? "The main agent plans and delegates to the enabled nodes instead of doing the work itself."
-            : "Single node: the main agent does the work itself."}
+            ? "The NEXT session's main agent plans and delegates to the enabled nodes instead of doing the work itself. A session already running keeps the brief it already received."
+            : "Single node: the NEXT session's main agent does the work itself directly."}
         </p>
       </div>
 
