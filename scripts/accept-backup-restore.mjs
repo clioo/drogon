@@ -124,8 +124,21 @@ async function runBundledCli(args, { expectFailure = false } = {}) {
     assert.equal(envelope.ok, false, `expected refusal, got: ${result.stdout}`);
     return envelope;
   }
-  assert.equal(envelope.ok, true, `bundled CLI failed: ${result.stderr || result.stdout}`);
-  return envelope;
+  // RPC verbs print the protocol envelope; the local backups verbs print
+  // their bare payload. Unwrap the envelope when it is one, and treat an
+  // `ok:false` envelope as the failure it is.
+  const record = envelope;
+  if (record && typeof record === "object" && "ok" in record) {
+    if (record.ok !== true) {
+      const message =
+        record.error && typeof record.error === "object"
+          ? record.error.message
+          : String(record.error ?? "unknown failure");
+      throw new Error(`bundled CLI failed: ${message}`);
+    }
+    return record.result;
+  }
+  return record;
 }
 
 /** Scoped process check: only drogond started against THIS fixture dir. */
@@ -216,7 +229,7 @@ let firstBackupId;
   ]);
   const list = await runBundledCli(["workspace", "list", "--json"]);
   assert.ok(
-    list.result.workspaces.some((w) => w.id === marker.result.id),
+    list.workspaces.some((w) => w.id === marker.id),
     "marker workspace exists before the restore",
   );
 
@@ -354,16 +367,31 @@ async function setViewportAndCapture(page, theme, width) {
     await confirm.getByText(/snapshotted first/).waitFor();
     await confirm.getByText(/Everything recorded after this backup's timestamp/).waitFor();
     report.phases.confirmCopy = "overwrite + snapshot-first + loss sentence all shown";
-    const before = await runBundledCli(["workspace", "list", "--json"]);
-    assert.ok(
-      before.result.workspaces.some((w) => w.name === "p6-post-backup-marker"),
-      "nothing restored before the explicit confirm click",
-    );
+    // Nothing restored before the explicit confirm click: the live database
+    // still carries the marker (read directly — the daemon is dead here, and
+    // must stay dead for the restore to be allowed).
+    {
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(path.join(dataDir, "drogon.sqlite3"), { readOnly: true });
+      const row = db
+        .prepare("SELECT COUNT(*) AS n FROM workspaces WHERE name = 'p6-post-backup-marker'")
+        .get();
+      db.close();
+      assert.ok(row.n === 1, "the marker still exists before the confirm click");
+    }
 
-    // Confirm. The app restores, then relaunches itself.
+    // Confirm. The app restores, then relaunches itself. The relaunch status
+    // text is cosmetic and may lose the race with app.exit — the AUTHORITATIVE
+    // signal is the app process exiting for its relaunch.
     const exited = new Promise((resolve) => app.child.once("exit", resolve));
     await confirm.getByRole("button", { name: /Restore backup from/ }).click();
-    await app.page.getByText(/Drogon is relaunching/).waitFor();
+    await Promise.race([
+      exited,
+      app.page
+        .getByText(/Drogon is relaunching/)
+        .waitFor()
+        .catch(() => {}),
+    ]);
     await exited;
 
     // The relaunched instance: fresh CDP endpoint, same bundle, healthy app.
@@ -383,7 +411,7 @@ async function setViewportAndCapture(page, theme, width) {
     // (The relaunched app's daemon is up, so the RPC path is live.)
     const workspaces = await runBundledCli(["workspace", "list", "--json"]);
     assert.ok(
-      !workspaces.result.workspaces.some((w) => w.name === "p6-post-backup-marker"),
+      !workspaces.workspaces.some((w) => w.name === "p6-post-backup-marker"),
       "the marker recorded after the backup is gone",
     );
     const dirs = await readdir(path.join(dataDir, "backups"));
@@ -442,9 +470,9 @@ async function setViewportAndCapture(page, theme, width) {
   // Phase D: with no daemon holding the lock, the CLI restore succeeds.
   const newest = (await backupIds()).sort().at(-1);
   const restored = await runBundledCli(["backups", "restore", newest, "--json"]);
-  assert.equal(restored.result.restoredBackupId, newest);
-  assert.ok(restored.result.preRestoreSnapshotId, "CLI restore snapshots first too");
-  report.phases.cliRestore = restored.result;
+  assert.equal(restored.restoredBackupId, newest);
+  assert.ok(restored.preRestoreSnapshotId, "CLI restore snapshots first too");
+  report.phases.cliRestore = restored;
 }
 
 async function isAlive(pid) {
