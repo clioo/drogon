@@ -564,6 +564,7 @@ mod tests {
     fn a_two_node_graph_with_one_agent_node_emits_the_exact_recipe() {
         let intent = GraphIntent {
             nodes: vec![node("n1", "shell", &[]), node("n2", "pi", &["n1"])],
+            ..GraphIntent::default()
         };
         let compiled = compile(&intent, &Selection::Target("n2".into()), &defaults()).unwrap();
         assert_eq!(compiled.recipe_id, "drogon-graph-n2");
@@ -592,6 +593,7 @@ mod tests {
     fn pi_provider_binding_is_always_complete() {
         let intent = GraphIntent {
             nodes: vec![node("n1", "pi", &[])],
+            ..GraphIntent::default()
         };
         let compiled = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap();
         let binding = &compiled.recipe["providers"]["drogon-pi-n1"];
@@ -615,6 +617,7 @@ mod tests {
     fn a_pi_node_without_a_provider_refuses_instead_of_emitting_bare_pi() {
         let intent = GraphIntent {
             nodes: vec![node("n1", "pi", &[])],
+            ..GraphIntent::default()
         };
         let err = compile(
             &intent,
@@ -634,7 +637,10 @@ mod tests {
             base_url: "https://node.example/v1".into(),
             api_key_env: "NODE_KEY".into(),
         });
-        let intent = GraphIntent { nodes: vec![n1] };
+        let intent = GraphIntent {
+            nodes: vec![n1],
+            ..GraphIntent::default()
+        };
         let compiled = compile(
             &intent,
             &Selection::Target("n1".into()),
@@ -654,6 +660,7 @@ mod tests {
                 node("n1", "shell", &[]),
                 node("n2", "pi", &["n1"]),
             ],
+            ..GraphIntent::default()
         };
         let compiled = compile(&intent, &Selection::Target("n3".into()), &defaults()).unwrap();
         assert_eq!(compiled.node_ids(), vec!["n1", "n3"]);
@@ -673,6 +680,7 @@ mod tests {
         n1.enabled = false;
         let intent = GraphIntent {
             nodes: vec![n1, node("n2", "shell", &["n1"])],
+            ..GraphIntent::default()
         };
         let err = compile(&intent, &Selection::Target("n2".into()), &defaults()).unwrap_err();
         assert!(err.message.contains("n1"));
@@ -684,6 +692,7 @@ mod tests {
         for harness in ["opencode", "antigravity", "mystery"] {
             let intent = GraphIntent {
                 nodes: vec![node("n1", harness, &[])],
+                ..GraphIntent::default()
             };
             let err = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap_err();
             assert!(err.message.contains("n1"), "{harness}: {err:?}");
@@ -695,7 +704,10 @@ mod tests {
     fn verify_commands_replace_the_completion_sentinel() {
         let mut n1 = node("n1", "pi", &[]);
         n1.verify_commands = vec!["test -f out.txt".into()];
-        let intent = GraphIntent { nodes: vec![n1] };
+        let intent = GraphIntent {
+            nodes: vec![n1],
+            ..GraphIntent::default()
+        };
         let compiled = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap();
         let step = &compiled.recipe["steps"][0];
         assert_eq!(step["verify"]["commands"], json!(["test -f out.txt"]));

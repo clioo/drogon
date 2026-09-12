@@ -87,6 +87,7 @@ fn the_emitted_two_node_recipe_validates_and_always_carries_a_complete_pi_bindin
 
     let intent = GraphIntent {
         nodes: vec![shell_node("n1", &[]), pi_node("n2", &["n1"])],
+        ..GraphIntent::default()
     };
     let mut compiled = compiler::compile(
         &intent,

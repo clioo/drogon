@@ -246,6 +246,7 @@ mod tests {
                     verify_commands: vec![],
                 })
                 .collect(),
+            ..GraphIntent::default()
         }
     }
 
