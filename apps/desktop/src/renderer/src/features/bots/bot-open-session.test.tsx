@@ -74,6 +74,7 @@ function dispatchedReceipt() {
       error: null,
       observedAt: null,
       recordedAt: 1,
+      homeNotice: null,
     },
   };
 }
@@ -551,6 +552,50 @@ describe("bot open session reuse", () => {
     // fall through to a fresh dispatch.
     expect(fake.botRun).not.toHaveBeenCalled();
     expect(onOpenSession).not.toHaveBeenCalled();
+    // Finding 6: the refusal must never advise a refresh -- this state
+    // cannot resolve on refresh, so the advice names the control that
+    // works (the card's New session button) instead.
+    expect(alert.textContent.toLowerCase()).not.toContain("refresh");
+    expect(alert.textContent).toContain("New session");
+  });
+
+  it("opens a fresh session with an honest notice when the recorded link is a resolved phantom", async () => {
+    // Finding 6 (the owner's dead end): the Bot record still names a
+    // session whose ROW is gone (no live child, no durable row -- the
+    // daemon's positive `recordedSessionMissing` fact). The old answer was
+    // a refusal whose "refresh and retry in a moment" could never succeed;
+    // the honest answer is a FRESH open (nothing live to duplicate) plus a
+    // plain notice that the previous session is gone.
+    const seeded = botWithRecordedSession();
+    const fake = fakeBridge(seeded);
+    const onOpenSession = vi.fn();
+    const resolveBotSession = vi.fn(() => ({
+      kind: "open" as const,
+      notice:
+        "This Bot's previous session is gone -- Drogon has no record of it anymore, so there is nothing to reopen. Starting a new conversation.",
+    }));
+    render(
+      <BotsPanel
+        snapshot={{ bots: [seeded], history: [] }}
+        bridge={fake.bridge}
+        scope={scope}
+        resolveBotSession={resolveBotSession}
+        onOpenSession={onOpenSession}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("open-session-bot-1"));
+    await waitFor(() => expect(fake.botRun).toHaveBeenCalledTimes(1));
+    const input = fake.botRun.mock.calls[0]![0] as Record<string, unknown>;
+    // A phantom has nothing to resume: the dispatch is a plain fresh open.
+    expect("resume" in input).toBe(false);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("previous session is gone");
+    expect(alert.textContent).toContain("Starting a new conversation");
+    // Advice that cannot work is never printed.
+    expect(alert.textContent.toLowerCase()).not.toContain("refresh and retry");
+    expect(onOpenSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "sess-1" }),
+    );
   });
 
   it("says a harness cannot resume rather than pretending a blank session is a continuation", async () => {

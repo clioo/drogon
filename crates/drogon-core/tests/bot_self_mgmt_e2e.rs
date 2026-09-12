@@ -189,12 +189,61 @@ fn provision_falls_back_when_the_bot_has_no_path_safe_handle() {
 fn provision_denies_a_handle_pinned_by_another_bot() {
     let fx = Fx::new();
     let a = fx.create_bot("c1", "Alpha", Some("same"));
-    let b = fx.create_bot("c2", "Beta", Some("same"));
-    fx.provision("p1", a["id"].as_str().unwrap());
+    let aid = a["id"].as_str().unwrap().to_string();
+    fx.provision("p1", &aid);
+
+    // The create-time contract (the adversarial report on the Bots data
+    // model): an exact duplicate handle that could never boot is rejected
+    // HERE, with the real reason naming the live owner, instead of being
+    // accepted and failing forever at first open.
+    let refused = fx.self_call(
+        "c2",
+        "bot.create",
+        json!({"body": bot_body("Beta", Some("same"))}),
+    );
+    assert!(!refused.ok, "{refused:?}");
+    let error = refused.error.unwrap();
+    assert_eq!(error.code, "invalid_argument");
+    assert!(
+        error.message.contains("already owned by bot") && error.message.contains(&aid),
+        "the refusal must name the real owner and the real reason: {error:?}"
+    );
+
+    // A LEGACY duplicate (a data dir written before create-time rejection
+    // existed, seeded straight into storage to simulate it) is still
+    // denied at PROVISION time.
+    let legacy = drogon_core::bots::records::Bot {
+        id: "legacy-beta".to_string(),
+        character_preset: "none".to_string(),
+        display_identity: drogon_core::bots::records::DisplayIdentity {
+            display_name: "Beta".to_string(),
+            handle: Some("same".to_string()),
+            title: None,
+        },
+        harness_policy: drogon_core::bots::records::HarnessModelPolicy {
+            default_harness: "codex".to_string(),
+            explicit_model: None,
+        },
+        instructions: String::new(),
+        memories: Vec::new(),
+        responsibilities: Vec::new(),
+        current_session: None,
+        created_at: 0.0,
+        updated_at: 0.0,
+    };
+    let conn =
+        rusqlite::Connection::open(fx._root.path().join("data").join(drogon_core::DB_FILE_NAME))
+            .unwrap();
+    let folder: String = conn
+        .query_row("SELECT folder FROM bots WHERE id = ?1", [&aid], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    drogon_core::bots::storage::create_bot(&conn, &fx.host_id, &folder, &legacy).unwrap();
     let code = failure_code(fx.self_call(
         "p2",
         "bot.self_provision",
-        json!({"botId": b["id"], "actorBotId": b["id"]}),
+        json!({"botId": "legacy-beta", "actorBotId": "legacy-beta"}),
     ));
     assert_eq!(code, "invalid_argument");
 }

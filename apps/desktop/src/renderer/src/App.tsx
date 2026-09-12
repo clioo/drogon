@@ -40,6 +40,7 @@ import type {
 import type { DaemonUpdateState } from "../../shared/daemon-contract";
 import { Button } from "./components/ui/button";
 import { Toaster } from "./components/ui/sonner";
+import { toast } from "sonner";
 import {
   isSessionDismissed,
   loadDismissedSessions,
@@ -543,6 +544,24 @@ export function App() {
   const [restoredBanners, setRestoredBanners] = useState<
     Record<string, SessionRestoredBannerReason>
   >({});
+  // A "restored" claim must never stand above an exited session
+  // (adversarial report: a refused resume kept the restored banner above
+  // "session already exited (code 1)"). The moment the daemon positively
+  // reports the exit, withdraw the banner: the pane's own exit overlay
+  // then speaks alone. The "started fresh" banner stays -- it states a
+  // true past fact and is the reference's own vocabulary.
+  useEffect(() => {
+    setRestoredBanners((banners) => {
+      let next: Record<string, SessionRestoredBannerReason> | null = null;
+      for (const session of sessions) {
+        if (session.verdict === "exited" && banners[session.id] === "restored") {
+          next ??= { ...banners };
+          delete next[session.id];
+        }
+      }
+      return next ?? banners;
+    });
+  }, [sessions]);
   const [active, setActive] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
   // Read inside in-flight `create`/`launchHarness`/`close` callbacks so a
@@ -2401,6 +2420,24 @@ export function App() {
       });
       if (!response || !response.ok) return;
       if (response.result.outcome !== "dispatched") return;
+      // The phantom-open notice (finding 6): the recorded link was a
+      // resolved phantom, the fresh session is safe, and the toast says the
+      // previous session is gone. Same toast id as the Bots page surface.
+      if (resolution.kind === "open" && resolution.notice) {
+        toast(resolution.notice, {
+          id: `bot-phantom-session-${bot.id}`,
+          duration: 8000,
+        });
+      }
+      // The daemon's honest notice for a recreated Bot home: say it out
+      // loud (the home was missing and was recreated; previous files in it
+      // are gone) instead of silently pretending nothing was lost.
+      if (response.result.homeNotice) {
+        toast(response.result.homeNotice, {
+          id: `bot-home-recreated-${bot.id}`,
+          duration: 8000,
+        });
+      }
       const opened = response.result.session;
       if (!opened) return;
       recordBotSession({

@@ -125,17 +125,30 @@ export function sleepingSessionFor(
 }
 
 /**
- * The banner a resume launch must raise, or `null` when the launch was not a
- * resume at all (so a fresh tab never claims a restore). Ported contract from
- * the reference's `agentResumeUnavailable`: main (there: the Electron main
- * process; here: the daemon) is the one that decides whether the requested
- * conversation can actually be opened, and when it declines, the pane says it
- * started fresh.
+ * The banner a resume launch must raise, or `null` when the launch was not
+ * a verified resume at all (so a fresh tab never claims a restore). Ported
+ * contract from the reference's `agentResumeUnavailable`: main (there: the
+ * Electron main process; here: the daemon) is the one that decides whether
+ * the requested conversation can actually be opened, and when it declines,
+ * the pane says it started fresh.
+ *
+ * Honesty over fidelity (owner rule: "a fresh start must say it started
+ * fresh"):
+ * - `fresh` -> `resume-unavailable`: the daemon declined (nothing to
+ *   resume, or the recorded transcript is gone) and a NEW conversation
+ *   started.
+ * - `resumed` -> `restored`: the daemon verified the locator (its
+ *   persisted transcript exists) before claiming anything.
+ * - `continued` / `resume-unverified` -> `null`: the daemon could not
+ *   confirm the restoration up front (`continued` is the CLI's own
+ *   most-recent entrypoint after a degraded resume, `resume-unverified`
+ *   an id-only locator with nothing to check). No banner is raised -- the
+ *   harness's own output is the only honest confirmation left.
  */
 export function restoredBannerReason(
   agentResume: Session["agentResume"],
 ): "restored" | "resume-unavailable" | null {
   if (agentResume === "fresh") return "resume-unavailable";
-  if (agentResume === "resumed" || agentResume === "continued") return "restored";
+  if (agentResume === "resumed") return "restored";
   return null;
 }

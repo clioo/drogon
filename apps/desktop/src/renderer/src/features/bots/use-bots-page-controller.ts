@@ -16,6 +16,7 @@
    Escape is this repo's (#270 — the fork unmounts the page instead). */
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import type { AutomationSummary } from "../../../../shared/automation-contract";
 import type {
   BotBridge,
@@ -569,7 +570,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       // UNKNOWN case is the actual bug this fixes: it must never fall
       // through to a dispatch, or the first click duplicates the session.
       let resume = false;
-      let resumeNotice: string | null = null;
+      let openNotice: string | null = null;
       if (!options?.forceNew && resolveBotSession) {
         const resolution = resolveBotSession({ bot: live });
         if (resolution.kind === "focus") {
@@ -593,8 +594,12 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
           return;
         }
         if (resolution.kind === "unknown") {
+          // No advice that cannot work: this state (an older daemon build
+          // without the liveness projection) never resolves on refresh, so
+          // the refusal names the control that DOES open a session now
+          // (finding 6) instead of a futile "refresh and retry".
           setActionError(
-            "The daemon has not reported whether this Bot's session is still running, so opening another one could create a duplicate. Refresh and retry in a moment.",
+            "The daemon has not reported whether this Bot's session is still running, so opening another one could create a duplicate. Use the card's “New session” button to start a fresh session anyway.",
           );
           return;
         }
@@ -608,12 +613,20 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
           // reopen will actually do (its own most-recent entrypoint) instead
           // of implying an exact restore.
           resume = harnessSupportsConversationResume(harnessId);
-          resumeNotice = botReopenNotice({
+          openNotice = botReopenNotice({
             harnessId,
             resumeByIdentity: resolution.resumeByIdentity,
           });
         }
-        // kind === "open": nothing recorded; a fresh session is correct.
+        // kind === "open": nothing recorded, a fresh session is correct --
+        // or the recorded link is a PHANTOM the daemon positively resolved
+        // to nothing (`recordedSessionMissing`): the fresh session is safe
+        // (no live Drogon session to duplicate) and the notice says the
+        // previous one is gone, instead of a refusal whose advice could
+        // never work (finding 6).
+        if (resolution.kind === "open" && resolution.notice) {
+          openNotice = resolution.notice;
+        }
       }
       const botRun = bridge?.botRun;
       if (!botRun) {
@@ -649,6 +662,17 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
           );
           return;
         }
+        // The daemon's honest notice for a recreated Bot home (the home was
+        // missing and was recreated; previous files in it are gone): say it
+        // out loud instead of silently pretending nothing was lost. Same
+        // toast id as the sidebar surface, so a joined dispatch never
+        // shows it twice.
+        if (response.result.homeNotice) {
+          toast(response.result.homeNotice, {
+            id: `bot-home-recreated-${bot.id}`,
+            duration: 8000,
+          });
+        }
         setSelectedBotId(bot.id);
         const opened = response.result.session;
         if (opened) {
@@ -668,7 +692,13 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
           });
         }
         await load();
-        if (resumeNotice) setActionError(resumeNotice);
+        if (openNotice) {
+          toast(openNotice, {
+            id: `bot-phantom-session-${bot.id}`,
+            duration: 8000,
+          });
+          setActionError(openNotice);
+        }
       } catch (launchFailure) {
         setActionError(
           `Could not open the Bot session: ${errorMessage(launchFailure)}`,

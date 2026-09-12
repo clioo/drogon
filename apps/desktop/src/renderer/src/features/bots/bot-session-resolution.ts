@@ -54,6 +54,41 @@ export function resolveBotSession(input: {
   const recorded = input.bot.currentSession;
   if (!recorded) return { kind: "open" };
 
+  // The harness-reported provider conversation the record latched comes
+  // FIRST. A reopen that names THAT conversation is safe no matter what
+  // else is stale: the worst case is the same conversation coming back
+  // (never two live processes on different conversations), and it is the
+  // bot-record-alone recovery -- the durable row can be gone entirely
+  // (closed, or a daemon restart) with the record as the only source.
+  if (recorded.agentSessionId) {
+    return {
+      kind: "reopen",
+      sessionId: recorded.sessionId,
+      harnessId: recordedHarnessId(recorded),
+      resumeByIdentity: "bot-record",
+    };
+  }
+
+  // Next: the daemon's POSITIVE "the recorded link is gone" fact -- before
+  // any renderer-side session copy. A stale local copy (a tab-strip entry,
+  // a host-wide poll cached across a daemon restart) can still name the
+  // recorded session with verdict exited/unverifiable and would shadow the
+  // phantom into a `reopen` whose "will reopen its most recent
+  // conversation" notice describes an intention -- the daemon has already
+  // positively resolved the link to NOTHING and the record latched NO
+  // conversation, so there is nothing to name: the honest answer is the
+  // fresh open plus the gone-session notice. Liveness stays owned by the
+  // host: when the daemon could NOT resolve the link (older build, snapshot
+  // pending), `recordedSessionMissing` is absent and every rule below
+  // stands unchanged.
+  if (recorded.recordedSessionMissing) {
+    return {
+      kind: "open",
+      notice:
+        "This Bot's previous session is gone -- Drogon has no record of it anymore, so there is nothing to reopen. Starting a new conversation.",
+    };
+  }
+
   const observed = input.observed;
   if (observed) {
     if (observed.verdict === "exited" || observed.verdict === "unverifiable") {
@@ -104,25 +139,19 @@ export function resolveBotSession(input: {
       },
     };
   }
-  // A recorded link with no projected verdict (an older daemon build, a
-  // snapshot that has not loaded, or -- the dead end this closes -- a Drogon
-  // session row that no longer exists because the user closed that tab).
+  // A recorded link with no projected verdict (an older daemon build, or
+  // -- the dead end this closes -- a Drogon session row that no longer
+  // exists because the user closed that tab).
   //
-  // The duplicate-prevention instinct is kept: a record whose liveness is not
-  // established must never silently open a SECOND session. But when the
-  // record itself carries the harness-reported provider conversation, the
-  // honest and useful answer is `reopen`: the harness's own resume verb names
-  // THAT conversation, so the worst case is the same conversation coming back
-  // (never two live processes on different conversations), and the refusal
-  // that used to be permanent becomes a real recovery. Without a latched
-  // identity there is nothing to name, so the refusal stays.
-  if (recorded.agentSessionId) {
-    return {
-      kind: "reopen",
-      sessionId: recorded.sessionId,
-      harnessId: recordedHarnessId(recorded),
-      resumeByIdentity: "bot-record",
-    };
-  }
+  // The duplicate-prevention instinct is kept: a record whose liveness is
+  // not established must never silently open a SECOND session. Without a
+  // latched provider conversation and without a daemon-positive missing
+  // fact, there is nothing to name and nothing positively gone, so the
+  // refusal stands.
+  // No projection at all (an older daemon build): the daemon COULD still
+  // hold a live session this renderer cannot see, so the conservative
+  // refusal stands -- but it must name a control that actually works (the
+  // card's "New session" button), never a refresh that cannot change the
+  // answer.
   return { kind: "unknown" };
 }

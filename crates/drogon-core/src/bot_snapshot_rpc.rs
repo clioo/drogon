@@ -160,19 +160,31 @@ impl Engine {
             return;
         };
         for bot in bots {
-            let Some(session_id) = bot
+            let session_id = bot
                 .get("currentSession")
                 .and_then(|session| session.get("sessionId"))
                 .and_then(Value::as_str)
-                .map(str::to_string)
-            else {
-                continue;
-            };
-            let Some(facts) = self.recorded_session_facts(conn, &session_id) else {
+                .map(str::to_string);
+            let Some(session_id) = session_id else {
                 continue;
             };
             let Some(session_obj) = bot.get_mut("currentSession").and_then(Value::as_object_mut)
             else {
+                continue;
+            };
+            let Some(facts) = self.recorded_session_facts(conn, &session_id) else {
+                // The daemon positively found NO live child and NO durable
+                // session row for the recorded link: the row is GONE (the
+                // tab was closed, or any wiped state). Say so plainly --
+                // the renderer turns this phantom into a fresh open with an
+                // honest notice instead of a refusal whose "refresh and
+                // retry" advice can never succeed (the projection that
+                // would find the row already ran, so a refresh re-reads the
+                // same absence forever). Without this marker an older
+                // daemon build (which never projects facts at all) is
+                // indistinguishable from a gone row, and the renderer
+                // keeps its conservative refusal for that case.
+                session_obj.insert("recordedSessionMissing".to_string(), Value::Bool(true));
                 continue;
             };
             for key in ["workspaceId", "incarnation", "verdict"] {

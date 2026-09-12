@@ -202,6 +202,7 @@ describe("gated bot bridge (R2-S: botCreate/botRun/botHistory/read)", () => {
             error: null,
             observedAt: null,
             recordedAt: 0,
+            homeNotice: null,
           },
         };
       },
@@ -482,6 +483,7 @@ describe("buildWiredBotsPanelProps", () => {
             error: null,
             observedAt: null,
             recordedAt: 0,
+            homeNotice: null,
           },
         };
       },
@@ -538,6 +540,7 @@ describe("buildWiredBotsPanelProps", () => {
             error: null,
             observedAt: null,
             recordedAt: 0,
+            homeNotice: null,
           },
         };
       },
@@ -592,6 +595,7 @@ describe("buildWiredBotsPanelProps", () => {
           error: "responsibility is disabled",
           observedAt: null,
           recordedAt: 0,
+          homeNotice: null,
         },
       }),
     };

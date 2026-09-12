@@ -82,6 +82,12 @@ const bot = z.object({
       // point of the gate is that it never invents or drops identity.
       agentSessionId: z.string().max(512).nullable().optional(),
       agentSessionTranscriptPath: z.string().max(4096).nullable().optional(),
+      // Finding 6: the daemon positively resolved the recorded link to
+      // NOTHING (no live child, no durable row). Listed here or the
+      // snapshot gate would strip it, and the renderer could never tell a
+      // phantom link (a fresh open is safe and honest) apart from an
+      // unresolved liveness (the conservative refusal).
+      recordedSessionMissing: z.boolean().optional(),
     })
     .nullable(),
   createdAt: timestamp,
@@ -246,6 +252,9 @@ export const botRunResultSchema = z.object({
   error: z.string().nullable(),
   observedAt: timestamp.nullable(),
   recordedAt: timestamp,
+  // The recreated-home notice (see BotRunReceipt in bot-contract.ts):
+  // additive, always present on current daemons.
+  homeNotice: z.string().nullable(),
 });
 
 const botMessage = z.object({

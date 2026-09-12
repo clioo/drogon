@@ -467,20 +467,23 @@ pub fn claim_home_in_tx(
     {
         return Ok((serde_json::from_str(&json)?, false));
     }
-    let payload = serde_json::to_string(profile)?;
-    match tx.execute(
-        "INSERT INTO bot_homes (bot_id, handle, path, updated_at, rev, payload_json)
-         VALUES (?1, ?2, ?3, ?4, 0, ?5)",
-        params![
-            profile.bot_id,
-            profile.handle,
-            profile.path,
-            profile.updated_at,
-            payload
-        ],
-    ) {
-        Ok(_) => Ok((profile.clone(), true)),
-        Err(rusqlite::Error::SqliteFailure(e, _))
+    let insert = |tx: &Transaction, profile: &BotHomeProfile| -> SelfResult<()> {
+        tx.execute(
+            "INSERT INTO bot_homes (bot_id, handle, path, updated_at, rev, payload_json)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+            params![
+                profile.bot_id,
+                profile.handle,
+                profile.path,
+                profile.updated_at,
+                serde_json::to_string(profile)?,
+            ],
+        )?;
+        Ok(())
+    };
+    match insert(tx, profile) {
+        Ok(()) => Ok((profile.clone(), true)),
+        Err(SelfStorageError::Sqlite(rusqlite::Error::SqliteFailure(e, _)))
             if e.code == rusqlite::ErrorCode::ConstraintViolation =>
         {
             // Either a lost race with our own bot_id row (now visible) or
@@ -502,13 +505,85 @@ pub fn claim_home_in_tx(
                     |r| r.get(0),
                 )
                 .optional()?;
+            // A tombstone left by a delete that predates handle release
+            // (the adversarial report): the row's Bot no longer exists, so
+            // the handle is free. Heal the dead row and retry once. The
+            // directory may still hold the dead Bot's files -- the
+            // successor's identity files are rewritten from the
+            // successor's OWN record on every open, and only one LIVE Bot
+            // can ever hold the handle (the UNIQUE constraint), so two
+            // live Bots can never share the home.
+            if let Some(owner_id) = owner.as_deref() {
+                let alive: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM bots WHERE id = ?1",
+                    params![owner_id],
+                    |r| r.get(0),
+                )?;
+                if alive == 0 {
+                    tx.execute("DELETE FROM bot_homes WHERE bot_id = ?1", params![owner_id])?;
+                    insert(tx, profile)?;
+                    return Ok((profile.clone(), true));
+                }
+            }
             Err(SelfStorageError::HandleCollision {
                 handle: profile.handle.clone(),
                 owner: owner.unwrap_or_else(|| "<unknown>".to_string()),
             })
         }
-        Err(e) => Err(e.into()),
+        Err(e) => Err(e),
     }
+}
+
+/// Deletes the Bot's pinned home row -- the handle-release half of
+/// `bot.delete` (the adversarial report: a tombstoned handle was owned
+/// forever by a deleted id). The home DIRECTORY is left on disk untouched:
+/// deleting a Bot must not silently destroy its files. A successor Bot
+/// that claims the same handle inherits the directory; its first session
+/// rewrites AGENTS.md/CLAUDE.md from the successor's own record, and the
+/// handle's UNIQUE constraint guarantees only one live owner ever.
+pub(crate) fn release_home_in_tx(tx: &Transaction, bot_id: &str) -> SelfResult<()> {
+    tx.execute("DELETE FROM bot_homes WHERE bot_id = ?1", params![bot_id])?;
+    Ok(())
+}
+
+/// The live Bot that owns `canonical` (a validated, lowercase directory
+/// handle), if any -- probing BOTH the pinned homes and the live Bot
+/// records, so a handle that could never boot is rejected at CREATE time
+/// with the real reason instead of being accepted and failing at first
+/// open:
+///
+/// - a `bot_homes` row whose Bot still exists owns it;
+/// - a tombstone row (Bot gone) is ignored -- [`claim_home_in_tx`] heals
+///   it at provision time;
+/// - a live Bot whose STORED handle canonicalizes to the same name owns
+///   it, even before either has provisioned a home ("Arya" vs "arya"
+///   canonicalize to the same directory).
+pub(crate) fn live_handle_owner(conn: &Connection, canonical: &str) -> SelfResult<Option<String>> {
+    if let Some(owner) = conn
+        .query_row(
+            "SELECT h.bot_id FROM bot_homes h
+             WHERE h.handle = ?1 COLLATE NOCASE
+               AND EXISTS (SELECT 1 FROM bots b WHERE b.id = h.bot_id)",
+            params![canonical],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+    {
+        return Ok(Some(owner));
+    }
+    let mut statement = conn.prepare("SELECT payload_json FROM bots")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    for row in rows {
+        let payload = row?;
+        let bot: Bot = serde_json::from_str(&payload)?;
+        if let Some(stored) = bot.display_identity.handle.as_deref()
+            && let Ok(stored_canonical) = validate_bot_handle(stored)
+            && stored_canonical == canonical
+        {
+            return Ok(Some(bot.id));
+        }
+    }
+    Ok(None)
 }
 
 pub fn home_for_bot(tx: &Transaction, bot_id: &str) -> SelfResult<Option<BotHomeProfile>> {
@@ -521,6 +596,14 @@ pub fn home_for_bot(tx: &Transaction, bot_id: &str) -> SelfResult<Option<BotHome
     .map(|json| Ok(serde_json::from_str(&json)?))
     .transpose()
 }
+
+/// The receipt-level notice a session open carries when the Bot's pinned
+/// home directory was missing and had to be recreated (the adversarial
+/// report: a missing home was a permanent dead end). Shown to the user
+/// verbatim -- the home was missing and was recreated, and the previous
+/// files in it are gone.
+pub const HOME_RECREATED_NOTICE: &str =
+    "The Bot's home directory was missing and Drogon recreated it. Previous files in it are gone.";
 
 /// Get-or-create the Bot's provisioned home (P1): reuses the pinned
 /// [`BotHomeProfile`] when one already exists (idempotent -- a Bot only
@@ -535,19 +618,33 @@ pub fn home_for_bot(tx: &Transaction, bot_id: &str) -> SelfResult<Option<BotHome
 /// wherever its record happens to be stored (that folder is whatever
 /// project workspace was selected at `bot.create` time -- the caller's
 /// workspace, not the Bot's).
+///
+/// Returns the profile plus whether the pinned directory had to be
+/// RECREATED (it was missing on disk): `ensure` means ensure -- a dead end
+/// is never acceptable, and the caller reports
+/// [`HOME_RECREATED_NOTICE`] to the user instead of silently pretending
+/// nothing was lost. A pinned path that exists but is not a directory
+/// (a file, a broken symlink) still fails loudly: recreating over it would
+/// destroy data the daemon did not write.
 pub(crate) fn ensure_home_for_bot(
     tx: &Transaction,
     data_dir: &std::path::Path,
     host_id: &str,
     bot: &Bot,
     origin_workspace_id: &str,
-) -> Result<BotHomeProfile, RpcError> {
+) -> Result<(BotHomeProfile, bool), RpcError> {
     if let Some(existing) = home_for_bot(tx, &bot.id).map_err(self_storage_error)? {
         // Refresh on every reuse, not just on first provision: an identity,
         // instruction or memory edit must be visible to the NEXT session,
-        // and a stale AGENTS.md must never be left behind.
+        // and a stale AGENTS.md must never be left behind. Recreate the
+        // pinned directory when it is missing so the write below cannot
+        // fail forever on `No such file or directory`.
+        let recreated = !std::path::Path::new(&existing.path).is_dir();
+        if recreated {
+            ensure_home_dir(std::path::Path::new(&existing.path))?;
+        }
         write_bot_identity_files(&existing.path, bot)?;
-        return Ok(existing);
+        return Ok((existing, recreated));
     }
     let handle = dir_handle_for_bot(bot).map_err(|e| invalid_argument(e.to_string()))?;
     let base = bot_home_base(data_dir);
@@ -578,7 +675,7 @@ pub(crate) fn ensure_home_for_bot(
     };
     let (pinned, _provisioned) = claim_home_in_tx(tx, &profile).map_err(self_storage_error)?;
     write_bot_identity_files(&pinned.path, bot)?;
-    Ok(pinned)
+    Ok((pinned, false))
 }
 
 /// Materializes the Bot's `AGENTS.md`/`CLAUDE.md` identity context files in

@@ -531,6 +531,7 @@ describe("BotsPanel R2-S: create/chat gate on bridge+scope, same rule as the run
         error: null,
         observedAt: null,
         recordedAt: 0,
+        homeNotice: null,
       },
     }),
     botHistory: async () => ({
