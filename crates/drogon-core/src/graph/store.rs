@@ -35,6 +35,9 @@ const KNOWN_STATE_NODE_KEYS: &[&str] = &[
     "endedAt",
     "evidence",
     "lastError",
+    "harness",
+    "model",
+    "isFreeDefaultRuntime",
 ];
 /// Known node keys; unknown node fields survive a rewrite.
 const KNOWN_NODE_KEYS: &[&str] = &[
@@ -525,6 +528,9 @@ mod tests {
                     ended_at: None,
                     evidence: None,
                     last_error: None,
+                    harness: None,
+                    model: None,
+                    is_free_default_runtime: None,
                 }],
             },
         )
@@ -594,6 +600,9 @@ mod tests {
                     ended_at: None,
                     evidence: None,
                     last_error: None,
+                    harness: None,
+                    model: None,
+                    is_free_default_runtime: None,
                 }],
             },
         )

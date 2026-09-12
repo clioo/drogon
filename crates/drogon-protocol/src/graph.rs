@@ -413,6 +413,21 @@ pub struct GraphNodeState {
     pub evidence: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// F0: which runtime actually ran this node's latest launch — the
+    /// failover-substituted candidate when one was tried, or the node's own
+    /// authored harness/model when it launched through `graph.run` (never
+    /// substituted). `None` only when the node has never been launched at
+    /// all; never a guess otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Whether the attributed runtime above is this build's free, local,
+    /// never-billed default (`failover::default_free_runtime()`) — the one
+    /// fact the canvas needs to disclose a paid/external spawn honestly,
+    /// without hardcoding the free pair a second time in the UI layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_free_default_runtime: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -967,6 +982,9 @@ mod tests {
                 ended_at: None,
                 evidence: None,
                 last_error: None,
+                harness: None,
+                model: None,
+                is_free_default_runtime: None,
             }],
         };
         let value = serde_json::to_value(&state).unwrap();

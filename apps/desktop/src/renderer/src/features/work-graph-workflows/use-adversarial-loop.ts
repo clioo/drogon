@@ -37,9 +37,11 @@ import {
   ADVERSARIAL_HARNESS,
   ADVERSARIAL_MODEL,
   advanceLoop,
+  dispatchRefusedLedger,
   isTerminalPhase,
   parseLoopLedger,
   startLedger,
+  type BaseSessionObservation,
   type LoopLedger,
 } from "./adversarial-loop";
 
@@ -49,7 +51,18 @@ export type StartLoopInput = {
   workflowId: string;
   baseRunId: string;
   baseNodeIds: string[];
+  /** DISHONEST-1: the Main agent's live session this run dispatched its
+   *  base work to, when the base work is that session rather than a batch
+   *  workflow's graph nodes. */
+  baseSessionId?: string | null;
   maxCycles: number;
+};
+
+export type StartFailedDispatchInput = {
+  workflowId: string;
+  baseRunId: string;
+  maxCycles: number;
+  message: string;
 };
 
 function reviewNodePayload(nodeId: string, prompt: string, verifyCommand: string): Record<string, unknown> {
@@ -94,6 +107,18 @@ export function useAdversarialLoop({
    *  the same or a different workflow is still in flight — one loop at a
    *  time, same as the daemon allowing only one live run per node. */
   startForRun: (input: StartLoopInput) => void;
+  /** DISHONEST-1: records a loop that never started because the base work
+   *  could not even be dispatched to the Main agent's session — a
+   *  terminal, honest `launch_refused` ledger from the first tick. Same
+   *  in-flight guard as `startForRun`. */
+  startFailedDispatch: (input: StartFailedDispatchInput) => void;
+  /** DISHONEST-1: the caller's latest READ of the dispatched base
+   *  session's own state (never guessed here) — consulted only while the
+   *  ledger's `baseSessionId` is set and its phase is `awaiting_base`. Feed
+   *  this every time the caller observes the session, even unchanged; a
+   *  stale/mismatched `sessionId` (not the one this ledger is waiting on)
+   *  is ignored. */
+  setBaseSessionObservation: (sessionId: string, observation: BaseSessionObservation) => void;
   /** Rehydrates the ledger for the currently-selected workflow from its
    *  persisted `lastLoop` (or clears it when the workflow has none / the
    *  library belongs to a different workflow). Call when the selected
@@ -109,6 +134,10 @@ export function useAdversarialLoop({
   const ledgerRef = useRef<LoopLedger | null>(null);
   const actionInFlight = useRef(false);
   const persistRef = useRef<((ledger: LoopLedger) => void) | null>(null);
+  const baseSessionObservationRef = useRef<{
+    sessionId: string;
+    observation: BaseSessionObservation;
+  } | null>(null);
 
   const setAndPersist = useCallback((next: LoopLedger | null) => {
     ledgerRef.current = next;
@@ -119,17 +148,43 @@ export function useAdversarialLoop({
   const startForRun = useCallback(
     (input: StartLoopInput) => {
       if (ledgerRef.current && !isTerminalPhase(ledgerRef.current.phase)) return;
+      baseSessionObservationRef.current = null;
       setAndPersist(
         startLedger({
           workflowId: input.workflowId,
           baseRunId: input.baseRunId,
           baseNodeIds: input.baseNodeIds,
+          baseSessionId: input.baseSessionId ?? null,
           maxCycles: input.maxCycles,
           now: new Date().toISOString(),
         }),
       );
     },
     [setAndPersist],
+  );
+
+  const startFailedDispatch = useCallback(
+    (input: StartFailedDispatchInput) => {
+      if (ledgerRef.current && !isTerminalPhase(ledgerRef.current.phase)) return;
+      baseSessionObservationRef.current = null;
+      setAndPersist(
+        dispatchRefusedLedger({
+          workflowId: input.workflowId,
+          baseRunId: input.baseRunId,
+          maxCycles: input.maxCycles,
+          message: input.message,
+          now: new Date().toISOString(),
+        }),
+      );
+    },
+    [setAndPersist],
+  );
+
+  const setBaseSessionObservation = useCallback(
+    (sessionId: string, observation: BaseSessionObservation) => {
+      baseSessionObservationRef.current = { sessionId, observation };
+    },
+    [],
   );
 
   const hydrate = useCallback((workflowId: string, lastLoop: unknown) => {
@@ -153,7 +208,35 @@ export function useAdversarialLoop({
           read.result.graph.state.nodes.map((node) => [node.id, node.status]),
         );
         const now = new Date().toISOString();
-        const { ledger: advanced, action } = advanceLoop(current, observed, now);
+
+        // BROKEN-2: a node's own recipe step failing is not automatically
+        // "the review found problems" or "the fix attempt failed" — the
+        // Subagent policy's approved-runtime list promises every runtime is
+        // tried before that verdict is final. Retry failover on the SAME
+        // node first; only once `graph.run_node_failover` itself refuses
+        // (every approved runtime, then the fallback, genuinely exhausted)
+        // does the reducer ever see this cycle's `failed` status. A runtime
+        // that merely launches keeps the ledger exactly where it is — the
+        // next tick re-reads the new attempt's real, settled status.
+        if (current.activeNodeId && observed.get(current.activeNodeId) === "failed") {
+          const retried = await graphBridge.graphRunNodeFailover({
+            workspaceId,
+            nodeId: current.activeNodeId,
+          });
+          if (cancelled || ledgerRef.current !== current) return;
+          if (retried.ok) return;
+        }
+
+        // DISHONEST-1: the reducer never guesses the Main agent session's
+        // state itself — the caller (`WorkGraphPane`, which already
+        // receives that session reactively) reports what it observed via
+        // `setBaseSessionObservation`. A mismatched/stale sessionId (a
+        // report for a session this ledger isn't waiting on) is ignored.
+        const baseObservation =
+          current.baseSessionId && baseSessionObservationRef.current?.sessionId === current.baseSessionId
+            ? baseSessionObservationRef.current.observation
+            : undefined;
+        const { ledger: advanced, action } = advanceLoop(current, observed, now, baseObservation);
         if (action.kind === "none") {
           if (advanced !== current) setAndPersist(advanced);
           return;
@@ -193,7 +276,14 @@ export function useAdversarialLoop({
           });
           return;
         }
-        setAndPersist(advanced);
+        // F0: attribute which runtime actually ran this cycle instead of
+        // discarding the RPC's own answer — the one thing that made the
+        // loop's paid/external spawns unattributable anywhere.
+        setAndPersist({
+          ...advanced,
+          lastRuntime: launched.result.runtime,
+          lastRuntimeIsFallback: launched.result.isFallback,
+        });
       } finally {
         actionInFlight.current = false;
       }
@@ -210,5 +300,12 @@ export function useAdversarialLoop({
     persistRef.current = fn;
   }, []);
 
-  return { ledger, startForRun, hydrate, setPersist };
+  return {
+    ledger,
+    startForRun,
+    startFailedDispatch,
+    setBaseSessionObservation,
+    hydrate,
+    setPersist,
+  };
 }

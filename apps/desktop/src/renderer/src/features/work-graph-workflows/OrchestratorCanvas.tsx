@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import type { GraphPolicy } from "../../../../shared/graph-contract";
 import type { Session } from "../../../../shared/session-contract";
+import { isFreeDefaultRuntime, policyFirstRuntime } from "../../../../shared/work-graph-contract";
 import { isMentuMainSessionLive } from "../mentu/mentu-run-dispatch";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -70,6 +71,27 @@ function Chip({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
     <span className="rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
       {children}
+    </span>
+  );
+}
+
+/** F0: BEFORE "Run workflow" launches anything that is not the free local
+ *  default, the canvas must say which runtime will be spawned and that it
+ *  is paid/external — never a silent spawn. Shows only when the adversarial
+ *  loop is actually configured to run (nothing automated otherwise). */
+function RuntimeDisclosure({ policy }: { policy: GraphPolicy }): React.JSX.Element | null {
+  if (!policy.adversarial.enabled) return null;
+  const runtime = policyFirstRuntime(policy);
+  const free = isFreeDefaultRuntime(runtime);
+  return (
+    <span
+      className={`text-[11px] ${free ? "text-muted-foreground" : "font-medium text-amber-700 dark:text-amber-400"}`}
+      data-testid="orchestrator-runtime-disclosure"
+      data-free-default={free}
+    >
+      {free
+        ? `Runs on the free local model (${runtime.model}) — never billed.`
+        : `Will run on ${runtime.harness}/${runtime.model} — a paid/external runtime, not the free local default.`}
     </span>
   );
 }
@@ -480,6 +502,7 @@ export function OrchestratorCanvas({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <RuntimeDisclosure policy={policy} />
           <Button
             type="button"
             size="sm"

@@ -12,7 +12,7 @@
 // throws on fileWrite, and the static scan test pins that
 // features/work-graph contains no write call at all.
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -25,6 +25,8 @@ import type { GraphBridge } from "../../../../shared/graph-contract";
 import type { Result, Session } from "../../../../shared/session-contract";
 import type { WorkGraphDocument } from "../../../../shared/work-graph-contract";
 import { WorkGraphPane } from "./WorkGraphPane";
+import type { MentuDispatchDeps } from "../mentu/mentu-run-dispatch";
+import { reviewNodeId, runToken } from "../work-graph-workflows/adversarial-loop";
 
 function stepEvidence(label: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -531,5 +533,226 @@ describe("WorkGraphPane orchestrator entry point", () => {
     await screen.findByTestId("orchestrator-canvas");
     fireEvent.click(screen.getByTestId("orchestrator-back"));
     await screen.findByTestId("work-graph-orchestrator");
+  });
+});
+
+// DISHONEST-1: "Run workflow" must actually dispatch the base work to the
+// Main agent's live session and wait for it to genuinely settle before the
+// review launches — never fire ~instantly against whatever already sits in
+// the workspace.
+function graphWithAdversarialPolicy(): WorkGraphDocument {
+  return {
+    version: 1,
+    intent: {
+      nodes: [],
+      policy: {
+        approvedRuntimes: [],
+        fallbackRuntime: null,
+        adversarial: { enabled: true, maxIterations: 1 },
+        delegate: false,
+      },
+    },
+    state: { updatedAt: "now", nodes: [] },
+  } as unknown as WorkGraphDocument;
+}
+
+/** A mutable fake graph bridge tracking every write/failover call, exactly
+ *  like `use-adversarial-loop.test.tsx`'s own fixture — this test drives it
+ *  through the REAL `WorkGraphPane` component instead of the hook directly. */
+function mutableOrchestratorGraphBridge(policyDoc: WorkGraphDocument): {
+  bridge: GraphBridge;
+  writes: unknown[];
+  failovers: { nodeId: string }[];
+} {
+  let intentNodes = policyDoc.intent.nodes as unknown as Record<string, unknown>[];
+  const policy = (policyDoc.intent as unknown as { policy: unknown }).policy;
+  const statuses = new Map<string, string>();
+  const writes: unknown[] = [];
+  const failovers: { nodeId: string }[] = [];
+  const bridge: GraphBridge = {
+    graphRead: async () => ({
+      ok: true,
+      result: {
+        graph: {
+          version: 1,
+          intent: { nodes: intentNodes, policy } as never,
+          state: {
+            updatedAt: "now",
+            nodes: [...statuses.entries()].map(([id, status]) => ({ id, status })) as never,
+          },
+        },
+      },
+    }),
+    graphWriteIntent: async (params) => {
+      writes.push(params);
+      intentNodes = (params.intent as { nodes: Record<string, unknown>[] }).nodes;
+      const newNode = intentNodes[intentNodes.length - 1];
+      statuses.set(newNode.id as string, "idle");
+      return {
+        ok: true,
+        result: {
+          graph: {
+            version: 1,
+            intent: { nodes: intentNodes, policy } as never,
+            state: { updatedAt: "now", nodes: [] },
+          },
+        },
+      };
+    },
+    graphCompile: async () => ({
+      ok: false,
+      error: { code: "x", message: "unused", retryable: false },
+    }),
+    graphRun: async () => ({
+      ok: false,
+      error: { code: "x", message: "unused", retryable: false },
+    }),
+    graphRunNodeFailover: async (params) => {
+      failovers.push({ nodeId: params.nodeId });
+      statuses.set(params.nodeId, "succeeded");
+      return {
+        ok: true,
+        result: {
+          run: { id: `run-${params.nodeId}`, status: "running" },
+          runtime: { harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4" },
+          isFallback: false,
+          attemptNumber: 1,
+          attempts: [{ harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4", outcome: "launched" }],
+        },
+      };
+    },
+  };
+  return { bridge, writes, failovers };
+}
+
+function dispatchDepsWithSession(session: Session): {
+  deps: MentuDispatchDeps;
+  write: ReturnType<typeof vi.fn>;
+} {
+  const write = vi.fn(async () => ({ ok: true as const, result: { acceptedBytes: 1 } }));
+  const deps: MentuDispatchDeps = {
+    sessions: async () => ({ ok: true, result: { sessions: [session] } }),
+    write,
+  };
+  return { deps, write };
+}
+
+describe("WorkGraphPane orchestrator Run workflow (DISHONEST-1)", () => {
+  afterEach(cleanup);
+
+  it("dispatches a real prompt to the main agent's session and does not review until it settles", async () => {
+    const fileBridge = {
+      fileRead: async () => ({
+        ok: false as const,
+        error: { code: "not_found", message: "unused in this test", retryable: false },
+      }),
+    } as unknown as FileBridge;
+    const session: Session = { ...liveSession(), agentState: "idle" };
+    const { bridge, writes, failovers } = mutableOrchestratorGraphBridge(graphWithAdversarialPolicy());
+    const { deps, write } = dispatchDepsWithSession(session);
+
+    const view = render(
+      <WorkGraphPane
+        fileBridge={fileBridge}
+        graphBridge={bridge}
+        hostId="host"
+        workspaceId="ws"
+        mainSession={session}
+        sessions={[session]}
+        mentuDispatchDeps={deps}
+        adversarialLoopPollMs={15}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("work-graph-orchestrator"));
+    await screen.findByTestId("orchestrator-canvas");
+
+    fireEvent.click(screen.getByTestId("orchestrator-run-workflow"));
+
+    // The Main agent's session must receive a REAL, visible prompt — not
+    // nothing (the exact DISHONEST-1 complaint).
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    const delivered = write.mock.calls[0][0] as { sessionId: string; text: string };
+    expect(delivered.sessionId).toBe(session.id);
+    expect(delivered.text).toContain("orchestrator run");
+    expect(delivered.text).toContain("adversarial review loop is about");
+    const baseRunId = /orchestrator run (\S+):/.exec(delivered.text)?.[1];
+    expect(baseRunId).toBeTruthy();
+
+    // Still waiting: the review must NOT launch just because the prompt
+    // was delivered — only once the session's turn genuinely settles.
+    await screen.findByTestId("orchestrator-terminal");
+    expect(screen.getByTestId("orchestrator-terminal").getAttribute("data-state")).toBe("in-progress");
+    expect(screen.getByTestId("orchestrator-terminal").textContent).toContain(
+      "Waiting for the main agent's delegated turn to finish",
+    );
+    // Give the poll loop several ticks to prove it genuinely does nothing.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(writes).toHaveLength(0);
+    expect(failovers).toHaveLength(0);
+
+    // The session's turn settles (a genuine idle transition AFTER dispatch).
+    const settled: Session = {
+      ...session,
+      agentState: "idle",
+      agentStateAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    view.rerender(
+      <WorkGraphPane
+        fileBridge={fileBridge}
+        graphBridge={bridge}
+        hostId="host"
+        workspaceId="ws"
+        mainSession={settled}
+        sessions={[settled]}
+        mentuDispatchDeps={deps}
+        adversarialLoopPollMs={15}
+      />,
+    );
+
+    // NOW the review launches, attributed to the exact run that was
+    // dispatched (the token derived from `baseRunId`).
+    await waitFor(() => expect(failovers.length).toBeGreaterThan(0));
+    const token = runToken(baseRunId!);
+    expect(failovers[0].nodeId).toBe(reviewNodeId(token, 1));
+  });
+
+  it("refuses honestly, without ever reviewing anything, when the main agent cannot receive the dispatch", async () => {
+    const fileBridge = {
+      fileRead: async () => ({
+        ok: false as const,
+        error: { code: "not_found", message: "unused in this test", retryable: false },
+      }),
+    } as unknown as FileBridge;
+    // `needs_input` refuses immediately (answering a live question would
+    // be dishonest to inject as a new task) — no real wait needed here.
+    const session: Session = { ...liveSession(), agentState: "needs_input" };
+    const { bridge, writes, failovers } = mutableOrchestratorGraphBridge(graphWithAdversarialPolicy());
+    const { deps, write } = dispatchDepsWithSession(session);
+
+    render(
+      <WorkGraphPane
+        fileBridge={fileBridge}
+        graphBridge={bridge}
+        hostId="host"
+        workspaceId="ws"
+        mainSession={session}
+        sessions={[session]}
+        mentuDispatchDeps={deps}
+        adversarialLoopPollMs={15}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("work-graph-orchestrator"));
+    await screen.findByTestId("orchestrator-canvas");
+    fireEvent.click(screen.getByTestId("orchestrator-run-workflow"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("orchestrator-terminal").getAttribute("data-state")).toBe("failed"),
+    );
+    expect(screen.getByTestId("orchestrator-terminal").textContent).toContain(
+      "Run workflow could not reach the main agent",
+    );
+    expect(write).not.toHaveBeenCalled();
+    expect(writes).toHaveLength(0);
+    expect(failovers).toHaveLength(0);
   });
 });

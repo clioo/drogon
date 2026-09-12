@@ -168,6 +168,13 @@ export const workGraphStateNodeSchema = z
     endedAt: isoText.nullable().optional(),
     evidence: workGraphEvidenceSchema.nullable().optional(),
     lastError: z.string().nullable().optional(),
+    /** F0: which runtime ACTUALLY ran this node's latest launch (the
+     *  failover-substituted candidate, or the node's own authored
+     *  harness/model when nothing was substituted) — absent only when the
+     *  daemon predates this field or the node has never launched. */
+    harness: z.string().nullable().optional(),
+    model: z.string().nullable().optional(),
+    isFreeDefaultRuntime: z.boolean().nullable().optional(),
   })
   .passthrough();
 
@@ -265,6 +272,49 @@ export function deriveSubagentPolicySummary(policy: GraphPolicy): string {
   const optional = policy.adversarial.enabled ? ADVERSARIAL_OPTIONAL_SUBAGENT_COUNT : 0;
   const subagentWord = optional === 1 ? "subagent" : "subagents";
   return `${approved} approved · ${fallback} fallback · ${optional} optional ${subagentWord}`;
+}
+
+// ---------------------------------------------------------------------------
+// F0: paid/external runtime disclosure. Mirrors
+// `crates/drogon-core/src/graph/failover.rs`'s `default_free_runtime`/
+// `attempt_sequence` exactly (a read-only TS mirror of that Rust logic, not
+// a shared implementation — kept in sync by hand, same as this whole
+// section already mirrors `GraphPolicy`). The daemon's OWN attribution
+// (`WorkGraphStateNode.isFreeDefaultRuntime`, once a node has launched) is
+// the authoritative source once it exists; this policy-level mirror is for
+// disclosure BEFORE anything launches, when there is nothing to observe yet.
+// ---------------------------------------------------------------------------
+
+/** The free, local runtime this build may always run for real without a
+ *  human approving it per call — the exact pair `default_free_runtime()`
+ *  returns. */
+export const FREE_DEFAULT_RUNTIME: GraphRuntimeRef = Object.freeze({
+  harness: "pi",
+  model: "qwen3.8-flash-next-nvidia-nvfp4",
+});
+
+export function isFreeDefaultRuntime(runtime: GraphRuntimeRef): boolean {
+  return runtime.harness === FREE_DEFAULT_RUNTIME.harness && runtime.model === FREE_DEFAULT_RUNTIME.model;
+}
+
+/** The full ordered attempt sequence a failover episode would try for any
+ *  node this policy governs — mirrors `failover::attempt_sequence` exactly. */
+export function policyAttemptSequence(policy: GraphPolicy): GraphRuntimeRef[] {
+  const sequence = policy.approvedRuntimes.length > 0 ? [...policy.approvedRuntimes] : [FREE_DEFAULT_RUNTIME];
+  return policy.fallbackRuntime ? [...sequence, policy.fallbackRuntime] : sequence;
+}
+
+/** The FIRST runtime a "Run workflow" governed by this policy would try —
+ *  the one fact the canvas needs to disclose before anything launches. */
+export function policyFirstRuntime(policy: GraphPolicy): GraphRuntimeRef {
+  return policyAttemptSequence(policy)[0] ?? FREE_DEFAULT_RUNTIME;
+}
+
+/** F0: whether ANY candidate this policy could ever launch is not the free
+ *  local default — i.e., whether a run this policy governs could spawn
+ *  paid/external inference at some point in its failover episode. */
+export function policyMayRunPaidRuntime(policy: GraphPolicy): boolean {
+  return policyAttemptSequence(policy).some((runtime) => !isFreeDefaultRuntime(runtime));
 }
 
 const intentSection = z.object({

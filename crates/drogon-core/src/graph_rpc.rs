@@ -48,24 +48,46 @@ impl Engine {
         workspace_root: &Path,
         intent: &GraphIntent,
     ) -> Result<GraphState, RpcError> {
-        let (mappings, runs) = {
+        let (mappings, runs, runtimes) = {
             let conn = self.db.lock().unwrap();
             let mappings = storage::latest_node_runs(&conn, workspace_id)?;
             let mut runs: HashMap<String, drogon_protocol::mentu::MentuRun> = HashMap::new();
+            let mut runtimes: HashMap<String, GraphRuntimeRef> = HashMap::new();
             for mapping in &mappings {
-                if runs.contains_key(&mapping.run_id) {
-                    continue;
-                }
-                if let Some(run) = mentu_storage::get_run(&conn, &mapping.run_id)? {
+                if !runs.contains_key(&mapping.run_id)
+                    && let Some(run) = mentu_storage::get_run(&conn, &mapping.run_id)?
+                {
                     runs.insert(mapping.run_id.clone(), run);
                 }
+                // F0: attribute which runtime actually ran this launch — the
+                // failover-substituted candidate when this node went through
+                // `graph.run_node_failover`, else the node's own authored
+                // harness/model (a `graph.run` launch never substitutes).
+                let attributed =
+                    storage::failover_attempts_for_node(&conn, workspace_id, &mapping.node_id)?
+                        .into_iter()
+                        .find(|attempt| attempt.run_id.as_deref() == Some(mapping.run_id.as_str()))
+                        .map(|attempt| GraphRuntimeRef {
+                            harness: attempt.harness,
+                            model: attempt.model,
+                        })
+                        .or_else(|| {
+                            intent.node(&mapping.node_id).map(|node| GraphRuntimeRef {
+                                harness: node.harness.clone(),
+                                model: node.model.clone(),
+                            })
+                        });
+                if let Some(runtime) = attributed {
+                    runtimes.insert(mapping.node_id.clone(), runtime);
+                }
             }
-            (mappings, runs)
+            (mappings, runs, runtimes)
         };
         let projected = state::project(
             intent,
             &mappings,
             &runs,
+            &runtimes,
             &execution::is_tracked,
             &crate::now_rfc3339(),
         );
@@ -307,7 +329,26 @@ impl Engine {
                      launching this subgraph again."
                 )));
             }
-            let run = self.launch_compiled(&parsed.workspace_id, &node_ids, &mut compiled)?;
+            // A spawn failure here is exactly as much "this candidate could
+            // not do the work" as a compile-time refusal — the recipe
+            // validated, but the process never actually started. Record it
+            // and try the next candidate instead of aborting the whole
+            // episode with no attempt recorded (the bug BROKEN-2 named).
+            let run = match self.launch_compiled(&parsed.workspace_id, &node_ids, &mut compiled) {
+                Ok(run) => run,
+                Err(launch_err) => {
+                    self.record_failover_attempt(
+                        &parsed.workspace_id,
+                        &parsed.node_id,
+                        &candidate,
+                        storage::FAILOVER_OUTCOME_LAUNCH_FAILED,
+                        Some(&launch_err.message),
+                        None,
+                    )?;
+                    attempted.push(candidate);
+                    continue;
+                }
+            };
             self.record_failover_attempt(
                 &parsed.workspace_id,
                 &parsed.node_id,
@@ -374,18 +415,65 @@ impl Engine {
         workspace_id: &str,
         node_id: &str,
     ) -> Result<Vec<GraphFailoverAttemptRecord>, RpcError> {
-        let conn = self.db.lock().unwrap();
-        Ok(
+        let attempts = {
+            let conn = self.db.lock().unwrap();
             storage::failover_attempts_for_node(&conn, workspace_id, node_id)?
-                .into_iter()
-                .map(|attempt| GraphFailoverAttemptRecord {
-                    harness: attempt.harness,
-                    model: attempt.model,
-                    outcome: attempt.outcome,
-                    reason: attempt.reason,
-                })
-                .collect(),
-        )
+        };
+        attempts
+            .into_iter()
+            .map(|attempt| self.settle_failover_attempt(attempt))
+            .collect()
+    }
+
+    /// The ledger only ever records `launched` at launch time (the daemon
+    /// cannot know a spawn's eventual outcome before it happens) — this
+    /// projects the attempt's REAL settlement onto that row for every
+    /// reader, the same way `refresh_graph_state` projects a node's real
+    /// status, so a caller never sees "launched" forever for a run that
+    /// actually settled failed (BROKEN-2: "every attempt row must carry the
+    /// settlement outcome and reason"). Never rewrites the stored row —
+    /// the ledger itself stays append-only; this is a read-time projection.
+    fn settle_failover_attempt(
+        &self,
+        attempt: storage::FailoverAttempt,
+    ) -> Result<GraphFailoverAttemptRecord, RpcError> {
+        if attempt.outcome != storage::FAILOVER_OUTCOME_LAUNCHED {
+            return Ok(GraphFailoverAttemptRecord {
+                harness: attempt.harness,
+                model: attempt.model,
+                outcome: attempt.outcome,
+                reason: attempt.reason,
+            });
+        }
+        let Some(run_id) = &attempt.run_id else {
+            return Ok(GraphFailoverAttemptRecord {
+                harness: attempt.harness,
+                model: attempt.model,
+                outcome: attempt.outcome,
+                reason: attempt.reason,
+            });
+        };
+        let run = {
+            let conn = self.db.lock().unwrap();
+            mentu_storage::get_run(&conn, run_id)?
+        };
+        match run {
+            Some(run) if run.status == MentuRunStatus::Failed => Ok(GraphFailoverAttemptRecord {
+                harness: attempt.harness,
+                model: attempt.model,
+                outcome: storage::FAILOVER_OUTCOME_FAILED.to_string(),
+                reason: Some(
+                    run.error
+                        .unwrap_or_else(|| "The launched run settled failed.".to_string()),
+                ),
+            }),
+            _ => Ok(GraphFailoverAttemptRecord {
+                harness: attempt.harness,
+                model: attempt.model,
+                outcome: attempt.outcome,
+                reason: attempt.reason,
+            }),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

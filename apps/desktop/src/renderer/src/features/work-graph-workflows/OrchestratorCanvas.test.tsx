@@ -436,4 +436,31 @@ describe("OrchestratorCanvas", () => {
     expect(screen.getByTestId("main-agent-harness-locked")).toBeTruthy();
     expect(screen.getByTestId("main-agent-delete-refused")).toBeTruthy();
   });
+
+  // F0: before "Run workflow" launches anything, the canvas must disclose
+  // which runtime will run and whether it is paid/external.
+  it("shows no runtime disclosure at all when nothing automated is configured", () => {
+    render(<OrchestratorCanvas {...baseProps()} policy={policyWithAdversarial(false)} />);
+    expect(screen.queryByTestId("orchestrator-runtime-disclosure")).toBeNull();
+  });
+
+  it("discloses the free local default honestly when no runtime is approved", () => {
+    render(<OrchestratorCanvas {...baseProps()} policy={policyWithAdversarial(true)} />);
+    const disclosure = screen.getByTestId("orchestrator-runtime-disclosure");
+    expect(disclosure.getAttribute("data-free-default")).toBe("true");
+    expect(disclosure.textContent).toContain("free local model");
+    expect(disclosure.textContent).not.toContain("paid");
+  });
+
+  it("discloses a paid/external runtime plainly before Run workflow can launch it", () => {
+    const policy: GraphPolicy = {
+      ...policyWithAdversarial(true),
+      approvedRuntimes: [{ harness: "claude", model: "claude-sonnet-5" }],
+    };
+    render(<OrchestratorCanvas {...baseProps()} policy={policy} />);
+    const disclosure = screen.getByTestId("orchestrator-runtime-disclosure");
+    expect(disclosure.getAttribute("data-free-default")).toBe("false");
+    expect(disclosure.textContent).toContain("claude/claude-sonnet-5");
+    expect(disclosure.textContent).toContain("paid/external");
+  });
 });
