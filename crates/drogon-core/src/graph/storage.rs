@@ -13,7 +13,7 @@ use drogon_protocol::RpcError;
 use crate::error;
 
 pub const GRAPH_SCHEMA_COMPONENT: &str = "graph";
-pub const GRAPH_SCHEMA_VERSION: i64 = 2;
+pub const GRAPH_SCHEMA_VERSION: i64 = 3;
 
 /// One recorded launch of a node: the daemon run it went into and the step
 /// label that run carries for it.
@@ -117,6 +117,7 @@ pub fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()> {
         match next_version {
             1 => create_v1_tables(tx)?,
             2 => migrate_v1_to_v2(tx)?,
+            3 => tx.execute_batch("CREATE TABLE graph_orchestrator_runs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE INDEX graph_orchestrator_workspace ON graph_orchestrator_runs(workspace_id);")?,
             _ => unreachable!("no migration step defined for version {next_version}"),
         }
         tx.execute(

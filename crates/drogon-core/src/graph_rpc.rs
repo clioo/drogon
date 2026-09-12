@@ -34,7 +34,7 @@ fn to_value<T: serde::Serialize>(value: T) -> Result<Value, RpcError> {
 }
 
 impl Engine {
-    fn workspace_path(&self, workspace_id: &str) -> Result<PathBuf, RpcError> {
+    pub(crate) fn workspace_path(&self, workspace_id: &str) -> Result<PathBuf, RpcError> {
         let conn = self.db.lock().unwrap();
         workspace::get_path(&conn, workspace_id).map(PathBuf::from)
     }
@@ -96,6 +96,7 @@ impl Engine {
     }
 
     pub(crate) fn graph_read(&self, params: &Value) -> Result<Value, RpcError> {
+        let _guard = self.graph_orchestrator_gate.lock().unwrap();
         let parsed: GraphWorkspaceParams = parse(params, "graph.read")?;
         parsed.validate()?;
         let workspace_root = self.workspace_path(&parsed.workspace_id)?;
@@ -106,6 +107,7 @@ impl Engine {
     }
 
     pub(crate) fn graph_node_state(&self, params: &Value) -> Result<Value, RpcError> {
+        let _guard = self.graph_orchestrator_gate.lock().unwrap();
         let parsed: GraphNodeParams = parse(params, "graph.node_state")?;
         parsed.validate()?;
         let workspace_root = self.workspace_path(&parsed.workspace_id)?;
@@ -127,6 +129,7 @@ impl Engine {
     }
 
     fn do_graph_write_intent(&self, params: &Value) -> Result<Value, RpcError> {
+        let _guard = self.graph_orchestrator_gate.lock().unwrap();
         // The refusal must happen on the raw params, before deserialization
         // can ignore a sibling `state` key.
         if params.get("state").is_some() {
@@ -164,6 +167,7 @@ impl Engine {
     }
 
     fn do_graph_run(&self, params: &Value) -> Result<Value, RpcError> {
+        let _guard = self.graph_orchestrator_gate.lock().unwrap();
         let parsed: GraphCompileParams = parse(params, "graph.run")?;
         parsed.validate()?;
         let workspace_root = self.workspace_path(&parsed.workspace_id)?;
@@ -208,6 +212,7 @@ impl Engine {
     }
 
     fn do_graph_run_node_failover(&self, params: &Value) -> Result<Value, RpcError> {
+        let _guard = self.graph_orchestrator_gate.lock().unwrap();
         let parsed: GraphNodeParams = parse(params, "graph.run_node_failover")?;
         parsed.validate()?;
         let workspace_root = self.workspace_path(&parsed.workspace_id)?;
@@ -362,7 +367,7 @@ impl Engine {
             let attempts = self.failover_attempt_records(&parsed.workspace_id, &parsed.node_id)?;
             return to_value(GraphRunNodeFailoverResult {
                 run,
-                is_fallback: failover::is_fallback(&policy, &candidate),
+                is_fallback: failover::is_fallback_attempt(&policy, attempted.len()),
                 runtime: candidate,
                 attempt_number,
                 attempts,
@@ -535,6 +540,7 @@ impl Engine {
         parsed: &GraphNodeParams,
         step: Option<&str>,
     ) -> Result<Value, RpcError> {
+        let _guard = self.graph_orchestrator_gate.lock().unwrap();
         let workspace_root = self.workspace_path(&parsed.workspace_id)?;
         let mapping = {
             let conn = self.db.lock().unwrap();
@@ -581,7 +587,7 @@ impl Engine {
     /// the intent and pressed run; the daemon records its own consent) and
     /// launches through the one existing `mentu.run` path, then records the
     /// node→run mapping the state projector reads.
-    fn launch_compiled(
+    pub(crate) fn launch_compiled(
         &self,
         workspace_id: &str,
         node_ids: &[String],

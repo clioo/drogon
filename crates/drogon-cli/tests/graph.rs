@@ -95,6 +95,18 @@ fn behavior() -> Behavior {
             }
             Some("graph.run_node_failover") => Action::Respond(ok_envelope(&id, failover_result())),
             Some("graph.write_intent") => Action::Respond(ok_envelope(&id, graph_result())),
+            Some("graph.orchestrator_start")
+            | Some("graph.orchestrator_status")
+            | Some("graph.orchestrator_stop")
+            | Some("graph.orchestrator_resume") => Action::Respond(ok_envelope(
+                &id,
+                json!({"run": {
+                    "id":"orch-1", "workspaceId":"ws-1", "policy":{},
+                    "main":graph_result()["graph"]["intent"]["nodes"][0],
+                    "status":"running", "phase":"main", "iteration":1, "steps":[],
+                    "startedAt":"2026-09-12T00:00:00Z", "updatedAt":"2026-09-12T00:00:00Z"
+                }}),
+            )),
             _ => Action::Respond(error_envelope(
                 &id,
                 "method_not_found",
@@ -121,6 +133,65 @@ fn last_graph_request(service: &MockService) -> Value {
                 .is_some_and(|method| method.starts_with("graph.") || method == "mentu.retry_step")
         })
         .expect("a graph request reached the mock")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_orchestrator_verbs_send_exact_workspace_and_run_identity() {
+    let (dir, service) = mock();
+    let task = graph_result()["graph"]["intent"]["nodes"][0].clone();
+    let path = dir.path().join("main-task.json");
+    std::fs::write(&path, serde_json::to_vec(&task).unwrap()).unwrap();
+    let started = common::run_cli(
+        &service.data_dir,
+        &[
+            "--json",
+            "graph",
+            "orchestrator-start",
+            "--workspace",
+            "ws-1",
+            "--file",
+            path.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(started.status.code(), Some(0), "{}", stderr(&started));
+    assert_eq!(
+        last_graph_request(&service)["params"],
+        json!({"workspaceId":"ws-1", "main":task})
+    );
+    for (verb, method) in [
+        ("orchestrator-stop", "graph.orchestrator_stop"),
+        ("orchestrator-resume", "graph.orchestrator_resume"),
+    ] {
+        let output = common::run_cli(
+            &service.data_dir,
+            &["graph", verb, "--workspace", "ws-1", "--run", "orch-1"],
+        );
+        assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+        let request = last_graph_request(&service);
+        assert_eq!(request["method"], method);
+        assert_eq!(
+            request["params"],
+            json!({"workspaceId":"ws-1", "runId":"orch-1"})
+        );
+        assert!(stdout(&output).contains("Workflow orch-1: running"));
+    }
+    let output = common::run_cli(
+        &service.data_dir,
+        &[
+            "--json",
+            "graph",
+            "orchestrator-status",
+            "--workspace",
+            "ws-1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(
+        last_graph_request(&service)["method"],
+        "graph.orchestrator_status"
+    );
+    let envelope: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(envelope["result"]["run"]["id"], "orch-1");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

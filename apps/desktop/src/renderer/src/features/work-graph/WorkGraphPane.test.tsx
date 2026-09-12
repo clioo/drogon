@@ -12,11 +12,22 @@
 // throws on fileWrite, and the static scan test pins that
 // features/work-graph contains no write call at all.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
+
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { FileBridge, FileReadResult } from "../../../../shared/file-contract";
+import type {
+  FileBridge,
+  FileReadResult,
+} from "../../../../shared/file-contract";
 import type {
   MentuBridge,
   MentuRunEvidenceResult,
@@ -26,7 +37,12 @@ import type { Result, Session } from "../../../../shared/session-contract";
 import type { WorkGraphDocument } from "../../../../shared/work-graph-contract";
 import { WorkGraphPane } from "./WorkGraphPane";
 import type { MentuDispatchDeps } from "../mentu/mentu-run-dispatch";
-import { reviewNodeId, runToken } from "../work-graph-workflows/adversarial-loop";
+import {
+  reviewNodeId,
+  runToken,
+} from "../work-graph-workflows/adversarial-loop";
+
+beforeEach(installRadixJsdomStubs);
 
 function stepEvidence(label: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -149,7 +165,11 @@ function mentuBridgeWith(evidence: {
       if (!evidence.result) {
         return {
           ok: false as const,
-          error: { code: "not_found", message: "run directory is gone", retryable: false },
+          error: {
+            code: "not_found",
+            message: "run directory is gone",
+            retryable: false,
+          },
         };
       }
       return { ok: true as const, result: evidence.result };
@@ -179,20 +199,32 @@ describe("WorkGraphPane", () => {
     await screen.findByText("Build");
     await screen.findByText("Review changes");
 
-    expect(screen.getAllByTestId("work-graph-canvas").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("work-graph-canvas").length).toBeGreaterThan(
+      0,
+    );
 
     // Status badges render the daemon's own words.
-    expect(document.querySelector('[data-work-graph-status="running"]')).not.toBeNull();
-    const unverifiable = document.querySelector('[data-work-graph-status="unverifiable"]');
+    expect(
+      document.querySelector('[data-work-graph-status="running"]'),
+    ).not.toBeNull();
+    const unverifiable = document.querySelector(
+      '[data-work-graph-status="unverifiable"]',
+    );
     expect(unverifiable).not.toBeNull();
     expect(unverifiable?.textContent).toContain("Unverifiable");
 
     // Aggregates: one running, one succeeded, one unverifiable; duration
     // from the step's recorded durationSeconds; tokens from the one agent
     // record (the shell node contributes nothing at all).
-    expect(screen.getByTestId("work-graph-total-running").textContent).toContain("1");
-    expect(screen.getByTestId("work-graph-total-succeeded").textContent).toContain("1");
-    expect(screen.getByTestId("work-graph-total-unverifiable").textContent).toContain("1");
+    expect(
+      screen.getByTestId("work-graph-total-running").textContent,
+    ).toContain("1");
+    expect(
+      screen.getByTestId("work-graph-total-succeeded").textContent,
+    ).toContain("1");
+    expect(
+      screen.getByTestId("work-graph-total-unverifiable").textContent,
+    ).toContain("1");
     const totals = screen.getByTestId("work-graph-totals").textContent ?? "";
     // Only the leader recorded a duration; the running and unverifiable
     // nodes' durations stay unknown and are COUNTED, never estimated.
@@ -236,9 +268,7 @@ describe("WorkGraphPane", () => {
     fireEvent.click(await screen.findByText("Plan the migration"));
     const inspector = await screen.findByTestId("work-graph-node-inspector");
     // Streams resolved through the EXISTING mentu.run_evidence seam.
-    await waitFor(() =>
-      expect(evidence.calls).toEqual([{ runId: "run-1" }]),
-    );
+    await waitFor(() => expect(evidence.calls).toEqual([{ runId: "run-1" }]));
     const stdout = await waitFor(() => {
       const found = inspector.querySelector('pre[aria-label="stdout output"]');
       expect(found).not.toBeNull();
@@ -259,7 +289,9 @@ describe("WorkGraphPane", () => {
     fireEvent.click(await screen.findByText("Build"));
     const inspector = await screen.findByTestId("work-graph-node-inspector");
     const na = await waitFor(() => {
-      const found = inspector.querySelector('[data-testid="work-graph-node-usage-na"]');
+      const found = inspector.querySelector(
+        '[data-testid="work-graph-node-usage-na"]',
+      );
       expect(found).not.toBeNull();
       return found!;
     });
@@ -271,7 +303,9 @@ describe("WorkGraphPane", () => {
     fireEvent.click(await screen.findByText("Review changes"));
     const inspector = await screen.findByTestId("work-graph-node-inspector");
     const badge = await waitFor(() => {
-      const found = inspector.querySelector('[data-testid="work-graph-node-disabled-badge"]');
+      const found = inspector.querySelector(
+        '[data-testid="work-graph-node-disabled-badge"]',
+      );
       expect(found).not.toBeNull();
       return found!;
     });
@@ -285,14 +319,22 @@ describe("WorkGraphPane", () => {
       },
       fileRead: async () => ({
         ok: false as const,
-        error: { code: "not_found", message: "file not found", retryable: false },
+        error: {
+          code: "not_found",
+          message: "file not found",
+          retryable: false,
+        },
       }),
       fileWrite: async () => {
         throw new Error("work-graph pane attempted a write");
       },
     };
     render(
-      <WorkGraphPane fileBridge={missingBridge} hostId="host" workspaceId="ws" />,
+      <WorkGraphPane
+        fileBridge={missingBridge}
+        hostId="host"
+        workspaceId="ws"
+      />,
     );
     const empty = await screen.findByTestId("work-graph-empty");
     expect(empty.textContent).toContain(".drogon/graph.json");
@@ -309,7 +351,9 @@ describe("WorkGraphPane", () => {
     const first = structuredClone(GRAPH);
     const view = renderPane(JSON.stringify(first));
     await screen.findByText("Build");
-    expect(document.querySelector('[data-work-graph-status="running"]')).not.toBeNull();
+    expect(
+      document.querySelector('[data-work-graph-status="running"]'),
+    ).not.toBeNull();
 
     // The daemon settles the node and the poller re-reads the file.
     const settled = structuredClone(GRAPH);
@@ -342,14 +386,18 @@ describe("WorkGraphPane", () => {
       />,
     );
     await waitFor(() =>
-      expect(document.querySelector('[data-work-graph-status="failed"]')).not.toBeNull(),
+      expect(
+        document.querySelector('[data-work-graph-status="failed"]'),
+      ).not.toBeNull(),
     );
 
     // The failing node carries its error and exit code on the node.
     fireEvent.click(screen.getByText("Build"));
     const inspector = await screen.findByTestId("work-graph-node-inspector");
     await waitFor(() =>
-      expect(inspector.textContent).toContain("Completion policy was not satisfied"),
+      expect(inspector.textContent).toContain(
+        "Completion policy was not satisfied",
+      ),
     );
     expect(inspector.textContent).toContain("Exit code:");
     expect(inspector.textContent).toContain("1");
@@ -384,7 +432,12 @@ describe("WorkGraphPane", () => {
       },
     } as unknown as FileBridge;
     render(
-      <WorkGraphPane fileBridge={oversize} mentuBridge={null} hostId="host" workspaceId="ws" />,
+      <WorkGraphPane
+        fileBridge={oversize}
+        mentuBridge={null}
+        hostId="host"
+        workspaceId="ws"
+      />,
     );
     const state = await screen.findByTestId("work-graph-too-large");
     expect(state.textContent).toContain("intact");
@@ -396,14 +449,18 @@ describe("WorkGraphPane", () => {
     // canvas saved now would replace the real intent wholesale.
     const design = screen.getByTestId("work-graph-design");
     expect(design.getAttribute("disabled")).not.toBeNull();
-    expect(design.getAttribute("data-blocked-reason") ?? "").toContain("too large");
+    expect(design.getAttribute("data-blocked-reason") ?? "").toContain(
+      "too large",
+    );
   });
 
   it("writes nothing — a static scan over features/work-graph finds no write call", () => {
     const dir = path.dirname(new URL(import.meta.url).pathname);
     const sources = readdirSync(dir).filter(
       (file) =>
-        /\.(ts|tsx)$/.test(file) && !file.endsWith(".test.ts") && !file.endsWith(".test.tsx"),
+        /\.(ts|tsx)$/.test(file) &&
+        !file.endsWith(".test.ts") &&
+        !file.endsWith(".test.tsx"),
     );
     expect(sources.length).toBeGreaterThan(0);
     for (const file of sources) {
@@ -475,7 +532,11 @@ describe("WorkGraphPane orchestrator entry point", () => {
     const fileBridge = {
       fileRead: async () => ({
         ok: false as const,
-        error: { code: "not_found", message: "unused in this test", retryable: false },
+        error: {
+          code: "not_found",
+          message: "unused in this test",
+          retryable: false,
+        },
       }),
     } as unknown as FileBridge;
     render(
@@ -489,7 +550,9 @@ describe("WorkGraphPane orchestrator entry point", () => {
     );
     fireEvent.click(await screen.findByTestId("work-graph-orchestrator"));
     await screen.findByTestId("orchestrator-canvas");
-    expect(screen.getByTestId("orchestrator-main-agent").getAttribute("data-state")).toBe("live");
+    expect(screen.getByTestId("orchestrator-main-agent").textContent).toContain(
+      "claude",
+    );
     expect(screen.getByTestId("subagent-policy-panel")).toBeTruthy();
   });
 
@@ -497,7 +560,11 @@ describe("WorkGraphPane orchestrator entry point", () => {
     const fileBridge = {
       fileRead: async () => ({
         ok: false as const,
-        error: { code: "not_found", message: "unused in this test", retryable: false },
+        error: {
+          code: "not_found",
+          message: "unused in this test",
+          retryable: false,
+        },
       }),
     } as unknown as FileBridge;
     render(
@@ -510,14 +577,22 @@ describe("WorkGraphPane orchestrator entry point", () => {
       />,
     );
     fireEvent.click(await screen.findByTestId("work-graph-orchestrator"));
-    await screen.findByTestId("orchestrator-disabled");
+    expect(screen.getByRole("textbox", { name: "Main task" })).toBeTruthy();
+    expect(
+      (screen.getByTestId("orchestrator-run-workflow") as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
   });
 
   it("Back returns to the read-only Work Graph view", async () => {
     const fileBridge = {
       fileRead: async () => ({
         ok: false as const,
-        error: { code: "not_found", message: "unused in this test", retryable: false },
+        error: {
+          code: "not_found",
+          message: "unused in this test",
+          retryable: false,
+        },
       }),
     } as unknown as FileBridge;
     render(
@@ -564,7 +639,10 @@ function mutableOrchestratorGraphBridge(policyDoc: WorkGraphDocument): {
   writes: unknown[];
   failovers: { nodeId: string }[];
 } {
-  let intentNodes = policyDoc.intent.nodes as unknown as Record<string, unknown>[];
+  let intentNodes = policyDoc.intent.nodes as unknown as Record<
+    string,
+    unknown
+  >[];
   const policy = (policyDoc.intent as unknown as { policy: unknown }).policy;
   const statuses = new Map<string, string>();
   const writes: unknown[] = [];
@@ -578,14 +656,18 @@ function mutableOrchestratorGraphBridge(policyDoc: WorkGraphDocument): {
           intent: { nodes: intentNodes, policy } as never,
           state: {
             updatedAt: "now",
-            nodes: [...statuses.entries()].map(([id, status]) => ({ id, status })) as never,
+            nodes: [...statuses.entries()].map(([id, status]) => ({
+              id,
+              status,
+            })) as never,
           },
         },
       },
     }),
     graphWriteIntent: async (params) => {
       writes.push(params);
-      intentNodes = (params.intent as { nodes: Record<string, unknown>[] }).nodes;
+      intentNodes = (params.intent as { nodes: Record<string, unknown>[] })
+        .nodes;
       const newNode = intentNodes[intentNodes.length - 1];
       statuses.set(newNode.id as string, "idle");
       return {
@@ -617,7 +699,13 @@ function mutableOrchestratorGraphBridge(policyDoc: WorkGraphDocument): {
           runtime: { harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4" },
           isFallback: false,
           attemptNumber: 1,
-          attempts: [{ harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4", outcome: "launched" }],
+          attempts: [
+            {
+              harness: "pi",
+              model: "qwen3.8-flash-next-nvidia-nvfp4",
+              outcome: "launched",
+            },
+          ],
         },
       };
     },
@@ -629,7 +717,10 @@ function dispatchDepsWithSession(session: Session): {
   deps: MentuDispatchDeps;
   write: ReturnType<typeof vi.fn>;
 } {
-  const write = vi.fn(async () => ({ ok: true as const, result: { acceptedBytes: 1 } }));
+  const write = vi.fn(async () => ({
+    ok: true as const,
+    result: { acceptedBytes: 1 },
+  }));
   const deps: MentuDispatchDeps = {
     sessions: async () => ({ ok: true, result: { sessions: [session] } }),
     write,
@@ -637,122 +728,124 @@ function dispatchDepsWithSession(session: Session): {
   return { deps, write };
 }
 
-describe("WorkGraphPane orchestrator Run workflow (DISHONEST-1)", () => {
+describe("WorkGraphPane durable orchestrator", () => {
   afterEach(cleanup);
-
-  it("dispatches a real prompt to the main agent's session and does not review until it settles", async () => {
-    const fileBridge = {
-      fileRead: async () => ({
-        ok: false as const,
-        error: { code: "not_found", message: "unused in this test", retryable: false },
-      }),
-    } as unknown as FileBridge;
-    const session: Session = { ...liveSession(), agentState: "idle" };
-    const { bridge, writes, failovers } = mutableOrchestratorGraphBridge(graphWithAdversarialPolicy());
-    const { deps, write } = dispatchDepsWithSession(session);
-
-    const view = render(
-      <WorkGraphPane
-        fileBridge={fileBridge}
-        graphBridge={bridge}
-        hostId="host"
-        workspaceId="ws"
-        mainSession={session}
-        sessions={[session]}
-        mentuDispatchDeps={deps}
-        adversarialLoopPollMs={15}
-      />,
-    );
-    fireEvent.click(await screen.findByTestId("work-graph-orchestrator"));
-    await screen.findByTestId("orchestrator-canvas");
-
-    fireEvent.click(screen.getByTestId("orchestrator-run-workflow"));
-
-    // The Main agent's session must receive a REAL, visible prompt — not
-    // nothing (the exact DISHONEST-1 complaint).
-    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
-    const delivered = write.mock.calls[0][0] as { sessionId: string; text: string };
-    expect(delivered.sessionId).toBe(session.id);
-    expect(delivered.text).toContain("orchestrator run");
-    expect(delivered.text).toContain("adversarial review loop is about");
-    const baseRunId = /orchestrator run (\S+):/.exec(delivered.text)?.[1];
-    expect(baseRunId).toBeTruthy();
-
-    // Still waiting: the review must NOT launch just because the prompt
-    // was delivered — only once the session's turn genuinely settles.
-    await screen.findByTestId("orchestrator-terminal");
-    expect(screen.getByTestId("orchestrator-terminal").getAttribute("data-state")).toBe("in-progress");
-    expect(screen.getByTestId("orchestrator-terminal").textContent).toContain(
-      "Waiting for the main agent's delegated turn to finish",
-    );
-    // Give the poll loop several ticks to prove it genuinely does nothing.
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(writes).toHaveLength(0);
-    expect(failovers).toHaveLength(0);
-
-    // The session's turn settles (a genuine idle transition AFTER dispatch).
-    const settled: Session = {
-      ...session,
-      agentState: "idle",
-      agentStateAt: new Date(Date.now() + 60_000).toISOString(),
+  it("retries the unsaved main task with the next policy edit before reporting Saved", async () => {
+    const document = graphWithAdversarialPolicy();
+    const { bridge } = mutableOrchestratorGraphBridge(document);
+    const writes: unknown[] = [];
+    bridge.graphWritePolicy = async (input) => {
+      writes.push(input);
+      if (writes.length === 1)
+        return {
+          ok: false,
+          error: {
+            code: "io_error",
+            message: "Save unavailable",
+            retryable: true,
+          },
+        };
+      return {
+        ok: true,
+        result: {
+          graph: {
+            ...document,
+            intent: {
+              nodes: input.main ? [input.main] : [],
+              policy: input.policy,
+            },
+          },
+        },
+      };
     };
-    view.rerender(
-      <WorkGraphPane
-        fileBridge={fileBridge}
-        graphBridge={bridge}
-        hostId="host"
-        workspaceId="ws"
-        mainSession={settled}
-        sessions={[settled]}
-        mentuDispatchDeps={deps}
-        adversarialLoopPollMs={15}
-      />,
-    );
-
-    // NOW the review launches, attributed to the exact run that was
-    // dispatched (the token derived from `baseRunId`).
-    await waitFor(() => expect(failovers.length).toBeGreaterThan(0));
-    const token = runToken(baseRunId!);
-    expect(failovers[0].nodeId).toBe(reviewNodeId(token, 1));
-  });
-
-  it("refuses honestly, without ever reviewing anything, when the main agent cannot receive the dispatch", async () => {
     const fileBridge = {
       fileRead: async () => ({
-        ok: false as const,
-        error: { code: "not_found", message: "unused in this test", retryable: false },
+        ok: false,
+        error: { code: "not_found", message: "missing", retryable: false },
       }),
     } as unknown as FileBridge;
-    // `needs_input` refuses immediately (answering a live question would
-    // be dishonest to inject as a new task) — no real wait needed here.
-    const session: Session = { ...liveSession(), agentState: "needs_input" };
-    const { bridge, writes, failovers } = mutableOrchestratorGraphBridge(graphWithAdversarialPolicy());
-    const { deps, write } = dispatchDepsWithSession(session);
-
     render(
       <WorkGraphPane
         fileBridge={fileBridge}
         graphBridge={bridge}
         hostId="host"
         workspaceId="ws"
-        mainSession={session}
-        sessions={[session]}
-        mentuDispatchDeps={deps}
-        adversarialLoopPollMs={15}
       />,
     );
     fireEvent.click(await screen.findByTestId("work-graph-orchestrator"));
-    await screen.findByTestId("orchestrator-canvas");
-    fireEvent.click(screen.getByTestId("orchestrator-run-workflow"));
-
+    fireEvent.change(screen.getByRole("textbox", { name: "Main task" }), {
+      target: { value: "Do not lose this task" },
+    });
     await waitFor(() =>
-      expect(screen.getByTestId("orchestrator-terminal").getAttribute("data-state")).toBe("failed"),
+      expect(
+        screen.getByTestId("orchestrator-save-status").textContent,
+      ).toContain("Save failed"),
     );
-    expect(screen.getByTestId("orchestrator-terminal").textContent).toContain(
-      "Run workflow could not reach the main agent",
+    fireEvent.click(screen.getByTestId("adversarial-toggle"));
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("orchestrator-save-status").textContent,
+      ).toContain("Saved automatically"),
     );
-    expect(write).not.toHaveBeenCalled();
-    expect(writes).toHaveLength(0);
-    expect(failovers).toHaveLength(0);
+    expect(writes[1]).toMatchObject({
+      main: { id: "orchestrator-main", prompt: "Do not lose this task" },
+      policy: { adversarial: { enabled: false } },
+    });
   });
+  it.each([false, true])(
+    "starts concrete main task when testing enabled=%s",
+    async (enabled) => {
+      const document = graphWithAdversarialPolicy();
+      document.intent.nodes.push({
+        id: "orchestrator-main",
+        title: "Main agent",
+        harness: "pi",
+        model: "fixture-model",
+        prompt: "Task",
+        enabled: true,
+        dependsOn: [],
+      });
+      document.intent.policy!.adversarial.enabled = enabled;
+      const { bridge, failovers } = mutableOrchestratorGraphBridge(document);
+      bridge.graphWritePolicy = async ({ policy, main }) => ({
+        ok: true,
+        result: {
+          graph: { ...document, intent: { nodes: main ? [main] : [], policy } },
+        },
+      });
+      const start = vi.fn(async (_input: unknown) => ({
+        ok: true as const,
+        result: { run: null },
+      }));
+      bridge.graphOrchestratorStart = start;
+      const fileBridge = {
+        fileRead: async () => ({
+          ok: false,
+          error: { code: "not_found", message: "missing", retryable: false },
+        }),
+      } as unknown as FileBridge;
+      render(
+        <WorkGraphPane
+          fileBridge={fileBridge}
+          graphBridge={bridge}
+          hostId="host"
+          workspaceId="ws"
+        />,
+      );
+      fireEvent.click(await screen.findByTestId("work-graph-orchestrator"));
+      fireEvent.change(screen.getByRole("textbox", { name: "Main task" }), {
+        target: { value: "Implement the selected task" },
+      });
+      fireEvent.click(screen.getByTestId("orchestrator-run-workflow"));
+      await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+      expect(start.mock.calls[0][0]).toMatchObject({
+        workspaceId: "ws",
+        main: {
+          prompt: "Implement the selected task",
+          id: "orchestrator-main",
+        },
+      });
+      expect(failovers).toHaveLength(0);
+    },
+  );
 });

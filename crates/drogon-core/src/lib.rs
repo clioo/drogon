@@ -218,6 +218,7 @@ pub struct Engine {
     desktop_relay: Mutex<RelayState>,
     worker_cli: Option<PathBuf>,
     worker_operations: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
+    graph_orchestrator_gate: Mutex<()>,
     /// R17-A: Jira integration state (site/token store, per-site request
     /// queues, in-flight search registry). Lives on the Engine so parallel
     /// tests with their own temp data dirs never share it. No outer mutex:
@@ -333,6 +334,7 @@ impl Engine {
             desktop_relay: Mutex::new(RelayState::default()),
             worker_cli: None,
             worker_operations: Mutex::new(HashMap::new()),
+            graph_orchestrator_gate: Mutex::new(()),
             jira: jira::JiraState::new(data_dir),
             meeting_commitments: meetings::CommitmentStore::new(data_dir),
             lifecycle_gate: RwLock::new(()),
@@ -665,6 +667,11 @@ impl Engine {
             "graph.compile" => self.graph_compile(&request.params),
             "graph.write_intent" => self.graph_write_intent(request),
             "graph.run" => self.graph_run(request),
+            "graph.write_policy" => self.graph_write_policy(request),
+            "graph.orchestrator_start" => self.graph_orchestrator_start(request),
+            "graph.orchestrator_status" => self.graph_orchestrator_status(&request.params),
+            "graph.orchestrator_stop" => self.graph_orchestrator_stop(request),
+            "graph.orchestrator_resume" => self.graph_orchestrator_resume(request),
             "graph.run_node_failover" => self.graph_run_node_failover(request),
             "graph.resume_node" => self.graph_resume_node(request),
             "graph.retry_step" => self.graph_retry_step(request),

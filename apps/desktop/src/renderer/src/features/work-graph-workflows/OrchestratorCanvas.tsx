@@ -1,38 +1,10 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// The Orchestrator canvas (Part 2 / Part 4): a fixed, policy-driven layout
-// — never the free-form authoring canvas's drag-and-drop positions — since
-// its shape is entirely determined by the Subagent policy: Main agent →
-// either "Ready to run" (no optional subagents) or the Adversarial loop
-// (Adversarial test ⇄ Code review, up to N times) → "Ready to merge".
-//
-// Part 4, decided here: the Main agent node is NOT an authored graph node
-// at all — it is a live projection of the workspace's real main session
-// (`pickMentuMainSession`, the same primitive the Mentu dispatch seam
-// uses), because the main agent IS that interactive session, not a batch
-// recipe step. Consequences: no session EVER observed → the whole graph is
-// honestly DISABLED (never an empty canvas that looks broken); a live
-// session shows its REAL harness; the session record carries no `model`
-// field today (see `shared/session-contract.ts`), so the model chip says
-// so honestly instead of fabricating one — a real product gap, not
-// something this view invents an answer for. The daemon's session list
-// drops a session once it is fully torn down, so a session that already
-// exited is remembered locally (`lastKnownRef`) rather than collapsing the
-// canvas back to "no session" and losing that fact — see `MainAgentNode`'s
-// `stale` handling. The node is clickable into a small inspector exposing
-// the same leader-node rules an authored node's `NodeInspector` already
-// enforces while live: harness-change refusal, and delete/stop refusal
-// with a real Stop-session action — never a model-next-launch badge, since
-// there is no model field to defer.
-//
-// "Run workflow" launches exactly the automated, non-interactive portion:
-// when Adversarial testing is on, the (real) adversarial loop; when it is
-// off, there is nothing automated configured yet, so the control is
-// disabled with an honest reason — "Ready to run" means the main agent
-// alone is enough, not "click to run something".
+// Policy preview and daemon-observed execution share the same fixed layout.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   Bot,
   CheckCircle2,
   ChevronDown,
@@ -42,9 +14,15 @@ import {
   Play,
   Shield,
 } from "lucide-react";
-import type { GraphPolicy } from "../../../../shared/graph-contract";
+import type {
+  GraphPolicy,
+  OrchestratorRun,
+} from "../../../../shared/graph-contract";
 import type { Session } from "../../../../shared/session-contract";
-import { isFreeDefaultRuntime, policyFirstRuntime } from "../../../../shared/work-graph-contract";
+import {
+  isFreeDefaultRuntime,
+  policyFirstRuntime,
+} from "../../../../shared/work-graph-contract";
 import { isMentuMainSessionLive } from "../mentu/mentu-run-dispatch";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -54,7 +32,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../../components/ui/popover";
 import type { LoopLedger } from "./adversarial-loop";
 import {
   loadLastKnownMainSession,
@@ -79,7 +61,11 @@ function Chip({ children }: { children: React.ReactNode }): React.JSX.Element {
  *  default, the canvas must say which runtime will be spawned and that it
  *  is paid/external — never a silent spawn. Shows only when the adversarial
  *  loop is actually configured to run (nothing automated otherwise). */
-function RuntimeDisclosure({ policy }: { policy: GraphPolicy }): React.JSX.Element | null {
+function RuntimeDisclosure({
+  policy,
+}: {
+  policy: GraphPolicy;
+}): React.JSX.Element | null {
   if (!policy.adversarial.enabled) return null;
   const runtime = policyFirstRuntime(policy);
   const free = isFreeDefaultRuntime(runtime);
@@ -199,25 +185,31 @@ function MainAgentNode({
               className="mt-1 text-[11px] text-muted-foreground"
               data-testid="main-agent-harness-locked"
             >
-              {guardReason}, so its harness cannot change. Start a new session with a different
-              harness if you need one — the change would apply at the next launch, not now.
+              {guardReason}, so its harness cannot change. Start a new session
+              with a different harness if you need one — the change would apply
+              at the next launch, not now.
             </p>
           ) : null}
         </div>
         <div>
           <p className="text-xs font-medium text-muted-foreground">Model</p>
-          <p className="mt-1 text-sm text-muted-foreground">model not tracked</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            model not tracked
+          </p>
         </div>
         <div className="border-t border-border pt-2">
-          <p className="text-xs font-medium text-muted-foreground">Danger zone</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            Danger zone
+          </p>
           {guardActive ? (
             <>
               <p
                 className="mt-1 text-[11px] text-muted-foreground"
                 data-testid="main-agent-delete-refused"
               >
-                {guardReason}, so this is the workspace's main session and it cannot be deleted
-                from here. Stop it first — that is the honest action, not a silent removal.
+                {guardReason}, so this is the workspace's main session and it
+                cannot be deleted from here. Stop it first — that is the honest
+                action, not a silent removal.
               </p>
               <Button
                 type="button"
@@ -304,12 +296,14 @@ function LoopRoleNode({
   icon,
   tone,
   active,
+  step,
 }: {
   title: string;
   caption: string;
   icon: React.ReactNode;
   tone: "test" | "review";
   active: boolean;
+  step?: OrchestratorRun["steps"][number];
 }): React.JSX.Element {
   const toneClasses =
     tone === "test"
@@ -333,9 +327,32 @@ function LoopRoleNode({
       </div>
       <p className="text-[11px] text-muted-foreground">{caption}</p>
       <div className="flex flex-wrap gap-1.5">
-        <Chip>Subagent policy</Chip>
-        <Chip>Auto failover</Chip>
+        <Chip>{step?.runtime?.harness ?? "Subagent policy"}</Chip>
+        <Chip>{step?.runtime?.model || "Auto failover"}</Chip>
       </div>
+      {step ? (
+        <p className="text-[11px] text-muted-foreground">
+          Iteration {step.iteration} · {step.status}
+          {step.isFallback ? " · Fallback" : ""}
+          {step.verdict ? ` · ${step.verdict}` : ""}
+        </p>
+      ) : null}
+      {step && step.attempts.length > 0 ? (
+        <details className="text-[11px] text-muted-foreground">
+          <summary className="cursor-pointer">
+            {step.attempts.length} runtime attempts
+          </summary>
+          <ol className="mt-1 space-y-1">
+            {step.attempts.map((attempt, index) => (
+              <li key={index}>
+                {index + 1}. {attempt.harness} / {attempt.model || "default"} ·{" "}
+                {attempt.outcome}
+                {attempt.reason ? ` — ${attempt.reason}` : ""}
+              </li>
+            ))}
+          </ol>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -353,6 +370,11 @@ export function OrchestratorCanvas({
   workspaceId,
   onStopMainSession,
   stoppingMainSession,
+  configuredMain,
+  durableRun,
+  runError,
+  onStopRun,
+  onResumeRun,
 }: {
   policy: GraphPolicy;
   mainSession: Session | null;
@@ -380,8 +402,58 @@ export function OrchestratorCanvas({
    *  renders the refusal without a broken button. */
   onStopMainSession?: () => void;
   stoppingMainSession?: boolean;
+  configuredMain?: { harness: string; model: string; prompt: string };
+  durableRun?: OrchestratorRun | null;
+  runError?: string | null;
+  onStopRun?: () => void;
+  onResumeRun?: () => void;
 }): React.JSX.Element {
   const [zoom, setZoom] = useState(ZOOM_DEFAULT);
+  const viewport = useRef<HTMLDivElement>(null);
+  const flow = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(true);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const narrow = viewportWidth > 0 && viewportWidth < 900;
+  const executionActive =
+    durableRun?.status === "running" || durableRun?.status === "stopping";
+  const previewHasLoop = executionActive
+    ? durableRun.policy.adversarial.enabled
+    : policy.adversarial.enabled;
+  useEffect(() => {
+    if (!viewport.current) return;
+    const resize = () => setViewportWidth(viewport.current!.clientWidth);
+    const observer = new ResizeObserver(resize);
+    observer.observe(viewport.current);
+    resize();
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!fit || !viewport.current || !flow.current || !viewportWidth) return;
+    const fitToViewport = () =>
+      setZoom(
+        Math.max(
+          30,
+          Math.min(
+            100,
+            Math.floor(
+              ((viewportWidth - 48) / flow.current!.scrollWidth) * 100,
+            ),
+          ),
+        ),
+      );
+    const observer = new ResizeObserver(fitToViewport);
+    observer.observe(flow.current);
+    fitToViewport();
+    return () => observer.disconnect();
+  }, [
+    fit,
+    viewportWidth,
+    narrow,
+    previewHasLoop,
+    durableRun?.status,
+    policy.adversarial.enabled,
+    durableRun?.policy.adversarial.enabled,
+  ]);
   // The Main agent node is a live projection of the real session (Part 4),
   // but the daemon's session list drops a session once it is fully torn
   // down — `mainSession` itself goes back to null the moment a session
@@ -396,20 +468,26 @@ export function OrchestratorCanvas({
   // render tree's lifetime. Reset the memory the moment the workspace
   // changes so a fact from workspace A can never bleed into workspace B's
   // honestly-never-had-one view.
-  const lastKnownRef = useRef<{ workspaceId: string | undefined; session: Session } | null>(
-    null,
-  );
+  const lastKnownRef = useRef<{
+    workspaceId: string | undefined;
+    session: Session;
+  } | null>(null);
   if (mainSession) {
     lastKnownRef.current = { workspaceId, session: mainSession };
     if (workspaceId) saveLastKnownMainSession(workspaceId, mainSession);
-  } else if (lastKnownRef.current && lastKnownRef.current.workspaceId !== workspaceId) {
+  } else if (
+    lastKnownRef.current &&
+    lastKnownRef.current.workspaceId !== workspaceId
+  ) {
     lastKnownRef.current = null;
   }
   if (lastKnownRef.current === null && mainSession === null && workspaceId) {
     const persisted = loadLastKnownMainSession(workspaceId);
     if (persisted) lastKnownRef.current = { workspaceId, session: persisted };
   }
-  const lastKnownSession = mainSession ? null : (lastKnownRef.current?.session ?? null);
+  const lastKnownSession = mainSession
+    ? null
+    : (lastKnownRef.current?.session ?? null);
   // Once the fresh record is gone we no longer have live confirmation —
   // even a session that was `live` a moment ago must never be claimed live
   // now (`MainAgentNode` enforces this via `stale`); a session already
@@ -417,14 +495,23 @@ export function OrchestratorCanvas({
   // forever.
   const stale = mainSession === null && lastKnownSession !== null;
   const displaySession = mainSession ?? lastKnownSession;
-  const disabled = displaySession === null;
-  const loopInFlight = loopLedger !== null && !isTerminalPhase(loopLedger.phase);
-  const repeatBound = loopInFlight ? loopLedger.maxCycles : policy.adversarial.maxIterations;
-  const repeatPending = loopInFlight && policy.adversarial.maxIterations !== loopLedger.maxCycles;
+  const disabled = displaySession === null && !configuredMain;
+  const loopInFlight =
+    loopLedger !== null && !isTerminalPhase(loopLedger.phase);
+  const repeatBound = loopInFlight
+    ? loopLedger.maxCycles
+    : policy.adversarial.maxIterations;
+  const repeatPending =
+    loopInFlight && policy.adversarial.maxIterations !== loopLedger.maxCycles;
+  const running = executionActive;
+  const showLoop = previewHasLoop;
+  const effectiveMain = running ? durableRun.main : configuredMain;
+  const latestStep = (phase: "test" | "review") =>
+    durableRun?.steps.filter((step) => step.phase === phase).at(-1);
 
   return (
     <div
-      className="flex h-full min-h-0 flex-1 flex-col bg-background"
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
       data-testid="orchestrator-canvas"
     >
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3">
@@ -453,6 +540,10 @@ export function OrchestratorCanvas({
             <span className="text-destructive" role="status">
               Save failed{saveError ? `: ${saveError}` : ""}
             </span>
+          ) : saveStatus === "saving" ? (
+            <span className="text-muted-foreground" role="status">
+              Saving…
+            </span>
           ) : (
             <>
               <CheckCircle2
@@ -479,23 +570,25 @@ export function OrchestratorCanvas({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem
-                onSelect={() => setZoom(ZOOM_DEFAULT)}
+                onSelect={() => setFit(true)}
                 data-testid="orchestrator-fit-view-reset"
               >
-                Fit view ({ZOOM_DEFAULT}%)
+                Fit view
               </DropdownMenuItem>
               <DropdownMenuItem
-                onSelect={() =>
+                onSelect={() => (
+                  setFit(false),
                   setZoom((current) => Math.min(ZOOM_MAX, current + ZOOM_STEP))
-                }
+                )}
                 data-testid="orchestrator-zoom-in"
               >
                 Zoom in
               </DropdownMenuItem>
               <DropdownMenuItem
-                onSelect={() =>
+                onSelect={() => (
+                  setFit(false),
                   setZoom((current) => Math.max(ZOOM_MIN, current - ZOOM_STEP))
-                }
+                )}
                 data-testid="orchestrator-zoom-out"
               >
                 Zoom out
@@ -503,6 +596,21 @@ export function OrchestratorCanvas({
             </DropdownMenuContent>
           </DropdownMenu>
           <RuntimeDisclosure policy={policy} />
+          {running ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onStopRun}
+              disabled={durableRun.status === "stopping"}
+            >
+              Stop
+            </Button>
+          ) : null}
+          {durableRun?.status === "stopped" ? (
+            <Button size="sm" variant="outline" onClick={onResumeRun}>
+              Resume run
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"
@@ -517,7 +625,21 @@ export function OrchestratorCanvas({
         </div>
       </div>
 
-      <div className="relative flex min-h-0 flex-1 items-center overflow-auto bg-[radial-gradient(circle,var(--border)_1px,transparent_1px)] bg-[length:16px_16px] p-8">
+      {runError ? (
+        <p className="px-4 py-2 text-xs text-destructive" role="alert">
+          {runError}
+        </p>
+      ) : null}
+      {running ? (
+        <p className="px-4 py-2 text-xs text-muted-foreground">
+          Run {durableRun.id} · {durableRun.phase} · Iteration{" "}
+          {durableRun.iteration}. Configuration changes apply to the next run.
+        </p>
+      ) : null}
+      <div
+        ref={viewport}
+        className="relative flex min-h-80 flex-1 items-center overflow-auto bg-[radial-gradient(circle,var(--border)_1px,transparent_1px)] bg-[length:16px_16px] p-6"
+      >
         {disabled ? (
           <div
             className="mx-auto flex max-w-md flex-col items-center gap-3 text-center"
@@ -534,23 +656,46 @@ export function OrchestratorCanvas({
           </div>
         ) : (
           <div
-            className="mx-auto flex flex-col items-center gap-3"
+            ref={flow}
+            className="mx-auto flex w-max shrink-0 flex-col items-center gap-3"
             style={{
-              transform: `scale(${zoom / 100})`,
-              transformOrigin: "center",
+              zoom: zoom / 100,
             }}
             data-testid="orchestrator-flow"
           >
-            <div className="flex items-center gap-3">
-              <MainAgentNode
-                mainSession={displaySession}
-                stale={stale}
-                onStopMainSession={onStopMainSession}
-                stoppingMainSession={stoppingMainSession}
+            <div
+              className={`flex items-center gap-3 ${narrow ? "flex-col" : "flex-row"}`}
+              data-testid="orchestrator-flow-sequence"
+              data-direction={narrow ? "vertical" : "horizontal"}
+            >
+              {effectiveMain ? (
+                <div
+                  className="flex w-56 flex-col gap-2 rounded-lg border-2 border-purple-500 bg-purple-500/5 p-3"
+                  data-testid="orchestrator-main-agent"
+                >
+                  <span className="text-sm font-medium">Main agent</span>
+                  <div className="flex flex-wrap gap-1">
+                    <Chip>{effectiveMain.harness}</Chip>
+                    <Chip>{effectiveMain.model || "Harness default"}</Chip>
+                  </div>
+                  <p className="line-clamp-3 text-xs text-muted-foreground">
+                    {effectiveMain.prompt || "Configure the main task"}
+                  </p>
+                </div>
+              ) : (
+                <MainAgentNode
+                  mainSession={displaySession}
+                  stale={stale}
+                  onStopMainSession={onStopMainSession}
+                  stoppingMainSession={stoppingMainSession}
+                />
+              )}
+              <ArrowRight
+                className={`size-6 shrink-0 text-muted-foreground ${narrow ? "rotate-90" : ""}`}
+                aria-hidden
               />
-              <div className="h-px w-8 bg-border" aria-hidden />
-              {policy.adversarial.enabled ? (
-                <div className="relative flex items-center gap-3 rounded-lg border-2 border-dashed border-border p-3 pt-6">
+              {showLoop ? (
+                <div className="relative flex items-center gap-3 rounded-lg border-2 border-dashed border-border p-3 pb-9 pt-6">
                   <span className="absolute -top-3 left-3 flex items-center gap-1.5 bg-background px-1 text-xs font-medium">
                     Adversarial loop
                     <Badge variant="outline" className="text-[10px]">
@@ -564,12 +709,17 @@ export function OrchestratorCanvas({
                       <Shield className="size-4 text-destructive" aria-hidden />
                     }
                     tone="test"
+                    step={latestStep("test")}
                     active={
+                      (running && durableRun.phase === "test") ||
                       loopLedger?.phase === "reviewing" ||
                       loopLedger?.phase === "awaiting_base"
                     }
                   />
-                  <div className="h-px w-6 bg-border" aria-hidden />
+                  <ArrowRight
+                    className="size-6 shrink-0 text-muted-foreground"
+                    aria-hidden
+                  />
                   <LoopRoleNode
                     title="Code review"
                     caption="Review changes and verify fixes"
@@ -580,30 +730,80 @@ export function OrchestratorCanvas({
                       />
                     }
                     tone="review"
-                    active={loopLedger?.phase === "fixing"}
+                    step={latestStep("review")}
+                    active={
+                      (running && durableRun.phase === "review") ||
+                      loopLedger?.phase === "fixing"
+                    }
                   />
+                  <svg
+                    className="absolute bottom-1 left-10 h-7 w-[calc(100%-5rem)] text-muted-foreground"
+                    viewBox="0 0 360 28"
+                    preserveAspectRatio="none"
+                    aria-label="Return to adversarial testing when findings remain"
+                  >
+                    <path
+                      d="M350 0 V14 Q350 22 342 22 H18 Q10 22 10 14 V4 M5 9 L10 4 L15 9"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    />
+                  </svg>
                 </div>
               ) : null}
-              <div className="h-px w-8 bg-border" aria-hidden />
-              <ReadyBadge
-                label={
-                  policy.adversarial.enabled ? "Ready to merge" : "Ready to run"
-                }
-                ledger={policy.adversarial.enabled ? loopLedger : null}
-              />
+              {showLoop ? (
+                <ArrowRight
+                  className={`size-6 shrink-0 text-muted-foreground ${narrow ? "rotate-90" : ""}`}
+                  aria-hidden
+                />
+              ) : null}
+              {durableRun ? (
+                <div
+                  className="w-40 rounded-lg border border-border p-3 text-sm"
+                  data-testid="orchestrator-terminal"
+                >
+                  {!running ? "Last run: " : ""}
+                  {durableRun.status === "passed"
+                    ? durableRun.policy.adversarial.enabled
+                      ? "Ready to merge"
+                      : "Completed"
+                    : durableRun.status}
+                  {durableRun.error ? (
+                    <p className="mt-1 text-xs text-destructive">
+                      {durableRun.error}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <ReadyBadge
+                  label={
+                    showLoop
+                      ? loopLedger?.phase === "passed"
+                        ? "Ready to merge"
+                        : "Awaiting checks"
+                      : "Ready to run"
+                  }
+                  ledger={policy.adversarial.enabled ? loopLedger : null}
+                />
+              )}
             </div>
-            {policy.adversarial.enabled ? (
+            {showLoop ? (
               <p
                 className="text-xs text-muted-foreground"
                 data-testid="orchestrator-repeat-caption"
               >
-                Repeat up to {repeatBound}×
+                Repeat up to{" "}
+                {running
+                  ? durableRun.policy.adversarial.maxIterations
+                  : repeatBound}
+                ×
                 {repeatPending ? (
                   <span
                     className="ml-1 text-amber-600 dark:text-amber-400"
                     data-testid="orchestrator-repeat-pending"
                   >
-                    — {policy.adversarial.maxIterations}× applies to the next run
+                    — {policy.adversarial.maxIterations}× applies to the next
+                    run
                   </span>
                 ) : null}
               </p>

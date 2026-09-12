@@ -488,6 +488,33 @@ pub enum MentuAction {
 
 #[derive(Subcommand, Debug)]
 pub enum GraphAction {
+    /// Start a durable workflow from a main-task node JSON file. The daemon
+    /// captures the current Subagent policy and continues without the desktop.
+    OrchestratorStart {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "PATH")]
+        file: String,
+    },
+    /// Read the workspace's latest durable workflow and its role attempts.
+    OrchestratorStatus {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+    },
+    /// Request cancellation of one durable workflow.
+    OrchestratorStop {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        run: String,
+    },
+    /// Resume a stopped durable workflow without repeating completed roles.
+    OrchestratorResume {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        run: String,
+    },
     /// Read the whole graph: the human-owned `intent` half and the
     /// daemon-owned `state` half, projected from real observation (a
     /// `running` node is only reported when a live process is confirmed;
@@ -1449,6 +1476,18 @@ impl Cli {
                 }
             },
             Command::Graph { action } => match action {
+                GraphAction::OrchestratorStart { workspace, file } => {
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("file", file)?;
+                }
+                GraphAction::OrchestratorStatus { workspace } => {
+                    require_nonempty("workspace", workspace)?;
+                }
+                GraphAction::OrchestratorStop { workspace, run }
+                | GraphAction::OrchestratorResume { workspace, run } => {
+                    require_nonempty("workspace", workspace)?;
+                    require_nonempty("run", run)?;
+                }
                 GraphAction::Read { workspace } | GraphAction::WriteIntent { workspace, .. } => {
                     require_nonempty("workspace", workspace)?;
                 }

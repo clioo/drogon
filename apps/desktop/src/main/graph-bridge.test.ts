@@ -35,10 +35,101 @@ const failoverResult = {
   runtime: { harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4" },
   isFallback: false,
   attemptNumber: 1,
-  attempts: [{ harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4", outcome: "launched" }],
+  attempts: [
+    {
+      harness: "pi",
+      model: "qwen3.8-flash-next-nvidia-nvfp4",
+      outcome: "launched",
+    },
+  ],
 };
 
 describe("graph bridge admission", () => {
+  it("routes policy-only autosave without a nodes replacement", async () => {
+    const input = {
+      workspaceId: "ws1",
+      policy: {
+        approvedRuntimes: [],
+        fallbackRuntime: null,
+        adversarial: { enabled: false, maxIterations: 3 },
+        delegate: false,
+      },
+    };
+    const calls: unknown[] = [];
+    const result = await dispatchGraphRequest(
+      "graphWritePolicy",
+      input,
+      async (method, params) => {
+        calls.push({ method, params });
+        return { ok: true, result: graphResult };
+      },
+    );
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual([{ method: "graph.write_policy", params: input }]);
+  });
+
+  it("refuses daemon state in policy autosave", async () => {
+    const result = await dispatchGraphRequest(
+      "graphWritePolicy",
+      { workspaceId: "ws1", state: {} },
+      async () => {
+        throw new Error("Must not call daemon");
+      },
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("accepts a missing durable run when polling a new workspace", async () => {
+    const result = await dispatchGraphRequest(
+      "graphOrchestratorStatus",
+      { workspaceId: "ws1" },
+      async (method) => {
+        expect(method).toBe("graph.orchestrator_status");
+        return { ok: true, result: { run: null } };
+      },
+    );
+    expect(result).toEqual({ ok: true, result: { run: null } });
+  });
+
+  it.each(["stopped", "dispatching"])(
+    "accepts daemon step status %s during stop and resume",
+    async (status) => {
+      const run = {
+        id: "run-1",
+        workspaceId: "ws1",
+        main: graphResult.graph.intent.nodes[0],
+        policy: {
+          approvedRuntimes: [],
+          fallbackRuntime: null,
+          adversarial: { enabled: true, maxIterations: 3 },
+          delegate: false,
+        },
+        status: status === "stopped" ? "stopped" : "running",
+        phase: "main",
+        iteration: 1,
+        steps: [
+          {
+            nodeId: "main-1",
+            phase: "main",
+            iteration: 1,
+            status,
+            isFallback: false,
+            attempts: [],
+          },
+        ],
+        startedAt: "now",
+        updatedAt: "now",
+      };
+      const result = await dispatchGraphRequest(
+        status === "stopped"
+          ? "graphOrchestratorStop"
+          : "graphOrchestratorResume",
+        { workspaceId: "ws1", runId: "run-1" },
+        async () => ({ ok: true, result: { run } }),
+      );
+      expect(result.ok).toBe(true);
+    },
+  );
   it("refuses a payload that carries the daemon-owned state half before any IPC", async () => {
     let called = false;
     const result = await dispatchGraphRequest(
@@ -94,10 +185,14 @@ describe("graph bridge admission", () => {
     // match the expected contract" no matter what the daemon answered.
     // (This exact gap shipped once: the save wrote nothing and the canvas
     // reported the daemon's honest answer as a contract mismatch.)
-    dispatchGraphRequest("graphCompile", {
-      workspaceId: "ws1",
-      nodeId: "n1",
-    }, async () => ({ ok: true, result: compileResult }));
+    dispatchGraphRequest(
+      "graphCompile",
+      {
+        workspaceId: "ws1",
+        nodeId: "n1",
+      },
+      async () => ({ ok: true, result: compileResult }),
+    );
     expect(resultSchemas["graph.read"]).toBeDefined();
     expect(resultSchemas["graph.write_intent"]).toBeDefined();
     expect(resultSchemas["graph.compile"]).toBeDefined();
@@ -110,7 +205,8 @@ describe("graph bridge admission", () => {
       resultSchemas["graph.compile"].safeParse(compileResult).success,
     ).toBe(true);
     expect(
-      resultSchemas["graph.run_node_failover"].safeParse(failoverResult).success,
+      resultSchemas["graph.run_node_failover"].safeParse(failoverResult)
+        .success,
     ).toBe(true);
   });
 
