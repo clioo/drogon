@@ -71,10 +71,22 @@ describe("prompts and verify command", () => {
     expect(prompt).toContain("cycle 1 of at most 3");
   });
 
-  it("the fix prompt points at the exact prior fail marker", () => {
+  it("the code-review prompt points at the exact prior fail marker, reviews independently, and verifies", () => {
     const prompt = buildFixPrompt({ token: "deadbeef", cycle: 2 });
     expect(prompt).toContain(failMarkerPath("deadbeef", 2));
-    expect(prompt).toMatch(/FIX every problem/);
+    expect(prompt).toMatch(/CODE REVIEWER/);
+    expect(prompt).toMatch(/Fix every real problem/);
+    expect(prompt).toMatch(/VERIFY each fix/);
+    // Genuinely a different brief from the adversarial-test role, not the
+    // same instructions under a new label.
+    expect(prompt).not.toMatch(/ADVERSARIAL/);
+    expect(prompt).not.toMatch(/try to BREAK it/);
+  });
+
+  it("the two roles' briefs are never textually identical", () => {
+    const testBrief = buildReviewPrompt({ token: "deadbeef", cycle: 1, maxCycles: 3 });
+    const reviewBrief = buildFixPrompt({ token: "deadbeef", cycle: 1 });
+    expect(testBrief).not.toBe(reviewBrief);
   });
 });
 

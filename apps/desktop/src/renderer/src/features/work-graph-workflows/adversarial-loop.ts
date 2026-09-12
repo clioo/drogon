@@ -1,10 +1,25 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// The bounded adversarial-review loop: review → fix → review → fix, up to
-// `maxCycles`, over a workflow that just finished. This module is a PURE
-// reducer plus deterministic id/prompt builders — no React, no IPC. The
-// I/O hook (`use-adversarial-loop.ts`) is the only thing that calls the
-// daemon; it feeds this reducer real, daemon-observed node statuses and
-// carries out exactly the action the reducer returns.
+// The bounded adversarial-review loop: TWO GENUINELY DISTINCT roles —
+// Adversarial test (find edge cases and failure) and Code review (review
+// the changes and verify fixes) — alternating up to `maxCycles` pairs over
+// a workflow that just finished. This module is a PURE reducer plus
+// deterministic id/prompt builders — no React, no IPC. The I/O hook
+// (`use-adversarial-loop.ts`) is the only thing that calls the daemon; it
+// feeds this reducer real, daemon-observed node statuses and carries out
+// exactly the action the reducer returns.
+//
+// The two roles are NOT a relabeling of one alternating role: `phase`
+// stays named `reviewing`/`fixing` internally (renaming it is a larger,
+// riskier diff for no behavioral gain — see the phase constants below for
+// the mapping), but `buildReviewPrompt` and `buildFixPrompt` below send
+// GENUINELY DIFFERENT instructions. `reviewing` launches the Adversarial
+// test brief (adversarially try to break the work); `fixing` launches the
+// Code review brief (review the changes with a reviewer's eyes — not
+// limited to what the adversarial pass flagged — fix every real problem,
+// and VERIFY each fix by actually re-running the relevant check rather
+// than assuming it worked). A canvas that shows two role nodes while one
+// brief runs under both labels is exactly the dishonesty this product
+// refuses; this file is the one place that must never let that happen.
 //
 // The loop reuses the SAME execution path as everything else in the work
 // graph: every review/fix "cycle" is an ordinary intent node, appended
@@ -34,12 +49,17 @@
 //     even attempted; a workflow that already failed is reported as such,
 //     never quietly "reviewed" anyway.
 //
-// Model policy (AGENTS.md, non-negotiable): every review/fix node runs on
-// the ONE model this app is ever allowed to run for real without a human
-// asking for it per-call: the free local `pi` model. Never a paid
-// provider, regardless of what harness/model the workflow's own nodes use
-// — the max-cycle cap is a TIME safety valve here, not a spend one, since
-// this path never bills anything.
+// Model policy: `ADVERSARIAL_HARNESS`/`ADVERSARIAL_MODEL` below are the
+// SAFE DEFAULT stored on each node's intent (satisfies shape validation,
+// and is exactly what runs if the daemon predates failover) — but the I/O
+// hook launches every node through `graph.run_node_failover`
+// (`crates/drogon-core/src/graph_rpc.rs`), which OVERRIDES them per attempt
+// with whichever runtime the workspace's Subagent policy says to try: the
+// free local `pi` model when nothing is configured yet, so this loop costs
+// nothing before anyone opens the policy panel, and a real approved
+// runtime once one is. The max-cycle cap is a TIME safety valve, not a
+// spend one — the free default is what keeps spend at zero by default, not
+// the cap.
 
 import { z } from "zod";
 import type { WorkGraphStatus } from "../../../../shared/work-graph-contract";
@@ -83,6 +103,9 @@ export function reviewVerifyCommand(token: string, cycle: number): string {
   return `test -f ${passMarkerPath(token, cycle)}`;
 }
 
+/** The Adversarial-test role's brief: actively try to BREAK the work,
+ *  never confirm it. Distinct from `buildFixPrompt`'s Code-review role —
+ *  this one never fixes anything, only finds and records. */
 export function buildReviewPrompt(input: {
   token: string;
   cycle: number;
@@ -102,11 +125,22 @@ export function buildReviewPrompt(input: {
   ].join("\n");
 }
 
+/** The Code review role's brief — deliberately NOT "read the findings and
+ *  patch them": a code reviewer reads the actual changes with their own
+ *  judgment (the adversarial findings are a starting point, never the
+ *  whole scope) and, unlike the adversarial-test role, is responsible for
+ *  VERIFYING each fix actually works rather than declaring it found or
+ *  broke something. */
 export function buildFixPrompt(input: { token: string; cycle: number }): string {
   const { token, cycle } = input;
   return [
-    `An adversarial review of this workflow's output (cycle ${cycle}) found real problems, recorded at:\n  ${failMarkerPath(token, cycle)}`,
-    "Read that file and FIX every problem it describes. Make the work genuinely correct, not cosmetically patched — the next cycle will review it again.",
+    `You are a CODE REVIEWER, not the adversarial tester that just ran. An adversarial pass (cycle ${cycle}) found real problems, recorded at:\n  ${failMarkerPath(token, cycle)}`,
+    "",
+    "Read that file first, then review the actual changes in this workspace (the diff, the affected files) with your own reviewer's judgment — you are not limited to what the adversarial pass wrote down. Flag and fix anything else genuinely wrong you notice too.",
+    "",
+    "Fix every real problem you confirm, adversarially-found or your own — make the work genuinely correct, not cosmetically patched. Then VERIFY each fix yourself: re-run whatever check, test, or build step is relevant to it, and confirm the problem is actually gone. Do not report a fix as done because you believe it should work; confirm it ran clean.",
+    "",
+    `This review-and-verify pass is cycle ${cycle} of the same bounded loop; the next adversarial test checks your work again.`,
   ].join("\n");
 }
 
