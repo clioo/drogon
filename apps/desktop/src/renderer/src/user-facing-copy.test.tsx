@@ -37,6 +37,10 @@ const SURVIVOR_STRINGS: ReadonlyArray<{ match: string; why: string }> = [
     why: "daemon capability id (wire protocol)",
   },
   {
+    match: "drogon-cli mentu",
+    why: "CLI verb invocation; subcommand names are the daemon's contract and stay",
+  },
+  {
     match: "Mentu Recipes unavailable:",
     why: "labels the external runtime's recipe subsystem when it is missing",
   },
