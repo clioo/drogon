@@ -1507,6 +1507,20 @@ pub fn all_commands() -> Vec<AgentCommand> {
             ],
         ),
         entry(
+            "graph run-node-failover",
+            &["graph", "run-node-failover"],
+            "Launch a node through the workspace's Subagent policy: approved runtimes in order, then the fallback",
+            "drogon-cli graph run-node-failover --workspace <ID> --node <ID> [--follow] [--timeout-ms <MS>]",
+            &["follow", "node", "timeout-ms", "workspace"],
+            &[],
+            &["drogon-cli graph run-node-failover --workspace ws-1 --node n2 --follow"],
+            &[
+                "Requires graph.v1. Tries each of policy.approvedRuntimes in order, only reaching policy.fallbackRuntime once every approved runtime has failed; an empty policy tries only the free local pi model, so this never costs anything by default.",
+                "The node's own stored harness/model is a shape-validation default only — this verb overrides it per attempt with whichever runtime the policy says to try.",
+                "The result names the runtime that actually ran, whether it was the fallback, its position in the attempt sequence, and the full attempt history for this episode.",
+            ],
+        ),
+        entry(
             "graph resume",
             &["graph", "resume"],
             "Resume the node's latest run without redoing the graph",

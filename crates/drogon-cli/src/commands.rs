@@ -36,7 +36,8 @@ use crate::paths;
 use crate::skills;
 use crate::transport::{ANALYSIS_TIMEOUT, DEFAULT_TIMEOUT};
 use drogon_protocol::graph::{
-    GraphNodeStateResult, GraphResult, GraphResumeResult, GraphRunResult,
+    GraphNodeStateResult, GraphResult, GraphResumeResult, GraphRunNodeFailoverResult,
+    GraphRunResult,
 };
 
 /// What one successful (RPC-level) invocation printed and how the process
@@ -1613,6 +1614,43 @@ async fn graph(
             let run = to_client_run(resumed.run, request_id)?;
             if !follow {
                 return emit(call, json, || output::mentu_run_started(&run), 0, None);
+            }
+            mentu_follow(client, request_id, json, call, run, *timeout_ms).await
+        }
+        GraphAction::RunNodeFailover {
+            workspace,
+            node,
+            follow,
+            timeout_ms,
+        } => {
+            capability_preflight(client, request_id, "graph.v1", "the work graph").await?;
+            let call = client
+                .call(
+                    "graph.run_node_failover",
+                    json!({ "workspaceId": workspace, "nodeId": node }),
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let decoded: GraphRunNodeFailoverResult =
+                Client::decode(&call, "graph.run_node_failover")?;
+            let run = to_client_run(decoded.run, request_id)?;
+            if !follow {
+                return emit(
+                    call,
+                    json,
+                    || {
+                        output::graph_run_node_failover(
+                            &run,
+                            &decoded.runtime,
+                            decoded.is_fallback,
+                            decoded.attempt_number,
+                            &decoded.attempts,
+                        )
+                    },
+                    0,
+                    None,
+                );
             }
             mentu_follow(client, request_id, json, call, run, *timeout_ms).await
         }

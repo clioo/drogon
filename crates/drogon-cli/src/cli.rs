@@ -577,6 +577,25 @@ pub enum GraphAction {
         #[arg(long, value_name = "MS", default_value_t = 900_000)]
         timeout_ms: u64,
     },
+    /// Launch a node through the workspace's Subagent policy: the approved
+    /// runtimes in order, then the configured fallback (or the free local
+    /// `pi` model when the policy is empty, so this never costs anything by
+    /// default). Reports which runtime actually ran, whether it was the
+    /// fallback, and the full attempt history for this episode.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli graph run-node-failover --workspace <ID> --node <ID> [--follow] [--timeout-ms <MS>]\nValid flags: --data-dir, --follow, --help, --json, --node, --request-id, --retry-request, --timeout-ms, --workspace"
+    )]
+    RunNodeFailover {
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "ID")]
+        node: String,
+        #[arg(long)]
+        follow: bool,
+        #[arg(long, value_name = "MS", default_value_t = 900_000)]
+        timeout_ms: u64,
+    },
     /// Retry exactly one node's step of its latest run, without redoing the
     /// graph. `--step` defaults to the node id (the label the compiler
     /// emits).
@@ -1480,6 +1499,12 @@ impl Cli {
                     validate_follow_timeout(*timeout_ms)?;
                 }
                 GraphAction::Resume {
+                    workspace,
+                    node,
+                    timeout_ms,
+                    ..
+                }
+                | GraphAction::RunNodeFailover {
                     workspace,
                     node,
                     timeout_ms,

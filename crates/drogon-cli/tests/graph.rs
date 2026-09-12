@@ -39,6 +39,19 @@ fn graph_result() -> Value {
     })
 }
 
+fn failover_result() -> Value {
+    json!({
+        "run": run_result(),
+        "runtime": {"harness": "pi", "model": "qwen3.8-flash-next-nvidia-nvfp4"},
+        "isFallback": true,
+        "attemptNumber": 2,
+        "attempts": [
+            {"harness": "opencode", "model": "claude-sonnet-4", "outcome": "launch_failed", "reason": "harness not installed"},
+            {"harness": "pi", "model": "qwen3.8-flash-next-nvidia-nvfp4", "outcome": "launched"},
+        ],
+    })
+}
+
 fn compile_result() -> Value {
     json!({
         "recipeId": "drogon-graph-n1",
@@ -79,6 +92,9 @@ fn behavior() -> Behavior {
             )),
             Some("graph.resume_node") | Some("graph.retry_step") | Some("mentu.retry_step") => {
                 Action::Respond(ok_envelope(&id, json!({"run": run_result()})))
+            }
+            Some("graph.run_node_failover") => {
+                Action::Respond(ok_envelope(&id, failover_result()))
             }
             Some("graph.write_intent") => Action::Respond(ok_envelope(&id, graph_result())),
             _ => Action::Respond(error_envelope(
@@ -381,6 +397,59 @@ async fn graph_retry_step_defaults_to_the_node_label_and_resume_uses_resume_node
         request["params"],
         json!({"workspaceId": "ws-1", "nodeId": "n2"})
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn graph_run_node_failover_sends_the_node_and_renders_the_winning_runtime_and_attempt_history()
+ {
+    let (_hold, service) = mock();
+    let output = common::run_cli(
+        &service.data_dir,
+        &[
+            "--json",
+            "graph",
+            "run-node-failover",
+            "--workspace",
+            "ws-1",
+            "--node",
+            "n1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).expect("JSON envelope");
+    assert_eq!(envelope["result"]["run"]["id"], "run-1");
+    assert_eq!(envelope["result"]["runtime"]["harness"], "pi");
+    assert_eq!(envelope["result"]["isFallback"], true);
+    assert_eq!(envelope["result"]["attemptNumber"], 2);
+    assert_eq!(
+        last_graph_request(&service)["method"],
+        "graph.run_node_failover"
+    );
+    assert_eq!(
+        last_graph_request(&service)["params"],
+        json!({"workspaceId": "ws-1", "nodeId": "n1"})
+    );
+
+    // The human-readable render (no --json) never overclaims the node's own
+    // stored harness/model — it must name the runtime the policy actually
+    // picked, that it was the fallback, and every runtime tried before it.
+    let output = common::run_cli(
+        &service.data_dir,
+        &[
+            "graph",
+            "run-node-failover",
+            "--workspace",
+            "ws-1",
+            "--node",
+            "n1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("pi/qwen3.8-flash-next-nvidia-nvfp4"), "{text}");
+    assert!(text.contains("the fallback runtime"), "{text}");
+    assert!(text.contains("opencode/claude-sonnet-4"), "{text}");
+    assert!(text.contains("harness not installed"), "{text}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
