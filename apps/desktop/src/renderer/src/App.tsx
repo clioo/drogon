@@ -331,7 +331,7 @@ import {
   SettingsStore,
 } from "./settings-store";
 import {
-  assertCloseReplyFor,
+  confirmCloseOrAlreadyAbsent,
   recoveryTabLabel,
   retryAffordanceDisabled,
   SESSIONS_INVALIDATE_EVENT,
@@ -3686,17 +3686,17 @@ export function App() {
   // removed anyway — the user, not the liveness oracle, decided to close.
   const close = (session: Session) =>
     action(async () => {
-      const result = checked(
+      confirmCloseOrAlreadyAbsent(
         await window.drogon.close({
           sessionId: session.id,
           incarnation: session.incarnation,
         }),
+        session,
       );
       // The service's own identity checks already reject a mismatched
-      // reply at the IPC boundary; this is defense-in-depth so a confirmed
-      // dismissal is never recorded against the wrong session if that
-      // boundary were ever bypassed.
-      assertCloseReplyFor(result, session);
+      // reply at the IPC boundary; confirmCloseOrAlreadyAbsent adds
+      // defense-in-depth and accepts `not_found` only because it positively
+      // proves another client already removed this exact stale record.
       // Only an explicit close hides the tab going forward — a
       // session that merely exited on its own must keep reappearing.
       // Dismissal keys off the session's own recorded host, not this
@@ -3762,13 +3762,13 @@ export function App() {
     // Pane teardown inside a tab close is a dismissal too (R16-AL2, #228):
     // `close` stops the PTY when live and forgets the record, so a split
     // member that is a post-restart stub cannot survive the tab close.
-    const result = checked(
+    confirmCloseOrAlreadyAbsent(
       await window.drogon.close({
         sessionId: session.id,
         incarnation: session.incarnation,
       }),
+      session,
     );
-    assertCloseReplyFor(result, session);
     markSessionDismissed(session.hostId, session.id, session.incarnation);
   };
   // Closing one split pane (header X, context menu, exit overlay): only

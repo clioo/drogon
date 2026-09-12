@@ -4,7 +4,11 @@
 // auto-respawns and never fabricates a successful retry — a failed refresh
 // keeps the unverifiable verdict and the error text.
 
-import type { Session, Verdict } from "../../shared/session-contract";
+import type {
+  Result,
+  Session,
+  Verdict,
+} from "../../shared/session-contract";
 
 /**
  * R16-AL2 (issue #228): Settings → Terminal kills/closes sessions through
@@ -122,6 +126,25 @@ export function assertCloseReplyFor(
   )
     throw new Error("The service's response was not for this session.");
   return result;
+}
+
+/**
+ * Confirms a tab-close result for the exact session the user dismissed.
+ * `not_found` is also conclusive: another Drogon client already closed and
+ * forgot that identity, so the renderer must drop its stale tab instead of
+ * surfacing an error. A reused id with a new incarnation is reported by the
+ * daemon as `stale_incarnation` and remains an error, never a blind close.
+ */
+export function confirmCloseOrAlreadyAbsent(
+  result: Result<Session>,
+  target: Session,
+): "closed" | "already-absent" {
+  if (!result.ok) {
+    if (result.error.code === "not_found") return "already-absent";
+    throw new Error(result.error.message);
+  }
+  assertCloseReplyFor(result.result, target);
+  return "closed";
 }
 
 /**
