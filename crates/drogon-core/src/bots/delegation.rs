@@ -380,19 +380,20 @@ fn settle_capped_bot_events(
     };
 
     for (event_id, payload_json, at_ms, monitor_id, monitor_json) in rows {
-        let mut event = serde_json::from_str::<DelegationEvent>(&payload_json).unwrap_or_else(|_| {
-            DelegationEvent {
-                event_id: event_id.clone(),
-                monitor_id: monitor_id.clone(),
-                monitor_version: 0,
-                cursor: String::new(),
-                host_id: String::new(),
-                project_id: String::new(),
-                resource: String::new(),
-                bot_id: Some(bot_id.to_string()),
-                observed_at_ms: at_ms,
-            }
-        });
+        let mut event =
+            serde_json::from_str::<DelegationEvent>(&payload_json).unwrap_or_else(|_| {
+                DelegationEvent {
+                    event_id: event_id.clone(),
+                    monitor_id: monitor_id.clone(),
+                    monitor_version: 0,
+                    cursor: String::new(),
+                    host_id: String::new(),
+                    project_id: String::new(),
+                    resource: String::new(),
+                    bot_id: Some(bot_id.to_string()),
+                    observed_at_ms: at_ms,
+                }
+            });
         // The indexed monitor row is the authoritative bot binding for this
         // targeted sweep; do not let a malformed/stale payload escape it.
         event.event_id = event_id;

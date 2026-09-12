@@ -658,7 +658,10 @@ fn daily_monitor_failed_before_its_first_attempt_waits_for_cron() {
     let checks =
         drogon_core::bots::monitors::storage::list_checks_for_monitor(&conn, &monitor_id).unwrap();
     assert_eq!(
-        checks.iter().filter(|check| check.result.is_error()).count(),
+        checks
+            .iter()
+            .filter(|check| check.result.is_error())
+            .count(),
         1,
         "a failed first attempt must not retry on every backoff tick"
     );
