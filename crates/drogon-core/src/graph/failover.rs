@@ -10,10 +10,9 @@
 //! binding, unsupported harness, or the runtime's own `check`/`doctor`
 //! rejecting the recipe) is unconditionally a failure — nothing ran, so
 //! there is nothing honest to wait for. A run that STARTED and later
-//! settled `failed` also counts, because the whole point of an ordered
-//! approved-runtime list is "if this runtime's agent could not get the job
-//! done, try the next one" — a subagent whose model gave a wrong or
-//! incomplete answer is exactly the case the fallback exists for. A run
+//! settled `failed` also counts as an execution failure. A tester reporting
+//! findings is a completed execution with a separate evaluation verdict;
+//! it must not exhaust runtimes simply because it found a product bug. A run
 //! that settles `unverifiable` (lost contact) or `blocked` (never got a
 //! chance to run) does NOT advance failover: the daemon cannot honestly
 //! blame the runtime for an outcome it never actually observed, so calling
@@ -61,11 +60,10 @@ pub fn next_runtime(
     attempt_sequence(policy).into_iter().nth(attempted.len())
 }
 
-/// Whether `runtime` is the sequence's fallback (the last entry, only when
-/// a fallback is actually configured) — used to render "used the fallback"
-/// truthfully instead of guessing from position alone.
-pub fn is_fallback(policy: &GraphPolicy, runtime: &GraphRuntimeRef) -> bool {
-    policy.fallback_runtime.as_ref() == Some(runtime)
+/// The zero-based attempt position identifies the fallback, even when its
+/// harness/model pair also occurs in the approved list.
+pub fn is_fallback_attempt(policy: &GraphPolicy, attempt_index: usize) -> bool {
+    policy.fallback_runtime.is_some() && attempt_index == policy.approved_runtimes.len().max(1)
 }
 
 #[cfg(test)]
@@ -151,18 +149,16 @@ mod tests {
     }
 
     #[test]
-    fn is_fallback_identifies_only_the_configured_fallback_pair() {
+    fn fallback_identity_uses_position_even_when_the_pair_is_approved() {
         let policy = GraphPolicy {
             approved_runtimes: vec![runtime("opencode", "claude-sonnet-4")],
-            fallback_runtime: Some(runtime("custom", "qwen3-coder")),
+            fallback_runtime: Some(runtime("opencode", "claude-sonnet-4")),
             ..GraphPolicy::default()
         };
-        assert!(is_fallback(&policy, &runtime("custom", "qwen3-coder")));
-        assert!(!is_fallback(
-            &policy,
-            &runtime("opencode", "claude-sonnet-4")
-        ));
+        assert!(!is_fallback_attempt(&policy, 0));
+        assert!(is_fallback_attempt(&policy, 1));
+        assert!(!is_fallback_attempt(&policy, 2));
         let no_fallback = GraphPolicy::default();
-        assert!(!is_fallback(&no_fallback, &default_free_runtime()));
+        assert!(!is_fallback_attempt(&no_fallback, 0));
     }
 }

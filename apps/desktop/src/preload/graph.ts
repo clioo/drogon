@@ -8,9 +8,21 @@ import type { GraphBridge } from "../shared/graph-contract";
  *  payload that carries the daemon-owned `state` half, so the renderer can
  *  never write what it may only observe. */
 export const graph: GraphBridge = {
+  graphOrchestratorStart: (value) =>
+    ipcRenderer.invoke("drogon:graphOrchestratorStart", value),
+  graphOrchestratorStatus: (value) =>
+    ipcRenderer.invoke("drogon:graphOrchestratorStatus", value),
+  graphOrchestratorStop: (value) =>
+    ipcRenderer.invoke("drogon:graphOrchestratorStop", value),
+  graphOrchestratorResume: (value) =>
+    ipcRenderer.invoke("drogon:graphOrchestratorResume", value),
   graphRead: (value) => ipcRenderer.invoke("drogon:graphRead", value),
-  graphWriteIntent: (value) => ipcRenderer.invoke("drogon:graphWriteIntent", value),
+  graphWriteIntent: (value) =>
+    ipcRenderer.invoke("drogon:graphWriteIntent", value),
+  graphWritePolicy: (value) =>
+    ipcRenderer.invoke("drogon:graphWritePolicy", value),
   graphCompile: (value) => ipcRenderer.invoke("drogon:graphCompile", value),
   graphRun: (value) => ipcRenderer.invoke("drogon:graphRun", value),
-  graphRunNodeFailover: (value) => ipcRenderer.invoke("drogon:graphRunNodeFailover", value),
+  graphRunNodeFailover: (value) =>
+    ipcRenderer.invoke("drogon:graphRunNodeFailover", value),
 };

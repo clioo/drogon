@@ -109,12 +109,15 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
     }
     if policy.adversarial.enabled {
         out.push_str(&format!(
-            "- **Adversarial testing: ON, up to {} cycle(s).** The desktop runs a bounded \
+            "- **Adversarial testing: ON, up to {} cycle(s).** The daemon runs a bounded \
              Adversarial-test / Code-review loop against a finished workflow: an \
              adversarial-test pass that tries to break the work, then an independent \
              code-review pass that fixes confirmed problems and verifies each fix. That loop \
-             is desktop-driven, not something to launch by hand -- leave the work in a state \
-             with real, runnable checks, since those are what get replayed.\n",
+             persists independently of open windows. Run starts it through \
+             `graph.orchestrator_start`; legacy graph node runs do not implicitly start it. \
+             Both roles execute before a cycle can pass. Findings trigger another cycle, \
+             while runtime failures try the next approved runtime and then the fallback. \
+             Leave real, runnable checks for replay. Subagent depth is one.\n",
             policy.adversarial.max_iterations
         ));
     } else {

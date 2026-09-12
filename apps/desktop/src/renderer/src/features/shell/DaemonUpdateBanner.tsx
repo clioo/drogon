@@ -70,7 +70,7 @@ export function DaemonUpdateBanner({
           <div className="mt-0.5 text-xs leading-5 text-muted-foreground">
             {updated
               ? "The background service now matches this install."
-              : state.reason}
+              : `${state.reason} Close any open dialog, stop sessions, then use Restart service.`}
             {restartFailure ? ` ${restartFailure}` : ""}
           </div>
         </div>

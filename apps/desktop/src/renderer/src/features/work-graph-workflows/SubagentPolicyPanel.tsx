@@ -1,22 +1,5 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// The "Subagent policy" panel (Orchestrator, Part 1): every control here
-// is `intent` — an ordered Approved-runtimes list (the failover order),
-// one Fallback runtime, the bounded Adversarial-testing loop's on/off and
-// max-iterations, and the new Delegate mode. Writes go through the SAME
-// `graph.write_intent` seam the authoring canvas uses (`onChange` hands
-// the parent a complete new `GraphPolicy`; the parent resends the current
-// `nodes` array unchanged alongside it — see `graph-contract.ts`'s doc on
-// why `policy` must never be sent without the current nodes, and never be
-// omitted when the human meant to change it).
-//
-// Harness/model choices come from the REAL catalogs
-// (`useHarnessCatalog`/`useMentuModelCatalog`, PRs #426/#436/#453) — the
-// same source WorkGraphDesigner's node inspector uses. A subagent policy
-// row only offers real agent harnesses (never `shell`: a policy row picks
-// WHICH AGENT does the work, and shell has no model to fail over to).
-//
-// The summary line is derived (`deriveSubagentPolicySummary`), never a
-// separately-tracked count — it can't drift from the policy it describes.
+// Changes are saved through the policy-only daemon seam.
 
 import { useMemo } from "react";
 import { Minus, Plus, ChevronDown, ChevronUp, X } from "lucide-react";
@@ -69,9 +52,9 @@ function RuntimeModelField({
     [modelCatalog.catalog, harness],
   );
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+    <div className="order-last col-span-full flex min-w-0 w-full flex-1 items-center gap-1.5">
       <span
-        className="min-w-0 flex-1 truncate rounded-md border border-input bg-transparent px-2 py-1 text-xs"
+        className="min-w-0 flex-1 break-all rounded-md border border-input bg-transparent px-2 py-1 text-xs"
         data-testid={`${testIdPrefix}-model-value`}
       >
         {model || "harness default"}
@@ -131,25 +114,34 @@ export function SubagentPolicyPanel({
   policy,
   onChange,
   interactive,
+  mainTask,
+  onMainTaskChange,
 }: {
   policy: GraphPolicy;
-  /** Hands the parent the COMPLETE new policy on every edit; the parent
-   *  writes it through `graph.write_intent` alongside the current, unchanged
-   *  `nodes`. */
+  /** Hands the parent the complete policy for serialized autosave. */
   onChange: (next: GraphPolicy) => void;
   /** False renders every control disabled with an honest reason, instead
    *  of accepting edits nothing will ever save. */
   interactive: boolean;
+  mainTask?: { harness: string; model: string; prompt: string };
+  onMainTaskChange?: (task: {
+    harness: string;
+    model: string;
+    prompt: string;
+  }) => void;
 }): React.JSX.Element {
   const harnessCatalog = useHarnessCatalog();
-  const harnesses = harnessCatalog.harnesses.filter(
+  const supportedHarnesses = harnessCatalog.harnesses.filter((harness) =>
+    ["pi", "claude", "codex", "opencode"].includes(harness.harnessId),
+  );
+  const harnesses = supportedHarnesses.filter(
     (harness) => harness.availability === "available",
   );
   const fallbackHarnesses =
     harnesses.length > 0
       ? harnesses
-      : harnessCatalog.harnesses.length > 0
-        ? harnessCatalog.harnesses
+      : supportedHarnesses.length > 0
+        ? supportedHarnesses
         : [
             {
               harnessId: policy.fallbackRuntime?.harness ?? "pi",
@@ -202,10 +194,47 @@ export function SubagentPolicyPanel({
 
   return (
     <div
-      className="flex h-full min-h-0 w-full flex-col overflow-y-auto border-l border-border bg-card p-4"
+      className="flex min-h-0 w-full shrink-0 flex-col overflow-y-auto border-l border-border bg-card p-4 lg:h-full lg:w-[420px]"
       data-testid="subagent-policy-panel"
     >
       <h2 className="text-base font-semibold">Subagent policy</h2>
+
+      {mainTask && onMainTaskChange ? (
+        <section className="mt-4 space-y-2 border-b border-border pb-4">
+          <h3 className="text-sm font-medium">Main task</h3>
+          <textarea
+            aria-label="Main task"
+            placeholder="Describe the work to run…"
+            value={mainTask.prompt}
+            disabled={!interactive}
+            className="min-h-24 w-full rounded-md border border-input bg-background p-2 text-xs"
+            onChange={(event) =>
+              onMainTaskChange({ ...mainTask, prompt: event.target.value })
+            }
+          />
+          <div className="grid grid-cols-1 gap-2">
+            <HarnessSelect
+              value={mainTask.harness}
+              harnesses={approvedHarnessChoices}
+              disabled={!interactive}
+              onChange={(harness) =>
+                onMainTaskChange({ ...mainTask, harness, model: "" })
+              }
+              testId="main-task-harness"
+            />
+            <RuntimeModelField
+              harness={mainTask.harness}
+              model={mainTask.model}
+              disabled={!interactive}
+              onChange={(model) => onMainTaskChange({ ...mainTask, model })}
+              testIdPrefix="main-task"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Run starts this task. Its subagents use the policy below.
+          </p>
+        </section>
+      ) : null}
 
       <div className="mt-5">
         <h3 className="text-sm font-medium">Approved runtimes</h3>
@@ -216,7 +245,7 @@ export function SubagentPolicyPanel({
           {policy.approvedRuntimes.map((runtime, index) => (
             <li
               key={index}
-              className="flex items-center gap-1.5 rounded-md border border-border bg-background p-1.5"
+              className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-1.5 rounded-md border border-border bg-background p-2"
               data-testid={`approved-runtime-row-${index}`}
             >
               <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium">
@@ -315,7 +344,7 @@ export function SubagentPolicyPanel({
           </Badge>
         </div>
         <div
-          className="mt-2 flex items-center gap-1.5 rounded-md border border-border bg-background p-1.5"
+          className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 rounded-md border border-border bg-background p-2"
           data-testid="fallback-runtime-row"
         >
           <HarnessSelect
@@ -325,7 +354,7 @@ export function SubagentPolicyPanel({
             onChange={(harness) =>
               onChange({
                 ...policy,
-                fallbackRuntime: { harness, model: fallback?.model ?? "" },
+                fallbackRuntime: { harness, model: "" },
               })
             }
             testId="fallback-runtime-harness"
@@ -457,23 +486,28 @@ export function SubagentPolicyPanel({
             : "Adds testing and code review subagents when enabled."}
         </p>
 
-        <div className="mt-4 flex items-center justify-between gap-2">
-          <Label htmlFor="policy-delegate-toggle" className="text-sm">
-            Delegate
-          </Label>
-          <Switch
-            id="policy-delegate-toggle"
-            checked={policy.delegate}
-            disabled={!interactive}
-            onCheckedChange={(delegate) => onChange({ ...policy, delegate })}
-            data-testid="delegate-toggle"
-          />
-        </div>
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          {policy.delegate
-            ? "The NEXT session's main agent plans and delegates to the enabled nodes instead of doing the work itself. A session already running keeps the brief it already received."
-            : "Single node: the NEXT session's main agent does the work itself directly."}
-        </p>
+        <details className="mt-4">
+          <summary className="cursor-pointer text-xs text-muted-foreground">
+            Advanced options
+          </summary>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <Label htmlFor="policy-delegate-toggle" className="text-sm">
+              Delegate
+            </Label>
+            <Switch
+              id="policy-delegate-toggle"
+              checked={policy.delegate}
+              disabled={!interactive}
+              onCheckedChange={(delegate) => onChange({ ...policy, delegate })}
+              data-testid="delegate-toggle"
+            />
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {policy.delegate
+              ? "The NEXT session's main agent plans and delegates to the enabled nodes instead of doing the work itself. A session already running keeps the brief it already received."
+              : "Single node: the NEXT session's main agent does the work itself directly."}
+          </p>
+        </details>
       </div>
 
       <p

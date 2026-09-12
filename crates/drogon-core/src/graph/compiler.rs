@@ -4,13 +4,13 @@
 //! emit a valid Mentu recipe JSON and hand it to the EXISTING runtime path —
 //! there is no second execution engine here.
 //!
-//! The single most important thing this module does: a Pi step is emitted
-//! with the COMPLETE provider binding (`api: "cli"`, `agent: "pi"`,
+//! An explicitly bound Pi step is emitted with the COMPLETE provider binding (`api: "cli"`, `agent: "pi"`,
 //! `base_url`, `model`, `api_key_env`). A provider entry missing `api` — or a
 //! bare `backend: "pi"` step — passes `mentu-recipes check` AND `doctor
 //! --strict` with score 100 and then makes the runtime silently downgrade the
 //! step to a bare chat-completion HTTP call (no system prompt, no tools) and
-//! stamp the run `ok`. The emitter must make that trap unreachable.
+//! stamp the run `ok`. The emitter must make that trap unreachable. Without
+//! a provider binding, Pi uses its own headless CLI through the shell adapter.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -116,8 +116,8 @@ impl Selection {
 }
 
 /// Where a Pi node's provider inputs come from when the node does not carry
-/// them: the daemon's environment. `None` for both means a Pi node refuses
-/// to compile rather than emit the bare-`pi` false-success recipe.
+/// them: the daemon's environment. `None` for both selects the headless Pi
+/// CLI rather than emitting the bare-`pi` false-success recipe.
 #[derive(Clone, Debug, Default)]
 pub struct PiProviderDefaults {
     pub base_url: Option<String>,
@@ -287,10 +287,9 @@ type NodeStepOutput = (Value, Option<(String, Value)>, Vec<GraphFinding>);
 /// compile-time finding (the provider/model split is surfaced, never
 /// silent). The backend mapping is explicit; an unsupported harness refuses
 /// with the node named.
-fn node_step(
-    node: &GraphNodeIntent,
-    defaults: &PiProviderDefaults,
-) -> Result<NodeStepOutput, RpcError> {
+type NodeStep = (Value, Option<(String, Value)>, Vec<GraphFinding>);
+
+fn node_step(node: &GraphNodeIntent, defaults: &PiProviderDefaults) -> Result<NodeStep, RpcError> {
     let mut step = json!({
         "label": node.id,
         "prompt": node.prompt,
@@ -298,10 +297,22 @@ fn node_step(
     });
     let mut provider = None;
     let mut findings: Vec<GraphFinding> = Vec::new();
+    let mut shell_harness = None;
     match node.harness.as_str() {
         "shell" => {
             step["backend"] = json!("shell");
             step["timeout"] = json!(SHELL_STEP_TIMEOUT_SECONDS);
+        }
+        "pi" if node.provider.is_none()
+            && defaults.base_url.is_none()
+            && defaults.api_key_env.is_none() =>
+        {
+            if node.model.trim().is_empty() {
+                return Err(node_error(&node.id, "a Pi node needs a model id."));
+            }
+            resolve_pi_model(&node.id, &node.model)?;
+            step["backend"] = json!("shell");
+            shell_harness = Some("pi");
         }
         "pi" => {
             if node.model.trim().is_empty() {
@@ -355,12 +366,24 @@ fn node_step(
                 step["model"] = json!(node.model);
             }
         }
-        "opencode" | "antigravity" => {
+        "opencode" => {
+            if node.model.trim().is_empty() {
+                return Err(node_error(
+                    &node.id,
+                    "an OpenCode node needs a provider/model id.",
+                ));
+            }
+            // The pinned recipe runtime has no OpenCode adapter. Its shell
+            // adapter owns the process lifecycle; OpenCode supplies the tools.
+            step["backend"] = json!("shell");
+            shell_harness = Some("opencode");
+        }
+        "antigravity" => {
             return Err(node_error(
                 &node.id,
                 format!(
                     "harness '{}' has no adapter registered in mentu-recipes {} (only shell, \
-                     claude, codex and pi execute); this node cannot be compiled to a recipe \
+                     claude, codex and pi adapters exist); this node cannot be compiled to a recipe \
                      that would actually run.",
                     node.harness,
                     runtime::MENTU_LOCK_VERSION
@@ -401,7 +424,60 @@ fn node_step(
     } else {
         step["verify"] = json!({ "commands": node.verify_commands });
     }
+    if let Some(harness) = shell_harness {
+        let prompt = step["prompt"].as_str().expect("step prompt is a string");
+        // `--` prevents a task beginning with a dash from becoming a CLI
+        // option. Single quoting preserves literal task/model text in sh.
+        let launch = format!(
+            "{harness} {} --model {} -- {}",
+            if harness == "pi" { "--print" } else { "run" },
+            shell_argument(&node.model),
+            shell_argument(&if harness == "pi" {
+                format!("Task:\n{prompt}")
+            } else {
+                prompt.to_string()
+            })
+        );
+        let command = if node.verify_commands.is_empty() {
+            // Shell exit zero does not prove the agent completed. Keep the
+            // output for evidence, and require its final unfenced line.
+            format!(
+                "drogon_output=$(mktemp) || exit 1\n\
+                 trap 'rm -f \"$drogon_output\"' EXIT\n\
+                 trap 'exit 129' HUP\n\
+                 trap 'exit 130' INT\n\
+                 trap 'exit 143' TERM\n\
+                 {launch} >\"$drogon_output\"\n\
+                 drogon_status=$?\n\
+                 cat \"$drogon_output\"\n\
+                 [ \"$drogon_status\" -eq 0 ] || exit \"$drogon_status\"\n\
+                 awk -v expected={} '/^[[:space:]]*```/ {{ fence = !fence }} \
+                 NF {{ last = $0; fenced = fence }} END {{ exit !(last == expected && !fenced) }}' \"$drogon_output\"",
+                shell_argument(&completion_sentinel(&node.id))
+            )
+        } else {
+            format!("exec {launch}")
+        };
+        if command.len() > drogon_protocol::graph::MAX_GRAPH_PROMPT_BYTES {
+            return Err(node_error(
+                &node.id,
+                "the escaped harness command exceeds the recipe size limit.",
+            ));
+        }
+        step["prompt"] = json!(command);
+        findings.push(GraphFinding {
+            code: format!("{harness}_shell_adapter"),
+            severity: GraphFindingSeverity::Info,
+            node_id: Some(node.id.clone()),
+            message: format!("{harness} runs headlessly through the recipe shell adapter using the runtime PATH and its configured credentials."),
+            recommendation: None,
+        });
+    }
     Ok((step, provider, findings))
+}
+
+fn shell_argument(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 /// The transitive dependency closure of `seeds`, including the seeds.
@@ -676,20 +752,25 @@ mod tests {
     }
 
     #[test]
-    fn a_pi_node_without_a_provider_refuses_instead_of_emitting_bare_pi() {
+    fn a_pi_node_without_a_provider_uses_cli_instead_of_emitting_bare_pi() {
         let intent = GraphIntent {
             nodes: vec![node("n1", "pi", &[])],
             ..GraphIntent::default()
         };
-        let err = compile(
+        let compiled = compile(
             &intent,
             &Selection::Target("n1".into()),
             &PiProviderDefaults::default(),
         )
-        .unwrap_err();
-        assert_eq!(err.code, "invalid_argument");
-        assert!(err.message.contains("provider binding"));
-        assert!(err.message.contains("n1"));
+        .unwrap();
+        assert_eq!(compiled.recipe["steps"][0]["backend"], "shell");
+        assert!(
+            compiled.recipe["steps"][0]["prompt"]
+                .as_str()
+                .unwrap()
+                .contains("pi --print --model")
+        );
+        assert!(compiled.recipe.get("providers").is_none());
     }
 
     #[test]
@@ -712,6 +793,27 @@ mod tests {
         let binding = &compiled.recipe["providers"]["drogon-pi-n1"];
         assert_eq!(binding["base_url"], "https://node.example/v1");
         assert_eq!(binding["api_key_env"], "NODE_KEY");
+    }
+
+    #[test]
+    fn partial_pi_provider_defaults_refuse_instead_of_using_another_binding() {
+        let intent = GraphIntent {
+            nodes: vec![node("n1", "pi", &[])],
+            ..GraphIntent::default()
+        };
+        for defaults in [
+            PiProviderDefaults {
+                base_url: Some("http://127.0.0.1:9/v1".into()),
+                api_key_env: None,
+            },
+            PiProviderDefaults {
+                base_url: None,
+                api_key_env: Some("PI_KEY".into()),
+            },
+        ] {
+            let err = compile(&intent, &Selection::Target("n1".into()), &defaults).unwrap_err();
+            assert!(err.message.contains("provider binding"));
+        }
     }
 
     #[test]
@@ -751,7 +853,7 @@ mod tests {
 
     #[test]
     fn unsupported_harnesses_refuse_with_the_node_named() {
-        for harness in ["opencode", "antigravity", "mystery"] {
+        for harness in ["antigravity", "mystery"] {
             let intent = GraphIntent {
                 nodes: vec![node("n1", harness, &[])],
                 ..GraphIntent::default()
@@ -760,6 +862,125 @@ mod tests {
             assert!(err.message.contains("n1"), "{harness}: {err:?}");
             assert!(err.message.contains(harness));
         }
+    }
+
+    #[cfg(unix)]
+    fn run_harness_fixture(
+        harness: &str,
+        prompt: &str,
+        model: &str,
+        body: &str,
+    ) -> std::process::Output {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join(harness);
+        std::fs::write(&binary, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut n = node("n1", harness, &[]);
+        n.prompt = prompt.into();
+        n.model = model.into();
+        let intent = GraphIntent {
+            nodes: vec![n],
+            ..GraphIntent::default()
+        };
+        let compiled = compile(
+            &intent,
+            &Selection::Target("n1".into()),
+            &PiProviderDefaults::default(),
+        )
+        .unwrap();
+        let step = &compiled.recipe["steps"][0];
+        assert_eq!(step["backend"], "shell");
+        assert_eq!(step["timeout"], AGENT_STEP_TIMEOUT_SECONDS);
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(step["prompt"].as_str().unwrap())
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+            .env("TMPDIR", dir.path())
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            1,
+            "the completion capture must be removed on success and failure"
+        );
+        output
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn opencode_launch_preserves_literal_prompt_and_model_without_shell_expansion() {
+        let model = "provider/model'$(exit 98)`exit 99`";
+        let output = run_harness_fixture(
+            "opencode",
+            "--task ' $(exit 97) `exit 96`\nsecond line",
+            model,
+            "[ \"$1\" = run ] && [ \"$2\" = --model ] && [ \"$4\" = -- ] || exit 90\n\
+             printf '%s\\n' \"$3\" \"$5\"\n\
+             printf '%s\\n' DROGON_NODE_N1_DONE",
+        );
+        assert!(output.status.success(), "{output:?}");
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stdout.contains(model));
+        assert!(stdout.contains("--task ' $(exit 97) `exit 96`\nsecond line"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn opencode_zero_exit_without_completion_is_not_success() {
+        for body in [
+            "echo incomplete",
+            "printf 'DROGON_NODE_N1_DONE\\nstill working\\n'",
+            "printf '```\\nDROGON_NODE_N1_DONE\\n'",
+            "printf 'DROGON_NODE_N1_DONE\\n'; exit 7",
+        ] {
+            assert!(
+                !run_harness_fixture("opencode", "task", "provider/model", body)
+                    .status
+                    .success(),
+                "{body}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn pi_cli_keeps_provider_prefix_and_uses_print_mode() {
+        let output = run_harness_fixture(
+            "pi",
+            "@literal-task",
+            "provider/exact-model",
+            "[ \"$1\" = --print ] && [ \"$2\" = --model ] && [ \"$3\" = provider/exact-model ] && [ \"$4\" = -- ] || exit 90\n\
+             printf '%s\\n' \"$5\"\n\
+             printf '%s\\n' DROGON_NODE_N1_DONE",
+        );
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("Task:\n@literal-task")
+        );
+    }
+
+    #[test]
+    fn opencode_deterministic_verification_keeps_original_commands() {
+        let mut n = node("n1", "opencode", &[]);
+        n.verify_commands = vec!["test -f result.json".into()];
+        let intent = GraphIntent {
+            nodes: vec![n],
+            ..GraphIntent::default()
+        };
+        let compiled = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap();
+        let step = &compiled.recipe["steps"][0];
+        assert_eq!(step["verify"]["commands"], json!(["test -f result.json"]));
+        assert!(
+            step["prompt"]
+                .as_str()
+                .unwrap()
+                .starts_with("exec opencode run --model ")
+        );
+        assert!(step.get("completion_keyword").is_none());
     }
 
     #[test]

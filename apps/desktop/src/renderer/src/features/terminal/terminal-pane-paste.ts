@@ -16,6 +16,10 @@ import {
 } from './terminal-paste-coordinator'
 import { formatTerminalPasteExecutionError } from './terminal-paste-errors'
 import type { TerminalPasteTarget } from './terminal-paste-model'
+import {
+  formatTerminalFileDropPaths,
+  terminalFileDropShellForUserAgent,
+} from './terminal-file-drop'
 
 export type TerminalPanePasteDeps = {
   /** Resolves the PTY write; false = the session cannot take input. */
@@ -139,6 +143,15 @@ export function createTerminalPanePaste(deps: TerminalPanePasteDeps) {
     terminal = value
   }
 
+  const pasteFilePaths = (paths: readonly string[]): Promise<void> => {
+    const text = formatTerminalFileDropPaths(
+      paths,
+      terminalFileDropShellForUserAgent(navigator.userAgent),
+    )
+    if (!text) return Promise.resolve()
+    return executePanePasteText('programmatic', text)
+  }
+
   const pasteFromClipboard = (
     source: TerminalPasteSource,
     readClipboardText: typeof readClipboardTextWithinMaxBytes = readClipboardTextWithinMaxBytes,
@@ -181,7 +194,12 @@ export function createTerminalPanePaste(deps: TerminalPanePasteDeps) {
       .catch(() => deps.report('Paste failed.'))
   }
 
-  return { bindTerminal, pasteFromClipboard, executePanePasteText }
+  return {
+    bindTerminal,
+    pasteFromClipboard,
+    pasteFilePaths,
+    executePanePasteText,
+  }
 }
 
 /** Structural subset of the xterm Terminal the paste path touches. */

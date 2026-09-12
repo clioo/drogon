@@ -137,6 +137,17 @@ export type GraphWriteIntentParams = {
   intent: { nodes: unknown[]; policy?: GraphPolicy };
 };
 
+export const graphWritePolicyParamsSchema = z
+  .object({
+    workspaceId,
+    policy: graphPolicySchema,
+    main: designableIntentNodeSchema.optional(),
+  })
+  .strict();
+export type GraphWritePolicyParams = z.infer<
+  typeof graphWritePolicyParamsSchema
+>;
+
 export const graphCompileParamsSchema = z
   .object({
     workspaceId,
@@ -165,7 +176,10 @@ export type GraphCompileParams = {
 
 export type GraphRunParams = GraphCompileParams;
 
-export const graphNodeParamsSchema = z.object({ workspaceId, nodeId: z.string().min(1).max(200) });
+export const graphNodeParamsSchema = z.object({
+  workspaceId,
+  nodeId: z.string().min(1).max(200),
+});
 
 export type GraphNodeParams = z.infer<typeof graphNodeParamsSchema>;
 
@@ -223,6 +237,58 @@ export const graphFailoverAttemptRecordSchema = z.object({
   reason: z.string().nullable().optional(),
 });
 
+export const orchestratorRunSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  policy: graphPolicySchema,
+  main: designableIntentNodeSchema,
+  status: z.enum([
+    "running",
+    "stopping",
+    "passed",
+    "exhausted",
+    "failed",
+    "stopped",
+    "unverifiable",
+  ]),
+  phase: z.enum(["main", "test", "review"]),
+  iteration: z.number().int(),
+  steps: z.array(
+    z.object({
+      nodeId: z.string(),
+      phase: z.enum(["main", "test", "review"]),
+      iteration: z.number().int(),
+      status: z.enum([
+        "pending",
+        "dispatching",
+        "running",
+        "succeeded",
+        "failed",
+        "stopped",
+        "unverifiable",
+      ]),
+      runId: z.string().nullable().optional(),
+      runtime: graphRuntimeRefSchema.nullable().optional(),
+      isFallback: z.boolean(),
+      verdict: z.enum(["pass", "findings"]).nullable().optional(),
+      attempts: z.array(graphFailoverAttemptRecordSchema),
+    }),
+  ),
+  error: z.string().nullable().optional(),
+  startedAt: z.string(),
+  updatedAt: z.string(),
+});
+export type OrchestratorRun = z.infer<typeof orchestratorRunSchema>;
+export const orchestratorResultSchema = z.object({
+  run: orchestratorRunSchema.nullable(),
+});
+export const orchestratorStartParamsSchema = z
+  .object({ workspaceId, main: designableIntentNodeSchema })
+  .strict();
+export const orchestratorControlParamsSchema = z
+  .object({ workspaceId, runId: z.string().min(1) })
+  .strict();
+
 /** Mirrors the daemon's `GraphRunNodeFailoverResult` exactly: which runtime
  *  this attempt used, whether it was the configured fallback, its position
  *  in the sequence, and the full attempt history for this failover episode
@@ -245,9 +311,13 @@ export type GraphCompileResult = z.infer<typeof graphCompileResultSchema>;
 
 export type GraphRunResult = z.infer<typeof graphRunResultSchema>;
 
-export type GraphFailoverAttemptRecord = z.infer<typeof graphFailoverAttemptRecordSchema>;
+export type GraphFailoverAttemptRecord = z.infer<
+  typeof graphFailoverAttemptRecordSchema
+>;
 
-export type GraphRunNodeFailoverResult = z.infer<typeof graphRunNodeFailoverResultSchema>;
+export type GraphRunNodeFailoverResult = z.infer<
+  typeof graphRunNodeFailoverResultSchema
+>;
 
 export type GraphResult = z.infer<typeof graphResultSchema>;
 
@@ -258,12 +328,27 @@ export type GraphFinding = z.infer<typeof graphFindingSchema>;
 // ---------------------------------------------------------------------------
 
 export interface GraphBridge {
+  graphOrchestratorStart?(
+    input: z.infer<typeof orchestratorStartParamsSchema>,
+  ): Promise<Result<z.infer<typeof orchestratorResultSchema>>>;
+  graphOrchestratorStatus?(
+    input: GraphReadParams,
+  ): Promise<Result<z.infer<typeof orchestratorResultSchema>>>;
+  graphOrchestratorStop?(
+    input: z.infer<typeof orchestratorControlParamsSchema>,
+  ): Promise<Result<z.infer<typeof orchestratorResultSchema>>>;
+  graphOrchestratorResume?(
+    input: z.infer<typeof orchestratorControlParamsSchema>,
+  ): Promise<Result<z.infer<typeof orchestratorResultSchema>>>;
   /** The daemon's own read: projects the state half from real observation
    *  (writing it back when it changed) and returns the whole graph. The
    *  pane's live view runs on this; the raw files bridge is only the
    *  fallback for builds whose daemon predates graph.v1. */
   graphRead(input: GraphReadParams): Promise<Result<GraphResult>>;
   graphWriteIntent(input: GraphWriteIntentParams): Promise<Result<GraphResult>>;
+  graphWritePolicy?(
+    input: GraphWritePolicyParams,
+  ): Promise<Result<GraphResult>>;
   graphCompile(input: GraphCompileParams): Promise<Result<GraphCompileResult>>;
   graphRun(input: GraphRunParams): Promise<Result<GraphRunResult>>;
   /** Launches or advances one node's Subagent-policy failover episode
@@ -271,5 +356,7 @@ export interface GraphBridge {
    *  other policy-governed subagent launch through instead of
    *  `graphCompile`/`graphRun` directly, so the approved-runtime order and
    *  fallback actually apply. */
-  graphRunNodeFailover(input: GraphNodeParams): Promise<Result<GraphRunNodeFailoverResult>>;
+  graphRunNodeFailover(
+    input: GraphNodeParams,
+  ): Promise<Result<GraphRunNodeFailoverResult>>;
 }

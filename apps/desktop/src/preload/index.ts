@@ -36,6 +36,10 @@ import { graph } from "./graph";
 // state, so this channel runs in main (main/backups-bridge.ts) through the
 // bundled CLI — never through the daemon socket.
 import { backups } from "./backups";
+import {
+  installTerminalFileDropHandlers,
+  terminalFileDrop,
+} from "./terminal-file-drop";
 
 contextBridge.executeInMainWorld({ func: installBrowserWindowCloseGuard });
 
@@ -142,5 +146,9 @@ Object.assign(
   // Install-resilience P6 (additive): backups list/restore for the
   // downgrade-refusal overlay; executed in main through the bundled CLI.
   { backups },
+  // Native Finder/file-manager drops are resolved in this preload because
+  // Electron 44 does not expose filesystem paths on renderer File objects.
+  { terminalFileDrop },
 );
 contextBridge.exposeInMainWorld("drogon", Object.freeze(bridge));
+installTerminalFileDropHandlers();

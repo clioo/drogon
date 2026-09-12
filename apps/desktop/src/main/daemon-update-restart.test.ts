@@ -3,6 +3,10 @@
 // by construction — it NEVER stops sessions, a busy/old daemon's refusal
 // becomes the honest `pending` outcome with the daemon still attached, and
 // a successful quiesce is followed by a respawn that must answer `status`.
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import {
   restartChangedDaemon,
@@ -155,6 +159,90 @@ describe("restartChangedDaemon", () => {
       deps({ binaryExists: () => false }),
     );
     expect(outcome.kind).toBe("failed");
+  });
+
+  test("endpoint never frees but the old instance still answers → honest pending, no respawn over it", async () => {
+    // Slow teardown: shutdown accepted, endpoint never freed, the OLD
+    // daemon still serving. Must stay attached with the honest pending
+    // state — never spawn a second daemon over a live one.
+    const spawned: string[] = [];
+    const outcome = await restartChangedDaemon(
+      deps({
+        call: async (method) =>
+          method === "status"
+            ? ok({ ...fences, protocol: 1, serviceInstanceId: "old-svc" })
+            : ok({ ...fences, accepted: true }),
+        observeEndpoint: async () => ({ kind: "present" }),
+        spawn: async (binaryPath) => {
+          spawned.push(binaryPath);
+        },
+      }),
+    );
+    expect(outcome.kind).toBe("pending");
+    if (outcome.kind === "pending")
+      expect(outcome.reason).toMatch(/could not finish shutting down/);
+    expect(spawned).toEqual([]);
+  });
+
+  test("endpoint never frees, a bundled-build instance answers → identity-verified restart", async () => {
+    // The replacement came up (slowly) but the endpoint observation keeps
+    // seeing a listener: a healthy daemon answering with THIS bundle's
+    // digest is a success, verified by digest rather than assumed.
+    const dir = mkdtempSync(path.join(tmpdir(), "dur-"));
+    const realBinary = path.join(dir, "drogond");
+    writeFileSync(realBinary, "fake bundled binary bytes");
+    const realDigest = createHash("sha256").update("fake bundled binary bytes").digest("hex");
+    let shutdownCalled = 0;
+    const outcome = await restartChangedDaemon(
+      deps({
+        call: async (method) => {
+          if (method === "status")
+            return ok({
+              ...fences,
+              serviceInstanceId: shutdownCalled > 0 ? "new-svc" : fences.serviceInstanceId,
+              protocol: 1,
+              daemonArtifactSha256: realDigest,
+            });
+          if (method === "runtime.shutdown") {
+            shutdownCalled += 1;
+            return ok({ ...fences, accepted: true });
+          }
+          return fail("method_not_found", method);
+        },
+        observeEndpoint: async () => ({ kind: "present" }),
+        target: { binaryPath: realBinary, args: ["--data-dir", "/data"] },
+        env: {},
+        binaryExists: () => true,
+        spawn: async () => {},
+      }),
+    );
+    expect(outcome).toEqual({ kind: "restarted" });
+  });
+
+  test("endpoint never frees and a FOREIGN daemon answers → honest pending, never a claimed restart", async () => {
+    let statusCalls = 0;
+    const outcome = await restartChangedDaemon(
+      deps({
+        call: async (method) => {
+          if (method === "status") {
+            statusCalls += 1;
+            return statusCalls === 1
+              ? ok({ ...fences, protocol: 1 })
+              : ok({
+                  hostId: "h1",
+                  serviceInstanceId: "new-svc",
+                  protocol: 1,
+                  daemonArtifactSha256: "b".repeat(64),
+                });
+          }
+          return ok({ ...fences, accepted: true });
+        },
+        observeEndpoint: async () => ({ kind: "present" }),
+      }),
+    );
+    expect(outcome.kind).toBe("pending");
+    if (outcome.kind === "pending")
+      expect(outcome.reason).toMatch(/does not match this install/);
   });
 });
 

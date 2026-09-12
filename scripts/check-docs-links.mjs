@@ -13,7 +13,6 @@ export const OWNED_DOCS = [
   "CHANGELOG.md",
   "docs/demo-script.md",
   "docs/SUBMISSION.md",
-  "docs/fidelity/reference-surface-catalog.md",
   "docs/reference/packaging-icon-invariant.md",
   "docs/reference/perf-navigation.md",
 ];

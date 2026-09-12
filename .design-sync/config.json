@@ -1,0 +1,38 @@
+{
+  "projectId": "cd8aadd5-be98-4400-bcc2-c37c6e8abb6a",
+  "shape": "package",
+  "pkg": "@drogon/desktop",
+  "globalName": "Drogon",
+  "entry": "apps/desktop/dist/index.js",
+  "srcDir": "src/renderer/src/components/ui",
+  "cssEntry": "out/renderer/assets/ds-styles.css",
+  "provider": {
+    "component": "TooltipProvider"
+  },
+  "buildCmd": "pnpm --filter @drogon/desktop build && cp apps/desktop/out/renderer/assets/index-*.css apps/desktop/out/renderer/assets/ds-styles.css",
+  "readmeHeader": ".design-sync/conventions.md",
+  "overrides": {
+    "Select": { "cardMode": "single", "primaryStory": "Open" },
+    "SelectGroup": { "cardMode": "single", "primaryStory": "InSelect" },
+    "SelectSeparator": { "cardMode": "single", "primaryStory": "InSelect" },
+    "ContextMenu": { "cardMode": "single", "primaryStory": "Open" },
+    "ContextMenuLabel": { "cardMode": "single", "primaryStory": "InMenu" },
+    "ContextMenuRadioGroup": { "cardMode": "single", "primaryStory": "InMenu" },
+    "ContextMenuSeparator": { "cardMode": "single", "primaryStory": "InMenu" },
+    "ContextMenuShortcut": { "cardMode": "single", "primaryStory": "InMenu" },
+    "Dialog": { "cardMode": "single", "primaryStory": "Default" },
+    "DialogHeader": { "cardMode": "single", "primaryStory": "InDialog" },
+    "DialogFooter": { "cardMode": "single", "primaryStory": "InDialog" },
+    "DropdownMenu": { "cardMode": "single", "primaryStory": "Open" },
+    "DropdownMenuLabel": { "cardMode": "single", "primaryStory": "InMenu" },
+    "DropdownMenuSeparator": { "cardMode": "single", "primaryStory": "InMenu" },
+    "DropdownMenuShortcut": { "cardMode": "single", "primaryStory": "InMenu" },
+    "DropdownMenuRadioGroup": { "cardMode": "single", "primaryStory": "InMenu" },
+    "Popover": { "cardMode": "single", "primaryStory": "Open" },
+    "HoverCard": { "cardMode": "single", "primaryStory": "Open" },
+    "Sheet": { "cardMode": "single", "primaryStory": "Default" },
+    "SheetHeader": { "cardMode": "single", "primaryStory": "InSheet" },
+    "Tooltip": { "cardMode": "single", "primaryStory": "Open" },
+    "Toaster": { "cardMode": "single", "primaryStory": "Default" }
+  }
+}

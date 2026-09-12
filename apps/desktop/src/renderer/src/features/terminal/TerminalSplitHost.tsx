@@ -213,6 +213,9 @@ function SplitPane({
     <div
       className="terminal-split-pane"
       data-terminal-pane-id={session.id}
+      data-native-file-drop-target="terminal"
+      data-terminal-tab-id={tabId}
+      data-terminal-pane-leaf-id={session.id}
       style={{ flexGrow: grow, flexBasis: 0 }}
       {...(isActivePane ? { "data-active-pane": "" } : {})}
       onFocusCapture={() => onFocusPane(session.id)}
@@ -221,6 +224,7 @@ function SplitPane({
       <TerminalPane
         key={`${session.id}:${revision}`}
         session={session}
+        tabId={tabId}
         fontSize={fontSize}
         gpuMode={gpuMode}
         canSplit={showSplit}

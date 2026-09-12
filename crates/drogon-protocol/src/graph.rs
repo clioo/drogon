@@ -15,6 +15,41 @@ use crate::orchestration_common::validate_opaque_token;
 
 pub const GRAPH_CAPABILITY: &str = "graph.v1";
 
+/// A daemon-owned workflow captures its configuration once, when Run is pressed.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphOrchestratorRun {
+    pub id: String,
+    pub workspace_id: String,
+    pub policy: GraphPolicy,
+    pub main: GraphNodeIntent,
+    pub status: String,
+    pub phase: String,
+    pub iteration: u32,
+    pub steps: Vec<GraphOrchestratorStep>,
+    pub started_at: String,
+    pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphOrchestratorStep {
+    pub node_id: String,
+    pub phase: String,
+    pub iteration: u32,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<GraphRuntimeRef>,
+    pub is_fallback: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<String>,
+    pub attempts: Vec<GraphFailoverAttemptRecord>,
+}
+
 /// The workspace-relative location of the graph file.
 pub const GRAPH_FILE_DIR: &str = ".drogon";
 pub const GRAPH_FILE_NAME: &str = "graph.json";
