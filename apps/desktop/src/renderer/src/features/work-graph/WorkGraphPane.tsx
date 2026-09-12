@@ -49,6 +49,7 @@ import {
   Activity,
   AlertCircle,
   ArrowRight,
+  Bot,
   CheckCircle2,
   CircleDashed,
   CircleHelp,
@@ -67,10 +68,12 @@ import type {
   MentuRunEvidenceResult,
 } from "../../../../shared/mentu-contract";
 import type { GraphBridge } from "../../../../shared/graph-contract";
+import type { Session } from "../../../../shared/session-contract";
 import {
   WORK_GRAPH_RELATIVE_PATH,
   intentModel,
   isShellHarness,
+  resolveGraphPolicy,
   stateNodeFor,
   type WorkGraphDocument,
   type WorkGraphEvidence,
@@ -92,6 +95,10 @@ import { WorkflowBar } from "../work-graph-workflows/WorkflowBar";
 import { useWorkflowLibrary } from "../work-graph-workflows/use-workflow-library";
 import { useAdversarialLoop } from "../work-graph-workflows/use-adversarial-loop";
 import { findWorkflow } from "../work-graph-workflows/workflow-library";
+import { isTerminalPhase } from "../work-graph-workflows/adversarial-loop";
+import { SubagentPolicyPanel } from "../work-graph-workflows/SubagentPolicyPanel";
+import { OrchestratorCanvas } from "../work-graph-workflows/OrchestratorCanvas";
+import { useSubagentPolicy } from "../work-graph-workflows/use-subagent-policy";
 
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 200;
@@ -560,6 +567,7 @@ export function WorkGraphPane({
   graphBridge = null,
   hostId,
   workspaceId,
+  mainSession = null,
 }: {
   fileBridge: FileBridge | null;
   /** The gated Mentu bridge, so a selected node can resolve its recorded
@@ -573,8 +581,13 @@ export function WorkGraphPane({
   graphBridge?: GraphBridge | null;
   hostId: string | null;
   workspaceId: string;
+  /** The workspace's real main agent session (`pickMentuMainSession`), the
+   *  same one the Mentu dispatch seam uses. The Orchestrator's Main agent
+   *  node is a live projection of THIS — never an authored graph node
+   *  (Part 4). `null`/absent renders the Orchestrator honestly disabled. */
+  mainSession?: Session | null;
 }): React.JSX.Element {
-  const [mode, setMode] = useState<"view" | "design">("view");
+  const [mode, setMode] = useState<"view" | "design" | "orchestrator">("view");
   // While DESIGNING, the read poll pauses (enabled=false): the canvas is
   // authoritative over its own draft, and a poll can never clobber it.
   const { source, refresh, refreshing } = useWorkGraphSource({
@@ -582,7 +595,10 @@ export function WorkGraphPane({
     graphBridge,
     hostId,
     workspaceId,
-    enabled: mode === "view",
+    // The Orchestrator reads the same live intent/state the read-only view
+    // does (it owns no draft of its own — only the design canvas does), so
+    // it keeps polling too.
+    enabled: mode === "view" || mode === "orchestrator",
   });
   const { zoom, zoomIn, zoomOut, fitToView } = useGraphZoom();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -695,6 +711,63 @@ export function WorkGraphPane({
     />
   );
 
+  // --- the Orchestrator (Part 1/2/4): the Subagent policy panel and the
+  // policy-driven canvas. Reuses the SAME `loopController` instance the
+  // WorkflowBar-triggered flow uses — never a second adversarial loop — so
+  // a run started from either surface is the one and only loop in flight.
+  const subagentPolicy = useSubagentPolicy({
+    graphBridge,
+    workspaceId,
+    document,
+    // Safe to start `nodes: []` only when the workspace genuinely has no
+    // graph yet — the same rule `designBlockedReason` applies below.
+    allowEmptyStart: source.kind === "missing",
+    onSaved: refresh,
+  });
+  const orchestratorLoopInFlight = Boolean(
+    loopController.ledger && !isTerminalPhase(loopController.ledger.phase),
+  );
+  const handleRunOrchestratorWorkflow = useCallback(() => {
+    loopController.startForRun({
+      workflowId: "__orchestrator__",
+      baseRunId: `orchestrator-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      baseNodeIds: [],
+      maxCycles: subagentPolicy.policy.adversarial.maxIterations,
+    });
+  }, [loopController, subagentPolicy.policy.adversarial.maxIterations]);
+  const orchestratorRunDisabledReason = !mainSession
+    ? "Start a session to enable the orchestrator."
+    : !subagentPolicy.policy.adversarial.enabled
+      ? "No optional subagents enabled — nothing to run automatically; the main agent does the work directly."
+      : orchestratorLoopInFlight
+        ? "A workflow is already running."
+        : !graphBridge
+          ? "Running a workflow is unavailable in this build."
+          : null;
+
+  if (mode === "orchestrator") {
+    return (
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-row" data-testid="work-graph-pane">
+        <OrchestratorCanvas
+          policy={subagentPolicy.policy}
+          mainSession={mainSession}
+          loopLedger={loopController.ledger}
+          onRunWorkflow={handleRunOrchestratorWorkflow}
+          canRun={orchestratorRunDisabledReason === null}
+          runDisabledReason={orchestratorRunDisabledReason}
+          saveStatus={subagentPolicy.saveStatus}
+          saveError={subagentPolicy.saveError}
+          onBack={() => setMode("view")}
+        />
+        <SubagentPolicyPanel
+          policy={subagentPolicy.policy}
+          onChange={subagentPolicy.save}
+          interactive={subagentPolicy.interactive}
+        />
+      </div>
+    );
+  }
+
   if (mode === "design") {
     return (
       <div
@@ -743,6 +816,19 @@ export function WorkGraphPane({
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setMode("orchestrator")}
+            disabled={designBlockedReason !== null}
+            title={designBlockedReason ?? undefined}
+            data-testid="work-graph-orchestrator"
+            data-blocked-reason={designBlockedReason ?? undefined}
+          >
+            <Bot className="size-3.5" aria-hidden />
+            Orchestrator
+          </Button>
           <Button
             type="button"
             size="sm"

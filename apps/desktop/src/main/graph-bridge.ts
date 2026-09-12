@@ -15,8 +15,10 @@ import type { BrowserWindow } from "electron";
 import {
   graphCompileParamsSchema,
   graphCompileResultSchema,
+  graphNodeParamsSchema,
   graphReadParamsSchema,
   graphResultSchema,
+  graphRunNodeFailoverResultSchema,
   graphRunResultSchema,
   graphWriteIntentParamsSchema,
 } from "../shared/graph-contract";
@@ -39,13 +41,19 @@ const invalid = {
   },
 } as const;
 
-type GraphMethod = "graphRead" | "graphWriteIntent" | "graphCompile" | "graphRun";
+type GraphMethod =
+  | "graphRead"
+  | "graphWriteIntent"
+  | "graphCompile"
+  | "graphRun"
+  | "graphRunNodeFailover";
 
 const nativeMethodFor: Record<GraphMethod, string> = {
   graphRead: "graph.read",
   graphWriteIntent: "graph.write_intent",
   graphCompile: "graph.compile",
   graphRun: "graph.run",
+  graphRunNodeFailover: "graph.run_node_failover",
 };
 
 const channelFor: Record<GraphMethod, string> = {
@@ -53,6 +61,7 @@ const channelFor: Record<GraphMethod, string> = {
   graphWriteIntent: "drogon:graphWriteIntent",
   graphCompile: "drogon:graphCompile",
   graphRun: "drogon:graphRun",
+  graphRunNodeFailover: "drogon:graphRunNodeFailover",
 };
 
 const paramSchemas = {
@@ -60,6 +69,7 @@ const paramSchemas = {
   graphWriteIntent: graphWriteIntentParamsSchema,
   graphCompile: graphCompileParamsSchema,
   graphRun: graphCompileParamsSchema,
+  graphRunNodeFailover: graphNodeParamsSchema,
 } as const;
 
 const resultSchemasFor = {
@@ -67,6 +77,7 @@ const resultSchemasFor = {
   graphWriteIntent: graphResultSchema,
   graphCompile: graphCompileResultSchema,
   graphRun: graphRunResultSchema,
+  graphRunNodeFailover: graphRunNodeFailoverResultSchema,
 } as const;
 
 // Registered here rather than editing shared/result-validation.ts directly:
@@ -75,14 +86,7 @@ const resultSchemasFor = {
 // so an unregistered method would fail every call with a false "does not
 // match the expected contract".
 for (const [method, schema] of Object.entries(resultSchemasFor)) {
-  resultSchemas[
-    {
-      graphRead: "graph.read",
-      graphWriteIntent: "graph.write_intent",
-      graphCompile: "graph.compile",
-      graphRun: "graph.run",
-    }[method as keyof typeof resultSchemasFor]
-  ] = schema;
+  resultSchemas[nativeMethodFor[method as keyof typeof resultSchemasFor]] = schema;
 }
 
 export async function dispatchGraphRequest(

@@ -65,5 +65,6 @@ export function createGatedGraphBridge(
     graphWriteIntent: gate(source.graphWriteIntent),
     graphCompile: gate(source.graphCompile),
     graphRun: gate(source.graphRun),
+    graphRunNodeFailover: gate(source.graphRunNodeFailover),
   };
 }

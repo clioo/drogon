@@ -12,4 +12,5 @@ export const graph: GraphBridge = {
   graphWriteIntent: (value) => ipcRenderer.invoke("drogon:graphWriteIntent", value),
   graphCompile: (value) => ipcRenderer.invoke("drogon:graphCompile", value),
   graphRun: (value) => ipcRenderer.invoke("drogon:graphRun", value),
+  graphRunNodeFailover: (value) => ipcRenderer.invoke("drogon:graphRunNodeFailover", value),
 };

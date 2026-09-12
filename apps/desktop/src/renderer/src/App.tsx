@@ -4954,6 +4954,7 @@ export function App() {
                       graphBridge={graphGatedBridge}
                       hostId={status?.hostId ?? null}
                       workspaceId={current.id}
+                      mainSession={mentuDispatchContext.mainSession}
                     />
                   </div>
                 ) : null}

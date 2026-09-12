@@ -94,6 +94,10 @@ function graphBridgeWith(input: {
         },
       });
     },
+    graphRunNodeFailover: async () => ({
+      ok: false as const,
+      error: { code: "not_implemented", message: "not used in this test", retryable: false },
+    }),
   };
   return { bridge, recorded };
 }
