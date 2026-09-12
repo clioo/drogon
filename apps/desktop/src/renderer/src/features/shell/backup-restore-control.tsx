@@ -93,26 +93,19 @@ export function BackupRestoreControl({
       setState({ kind: "unavailable" });
       return;
     }
-    bridge
-      .list()
-      .then((result) => {
-        if (cancelled) return;
-        setState(
-          result.backups.length === 0
-            ? { kind: "empty", dataDir: result.dataDir }
-            : { kind: "listing", dataDir: result.dataDir, result },
-        );
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        setState({
-          kind: "error",
-          message:
-            error instanceof Error
-              ? error.message
-              : "The backups on this data directory could not be read.",
-        });
-      });
+    bridge.list().then((outcome) => {
+      if (cancelled) return;
+      if (!outcome.ok || !("list" in outcome)) {
+        setState({ kind: "error", message: outcome.error });
+        return;
+      }
+      const result = outcome.list;
+      setState(
+        result.backups.length === 0
+          ? { kind: "empty", dataDir: result.dataDir }
+          : { kind: "listing", dataDir: result.dataDir, result },
+      );
+    });
     return () => {
       cancelled = true;
     };
@@ -126,7 +119,12 @@ export function BackupRestoreControl({
         : current,
     );
     bridge.restore(entry.id)
-      .then(() => bridge.relaunchApp())
+      .then((outcome) => {
+        if (!outcome.ok || !("restore" in outcome)) throw new Error(outcome.error);
+        return bridge.relaunchApp().then((relaunchOutcome) => {
+          if (!relaunchOutcome.ok) throw new Error(relaunchOutcome.error);
+        });
+      })
       .then(() => {
         setState({
           kind: "relaunching",

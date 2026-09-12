@@ -40,14 +40,17 @@ function fakeBridge(
   overrides: Partial<BackupsBridge> = {},
 ): BackupsBridge & { restore: ReturnType<typeof vi.fn>; relaunchApp: ReturnType<typeof vi.fn> } {
   return {
-    list: vi.fn().mockResolvedValue(result),
+    list: vi.fn().mockResolvedValue({ ok: true, list: result }),
     restore: vi.fn().mockResolvedValue({
-      restoredBackupId: restorableEntry.id,
-      preRestoreSnapshotId: "pre-restore-1727000006000",
-      databaseFile: "/tmp/Drogon/drogon.sqlite3",
-      sizeBytes: 36864,
+      ok: true,
+      restore: {
+        restoredBackupId: restorableEntry.id,
+        preRestoreSnapshotId: "pre-restore-1727000006000",
+        databaseFile: "/tmp/Drogon/drogon.sqlite3",
+        sizeBytes: 36864,
+      },
     }),
-    relaunchApp: vi.fn().mockResolvedValue(undefined),
+    relaunchApp: vi.fn().mockResolvedValue({ ok: true, relaunchApp: true }),
     ...overrides,
   } as never;
 }
@@ -113,7 +116,10 @@ describe("BackupRestoreControl", () => {
     const bridge = fakeBridge(listResult([restorableEntry]), {
       restore: vi
         .fn()
-        .mockRejectedValue(new Error("restore refused: backup refused: manifest kind is \"x\"")),
+        .mockResolvedValue({
+          ok: false,
+          error: "restore refused: backup refused: manifest kind is \"x\"",
+        }),
     });
     render(<BackupRestoreControl dataDir="/tmp/Drogon" bridge={bridge} />);
     fireEvent.click(await screen.findByRole("button", { name: "Restore…" }));

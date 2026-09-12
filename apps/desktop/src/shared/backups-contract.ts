@@ -41,11 +41,17 @@ export type BackupsRestoreResult = {
 };
 
 /** Additive `window.drogon.backups` namespace (preload/backups.ts). */
+export type BackupsBridgeResult =
+  | { ok: true; list: BackupsListResult }
+  | { ok: true; restore: BackupsRestoreResult }
+  | { ok: true; relaunchApp: true }
+  | { ok: false; error: string };
+
 export type BackupsBridge = {
-  list(): Promise<BackupsListResult>;
-  restore(backupId: string): Promise<BackupsRestoreResult>;
+  list(): Promise<BackupsBridgeResult>;
+  restore(backupId: string): Promise<BackupsBridgeResult>;
   /** Full app relaunch, offered ONLY after a successful restore: the fresh
    * bootstrap starts the daemon against the restored data dir without the
    * refusal in play. Resolves right before main relaunches. */
-  relaunchApp(): Promise<void>;
+  relaunchApp(): Promise<BackupsBridgeResult>;
 };

@@ -177,8 +177,11 @@ export async function handleBackupsRequest(
     // Offered only by the overlay after a successful restore. Reply first so
     // the invoke resolves, then relaunch: the fresh bootstrap starts the
     // daemon against the restored data dir, without the refusal in play.
+    // Args are carried over explicitly so operator/packager flags survive
+    // the restart exactly as they were.
+    const args = process.argv.slice(1);
     setImmediate(() => {
-      app.relaunch();
+      app.relaunch(args.length > 0 ? { args } : undefined);
       app.exit(0);
     });
     return { ok: true, relaunchApp: true };
