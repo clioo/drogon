@@ -242,6 +242,29 @@ impl Fixture {
         fs::read_to_string(self.workspace_dir.join(".mentu").join("argv.log")).unwrap_or_default()
     }
 
+    /// The fixture harness logs its argv when the run's process actually
+    /// execs, which is asynchronous to the RPC that created the run: a
+    /// single read right after `graph.retry_step`/`graph.resume_node`
+    /// races that exec and has been observed missing the line entirely
+    /// under full-suite load. Poll boundedly for the expected line; the
+    /// assertion still fails the moment the line never appears (wrong
+    /// target included — only the exact expected line ends the wait).
+    fn wait_argv_contains(&self, needle: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(45);
+        loop {
+            let argv = self.argv_log();
+            if argv.contains(needle) {
+                return argv;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "argv log never produced {needle:?}; argv log:\n{}",
+                self.argv_log()
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
     fn wait_mentu_run_id(&self, run_id: &str) -> String {
         let deadline = Instant::now() + Duration::from_secs(45);
         loop {
@@ -408,7 +431,7 @@ fn the_whole_graph_lifecycle_runs_through_the_real_daemon() {
     );
     let retry_run = retried["run"]["id"].as_str().unwrap().to_string();
     assert_ne!(retry_run, run_id, "a retry is a new daemon run row");
-    let argv = fixture.argv_log();
+    let argv = fixture.wait_argv_contains(&format!("retry-step {mentu_run_id} n2"));
     assert!(
         argv.contains(&format!("retry-step {mentu_run_id} n2")),
         "retry-step must target the SAME mentu run and only n2; argv log:\n{argv}"
@@ -429,7 +452,7 @@ fn the_whole_graph_lifecycle_runs_through_the_real_daemon() {
         json!({"workspaceId": fixture.workspace_id, "nodeId": "n1"}),
     );
     let resume_run = resumed["run"]["id"].as_str().unwrap().to_string();
-    let argv = fixture.argv_log();
+    let argv = fixture.wait_argv_contains(&format!("resume {mentu_run_id}"));
     assert!(
         argv.contains(&format!("resume {mentu_run_id}")),
         "resume must target the node's mentu run; argv log:\n{argv}"

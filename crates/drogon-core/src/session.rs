@@ -1791,10 +1791,19 @@ mod session_start_cwd_tests {
         })
     }
 
-    /// Reads the retained ring until output appears (bounded), returning
-    /// the decoded text.
+    /// Reads the retained ring until output appears, returning the
+    /// decoded text. The completion signal is the session's positively
+    /// observed exit, never a wall-clock timer: the fixture cannot exit
+    /// before writing to the PTY, so under a loaded host the poll waits
+    /// for the persisted exit (generously bounded against a genuinely
+    /// hung spawn) and then only grants the reader thread a short,
+    /// bounded grace to drain the ring. A bare timer starves under
+    /// full-suite parallel PTY spawning and turns scheduling latency
+    /// into a false "no output" failure.
     fn read_output(engine: &crate::Engine, session_id: &str, incarnation: &str) -> String {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let drain_grace = Duration::from_secs(5);
+        let mut exited_at: Option<Instant> = None;
         loop {
             let response = engine.dispatch(crate::Request {
                 protocol: crate::PROTOCOL_VERSION,
@@ -1813,9 +1822,44 @@ mod session_start_cwd_tests {
             if !text.is_empty() {
                 return String::from_utf8_lossy(&text).into_owned();
             }
-            assert!(Instant::now() < deadline, "no PTY output observed");
+            if exited_at.is_none() && session_exit_persisted(engine, session_id) {
+                exited_at = Some(Instant::now());
+            }
+            match exited_at {
+                Some(observed_at) => assert!(
+                    observed_at.elapsed() < drain_grace,
+                    "session exited without producing PTY output"
+                ),
+                None => assert!(
+                    Instant::now() < deadline,
+                    "session never exited; no PTY output observed"
+                ),
+            }
             std::thread::sleep(Duration::from_millis(25));
         }
+    }
+
+    /// True once the session's exit has been positively observed and
+    /// persisted (`verdict` exited in `session.list`), which the PTY
+    /// poller only writes after a real reaped exit status.
+    fn session_exit_persisted(engine: &crate::Engine, session_id: &str) -> bool {
+        let response = engine.dispatch(crate::Request {
+            protocol: crate::PROTOCOL_VERSION,
+            request_id: "l".into(),
+            auth: None,
+            method: "session.list".into(),
+            params: json!({}),
+        });
+        let result = response.result.expect("session.list ok");
+        result["sessions"]
+            .as_array()
+            .map(|sessions| {
+                sessions.iter().any(|session| {
+                    session["id"].as_str() == Some(session_id)
+                        && session["verdict"].as_str() == Some("exited")
+                })
+            })
+            .unwrap_or(false)
     }
 
     #[test]
