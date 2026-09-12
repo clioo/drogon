@@ -324,6 +324,97 @@ fn delete_event(conn: &Connection, event_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Settle the entire bound backlog for a bot after its daily cap is found.
+/// The drain's four-row peek is a dispatch bound, not a settlement bound:
+/// leaving the rest queued would let one capped bot starve every other bot.
+fn settle_capped_bot_events(
+    db: &Mutex<Connection>,
+    bot_id: &str,
+    now_ms: f64,
+    summary: &mut DelegationSummary,
+) -> bool {
+    let rows = {
+        let conn = db.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT e.event_id, e.payload_json, e.at, e.monitor_id, m.payload_json
+             FROM bot_monitor_events e
+             JOIN bot_monitors m ON m.id = e.monitor_id
+             WHERE m.bot_id = ?1
+               AND json_extract(m.payload_json, '$.inferencePolicy.kind')
+                   = 'explicit_responsibility'
+             ORDER BY e.at, e.rowid",
+        ) {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                eprintln!("[delegation] capped backlog peek failed: {e}");
+                summary.failed += 1;
+                return false;
+            }
+        };
+        match stmt
+            .query_map(params![bot_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, f64>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })
+            .and_then(|mapped| mapped.collect::<std::result::Result<Vec<_>, _>>())
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                eprintln!("[delegation] capped backlog read failed: {e}");
+                summary.failed += 1;
+                return false;
+            }
+        }
+    };
+
+    for (event_id, payload_json, at_ms, monitor_id, monitor_json) in rows {
+        let mut event = serde_json::from_str::<DelegationEvent>(&payload_json).unwrap_or_else(|_| {
+            DelegationEvent {
+                event_id: event_id.clone(),
+                monitor_id: monitor_id.clone(),
+                monitor_version: 0,
+                cursor: String::new(),
+                host_id: String::new(),
+                project_id: String::new(),
+                resource: String::new(),
+                bot_id: Some(bot_id.to_string()),
+                observed_at_ms: at_ms,
+            }
+        });
+        // The indexed monitor row is the authoritative bot binding for this
+        // targeted sweep; do not let a malformed/stale payload escape it.
+        event.event_id = event_id;
+        event.monitor_id = monitor_id;
+        event.bot_id = Some(bot_id.to_string());
+        let responsibility_id = serde_json::from_str::<MonitorRecord>(&monitor_json)
+            .ok()
+            .and_then(|monitor| match monitor.inference_policy {
+                MonitorInferencePolicy::ExplicitResponsibility { responsibility_id } => {
+                    Some(responsibility_id)
+                }
+                MonitorInferencePolicy::NotificationOnly => None,
+            });
+        settle_event(
+            db,
+            &event,
+            Verdict {
+                responsibility_id: responsibility_id.as_deref(),
+                run_id: None,
+                detail: Some("per-day delegation cap already used"),
+            },
+            DeleteBucket::CapExceeded,
+            now_ms,
+            summary,
+        );
+    }
+    true
+}
+
 /// Whether both P2 tables this drain reads exist yet. Databases that
 /// predate the BotSelf/BotMonitors components' adoption (or unit-test
 /// databases that never migrated them) drain to an empty summary, never
@@ -1236,18 +1327,7 @@ fn drain_single_event<S: DispatchSeam>(
         }
     };
     if capped.contains(&bot_id) {
-        settle_event(
-            db,
-            event,
-            Verdict {
-                responsibility_id: Some(&responsibility_id),
-                run_id: None,
-                detail: Some("per-day delegation cap already used"),
-            },
-            DeleteBucket::CapExceeded,
-            now_ms,
-            summary,
-        );
+        settle_capped_bot_events(db, &bot_id, now_ms, summary);
         return;
     }
     let folder_lookup =
@@ -1392,19 +1472,8 @@ fn drain_single_event<S: DispatchSeam>(
         }
     };
     if used >= MAX_DELEGATIONS_PER_BOT_PER_DAY {
-        capped.insert(bot_id);
-        settle_event(
-            db,
-            event,
-            Verdict {
-                responsibility_id: Some(&responsibility_id),
-                run_id: None,
-                detail: Some("per-day delegation cap already used"),
-            },
-            DeleteBucket::CapExceeded,
-            now_ms,
-            summary,
-        );
+        capped.insert(bot_id.clone());
+        settle_capped_bot_events(db, &bot_id, now_ms, summary);
         return;
     }
     // Idempotency: the CASE (repository + pull number for a PR release,

@@ -225,6 +225,52 @@ impl Fixture {
         }
     }
 
+    fn add_second_bound_bot(&self) -> String {
+        let bot = ok(self._engine.dispatch(request(
+            "bot-create-2",
+            "bot.create",
+            json!({
+                "workspaceId": self.workspace_id,
+                "hostId": self.host_id,
+                "body": {
+                    "characterPreset": "none",
+                    "displayIdentity": {"displayName": "Second Watcher", "handle": null, "title": null},
+                    "harnessPolicy": {"defaultHarness": "codex", "explicitModel": null},
+                    "instructions": "Guard the second realm.",
+                    "memories": [],
+                },
+            }),
+        )));
+        let bot_id = bot["id"].as_str().unwrap().to_string();
+        let monitor_id = "mon-2";
+        let created = ok(self._engine.dispatch(request(
+            "m-create-2",
+            "bot.monitor_create",
+            json!({
+                "workspaceId": self.workspace_id,
+                "hostId": self.host_id,
+                "botId": bot_id,
+                "monitorId": monitor_id,
+                "resource": RESOURCE,
+                "responsibilityName": "triage-second",
+                "instructions": "Triage the second change.",
+            }),
+        )));
+        assert_eq!(created["approved"], false);
+        let approved = ok(self._engine.dispatch(request(
+            "m-approve-2",
+            "bot.monitor_approve",
+            json!({
+                "workspaceId": self.workspace_id,
+                "hostId": self.host_id,
+                "botId": bot_id,
+                "monitorId": monitor_id,
+            }),
+        )));
+        assert_eq!(approved["approved"], true);
+        bot_id
+    }
+
     fn conn(&self) -> Connection {
         Connection::open(&self.db_path).unwrap()
     }
@@ -254,6 +300,17 @@ impl Fixture {
         at: f64,
         resource: &str,
     ) -> String {
+        self.enqueue_resource_for_bot(monitor_id, &self.bot_id, event_no, at, resource)
+    }
+
+    fn enqueue_resource_for_bot(
+        &self,
+        monitor_id: &str,
+        bot_id: &str,
+        event_no: u64,
+        at: f64,
+        resource: &str,
+    ) -> String {
         let digest = drogon_core::bots::monitors::eval::digest_bytes(
             format!("payload {monitor_id} {event_no} {resource}").as_bytes(),
         );
@@ -268,7 +325,7 @@ impl Fixture {
             "hostId": self.host_id,
             "projectId": self.workspace_id,
             "resource": resource,
-            "botId": self.bot_id,
+            "botId": bot_id,
             "observedAtMs": at,
         });
         let conn = self.conn();
@@ -277,7 +334,7 @@ impl Fixture {
             &tx,
             &event_id,
             monitor_id,
-            Some(&self.bot_id),
+            Some(bot_id),
             at,
             &payload,
         )
@@ -556,9 +613,45 @@ fn already_capped_bot_settles_every_peeked_excess_event() {
 
     let drained = fixture.drain(now + 100.0);
     assert_eq!(drained.claimed, delegation::MAX_DRAIN_PER_TICK);
-    assert_eq!(drained.cap_exceeded, delegation::MAX_DRAIN_PER_TICK);
+    // The four-row peek remains the dispatch/claim bound, but discovering
+    // the cap settles the bot's entire queued bound backlog in this drain.
+    assert_eq!(drained.cap_exceeded, 12);
     assert_eq!(drained.dispatched, 0);
-    assert_eq!(fixture.outbox_len(), 12 - delegation::MAX_DRAIN_PER_TICK);
+    assert_eq!(fixture.outbox_len(), 0);
+}
+
+#[test]
+fn capped_bot_backlog_cannot_starve_a_newer_bot_event() {
+    let fixture = Fixture::new();
+    let now = Fixture::now_ms();
+    let day = utc_day_number(now);
+    fixture
+        .conn()
+        .execute(
+            "INSERT INTO bot_delegation_daily (bot_id, day_utc, count) VALUES (?1, ?2, ?3)",
+            params![fixture.bot_id, day, MAX_DELEGATIONS_PER_BOT_PER_DAY],
+        )
+        .unwrap();
+    for event_no in 1..=12u64 {
+        fixture.enqueue(event_no, now + event_no as f64);
+    }
+    let second_bot_id = fixture.add_second_bound_bot();
+    fixture.enqueue_resource_for_bot(
+        "mon-2",
+        &second_bot_id,
+        1,
+        now + 100.0,
+        RESOURCE,
+    );
+
+    let first = fixture.drain(now + 200.0);
+    assert_eq!(first.cap_exceeded, 12, "capped bot is settled wholesale: {first:?}");
+    assert_eq!(first.dispatched, 0);
+    assert_eq!(fixture.outbox_len(), 1);
+
+    let second = fixture.drain(now + 201.0);
+    assert_eq!(second.dispatched, 1, "the other bot is not starved: {second:?}");
+    assert_eq!(fixture.outbox_len(), 0);
 }
 
 #[test]
