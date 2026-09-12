@@ -147,7 +147,7 @@ describe("TabCreateMenu order and copy", () => {
     expect(menuItemNames()).toEqual([
       `New Terminal${TABLE_TERMINAL_CHORD}`,
       `New Browser Tab${TABLE_BROWSER_CHORD}`,
-      "Mentu",
+      "Work Graph",
       `New Markdown${tabCreateMenuChord("tab.newMarkdown", "other")}`,
       "Claude",
       "Pi",
@@ -183,10 +183,10 @@ describe("TabCreateMenu order and copy", () => {
     ).not.toBeNull();
   });
 
-  it("uses the fork copy Mentu, never Open Mentu", () => {
+  it("uses the feature copy Work Graph, never Open Mentu", () => {
     mount({ onOpenAgentSettings: () => {} });
     openMenu();
-    expect(screen.getByRole("menuitem", { name: "Mentu" })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Work Graph" })).not.toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Open Mentu" })).toBeNull();
   });
 

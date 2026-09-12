@@ -245,8 +245,8 @@ async function main() {
   await page.getByRole("button", { name: "Select orch-a11y" }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor({ timeout: 20000 });
   await page.getByRole("button", { name: "New tab", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Mentu", exact: true }).click();
-  await page.getByRole("tab", { name: "Mentu", exact: true }).waitFor();
+  await page.getByRole("menuitem", { name: "Work Graph", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).waitFor();
   const panel = page.locator('[data-testid="mentu-tab-panel"]');
 
   // 3. No session yet: the Orchestrator button is reachable (an empty
@@ -294,8 +294,8 @@ async function main() {
     .getByRole("button", { name: "Reveal active workspace", exact: true })
     .waitFor({ timeout: 30000 });
   await page.getByRole("button", { name: "New tab", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Mentu", exact: true }).click();
-  await page.getByRole("tab", { name: "Mentu", exact: true }).waitFor();
+  await page.getByRole("menuitem", { name: "Work Graph", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).waitFor();
   await orchestratorButton.waitFor({ timeout: 15000 });
   await orchestratorButton.click();
   await canvas.waitFor();
@@ -326,7 +326,7 @@ async function main() {
   assert.equal(await panel.locator('[data-testid="orchestrator-test-node"]').count(), 0);
   for (const theme of ["light", "dark"]) {
     await selectSettingsTheme(page, theme);
-    await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+    await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
     // The Settings detour remounts the Mentu surfaces (same as
     // accept-workflow-adversarial.mjs's own note), so the pane is back in
     // its default read-only view; re-enter the Orchestrator each time.
@@ -347,7 +347,7 @@ async function main() {
   // 7. Design 2: adversarial on, max iterations 10 — the two role nodes,
   //    the repeat caption, and the summary line update for real.
   await selectSettingsTheme(page, "light");
-  await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
   if ((await panel.locator('[data-testid="orchestrator-canvas"]').count()) === 0) {
     await orchestratorButton.waitFor({ timeout: 15000 });
     await orchestratorButton.click();
@@ -375,7 +375,7 @@ async function main() {
 
   for (const theme of ["light", "dark"]) {
     await selectSettingsTheme(page, theme);
-    await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+    await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
     if ((await panel.locator('[data-testid="orchestrator-canvas"]').count()) === 0) {
       await orchestratorButton.waitFor({ timeout: 15000 });
       await orchestratorButton.click();
@@ -389,7 +389,7 @@ async function main() {
     await page.setViewportSize({ width: 1440, height: 900 });
   }
   await selectSettingsTheme(page, "light");
-  await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
   if ((await panel.locator('[data-testid="orchestrator-canvas"]').count()) === 0) {
     await orchestratorButton.waitFor({ timeout: 15000 });
     await orchestratorButton.click();

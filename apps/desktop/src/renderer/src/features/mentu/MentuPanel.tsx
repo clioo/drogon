@@ -127,7 +127,7 @@ function MentuPanelBody({
       <div className="flex shrink-0 items-start gap-2">
         <Network className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
         <div className="min-w-0">
-          <h1 className="truncate text-sm font-medium">Mentu</h1>
+          <h1 className="truncate text-sm font-medium">Work Graph</h1>
           <p className="text-xs text-muted-foreground">Workspace source: .mentu/recipes</p>
         </div>
         <Button
@@ -180,7 +180,7 @@ function MentuPanelBody({
       <div
         className="grid shrink-0 grid-cols-2 gap-1 rounded-md border border-border bg-card p-1"
         role="tablist"
-        aria-label="Mentu inspector view"
+        aria-label="Work Graph inspector view"
       >
         <Button
           size="sm"
@@ -344,7 +344,7 @@ function MentuPanelBody({
           <Textarea
             value={controller.draftSource}
             readOnly
-            aria-label="Mentu source JSON"
+            aria-label="Work Graph source JSON"
             className="min-h-32 resize-y font-mono text-[11px]"
           />
         </div>

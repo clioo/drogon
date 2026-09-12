@@ -491,7 +491,7 @@ pub fn launch_run(
     });
 
     storage::get_run(&db.lock().unwrap(), &internal_id)?
-        .ok_or_else(|| error::internal_error("Mentu run vanished immediately after insert."))
+        .ok_or_else(|| error::internal_error("Work Graph run vanished immediately after insert."))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1407,7 +1407,7 @@ pub fn stage_approved_snapshot(
     let recipe_file_name = recipe_path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| error::invalid_argument("Invalid Mentu recipe reference."))?
+        .ok_or_else(|| error::invalid_argument("Invalid Work Graph recipe reference."))?
         .to_string();
     // A relative resource that would land on the snapshot's own files
     // (the recipe copy or the manifest) is refused loudly: silently
@@ -1585,7 +1585,7 @@ pub fn materialize_snapshot(
     argv: &[String],
 ) -> Result<MaterializedSnapshot, RpcError> {
     if !valid_run_id(run_id) {
-        return Err(error::invalid_argument("Invalid Mentu run identity."));
+        return Err(error::invalid_argument("Invalid Work Graph run identity."));
     }
     let dir = snapshot_root(workspace_root).join(run_id);
     // `create_dir` (not `create_dir_all` on the leaf): an existing

@@ -43,7 +43,7 @@ const invalid = {
   ok: false,
   error: {
     code: "invalid_argument",
-    message: "Invalid Mentu request.",
+    message: "Invalid Work Graph request.",
     retryable: false,
   },
 } as const;
@@ -67,7 +67,7 @@ export async function dispatchMentuRequest(
       ok: false,
       error: {
         code: "internal_error",
-        message: "The Mentu response does not match its contract.",
+        message: "The Work Graph response does not match its contract.",
         retryable: false,
       },
     };

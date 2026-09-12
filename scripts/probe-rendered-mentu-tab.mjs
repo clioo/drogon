@@ -230,8 +230,8 @@ export async function probeRenderedMentuTab({
 
   // 1. The reported reproduction: plus menu -> Mentu.
   await page.getByRole("button", { name: "New tab", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Mentu", exact: true }).click();
-  await page.getByRole("tab", { name: "Mentu", exact: true }).waitFor();
+  await page.getByRole("menuitem", { name: "Work Graph", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).waitFor();
   const after = await stripLabels(page);
   assert.equal(
     after.length,
@@ -262,7 +262,7 @@ export async function probeRenderedMentuTab({
 
   // 2. The Mentu tab selected itself and shows the WORK GRAPH surface —
   //    the tab's content since the work-graph takeover.
-  const mentuTab = page.getByRole("tab", { name: "Mentu", exact: true });
+  const mentuTab = page.getByRole("tab", { name: "Work Graph", exact: true });
   assert.equal(
     await mentuTab.getAttribute("aria-selected"),
     "true",
@@ -357,7 +357,7 @@ export async function probeRenderedMentuTab({
   //     panel, which owns the recipe surface since the takeover: select,
   //     review, approve & run against the pinned runtime, then per-step
   //     evidence. Same assertions the tab used to make — new entry point.
-  await page.locator('.right-sidebar-header-drag button[aria-label="Mentu"]').click();
+  await page.locator('.right-sidebar-header-drag button[aria-label="Work Graph"]').click();
   const sidePanel = page.locator('[data-testid="mentu-panel"]');
   await sidePanel.waitFor();
   const recipeSelect = sidePanel.getByRole("combobox", { name: "Recipe", exact: true });
@@ -467,7 +467,7 @@ export async function probeRenderedMentuTab({
   //    horizontal-overflow budget on this surface.
   for (const theme of ["light", "dark"]) {
     const selection = await selectSettingsTheme(page, theme);
-    await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+    await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
     await panel.locator('[data-testid="work-graph-pane"]').waitFor();
     await captureThemeSurface(
       page,
@@ -476,7 +476,7 @@ export async function probeRenderedMentuTab({
     );
   }
   await selectSettingsTheme(page, "light");
-  await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
   await panel.locator('[data-testid="work-graph-pane"]').waitFor();
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 });
@@ -498,7 +498,7 @@ export async function probeRenderedMentuTab({
     .getByRole("button", { name: "Reveal active workspace", exact: true })
     .waitFor({ timeout: 30000 });
   await page
-    .getByRole("tab", { name: "Mentu", exact: true })
+    .getByRole("tab", { name: "Work Graph", exact: true })
     .waitFor({ timeout: 30000 });
   assert.equal(
     await page.getByRole("tablist", { name: "Sessions" }).count(),
@@ -565,7 +565,7 @@ export async function probeRenderedMentuTab({
   assert.equal(opened.ok, true, JSON.stringify(opened.error ?? opened));
   assert.equal(opened.result.opened, true, JSON.stringify(opened.result));
   assert.equal(opened.result.recipeId, "acceptance-mentu-tab");
-  const focused = page.getByRole("tab", { name: "Mentu", exact: true });
+  const focused = page.getByRole("tab", { name: "Work Graph", exact: true });
   await focused.waitFor();
   assert.equal(
     await focused.getAttribute("aria-selected"),
@@ -576,9 +576,9 @@ export async function probeRenderedMentuTab({
   checks.push("drogon-cli-mentu-open-focuses-the-mentu-tab");
 
   // 9. Closing the tab leaves the strip intact — the mirror image of the bug.
-  await page.getByRole("button", { name: "Close tab Mentu", exact: true }).click();
+  await page.getByRole("button", { name: "Close tab Work Graph", exact: true }).click();
   await page
-    .getByRole("tab", { name: "Mentu", exact: true })
+    .getByRole("tab", { name: "Work Graph", exact: true })
     .waitFor({ state: "detached" });
   const remaining = await stripLabels(page);
   assert.ok(

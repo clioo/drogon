@@ -986,7 +986,7 @@ async fn mentu(
 ) -> Result<RunOutcome, CliError> {
     match action {
         MentuAction::Status { workspace } => {
-            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            capability_preflight(client, request_id, "mentu.v1", "Work Graph").await?;
             let runtime_call = client
                 .call("mentu.runtime", json!({}), request_id, DEFAULT_TIMEOUT)
                 .await?;
@@ -1050,7 +1050,7 @@ async fn mentu(
             // anything, browser.relay.v1 for the transport that reaches the
             // desktop. Without the desktop the call fails
             // `desktop_not_connected` inside its own timeout.
-            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            capability_preflight(client, request_id, "mentu.v1", "Work Graph").await?;
             capability_preflight(client, request_id, "browser.relay.v1", "the desktop relay")
                 .await?;
             let mut params = json!({ "workspaceId": workspace, "timeoutMs": timeout_ms });
@@ -1071,7 +1071,7 @@ async fn mentu(
             follow,
             timeout_ms,
         } => {
-            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            capability_preflight(client, request_id, "mentu.v1", "Work Graph").await?;
             let approval = match approval {
                 Some(approval_id) => approval_id.clone(),
                 None => resolve_pending_approval(client, request_id, workspace, recipe).await?,
@@ -1106,7 +1106,7 @@ async fn mentu(
             mentu_follow(client, request_id, json, call, started.run, *timeout_ms).await
         }
         MentuAction::RunStatus { run } => {
-            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            capability_preflight(client, request_id, "mentu.v1", "Work Graph").await?;
             let call = client
                 .call(
                     "mentu.run_status",
@@ -1127,7 +1127,7 @@ async fn mentu(
             )
         }
         MentuAction::Runs { workspace, limit } => {
-            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            capability_preflight(client, request_id, "mentu.v1", "Work Graph").await?;
             let mut params = json!({ "workspaceId": workspace });
             if let Some(limit) = limit {
                 params["limit"] = json!(limit);
@@ -1140,7 +1140,7 @@ async fn mentu(
             emit(call, json, || output::mentu_run_list(&runs), 0, None)
         }
         MentuAction::Cancel { run } => {
-            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            capability_preflight(client, request_id, "mentu.v1", "Work Graph").await?;
             let call = client
                 .call(
                     "mentu.cancel",
@@ -1167,7 +1167,7 @@ async fn mentu(
             follow,
             timeout_ms,
         } => {
-            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            capability_preflight(client, request_id, "mentu.v1", "Work Graph").await?;
             // The runtime's own `resume`: rerun only the steps that did not
             // succeed. `mentu.retry` is that verb (kept for the panel).
             let call = client
@@ -1197,7 +1197,7 @@ async fn mentu(
             follow,
             timeout_ms,
         } => {
-            capability_preflight(client, request_id, "mentu.v1", "Mentu").await?;
+            capability_preflight(client, request_id, "mentu.v1", "Work Graph").await?;
             let call = client
                 .call(
                     "mentu.retry_step",

@@ -329,8 +329,8 @@ async function main() {
   await page.getByRole("button", { name: "Select wf-adv" }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor({ timeout: 20000 });
   await page.getByRole("button", { name: "New tab", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Mentu", exact: true }).click();
-  await page.getByRole("tab", { name: "Mentu", exact: true }).waitFor();
+  await page.getByRole("menuitem", { name: "Work Graph", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).waitFor();
   const panel = page.locator('[data-testid="mentu-tab-panel"]');
   const empty = panel.locator('[data-testid="work-graph-empty"]');
   await empty.waitFor({ timeout: 15000 });
@@ -377,7 +377,7 @@ async function main() {
   //    horizontal overflow.
   for (const theme of ["light", "dark"]) {
     await selectSettingsTheme(page, theme);
-    await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+    await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
     await bar.waitFor();
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
@@ -390,7 +390,7 @@ async function main() {
     await page.setViewportSize({ width: 1440, height: 900 });
   }
   await selectSettingsTheme(page, "light");
-  await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
   report.checks.push("workflow-bar-screenshots-light-dark-no-overflow-1440-1100-900-760");
 
   // The Settings detour remounted the Mentu surfaces (same as the fork —
@@ -481,7 +481,7 @@ async function main() {
   });
   await panel.locator('[data-testid="work-graph-refresh"]').click();
   await page.reload();
-  await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
   await bar.waitFor();
   await loopStatus.waitFor({ timeout: 15000 });
   await bar.locator('[data-testid="workflow-bar-select"]').waitFor();
@@ -504,7 +504,7 @@ async function main() {
     ),
   });
   await page.reload();
-  await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
   await bar.waitFor();
   await loopStatus.waitFor({ timeout: 15000 });
   const stoppedText = (await loopStatus.innerText()) ?? "";
@@ -515,7 +515,7 @@ async function main() {
   );
   await shot(page, "workflow-loop-seeded-stopped-failing-light.png");
   await selectSettingsTheme(page, "dark");
-  await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
   await bar.waitFor();
   await loopStatus.waitFor();
   await shot(page, "workflow-loop-seeded-stopped-failing-dark.png");

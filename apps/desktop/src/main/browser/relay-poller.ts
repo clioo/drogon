@@ -277,7 +277,7 @@ export async function dispatchRelayCommand(
           ok: false,
           error: {
             code: "mentu_open_unsupported",
-            message: "This Drogon build has no Mentu tab relay wired.",
+            message: "This Drogon build has no Work Graph tab relay wired.",
           },
         };
       }

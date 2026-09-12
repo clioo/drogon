@@ -444,7 +444,7 @@ async fn run_resolves_the_pending_approval_and_starts_the_daemon_run() {
         &["mentu", "run", "--workspace", "ws-1", "--recipe", "hello"],
     );
     assert!(
-        stdout(&output).contains("Started Mentu run run-row-1"),
+        stdout(&output).contains("Started Work Graph run run-row-1"),
         "stdout: {}",
         stdout(&output)
     );

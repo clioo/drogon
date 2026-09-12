@@ -8,9 +8,10 @@ description: >-
   harnesses, create and run cron automations, manage Bots and their
   self-managed automations, monitors and monitor actions, seal and grant
   integration secrets, list and restore pre-migration backups, and use the
-  optional Mentu recipe environment (status, open, run, follow, cancel). Use
-  for terminal control, lightweight prompts and shell commands. Use the
-  orchestration guide for supervised multi-agent coordination.
+  optional work-graph recipe environment (the `mentu` verbs: status, open,
+  run, follow, cancel). Use for terminal control, lightweight prompts and
+  shell commands. Use the orchestration guide for supervised multi-agent
+  coordination.
 ---
 
 # Drogon CLI
@@ -34,7 +35,7 @@ If the CLI is missing, say so explicitly instead of inspecting source files.
 For the full machine-readable surface, run
 `drogon-cli agent-context --json` (local, no daemon needed).
 
-Recipes are optional work; the Mentu section below says how to find out
+Recipes are optional work; the recipe section below says how to find out
 whether this host can run one before you say you made one.
 
 ## Inside A Drogon Terminal
@@ -66,11 +67,11 @@ for agent-state fields on sessions, `browser.relay.v1` for the browser
 commands below (which additionally need a connected Drogon desktop),
 `automation.v1` for the cron automation verbs, `bot.self.v1` for the Bot
 self-management verbs, `bot.secrets.v1` for the secret verbs, and
-`mentu.v1` for the Mentu recipe verbs below, and `graph.v1` for the
+`mentu.v1` for the recipe verbs below, and `graph.v1` for the
 work-graph verbs.
 
 Run `drogon-cli status --json` first, then the narrowest command for the
-job. Before promising a Mentu recipe, run
+job. Before promising a recipe, run
 `drogon-cli mentu status --workspace <ID> --json` — the runtime is
 optional, and a recipe can only run once a human has approved its current
 content (`mentu run` refuses otherwise). The full guide for supervised
@@ -401,9 +402,9 @@ sealed (names and kinds, never values) and `secrets delete --kind <KIND>
 `drogon-cli bot grant-secret --bot <ID> --workspace <ID> --secret-ref <NAME>
 --kind <KIND>` (above).
 
-## Mentu Recipes
+## Recipes
 
-Mentu is Drogon's recipe runner: a recipe is a JSON file under the
+The work graph's runner executes recipes: a recipe is a JSON file under the
 workspace's `.mentu/recipes` directory describing steps in a dependency
 graph. Its runtime is OPTIONAL, so check before you promise anything:
 `drogon-cli mentu status --workspace <ID> --json` reports a `verdict` of
@@ -426,7 +427,7 @@ Hand the human the recipe with
 `--recipe` to reopen the tab on whatever was selected). It enqueues one
 relay request and waits (bounded, `--timeout-ms 5000` overrides the 15000
 default, range 1 to 25000) for the connected Drogon desktop, which opens or
-focuses the workspace's Mentu tab and answers with its own verdict: a
+focuses the workspace's Work Graph tab and answers with its own verdict: a
 refusal is an error (`desktop_unavailable`, `mentu_unavailable`,
 `mentu_workspace_unknown`, `mentu_open_timeout`), never a silent success.
 With no desktop connected the call fails with `desktop_not_connected`
@@ -438,7 +439,7 @@ recipe; it never runs one.
 Running a recipe is a daemon operation you start and then follow. It needs
 an approval bound to the recipe's EXACT current bytes: `mentu run` never
 approves anything itself, so an edited recipe has to be re-approved by a
-human (the Drogon Mentu tab's Run Recipe action) before the CLI can run it.
+human (the Drogon Work Graph tab's Run Recipe action) before the CLI can run it.
 
 ```text
 drogon-cli mentu run --workspace <ID> --recipe <ID> --follow --timeout-ms 900000
@@ -447,11 +448,11 @@ drogon-cli mentu run --workspace <ID> --recipe <ID> --follow --timeout-ms 900000
 - Without `--approval`, the verb resolves the recipe's pending approval
   (`mentu.pending_approval`: the newest unconsumed approval whose content
   hash equals the recipe on disk). Pass `--approval <ID>` to consume one
-  specific approval instead — that is what the Mentu tab's Run Recipe
+  specific approval instead — that is what the Work Graph tab's Run Recipe
   button does when it hands you the id it just approved.
 - With no matching approval the call fails with `mentu_approval_required`
   (exit 1). Do not look for a way to approve it yourself: report the
-  recipe and ask the human to approve it in the Mentu tab, then run again.
+  recipe and ask the human to approve it in the Work Graph tab, then run again.
 - `--follow` polls `mentu.run_status` until the run settles, bounded by
   `--timeout-ms` (default 900000, range 1 to 3600000). Without `--follow`
   the verb returns as soon as the daemon has recorded the `running` row.
@@ -487,7 +488,7 @@ drogon-cli mentu cancel --run <RUN-ID>
 Cancellation is asynchronous: the returned row may still read `running`, so
 poll `mentu run-status` until it settles as `cancelled`. It works on any run
 row, including one another agent started, which is why a run started from
-the Mentu tab stays stoppable by the human (the tab's Cancel) and by you.
+the Work Graph tab stays stoppable by the human (the tab's Cancel) and by you.
 
 When a recipe is worth writing, its steps should be independently
 verifiable: give each step a `shell` command whose exit code means
@@ -508,7 +509,7 @@ status follows the same truth table as `mentu run`.
 ## Work Graphs
 
 A workspace can own a work graph: `<workspace>/.drogon/graph.json`
-describes nodes with dependencies, and the daemon compiles it into Mentu
+describes nodes with dependencies, and the daemon compiles it into
 recipes. These verbs need the service capability `graph.v1`.
 
 Read the graph with `drogon-cli graph read --workspace <ID> --json` —
@@ -530,7 +531,7 @@ and findings are attributed to the node that caused them.
 Run the compiled node with
 `drogon-cli graph run --workspace <ID> --node <ID> --follow`: the daemon
 mints the approval for the exact compiled bytes and executes through the
-Mentu run path, so there is no second engine. Resume or retry follow the
+work-graph run path, so there is no second engine. Resume or retry follow the
 same seams as above (`graph resume` reruns every non-succeeded step,
 `graph retry-step` reruns one), and `--follow` polls until the run
 settles with the same exit-status truth table.
@@ -632,7 +633,7 @@ never established). Only an observed exit is an exit.
 Confirm `drogon-cli status --json` unless already checked this turn, then
 choose the narrowest command: `workspace list`, `project list`,
 `worktree list --project <ID>`, `terminal list`, `terminal read`, or
-`terminal wait`. To run a Mentu recipe the human approved, use
+`terminal wait`. To run a recipe the human approved, use
 `drogon-cli mentu run --workspace <ID> --recipe <ID> --follow`; to report on
 one that is already in flight, `drogon-cli mentu run-status --run <RUN-ID>`.
 To give a Bot a purpose that fires on change, bind a monitor action with

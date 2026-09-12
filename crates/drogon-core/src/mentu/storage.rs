@@ -139,10 +139,10 @@ pub fn consume_approval(
     recipe_id: &str,
 ) -> Result<String, RpcError> {
     let row = get_approval_row(conn, approval_id)?
-        .ok_or_else(|| error::not_found("Mentu approval not found."))?;
+        .ok_or_else(|| error::not_found("Work Graph approval not found."))?;
     if row.workspace_id != workspace_id || row.recipe_id != recipe_id {
         return Err(error::invalid_argument(
-            "Mentu approval does not match this workspace/recipe.",
+            "Work Graph approval does not match this workspace/recipe.",
         ));
     }
     if row.consumed {

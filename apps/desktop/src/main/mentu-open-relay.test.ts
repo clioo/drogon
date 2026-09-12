@@ -91,7 +91,7 @@ describe("mentu open relay", () => {
       ok: false,
       error: {
         code: "desktop_unavailable",
-        message: "No Drogon window is loaded to open the Mentu tab in.",
+        message: "No Drogon window is loaded to open the Work Graph tab in.",
       },
     });
   });
@@ -106,7 +106,7 @@ describe("mentu open relay", () => {
         ok: false,
         error: {
           code: "mentu_open_timeout",
-          message: "The Drogon window did not confirm the Mentu tab within 25ms.",
+          message: "The Drogon window did not confirm the Work Graph tab within 25ms.",
         },
       });
     } finally {
@@ -136,7 +136,7 @@ describe("mentu open relay", () => {
       ok: false,
       error: {
         code: "mentu_open_unsupported",
-        message: "The Drogon window could not receive the Mentu request: destroyed",
+        message: "The Drogon window could not receive the Work Graph request: destroyed",
       },
     });
   });

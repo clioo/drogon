@@ -444,7 +444,7 @@ export function MetricsView({ run }: { run: MentuRun | null }): React.JSX.Elemen
       data-testid="recipe-metrics"
     >
       <p className="text-xs text-muted-foreground">
-        Recipe totals aggregate only values directly reported by this Mentu run record. Missing
+        Recipe totals aggregate only values directly reported by this Work Graph run record. Missing
         values remain unavailable; Drogon does not estimate them.
       </p>
       <div className="grid gap-2 @md/mentu-metrics:grid-cols-2 @2xl/mentu-metrics:grid-cols-4">
@@ -650,7 +650,7 @@ export function EmptyRecipeState({
               ))}
             </ul>
             <p className="mt-1.5 text-xs">
-              Mentu reads only the workspace root path above. Open that
+              Work Graph reads only the workspace root path above. Open that
               subproject as its own workspace to view and run its recipes, or
               move them into the root directory.
             </p>

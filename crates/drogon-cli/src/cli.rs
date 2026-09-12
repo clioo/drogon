@@ -129,10 +129,10 @@ pub enum Command {
         #[command(subcommand)]
         action: BotAction,
     },
-    /// Mentu recipes (requires the service capability mentu.v1): inspect
+    /// Work Graph recipes (requires the service capability mentu.v1): inspect
     /// whether the optional Mentu environment (pinned runtime + workspace
     /// recipes) is really present on this host, and open the workspace's
-    /// Mentu tab in the running Drogon desktop so a human can see the
+    /// Work Graph tab in the running Drogon desktop so a human can see the
     /// recipe.
     Mentu {
         #[command(subcommand)]
@@ -140,7 +140,7 @@ pub enum Command {
     },
     /// The work graph (`.drogon/graph.json`): read the human-owned `intent`
     /// half and the daemon-owned `state` half, compile a node plus its
-    /// transitive dependencies into the Mentu recipe the system runs, and
+    /// transitive dependencies into the recipe the system runs, and
     /// resume/retry a single node without redoing the graph (requires the
     /// service capability graph.v1).
     Graph {
@@ -363,7 +363,7 @@ pub enum MentuAction {
         #[arg(long, value_name = "ID")]
         workspace: Option<String>,
     },
-    /// Open (or focus) the workspace's Mentu tab in the connected Drogon
+    /// Open (or focus) the workspace's Work Graph tab in the connected Drogon
     /// desktop, optionally focused on one recipe. Requires the service
     /// capability browser.relay.v1 plus a connected Drogon desktop; the
     /// desktop's own verdict is the result, so an open that did not happen
@@ -375,7 +375,7 @@ pub enum MentuAction {
     Open {
         #[arg(long, value_name = "ID")]
         workspace: String,
-        /// Recipe id to select in the Mentu tab (`mentu status --workspace`
+        /// Recipe id to select in the Work Graph tab (`mentu status --workspace`
         /// lists the ids this workspace exposes)
         #[arg(long, value_name = "ID")]
         recipe: Option<String>,
@@ -437,7 +437,7 @@ pub enum MentuAction {
     },
     /// Cancel a running run by its daemon run id. Works no matter who
     /// started it, so a run an agent began stays stoppable from here (or
-    /// from the Mentu tab's Cancel).
+    /// from the Work Graph tab's Cancel).
     #[command(
         args_override_self = true,
         override_usage = "drogon-cli mentu cancel --run <ID>\nValid flags: --data-dir, --help, --json, --request-id, --retry-request, --run"
@@ -515,7 +515,7 @@ pub enum GraphAction {
         file: String,
     },
     /// Compile a node (or explicit selection) plus its transitive
-    /// dependencies into a Mentu recipe and validate it with the pinned
+    /// dependencies into a recipe and validate it with the pinned
     /// runtime's own `check`/`doctor --strict`. Writes the compiled recipe
     /// to `.mentu/recipes`; runs nothing.
     #[command(

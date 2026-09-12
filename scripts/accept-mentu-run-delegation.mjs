@@ -339,7 +339,7 @@ async function main() {
   //    drove; the wide tab now renders the work graph.
   const panel = page.locator('[data-testid="mentu-panel"]');
   if (!(await panel.isVisible().catch(() => false))) {
-    await page.locator('.right-sidebar-header-drag button[aria-label="Mentu"]').click();
+    await page.locator('.right-sidebar-header-drag button[aria-label="Work Graph"]').click();
   }
   await panel.waitFor({ timeout: 20000 });
   await panel.getByRole("combobox", { name: "Recipe", exact: true }).click();
@@ -358,7 +358,7 @@ async function main() {
   await page.setViewportSize({ width: 1440, height: 900 });
   await selectSettingsTheme(page, "light");
   if (!(await panel.isVisible().catch(() => false))) {
-    await page.locator('.right-sidebar-header-drag button[aria-label="Mentu"]').click();
+    await page.locator('.right-sidebar-header-drag button[aria-label="Work Graph"]').click();
   }
   await panel.waitFor();
   await runButton.waitFor();
@@ -555,7 +555,7 @@ async function main() {
   // 10. Run 2 in dark: the same delegation, the dark matrix DURING the run.
   await selectSettingsTheme(page, "dark");
   if (!(await panel.isVisible().catch(() => false))) {
-    await page.locator('.right-sidebar-header-drag button[aria-label="Mentu"]').click();
+    await page.locator('.right-sidebar-header-drag button[aria-label="Work Graph"]').click();
   }
   await panel.waitFor();
   await runButton.waitFor();

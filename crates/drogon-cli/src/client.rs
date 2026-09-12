@@ -1288,7 +1288,7 @@ pub fn check_mentu_recipes(result: &MentuRecipesResult) -> Result<(), String> {
 pub fn check_mentu_open(result: &MentuOpenResult) -> Result<(), String> {
     require_nonempty("workspaceId", &result.workspace_id)?;
     if !result.opened {
-        return Err("the desktop reported the Mentu tab as not opened".into());
+        return Err("the desktop reported the Work Graph tab as not opened".into());
     }
     Ok(())
 }

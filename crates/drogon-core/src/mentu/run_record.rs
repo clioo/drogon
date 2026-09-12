@@ -32,7 +32,7 @@ pub fn validate_mentu_run_id(id: &str) -> Result<(), RpcError> {
     if valid {
         Ok(())
     } else {
-        Err(error::invalid_argument("Invalid Mentu run id."))
+        Err(error::invalid_argument("Invalid Work Graph run id."))
     }
 }
 

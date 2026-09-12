@@ -480,11 +480,11 @@ pub fn mentu_environment(report: &serde_json::Value) -> String {
 pub fn mentu_opened(result: &MentuOpenResult) -> String {
     match &result.recipe_id {
         Some(recipe) => format!(
-            "Opened the Mentu tab for workspace {} focused on recipe {recipe}.",
+            "Opened the Work Graph tab for workspace {} focused on recipe {recipe}.",
             result.workspace_id
         ),
         None => format!(
-            "Opened the Mentu tab for workspace {}.",
+            "Opened the Work Graph tab for workspace {}.",
             result.workspace_id
         ),
     }
@@ -494,7 +494,7 @@ pub fn mentu_opened(result: &MentuOpenResult) -> String {
 /// that is the handle the caller needs to follow or cancel it.
 pub fn mentu_run_started(run: &MentuRun) -> String {
     format!(
-        "Started Mentu run {} (recipe {}, status {}).",
+        "Started Work Graph run {} (recipe {}, status {}).",
         run.id,
         run.recipe_id,
         run.status.as_wire()
@@ -539,7 +539,7 @@ pub fn mentu_progress(run: &MentuRun) -> String {
 
 fn mentu_run_line(run: &MentuRun) -> String {
     let mut line = format!(
-        "Mentu run {}: recipe {} status {}",
+        "Work Graph run {}: recipe {} status {}",
         run.id,
         run.recipe_id,
         run.status.as_wire()
@@ -579,7 +579,7 @@ fn mentu_step_line(step: &MentuStepRun) -> String {
 /// `mentu runs`: one line per run, newest first.
 pub fn mentu_run_list(result: &MentuRunsResult) -> String {
     if result.runs.is_empty() {
-        return "No Mentu runs recorded for this workspace.".into();
+        return "No Work Graph runs recorded for this workspace.".into();
     }
     result
         .runs
@@ -595,7 +595,7 @@ pub fn mentu_run_list(result: &MentuRunsResult) -> String {
 pub fn mentu_approval_required(workspace: &str, recipe: &str) -> String {
     format!(
         "Recipe {recipe} in workspace {workspace} has no approval for its current content. \
-         Review and approve it from the Drogon Mentu tab (Run Recipe), then run it again. \
+         Review and approve it from the Drogon Work Graph tab (Run Recipe), then run it again. \
          This verb never approves a recipe on its own."
     )
 }
@@ -615,7 +615,7 @@ pub fn mentu_approval_used(approval: &MentuApproval) -> String {
 /// asynchronous, so the line must not claim the run already stopped.
 pub fn mentu_cancel_requested(run: &MentuRun) -> String {
     format!(
-        "Cancellation requested for Mentu run {} (status {}). Poll `mentu run-status --run {}` until it settles.",
+        "Cancellation requested for Work Graph run {} (status {}). Poll `mentu run-status --run {}` until it settles.",
         run.id,
         run.status.as_wire(),
         run.id

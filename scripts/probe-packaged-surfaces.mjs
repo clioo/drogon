@@ -260,7 +260,7 @@ async function probeMentuSurface({ page, workspace, output }) {
     JSON.stringify(MENTU_FIXTURE_RECIPE, null, 2) + "\n",
   );
   await page
-    .locator('.right-sidebar-header-drag button[aria-label="Mentu"]')
+    .locator('.right-sidebar-header-drag button[aria-label="Work Graph"]')
     .click();
   const panel = page.locator('[data-testid="mentu-panel"]');
   await panel.waitFor();

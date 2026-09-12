@@ -176,8 +176,8 @@ describe("activity-bar-items", () => {
       "Explorer (⌘⇧E)",
     );
     // The fork's mentu entry carries no toggle chord.
-    assert.equal(items[1].title, "Mentu");
-    assert.equal(activityItemAriaLabel(items[1]), "Mentu");
+    assert.equal(items[1].title, "Work Graph");
+    assert.equal(activityItemAriaLabel(items[1]), "Work Graph");
     // R13-B: the source's ports item (Plug icon, ⌘⇧I chord) sits after
     // Source Control, in the source's relative order.
     assert.equal(items[3].title, "Ports");
@@ -284,7 +284,7 @@ describe("activity-bar-items", () => {
         isFolder: true,
         isFolderWorkspace: true,
       }).map((item) => item.title),
-      ["Explorer", "Mentu", "Ports", "Attached worktrees"],
+      ["Explorer", "Work Graph", "Ports", "Attached worktrees"],
     );
     // Git workspace with SSH: folderOnly hides, sshOnly shows.
     assert.deepEqual(
@@ -292,7 +292,7 @@ describe("activity-bar-items", () => {
         ...fullState,
         isSshRepo: true,
       }).map((item) => item.title),
-      ["Explorer", "Mentu", "Source Control", "Ports", "Ssh"],
+      ["Explorer", "Work Graph", "Source Control", "Ports", "Ssh"],
     );
   });
 });

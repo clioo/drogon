@@ -112,14 +112,14 @@ export function composeMentuRunPrompt(input: MentuRunPromptInput): string {
     `drogon-cli mentu run --workspace ${input.workspaceId} --recipe ${input.recipeId} ` +
     `--approval ${input.approvalId} --follow --timeout-ms 900000`;
   return [
-    `Drogon Mentu run request for recipe "${input.recipeId}" in workspace "${input.workspaceId}"`,
+    `Drogon Work Graph run request for recipe "${input.recipeId}" in workspace "${input.workspaceId}"`,
     `(approved, approval ${input.approvalId}).`,
     `You are the orchestrator: do not edit the recipe and do not run its steps by hand.`,
     `If you have not read it this session, run drogon-cli skills get --topic drogon-cli first,`,
     `then run and follow it to the end with: ${run}.`,
     `When it settles, report here the run id, every step's status, and the failing step's error;`,
     `stop it with drogon-cli mentu cancel --run <RUN-ID>.`,
-    `The daemon records the run, so Evidence and Metrics in the Mentu tab fill in while it runs.`,
+    `The daemon records the run, so Evidence and Metrics in the Work Graph tab fill in while it runs.`,
   ].join(" ");
 }
 

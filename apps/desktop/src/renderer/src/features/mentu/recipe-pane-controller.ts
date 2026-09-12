@@ -80,7 +80,7 @@ export function STARTER_RECIPE(name: string) {
       {
         label: "hello",
         backend: "shell",
-        prompt: "printf 'Hello from Mentu\\n'",
+        prompt: "printf 'Hello from Work Graph\\n'",
         timeout: 30,
       },
     ],
@@ -519,7 +519,7 @@ export function useMentuPaneController(
       if (Date.now() - pendingDispatch.dispatchedAt >= MENTU_DISPATCH_HOLD_MS) {
         setPendingDispatch(null);
         setError(
-          `The prompt was delivered to session ${pendingDispatch.sessionId}, but no Mentu run has appeared for approval ${pendingDispatch.approvalId} yet. Read that session's reply; nothing was auto-approved or auto-run here.`,
+          `The prompt was delivered to session ${pendingDispatch.sessionId}, but no Work Graph run has appeared for approval ${pendingDispatch.approvalId} yet. Read that session's reply; nothing was auto-approved or auto-run here.`,
         );
       }
     };

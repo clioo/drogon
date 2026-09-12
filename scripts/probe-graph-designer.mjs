@@ -73,8 +73,8 @@ export async function probeGraphDesigner({ page, workspace, output, cli, dataDir
   // 1. With NO graph on disk, the empty state states the ownership split
   //    and offers the design action.
   await page.getByRole("button", { name: "New tab", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Mentu", exact: true }).click();
-  await page.getByRole("tab", { name: "Mentu", exact: true }).waitFor();
+  await page.getByRole("menuitem", { name: "Work Graph", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).waitFor();
   const empty = panel.locator('[data-testid="work-graph-empty"]');
   await empty.waitFor({ timeout: 15000 });
   const emptyText = (await empty.innerText()) ?? "";
@@ -332,7 +332,7 @@ export async function probeGraphDesigner({ page, workspace, output, cli, dataDir
   //    width, with a strict no-horizontal-overflow budget.
   for (const theme of ["light", "dark"]) {
     await selectSettingsTheme(page, theme);
-    await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+    await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
     await panel.locator('[data-testid="work-graph-pane"]').waitFor();
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
@@ -358,15 +358,15 @@ export async function probeGraphDesigner({ page, workspace, output, cli, dataDir
     await shot(page, output, `work-graph-run-${theme}-hero.png`);
   }
   await selectSettingsTheme(page, "light");
-  await page.getByRole("tab", { name: "Mentu", exact: true }).click();
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).click();
   await panel.locator('[data-testid="work-graph-pane"]').waitFor();
   checks.push("graph-screenshots-light-dark-and-no-overflow-1440-1100-900-760");
 
   // Leave the strip as the probe found it: the Mentu tab probe that runs
   // next expects a strip without a Mentu tab.
-  await page.getByRole("button", { name: "Close tab Mentu", exact: true }).click();
+  await page.getByRole("button", { name: "Close tab Work Graph", exact: true }).click();
   await page
-    .getByRole("tab", { name: "Mentu", exact: true })
+    .getByRole("tab", { name: "Work Graph", exact: true })
     .waitFor({ state: "detached" });
 
   return checks;
