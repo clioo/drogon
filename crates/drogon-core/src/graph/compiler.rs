@@ -256,7 +256,11 @@ fn resolve_pi_model(node_id: &str, raw: &str) -> Result<(String, Option<GraphFin
                  it is neither a bare exact id nor the `provider/model` form the product \
                  teaches (e.g. dgx-spark/qwen3.8-flash-next-nvidia-nvfp4). Pass the exact id \
                  the per-harness model catalog lists, or `provider/model`.",
-                if provider.is_empty() { "provider" } else { "model" }
+                if provider.is_empty() {
+                    "provider"
+                } else {
+                    "model"
+                }
             ),
         ));
     }
@@ -782,7 +786,10 @@ mod tests {
     fn a_prefixed_provider_model_splits_to_the_exact_id_the_server_knows() {
         let mut n1 = node("n1", "pi", &[]);
         n1.model = "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4".into();
-        let intent = GraphIntent { nodes: vec![n1] };
+        let intent = GraphIntent {
+            nodes: vec![n1],
+            ..GraphIntent::default()
+        };
         let compiled = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap();
         let binding = &compiled.recipe["providers"]["drogon-pi-n1"];
         assert_eq!(binding["model"], "qwen3.8-flash-next-nvidia-nvfp4");
@@ -800,7 +807,11 @@ mod tests {
             .expect("the split must be surfaced as a finding");
         assert_eq!(split.node_id.as_deref(), Some("n1"));
         assert_eq!(split.severity, GraphFindingSeverity::Info);
-        assert!(split.message.contains("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"));
+        assert!(
+            split
+                .message
+                .contains("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4")
+        );
         assert!(split.message.contains("qwen3.8-flash-next-nvidia-nvfp4"));
     }
 
@@ -811,7 +822,10 @@ mod tests {
         for bad in ["/qwen3.8-flash-next-nvidia-nvfp4", "dgx-spark/", "/"] {
             let mut n1 = node("n1", "pi", &[]);
             n1.model = bad.into();
-            let intent = GraphIntent { nodes: vec![n1] };
+            let intent = GraphIntent {
+                nodes: vec![n1],
+                ..GraphIntent::default()
+            };
             let err = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap_err();
             assert_eq!(err.code, "invalid_argument");
             assert!(
@@ -839,7 +853,10 @@ mod tests {
     #[test]
     fn bare_ids_and_multi_segment_ids_split_like_the_product_rule() {
         let bare = node("n1", "pi", &[]);
-        let intent = GraphIntent { nodes: vec![bare] };
+        let intent = GraphIntent {
+            nodes: vec![bare],
+            ..GraphIntent::default()
+        };
         let compiled = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap();
         assert_eq!(
             compiled.recipe["providers"]["drogon-pi-n1"]["model"],
@@ -852,7 +869,10 @@ mod tests {
         // at the FIRST slash keeps the full id.
         let mut n2 = node("n2", "pi", &[]);
         n2.model = "nvidia/deepseek-ai/deepseek-v4-flash-0731".into();
-        let intent = GraphIntent { nodes: vec![n2] };
+        let intent = GraphIntent {
+            nodes: vec![n2],
+            ..GraphIntent::default()
+        };
         let compiled = compile(&intent, &Selection::Target("n2".into()), &defaults()).unwrap();
         assert_eq!(
             compiled.recipe["providers"]["drogon-pi-n2"]["model"],
