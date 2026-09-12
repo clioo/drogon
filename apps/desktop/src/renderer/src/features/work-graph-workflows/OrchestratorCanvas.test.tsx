@@ -352,7 +352,8 @@ describe("OrchestratorCanvas", () => {
     expect(terminal.textContent).toContain("Ready to run");
     expect(
       screen.getByTestId("orchestrator-no-subagents-caption").textContent,
-    ).toBe("No optional subagents enabled");
+    ).toBe("Direct mode · main agent works without subagents");
+    expect(screen.queryByTestId("orchestrator-depth-one-workers")).toBeNull();
   });
 
   it("design-2: adversarial on shows the loop with both role nodes and the repeat caption", () => {
@@ -364,9 +365,24 @@ describe("OrchestratorCanvas", () => {
     );
     expect(screen.getByTestId("orchestrator-test-node")).toBeTruthy();
     expect(screen.getByTestId("orchestrator-review-node")).toBeTruthy();
+    expect(screen.getByTestId("orchestrator-depth-one-workers")).toBeTruthy();
     expect(screen.getByTestId("orchestrator-repeat-caption").textContent).toBe(
       "Repeat up to 10×",
     );
+  });
+
+  it("Delegate mode shows depth-one implementation workers without the adversarial loop", () => {
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={{ ...policyWithAdversarial(false), delegate: true }}
+      />,
+    );
+    expect(screen.getByTestId("orchestrator-depth-one-workers")).toBeTruthy();
+    expect(screen.queryByTestId("orchestrator-test-node")).toBeNull();
+    expect(
+      screen.getByTestId("orchestrator-no-subagents-caption").textContent,
+    ).toBe("Delegate mode · depth-1 implementation workers");
   });
 
   it("a never-run terminal renders dashed, not a fabricated green check", () => {

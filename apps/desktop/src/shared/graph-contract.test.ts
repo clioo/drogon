@@ -40,11 +40,11 @@ function fixturePolicy(overrides: Partial<GraphPolicy> = {}): GraphPolicy {
 }
 
 describe("graphPolicySchema", () => {
-  it("parses design-2's exact configuration", () => {
+  it("parses an adversarial configuration", () => {
     const policy = graphPolicySchema.parse(
       fixturePolicy({
         adversarial: { enabled: true, maxIterations: 10 },
-        delegate: true,
+        delegate: false,
       }),
     );
     expect(policy.approvedRuntimes).toHaveLength(3);
@@ -53,7 +53,18 @@ describe("graphPolicySchema", () => {
       model: "qwen3-coder",
     });
     expect(policy.adversarial).toEqual({ enabled: true, maxIterations: 10 });
-    expect(policy.delegate).toBe(true);
+    expect(policy.delegate).toBe(false);
+  });
+
+  it("rejects Delegate and adversarial testing enabled together", () => {
+    expect(() =>
+      graphPolicySchema.parse(
+        fixturePolicy({
+          adversarial: { enabled: true, maxIterations: 3 },
+          delegate: true,
+        }),
+      ),
+    ).toThrow(/mutually exclusive/);
   });
 
   it("defaults every field when parsing an empty object — nothing configured yet", () => {
@@ -124,7 +135,7 @@ describe("deriveSubagentPolicySummary", () => {
       adversarial: { enabled: false, maxIterations: 3 },
     });
     expect(deriveSubagentPolicySummary(policy)).toBe(
-      "3 approved · 1 fallback · 0 optional subagents",
+      "3 approved · 1 fallback · Direct",
     );
   });
 
@@ -133,28 +144,28 @@ describe("deriveSubagentPolicySummary", () => {
       adversarial: { enabled: true, maxIterations: 10 },
     });
     expect(deriveSubagentPolicySummary(policy)).toBe(
-      "3 approved · 1 fallback · 2 optional subagents",
+      "3 approved · 1 fallback · Adversarial · Depth 1",
     );
   });
 
   it("is always derived from the policy, never a stored count that can drift", () => {
     const empty = deriveSubagentPolicySummary(DEFAULT_GRAPH_POLICY);
-    expect(empty).toBe("0 approved · 0 fallback · 0 optional subagents");
+    expect(empty).toBe("0 approved · 0 fallback · Direct");
 
     const noFallback = deriveSubagentPolicySummary(
       fixturePolicy({ fallbackRuntime: null }),
     );
-    expect(noFallback).toBe("3 approved · 0 fallback · 0 optional subagents");
+    expect(noFallback).toBe("3 approved · 0 fallback · Direct");
   });
 
-  it("adds exactly the adversarial loop's two role nodes, never a delegate-driven count", () => {
+  it("reports the mutually exclusive depth-one mode without inventing worker counts", () => {
     expect(ADVERSARIAL_OPTIONAL_SUBAGENT_COUNT).toBe(2);
     const delegateOnAdversarialOff = fixturePolicy({
       delegate: true,
       adversarial: { enabled: false, maxIterations: 3 },
     });
     expect(deriveSubagentPolicySummary(delegateOnAdversarialOff)).toBe(
-      "3 approved · 1 fallback · 0 optional subagents",
+      "3 approved · 1 fallback · Delegate · Depth 1",
     );
   });
 });

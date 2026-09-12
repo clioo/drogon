@@ -490,19 +490,47 @@ fn node_for_step(run: &Run, candidate: &GraphRuntimeRef) -> GraphNodeIntent {
     node.model = candidate.model.clone();
     node.depends_on.clear();
     if run.phase == "main" && node.harness != "shell" {
-        if run.policy.delegate {
-            node.prompt.push_str("\nPlan and delegate the implementation to depth-one Drogon nodes using the approved policy below; coordinate and review their results.");
+        if run.policy.adversarial.enabled {
+            node.prompt.push_str(
+                "\nAct only as planner and director; do not implement the task yourself. Read \
+                 the workspace's native .drogon state before planning. Dispatch implementation \
+                 workers as depth-one children. As each implementation worker finishes, \
+                 immediately dispatch a separate depth-one adversarial tester for that worker's \
+                 output; route findings to a depth-one correction worker and retest within the \
+                 configured iteration bound. Every worker, tester, and correction worker is a \
+                 sibling child and must not delegate. The daemon owns the final whole-workflow \
+                 test/review pass after your directed work settles; do not duplicate that final \
+                 pass.",
+            );
+        } else if run.policy.delegate {
+            node.prompt.push_str(
+                "\nAct only as planner and director; do not implement the task yourself. Read \
+                 the workspace's native .drogon state before planning, delegate implementation \
+                 to depth-one Drogon children using the approved policy below, supervise their \
+                 results, and do not add adversarial testers. Children must not delegate further.",
+            );
+        } else {
+            node.prompt.push_str(
+                "\nWork directly on the task in this main agent. Delegate and adversarial \
+                 testing are off, so do not dispatch subagents.",
+            );
         }
         node.prompt.push_str(&format!(
             "\n\nDrogon run {}: immutable Subagent policy snapshot\n{}\n\
-             If you delegate, use Drogon graph CLI declared nodes (see `drogon-cli graph --help`) \
-             and explicit harness/model pairs from this snapshot. Try approved pairs in their \
-             configured order; use fallback only after every approved runtime fails to execute. \
-             Findings are successful evaluations and do not trigger runtime failover. Do not use \
-             native ungoverned subagent spawns. Maximum subagent depth is one: children must not \
-             delegate further. Workspace policy edits apply to future runs; do not substitute them \
-             for this snapshot. The daemon owns any enabled adversarial loop; do not launch duplicate \
-             test/review workers yourself.", run.id, serde_json::to_string(&run.policy).expect("policy serializes")
+             Before acting, read `.drogon/graph.json` with `drogon-cli graph read --workspace {} \
+             --json` and read native evidence/usage with `drogon-cli graph observability \
+             --workspace {} --json`. If this mode delegates, use Drogon graph CLI declared nodes \
+             (see `drogon-cli graph --help`) and explicit harness/model pairs from this snapshot. \
+             Try approved pairs in their configured order; use fallback only after every approved \
+             runtime fails to execute. Findings are successful evaluations and do not trigger \
+             runtime failover. Do not use native ungoverned subagent spawns. Maximum subagent depth \
+             is one: children must not delegate further. Workspace policy edits apply to future \
+             runs; do not substitute them for this snapshot. The daemon owns any enabled \
+             adversarial loop; do not launch duplicate whole-workflow test/review workers yourself.",
+            run.id,
+            serde_json::to_string(&run.policy).expect("policy serializes"),
+            run.workspace_id,
+            run.workspace_id
         ));
         node.prompt.push_str(&format!(
             "\nRecord concise, meaningful progress checkpoints for the human with `drogon-cli graph evidence-add --workspace {} --run {} --agent leader`; use progress, finding, blocked, completed, or failed. Every agent must record exact incremental token usage with `graph usage-add` when its harness reports it. Omit unknown token fields; never estimate them. These native ledgers live under .drogon and do not depend on Mentu.",
@@ -686,8 +714,47 @@ mod tests {
             },
         );
         assert!(main.provider.is_some());
-        assert!(main.prompt.contains("Plan and delegate the implementation"));
+        assert!(main.prompt.contains("only as planner and director"));
+        assert!(main.prompt.contains("do not add adversarial testers"));
         assert!(main.prompt.contains("immutable Subagent policy snapshot"));
         assert!(main.prompt.contains("children must not"));
+        assert!(
+            main.prompt
+                .contains("drogon-cli graph read --workspace ws --json")
+        );
+        assert!(
+            main.prompt
+                .contains("drogon-cli graph observability --workspace ws --json")
+        );
+
+        run.policy.delegate = false;
+        run.policy.adversarial.enabled = true;
+        let adversarial = node_for_step(
+            &run,
+            &GraphRuntimeRef {
+                harness: "pi".into(),
+                model: "main-model".into(),
+            },
+        );
+        assert!(
+            adversarial
+                .prompt
+                .contains("As each implementation worker finishes")
+        );
+        assert!(
+            adversarial
+                .prompt
+                .contains("tester, and correction worker is a sibling child")
+        );
+
+        run.policy.adversarial.enabled = false;
+        let direct = node_for_step(
+            &run,
+            &GraphRuntimeRef {
+                harness: "pi".into(),
+                model: "main-model".into(),
+            },
+        );
+        assert!(direct.prompt.contains("do not dispatch subagents"));
     }
 }

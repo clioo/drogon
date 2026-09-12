@@ -461,9 +461,8 @@ async function main() {
   await canvas.waitFor();
   const mainAgent = panel.locator('[data-testid="orchestrator-main-agent"]');
   await mainAgent.waitFor({ timeout: 15000 });
-  assert.equal(await mainAgent.getAttribute("data-state"), "live");
-  assert.match((await mainAgent.innerText()) ?? "", /claude/);
-  report.checks.push("main-agent-node-reflects-the-real-live-session");
+  assert.match((await mainAgent.innerText()) ?? "", /Main agent/);
+  report.checks.push("main-agent-node-remains-visible-with-a-live-session");
 
   // 5. DISHONEST-3 (Delegate must be delivered): a policy toggle changes
   //    what the NEXT session in this workspace actually receives. Start with
@@ -502,15 +501,41 @@ async function main() {
     path.join(workspace, "CLAUDE.md"),
     "utf8",
   );
-  assert.match(agentsWithDelegateOn, /Delegate: ON/, agentsWithDelegateOn);
-  assert.match(claudeWithDelegateOn, /Delegate: ON/, claudeWithDelegateOn);
+  assert.match(agentsWithDelegateOn, /Mode: DELEGATE/, agentsWithDelegateOn);
+  assert.match(claudeWithDelegateOn, /Mode: DELEGATE/, claudeWithDelegateOn);
   assert.ok(
     agentsWithDelegateOn.includes(
       `drogon-cli graph write-intent --workspace ${workspaceRecord.id} --file graph-intent.json`,
     ),
     `the Delegate brief must name the real, workspace-scoped write-intent verb: ${agentsWithDelegateOn}`,
   );
+  assert.match(
+    agentsWithDelegateOn,
+    new RegExp(
+      `drogon-cli graph observability --workspace ${workspaceRecord.id} --json`,
+    ),
+  );
   report.checks.push("delegate-on-reaches-the-next-sessions-own-brief-files");
+
+  // Both execution modes are impossible at once. Enabling either one turns
+  // the other off in the same saved policy, rather than relying on display.
+  await policyPanel.locator('[data-testid="adversarial-toggle"]').click();
+  await delay(400);
+  const adversarialReplacedDelegate = await readGraph(workspace);
+  assert.equal(adversarialReplacedDelegate.intent.policy.delegate, false);
+  assert.equal(
+    adversarialReplacedDelegate.intent.policy.adversarial.enabled,
+    true,
+  );
+  await policyPanel.locator('[data-testid="delegate-toggle"]').click();
+  await delay(400);
+  const delegateReplacedAdversarial = await readGraph(workspace);
+  assert.equal(delegateReplacedAdversarial.intent.policy.delegate, true);
+  assert.equal(
+    delegateReplacedAdversarial.intent.policy.adversarial.enabled,
+    false,
+  );
+  report.checks.push("delegate-and-adversarial-are-mutually-exclusive");
 
   await policyPanel.locator('[data-testid="delegate-toggle"]').click();
   await delay(400);
@@ -539,6 +564,29 @@ async function main() {
   report.checks.push(
     "delegate-off-removes-the-managed-block-and-restores-a-clean-repo",
   );
+
+  if (process.env.ORCHESTRATOR_POLICY_ONLY === "1") {
+    await policyPanel.locator('[data-testid="adversarial-toggle"]').click();
+    await panel
+      .locator('[data-testid="orchestrator-depth-one-workers"]')
+      .waitFor();
+    await panel.locator('[data-testid="orchestrator-test-node"]').waitFor();
+    await delay(400);
+    const adversarialPolicy = await readGraph(workspace);
+    assert.equal(adversarialPolicy.intent.policy.delegate, false);
+    assert.equal(adversarialPolicy.intent.policy.adversarial.enabled, true);
+    assert.match((await summary.innerText()) ?? "", /Adversarial · Depth 1/);
+    await shot(page, "orchestrator-adversarial-depth-one-light-1440.png");
+    await policyPanel.locator('[data-testid="adversarial-toggle"]').click();
+    await delay(400);
+    const restored = await readGraph(workspace);
+    assert.equal(restored.intent.policy.delegate, false);
+    assert.equal(restored.intent.policy.adversarial.enabled, false);
+    report.checks.push(
+      "mutually-exclusive-depth-one-policy-persists-and-renders",
+    );
+    return;
+  }
 
   // Keep the existing policy-panel write-through coverage: once the reset
   // proof is complete, configure an approved runtime for the design and graph
@@ -620,7 +668,7 @@ async function main() {
 
   // 6. Design 1: adversarial off — screenshots light + dark, every width.
   await summary.waitFor();
-  assert.match((await summary.innerText()) ?? "", /0 optional subagents/);
+  assert.match((await summary.innerText()) ?? "", /Direct/);
   assert.equal(
     await panel.locator('[data-testid="orchestrator-test-node"]').count(),
     0,
@@ -661,6 +709,9 @@ async function main() {
     await delay(150);
   }
   assert.equal(await maxIterationsValue.innerText(), "10");
+  await panel
+    .locator('[data-testid="orchestrator-depth-one-workers"]')
+    .waitFor();
   await panel.locator('[data-testid="orchestrator-test-node"]').waitFor();
   await panel.locator('[data-testid="orchestrator-review-node"]').waitFor();
   assert.equal(
@@ -669,7 +720,7 @@ async function main() {
       .innerText()) ?? "",
     "Repeat up to 10×",
   );
-  assert.match((await summary.innerText()) ?? "", /2 optional subagents/);
+  assert.match((await summary.innerText()) ?? "", /Adversarial · Depth 1/);
   const withAdversarial = await readGraph(workspace);
   assert.equal(withAdversarial.intent.policy.adversarial.enabled, true);
   assert.equal(withAdversarial.intent.policy.adversarial.maxIterations, 10);

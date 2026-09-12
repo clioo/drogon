@@ -12,6 +12,7 @@ import {
   Maximize,
   Play,
   Shield,
+  Users,
 } from "lucide-react";
 import type {
   GraphPolicy,
@@ -466,9 +467,10 @@ export function OrchestratorCanvas({
   const narrow = viewportWidth > 0 && viewportWidth < 900;
   const executionActive =
     durableRun?.status === "running" || durableRun?.status === "stopping";
-  const previewHasLoop = executionActive
-    ? durableRun.policy.adversarial.enabled
-    : policy.adversarial.enabled;
+  const previewPolicy = executionActive ? durableRun.policy : policy;
+  const previewHasLoop = previewPolicy.adversarial.enabled;
+  const previewDelegates =
+    previewPolicy.delegate || previewPolicy.adversarial.enabled;
   useEffect(() => {
     if (!viewport.current) return;
     const resize = () => {
@@ -504,6 +506,7 @@ export function OrchestratorCanvas({
     viewportWidth,
     narrow,
     previewHasLoop,
+    previewDelegates,
     durableRun?.status,
     policy.adversarial.enabled,
     durableRun?.policy.adversarial.enabled,
@@ -760,6 +763,7 @@ export function OrchestratorCanvas({
                   <div className="flex flex-wrap gap-1">
                     <Chip>{effectiveMain.harness}</Chip>
                     <Chip>{effectiveMain.model || "Harness default"}</Chip>
+                    {previewDelegates ? <Chip>Director</Chip> : null}
                   </div>
                   <p className="line-clamp-3 text-xs text-muted-foreground">
                     {effectiveMain.prompt || "Configure the main task"}
@@ -773,6 +777,35 @@ export function OrchestratorCanvas({
                   stoppingMainSession={stoppingMainSession}
                 />
               )}
+              {previewDelegates ? (
+                <>
+                  <ArrowRight
+                    className={`size-6 shrink-0 text-muted-foreground ${narrow ? "rotate-90" : ""}`}
+                    aria-hidden
+                  />
+                  <div
+                    className="flex w-48 flex-col gap-1.5 rounded-lg border border-border bg-card p-3"
+                    data-testid="orchestrator-depth-one-workers"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Users
+                        className="size-4 text-muted-foreground"
+                        aria-hidden
+                      />
+                      <span className="text-sm font-medium">
+                        Implementation workers
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      <Chip>Depth 1</Chip>
+                      <Chip>Subagent policy</Chip>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Planned and supervised by the main agent
+                    </p>
+                  </div>
+                </>
+              ) : null}
               <ArrowRight
                 className={`size-6 shrink-0 text-muted-foreground ${narrow ? "rotate-90" : ""}`}
                 aria-hidden
@@ -895,7 +928,9 @@ export function OrchestratorCanvas({
                 className="text-xs text-muted-foreground"
                 data-testid="orchestrator-no-subagents-caption"
               >
-                No optional subagents enabled
+                {previewDelegates
+                  ? "Delegate mode · depth-1 implementation workers"
+                  : "Direct mode · main agent works without subagents"}
               </p>
             )}
           </div>

@@ -398,6 +398,12 @@ pub struct GraphPolicy {
 
 impl GraphPolicy {
     pub fn validate(&self) -> Result<(), RpcError> {
+        if self.delegate && self.adversarial.enabled {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "Delegate and adversarial testing are mutually exclusive execution modes.",
+            ));
+        }
         if self.approved_runtimes.len() > MAX_POLICY_APPROVED_RUNTIMES {
             return Err(RpcError::new(
                 "invalid_argument",
@@ -1149,7 +1155,7 @@ mod tests {
                     enabled: true,
                     max_iterations: 10,
                 },
-                delegate: true,
+                delegate: false,
             },
         };
         intent.validate().unwrap();
@@ -1160,9 +1166,24 @@ mod tests {
         );
         assert_eq!(value["policy"]["fallbackRuntime"]["model"], "qwen3-coder");
         assert_eq!(value["policy"]["adversarial"]["maxIterations"], 10);
-        assert_eq!(value["policy"]["delegate"], true);
+        assert_eq!(value["policy"]["delegate"], false);
         let back: GraphIntent = serde_json::from_value(value).unwrap();
         assert_eq!(back, intent);
+    }
+
+    #[test]
+    fn delegate_and_adversarial_modes_are_mutually_exclusive() {
+        let policy = GraphPolicy {
+            delegate: true,
+            adversarial: GraphAdversarialPolicy {
+                enabled: true,
+                max_iterations: 3,
+            },
+            ..GraphPolicy::default()
+        };
+        let error = policy.validate().unwrap_err();
+        assert_eq!(error.code, "invalid_argument");
+        assert!(error.message.contains("mutually exclusive"));
     }
 
     #[test]

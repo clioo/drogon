@@ -152,6 +152,24 @@ impl Drop for Fixture {
 #[test]
 fn daemon_runs_off_mode_and_both_roles_with_snapshot_policy_and_fallback() {
     let mut fixture = Fixture::new();
+    let invalid = fixture.engine.dispatch(Request {
+        protocol: PROTOCOL_VERSION,
+        request_id: uuid::Uuid::new_v4().to_string(),
+        auth: None,
+        method: "graph.write_policy".into(),
+        params: json!({
+            "workspaceId": fixture.workspace,
+            "policy": {
+                "approvedRuntimes": [],
+                "fallbackRuntime": null,
+                "adversarial": {"enabled": true, "maxIterations": 3},
+                "delegate": true
+            }
+        }),
+    });
+    assert!(!invalid.ok);
+    assert_eq!(invalid.error.unwrap().code, "invalid_argument");
+
     fixture.policy(false, 2);
     fixture.start();
     // Pending work persists across a daemon reconstruction before any worker launches.
