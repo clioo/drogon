@@ -55,7 +55,7 @@ export type StartLoopInput = {
 function reviewNodePayload(nodeId: string, prompt: string, verifyCommand: string): Record<string, unknown> {
   return {
     id: nodeId,
-    title: `Adversarial review (${nodeId})`,
+    title: `Adversarial test (${nodeId})`,
     harness: ADVERSARIAL_HARNESS,
     model: ADVERSARIAL_MODEL,
     dependsOn: [],
@@ -68,7 +68,7 @@ function reviewNodePayload(nodeId: string, prompt: string, verifyCommand: string
 function fixNodePayload(nodeId: string, prompt: string): Record<string, unknown> {
   return {
     id: nodeId,
-    title: `Adversarial fix (${nodeId})`,
+    title: `Code review (${nodeId})`,
     harness: ADVERSARIAL_HARNESS,
     model: ADVERSARIAL_MODEL,
     dependsOn: [],
