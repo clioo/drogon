@@ -354,8 +354,13 @@ fn one_event_produces_exactly_one_dispatch() {
     assert!(prompts[0].contains(&event_id));
     assert!(prompts[0].contains("drogon-cli worktree create"));
     assert!(prompts[0].contains("drogon-cli harness start"));
+    assert!(prompts[0].contains("--json"));
+    assert!(prompts[0].contains(".result.workspaceId"));
+    assert!(prompts[0].contains(".result.id"));
+    assert!(prompts[0].contains(".result.incarnation"));
     assert!(prompts[0].contains("--permission-mode unattended"));
     assert!(prompts[0].contains("terminal wait --session <id>"));
+    assert!(prompts[0].contains("--timeout-ms 900000"));
     assert!(prompts[0].contains("terminal read"));
     assert!(!prompts[0].contains("terminal send"));
 }
