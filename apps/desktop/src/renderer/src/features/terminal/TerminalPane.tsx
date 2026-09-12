@@ -141,6 +141,8 @@ import {
   createTerminalPanePaste,
   registerTerminalPanePasteListeners,
 } from "./terminal-pane-paste";
+import type { TerminalFileDropPayload } from "../../../../shared/terminal-file-drop-contract";
+import { registerTerminalInternalFileDropListeners } from "./terminal-file-drop";
 import {
   windowBrowserBridge,
   readOpenLinksInApp,
@@ -254,6 +256,7 @@ function unregisterTerminalDebugHandle(sessionId: string, terminal: Terminal) {
 
 export function TerminalPane({
   session,
+  tabId,
   fontSize,
   fontFamily,
   fontWeight,
@@ -268,6 +271,8 @@ export function TerminalPane({
   onDismissRestoredBanner,
 }: {
   session: Session;
+  /** Root tab identity, used to keep native drops inside the owning tab. */
+  tabId?: string;
   /** Terminal font size in px, mirrored from the settings store by App. */
   fontSize: number;
   /**
@@ -963,6 +968,35 @@ export function TerminalPane({
       report,
     });
     paste.bindTerminal(terminal);
+    const disposeInternalFileDrop = registerTerminalInternalFileDropListeners({
+      container: mount,
+      workspaceId: session.workspaceId,
+      resolveWorkspacePath: async () => {
+        try {
+          const result = await window.drogon.workspaces();
+          if (!result.ok) return null;
+          return (
+            result.result.workspaces.find(
+              (workspace) => workspace.id === sessionRef.current.workspaceId,
+            )?.path ?? null
+          );
+        } catch {
+          return null;
+        }
+      },
+      pasteFilePaths: (paths) => paste.pasteFilePaths(paths),
+      focus: () => terminal.focus(),
+      report,
+    });
+    const disposeNativeFileDrop =
+      window.drogon.terminalFileDrop?.onDrop(
+        (payload: TerminalFileDropPayload) => {
+          if (payload.paneLeafId !== sessionRef.current.id) return;
+          if (tabId !== undefined && payload.tabId !== tabId) return;
+          live.current?.focus();
+          void paste.pasteFilePaths(payload.paths);
+        },
+      ) ?? (() => undefined);
     const disposePasteListeners = registerTerminalPanePasteListeners({
       container: mount,
       paste,
@@ -1329,6 +1363,8 @@ export function TerminalPane({
       disposeTerminalWebglAddon(webgl.addon);
       webgl.addon = null;
       disposePasteListeners();
+      disposeInternalFileDrop();
+      disposeNativeFileDrop();
       disposeBell.dispose();
       disposeLinkClickPriming.dispose();
       linkPointerGesture.current?.dispose();

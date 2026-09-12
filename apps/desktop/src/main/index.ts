@@ -101,6 +101,7 @@ import {
 // daemon-restart.ts; this file only gates the channel and builds its deps.
 import { handleDaemonRestart } from "./daemon-restart";
 import { installNativeThemeBridge } from "./native-theme-bridge";
+import { registerTerminalFileDropBridge } from "./terminal-file-drop";
 // R1-A: self-registering usage IPC (snapshot/refresh/awake); the module owns
 // its channels and validation, this line only loads it.
 import { registerUsageIpc, disposeUsage, getUsageStore } from "./usage/service";
@@ -915,6 +916,7 @@ if (!holdsSingleInstanceLock) {
     registerAppMenuBar();
     registerAppMenuIpc();
     registerBridge();
+    registerTerminalFileDropBridge(() => window);
     registerDaemonRestart();
     registerDaemonUpdateStatePull();
     registerNativeThemeBridge();
