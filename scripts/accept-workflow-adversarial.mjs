@@ -100,8 +100,8 @@ async function findVerifiedRuntimeSource() {
     "mentu-recipes",
   );
   if (existsSync(bundled)) return bundled;
-  // A permission-denied entry anywhere under /private/tmp must not abort
-  // the whole search (shelling out to `find` does exactly that — a
+  // A permission-denied entry anywhere under the OS temp directory must not
+  // abort the whole search (shelling out to `find` does exactly that — a
   // nonzero exit from ONE unreadable directory loses every match `find`
   // already printed), so this walks directly and skips what it cannot read.
   const { readdir } = await import("node:fs/promises");
@@ -131,11 +131,12 @@ async function findVerifiedRuntimeSource() {
     }
     return null;
   }
-  const found = await walk("/private/tmp", 6);
+  const scratchRoot = tmpdir();
+  const found = await walk(scratchRoot, 6);
   if (found) return found;
   throw new Error(
     "no verified mentu-recipes runtime found (bundled resources absent and no " +
-      `sha256-matching (${MENTU_LOCK_SHA256}) copy under /private/tmp)`,
+      `sha256-matching (${MENTU_LOCK_SHA256}) copy under the OS temp directory)`,
   );
 }
 
@@ -228,10 +229,10 @@ async function main() {
   // A SHORT prefix matters: `native-client.ts`'s `resolveEndpointPath` joins
   // `<dataDir>/runtime-v1.sock` with no long-path fallback (unlike the Rust
   // endpoint, which has one — see `crates/drogond/src/endpoint.rs`), and
-  // macOS's AF_UNIX `sun_path` is 104 bytes. `realpath()` turns the tmp
-  // root into `/private/var/folders/.../T/...`, so a longer prefix here
-  // silently produces `connect EINVAL` in the real app while `drogon-cli`
-  // (which the Rust side accepted) keeps working — proven the hard way.
+  // macOS's AF_UNIX `sun_path` is 104 bytes. `realpath()` can lengthen the
+  // tmp root, so a longer prefix here silently produces `connect EINVAL` in
+  // the real app while `drogon-cli` (which the Rust side accepted) keeps
+  // working — proven the hard way.
   const fixture = await mkdtemp(path.join(tmpdir(), "wfadv-"));
   dataDir = path.join(fixture, "data");
   report.dataDir = dataDir;

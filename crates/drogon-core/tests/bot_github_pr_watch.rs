@@ -724,7 +724,7 @@ fn a_watch_fires_once_per_new_pull_request_and_seeds_instead_of_catching_up() {
     assert_eq!(view["filter"], "assigned");
     assert_eq!(view["caseHarness"], "codex");
     assert_eq!(view["caseSkills"], json!(["drogon-cli", "frontend-review"]));
-    assert_eq!(view["approved"], true);
+    assert_eq!(view["approved"], json!(true));
     assert!(
         view["firing"].is_null(),
         "an unbound watch releases nothing, so it has no firing record: {view:?}"
@@ -1176,7 +1176,7 @@ fn two_repositories_sharing_a_pull_number_never_collapse_into_one_worktree() {
         ],
         "the names are case-scoped: {names:?}"
     );
-    assert_eq!(names[0] != names[1], true);
+    assert!(names[0] != names[1]);
 
     for session in &sessions {
         fx.close_session(session);
