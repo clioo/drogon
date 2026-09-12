@@ -12,6 +12,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+
 use drogon_protocol::RpcError;
 use drogon_protocol::mentu::{
     MAX_MENTU_EVIDENCE_BYTES, MENTU_EVIDENCE_CONTENT_TRUNCATED, MENTU_EVIDENCE_OUTSIDE_RUN_DIR,
@@ -205,8 +208,41 @@ pub fn shell_step_stderr_tail(
     if error_file.is_empty() || error_file.contains('/') || error_file.contains('\\') {
         return None;
     }
-    let path = run_dir(workspace_root, mentu_run_id).ok()?.join(error_file);
-    let stderr = fs::read_to_string(path).ok()?;
+    let canonical_run_dir = run_dir(workspace_root, mentu_run_id)
+        .ok()?
+        .canonicalize()
+        .ok()?;
+    let path = canonical_run_dir.join(error_file);
+    if !path.starts_with(&canonical_run_dir)
+        || !fs::symlink_metadata(&path).ok()?.file_type().is_file()
+    {
+        return None;
+    }
+    let resolved = path.canonicalize().ok()?;
+    if !resolved.starts_with(&canonical_run_dir)
+        || !fs::metadata(&resolved).ok()?.file_type().is_file()
+    {
+        return None;
+    }
+    // Keep the lexical/canonical checks above for containment and reject a
+    // replacement symlink at open time as well (the record is untrusted).
+    let mut file = {
+        #[cfg(unix)]
+        {
+            fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&resolved)
+                .ok()?
+        }
+        #[cfg(not(unix))]
+        {
+            fs::File::open(&resolved).ok()?
+        }
+    };
+    use std::io::Read as _;
+    let mut stderr = String::new();
+    file.read_to_string(&mut stderr).ok()?;
     let stderr = stderr.trim();
     if stderr.is_empty() {
         return None;
@@ -1024,6 +1060,29 @@ mod tests {
             output.error.as_deref(),
             Some(MENTU_EVIDENCE_OUTSIDE_RUN_DIR)
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stderr_tail_does_not_follow_symlink_outside_run_dir() {
+        let workspace = tempfile::tempdir().unwrap();
+        let run_dir = workspace
+            .path()
+            .join(".mentu")
+            .join("runs")
+            .join("run_stderr_symlink");
+        fs::create_dir_all(&run_dir).unwrap();
+        let outside = workspace.path().join("auth.json");
+        let secret = "synthetic-secret-that-must-not-escape";
+        fs::write(&outside, secret).unwrap();
+        std::os::unix::fs::symlink(&outside, run_dir.join("step.stderr")).unwrap();
+        let run_json = json!({
+            "steps": [{"backend": "shell", "exit_code": 1, "error_file": "step.stderr"}]
+        });
+
+        let tail = shell_step_stderr_tail(workspace.path(), "run_stderr_symlink", &run_json);
+
+        assert!(tail.is_none(), "refused stderr must use the generic reason");
     }
 
     #[test]
