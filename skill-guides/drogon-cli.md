@@ -535,6 +535,36 @@ same seams as above (`graph resume` reruns every non-succeeded step,
 `graph retry-step` reruns one), and `--follow` polls until the run
 settles with the same exit-status truth table.
 
+### Subagent Policy And The Adversarial Loop
+
+A graph's intent can carry a Subagent policy at `intent.policy` (visible in
+`drogon-cli graph read --workspace <ID> --json`; a workspace nobody has
+configured yet reads back an empty policy — no approved runtimes,
+adversarial off, delegate off). Read it before deciding how to act:
+
+- `policy.delegate: true` means plan and delegate instead of doing the
+  work yourself: write intent nodes for the subtasks with
+  `drogon-cli graph write-intent --workspace <ID> --file graph-intent.json`
+  and let the graph's own execution path run them, rather than doing the
+  work directly in this session.
+- `policy.adversarial.enabled: true` means the desktop runs a bounded
+  Adversarial-test / Code-review loop against a finished workflow, up to
+  `policy.adversarial.maxIterations` cycles: an adversarial-test pass that
+  tries to break the work, then an independent code-review pass that fixes
+  confirmed problems and verifies each fix. That loop is desktop-driven,
+  not something this CLI launches by hand — when it is on, leave the work
+  in a state with real, runnable checks, since those are what get
+  replayed.
+- `policy.approvedRuntimes` (an ordered list) and `policy.fallbackRuntime`
+  are the runtimes a subagent node may run under, in priority order.
+  Launch a node through that exact order with
+  `drogon-cli graph run-node-failover --workspace <ID> --node <ID> --follow`:
+  it tries each approved runtime and only reaches the fallback once every
+  approved runtime has failed; an empty policy tries only the free local
+  `pi` model, so this never costs anything by default. The result names
+  the runtime that actually ran, whether it was the fallback, and the full
+  attempt history — never a guess at what "should" have run.
+
 ## Skill Topics
 
 The `drogon-cli` guide and the orchestration guide are installable into

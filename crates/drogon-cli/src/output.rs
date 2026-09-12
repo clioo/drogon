@@ -12,7 +12,9 @@ use crate::client::{
     ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Workspace, WorkspaceList,
     Worktree, WorktreeList, WriteResult,
 };
-use drogon_protocol::graph::{Graph, GraphCompileResult, GraphNodeState};
+use drogon_protocol::graph::{
+    Graph, GraphCompileResult, GraphFailoverAttemptRecord, GraphNodeState, GraphRuntimeRef,
+};
 
 pub fn status_line(result: &StatusResult) -> String {
     [
@@ -731,6 +733,44 @@ pub fn graph_compiled(compiled: &GraphCompileResult) -> String {
 /// `graph run`: the started run plus what was compiled for it.
 pub fn graph_run_started(compiled: &GraphCompileResult, run: &MentuRun) -> String {
     format!("{}\n{}", graph_compiled(compiled), mentu_run_started(run))
+}
+
+/// `graph run-node-failover`: which runtime the Subagent policy actually
+/// picked (never the node's own stored harness/model, which is only a
+/// shape-validation default), whether it was the configured fallback, and
+/// the full attempt history for this episode so a caller sees every runtime
+/// that was tried, not just the one that won.
+pub fn graph_run_node_failover(
+    run: &MentuRun,
+    runtime: &GraphRuntimeRef,
+    is_fallback: bool,
+    attempt_number: u32,
+    attempts: &[GraphFailoverAttemptRecord],
+) -> String {
+    let mut lines = vec![format!(
+        "Ran on {}{}{} (attempt {attempt_number}).",
+        runtime.harness,
+        if runtime.model.is_empty() {
+            String::new()
+        } else {
+            format!("/{}", runtime.model)
+        },
+        if is_fallback { ", the fallback runtime" } else { "" },
+    )];
+    for attempt in attempts {
+        let target = if attempt.model.is_empty() {
+            attempt.harness.clone()
+        } else {
+            format!("{}/{}", attempt.harness, attempt.model)
+        };
+        let mut line = format!("  attempt: {target} [{}]", attempt.outcome);
+        if let Some(reason) = &attempt.reason {
+            line.push_str(&format!(" - {reason}"));
+        }
+        lines.push(line);
+    }
+    lines.push(mentu_run_started(run));
+    lines.join("\n")
 }
 
 /// One line per discovered harness; unknown future harness ids render
