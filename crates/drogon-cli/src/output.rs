@@ -1340,7 +1340,9 @@ mod tests {
             "createdAt": "2026-09-05T12:00:00Z"
         }))
         .unwrap();
-        assert!(worktree_created(&created).contains("feature"));
+        let created_text = worktree_created(&created);
+        assert!(created_text.contains("feature"));
+        assert!(created_text.contains("workspace=ws2"));
         assert!(
             worktree_removed(&Removed {
                 id: "w1".into(),

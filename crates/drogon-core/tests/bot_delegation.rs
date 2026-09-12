@@ -534,6 +534,29 @@ fn outage_past_grace_skips_without_catch_up_storm() {
 // --- Per-day cap: honest state, no flood ----------------------------------
 
 #[test]
+fn already_capped_bot_settles_every_peeked_excess_event() {
+    let fixture = Fixture::new();
+    let now = Fixture::now_ms();
+    let day = utc_day_number(now);
+    fixture
+        .conn()
+        .execute(
+            "INSERT INTO bot_delegation_daily (bot_id, day_utc, count) VALUES (?1, ?2, ?3)",
+            params![fixture.bot_id, day, MAX_DELEGATIONS_PER_BOT_PER_DAY],
+        )
+        .unwrap();
+    for event_no in 1..=12u64 {
+        fixture.enqueue(event_no, now + event_no as f64);
+    }
+
+    let drained = fixture.drain(now + 100.0);
+    assert_eq!(drained.claimed, delegation::MAX_DRAIN_PER_TICK);
+    assert_eq!(drained.cap_exceeded, delegation::MAX_DRAIN_PER_TICK);
+    assert_eq!(drained.dispatched, 0);
+    assert_eq!(fixture.outbox_len(), 12 - delegation::MAX_DRAIN_PER_TICK);
+}
+
+#[test]
 fn delegation_cap_trips_with_an_honest_state() {
     let fixture = Fixture::new();
     let now = Fixture::now_ms();
