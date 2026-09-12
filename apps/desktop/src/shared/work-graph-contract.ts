@@ -171,7 +171,109 @@ export const workGraphStateNodeSchema = z
   })
   .passthrough();
 
-const intentSection = z.object({ nodes: z.array(workGraphIntentNodeSchema) });
+// ---------------------------------------------------------------------------
+// Subagent policy (mirrors `GraphPolicy`/`GraphRuntimeRef`/
+// `GraphAdversarialPolicy` in `crates/drogon-protocol/src/graph.rs` exactly).
+// Lives here, not in `graph-contract.ts` (the write/authoring seam), so the
+// read-only view — which parses raw `.drogon/graph.json` bytes through THIS
+// module alone, with no dependency on `graph-contract.ts` — can also see
+// it; `graph-contract.ts` re-exports everything below unchanged.
+//
+// This section is additive on the daemon's `GraphIntent` and, on the write
+// side, deliberately absent from the store's known-intent-key set (see the
+// Rust doc comment on `GraphIntent::policy`): a `graph.write_intent` payload
+// that omits `policy` entirely (e.g. the authoring canvas saving a node
+// edit) must leave whatever policy is already on disk untouched. The panel
+// that EDITS policy must therefore always resend the current `nodes` array
+// unchanged alongside its policy edit, exactly as the designer already does
+// for node edits today.
+// ---------------------------------------------------------------------------
+
+export const MIN_ADVERSARIAL_MAX_ITERATIONS = 1;
+export const MAX_ADVERSARIAL_MAX_ITERATIONS = 10;
+export const DEFAULT_ADVERSARIAL_MAX_ITERATIONS = 3;
+export const MAX_POLICY_APPROVED_RUNTIMES = 32;
+/** The adversarial loop always contributes exactly two role nodes to the
+ *  canvas when enabled: Adversarial test and Code review (Part 2). Typed
+ *  `number`, not the literal `2`, so `deriveSubagentPolicySummary`'s
+ *  singular/plural check stays real type-checked code instead of TS
+ *  narrowing it to an "unreachable" comparison. */
+export const ADVERSARIAL_OPTIONAL_SUBAGENT_COUNT: number = 2;
+
+export const graphRuntimeRefSchema = z
+  .object({
+    harness: z.string().min(1).max(64),
+    model: z.string().max(256).optional().default(""),
+  })
+  .strict();
+
+export type GraphRuntimeRef = z.infer<typeof graphRuntimeRefSchema>;
+
+export const graphAdversarialPolicySchema = z
+  .object({
+    enabled: z.boolean().optional().default(false),
+    maxIterations: z
+      .number()
+      .int()
+      .min(MIN_ADVERSARIAL_MAX_ITERATIONS)
+      .max(MAX_ADVERSARIAL_MAX_ITERATIONS)
+      .optional()
+      .default(DEFAULT_ADVERSARIAL_MAX_ITERATIONS),
+  })
+  .strict();
+
+export type GraphAdversarialPolicy = z.infer<typeof graphAdversarialPolicySchema>;
+
+export const graphPolicySchema = z
+  .object({
+    approvedRuntimes: z.array(graphRuntimeRefSchema).max(MAX_POLICY_APPROVED_RUNTIMES).optional().default([]),
+    fallbackRuntime: graphRuntimeRefSchema.nullable().optional().default(null),
+    adversarial: graphAdversarialPolicySchema.optional().default({
+      enabled: false,
+      maxIterations: DEFAULT_ADVERSARIAL_MAX_ITERATIONS,
+    }),
+    delegate: z.boolean().optional().default(false),
+  })
+  .strict();
+
+export type GraphPolicy = z.infer<typeof graphPolicySchema>;
+
+/** "Nothing configured yet" — the same state an intent written before this
+ *  field existed parses as, on both sides of the wire. */
+export const DEFAULT_GRAPH_POLICY: GraphPolicy = Object.freeze({
+  approvedRuntimes: [],
+  fallbackRuntime: null,
+  adversarial: { enabled: false, maxIterations: DEFAULT_ADVERSARIAL_MAX_ITERATIONS },
+  delegate: false,
+});
+
+/** A daemon build that predates this field omits `policy` from `graph.read`
+ *  entirely; callers should read policy through this helper rather than
+ *  reaching into `intent.policy` directly so that skew never crashes. */
+export function resolveGraphPolicy(intent: { policy?: GraphPolicy | null }): GraphPolicy {
+  return intent.policy ?? DEFAULT_GRAPH_POLICY;
+}
+
+/** The exact "3 approved · 1 fallback · 0 optional subagents" line (Part 1).
+ *  Pure and derived — never a separately-tracked value that could drift
+ *  from the policy it summarizes. Delegate does not add canvas nodes by
+ *  itself; only the adversarial loop's two role nodes count as "optional
+ *  subagents" today. */
+export function deriveSubagentPolicySummary(policy: GraphPolicy): string {
+  const approved = policy.approvedRuntimes.length;
+  const fallback = policy.fallbackRuntime ? 1 : 0;
+  const optional = policy.adversarial.enabled ? ADVERSARIAL_OPTIONAL_SUBAGENT_COUNT : 0;
+  const subagentWord = optional === 1 ? "subagent" : "subagents";
+  return `${approved} approved · ${fallback} fallback · ${optional} optional ${subagentWord}`;
+}
+
+const intentSection = z.object({
+  nodes: z.array(workGraphIntentNodeSchema),
+  // Optional: an older daemon build (or a raw file written before this field
+  // existed) omits it entirely. Read through `resolveGraphPolicy` so that
+  // skew never crashes the renderer.
+  policy: graphPolicySchema.optional(),
+});
 const stateSection = z.object({
   updatedAt: isoText,
   nodes: z.array(workGraphStateNodeSchema),

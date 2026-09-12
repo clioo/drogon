@@ -30,6 +30,14 @@ const compileResult = {
   findings: [],
 };
 
+const failoverResult = {
+  run: { id: "run-1", status: "running" },
+  runtime: { harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4" },
+  isFallback: false,
+  attemptNumber: 1,
+  attempts: [{ harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4", outcome: "launched" }],
+};
+
 describe("graph bridge admission", () => {
   it("refuses a payload that carries the daemon-owned state half before any IPC", async () => {
     let called = false;
@@ -94,12 +102,48 @@ describe("graph bridge admission", () => {
     expect(resultSchemas["graph.write_intent"]).toBeDefined();
     expect(resultSchemas["graph.compile"]).toBeDefined();
     expect(resultSchemas["graph.run"]).toBeDefined();
+    expect(resultSchemas["graph.run_node_failover"]).toBeDefined();
     expect(
       resultSchemas["graph.write_intent"].safeParse(graphResult).success,
     ).toBe(true);
     expect(
       resultSchemas["graph.compile"].safeParse(compileResult).success,
     ).toBe(true);
+    expect(
+      resultSchemas["graph.run_node_failover"].safeParse(failoverResult).success,
+    ).toBe(true);
+  });
+
+  it("forwards a valid graph.run_node_failover request and validates the response", async () => {
+    let seen: { method: string; params: unknown } | null = null;
+    const result = await dispatchGraphRequest(
+      "graphRunNodeFailover",
+      { workspaceId: "ws1", nodeId: "n1" },
+      async (method, params) => {
+        seen = { method, params };
+        return { ok: true as const, result: failoverResult };
+      },
+    );
+    expect(result.ok).toBe(true);
+    expect(seen).toEqual({
+      method: "graph.run_node_failover",
+      params: { workspaceId: "ws1", nodeId: "n1" },
+    });
+    if (result.ok) expect(result.result).toEqual(failoverResult);
+  });
+
+  it("refuses a graph.run_node_failover request missing nodeId", async () => {
+    let called = false;
+    const result = await dispatchGraphRequest(
+      "graphRunNodeFailover",
+      { workspaceId: "ws1" },
+      async () => {
+        called = true;
+        return { ok: true, result: failoverResult };
+      },
+    );
+    expect(result.ok).toBe(false);
+    expect(called).toBe(false);
   });
 
   it("refuses a daemon response that does not match the graph contract", async () => {

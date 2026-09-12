@@ -66,6 +66,10 @@ describe("work-graph-source", () => {
         ok: false as const,
         error: { code: "x", message: "unused", retryable: false },
       }),
+      graphRunNodeFailover: async () => ({
+        ok: false as const,
+        error: { code: "x", message: "unused", retryable: false },
+      }),
     };
     const fileBridge: FileBridge = {
       fileRead: async () => {
@@ -134,6 +138,10 @@ describe("work-graph-source", () => {
         error: { code: "x", message: "unused", retryable: false },
       }),
       graphRun: async () => ({
+        ok: false as const,
+        error: { code: "x", message: "unused", retryable: false },
+      }),
+      graphRunNodeFailover: async () => ({
         ok: false as const,
         error: { code: "x", message: "unused", retryable: false },
       }),

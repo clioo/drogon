@@ -21,7 +21,8 @@ import type {
   MentuBridge,
   MentuRunEvidenceResult,
 } from "../../../../shared/mentu-contract";
-import type { Result } from "../../../../shared/session-contract";
+import type { GraphBridge } from "../../../../shared/graph-contract";
+import type { Result, Session } from "../../../../shared/session-contract";
 import type { WorkGraphDocument } from "../../../../shared/work-graph-contract";
 import { WorkGraphPane } from "./WorkGraphPane";
 
@@ -409,5 +410,120 @@ describe("WorkGraphPane", () => {
         /\.fileWrite\(|\.fileCreate\(|\.fileRename\(|\.fileDelete\(/,
       );
     }
+  });
+});
+
+function graphBridgeWith(graph: WorkGraphDocument): GraphBridge {
+  return {
+    graphRead: async () => ({ ok: true, result: { graph } }),
+    graphWriteIntent: async () => ({
+      ok: false,
+      error: { code: "x", message: "unused", retryable: false },
+    }),
+    graphCompile: async () => ({
+      ok: false,
+      error: { code: "x", message: "unused", retryable: false },
+    }),
+    graphRun: async () => ({
+      ok: false,
+      error: { code: "x", message: "unused", retryable: false },
+    }),
+    graphRunNodeFailover: async () => ({
+      ok: false,
+      error: { code: "x", message: "unused", retryable: false },
+    }),
+  };
+}
+
+function emptyGraph(): WorkGraphDocument {
+  return {
+    version: 1,
+    intent: { nodes: [] },
+    state: { updatedAt: "now", nodes: [] },
+  } as unknown as WorkGraphDocument;
+}
+
+function liveSession(): Session {
+  return {
+    id: "s1",
+    workspaceId: "ws",
+    hostId: "host",
+    incarnation: "inc-1",
+    command: "claude",
+    args: [],
+    cols: 80,
+    rows: 24,
+    verdict: "live",
+    exitCode: null,
+    createdAt: "2026-01-01T00:00:00Z",
+    harnessId: "claude",
+  } as Session;
+}
+
+describe("WorkGraphPane orchestrator entry point", () => {
+  afterEach(cleanup);
+
+  it("switches to the Orchestrator canvas and threads the real main session through", async () => {
+    const fileBridge = {
+      fileRead: async () => ({
+        ok: false as const,
+        error: { code: "not_found", message: "unused in this test", retryable: false },
+      }),
+    } as unknown as FileBridge;
+    render(
+      <WorkGraphPane
+        fileBridge={fileBridge}
+        graphBridge={graphBridgeWith(emptyGraph())}
+        hostId="host"
+        workspaceId="ws"
+        mainSession={liveSession()}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("work-graph-orchestrator"));
+    await screen.findByTestId("orchestrator-canvas");
+    expect(screen.getByTestId("orchestrator-main-agent").getAttribute("data-state")).toBe("live");
+    expect(screen.getByTestId("subagent-policy-panel")).toBeTruthy();
+  });
+
+  it("renders the honest no-session disabled state when there is no main session", async () => {
+    const fileBridge = {
+      fileRead: async () => ({
+        ok: false as const,
+        error: { code: "not_found", message: "unused in this test", retryable: false },
+      }),
+    } as unknown as FileBridge;
+    render(
+      <WorkGraphPane
+        fileBridge={fileBridge}
+        graphBridge={graphBridgeWith(emptyGraph())}
+        hostId="host"
+        workspaceId="ws"
+        mainSession={null}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("work-graph-orchestrator"));
+    await screen.findByTestId("orchestrator-disabled");
+  });
+
+  it("Back returns to the read-only Work Graph view", async () => {
+    const fileBridge = {
+      fileRead: async () => ({
+        ok: false as const,
+        error: { code: "not_found", message: "unused in this test", retryable: false },
+      }),
+    } as unknown as FileBridge;
+    render(
+      <WorkGraphPane
+        fileBridge={fileBridge}
+        graphBridge={graphBridgeWith(emptyGraph())}
+        hostId="host"
+        workspaceId="ws"
+        mainSession={liveSession()}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("work-graph-orchestrator"));
+    await screen.findByTestId("orchestrator-canvas");
+    fireEvent.click(screen.getByTestId("orchestrator-back"));
+    await screen.findByTestId("work-graph-orchestrator");
   });
 });

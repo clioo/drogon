@@ -1,20 +1,20 @@
 // @vitest-environment jsdom
 // MIT Copyright (c) 2026 Lovecast Inc.
 // End-to-end wiring test over a FAKE graph bridge: proves the hook really
-// drives `graph.write_intent` → `graph.compile` → `graph.run` for each
-// cycle (never a second engine), appends nodes without ever touching the
-// base graph's own nodes, and reaches the exact required outcomes —
-// "passed" after a genuine daemon-observed success, and the literal
-// "Stopped after N review cycles, still failing." at the cap — driven
-// entirely by OBSERVED node status from `graph.read`, never inferred.
+// drives `graph.write_intent` → `graph.run_node_failover` for each cycle
+// (never a second engine, never a hardcoded runtime — the Subagent
+// policy's failover seam), appends nodes without ever touching the base
+// graph's own nodes, and reaches the exact required outcomes — "passed"
+// after a genuine daemon-observed success, and the literal "Stopped after
+// N review cycles, still failing." at the cap — driven entirely by
+// OBSERVED node status from `graph.read`, never inferred.
 
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type {
   GraphBridge,
-  GraphCompileParams,
+  GraphNodeParams,
   GraphResult,
-  GraphRunParams,
   GraphWriteIntentParams,
 } from "../../../../shared/graph-contract";
 import type { WorkGraphStatus } from "../../../../shared/work-graph-contract";
@@ -27,8 +27,7 @@ const TOKEN = runToken(BASE_RUN_ID);
 
 type Recorded = {
   writes: GraphWriteIntentParams[];
-  compiles: GraphCompileParams[];
-  runs: GraphRunParams[];
+  failovers: GraphNodeParams[];
 };
 
 function makeBridge(): {
@@ -36,7 +35,7 @@ function makeBridge(): {
   recorded: Recorded;
   setStatus: (nodeId: string, status: WorkGraphStatus) => void;
 } {
-  const recorded: Recorded = { writes: [], compiles: [], runs: [] };
+  const recorded: Recorded = { writes: [], failovers: [] };
   let intentNodes: Record<string, unknown>[] = [
     { id: "n1", title: "n1", harness: "shell", model: "", dependsOn: [], prompt: "x", enabled: true },
     { id: "n2", title: "n2", harness: "shell", model: "", dependsOn: [], prompt: "x", enabled: true },
@@ -45,6 +44,11 @@ function makeBridge(): {
     ["n1", "succeeded"],
     ["n2", "succeeded"],
   ]);
+
+  const notUsed = async () => ({
+    ok: false as const,
+    error: { code: "not_implemented", message: "not used in this test", retryable: false },
+  });
 
   const bridge: GraphBridge = {
     graphRead: async () => {
@@ -62,8 +66,8 @@ function makeBridge(): {
       recorded.writes.push(params);
       intentNodes = (params.intent as { nodes: Record<string, unknown>[] }).nodes;
       const newNode = intentNodes[intentNodes.length - 1];
-      // Not yet running until `graph.run` actually launches it — mirrors
-      // the daemon reporting `idle` for a node with no run yet.
+      // Not yet running until `graph.run_node_failover` actually launches
+      // it — mirrors the daemon reporting `idle` for a node with no run yet.
       statuses.set(newNode.id as string, "idle");
       return {
         ok: true,
@@ -76,23 +80,21 @@ function makeBridge(): {
         },
       };
     },
-    graphCompile: async (params) => {
-      recorded.compiles.push(params);
+    graphCompile: notUsed,
+    graphRun: notUsed,
+    graphRunNodeFailover: async (params) => {
+      recorded.failovers.push(params);
+      statuses.set(params.nodeId, "running");
       return {
         ok: true,
         result: {
-          recipeId: "r",
-          recipe: {},
-          contentHash: "hash",
-          nodeIds: [params.nodeId as string],
-          findings: [],
+          run: { id: `run-${params.nodeId}`, status: "running" },
+          runtime: { harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4" },
+          isFallback: false,
+          attemptNumber: 1,
+          attempts: [{ harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4", outcome: "launched" }],
         },
       };
-    },
-    graphRun: async (params) => {
-      recorded.runs.push(params);
-      statuses.set(params.nodeId as string, "running");
-      return { ok: true, result: { run: { id: `run-${params.nodeId}`, status: "running" }, compile: { recipeId: "r", recipe: {}, contentHash: "hash", nodeIds: [params.nodeId as string], findings: [] } } };
     },
   };
 
@@ -122,7 +124,7 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
     });
 
     const review1 = reviewNodeId(TOKEN, 1);
-    await waitFor(() => expect(recorded.runs.map((r) => r.nodeId)).toContain(review1));
+    await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(review1));
     expect(view.result.current.ledger?.phase).toBe("reviewing");
 
     // The base graph's own nodes must never be rewritten away.
@@ -135,12 +137,12 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
     // The reviewer "finishes" and found problems.
     setStatus(review1, "failed");
     const fix1 = fixNodeId(TOKEN, 1);
-    await waitFor(() => expect(recorded.runs.map((r) => r.nodeId)).toContain(fix1));
+    await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(fix1));
     expect(view.result.current.ledger?.phase).toBe("fixing");
 
     setStatus(fix1, "succeeded");
     const review2 = reviewNodeId(TOKEN, 2);
-    await waitFor(() => expect(recorded.runs.map((r) => r.nodeId)).toContain(review2));
+    await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(review2));
     expect(view.result.current.ledger?.cycle).toBe(2);
 
     setStatus(review2, "succeeded");
@@ -149,7 +151,7 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
 
     // Passing never launches a third cycle.
     await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(recorded.runs).toHaveLength(3);
+    expect(recorded.failovers).toHaveLength(3);
   });
 
   it("stops at the cap with the exact required message when it never passes", async () => {
@@ -168,15 +170,15 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
     });
 
     const review1 = reviewNodeId(TOKEN, 1);
-    await waitFor(() => expect(recorded.runs.map((r) => r.nodeId)).toContain(review1));
+    await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(review1));
     setStatus(review1, "failed");
 
     const fix1 = fixNodeId(TOKEN, 1);
-    await waitFor(() => expect(recorded.runs.map((r) => r.nodeId)).toContain(fix1));
+    await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(fix1));
     setStatus(fix1, "succeeded");
 
     const review2 = reviewNodeId(TOKEN, 2);
-    await waitFor(() => expect(recorded.runs.map((r) => r.nodeId)).toContain(review2));
+    await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(review2));
     setStatus(review2, "failed");
 
     await waitFor(() => expect(view.result.current.ledger?.phase).toBe("stopped_failing"));
@@ -184,7 +186,7 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
       "Stopped after 2 review cycles, still failing.",
     );
     // No fix for cycle 2 was ever attempted — the cap stops it cold.
-    expect(recorded.runs.map((r) => r.nodeId)).not.toContain(fixNodeId(TOKEN, 2));
+    expect(recorded.failovers.map((r) => r.nodeId)).not.toContain(fixNodeId(TOKEN, 2));
   });
 
   it("never starts a review when the base workflow itself did not fully succeed", async () => {
@@ -205,7 +207,7 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
 
     await waitFor(() => expect(view.result.current.ledger?.phase).toBe("base_failed"));
     expect(recorded.writes).toHaveLength(0);
-    expect(recorded.runs).toHaveLength(0);
+    expect(recorded.failovers).toHaveLength(0);
   });
 
   it("persists the ledger through setPersist on every transition", async () => {
@@ -226,7 +228,7 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
     const review1 = reviewNodeId(TOKEN, 1);
     // Wait until the review node has genuinely been launched (not just the
     // ledger's initial "awaiting_base" persist) before flipping its status.
-    await waitFor(() => expect(recorded.runs.map((r) => r.nodeId)).toContain(review1));
+    await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(review1));
     const afterLaunch = persisted.length;
     setStatus(review1, "succeeded");
     await waitFor(() => expect(view.result.current.ledger?.phase).toBe("passed"), { timeout: 3000 });

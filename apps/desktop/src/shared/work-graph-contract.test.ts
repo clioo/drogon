@@ -7,7 +7,9 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_GRAPH_POLICY,
   parseWorkGraphDocument,
+  resolveGraphPolicy,
   stateNodeFor,
   WORK_GRAPH_VERSION,
   type WorkGraphDocument,
@@ -84,6 +86,30 @@ describe("parseWorkGraphDocument", () => {
     // The daemon writes the EMPTY string for a shell node, never null.
     expect(parsed.document.intent.nodes[1].model).toBe("");
     expect(parsed.document.intent.nodes[1].enabled).toBe(false);
+  });
+
+  it("carries the intent's policy section through to the parsed document", () => {
+    const document = fixtureDocument();
+    (document.intent as { policy?: unknown }).policy = {
+      approvedRuntimes: [{ harness: "opencode", model: "claude-sonnet-4" }],
+      fallbackRuntime: null,
+      adversarial: { enabled: true, maxIterations: 5 },
+      delegate: true,
+    };
+    const parsed = parseWorkGraphDocument(JSON.stringify(document));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const policy = resolveGraphPolicy(parsed.document.intent);
+    expect(policy.approvedRuntimes).toHaveLength(1);
+    expect(policy.adversarial).toEqual({ enabled: true, maxIterations: 5 });
+    expect(policy.delegate).toBe(true);
+  });
+
+  it("resolves the default policy when the document predates the field", () => {
+    const parsed = parseWorkGraphDocument(JSON.stringify(fixtureDocument()));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(resolveGraphPolicy(parsed.document.intent)).toEqual(DEFAULT_GRAPH_POLICY);
   });
 
   it("keeps a recorded measured zero as zero (usageKnown true)", () => {

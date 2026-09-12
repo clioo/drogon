@@ -2,11 +2,20 @@
 // The adversarial-review loop's I/O controller: the ONLY place that turns
 // the pure `advanceLoop` reducer's decisions into real daemon calls. Every
 // review/fix "cycle" goes through the SAME sanctioned seam the design
-// canvas uses — `graph.write_intent` (append one node, never touch the
-// human's own nodes or `state`), `graph.compile` (the runtime's own
-// findings, checked before anything launches), `graph.run` (the one
-// execution path) — polled through `graph.read` until the daemon reports a
-// terminal, confirmed status. Nothing here estimates a node's outcome.
+// canvas uses to APPEND a node — `graph.write_intent` (one node, never
+// touching the human's own nodes or `state`) — then launches it through
+// `graph.run_node_failover`: the Subagent policy's approved-runtime order,
+// then the fallback, the same seam any other policy-governed subagent uses
+// (`crates/drogon-core/src/graph_rpc.rs`), rather than a hardcoded model —
+// polled through `graph.read` until the daemon reports a terminal,
+// confirmed status. Nothing here estimates a node's outcome.
+//
+// The node's own stored harness/model (`ADVERSARIAL_HARNESS`/
+// `ADVERSARIAL_MODEL` below) are a SAFE DEFAULT for the payload's shape
+// validation, not what actually runs: `graph.run_node_failover` overrides
+// them per attempt with whichever runtime the workspace's Subagent policy
+// says to try — the free local model when nothing is configured yet, so
+// this loop costs nothing until someone opens the policy panel.
 //
 // Lives in `WorkGraphPane` (the parent of both the read-only view and the
 // design canvas) specifically so it keeps running across the view↔design
@@ -172,33 +181,15 @@ export function useAdversarialLoop({
           });
           return;
         }
-        const compiled = await graphBridge.graphCompile({ workspaceId, nodeId: action.nodeId });
+        const launched = await graphBridge.graphRunNodeFailover({ workspaceId, nodeId: action.nodeId });
         if (cancelled || ledgerRef.current !== current) return;
-        const errors = compiled.ok
-          ? compiled.result.findings.filter((finding) => finding.severity === "error")
-          : null;
-        if (!compiled.ok || (errors && errors.length > 0)) {
-          const reason = !compiled.ok
-            ? compiled.error.message
-            : (errors ?? []).map((finding) => `${finding.code}: ${finding.message}`).join("; ");
+        if (!launched.ok) {
           setAndPersist({
             ...advanced,
             phase: "launch_refused",
             activeNodeId: null,
             updatedAt: now,
-            message: `Cycle ${action.cycle} would not compile, so it was never run: ${reason}`,
-          });
-          return;
-        }
-        const run = await graphBridge.graphRun({ workspaceId, nodeId: action.nodeId });
-        if (cancelled || ledgerRef.current !== current) return;
-        if (!run.ok) {
-          setAndPersist({
-            ...advanced,
-            phase: "launch_refused",
-            activeNodeId: null,
-            updatedAt: now,
-            message: `Cycle ${action.cycle} could not be launched: ${run.error.message}`,
+            message: `Cycle ${action.cycle} could not be launched: ${launched.error.message}`,
           });
           return;
         }
