@@ -131,6 +131,9 @@ pub struct Worktree {
     pub branch: String,
     pub head: String,
     pub base_ref: Option<String>,
+    /// Sidebar-nesting parent; absent on the wire for a top-level worktree.
+    #[serde(default)]
+    pub parent_worktree_id: Option<String>,
     #[serde(deserialize_with = "require_rfc3339")]
     pub created_at: String,
 }

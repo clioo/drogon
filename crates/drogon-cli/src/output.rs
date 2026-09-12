@@ -94,13 +94,18 @@ pub fn project_list(list: &ProjectList) -> String {
 
 pub fn worktree_created(worktree: &Worktree) -> String {
     format!(
-        "Created worktree {} for project {} workspace={} on branch {} -> {} (head {})",
+        "Created worktree {} for project {} workspace={} on branch {} -> {} (head {}){}",
         worktree.id,
         worktree.project_id,
         worktree.workspace_id,
         worktree.branch,
         worktree.path,
-        worktree.head
+        worktree.head,
+        worktree
+            .parent_worktree_id
+            .as_deref()
+            .map(|parent| format!(" nested under {parent}"))
+            .unwrap_or_default()
     )
 }
 

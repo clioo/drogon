@@ -97,6 +97,15 @@ list a project's worktrees with `drogon-cli worktree list --project <ID>`,
 and remove one with `drogon-cli worktree rm <ID> --force`. Removal refuses
 a dirty checkout unless `--force` is passed.
 
+A worktree created from inside a Drogon session nests under the calling
+session's worktree in the sidebar (the daemon exports `DROGON_WORKSPACE_ID`
+into every session; outside a session the worktree that contains the
+current directory counts instead). That is how a subagent's worktree shows
+up under its coordinator. Pass `--parent <ID>` (a worktree id or workspaceId
+of the same project) to choose the parent yourself, or `--no-parent` for a
+top-level worktree; an explicit parent that is not in the project refuses
+the create.
+
 ## Terminals
 
 Sessions are PTY processes with a stable id plus an incarnation token:

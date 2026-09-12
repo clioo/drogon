@@ -217,6 +217,25 @@ pub fn run_cli_with(
     command.output().expect("spawn drogon-cli")
 }
 
+/// Like `run_cli_with`, from a chosen working directory: `worktree create`
+/// reads the caller's cwd when it infers a sidebar-nesting parent.
+pub fn run_cli_in(
+    data_dir: &Path,
+    cwd: &Path,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> std::process::Output {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_drogon-cli"));
+    command
+        .args(args)
+        .current_dir(cwd)
+        .env("DROGON_DATA_DIR", data_dir);
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
+    command.output().expect("spawn drogon-cli")
+}
+
 pub fn stdout(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
