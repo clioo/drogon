@@ -228,7 +228,10 @@ async function main() {
     report.dataDir = dataDir;
     report.workspace = workspace;
 
-    async function cliJson(args, { allowFailure = false, timeoutMs = 30_000 } = {}) {
+    async function cliJson(
+      args,
+      { allowFailure = false, timeoutMs = 30_000 } = {},
+    ) {
       const captured = captureProcess(
         spawn(cli, ["--data-dir", dataDir, "--json", ...args], {
           cwd: root,
@@ -336,7 +339,10 @@ async function main() {
       );
       const session = response.result;
       assert.ok(session.id, "real parent did not return a session id");
-      assert.ok(session.incarnation, "real parent did not return an incarnation");
+      assert.ok(
+        session.incarnation,
+        "real parent did not return an incarnation",
+      );
       let wait;
       try {
         wait = await cliJson(
@@ -476,7 +482,8 @@ async function main() {
 
     function evidenceDispatchRecords(value, inherited = {}, records = []) {
       if (Array.isArray(value)) {
-        for (const item of value) evidenceDispatchRecords(item, inherited, records);
+        for (const item of value)
+          evidenceDispatchRecords(item, inherited, records);
         return records;
       }
       if (!value || typeof value !== "object") return records;
@@ -484,7 +491,9 @@ async function main() {
         runId: value.runId ?? value.run_id ?? inherited.runId,
         taskId: value.taskId ?? value.task_id ?? inherited.taskId,
         coordinatorId:
-          value.coordinatorId ?? value.coordinator_id ?? inherited.coordinatorId,
+          value.coordinatorId ??
+          value.coordinator_id ??
+          inherited.coordinatorId,
         consumerGeneration:
           value.consumerGeneration ??
           value.generation ??
@@ -513,7 +522,10 @@ async function main() {
           scope.push("--coordinator-id", record.coordinatorId);
         }
         if (record.consumerGeneration != null) {
-          scope.push("--consumer-generation", String(record.consumerGeneration));
+          scope.push(
+            "--consumer-generation",
+            String(record.consumerGeneration),
+          );
         }
         try {
           const shown = await workerShow(scope, record.dispatchId);
@@ -549,15 +561,13 @@ async function main() {
         (worker) => worker.dispatchId,
       ).length;
       const transcriptEvidence = parentResult?.excerpt ?? "";
-      const graphEvidence = [
-        "graph-intent.json",
-        ".drogon/graph.json",
-      ]
+      const graphEvidence = ["graph-intent.json", ".drogon/graph.json"]
         .map((name) => files[name] ?? "")
         .join("\n");
-      const usedGraphCli = /run-node-failover|graph-intent|graph write-intent/i.test(
-        `${transcriptEvidence}\n${graphEvidence}`,
-      );
+      const usedGraphCli =
+        /run-node-failover|graph-intent|graph write-intent/i.test(
+          `${transcriptEvidence}\n${graphEvidence}`,
+        );
       const fileEvidence = Object.entries(files)
         .filter(([name]) => !["AGENTS.md", "CLAUDE.md"].includes(name))
         .map(([, text]) => text)
@@ -576,11 +586,12 @@ async function main() {
         durableChildDispatches,
         independentlyVerifiedDispatches: verified.length,
         usedDrogonCliUnprompted: usedDrogonCli,
-        delegationSurface: verified.length > 0
-          ? "drogon-cli orchestration/worker-start"
-          : usedGraphCli
-            ? "drogon-cli graph/run-node-failover"
-            : "none-observed",
+        delegationSurface:
+          verified.length > 0
+            ? "drogon-cli orchestration/worker-start"
+            : usedGraphCli
+              ? "drogon-cli graph/run-node-failover"
+              : "none-observed",
         transcriptEvidence,
         workspaceEvidence: files,
       };
@@ -594,8 +605,7 @@ async function main() {
           ? workers.length >= 1 &&
             workers.some(
               (worker) =>
-                worker.processVerdict === "exited" &&
-                worker.outcome == null,
+                worker.processVerdict === "exited" && worker.outcome == null,
             )
           : scenario.id === "c"
             ? verified.length >= expected &&
@@ -654,7 +664,10 @@ async function main() {
         const parentPromptWithIds = parentPrompt
           .replaceAll("{{RUN_ID}}", context.run.runId)
           .replaceAll("{{COORDINATOR_ID}}", context.run.coordinatorId)
-          .replaceAll("{{CONSUMER_GENERATION}}", String(context.run.consumerGeneration))
+          .replaceAll(
+            "{{CONSUMER_GENERATION}}",
+            String(context.run.consumerGeneration),
+          )
           .replaceAll("{{TASK_ID}}", context.taskId)
           .replaceAll("{{WORKSPACE_ID}}", workspaceId);
         scenario.parentPrompt = parentPromptWithIds;
@@ -691,13 +704,13 @@ async function main() {
 
     await runParentScenario({
       id: "a",
-      objective: "Real cheap-model delegation says hello and reports through Drogon CLI",
+      objective:
+        "Real cheap-model delegation says hello and reports through Drogon CLI",
       title: "real model hello",
       taskInstructions: workerStartInstructions(
         'Say exactly "hola desde Drogon" in your result and then complete through the CLI.',
       ),
-      parentPrompt:
-        `${parentDelegationPrelude} Delegate the child to say hello, wait for its worker_done, and summarize whether the report arrived through the coordinator mailbox.`,
+      parentPrompt: `${parentDelegationPrelude} Delegate the child to say hello, wait for its worker_done, and summarize whether the report arrived through the coordinator mailbox.`,
       policy: piPolicy,
       expectedWorkers: 1,
       afterParent: async ({ context }) => {
@@ -725,7 +738,9 @@ async function main() {
             worker.outcome === "succeeded"
               ? worker.reportResult
                 ? []
-                : ["The child reported worker_done without a structured result field."]
+                : [
+                    "The child reported worker_done without a structured result field.",
+                  ]
               : ["The child did not produce a durable worker_done report."],
         };
       },
@@ -733,13 +748,13 @@ async function main() {
 
     await runParentScenario({
       id: "b",
-      objective: "Real cheap-model policy dispatch uses the approved provider and model",
+      objective:
+        "Real cheap-model policy dispatch uses the approved provider and model",
       title: "real model policy",
       taskInstructions: workerStartInstructions(
         "Report that you were selected by policy, including the effective provider and model visible in your brief/environment.",
       ),
-      parentPrompt:
-        `${parentDelegationPrelude} This scenario specifically tests policy selection. Start one child without runtime flags, then inspect its durable launch provider/model and worker_done report. Do not guess a provider from a bare model id.`,
+      parentPrompt: `${parentDelegationPrelude} This scenario specifically tests policy selection. Start one child without runtime flags, then inspect its durable launch provider/model and worker_done report. Do not guess a provider from a bare model id.`,
       policy: piPolicy,
       expectedWorkers: 1,
       afterParent: async ({ context }) => {
@@ -782,8 +797,7 @@ async function main() {
       taskInstructions: workerStartInstructions(
         "Say which concurrent worker you are (one, two, or three) in the final report and do not wait on a PTY.",
       ),
-      parentPrompt:
-        `${parentDelegationPrelude} Create three independent child tasks named one, two, and three (you may create them with the CLI), start all three without runtime flags, and wait for three attributed worker_done reports through the CLI. Do not scrape terminal output.`,
+      parentPrompt: `${parentDelegationPrelude} Create three independent child tasks named one, two, and three (you may create them with the CLI), start all three without runtime flags, and wait for three attributed worker_done reports through the CLI. Do not scrape terminal output.`,
       policy: piPolicy,
       expectedWorkers: 3,
       afterParent: async ({ context, scenario }) => {
@@ -849,7 +863,9 @@ async function main() {
           workers: evidence,
           confusions: ok
             ? []
-            : ["At least one concurrent child lacked an exited worker_done state."],
+            : [
+                "At least one concurrent child lacked an exited worker_done state.",
+              ],
         };
       },
     });
@@ -861,12 +877,15 @@ async function main() {
       taskInstructions: workerStartInstructions(
         'Ask the coordinator exactly "Need approval to continue" with orchestration ask, wait for the reply, then include the answer in your worker_done result.',
       ),
-      parentPrompt:
-        `${parentDelegationPrelude} Start the child. Consume its question using the orchestration mailbox, reply "approved by the real coordinator", and then wait for the same child to resume and report. Never answer by writing to a PTY.`,
+      parentPrompt: `${parentDelegationPrelude} Start the child. Consume its question using the orchestration mailbox, reply "approved by the real coordinator", and then wait for the same child to resume and report. Never answer by writing to a PTY.`,
       policy: {
         ...piPolicy,
         approvedRuntimes: [
-          { harness: "pi", provider: realModel.provider, model: realModel.model },
+          {
+            harness: "pi",
+            provider: realModel.provider,
+            model: realModel.model,
+          },
         ],
       },
       expectedWorkers: 1,
@@ -932,20 +951,22 @@ async function main() {
             ? ["Coordinator rescue was required."]
             : worker.reportResult
               ? []
-              : ["The child reported worker_done without a structured result field."],
+              : [
+                  "The child reported worker_done without a structured result field.",
+                ],
         };
       },
     });
 
     await runParentScenario({
       id: "e",
-      objective: "A real worker that never reports remains outcome-less after exit",
+      objective:
+        "A real worker that never reports remains outcome-less after exit",
       title: "real model missing report",
       taskInstructions: workerStartInstructions(
         'This is an intentional failure path: before any completion report, use a shell tool to run `kill -TERM "$PPID"` and therefore terminate the Pi worker. Do not send worker_done.',
       ),
-      parentPrompt:
-        `${parentDelegationPrelude} Start the child and observe the durable worker state. It is intentionally supposed to die without worker_done; report unverifiable/outcome-less state, not success. Do not fabricate a report.`,
+      parentPrompt: `${parentDelegationPrelude} Start the child and observe the durable worker state. It is intentionally supposed to die without worker_done; report unverifiable/outcome-less state, not success. Do not fabricate a report.`,
       policy: piPolicy,
       expectedWorkers: 1,
       afterParent: async ({ context, scenario }) => {
@@ -993,7 +1014,8 @@ async function main() {
         toldOnTurnOne:
           "Repeat scenario a with Claude Code and OpenCode as the parent harness; children remain on the approved Pi/Luna policy.",
         usedDrogonCliUnprompted: null,
-        transcriptEvidence: "Not run: real inference is authorized only for Pi/Luna in this repository task.",
+        transcriptEvidence:
+          "Not run: real inference is authorized only for Pi/Luna in this repository task.",
       },
       workers: [],
       confusions: [
@@ -1011,7 +1033,10 @@ async function main() {
   } finally {
     if (daemonCapture && daemonEnv) {
       try {
-        descendants = await ownedProcessTree(daemonCapture.child.pid, daemonEnv);
+        descendants = await ownedProcessTree(
+          daemonCapture.child.pid,
+          daemonEnv,
+        );
         report.processes = { beforeShutdown: descendants };
       } catch (error) {
         report.cleanup.push(`process enumeration failed: ${error.message}`);
