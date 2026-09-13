@@ -166,10 +166,33 @@ pub fn completion_sentinel(node_id: &str) -> String {
 
 /// Compiles `selection` against `intent`. Writes nothing here; the caller
 /// persists and validates. `defaults` supplies Pi provider inputs.
+/// The one sentence that keeps a dispatched node from obeying the wrong
+/// instructions. The Subagent Policy block Drogon writes into a workspace's
+/// `AGENTS.md`/`CLAUDE.md` is a repository file every agent in that checkout
+/// reads, and under Delegate or Adversarial it says "act only as planner and
+/// director; do not implement the task yourself". A depth-one worker reads
+/// that too — and obeys it over its own task (observed in a real run: a
+/// delegated child refused to create its file and tried to delegate onward,
+/// then printed the completion line anyway). The node's own prompt is the
+/// stronger channel, so the compiler states the reader's role there.
+pub const WORKER_ROLE_NOTE: &str = "\n\nYou are a depth-one Work Graph worker that Drogon launched for this      node. The Subagent Policy block in this workspace's AGENTS.md/CLAUDE.md is addressed to the main      agent, not to you: do this task yourself and dispatch no subagents.";
+
 pub fn compile(
     intent: &GraphIntent,
     selection: &Selection,
     defaults: &PiProviderDefaults,
+) -> Result<CompiledGraph, RpcError> {
+    compile_for(intent, selection, defaults, None)
+}
+
+/// `leader` names the node that IS the workspace's main agent (the durable
+/// orchestrator's main phase), whose prompt already carries its own mode.
+/// Every other compiled node is a dispatched worker and is told so.
+pub fn compile_for(
+    intent: &GraphIntent,
+    selection: &Selection,
+    defaults: &PiProviderDefaults,
+    leader: Option<&str>,
 ) -> Result<CompiledGraph, RpcError> {
     intent.validate()?;
     let order = topological_order(intent)?;
@@ -189,7 +212,8 @@ pub fn compile(
                  Enable it in the graph, or remove it from the dependency path.",
             ));
         }
-        let (mut step, provider, mut step_findings) = node_step(node, defaults)?;
+        let (mut step, provider, mut step_findings) =
+            node_step(node, defaults, leader != Some(node.id.as_str()))?;
         if let Some((name, binding)) = provider {
             providers.insert(name, binding);
         }
@@ -291,15 +315,25 @@ const GRAPH_HARNESS_CONTEXT: &str = "You are running inside Drogon. Drogon is th
 /// with the node named.
 type NodeStep = (Value, Option<(String, Value)>, Vec<GraphFinding>);
 
-fn node_step(node: &GraphNodeIntent, defaults: &PiProviderDefaults) -> Result<NodeStep, RpcError> {
-    let prompt = if node.harness == "shell" {
+fn node_step(
+    node: &GraphNodeIntent,
+    defaults: &PiProviderDefaults,
+    worker: bool,
+) -> Result<NodeStep, RpcError> {
+    // A shell node has no agent to address; every agent-backed worker does.
+    let task = if node.harness == "shell" {
         node.prompt.clone()
+    } else if worker {
+        format!(
+            "{GRAPH_HARNESS_CONTEXT}\n\nTask:\n{}{WORKER_ROLE_NOTE}",
+            node.prompt
+        )
     } else {
         format!("{GRAPH_HARNESS_CONTEXT}\n\nTask:\n{}", node.prompt)
     };
     let mut step = json!({
         "label": node.id,
-        "prompt": prompt,
+        "prompt": task,
         "timeout": AGENT_STEP_TIMEOUT_SECONDS,
     });
     let mut provider = None;
@@ -418,11 +452,7 @@ fn node_step(node: &GraphNodeIntent, defaults: &PiProviderDefaults) -> Result<No
                 "\n\nWhen this task is complete, end your final message with exactly this \
                  line:\n{sentinel}\n"
             );
-            let prompt = format!(
-                "{}{}",
-                step["prompt"].as_str().expect("step prompt is a string"),
-                instruction
-            );
+            let prompt = format!("{task}{instruction}");
             if prompt.len() > drogon_protocol::graph::MAX_GRAPH_PROMPT_BYTES {
                 return Err(node_error(
                     &node.id,
@@ -1012,13 +1042,60 @@ mod tests {
         let step = &compiled.recipe["steps"][0];
         assert_eq!(step["verify"]["commands"], json!(["test -f out.txt"]));
         assert!(step.get("completion_keyword").is_none());
+        let prompt = step["prompt"].as_str().unwrap();
+        assert!(prompt.starts_with(GRAPH_HARNESS_CONTEXT));
+        assert!(prompt.contains("Task:\ndo n1"));
         assert!(
-            step["prompt"]
+            prompt.ends_with(WORKER_ROLE_NOTE),
+            "a dispatched node learns it is a worker even without a sentinel: {prompt}"
+        );
+    }
+
+    /// The managed policy brief is a workspace file every agent reads. A
+    /// dispatched node must be told the mode is not addressed to it; the
+    /// orchestrator's own leader node, whose prompt already carries the
+    /// mode, must NOT be told that.
+    #[test]
+    fn every_node_but_the_named_leader_is_told_it_is_a_depth_one_worker() {
+        let intent = GraphIntent {
+            nodes: vec![node("n1", "pi", &[])],
+            ..GraphIntent::default()
+        };
+        let worker = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap();
+        let prompt = worker.recipe["steps"][0]["prompt"].as_str().unwrap();
+        assert!(prompt.contains("depth-one Work Graph worker"), "{prompt}");
+        assert!(
+            prompt.contains("not to you: do this task yourself"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.trim_end().ends_with(&completion_sentinel("n1")),
+            "the completion line stays last: {prompt}"
+        );
+        let leader = compile_for(
+            &intent,
+            &Selection::Target("n1".into()),
+            &defaults(),
+            Some("n1"),
+        )
+        .unwrap();
+        assert!(
+            !leader.recipe["steps"][0]["prompt"]
                 .as_str()
                 .unwrap()
-                .starts_with(GRAPH_HARNESS_CONTEXT)
+                .contains("depth-one Work Graph worker"),
+            "the leader carries its own mode, never the worker note"
         );
-        assert!(step["prompt"].as_str().unwrap().contains("Task:\ndo n1"));
+    }
+
+    #[test]
+    fn a_shell_node_gets_no_worker_note_because_it_has_no_agent_to_address() {
+        let intent = GraphIntent {
+            nodes: vec![node("n1", "shell", &[])],
+            ..GraphIntent::default()
+        };
+        let compiled = compile(&intent, &Selection::Target("n1".into()), &defaults()).unwrap();
+        assert_eq!(compiled.recipe["steps"][0]["prompt"], "do n1");
     }
 
     /// Regression for the QA finding "the model syntax the product teaches

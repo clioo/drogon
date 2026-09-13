@@ -9,7 +9,13 @@
 // reason when there is nothing automated to run.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import type {
   GraphPolicy,
   OrchestratorRun,
@@ -220,6 +226,125 @@ describe("OrchestratorCanvas", () => {
     );
     expect(screen.getByTestId("orchestrator-test-node").dataset.active).toBe(
       "false",
+    );
+  });
+  it("keeps the live session projection and its inspector when a main task is configured", async () => {
+    // Regression for ed5747c9: the canvas branched to a task-only card
+    // whenever `configuredMain` was present, and WorkGraphPane always
+    // supplies one — so the Main agent node stopped being a projection of
+    // the real session and the inspector's harness-lock, delete-refusal and
+    // real stop action became unreachable in the shipped app.
+    installRadixJsdomStubs();
+    const onStopMainSession = vi.fn();
+    render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        configuredMain={{
+          harness: "pi",
+          model: "openai-codex/gpt-5.6-luna:low",
+          prompt: "Create direct.txt",
+        }}
+        onStopMainSession={onStopMainSession}
+      />,
+    );
+    const node = screen.getByTestId("orchestrator-main-agent");
+    expect(node.getAttribute("data-state")).toBe("live");
+    // The task the next run will execute is still what the node shows.
+    expect(node.textContent).toContain("openai-codex/gpt-5.6-luna:low");
+    expect(node.textContent).toContain("Create direct.txt");
+
+    fireEvent.click(node);
+    const inspector = await screen.findByTestId("main-agent-inspector");
+    expect(
+      within(inspector).getByTestId("main-agent-harness-locked").textContent,
+    ).toContain("harness cannot change");
+    expect(
+      within(inspector).getByTestId("main-agent-delete-refused").textContent,
+    ).toContain("cannot be deleted from here");
+    fireEvent.click(within(inspector).getByTestId("main-agent-stop-session"));
+    expect(onStopMainSession).toHaveBeenCalledTimes(1);
+  });
+  it("a stopped run reads as stopped, and a failed run's receipt names the runtime's own reason", () => {
+    installRadixJsdomStubs();
+    const main = {
+      id: "orchestrator-main",
+      title: "Main agent",
+      harness: "pi",
+      model: "openai-codex/does-not-exist-model",
+      prompt: "Task",
+      enabled: true,
+      dependsOn: [],
+    };
+    const base: OrchestratorRun = {
+      id: "r",
+      workspaceId: "ws",
+      main,
+      policy: policyWithAdversarial(false),
+      status: "stopped",
+      phase: "main",
+      iteration: 1,
+      startedAt: "now",
+      updatedAt: "now",
+      steps: [
+        {
+          nodeId: "or-r-0-1-main",
+          phase: "main",
+          iteration: 1,
+          status: "stopped",
+          runId: "m1",
+          runtime: { harness: "pi", model: main.model },
+          isFallback: false,
+          attempts: [{ harness: "pi", model: main.model, outcome: "launched" }],
+        },
+      ],
+    };
+    const view = render(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        configuredMain={main}
+        durableRun={base}
+      />,
+    );
+    const terminal = screen.getByTestId("orchestrator-terminal");
+    expect(terminal.getAttribute("data-state")).toBe("stopped");
+    expect(terminal.textContent).toBe("Last run: stopped");
+    expect(screen.queryByTestId("orchestrator-terminal-reason")).toBeNull();
+
+    view.rerender(
+      <OrchestratorCanvas
+        {...baseProps()}
+        policy={policyWithAdversarial(false)}
+        configuredMain={main}
+        durableRun={{
+          ...base,
+          status: "failed",
+          error: "Every configured runtime failed to execute this role.",
+          steps: [
+            {
+              ...base.steps[0],
+              status: "failed",
+              attempts: [
+                {
+                  harness: "pi",
+                  model: main.model,
+                  outcome: "failed",
+                  reason:
+                    'Warning: Model "does-not-exist-model" not found for provider "openai-codex".\nCodex error: The model is not supported when using Codex with a ChatGPT account.',
+                },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByTestId("orchestrator-terminal").getAttribute("data-state")).toBe("failed");
+    expect(screen.getByTestId("orchestrator-terminal").textContent).toContain(
+      "Every configured runtime failed to execute this role.",
+    );
+    expect(screen.getByTestId("orchestrator-terminal-reason").textContent).toContain(
+      "The model is not supported when using Codex with a ChatGPT account.",
     );
   });
   it("stacks the outer sequence in a narrow viewport while keeping test and review side by side", () => {

@@ -57,6 +57,18 @@ bookkeeping=',"drift":{"created_paths":["work.txt",".drogon/evaluations/'"$label
 if grep -q '"expected_changes"' "$recipe"; then
  bookkeeping=',"warnings":["expected_changes declared: the runtime would auto-commit"]'
 fi
+# A role step proves completion with the evaluation file it was told to write,
+# never with a 60-character keyword the agent has to transcribe by hand.
+case "$label" in
+ *-test|*-review)
+  if ! grep -q '"verify"' "$recipe"; then
+   bookkeeping=',"warnings":["role completion was left to a transcribed keyword"]'
+  fi
+  if grep -q '"completion_keyword"' "$recipe"; then
+   bookkeeping=',"warnings":["role step still carries a completion keyword"]'
+  fi
+  ;;
+esac
 printf '{"run_id":"%s","recipe_name":"fixture","started_at":"2026-01-01T00:00:00Z","ended_at":"2026-01-01T00:00:01Z","outcome":"ok","cloud_mode":"local-only","steps":[{"label":"%s","backend":"shell","outcome":"ok","exit_code":0,"duration_seconds":0,"attempts":1,"output_file":"out","error_file":"err"%s}],"hooks":[]}' "$run_id" "$label" "$bookkeeping" > "$run_dir/run.json"
 echo "Run record: $run_dir/run.json"
 "#;
