@@ -936,27 +936,15 @@ fn open_session_materializes_the_identity_files_the_harness_reads() {
     );
 }
 
-/// Execute the skill's actual extraction in a real Bot PTY, then use ONLY
-/// those discovered values against the real self-management service. The
-/// home handle and record workspace deliberately differ from the needed IDs.
+/// The supplementary generated identity still carries usable IDs. Live CLI
+/// discovery with stale/missing context is covered in drogon-cli's bot_identity tests.
 #[test]
 fn bot_discovers_its_id_from_refreshed_context_and_lists_its_own_resources() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _saved_path = SavedEnv::capture("PATH");
     let fx = Fixture::new();
     let bin = tempfile::tempdir().unwrap();
-    let guide = include_str!("../../../skill-guides/drogon-cli.md");
-    let recipe = guide
-        .split_once("```sh\nBOT_ID=")
-        .expect("the shipped guide contains the discovery recipe")
-        .1
-        .split_once("\n```")
-        .unwrap()
-        .0;
-    let recipe = format!("BOT_ID={recipe}");
-    let extraction = recipe.split_once("\ndrogon-cli bot list").unwrap().0;
-    // No real harness or CLI substitute: the fixture executes just the
-    // documented shell extraction. The read-only RPC below tests its values.
+    let extraction = "BOT_ID=$(awk '/^- Bot ID: / { print $4; exit }' AGENTS.md)";
     std::fs::write(
         bin.path().join("pi"),
         format!(

@@ -1829,6 +1829,7 @@ impl Cli {
                 }
             },
             Command::Bot { action } => match action {
+                BotAction::Whoami => {}
                 BotAction::Provision { bot, workspace } | BotAction::List { bot, workspace } => {
                     require_nonempty("bot", bot)?;
                     require_nonempty("workspace", workspace)?;
@@ -3334,6 +3335,12 @@ mod browser_tests {
 /// other `bot.*` method.
 #[derive(Subcommand, Debug)]
 pub enum BotAction {
+    /// Resolve this session's Bot ID from the daemon, without reading context files
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli bot whoami\nValid flags: --data-dir, --help, --json, --request-id, --retry-request"
+    )]
+    Whoami,
     /// Provision the Bot's dedicated working folder and profile
     #[command(
         args_override_self = true,

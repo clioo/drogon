@@ -185,8 +185,9 @@ fn guides_cover_the_contracted_surface() {
         "- Bot ID: <ID>",
         "DROGON_WORKSPACE_ID",
         ".result.botId",
-        ".result.home.homeWorkspaceId",
-        "update Drogon and reopen the Bot session",
+        ".result.workspaceId",
+        "drogon-cli bot whoami --json",
+        "bot.snapshot.v1",
     ] {
         assert!(
             cli.markdown.contains(needle),
@@ -209,49 +210,21 @@ fn guides_cover_the_contracted_surface() {
 }
 
 #[test]
-fn bot_identity_recipe_stops_on_missing_context_without_calling_the_cli() {
+fn bot_identity_recipe_queries_live_state_instead_of_requiring_fresh_context() {
     let guides = canonical_guides();
     let guide = guides.iter().find(|g| g.name == "drogon-cli").unwrap();
-    let recipe = format!(
-        "BOT_ID={}",
-        guide
-            .markdown
-            .split_once("```sh\nBOT_ID=")
-            .unwrap()
-            .1
-            .split_once("\n```")
-            .unwrap()
-            .0
-    );
-    let directory = tempfile::tempdir().unwrap();
-    for (context, workspace, expected_error) in [
-        (
-            "# Arya Stark\n- Handle: @bot-175f377c\n",
-            Some("ws-1"),
-            "Missing Bot ID",
-        ),
-        (
-            "# Arya Stark\n- Bot ID: bot-1\n",
-            None,
-            "Run this inside the Drogon Bot session",
-        ),
-    ] {
-        std::fs::write(directory.path().join("AGENTS.md"), context).unwrap();
-        let mut command = std::process::Command::new("/bin/sh");
-        command
-            .env_clear()
-            .env("PATH", "/usr/bin:/bin")
-            .current_dir(directory.path())
-            .args(["-c", &recipe]);
-        if let Some(workspace) = workspace {
-            command.env("DROGON_WORKSPACE_ID", workspace);
-        }
-        let output = command.output().unwrap();
-        assert!(!output.status.success());
-        assert!(stdout(&output).is_empty());
-        assert!(stderr(&output).contains(expected_error), "{output:?}");
-        assert!(!stderr(&output).contains("drogon-cli: not found"));
-    }
+    let section = guide
+        .markdown
+        .split_once("### Find your own Bot ID")
+        .unwrap()
+        .1
+        .split_once("### Provision and inspect")
+        .unwrap()
+        .0;
+    assert!(section.contains("drogon-cli bot whoami --json"));
+    assert!(section.contains("If your file lacks\nthat line, run `bot whoami` anyway"));
+    assert!(!section.contains("BOT_ID=$(awk"));
+    assert!(!section.contains("update Drogon and reopen"));
 }
 
 #[test]
