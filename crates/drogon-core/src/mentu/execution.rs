@@ -2224,7 +2224,7 @@ mod timeout_tests {
         fs::write(&file, b"{}").unwrap();
         let file_link = root.path().join("recipe-link.json");
         symlink_file(&file, &file_link).unwrap();
-        assert!(read_snapshot_file(&file_link, SNAPSHOT_MAX_RECIPE_BYTES).is_none());
+        assert!(read_snapshot_file(&file_link).is_none());
 
         let directory = root.path().join("snapshot");
         fs::create_dir(&directory).unwrap();

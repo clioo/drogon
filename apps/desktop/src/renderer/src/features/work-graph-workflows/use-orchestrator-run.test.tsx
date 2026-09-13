@@ -200,6 +200,31 @@ it("does not regress the controller to a stale non-null mutation reply", async (
   expect(view.result.current.run?.updatedAt).toBe(newer.updatedAt);
 });
 
+it("keeps shared snapshots scoped while switching workspaces", async () => {
+  const second = {
+    ...run,
+    id: "run-2",
+    workspaceId: "ws-2",
+    updatedAt: "2026-09-13T00:00:02Z",
+  };
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async ({ workspaceId }) => ({
+      ok: true,
+      result: { run: workspaceId === "ws" ? run : second },
+    })),
+  } as unknown as GraphBridge;
+  const view = renderHook(
+    ({ workspaceId }) => useOrchestratorRun(bridge, workspaceId, 10),
+    { initialProps: { workspaceId: "ws" } },
+  );
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-1"));
+
+  view.rerender({ workspaceId: "ws-2" });
+
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-2"));
+  expect(view.result.current.run?.workspaceId).toBe("ws-2");
+});
+
 it("reports lost contact without converting a running run to exited or passed", async () => {
   const bridge = {
     graphOrchestratorStart: async () => ({ ok: true, result: { run } }),

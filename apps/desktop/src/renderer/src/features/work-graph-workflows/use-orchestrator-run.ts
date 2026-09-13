@@ -5,8 +5,11 @@ import type {
   OrchestratorRun,
 } from "../../../../shared/graph-contract";
 
-type RunObserver = (workspaceId: string) => void;
-const runObservers = new WeakMap<GraphBridge, Set<RunObserver>>();
+type RunObserver = () => void;
+const runObservers = new WeakMap<
+  GraphBridge,
+  Map<string, Set<RunObserver>>
+>();
 const latestRunSnapshots = new WeakMap<
   GraphBridge,
   Map<string, OrchestratorRun>
@@ -14,7 +17,9 @@ const latestRunSnapshots = new WeakMap<
 const RUN_STATUS_UNAVAILABLE = "Latest Work Graph status is unavailable.";
 
 function publishRefresh(bridge: GraphBridge, workspaceId: string): void {
-  for (const observer of runObservers.get(bridge) ?? []) observer(workspaceId);
+  for (const observer of runObservers.get(bridge)?.get(workspaceId) ?? []) {
+    observer();
+  }
 }
 
 function newestRunSnapshot(
@@ -64,24 +69,39 @@ export function useOrchestratorRun(
   const durableRun = useRef<OrchestratorRun | null>(null);
   const mutation = useRef(0);
   const mutating = useRef(false);
+  const mounted = useRef(false);
   scope.current = workspaceId;
   useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
     if (!bridge) return;
-    const observe: RunObserver = (observedWorkspaceId) => {
-      if (observedWorkspaceId !== scope.current) return;
+    const observe: RunObserver = () => {
       // Invalidate an older in-flight read, then ask the daemon for its latest
       // durable snapshot instead of publishing a possibly stale mutation reply.
       mutation.current++;
       setRefreshEpoch((epoch) => epoch + 1);
     };
-    const observers = runObservers.get(bridge) ?? new Set<RunObserver>();
+    const scopes =
+      runObservers.get(bridge) ?? new Map<string, Set<RunObserver>>();
+    const observers = scopes.get(workspaceId) ?? new Set<RunObserver>();
     observers.add(observe);
-    runObservers.set(bridge, observers);
+    scopes.set(workspaceId, observers);
+    runObservers.set(bridge, scopes);
     return () => {
       observers.delete(observe);
-      if (observers.size === 0) runObservers.delete(bridge);
+      if (observers.size === 0) {
+        scopes.delete(workspaceId);
+        const snapshots = latestRunSnapshots.get(bridge);
+        snapshots?.delete(workspaceId);
+        if (snapshots?.size === 0) latestRunSnapshots.delete(bridge);
+      }
+      if (scopes.size === 0) runObservers.delete(bridge);
     };
-  }, [bridge]);
+  }, [bridge, workspaceId]);
   useEffect(() => {
     durableRun.current = null;
     setRun(null);
@@ -150,7 +170,7 @@ export function useOrchestratorRun(
           workspaceId,
           main,
         });
-        if (scope.current !== workspaceId) return;
+        if (!mounted.current || scope.current !== workspaceId) return;
         if (result.ok) {
           const next = newestScopedRunSnapshot(
             bridge,
@@ -164,11 +184,13 @@ export function useOrchestratorRun(
           publishRefresh(bridge, workspaceId);
         } else setError(result.error.message);
       } catch (reason) {
-        if (scope.current === workspaceId) setError(String(reason));
+        if (mounted.current && scope.current === workspaceId) {
+          setError(String(reason));
+        }
       } finally {
         mutation.current++;
         mutating.current = false;
-        if (scope.current === workspaceId) setBusy(false);
+        if (mounted.current && scope.current === workspaceId) setBusy(false);
       }
     },
     [bridge, workspaceId],
@@ -182,7 +204,7 @@ export function useOrchestratorRun(
         workspaceId,
         runId: run.id,
       });
-      if (scope.current !== workspaceId) return;
+      if (!mounted.current || scope.current !== workspaceId) return;
       if (result.ok) {
         const next = newestScopedRunSnapshot(
           bridge,
@@ -196,7 +218,9 @@ export function useOrchestratorRun(
         publishRefresh(bridge, workspaceId);
       } else setError(result.error.message);
     } catch (reason) {
-      if (scope.current === workspaceId) setError(String(reason));
+      if (mounted.current && scope.current === workspaceId) {
+        setError(String(reason));
+      }
     } finally {
       mutation.current++;
       mutating.current = false;
@@ -212,7 +236,7 @@ export function useOrchestratorRun(
         workspaceId,
         runId: run.id,
       });
-      if (scope.current !== workspaceId) return;
+      if (!mounted.current || scope.current !== workspaceId) return;
       if (result.ok) {
         const next = newestScopedRunSnapshot(
           bridge,
@@ -226,11 +250,13 @@ export function useOrchestratorRun(
         publishRefresh(bridge, workspaceId);
       } else setError(result.error.message);
     } catch (reason) {
-      if (scope.current === workspaceId) setError(String(reason));
+      if (mounted.current && scope.current === workspaceId) {
+        setError(String(reason));
+      }
     } finally {
       mutation.current++;
       mutating.current = false;
-      if (scope.current === workspaceId) setBusy(false);
+      if (mounted.current && scope.current === workspaceId) setBusy(false);
     }
   }, [bridge, workspaceId, run]);
   return { run, error, busy, start, stop, resume };
