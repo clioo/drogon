@@ -18,7 +18,9 @@ description: >-
 
 Use `drogon-cli` when the Drogon daemon is the source of truth. It is the
 only supported way for an agent inside a Drogon terminal to inspect or drive
-Drogon state: never reach into daemon files or sockets directly.
+Drogon state: never reach into daemon files or sockets directly. Reading
+Drogon's generated `AGENTS.md` in your own Bot home is supported session
+context, not an inspection of the daemon's private state.
 
 ## Start Here
 
@@ -171,6 +173,46 @@ A Bot is a persistent agent identity with its own workspace, harness and
 purpose. A Bot manages its OWN automations and monitors through the
 `bot` verbs; every call needs `--bot <ID> --workspace <ID>` and the
 service capability `bot.self.v1`.
+
+### Find your own Bot ID
+
+Do this BEFORE any self-management command; do not ask the owner to copy
+an ID from the Bots page.
+
+1. Read `AGENTS.md` in this Bot session's initial working directory (your
+   Bot home). Drogon writes your exact ID as `- Bot ID: <ID>` under
+   `## Identity`; `CLAUDE.md` points to that same file. Reading these
+   generated context files is supported. The ID is NOT your display name,
+   `@handle`, home folder basename (even one shaped like `bot-175f377c`),
+   or `DROGON_SESSION_ID`. Never derive it from any of those.
+2. Use the session's `DROGON_WORKSPACE_ID` for `--workspace`. This is your
+   home workspace, not necessarily the project where your Bot was created.
+   The daemon resolves your Bot's owning scope. If you changed directories,
+   use `drogon-cli workspace list --json`, match `.result.workspaces[].id`
+   exactly to `DROGON_WORKSPACE_ID`, and read `AGENTS.md` at that row's
+   `path` — not an unrelated project's `AGENTS.md`.
+3. From your Bot home, this POSIX-shell recipe reads both values without
+   inspecting daemon storage:
+
+```sh
+BOT_ID=$(awk '/^- Bot ID: / { print $4; exit }' AGENTS.md)
+: "${BOT_ID:?Missing Bot ID in generated AGENTS.md; update Drogon and reopen the Bot session}"
+: "${DROGON_WORKSPACE_ID:?Run this inside the Drogon Bot session}"
+drogon-cli bot list --bot "$BOT_ID" --workspace "$DROGON_WORKSPACE_ID" --json
+```
+
+Require a successful response and check `.result.botId` equals `BOT_ID`
+and `.result.home.homeWorkspaceId` equals `DROGON_WORKSPACE_ID`. Reuse
+those exact values for `--bot` and `--workspace` on automations and
+monitors. `bot list` lists ONE Bot's resources; it is not a bot catalog.
+
+If the generated ID line is absent, the context may predate this feature:
+update Drogon and reopen the Bot session to regenerate it. If the workspace
+environment is missing, return to a Drogon-launched Bot session. Report the
+specific missing context or CLI error rather than guessing IDs, searching
+private daemon files, or asking the owner to transcribe an ID.
+
+### Provision and inspect
 
 Provision the Bot's dedicated working folder with `drogon-cli bot
 provision --bot <ID> --workspace <ID>` (automations and monitors live in
