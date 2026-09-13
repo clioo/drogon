@@ -31,6 +31,8 @@ import { WorktreeContextMenu } from "./WorktreeContextMenu";
 import { WorktreeTitleInlineRename } from "./WorktreeTitleInlineRename";
 import { WorktreeCardMetaBadges } from "./WorktreeCardMetaBadges";
 import { WorktreeCardLinkedMetadata } from "./WorktreeCardLinkedMetadata";
+import { WorktreeWorkflow } from "./WorktreeWorkflow";
+import { windowGraphBridge } from "../../work-graph-mount";
 import {
   cardIdentitySession,
   formatWorktreeCardSummaryLine,
@@ -384,6 +386,10 @@ export function WorktreeCard({
             ) : null}
           </button>
           <WorktreeCardLinkedMetadata worktree={worktree} properties={showProperties} ports={ports} issueLinks={issueLinks} />
+          <WorktreeWorkflow
+            workspaceId={worktree.workspaceId}
+            bridge={typeof window !== "undefined" && window.drogon ? windowGraphBridge() : null}
+          />
           {/* Nested session rows (the fork's WorktreeCardAgents inline list):
             one row per session, outside the select button so rows stay real
             buttons. Issue #359: rows with a recorded parent session render

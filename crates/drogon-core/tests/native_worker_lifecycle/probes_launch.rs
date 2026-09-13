@@ -26,6 +26,26 @@ pub fn fresh_launch_context(env: &ProbeEnv) {
         json!(worker.incarnation)
     );
 
+    // Host-wide and workspace lists feed the sidebar and terminal strip.
+    // Native workers must retain the resolved harness, not look like shells.
+    for params in [json!({}), json!({"workspaceId": env.workspace_id(&engine)})] {
+        let listed = ok(
+            &engine,
+            &format!("visible-{params}"),
+            "session.list",
+            params,
+        );
+        let session = listed["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["id"] == worker.session_id)
+            .expect("dispatched worker is visible in session.list");
+        assert_eq!(session["harnessId"], "claude");
+        assert_eq!(session["verdict"], "live");
+        assert_eq!(session["incarnation"], worker.incarnation);
+    }
+
     // The probe actually used the fixture harness, not an installed model CLI.
     // macOS /var vs /private/var: compare canonicalized paths.
     let dump = completed_env_dump(env);

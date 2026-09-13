@@ -23,6 +23,7 @@ export function useOrchestratorRun(
     setRun(null);
     setError(null);
     setBusy(false);
+    if (!bridge?.graphOrchestratorStatus) return;
     const poll = async () => {
       const version = mutation.current;
       try {
