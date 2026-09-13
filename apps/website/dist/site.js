@@ -17,6 +17,13 @@ for (const tab of tabs) {
   });
 }
 const copyButton = document.getElementById('copy-command');
+const photo = document.getElementById('drogon-photo');
+function photoFailed() {
+  photo.hidden = true;
+  document.getElementById('image-unavailable').hidden = false;
+}
+photo.addEventListener('error', photoFailed);
+if (photo.complete && !photo.naturalWidth) photoFailed();
 copyButton.addEventListener('click', async () => {
   const status = document.getElementById('copy-status');
   try {
