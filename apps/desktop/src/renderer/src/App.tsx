@@ -401,6 +401,42 @@ export function appendOrReplaceSession(
 }
 
 /**
+ * Folds sessions the selected workspace gained out of band into the list
+ * this shell drew when the workspace was selected.
+ *
+ * That list is fetched once per selection, so a session started by the CLI,
+ * a Bot, or another window never reached the tab strip — or the Work Graph's
+ * Main agent node — until the next load, while the sidebar's own rows showed
+ * it within seconds because they read the host-wide poll. The two views
+ * disagreed about whether the workspace had a session at all. The same poll
+ * already carries these rows, so no new request is made here.
+ *
+ * Returns the given array unchanged when there is nothing to adopt, so a
+ * poll that brings no news cannot re-render the shell.
+ */
+export function adoptOutOfBandSessions(
+  current: Session[],
+  hostWide: readonly Session[],
+  workspaceId: string,
+  isHidden: (session: Session) => boolean,
+): Session[] {
+  const known = new Set(current.map((item) => `${item.hostId}:${item.id}`));
+  const adopted = hostWide.filter(
+    (item) =>
+      item.workspaceId === workspaceId &&
+      !known.has(`${item.hostId}:${item.id}`) &&
+      !isHidden(item),
+  );
+  if (adopted.length === 0) return current;
+  return [
+    ...current,
+    ...[...adopted].sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt),
+    ),
+  ];
+}
+
+/**
  * Removes a session only on an exact host+id+incarnation match — a
  * coincident id from a different host, or a stale reply for an incarnation
  * that has since moved on, must never remove the actual current entry.
@@ -1971,6 +2007,20 @@ export function App() {
       cancelled = true;
     };
   }, [status, workspaces, tasksProjectBridge, projectReloadTick]);
+  useEffect(() => {
+    // A session this shell did not start — `drogon-cli terminal create`, a
+    // Bot's own session, another window — reaches the selected workspace's
+    // list here, from the host-wide poll that already runs for the sidebar.
+    // `active` is deliberately left alone: adopting a session must never
+    // steal the tab the owner is looking at.
+    if (!selected) return;
+    const dismissed = loadDismissedSessions();
+    setSessions((items) =>
+      adoptOutOfBandSessions(items, allBotSessions, selected, (item) =>
+        isSessionDismissed(dismissed, item.hostId, item),
+      ),
+    );
+  }, [allBotSessions, selected]);
   useEffect(() => {
     // Persists every confirmed selection once it settles against a known
     // workspace, so the next reload's restore has an up-to-date target.

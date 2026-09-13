@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  adoptOutOfBandSessions,
   appendOrReplaceSession,
   applyConfirmedClose,
   contextMatches,
@@ -20,6 +21,47 @@ const session = (id: string, overrides: Partial<Session> = {}): Session => ({
   exitCode: null,
   createdAt: "2026-01-01T00:00:00Z",
   ...overrides,
+});
+
+describe("adoptOutOfBandSessions", () => {
+  const never = () => false;
+  // Found by scripts/accept-bot-monitors.mjs: a session started through the
+  // CLI showed in the sidebar within seconds and never in the tab strip.
+  test("a session the shell did not start joins the selected workspace's list", () => {
+    const current = [session("s1")];
+    const result = adoptOutOfBandSessions(
+      current,
+      [session("s1"), session("s2", { createdAt: "2026-01-01T00:01:00Z" })],
+      "w1",
+      never,
+    );
+    expect(result.map((item) => item.id)).toEqual(["s1", "s2"]);
+  });
+
+  test("another workspace's sessions, dismissed ones, and no news leave the list alone", () => {
+    const current = [session("s1")];
+    expect(
+      adoptOutOfBandSessions(current, [session("other", { workspaceId: "w2" })], "w1", never),
+    ).toBe(current);
+    expect(
+      adoptOutOfBandSessions(current, [session("s9")], "w1", (item) => item.id === "s9"),
+    ).toBe(current);
+    expect(adoptOutOfBandSessions(current, [session("s1")], "w1", never)).toBe(
+      current,
+    );
+  });
+
+  test("a coincident id on another host is a different session, not a duplicate", () => {
+    const current = [session("s1")];
+    const result = adoptOutOfBandSessions(
+      current,
+      [session("s1", { hostId: "h2" })],
+      "w1",
+      never,
+    );
+    expect(result).toHaveLength(2);
+    expect(result[1].hostId).toBe("h2");
+  });
 });
 
 describe("appendOrReplaceSession", () => {

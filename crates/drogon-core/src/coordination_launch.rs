@@ -57,6 +57,64 @@ fn policy_provider_model(
     )
 }
 
+/// Binds a hand-named harness to the workspace's own Subagent policy.
+///
+/// `worker-start --harness X` with no `--model` used to launch whatever that
+/// harness picks for itself. On a host with several authenticated providers
+/// that is a paid model chosen silently, while the workspace policy pinned a
+/// free one — the exact case a delegating agent caught in its own dispatch
+/// ("worker-start with --harness pi but no explicit --provider/--model let
+/// the child session self-select openai-codex/gpt-5.6-sol"). A configured
+/// policy is the owner's spending decision, so an unspecified model is
+/// filled from it, and a harness the policy never approved is refused
+/// instead of guessed. An explicitly named model stays the caller's own
+/// recorded choice; this closes the silent path, not the deliberate one.
+fn pin_fresh_launch_to_policy(
+    policy: &drogon_protocol::graph::GraphPolicy,
+    launch: LaunchPreferences,
+) -> Result<LaunchPreferences, RpcError> {
+    let configured: Vec<&drogon_protocol::graph::GraphRuntimeRef> = policy
+        .approved_runtimes
+        .iter()
+        .chain(policy.fallback_runtime.iter())
+        .collect();
+    if configured.is_empty() || launch.model.is_some() {
+        return Ok(launch);
+    }
+    let Some(runtime) = configured
+        .iter()
+        .find(|runtime| runtime.harness == launch.harness_id)
+    else {
+        let approved = configured
+            .iter()
+            .map(|runtime| {
+                let (provider, model) = policy_provider_model(runtime);
+                match (provider, model) {
+                    (Some(provider), Some(model)) => {
+                        format!("{}/{provider}/{model}", runtime.harness)
+                    }
+                    (None, Some(model)) => format!("{}/{model}", runtime.harness),
+                    _ => runtime.harness.clone(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(RpcError::new(
+            "invalid_argument",
+            format!(
+                "This workspace's Subagent policy does not approve harness '{}', so a worker                  cannot be launched on it without naming a model explicitly. Approved runtimes:                  {approved}. Drop --harness to let the policy choose, or name --model yourself.",
+                launch.harness_id
+            ),
+        ));
+    };
+    let (provider, model) = policy_provider_model(runtime);
+    Ok(LaunchPreferences {
+        provider: launch.provider.or(provider),
+        model,
+        ..launch
+    })
+}
+
 impl Engine {
     pub(crate) fn start_coordination_worker(
         &self,
@@ -151,7 +209,9 @@ impl Engine {
         })?;
         let graph = crate::graph::store::read_graph(Path::new(&workspace_path))?;
         let launch = match &params.execution {
-            WorkerExecution::Fresh { launch } => launch.clone(),
+            WorkerExecution::Fresh { launch } => {
+                pin_fresh_launch_to_policy(&graph.intent.policy, launch.clone())?
+            }
             WorkerExecution::Policy => {
                 let attempted = self.coordination_read(|tx| {
                     attempts::failed_policy_launches(tx, &params.scope, &params.task_id)
@@ -410,5 +470,89 @@ impl Engine {
             .worker_verdict(&prepared.attempt)
             .unwrap_or(ProcessVerdict::Unverifiable);
         encode(prepared.attempt.result)
+    }
+}
+
+#[cfg(test)]
+mod policy_pinning_tests {
+    use super::*;
+    use drogon_protocol::graph::{GraphPolicy, GraphRuntimeRef};
+
+    fn runtime(harness: &str, model: &str) -> GraphRuntimeRef {
+        GraphRuntimeRef {
+            harness: harness.into(),
+            model: model.into(),
+            provider: None,
+        }
+    }
+    fn launch(harness: &str, model: Option<&str>) -> LaunchPreferences {
+        LaunchPreferences {
+            harness_id: harness.into(),
+            model: model.map(str::to_string),
+            effort: None,
+            provider: None,
+            permission_mode: LaunchPermissionMode::Inherit,
+        }
+    }
+
+    #[test]
+    fn an_unspecified_model_is_filled_from_the_policy_never_left_to_the_harness() {
+        let policy = GraphPolicy {
+            approved_runtimes: vec![runtime("pi", "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4")],
+            ..GraphPolicy::default()
+        };
+        let pinned = pin_fresh_launch_to_policy(&policy, launch("pi", None)).unwrap();
+        assert_eq!(pinned.provider.as_deref(), Some("dgx-spark"));
+        assert_eq!(
+            pinned.model.as_deref(),
+            Some("qwen3.8-flash-next-nvidia-nvfp4"),
+            "the free runtime the owner approved, not whatever pi would pick"
+        );
+    }
+
+    #[test]
+    fn a_harness_the_policy_never_approved_is_refused_with_the_approved_list() {
+        let policy = GraphPolicy {
+            approved_runtimes: vec![runtime("pi", "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4")],
+            ..GraphPolicy::default()
+        };
+        let error = pin_fresh_launch_to_policy(&policy, launch("claude", None)).unwrap_err();
+        assert_eq!(error.code, "invalid_argument");
+        assert!(
+            error.message.contains("does not approve harness 'claude'"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("qwen3.8-flash-next-nvidia-nvfp4"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn an_explicit_model_and_an_unconfigured_policy_both_pass_through_untouched() {
+        let policy = GraphPolicy {
+            approved_runtimes: vec![runtime("pi", "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4")],
+            ..GraphPolicy::default()
+        };
+        let explicit =
+            pin_fresh_launch_to_policy(&policy, launch("pi", Some("openai-codex/gpt-5.6-luna")))
+                .unwrap();
+        assert_eq!(explicit.model.as_deref(), Some("openai-codex/gpt-5.6-luna"));
+        let unconfigured =
+            pin_fresh_launch_to_policy(&GraphPolicy::default(), launch("claude", None)).unwrap();
+        assert_eq!(unconfigured.model, None, "no policy, no opinion");
+    }
+
+    #[test]
+    fn the_fallback_runtime_also_pins_a_harness_the_approved_list_does_not_carry() {
+        let policy = GraphPolicy {
+            approved_runtimes: vec![runtime("pi", "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4")],
+            fallback_runtime: Some(runtime("claude", "claude-sonnet-5")),
+            ..GraphPolicy::default()
+        };
+        let pinned = pin_fresh_launch_to_policy(&policy, launch("claude", None)).unwrap();
+        assert_eq!(pinned.model.as_deref(), Some("claude-sonnet-5"));
     }
 }

@@ -609,14 +609,12 @@ try {
     // No session yet: the node says so instead of claiming an agent.
     assert.equal(await page.getByTestId("orchestrator-main-agent").getAttribute("data-state"), "no-session");
     const session = await cliJson(["harness", "start", "--workspace", workspaceId, "--harness", "claude", "--permission-mode", "unattended"]);
-    // A session started out of band (this CLI, a bot, another window) reaches
-    // the selected workspace's list on its next load, not by polling — the
-    // sidebar's own rows do poll, so the two views disagree until then.
-    // Reported to the owner; the reload is how this check observes the node.
-    await page.reload();
-    await openOrchestrator();
+    // No reload: a session started out of band (this CLI, a Bot, another
+    // window) must reach this view on its own, from the host-wide poll the
+    // sidebar already reads. It used to appear only on the next load, so
+    // the sidebar showed a session while this node said there was none.
     const node = page.getByTestId("orchestrator-main-agent");
-    await until(async () => (await node.getAttribute("data-state")) === "live", "the node projects the real live session", 30000);
+    await until(async () => (await node.getAttribute("data-state")) === "live", "the node projects the real live session without a reload", 60000);
     assert.match(await node.innerText(), /Main agent/);
     assert.equal(await page.getByLabel("Main agent, live. Open inspector.").count(), 1);
     await node.click();
@@ -647,6 +645,7 @@ try {
     assert.match(await inspector.innerText(), /there is nothing to stop/);
     await shot("inspector-exited");
     report.checks.push("main-agent-inspector-locks-the-harness-refuses-deletion-and-really-stops-the-session");
+  report.checks.push("a-session-started-out-of-band-reaches-the-open-workspace-without-a-reload");
   }
   report.status = "PASSED";
 } catch (error) {
