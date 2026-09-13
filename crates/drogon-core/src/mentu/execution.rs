@@ -218,9 +218,9 @@ enum WaitOutcome {
 }
 
 fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
-    let Some(steps) = serde_json::from_slice::<serde_json::Value>(recipe_bytes)
+    let Some(steps) = std::str::from_utf8(recipe_bytes)
         .ok()
-        .and_then(|recipe| recipe.get("steps")?.as_array().cloned())
+        .and_then(|source| super::recipe::parse_recipe_steps(source).ok())
         .filter(|steps| !steps.is_empty())
     else {
         return DEFAULT_RUN_TIMEOUT;
@@ -228,10 +228,7 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
     let mut declared_seconds = 0_u64;
     let mut every_step_declared = true;
     for step in steps {
-        let declared = step
-            .get("timeout")
-            .and_then(serde_json::Value::as_u64)
-            .filter(|seconds| *seconds > 0);
+        let declared = step.timeout_seconds.filter(|seconds| *seconds > 0);
         every_step_declared &= declared.is_some();
         declared_seconds = declared_seconds.saturating_add(declared.unwrap_or(0));
     }
@@ -284,12 +281,16 @@ fn read_retry_chain_snapshot(
     let mut current = run_id.to_string();
     let mut visited = HashSet::new();
     while visited.len() < 64 && visited.insert(current.clone()) {
-        if let Some(bytes) = read_original_snapshot_recipe(workspace_root, &current) {
-            return Some(bytes);
-        }
-        let prior = storage::get_run(&db.lock().unwrap(), &current).ok()??;
+        let snapshot = read_original_snapshot_recipe(workspace_root, &current);
+        let conn = db.lock().unwrap();
+        let prior = storage::get_run(&conn, &current).ok()??;
         if prior.workspace_id != workspace_id {
             return None;
+        }
+        if let Some(bytes) = snapshot {
+            let approved_hash =
+                storage::approval_content_hash(&conn, &prior.approval_id).ok()??;
+            return (sha256_hex(&bytes) == approved_hash).then_some(bytes);
         }
         current = prior.retry_of?;
     }
@@ -1813,11 +1814,11 @@ mod timeout_tests {
     #[test]
     fn short_explicit_and_partially_undeclared_budgets_stay_safe() {
         assert_eq!(
-            recipe_run_timeout(br#"{"steps":[{"timeout":30}]}"#),
+            recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":30}]}"#),
             Duration::from_secs(30) + DECLARED_TIMEOUT_GRACE
         );
         assert_eq!(
-            recipe_run_timeout(br#"{"steps":[{"timeout":30},{}]}"#),
+            recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":30},{"label":"verify"}]}"#),
             DEFAULT_RUN_TIMEOUT
         );
     }
@@ -1825,10 +1826,10 @@ mod timeout_tests {
     #[test]
     fn absent_and_hostile_budgets_stay_bounded() {
         assert_eq!(
-            recipe_run_timeout(br#"{"steps":[{}]}"#),
+            recipe_run_timeout(br#"{"steps":[{"label":"main"}]}"#),
             DEFAULT_RUN_TIMEOUT
         );
-        let hostile = serde_json::json!({ "steps": [{ "timeout": u64::MAX }] });
+        let hostile = serde_json::json!({ "steps": [{ "label": "main", "timeout": u64::MAX }] });
         assert_eq!(
             recipe_run_timeout(&serde_json::to_vec(&hostile).unwrap()),
             MAX_RUN_TIMEOUT
@@ -1842,7 +1843,7 @@ mod timeout_tests {
         let dir = snapshot_root(workspace.path()).join(original_run_id);
         fs::create_dir_all(&dir).unwrap();
         let recipe_path = dir.join("approved.json");
-        let recipe_bytes = br#"{"steps":[{"timeout":45}]}"#;
+        let recipe_bytes = br#"{"steps":[{"label":"main","timeout":45}]}"#;
         fs::write(&recipe_path, recipe_bytes).unwrap();
         fs::write(
             dir.join("manifest.json"),
@@ -1874,7 +1875,7 @@ mod timeout_tests {
         let dir = snapshot_root(workspace.path()).join("original");
         fs::create_dir_all(&dir).unwrap();
         let recipe_path = dir.join("approved.json");
-        let recipe_bytes = br#"{"steps":[{"timeout":75}]}"#;
+        let recipe_bytes = br#"{"steps":[{"label":"main","timeout":75}]}"#;
         fs::write(&recipe_path, recipe_bytes).unwrap();
         fs::write(
             dir.join("manifest.json"),
@@ -1890,6 +1891,17 @@ mod timeout_tests {
         let tx = conn.transaction().unwrap();
         storage::apply_pending_steps_in_tx(&tx).unwrap();
         tx.commit().unwrap();
+        storage::insert_approval(
+            &conn,
+            &drogon_protocol::mentu::MentuApproval {
+                id: "approval".into(),
+                workspace_id: "workspace".into(),
+                recipe_id: "recipe".into(),
+                content_hash: sha256_hex(recipe_bytes),
+                approved_at: "2026-09-13T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
         for (id, retry_of) in [
             ("original", None),
             ("retry-one", Some("original")),
@@ -1912,6 +1924,22 @@ mod timeout_tests {
         let recovered =
             read_retry_chain_snapshot(&db, workspace.path(), "workspace", "retry-two").unwrap();
         assert_eq!(recovered, recipe_bytes);
+
+        let changed = br#"{"steps":[{"label":"main","timeout":999}]}"#;
+        fs::write(&recipe_path, changed).unwrap();
+        fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "recipePath": recipe_path,
+                "contentHash": sha256_hex(changed),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            read_retry_chain_snapshot(&db, workspace.path(), "workspace", "retry-two").is_none(),
+            "workspace-owned snapshot edits must not replace the approved durable hash"
+        );
     }
 }
 

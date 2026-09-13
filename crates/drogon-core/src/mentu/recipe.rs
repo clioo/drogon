@@ -221,6 +221,14 @@ fn parse_steps(recipe: &Value) -> Result<Vec<MentuStep>, String> {
         .collect()
 }
 
+/// Parses the runtime recipe's step schema into the same typed shape used by
+/// `mentu.recipe`. Execution watchdogs consume this instead of maintaining a
+/// second, looser interpretation of recipe fields.
+pub(crate) fn parse_recipe_steps(source: &str) -> Result<Vec<MentuStep>, String> {
+    let recipe = parse_recipe_json(source)?;
+    parse_steps(&recipe)
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|b| format!("{b:02x}")).collect()
