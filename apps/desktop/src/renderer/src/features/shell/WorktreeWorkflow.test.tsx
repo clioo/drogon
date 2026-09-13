@@ -178,7 +178,7 @@ it("backs off card polling while no workflow is active", async () => {
   await act(async () => {});
   expect(status).toHaveBeenCalledTimes(1);
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(29_999);
+    await vi.advanceTimersByTimeAsync(9_999);
   });
   expect(status).toHaveBeenCalledTimes(1);
   await act(async () => {

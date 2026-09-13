@@ -29,7 +29,7 @@ export function WorktreeWorkflow({
   workspaceId: string;
   bridge: GraphBridge | null;
 }) {
-  const { run, error } = useOrchestratorRun(bridge, workspaceId, 3000, 30_000);
+  const { run, error } = useOrchestratorRun(bridge, workspaceId, 3000, 10_000);
   const labelId = useId();
   const [expanded, setExpanded] = useState(false);
   if (!run || run.workspaceId !== workspaceId) return null;
