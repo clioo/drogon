@@ -532,6 +532,46 @@ it("backs off a terminal run even when its last step was dispatching", async () 
   expect(status).toHaveBeenCalledTimes(2);
 });
 
+it("ignores an invalidated poll rejection while launch is pending", async () => {
+  let finishStart: ((value: unknown) => void) | undefined;
+  let rejectPoll: ((reason: Error) => void) | undefined;
+  const status = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: true, result: { run } })
+    .mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectPoll = reject;
+        }),
+    );
+  const bridge = {
+    graphOrchestratorStart: () =>
+      new Promise((resolve) => {
+        finishStart = resolve;
+      }),
+    graphOrchestratorStatus: status,
+  } as unknown as GraphBridge;
+  const view = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-1"));
+  await waitFor(() => expect(rejectPoll).toBeDefined());
+
+  let launching!: Promise<void>;
+  act(() => {
+    launching = view.result.current.start(main);
+  });
+  await act(async () => {
+    rejectPoll?.(new Error("stale contact loss"));
+    await Promise.resolve();
+  });
+
+  expect(view.result.current.error).toBeNull();
+  await act(async () => {
+    finishStart?.({ ok: true, result: { run } });
+    await launching;
+  });
+  expect(view.result.current.run?.id).toBe("run-1");
+});
+
 it("ignores a stale poll started during launch that resolves after the launch", async () => {
   let finishStart: ((value: unknown) => void) | undefined;
   let finishPoll: ((value: unknown) => void) | undefined;

@@ -184,15 +184,14 @@ export function useOrchestratorRun(
     if (!bridge?.graphOrchestratorStatus) return;
     const poll = async () => {
       const version = pollVersions.current.get(workspaceId) ?? 0;
+      const isCurrent = () =>
+        !cancelled &&
+        !mutatingScopes.current.has(workspaceId) &&
+        version === (pollVersions.current.get(workspaceId) ?? 0);
       let nextPollMs = pollMs;
       try {
         const result = await bridge?.graphOrchestratorStatus?.({ workspaceId });
-        if (
-          !cancelled &&
-          result &&
-          !mutatingScopes.current.has(workspaceId) &&
-          version === (pollVersions.current.get(workspaceId) ?? 0)
-        ) {
+        if (result && isCurrent()) {
           if (result.ok) {
             const observed = result.result.run;
             // Orchestrator runs are durable. A later empty observation cannot
@@ -224,7 +223,7 @@ export function useOrchestratorRun(
           }
         }
       } catch (reason) {
-        if (!cancelled) {
+        if (isCurrent()) {
           setError(String(reason));
           publishAvailability(bridge, workspaceId, true);
         }
