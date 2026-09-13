@@ -70,9 +70,17 @@ pub fn harness_overrides(bot: &Bot) -> BotHarnessOverrides {
         .as_deref()
         .map(str::trim)
         .unwrap_or("");
+    // Only Pi takes a provider at launch: `harness.start` refuses one for
+    // every other harness ("Provider selection is available only for Pi"), and
+    // OpenCode's own ids are natively `provider/model`
+    // (`anthropic/claude-sonnet-4`). Splitting those turned a correct model id
+    // into a launch the daemon then refused, so a monitor-released or
+    // scheduled run of any non-Pi bot could never start. Everything but Pi
+    // keeps the stored id exactly as configured.
+    let splits_provider = bot.harness_policy.default_harness.trim() == "pi";
     let (provider, model) = match stored.find('/') {
         // `slash` is an ASCII byte index, so both slices are char boundaries.
-        Some(slash) if slash > 0 && slash < stored.len() - 1 => (
+        Some(slash) if splits_provider && slash > 0 && slash < stored.len() - 1 => (
             Some(stored[..slash].to_string()),
             Some(stored[slash + 1..].to_string()),
         ),

@@ -1,0 +1,14 @@
+[
+  { "id": "d01", "name": "Mochi", "breed": "Shiba Inu", "age": 2, "city": "Monterrey", "likesYou": true },
+  { "id": "d02", "name": "Tostada", "breed": "Xoloitzcuintle", "age": 5, "city": "Oaxaca", "likesYou": false },
+  { "id": "d03", "name": "Bruno", "breed": "Pastor Alemán", "age": 3, "city": "Guadalajara", "likesYou": true },
+  { "id": "d04", "name": "Canela", "breed": "Criolla", "age": 1, "city": "Puebla", "likesYou": true },
+  { "id": "d05", "name": "Sushi", "breed": "Corgi", "age": 4, "city": "CDMX", "likesYou": false },
+  { "id": "d06", "name": "Pelusa", "breed": "Poodle", "age": 7, "city": "Mérida", "likesYou": false },
+  { "id": "d07", "name": "Nube", "breed": "Samoyedo", "age": 2, "city": "Querétaro", "likesYou": true },
+  { "id": "d08", "name": "Chamoy", "breed": "Chihuahua", "age": 6, "city": "Tijuana", "likesYou": false },
+  { "id": "d09", "name": "Frida", "breed": "Beagle", "age": 3, "city": "León", "likesYou": true },
+  { "id": "d10", "name": "Tamal", "breed": "Basset Hound", "age": 8, "city": "Toluca", "likesYou": false },
+  { "id": "d11", "name": "Nieve", "breed": "Husky", "age": 2, "city": "Saltillo", "likesYou": true },
+  { "id": "d12", "name": "Pulga", "breed": "Criolla", "age": 1, "city": "Veracruz", "likesYou": false }
+]

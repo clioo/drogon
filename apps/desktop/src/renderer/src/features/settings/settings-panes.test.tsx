@@ -25,12 +25,13 @@ function render(node: React.ReactElement): string {
 }
 
 describe("settings sidebar order (source order for the MVP subset)", () => {
-  test("declares agents, general, git, terminal, appearance, notifications, shortcuts", () => {
+  test("declares agents, general, git, terminal, demo, appearance, notifications, shortcuts", () => {
     expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([
       "agents",
       "general",
       "git",
       "terminal",
+      "demo",
       "appearance",
       "notifications",
       "shortcuts",

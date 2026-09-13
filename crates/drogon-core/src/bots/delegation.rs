@@ -1002,6 +1002,11 @@ pub struct DelegationSummary {
     pub orphaned: usize,
     /// Storage failures; the event stays queued for the next tick.
     pub failed: usize,
+    /// Events whose `harness.start` was refused: the firing records
+    /// `dispatch_failed` with the daemon's own reason, and no session was
+    /// ever admitted. Counted apart from `dispatched` so a log line cannot
+    /// read as work that started.
+    pub dispatch_failed: usize,
 }
 
 fn find_run_by_id(conn: &Connection, run_id: &str) -> Result<bool> {
@@ -1729,6 +1734,28 @@ fn drain_single_event<S: DispatchSeam>(
     // No database guard held across the seam call.
     let outcome = runner::dispatch_run_plan(seam, &plan);
     let (host_observation, ended_at, _) = projection_of(&outcome, now_ms, now_ms);
+    // A refused `harness.start` admitted no session at all. The firing is the
+    // evidence a human reads, so it must say that — with the daemon's own
+    // code and message — instead of reading exactly like a dispatch that
+    // worked. An admitted session whose observation failed stays
+    // `dispatched`, with the observation failure kept as its detail.
+    let (firing_outcome, dispatch_detail) = match &outcome {
+        RunnerOutcome::DispatchFailed(error) => (
+            "dispatch_failed",
+            Some(format!(
+                "harness.start refused: {}: {}",
+                error.code, error.message
+            )),
+        ),
+        RunnerOutcome::ObservationFailed { error, .. } => (
+            "dispatched",
+            Some(format!(
+                "session started; observation failed: {}: {}",
+                error.code, error.message
+            )),
+        ),
+        RunnerOutcome::Observed { .. } => ("dispatched", None),
+    };
     // Claim = delete, in the SAME transaction as the run row, the firing
     // evidence, and the cap bump: all four commit together or none do.
     let record = (|| -> Result<()> {
@@ -1760,8 +1787,8 @@ fn drain_single_event<S: DispatchSeam>(
             event,
             Some(&responsibility_id),
             Some(&request_id),
-            None,
-            "dispatched",
+            dispatch_detail.as_deref(),
+            firing_outcome,
             now_ms,
         )?;
         delete_event(&tx, &event.event_id)?;
@@ -1770,7 +1797,20 @@ fn drain_single_event<S: DispatchSeam>(
         Ok(())
     })();
     match record {
-        Ok(()) => summary.dispatched += 1,
+        Ok(()) => {
+            if firing_outcome == "dispatch_failed" {
+                eprintln!(
+                    "[delegation] {} {}",
+                    event.event_id,
+                    dispatch_detail
+                        .as_deref()
+                        .unwrap_or("harness.start refused")
+                );
+                summary.dispatch_failed += 1;
+            } else {
+                summary.dispatched += 1;
+            }
+        }
         Err(e) => {
             eprintln!("[delegation] record failed: {e}");
             summary.failed += 1;

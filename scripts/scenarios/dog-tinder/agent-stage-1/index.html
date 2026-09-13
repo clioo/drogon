@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dog Tinder</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0; min-height: 100vh; display: grid; place-items: center;
+        background: #f3f1ee; color: #1a1614;
+        font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      @media (prefers-color-scheme: dark) { body { background: #17140f; color: #f0ece6; } }
+      main { width: min(420px, 92vw); display: flex; flex-direction: column; gap: 16px; padding: 24px 0; }
+      .card {
+        border: 1px solid rgba(120, 100, 80, 0.3); border-radius: 14px; padding: 22px;
+        background: color-mix(in srgb, currentColor 4%, transparent); text-align: center;
+      }
+      .name { font-size: 28px; font-weight: 700; margin: 0; }
+      .meta { margin: 4px 0 0; opacity: 0.72; }
+      .row { display: flex; gap: 10px; }
+      button {
+        flex: 1; padding: 12px 14px; border-radius: 10px; font: inherit; font-weight: 600;
+        border: 1px solid rgba(120, 100, 80, 0.45); background: transparent; color: inherit; cursor: pointer;
+      }
+      button:focus-visible { outline: 2px solid #b4623a; outline-offset: 2px; }
+      .matches { font-size: 14px; opacity: 0.8; min-height: 1.5em; }
+      .note { font-size: 13px; opacity: 0.65; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="card" id="card"><p class="name">Cargando…</p></div>
+      <div class="row">
+        <button id="pass" type="button">Paso</button>
+        <button id="like" type="button">Me late</button>
+      </div>
+      <p class="matches" id="matches"></p>
+      <p class="note">Sirve esta carpeta (<code>python3 -m http.server</code>) para abrirla: los módulos ES no cargan desde <code>file://</code>.</p>
+    </main>
+    <script type="module">
+      import { currentProfile, newDeck, swipe } from "./src/deck.js";
+
+      const profiles = await (await fetch("./fixtures/dogs.json")).json();
+      let state = newDeck(profiles);
+
+      const card = document.getElementById("card");
+      const matches = document.getElementById("matches");
+
+      function render() {
+        const profile = currentProfile(state);
+        card.innerHTML = profile
+          ? `<p class="name">${profile.name}</p><p class="meta">${profile.breed} · ${profile.age} años · ${profile.city}</p>`
+          : `<p class="name">Ya no hay perros</p><p class="meta">Volvé mañana.</p>`;
+        matches.textContent = state.matches.length
+          ? `Matches: ${state.matches.length}`
+          : "Sin matches todavía";
+      }
+
+      for (const [id, direction] of [["pass", "left"], ["like", "right"]]) {
+        document.getElementById(id).addEventListener("click", () => {
+          if (!currentProfile(state)) return;
+          state = swipe(state, direction);
+          render();
+        });
+      }
+
+      render();
+    </script>
+  </body>
+</html>

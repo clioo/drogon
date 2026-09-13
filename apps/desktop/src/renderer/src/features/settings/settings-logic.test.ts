@@ -19,12 +19,13 @@ import {
 import { filterSettingsSections } from "./settings-search";
 
 describe("settings sections", () => {
-  test("declares the seven J10 sections in reference sidebar order", () => {
+  test("declares the J10 sections plus the demo, in sidebar order", () => {
     expect(SETTINGS_SECTIONS.map((s) => s.id)).toEqual([
       "agents",
       "general",
       "git",
       "terminal",
+      "demo",
       "appearance",
       "notifications",
       "shortcuts",
@@ -41,6 +42,7 @@ describe("settings sections", () => {
     expect(byId.get("general")).toBe("setup");
     expect(byId.get("git")).toBe("workflows");
     expect(byId.get("terminal")).toBe("workflows");
+    expect(byId.get("demo")).toBe("workflows");
     expect(byId.get("appearance")).toBe("interface");
     expect(byId.get("notifications")).toBe("interface");
     expect(byId.get("shortcuts")).toBe("interface");
@@ -58,6 +60,7 @@ describe("settings sections", () => {
       "general",
       "git",
       "terminal",
+      "demo",
       "appearance",
       "notifications",
       "shortcuts",

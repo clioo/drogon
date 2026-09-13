@@ -455,6 +455,39 @@ export const botMonitorApproveInputSchema = z
   })
   .strict();
 
+/** `bot.monitor_create`, narrowed to the file-digest watch the product's own
+ *  Bots surfaces create: a workspace-relative resource and the reactive
+ *  action it releases. The daemon owns every other rule kind and all
+ *  validation; this is transport shape only. */
+export const botMonitorCreateInputSchema = z
+  .object({
+    hostId: id,
+    workspaceId: z
+      .string()
+      .max(128)
+      .regex(/^[^\x00-\x1f\x7f]*$/u),
+    botId: id,
+    resource: z
+      .string()
+      .min(1)
+      .max(1024)
+      .regex(/^[^\x00]*$/u),
+    cron: z.string().min(1).max(128).optional(),
+    responsibilityName: z.string().min(1).max(128).optional(),
+    instructions: z.string().max(32_768).optional(),
+  })
+  .strict();
+
+export const botMonitorCreateResultSchema = z.object({
+  monitorId: id,
+  botId: id,
+  ruleKind: z.string(),
+  approvalHash: z.string(),
+  approved: z.boolean(),
+  trigger: z.unknown().optional(),
+  responsibilityId: z.string().nullable().optional(),
+});
+
 export const botMonitorApproveResultSchema = z.object({
   hostId: id,
   botId: id,

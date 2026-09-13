@@ -1,0 +1,397 @@
+// The fixture agent behind every harness shim of `make repro`.
+//
+// It stands in for a coding agent so the demo can run the REAL product end to
+// end — daemon, work graph, durable orchestrator, adversarial rounds, evidence
+// and usage ledgers — with no model inference and no provider spend. What it
+// does is deterministic and declared in the receipt; nothing here pretends to
+// be a model:
+//
+//   main   → writes the Dog Tinder deck WITHOUT the undo feature (stage 1)
+//   test   → runs `node --test` and reports the verdict the test run actually
+//            gives (3 failures at stage 1 ⇒ `findings`), never a guess
+//   review → applies the undo implementation (stage 2), RE-RUNS the tests, and
+//            reports `pass` only when the re-run is green
+//
+// Token counts are fixed per role and labelled `fixture-harness` wherever they
+// surface, because a fixture has no provider to report real ones.
+
+import { spawnSync } from "node:child_process";
+import { appendFileSync, cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+const FIXTURE_VERSION = "drogon-repro-fixture 1.0";
+
+/** Deterministic per-role token counts the fixture "reports", in the shape a
+ *  real harness would: input/output plus cache reads on the long main turn. */
+const ROLE_USAGE = {
+  main: { input: 18_400, output: 3_250, cacheRead: 6_000 },
+  test: { input: 9_100, output: 1_180 },
+  review: { input: 12_700, output: 2_040 },
+};
+
+function parseShimArgs(argv) {
+  let harness = "unknown";
+  const rest = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === "--harness") {
+      harness = argv[index + 1] ?? "unknown";
+      index += 1;
+      continue;
+    }
+    if (argv[index] === "--") {
+      rest.push(...argv.slice(index + 1));
+      break;
+    }
+    rest.push(argv[index]);
+  }
+  return { harness, rest };
+}
+
+function loadContext() {
+  const candidates = [
+    path.join(process.cwd(), ".drogon", "repro-context.json"),
+    process.env.DROGON_REPRO_CONTEXT ?? "",
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(readFileSync(candidate, "utf8"));
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function log(context, entry) {
+  if (!context?.invocationLog) return;
+  try {
+    appendFileSync(context.invocationLog, `${JSON.stringify(entry)}\n`);
+  } catch {
+    // The log is evidence, not control flow: a demo must not die for it.
+  }
+}
+
+/** The prompt the harness was launched with: the last non-flag argument the
+ *  adapters pass, or stdin for an adapter that pipes it. */
+function resolvePrompt(rest) {
+  const candidates = rest.filter((value) => typeof value === "string" && value.length > 40);
+  if (candidates.length > 0) return candidates[candidates.length - 1];
+  try {
+    return readFileSync(0, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function runTests(cwd) {
+  const result = spawnSync(process.execPath, ["--test", "--test-reporter", "tap"], {
+    cwd,
+    encoding: "utf8",
+    timeout: 120_000,
+  });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  const count = (label) => {
+    const match = output.match(new RegExp(`^# ${label} (\\d+)$`, "m"));
+    return match ? Number(match[1]) : null;
+  };
+  const failing = [...output.matchAll(/^not ok \d+ - (.+)$/gm)].map((match) => match[1].trim());
+  return { pass: count("pass"), fail: count("fail"), failing, code: result.status };
+}
+
+function cli(context, args) {
+  if (!context?.cli || !context?.dataDir) return null;
+  const result = spawnSync(context.cli, ["--data-dir", context.dataDir, "--json", ...args], {
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  return { code: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
+function cliJson(context, args) {
+  const result = cli(context, args);
+  if (!result || result.code !== 0) return null;
+  try {
+    const parsed = JSON.parse(result.stdout);
+    return parsed.ok === true ? parsed.result : null;
+  } catch {
+    return null;
+  }
+}
+
+function reportUsage(context, { role, harness, model, runId, agentId }) {
+  const usage = ROLE_USAGE[role];
+  if (!usage || !context?.workspaceId) return null;
+  const args = [
+    "graph",
+    "usage-add",
+    "--workspace",
+    context.workspaceId,
+    "--input",
+    String(usage.input),
+    "--output",
+    String(usage.output),
+    "--harness",
+    harness,
+    "--model",
+    model,
+    "--role",
+    role,
+  ];
+  if (usage.cacheRead) args.push("--cache-read", String(usage.cacheRead));
+  if (runId) args.push("--run", runId);
+  if (agentId) args.push("--agent", agentId);
+  return cli(context, args);
+}
+
+function recordEvidence(context, { status, summary, detail, role, runId, agentId }) {
+  if (!context?.workspaceId) return null;
+  const args = [
+    "graph",
+    "evidence-add",
+    "--workspace",
+    context.workspaceId,
+    "--status",
+    status,
+    "--summary",
+    summary,
+    "--role",
+    role,
+  ];
+  if (detail) args.push("--detail", detail);
+  if (runId) args.push("--run", runId);
+  if (agentId) args.push("--agent", agentId);
+  return cli(context, args);
+}
+
+function applyStage(context, stage) {
+  const source = path.join(context.stagesDir, stage);
+  cpSync(source, process.cwd(), { recursive: true });
+  return source;
+}
+
+function writeEvaluation(target, verdict, evidence) {
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, `${JSON.stringify({ verdict, evidence }, null, 2)}\n`);
+}
+
+function describeTests({ pass, fail, failing }) {
+  const counts = `${pass ?? "?"} passed, ${fail ?? "?"} failed`;
+  if (!failing.length) return `node --test: ${counts}`;
+  return `node --test: ${counts} — ${failing.join("; ")}`;
+}
+
+const { harness, rest } = parseShimArgs(process.argv.slice(2));
+const context = loadContext();
+
+if (rest.includes("--version") || rest.includes("-v") || rest[0] === "--version") {
+  process.stdout.write(`${harness} ${FIXTURE_VERSION}\n`);
+  process.exit(0);
+}
+
+// Enumeration surfaces the harness catalog probes. The fixture model is the
+// only id it will ever claim.
+if (rest[0] === "models" || rest.includes("--list-models")) {
+  process.stdout.write(`${context?.model ?? "fixture/dog-tinder"}\n`);
+  process.exit(0);
+}
+
+const prompt = resolvePrompt(rest);
+const modelIndex = rest.indexOf("--model");
+const model = modelIndex === -1 ? (context?.model ?? "fixture") : (rest[modelIndex + 1] ?? "fixture");
+const sentinel = prompt.match(/DROGON_NODE_[A-Z0-9_]+_DONE/g)?.at(-1) ?? null;
+const evaluation = prompt.match(/Write (\.drogon\/evaluations\/[^\s]+\.json) as JSON/)?.[1] ?? null;
+const runId =
+  prompt.match(/Drogon run ([0-9a-f]{8,})/)?.[1] ??
+  prompt.match(/for workflow ([0-9a-f]{8,})/)?.[1] ??
+  null;
+const releaseEvent = prompt.match(/Monitor delegation (\S+)/)?.[1] ?? null;
+const agentId = evaluation ? path.basename(evaluation, ".json") : releaseEvent ? "monitor-release" : "orchestrator-main";
+const role = evaluation
+  ? evaluation.endsWith("-test.json")
+    ? "test"
+    : "review"
+  : releaseEvent
+    ? "release"
+    : "main";
+
+log(context, {
+  at: new Date().toISOString(),
+  harness,
+  role,
+  model,
+  cwd: process.cwd(),
+  argv: rest,
+  promptBytes: prompt.length,
+});
+
+if (!context) {
+  process.stderr.write("repro fixture: no run context; refusing to act\n");
+  process.exit(21);
+}
+
+/** The monitor-released session: open the worktree the delegation prompt
+ *  names, put this run's Subagent policy on it, and start the durable
+ *  workflow there. The rounds themselves are the daemon's job. */
+function release() {
+  const worktree = prompt.match(/worktree create --project (\S+) --name (\S+)/);
+  if (!worktree) throw new Error("the delegation prompt named no worktree to create");
+  const [, projectId, worktreeName] = worktree;
+
+  let created = cliJson(context, [
+    "worktree",
+    "create",
+    "--project",
+    projectId,
+    "--name",
+    worktreeName,
+    "--no-parent",
+  ]);
+  if (!created) {
+    // A redelivered event reuses the worktree this name already made.
+    const listed = cliJson(context, ["worktree", "list", "--project", projectId]);
+    created = (listed?.worktrees ?? []).find((entry) => entry.name === worktreeName) ?? null;
+  }
+  if (!created?.workspaceId || !created?.path) {
+    throw new Error(`could not open the released worktree '${worktreeName}'`);
+  }
+
+  // Role nodes launched inside this worktree must report to ITS workspace.
+  const scoped = { ...context, workspaceId: created.workspaceId };
+  mkdirSync(path.join(created.path, ".drogon"), { recursive: true });
+  writeFileSync(
+    path.join(created.path, ".drogon/repro-context.json"),
+    `${JSON.stringify(scoped, null, 2)}\n`,
+  );
+
+  const intent = path.join(created.path, ".drogon/repro-intent.json");
+  writeFileSync(intent, `${JSON.stringify({ nodes: [], policy: context.policy }, null, 2)}\n`);
+  const wrote = cliJson(scoped, [
+    "graph",
+    "write-intent",
+    "--workspace",
+    created.workspaceId,
+    "--file",
+    intent,
+  ]);
+  if (!wrote) throw new Error("graph write-intent refused the released policy");
+
+  let task = context.mainNode?.prompt ?? "";
+  try {
+    task = `${readFileSync(path.join(created.path, context.specPath ?? "specs/dog-tinder.md"), "utf8")}\n\n${task}`;
+  } catch {
+    // The spec is the better brief, but its absence is not fatal: the node
+    // still carries the task text this run was configured with.
+  }
+  const mainFile = path.join(created.path, ".drogon/repro-main-node.json");
+  writeFileSync(
+    mainFile,
+    `${JSON.stringify({ ...context.mainNode, prompt: task }, null, 2)}\n`,
+  );
+  const started = cliJson(scoped, [
+    "graph",
+    "orchestrator-start",
+    "--workspace",
+    created.workspaceId,
+    "--file",
+    mainFile,
+  ]);
+  if (!started?.run?.id) throw new Error("graph orchestrator-start did not return a workflow");
+
+  recordEvidence(scoped, {
+    status: "progress",
+    summary: `Monitor firing ${releaseEvent} released the work: durable workflow started on this worktree.`,
+    detail: `Watched ${context.specPath ?? "the spec"} changed. Opened worktree ${worktreeName} (${created.workspaceId}) and started workflow ${started.run.id} with adversarial testing.`,
+    role: "release",
+    runId: started.run.id,
+    agentId: "monitor-release",
+  });
+  process.stdout.write(
+    `Released by ${releaseEvent}: worktree ${worktreeName} (${created.workspaceId}), workflow ${started.run.id}\n`,
+  );
+  return started.run.id;
+}
+
+try {
+  if (role === "release") {
+    release();
+    if (sentinel) process.stdout.write(`${sentinel}\n`);
+    process.exit(0);
+  }
+
+  if (role === "main") {
+    applyStage(context, "agent-stage-1");
+    const tests = runTests(process.cwd());
+    process.stdout.write(`Dog Tinder deck written (stage 1). ${describeTests(tests)}\n`);
+    recordEvidence(context, {
+      status: "completed",
+      summary: "Dog Tinder deck and storage implemented; page renders the profile queue.",
+      detail: `Implemented src/deck.js, src/storage.js and index.html. ${describeTests(tests)}`,
+      role: "main",
+      runId,
+      agentId,
+    });
+    reportUsage(context, { role: "main", harness, model, runId, agentId });
+    if (sentinel) process.stdout.write(`${sentinel}\n`);
+    process.exit(0);
+  }
+
+  if (role === "test") {
+    const tests = runTests(process.cwd());
+    const green = tests.fail === 0 && (tests.pass ?? 0) > 0;
+    const evidence = green
+      ? `Ran the deck contract adversarially: ${describeTests(tests)}. Swipe, match, empty-deck, undo and reload paths all hold.`
+      : `Ran the deck contract adversarially: ${describeTests(tests)}. Undo of the last swipe is missing, so a mis-swipe is unrecoverable and the reloaded deck cannot take one back.`;
+    writeEvaluation(path.join(process.cwd(), evaluation), green ? "pass" : "findings", evidence);
+    recordEvidence(context, {
+      status: green ? "completed" : "finding",
+      summary: green ? "Adversarial test found nothing left to break." : "Adversarial test: undo of the last swipe is missing.",
+      detail: evidence,
+      role: "test",
+      runId,
+      agentId,
+    });
+    reportUsage(context, { role: "test", harness, model, runId, agentId });
+    process.stdout.write(`${evidence}\n`);
+    if (sentinel) process.stdout.write(`${sentinel}\n`);
+    process.exit(0);
+  }
+
+  const before = runTests(process.cwd());
+  let evidence;
+  let verdict;
+  let changedCode = false;
+  if (before.fail === 0 && (before.pass ?? 0) > 0) {
+    verdict = "pass";
+    evidence = `Reviewed the deck and re-ran the contract without changing product code: ${describeTests(before)}.`;
+  } else {
+    changedCode = true;
+    applyStage(context, "agent-stage-2");
+    const after = runTests(process.cwd());
+    const fixed = after.fail === 0 && (after.pass ?? 0) > 0;
+    verdict = fixed ? "pass" : "findings";
+    evidence = fixed
+      ? `Implemented one-level undo in src/deck.js (restores the cursor, the like/pass and the match it created; refuses a second undo) and wired the Undo control in index.html. Verified by re-running the contract: ${describeTests(after)} (was ${describeTests(before)}).`
+      : `Applied the undo implementation but the re-run still fails: ${describeTests(after)}.`;
+  }
+  writeEvaluation(path.join(process.cwd(), evaluation), verdict, evidence);
+  recordEvidence(context, {
+    status: verdict === "pass" ? "completed" : "finding",
+    summary:
+      verdict !== "pass"
+        ? "Code review: findings remain after the correction attempt."
+        : changedCode
+          ? "Code review: undo implemented and verified by re-running the contract."
+          : "Code review: nothing left to fix; re-ran the contract to confirm.",
+    detail: evidence,
+    role: "review",
+    runId,
+    agentId,
+  });
+  reportUsage(context, { role: "review", harness, model, runId, agentId });
+  process.stdout.write(`${evidence}\n`);
+  if (sentinel) process.stdout.write(`${sentinel}\n`);
+  process.exit(0);
+} catch (error) {
+  process.stderr.write(`repro fixture ${role} failed: ${error.message}\n`);
+  process.exit(22);
+}

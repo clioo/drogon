@@ -1,0 +1,10 @@
+{
+  "name": "dog-tinder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A swipe deck for adoptable dogs. The deck and its storage are the task; the tests are the contract.",
+  "scripts": {
+    "test": "node --test"
+  }
+}

@@ -18,6 +18,7 @@ import { AppearanceSection } from "./appearance-section";
 import { GeneralSection } from "./general-section";
 import { GitSection } from "./git-section";
 import { NotificationsSection } from "./notifications-section";
+import { ReproDemoSection } from "./repro-demo/ReproDemoSection";
 import { ShortcutsSection } from "./shortcuts-section";
 import { TerminalSection } from "./terminal-section";
 import { SettingsSidebar } from "./SettingsSidebar";
@@ -260,6 +261,7 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                     onSuppressWhenFocusedChange={props.onSuppressWhenFocusedChange}
                   />
                 ) : null}
+                {visible.includes("demo") ? <ReproDemoSection /> : null}
                 {visible.includes("shortcuts") ? <ShortcutsSection /> : null}
                 {showProject && props.project ? (
                   <ProjectSettingsSectionChrome project={props.project}>
