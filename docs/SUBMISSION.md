@@ -71,7 +71,11 @@ notarized: on first launch, right-click `Drogon.app` and choose **Open**.
   for real, no model inference happens, and nothing is billed. The same demo
   runs from the app in **Settings → Demo reproducible**, which walks the
   viewer through the phases and moves the focus to whatever is changing.
-  Tests: `make repro-test` and `node scripts/probe-repro-demo.mjs`.
+  Tests: `make repro-test`, `node scripts/probe-repro-demo.mjs`, and
+  `make repro-ui`, which runs the in-app demo end to end from its own button
+  in a background window — the bot, its watch firing on the spec change, the
+  Work Graph opening by itself, the adversarial rounds passing there, and the
+  cost the panel reports afterwards.
 - Screenshots: [docs/screenshots/](screenshots/) — 23 images of every surface
   (workspace, Orchestrator off and on, Bots, Meetings, Automations, Tasks,
   Settings; light and dark; one at 760px), all captured from the real packaged

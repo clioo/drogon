@@ -16,7 +16,7 @@
 // surface, because a fixture has no provider to report real ones.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const FIXTURE_VERSION = "drogon-repro-fixture 1.0";
@@ -163,6 +163,28 @@ function recordEvidence(context, { status, summary, detail, role, runId, agentId
   return cli(context, args);
 }
 
+/** The workspace this invocation is running in, resolved from the daemon's own
+ *  registry by matching this process's cwd. The CLI lane writes a context file
+ *  next to the workspace and already knows it; the in-app lane does not, so the
+ *  fixture asks instead of assuming (and never reports usage to the wrong
+ *  workspace). */
+function resolveWorkspaceId(context) {
+  const listed = cliJson(context, ["workspace", "list"]);
+  const here = realpathSync(process.cwd());
+  for (const workspace of listed?.workspaces ?? []) {
+    if (typeof workspace?.path !== "string") continue;
+    let candidate = workspace.path;
+    try {
+      candidate = realpathSync(workspace.path);
+    } catch {
+      // A workspace whose folder moved cannot be this one.
+      continue;
+    }
+    if (candidate === here) return workspace.id ?? null;
+  }
+  return null;
+}
+
 function applyStage(context, stage) {
   const source = path.join(context.stagesDir, stage);
   cpSync(source, process.cwd(), { recursive: true });
@@ -229,10 +251,53 @@ if (!context) {
   process.exit(21);
 }
 
+// The context may name no workspace (the in-app lane carries only the CLI and
+// the stages): resolve this one from the daemon rather than guessing, so
+// evidence and usage land where the work actually happened.
+if (!context.workspaceId) {
+  const resolved = resolveWorkspaceId(context);
+  if (resolved) context.workspaceId = resolved;
+}
+
 /** The monitor-released session: open the worktree the delegation prompt
  *  names, put this run's Subagent policy on it, and start the durable
  *  workflow there. The rounds themselves are the daemon's job. */
 function release() {
+  // Standing instructions win over the delegation template, the same way they
+  // would for a real agent: when the responsibility names the exact command to
+  // run (the in-app demo does, so a small local model can follow it), run THAT
+  // in this workspace instead of opening a worktree of our own.
+  const direct = prompt.match(
+    /drogon-cli graph orchestrator-start --workspace (\S+) --file (\S+)/,
+  );
+  if (direct) {
+    const [, workspaceId, file] = direct;
+    const scoped = { ...context, workspaceId };
+    const started = cliJson(scoped, [
+      "graph",
+      "orchestrator-start",
+      "--workspace",
+      workspaceId,
+      "--file",
+      file,
+    ]);
+    if (!started?.run?.id) {
+      throw new Error(`graph orchestrator-start did not return a workflow for ${workspaceId}`);
+    }
+    recordEvidence(scoped, {
+      status: "progress",
+      summary: `Monitor firing ${releaseEvent} released the work: durable workflow started here.`,
+      detail: `Watched ${context.specPath ?? "the spec"} changed. Followed the responsibility's own instructions and started workflow ${started.run.id} in this workspace.`,
+      role: "release",
+      runId: started.run.id,
+      agentId: "monitor-release",
+    });
+    process.stdout.write(
+      `Released by ${releaseEvent}: workflow ${started.run.id} in ${workspaceId}\n`,
+    );
+    return started.run.id;
+  }
+
   const worktree = prompt.match(/worktree create --project (\S+) --name (\S+)/);
   if (!worktree) throw new Error("the delegation prompt named no worktree to create");
   const [, projectId, worktreeName] = worktree;

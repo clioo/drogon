@@ -12,6 +12,10 @@
 #                                Every invocation is a new run.
 #   make repro-list              every run this checkout has produced
 #   make repro-test              run the reproducible run's own tests
+#   make repro-ui                run the SAME demo from the app's own button
+#                                (Settings -> Demo reproducible) end to end,
+#                                in a background window, and report what a
+#                                viewer would see
 #
 # Extra flags reach the installer through FLAGS, e.g.
 #   make install FLAGS=--no-restart
@@ -35,7 +39,7 @@ INSTALLER := scripts/install-drogon.mjs
 FLAGS ?=
 BUNDLE ?=
 
-.PHONY: help install install-main install-test pnpm-toolchain repro repro-list repro-test
+.PHONY: help install install-main install-test pnpm-toolchain repro repro-list repro-test repro-ui
 
 REPRO := scripts/reproduce-adversarial-run.mjs
 
@@ -82,3 +86,10 @@ repro-list:
 
 repro-test:
 	@PATH="$(PATH)"; export PATH; node --test scripts/reproduce-adversarial-run.test.mjs
+
+# Needs the desktop bundle: build it first if this checkout has not.
+repro-ui: | node_modules
+	@PATH="$(PATH)"; export PATH; \
+	node scripts/accept-repro-demo.mjs --check >/dev/null 2>&1 || \
+		"$(PNPM_BIN)/pnpm" --filter @drogon/desktop build; \
+	node scripts/accept-repro-demo.mjs $(FLAGS)

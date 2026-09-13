@@ -127,6 +127,30 @@ describe("Settings → Demo reproducible", () => {
     ).toBe("on");
   }, 20_000);
 
+  test("reopening the panel after a run shows what ran, not the defaults", async () => {
+    const { unmount } = render(<ReproDemoSection bridge={bridgeThatRuns()} />);
+    fireEvent.change(screen.getByTestId("repro-demo-runtime"), {
+      target: { value: "opencode" },
+    });
+    fireEvent.change(screen.getByTestId("repro-demo-model"), {
+      target: { value: "fixture/dog-tinder" },
+    });
+    fireEvent.click(screen.getByTestId("repro-demo-run"));
+    await waitFor(() =>
+      expect(screen.getByTestId("repro-demo-run-name").textContent).toMatch(/dog-tinder-/),
+    );
+
+    // The tour unmounts this panel when it takes the viewer to the Work Graph.
+    unmount();
+    render(<ReproDemoSection bridge={bridgeThatRuns()} />);
+    expect((screen.getByTestId("repro-demo-model") as HTMLInputElement).value).toBe(
+      "fixture/dog-tinder",
+    );
+    expect((screen.getByTestId("repro-demo-runtime") as HTMLSelectElement).value).toBe(
+      "opencode",
+    );
+  }, 20_000);
+
   test("a build without the channels the demo needs says so instead of offering a dead button", () => {
     render(<ReproDemoSection bridge={null} />);
     expect((screen.getByTestId("repro-demo-run") as HTMLButtonElement).disabled).toBe(

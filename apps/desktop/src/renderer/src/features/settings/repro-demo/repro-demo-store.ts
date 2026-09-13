@@ -131,6 +131,9 @@ export type ReproDemoBridge = {
 
 export type ReproDemoState = {
   running: boolean;
+  /** What the last run was started with, so the controls show what actually
+   *  ran when the panel is reopened after the tour — not their defaults. */
+  selection: { runtimeId: string; harness: string; model: string; iterations: number } | null;
   phases: Record<ReproPhaseId, ReproPhaseState>;
   /** The widget in the panel the viewer should be looking at right now. */
   spotlight: ReproPhaseId | null;
@@ -165,6 +168,7 @@ export type ReproDemoDeps = {
 function initialState(): ReproDemoState {
   return {
     running: false,
+    selection: null,
     phases: initialPhaseStates(),
     spotlight: null,
     workspaceId: null,
@@ -233,6 +237,19 @@ export function cancelReproDemo(): void {
   update({ running: false });
 }
 
+/** A short, readable tag for one run: enough to tell two demos apart at a
+ *  glance in the sidebar, the Bots page and the Work Graph, and short enough
+ *  to read out loud. Six hex characters from the CSPRNG, not a timestamp — two
+ *  runs in the same second still get different names. */
+function shortToken(): string {
+  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+    const bytes = new Uint8Array(3);
+    crypto.getRandomValues(bytes);
+    return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  return Math.random().toString(16).slice(2, 8).padEnd(6, "0");
+}
+
 function requestId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -295,7 +312,16 @@ export async function runReproDemo(
   const tour = deps.tour ?? requestReproTour;
 
   cancelled = false;
-  state = { ...initialState(), running: true };
+  state = {
+    ...initialState(),
+    running: true,
+    selection: {
+      runtimeId: runtime.id,
+      harness: runtime.harness,
+      model: runtime.model,
+      iterations,
+    },
+  };
   for (const listener of listeners) listener();
 
   const until = async <T>(
@@ -319,9 +345,9 @@ export async function runReproDemo(
 
     // Phase 1 — a workspace of the demo's own.
     setPhase("workspace", "running");
-    const stamp = new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
+    const tag = shortToken();
     const quick = unwrap(
-      await bridge.quickSessionCreate({ name: `dog-tinder-demo-${stamp}` }),
+      await bridge.quickSessionCreate({ name: `dog-tinder-${tag}` }),
       "quickSessionCreate",
     );
     const workspaceId = quick.workspaceId;
@@ -357,7 +383,7 @@ export async function runReproDemo(
 
     // Phase 3 — the bot that owns the watch.
     setPhase("bot", "running");
-    const botId = `dog-tinder-demo-${stamp}`;
+    const botId = `dog-tinder-${tag}`;
     const bot = unwrap(
       await bridge.botCreate({
         hostId,
