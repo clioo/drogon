@@ -256,8 +256,10 @@ fn opencode_headless_dispatches_the_run_subcommand() {
         "headless OpenCode must dispatch the run subcommand: {args:?}"
     );
     assert!(
-        args.contains(&"hi".to_string()),
-        "the prompt goes to run as a message positional: {args:?}"
+        args.iter()
+            .any(|arg| arg.contains("=== DROGON RUNTIME CONTEXT ===")
+                && arg.contains("User task:\nhi")),
+        "the prompt and first-turn Drogon context go to run as one message positional: {args:?}"
     );
     let session_id = launched["id"].as_str().unwrap().to_string();
     let incarnation = launched["incarnation"].as_str().unwrap().to_string();

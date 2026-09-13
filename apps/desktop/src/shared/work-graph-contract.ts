@@ -172,6 +172,7 @@ export const workGraphStateNodeSchema = z
      *  daemon predates this field or the node has never launched. */
     harness: z.string().nullable().optional(),
     model: z.string().nullable().optional(),
+    provider: z.string().nullable().optional(),
     isFreeDefaultRuntime: z.boolean().nullable().optional(),
   })
   .passthrough();
@@ -209,6 +210,9 @@ export const graphRuntimeRefSchema = z
   .object({
     harness: z.string().min(1).max(64),
     model: z.string().max(256).optional().default(""),
+    /** Provider is persisted with the model so ambiguous ids never require a
+     * prompt-time guess (for example openai-codex/gpt-5.6-luna). */
+    provider: z.string().min(1).max(128).optional(),
   })
   .strict();
 
@@ -310,13 +314,16 @@ export function deriveSubagentPolicySummary(policy: GraphPolicy): string {
  *  returns. */
 export const FREE_DEFAULT_RUNTIME: GraphRuntimeRef = Object.freeze({
   harness: "pi",
+  provider: "dgx-spark",
   model: "qwen3.8-flash-next-nvidia-nvfp4",
 });
 
 export function isFreeDefaultRuntime(runtime: GraphRuntimeRef): boolean {
   return (
     runtime.harness === FREE_DEFAULT_RUNTIME.harness &&
-    runtime.model === FREE_DEFAULT_RUNTIME.model
+    runtime.model === FREE_DEFAULT_RUNTIME.model &&
+    (runtime.provider === undefined ||
+      runtime.provider === FREE_DEFAULT_RUNTIME.provider)
   );
 }
 

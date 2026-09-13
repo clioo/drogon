@@ -14,6 +14,7 @@ import {
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Label } from "../../components/ui/label";
+import { Input } from "../../components/ui/input";
 import {
   Select,
   SelectContent,
@@ -26,6 +27,35 @@ import { useHarnessCatalog } from "../mentu/mentu-harness-catalog";
 import { useMentuModelCatalog } from "../mentu/mentu-model-catalog";
 import { MentuModelPicker } from "../mentu/MentuModelPicker";
 import { modelOptionsFromCatalog } from "../mentu/mentu-model-registry";
+
+function RuntimeProviderField({
+  provider,
+  disabled,
+  onChange,
+  testIdPrefix,
+}: {
+  provider?: string;
+  disabled: boolean;
+  onChange: (provider: string | undefined) => void;
+  testIdPrefix: string;
+}): React.JSX.Element {
+  return (
+    <div className="order-last col-span-full flex min-w-0 w-full flex-1 items-center gap-1.5">
+      <Input
+        value={provider ?? ""}
+        disabled={disabled}
+        placeholder="Provider (for example openai-codex)"
+        aria-label="Provider"
+        className="h-7 text-xs"
+        data-testid={`${testIdPrefix}-provider`}
+        onChange={(event) => {
+          const value = event.target.value.trim();
+          onChange(value || undefined);
+        }}
+      />
+    </div>
+  );
+}
 
 function RuntimeModelField({
   harness,
@@ -183,6 +213,7 @@ export function SubagentPolicyPanel({
     const fallback: GraphRuntimeRef = {
       harness: approvedHarnessChoices[0]?.harnessId ?? "pi",
       model: "",
+      provider: undefined,
     };
     onChange({
       ...policy,
@@ -256,9 +287,19 @@ export function SubagentPolicyPanel({
                 harnesses={approvedHarnessChoices}
                 disabled={!interactive}
                 onChange={(harness) =>
-                  updateApproved(index, { harness, model: "" })
+                  updateApproved(index, {
+                    harness,
+                    model: "",
+                    provider: undefined,
+                  })
                 }
                 testId={`approved-runtime-${index}-harness`}
+              />
+              <RuntimeProviderField
+                provider={runtime.provider}
+                disabled={!interactive}
+                onChange={(provider) => updateApproved(index, { provider })}
+                testIdPrefix={`approved-runtime-${index}`}
               />
               <RuntimeModelField
                 harness={runtime.harness}
@@ -354,10 +395,21 @@ export function SubagentPolicyPanel({
             onChange={(harness) =>
               onChange({
                 ...policy,
-                fallbackRuntime: { harness, model: "" },
+                fallbackRuntime: { harness, model: "", provider: undefined },
               })
             }
             testId="fallback-runtime-harness"
+          />
+          <RuntimeProviderField
+            provider={fallback?.provider}
+            disabled={!interactive || !fallback}
+            onChange={(provider) =>
+              onChange({
+                ...policy,
+                fallbackRuntime: fallback ? { ...fallback, provider } : null,
+              })
+            }
+            testIdPrefix="fallback-runtime"
           />
           <RuntimeModelField
             harness={fallback?.harness ?? ""}
@@ -366,7 +418,11 @@ export function SubagentPolicyPanel({
             onChange={(model) =>
               onChange({
                 ...policy,
-                fallbackRuntime: { harness: fallback?.harness ?? "", model },
+                fallbackRuntime: {
+                  harness: fallback?.harness ?? "",
+                  model,
+                  provider: fallback?.provider,
+                },
               })
             }
             testIdPrefix="fallback-runtime"

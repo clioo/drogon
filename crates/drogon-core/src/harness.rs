@@ -259,6 +259,36 @@ impl Engine {
         // refuses unsupported combinations without substitution; the
         // existing plan below stays the argv and fencing authority.
         let _admission = selection_gate::check_launch_selection(&request, None)?;
+        let cwd = {
+            let conn = self.db.lock().unwrap();
+            crate::workspace::get_path(&conn, workspace_id)?
+        };
+        // Every harness receives Drogon delegation context on its first turn.
+        // Claude and Pi have a portable system-prompt flag; the other
+        // adapters receive the same bytes as a prefixed initial prompt. No
+        // workspace context file is created here, preserving #491.
+        let graph = crate::graph::store::read_graph(std::path::Path::new(&cwd))?;
+        let context = crate::worker_brief::compose_harness_context(
+            workspace_id,
+            std::path::Path::new(&cwd),
+            &graph.intent.policy,
+        );
+        crate::worker_brief::validate_context_text(&context)?;
+        match request.harness_id {
+            HarnessId::Claude | HarnessId::Pi => {
+                request.append_system_prompt = Some(match request.append_system_prompt.take() {
+                    Some(existing) => format!("{context}\n{existing}"),
+                    None => context,
+                });
+            }
+            HarnessId::Codex | HarnessId::Opencode | HarnessId::Antigravity => {
+                let existing = request.prompt.take();
+                request.prompt = Some(crate::worker_brief::prefix_user_prompt(
+                    &context,
+                    existing.as_deref(),
+                ));
+            }
+        }
         let settings = self.read_agent_settings()?;
         let plan = match settings.as_ref() {
             Some(settings) => crate::agent_settings::plan_with_settings(&request, settings)?,
@@ -361,10 +391,6 @@ impl Engine {
                 Some(event_id.to_string())
             }
             None => None,
-        };
-        let cwd = {
-            let conn = self.db.lock().unwrap();
-            crate::workspace::get_path(&conn, workspace_id)?
         };
         // DISHONEST-3: the Work Graph's Subagent policy must reach the
         // session it describes, not only `drogon-cli skills get`'s prose.

@@ -317,6 +317,16 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
     assert_eq!(start_json["retryOf"], json!("dispatch-0"));
     assert_camel_case_round_trip(&start, "launch");
 
+    let policy = WorkerStartParams {
+        execution: WorkerExecution::Policy,
+        ..start.clone()
+    };
+    policy.validate_shape("host-a").unwrap();
+    let policy_json = serde_json::to_value(&policy).unwrap();
+    assert_eq!(policy_json["mode"], json!("policy"));
+    assert!(policy_json.get("launch").is_none());
+    assert_camel_case_round_trip(&policy, "mode");
+
     let reuse = WorkerStartParams {
         execution: WorkerExecution::Reuse {
             session_identity: SessionIdentity {

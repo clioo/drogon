@@ -1162,9 +1162,16 @@ pub async fn run(
                     ));
                 }
                 (None, None) => {
-                    return Err(usage(
-                        "worker-start needs --harness (fresh launch) or --reuse-session/--reuse-incarnation (explicit reuse)",
-                    ));
+                    if model.is_some()
+                        || effort.is_some()
+                        || provider.is_some()
+                        || permission_mode.is_some()
+                    {
+                        return Err(usage(
+                            "--model/--effort/--provider/--permission-mode require --harness; omit all fresh flags to use the Work Graph policy",
+                        ));
+                    }
+                    WorkerExecution::Policy
                 }
             };
             let requested_reuse_check = match &execution {

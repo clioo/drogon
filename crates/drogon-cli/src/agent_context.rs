@@ -1019,7 +1019,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "orchestration worker-start",
             &["orchestration", "worker-start"],
-            "Start exactly one worker attempt in a registered workspace",
+            "Start exactly one worker attempt in a registered workspace; omitted fresh runtime flags select the Work Graph policy",
             "drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation <N> --task <ID> --workspace <ID>",
             &[
                 "comment",
@@ -1047,6 +1047,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[
                 ORCHESTRATION_CAPABILITY,
                 COORDINATOR_BINDING,
+                "Without --harness or --reuse-session, the daemon selects approved policy runtimes in order, then fallback, preserving provider+model.",
                 "Fresh launch (--harness) and reuse (--reuse-session) are exclusive.",
             ],
         ),
@@ -1193,6 +1194,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[
                 ORCHESTRATION_CAPABILITY,
                 "Dual-actor verb: pass either the coordinator binding or the dispatch binding.",
+                "A dispatched worker uses --kind worker_done (alias final-report) exactly once with --outcome succeeded or failed; status messages and ask/reply use the same scoped CLI.",
             ],
         ),
         entry(

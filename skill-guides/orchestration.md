@@ -59,6 +59,12 @@ The execution modes are mutually exclusive:
 Every worker/tester brief must say that it cannot dispatch another worker. All
 implementation, testing, and correction workers are siblings at depth one.
 
+A Drogon-launched harness receives this context on its first turn, without a
+new `AGENTS.md` or `CLAUDE.md` in an unconfigured workspace: delegation goes
+through the `drogon-cli` on its managed `PATH`, and the Work Graph policy is
+authoritative for child runtimes. Read the policy's provider and model as one
+pair; never resolve an ambiguous model id by guessing.
+
 ## The Loop
 
 Create a run, create a task, dispatch a worker, wait for its report:
@@ -73,9 +79,15 @@ List ready work with
 and inspect one task with
 `drogon-cli orchestration task-show --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID>`.
 
-Dispatch the task to a worker session with
-`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID> --harness <HARNESS>`,
-or attach an existing session explicitly with
+Dispatch the task through the Work Graph policy with
+`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID>`.
+This is the default and records the exact provider+model selected from the
+ordered approved runtimes, then the fallback. A failed attempt may be retried
+explicitly with `--retry-of <DISPATCH-ID>`; the next policy runtime is chosen
+without the coordinator hand-picking a provider. A coordinator may override
+that policy only when it deliberately supplies the full fresh launch pair:
+`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID> --harness <HARNESS> --provider <PROVIDER> --model <MODEL>`.
+To attach an existing session explicitly, use
 `drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID> --reuse-session <SESSION> --reuse-incarnation <TOKEN>`.
 Watch it with
 `drogon-cli orchestration worker-show --run <ID> --coordinator-id <ID> --consumer-generation 3 --dispatch <ID>`
@@ -92,12 +104,21 @@ consuming with
 
 ## Worker Reports And Mail
 
-A worker inside its dispatched terminal reports completion through its
-scoped credential and environment hints, with no explicit bindings:
-`drogon-cli orchestration send --kind final-report --subject <TEXT> --outcome succeeded --body <REPORT>`.
-The outcome is `succeeded` or `failed`, and it is required for
-`final-report` kinds. Send exactly one final report per dispatch; a second,
-conflicting report is refused.
+A worker inside its dispatched terminal receives a structured first-turn
+brief with these stable sections, verbatim: `Objective`, `Scope / paths`,
+`Exact instructions (verbatim)`, `Run ID`, `Task ID`, `Dispatch ID`, the
+policy runtime order, and this reporting contract. It reports completion
+through its scoped credential and environment hints, with no explicit
+bindings:
+`drogon-cli orchestration send --kind worker_done --subject <TEXT> --outcome succeeded --body <REPORT>`.
+`worker_done` is the CLI alias for Drogon's `final-report` kind. The outcome
+is `succeeded` or `failed`, and it is required. Send progress with
+`drogon-cli orchestration send --kind status --subject <TEXT> --body <TEXT>`;
+ask a blocker with
+`drogon-cli orchestration ask --question <TEXT> --timeout-ms 60000`.
+Send exactly one final report per dispatch; a second, conflicting report is
+refused. The final body must name the outcome, modified files, and any
+artifact path; a PTY line alone is not a completion report.
 
 Coordinators send with explicit scope instead. Post a status note home with
 `drogon-cli orchestration send --run <ID> --coordinator-id <ID> --consumer-generation 3 --kind status --subject <TEXT> --to run-home`,

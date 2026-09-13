@@ -70,11 +70,13 @@ impl Engine {
                         .map(|attempt| GraphRuntimeRef {
                             harness: attempt.harness,
                             model: attempt.model,
+                            provider: attempt.provider,
                         })
                         .or_else(|| {
                             intent.node(&mapping.node_id).map(|node| GraphRuntimeRef {
                                 harness: node.harness.clone(),
                                 model: node.model.clone(),
+                                provider: None,
                             })
                         });
                 if let Some(runtime) = attributed {
@@ -289,7 +291,16 @@ impl Engine {
                     .find(|node| node.id == parsed.node_id)
                     .expect("presence already checked above");
                 node.harness = candidate.harness.clone();
-                node.model = candidate.model.clone();
+                node.model = if candidate.harness == "pi" {
+                    candidate
+                        .provider
+                        .as_deref()
+                        .filter(|provider| !provider.is_empty())
+                        .map(|provider| format!("{provider}/{}", candidate.model))
+                        .unwrap_or_else(|| candidate.model.clone())
+                } else {
+                    candidate.model.clone()
+                };
             }
             let selection = compiler::Selection::Target(parsed.node_id.clone());
             let attempt_outcome = compiler::compile(
@@ -411,6 +422,7 @@ impl Engine {
             .map(|attempt| GraphRuntimeRef {
                 harness: attempt.harness.clone(),
                 model: attempt.model.clone(),
+                provider: attempt.provider.clone(),
             })
             .collect())
     }
@@ -446,6 +458,7 @@ impl Engine {
             return Ok(GraphFailoverAttemptRecord {
                 harness: attempt.harness,
                 model: attempt.model,
+                provider: attempt.provider,
                 outcome: attempt.outcome,
                 reason: attempt.reason,
             });
@@ -454,6 +467,7 @@ impl Engine {
             return Ok(GraphFailoverAttemptRecord {
                 harness: attempt.harness,
                 model: attempt.model,
+                provider: attempt.provider,
                 outcome: attempt.outcome,
                 reason: attempt.reason,
             });
@@ -466,6 +480,7 @@ impl Engine {
             Some(run) if run.status == MentuRunStatus::Failed => Ok(GraphFailoverAttemptRecord {
                 harness: attempt.harness,
                 model: attempt.model,
+                provider: attempt.provider,
                 outcome: storage::FAILOVER_OUTCOME_FAILED.to_string(),
                 reason: Some(
                     run.error
@@ -475,6 +490,7 @@ impl Engine {
             _ => Ok(GraphFailoverAttemptRecord {
                 harness: attempt.harness,
                 model: attempt.model,
+                provider: attempt.provider,
                 outcome: attempt.outcome,
                 reason: attempt.reason,
             }),
@@ -498,6 +514,7 @@ impl Engine {
             node_id,
             &runtime.harness,
             &runtime.model,
+            runtime.provider.as_deref(),
             outcome,
             reason,
             run_id,

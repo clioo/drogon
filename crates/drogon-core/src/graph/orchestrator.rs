@@ -422,6 +422,7 @@ impl Engine {
             vec![GraphRuntimeRef {
                 harness: run.main.harness.clone(),
                 model: run.main.model.clone(),
+                provider: None,
             }]
         } else {
             failover::attempt_sequence(&run.policy)
@@ -478,6 +479,7 @@ impl Engine {
                 step.attempts.push(GraphFailoverAttemptRecord {
                     harness: candidate.harness,
                     model: candidate.model,
+                    provider: candidate.provider,
                     outcome: "launched".into(),
                     reason: None,
                 });
@@ -487,6 +489,7 @@ impl Engine {
                 step.attempts.push(GraphFailoverAttemptRecord {
                     harness: candidate.harness,
                     model: candidate.model,
+                    provider: candidate.provider,
                     outcome: "launch_failed".into(),
                     reason: Some(err.message),
                 });
@@ -588,7 +591,16 @@ fn node_for_step(run: &Run, candidate: &GraphRuntimeRef) -> GraphNodeIntent {
     let mut node = run.main.clone();
     node.id = step.node_id.clone();
     node.harness = candidate.harness.clone();
-    node.model = candidate.model.clone();
+    node.model = if candidate.harness == "pi" {
+        candidate
+            .provider
+            .as_deref()
+            .filter(|provider| !provider.is_empty())
+            .map(|provider| format!("{provider}/{}", candidate.model))
+            .unwrap_or_else(|| candidate.model.clone())
+    } else {
+        candidate.model.clone()
+    };
     node.depends_on.clear();
     if run.phase == "main" && node.harness != "shell" {
         if run.policy.adversarial.enabled {
@@ -826,6 +838,38 @@ mod tests {
     }
 
     #[test]
+    fn policy_provider_stays_paired_with_a_pi_model_for_compilation() {
+        let main: GraphNodeIntent = serde_json::from_value(
+            json!({"id":"main","title":"Task","harness":"pi","model":"main-model","prompt":"Task"}),
+        )
+        .unwrap();
+        let mut run = Run {
+            id: "provider-test".into(),
+            workspace_id: "ws".into(),
+            main,
+            policy: GraphPolicy::default(),
+            status: "running".into(),
+            phase: "test".into(),
+            iteration: 1,
+            steps: vec![],
+            started_at: String::new(),
+            updated_at: String::new(),
+            error: None,
+        };
+        run.steps.push(new_step(&run));
+        let node = node_for_step(
+            &run,
+            &GraphRuntimeRef {
+                harness: "pi".into(),
+                model: "gpt-5.6-luna".into(),
+                provider: Some("openai-codex".into()),
+            },
+        );
+        assert_eq!(node.model, "openai-codex/gpt-5.6-luna");
+        assert!(node.provider.is_none());
+    }
+
+    #[test]
     fn subagent_does_not_inherit_the_main_provider_binding() {
         let main: GraphNodeIntent = serde_json::from_value(json!({"id":"main","title":"Task","harness":"pi","model":"main-model","prompt":"Task","provider":{"baseUrl":"https://example.com/v1","apiKeyEnv":"MAIN_KEY"}})).unwrap();
         let mut run = Run {
@@ -847,6 +891,7 @@ mod tests {
             &GraphRuntimeRef {
                 harness: "pi".into(),
                 model: "different-provider/model".into(),
+                provider: None,
             },
         );
         assert!(node.provider.is_none());
@@ -858,6 +903,7 @@ mod tests {
             &GraphRuntimeRef {
                 harness: "pi".into(),
                 model: "main-model".into(),
+                provider: None,
             },
         );
         assert!(main.provider.is_some());
@@ -881,6 +927,7 @@ mod tests {
             &GraphRuntimeRef {
                 harness: "pi".into(),
                 model: "main-model".into(),
+                provider: None,
             },
         );
         assert!(
@@ -900,6 +947,7 @@ mod tests {
             &GraphRuntimeRef {
                 harness: "pi".into(),
                 model: "main-model".into(),
+                provider: None,
             },
         );
         assert!(direct.prompt.contains("do not dispatch subagents"));

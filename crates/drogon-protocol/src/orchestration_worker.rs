@@ -42,14 +42,24 @@ impl WorkerPlacement {
     rename_all_fields = "camelCase"
 )]
 pub enum WorkerExecution {
-    Fresh { launch: LaunchPreferences },
-    Reuse { session_identity: SessionIdentity },
+    /// Launch exactly the preferences supplied by the coordinator.
+    Fresh {
+        launch: LaunchPreferences,
+    },
+    /// Resolve the next runtime from the workspace's Work Graph policy. The
+    /// daemon records the resolved provider/model pair in the attempt; a
+    /// caller cannot smuggle a hand-picked model through this mode.
+    Policy,
+    Reuse {
+        session_identity: SessionIdentity,
+    },
 }
 
 impl WorkerExecution {
     pub fn validate_shape(&self) -> Result<(), RpcError> {
         match self {
             WorkerExecution::Fresh { launch } => validate_launch_preferences(launch),
+            WorkerExecution::Policy => Ok(()),
             WorkerExecution::Reuse { session_identity } => session_identity.validate_shape(),
         }
     }

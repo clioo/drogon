@@ -1,5 +1,6 @@
 //! Native launch admission commits before the owned PTY effect.
 
+use std::path::Path;
 use std::sync::atomic::Ordering;
 
 use drogon_harness::{HarnessLaunchPlan, HarnessLaunchRequest};
@@ -11,13 +12,13 @@ use drogon_protocol::orchestration_worker::{
 };
 use drogon_protocol::{Request, RpcError};
 use rusqlite::{OptionalExtension, Transaction};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::coordination_attempts::{self as attempts, Attempt};
 use crate::coordination_identity::DispatchCredential;
 use crate::coordination_runs::{coordinator_actor, decode, encode};
 use crate::session::session_admission::{self, PreparedSession, WorkerEnvironment};
-use crate::{Engine, coordination_access, error, harness, session};
+use crate::{Engine, coordination_access, error, harness, session, worker_brief};
 
 struct PreparedWorker {
     attempt: Attempt,
@@ -29,6 +30,31 @@ struct LaunchPlan {
     harness: HarnessLaunchPlan,
     cli: String,
     preferences: LaunchPreferences,
+}
+
+/// Converts a policy runtime into the launch vocabulary. New policy files use
+/// the explicit provider field; the `provider/model` spelling remains a
+/// compatibility bridge for graph files written before that field existed.
+fn policy_provider_model(
+    runtime: &drogon_protocol::graph::GraphRuntimeRef,
+) -> (Option<String>, Option<String>) {
+    if let Some(provider) = &runtime.provider {
+        return (
+            Some(provider.clone()),
+            (!runtime.model.is_empty()).then(|| runtime.model.clone()),
+        );
+    }
+    if runtime.harness == "pi"
+        && let Some((provider, model)) = runtime.model.split_once('/')
+        && !provider.is_empty()
+        && !model.is_empty()
+    {
+        return (Some(provider.to_string()), Some(model.to_string()));
+    }
+    (
+        None,
+        (!runtime.model.is_empty()).then(|| runtime.model.clone()),
+    )
 }
 
 impl Engine {
@@ -87,12 +113,12 @@ impl Engine {
         params: &WorkerStartParams,
         dispatch_id: &str,
     ) -> Result<LaunchPlan, RpcError> {
-        let WorkerExecution::Fresh { launch } = &params.execution else {
+        if matches!(params.execution, WorkerExecution::Reuse { .. }) {
             return Err(RpcError::new(
                 "unsupported_feature",
                 "Existing sessions cannot receive a fresh private worker context yet.",
             ));
-        };
+        }
         let cli = self
             .worker_cli
             .as_ref()
@@ -113,24 +139,82 @@ impl Engine {
                 },
             )
         })?;
-        let mut launch_request: HarnessLaunchRequest = decode(&encode(launch)?)?;
-        let context = json!({"hostId":self.host_id,"runId":params.scope.run_id,"taskId":params.task_id,"dispatchId":dispatch_id});
-        launch_request.prompt = Some(format!(
-            "You are a directly assigned Drogon worker. Do not start subworkers.\n\
-             Use the host executable {} with an argv-aware process API. Its private environment carries your credential; never print it or read the admin token.\n\
-             Your exact non-secret context is {}. Read orchestration --help for command syntax.\n\
-             Complete the task, then send exactly one orchestration send --kind final-report with --outcome succeeded or failed, --subject and a concise --body report. Use your environment-provided run/task/dispatch scope; never impersonate a coordinator.\n\
-             Use orchestration ask for a blocking question and resume its existing ID after timeout. End this assigned turn after the final report.\n\
-             TASK INSTRUCTIONS:\n{}",
-            serde_json::to_string(&cli)
-                .map_err(|_| error::internal_error("Invalid host CLI path."))?,
-            context,
-            task.spec.instructions,
+        let workspace_path = self.coordination_read(|tx| {
+            tx.query_row(
+                "SELECT path FROM workspaces WHERE id=?1 AND host_id=?2",
+                rusqlite::params![params.placement.workspace_id, self.host_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(error::from_sqlite)?
+            .ok_or_else(|| error::not_found("Workspace is not registered on this execution host."))
+        })?;
+        let graph = crate::graph::store::read_graph(Path::new(&workspace_path))?;
+        let launch = match &params.execution {
+            WorkerExecution::Fresh { launch } => launch.clone(),
+            WorkerExecution::Policy => {
+                let attempted = self.coordination_read(|tx| {
+                    attempts::failed_policy_launches(tx, &params.scope, &params.task_id)
+                })?;
+                let attempted_refs = attempted
+                    .iter()
+                    .map(|launch| drogon_protocol::graph::GraphRuntimeRef {
+                        harness: launch.harness_id.clone(),
+                        model: launch.model.clone().unwrap_or_default(),
+                        provider: launch.provider.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                let runtime = crate::graph::failover::next_runtime(
+                    &graph.intent.policy,
+                    &attempted_refs,
+                )
+                .ok_or_else(|| {
+                    RpcError::new(
+                        "policy_exhausted",
+                        "The Work Graph policy has no untried approved or fallback runtime for this task.",
+                    )
+                })?;
+                if runtime.harness == "shell" {
+                    return Err(RpcError::new(
+                        "unsupported_feature",
+                        "A shell graph runtime cannot be used as an orchestration worker.",
+                    ));
+                }
+                let (provider, model) = policy_provider_model(&runtime);
+                LaunchPreferences {
+                    harness_id: runtime.harness,
+                    model,
+                    effort: None,
+                    provider,
+                    permission_mode: LaunchPermissionMode::Inherit,
+                }
+            }
+            WorkerExecution::Reuse { .. } => unreachable!(),
+        };
+        let mut launch_request: HarnessLaunchRequest = decode(&encode(&launch)?)?;
+        let objective = task
+            .spec
+            .display_name
+            .as_deref()
+            .or(task.spec.title.as_deref())
+            .unwrap_or("Complete the assigned task");
+        let scope_paths =
+            worker_brief::task_scope_paths(task.spec.metadata.as_ref(), Path::new(&workspace_path));
+        launch_request.prompt = Some(worker_brief::compose_worker_brief(
+            objective,
+            &scope_paths,
+            &task.spec.instructions,
+            Path::new(&workspace_path),
+            &params.scope.run_id,
+            &params.task_id,
+            dispatch_id,
+            &cli,
+            &graph.intent.policy,
         ));
         Ok(LaunchPlan {
             harness: harness::resolve_launch(&launch_request)?,
             cli,
-            preferences: launch.clone(),
+            preferences: launch,
         })
     }
 

@@ -758,8 +758,13 @@ pub fn graph_run_node_failover(
     attempts: &[GraphFailoverAttemptRecord],
 ) -> String {
     let mut lines = vec![format!(
-        "Ran on {}{}{} (attempt {attempt_number}).",
+        "Ran on {}{}{}{} (attempt {attempt_number}).",
         runtime.harness,
+        runtime
+            .provider
+            .as_deref()
+            .map(|provider| format!("/{provider}"))
+            .unwrap_or_default(),
         if runtime.model.is_empty() {
             String::new()
         } else {
@@ -775,7 +780,16 @@ pub fn graph_run_node_failover(
         let target = if attempt.model.is_empty() {
             attempt.harness.clone()
         } else {
-            format!("{}/{}", attempt.harness, attempt.model)
+            format!(
+                "{}{}/{}",
+                attempt.harness,
+                attempt
+                    .provider
+                    .as_deref()
+                    .map(|provider| format!("/{provider}"))
+                    .unwrap_or_default(),
+                attempt.model
+            )
         };
         let mut line = format!("  attempt: {target} [{}]", attempt.outcome);
         if let Some(reason) = &attempt.reason {

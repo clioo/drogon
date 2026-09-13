@@ -27,7 +27,7 @@ use std::io;
 use std::path::Path;
 
 use drogon_protocol::RpcError;
-use drogon_protocol::graph::GraphPolicy;
+use drogon_protocol::graph::{GraphPolicy, GraphRuntimeRef};
 
 use crate::error;
 
@@ -131,7 +131,7 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
     let listed = policy
         .approved_runtimes
         .iter()
-        .map(|runtime| format!("{}/{}", runtime.harness, runtime.model))
+        .map(runtime_label)
         .collect::<Vec<_>>()
         .join(", ");
     match (
@@ -144,17 +144,17 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
         ),
         (true, Some(fallback)) => out.push_str(&format!(
             "- **Approved runtimes:** none configured, so the free local `pi` model is tried \
-             first. **Fallback runtime:** {}/{} is tried after that attempt fails.\n",
-            fallback.harness, fallback.model
+             first. **Fallback runtime:** {} is tried after that attempt fails.\n",
+            runtime_label(fallback)
         )),
         (false, fallback) => {
             let fallback_text = fallback
                 .as_ref()
                 .map(|runtime| {
                     format!(
-                        " The configured fallback is {}/{} and is tried only after every \
+                        " The configured fallback is {} and is tried only after every \
                          approved runtime fails.",
-                        runtime.harness, runtime.model
+                        runtime_label(runtime)
                     )
                 })
                 .unwrap_or_default();
@@ -168,6 +168,15 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
         }
     }
     out
+}
+
+fn runtime_label(runtime: &GraphRuntimeRef) -> String {
+    let base = format!("{}/{}", runtime.harness, runtime.model);
+    runtime
+        .provider
+        .as_deref()
+        .map(|provider| format!("{base} [provider={provider}]"))
+        .unwrap_or(base)
 }
 
 /// Reads `path`, replaces or appends the managed block, and writes back only
@@ -390,6 +399,7 @@ mod tests {
                 approved_runtimes: vec![GraphRuntimeRef {
                     harness: "pi".into(),
                     model: "local".into(),
+                    provider: None,
                 }],
                 ..GraphPolicy::default()
             },
@@ -407,10 +417,12 @@ mod tests {
                 GraphRuntimeRef {
                     harness: "codex".to_string(),
                     model: "gpt-5.3-codex".to_string(),
+                    provider: None,
                 },
                 GraphRuntimeRef {
                     harness: "opencode".to_string(),
                     model: "claude-sonnet-4".to_string(),
+                    provider: None,
                 },
             ],
             ..GraphPolicy::default()
@@ -432,6 +444,7 @@ mod tests {
             approved_runtimes: vec![GraphRuntimeRef {
                 harness: "codex".to_string(),
                 model: "gpt-5.3-codex".to_string(),
+                provider: None,
             }],
             ..GraphPolicy::default()
         };
@@ -553,6 +566,7 @@ mod tests {
             approved_runtimes: vec![GraphRuntimeRef {
                 harness: "pi".into(),
                 model: "local".into(),
+                provider: None,
             }],
             ..GraphPolicy::default()
         }));
@@ -560,6 +574,7 @@ mod tests {
             fallback_runtime: Some(GraphRuntimeRef {
                 harness: "pi".into(),
                 model: "local".into(),
+                provider: None,
             }),
             ..GraphPolicy::default()
         }));
@@ -573,6 +588,7 @@ mod tests {
                 fallback_runtime: Some(GraphRuntimeRef {
                     harness: "custom".into(),
                     model: "qwen3-coder".into(),
+                    provider: None,
                 }),
                 ..GraphPolicy::default()
             },

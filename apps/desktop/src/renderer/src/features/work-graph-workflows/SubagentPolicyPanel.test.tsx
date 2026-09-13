@@ -148,6 +148,28 @@ describe("SubagentPolicyPanel", () => {
     expect(latest!.approvedRuntimes[0].model).toBe("");
   });
 
+  it("edits a runtime provider without losing its exact model pair", () => {
+    stubDrogon();
+    let latest: GraphPolicy | null = null;
+    render(
+      <SubagentPolicyPanel
+        policy={design2Policy()}
+        interactive
+        onChange={(next) => {
+          latest = next;
+        }}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("approved-runtime-0-provider"), {
+      target: { value: "openai-codex" },
+    });
+    expect(latest!.approvedRuntimes[0]).toEqual({
+      harness: "opencode",
+      model: "claude-sonnet-4",
+      provider: "openai-codex",
+    });
+  });
+
   it("once the real harness catalog loads, a new row defaults to its first entry", async () => {
     stubDrogon();
     let latest: GraphPolicy | null = null;
