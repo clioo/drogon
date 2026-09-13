@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   DEFAULT_REPRO_RUNTIME,
+  REPRO_RUNTIME_CHOICES,
   describeReproCost,
   describeWorkflowStatus,
   formatReproCost,
@@ -30,13 +31,21 @@ describe("the demo's plan", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  test("offers the free local lane first, with an exact model id", () => {
-    expect(DEFAULT_REPRO_RUNTIME.harness).toBe("pi");
-    expect(DEFAULT_REPRO_RUNTIME.model).toBe(
-      "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
-    );
-    expect(DEFAULT_REPRO_RUNTIME.free).toBe(true);
-    expect(REPRO_RATES[DEFAULT_REPRO_RUNTIME.model].kind).toBe("local_free");
+  test("ships no model id of its own: the operator names the runtime", () => {
+    // A demo that pinned a model would be choosing someone else's spend. Every
+    // choice is a harness this product can run a node on, with the model left
+    // to whatever that harness is already set up to use, or typed exactly.
+    for (const choice of REPRO_RUNTIME_CHOICES) {
+      expect(choice.model).toBe("");
+      expect(choice.free).toBe(false);
+    }
+    expect(REPRO_RUNTIME_CHOICES.map((choice) => choice.harness)).toEqual([
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+    ]);
+    expect(DEFAULT_REPRO_RUNTIME).toBe(REPRO_RUNTIME_CHOICES[0]);
   });
 });
 
@@ -54,8 +63,8 @@ describe("pricing what actually ran", () => {
     const cost = priceReproUsage([]);
     expect(cost.bucket).toBe("not_reported");
     expect(cost.totalUsd).toBeNull();
-    expect(formatReproCost(cost)).toBe("no disponible");
-    expect(describeReproCost(cost)).toMatch(/ausencia no es cero/);
+    expect(formatReproCost(cost)).toBe("unavailable");
+    expect(describeReproCost(cost)).toMatch(/absence is not zero/);
   });
 
   test("prices every measurement at the demo rate and splits it by role", () => {
@@ -76,7 +85,7 @@ describe("pricing what actually ran", () => {
     expect(cost.bucket).toBe("partial");
     expect(cost.pricedMeasurements).toBe(1);
     expect(cost.unpricedModels).toEqual(["opencode/some/unknown-model"]);
-    expect(describeReproCost(cost)).toMatch(/sin tarifa/);
+    expect(describeReproCost(cost)).toMatch(/no rate for/);
   });
 
   test("tokens with no rate at all are never priced as zero", () => {
@@ -85,13 +94,23 @@ describe("pricing what actually ran", () => {
     expect(cost.totalUsd).toBeNull();
   });
 
-  test("a declared-free local model is named as free, not as an exact bill", () => {
-    const cost = priceReproUsage([
-      demo({ harness: "pi", model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4" }),
-    ]);
+  test("a model with a declared-free rate is named as free, not as an exact bill", () => {
+    const cost = priceReproUsage(
+      [demo({ harness: "pi", model: "some-local-model" })],
+      {
+        "some-local-model": {
+          kind: "local_free",
+          label: "local model, nothing billed",
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+        },
+      },
+    );
     expect(cost.bucket).toBe("local_free");
     expect(cost.totalUsd).toBe(0);
-    expect(describeReproCost(cost)).toMatch(/sin facturación/);
+    expect(describeReproCost(cost)).toMatch(/declared-free local model/);
   });
 
   test("a missing token field contributes nothing and stays unknown", () => {
@@ -139,7 +158,7 @@ describe("the rounds the daemon reported", () => {
   test("unverifiable is terminal and is described as neither pass nor fail", () => {
     expect(isTerminalWorkflowStatus("unverifiable")).toBe(true);
     expect(isTerminalWorkflowStatus("running")).toBe(false);
-    expect(describeWorkflowStatus("unverifiable")).toMatch(/no se asume nada/);
-    expect(describeWorkflowStatus("exhausted")).toMatch(/tope/);
+    expect(describeWorkflowStatus("unverifiable")).toMatch(/nothing is assumed/);
+    expect(describeWorkflowStatus("exhausted")).toMatch(/round cap/);
   });
 });

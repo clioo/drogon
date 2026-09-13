@@ -76,8 +76,8 @@ export const SETTINGS_SECTIONS: readonly SettingsNavEntry[] = [
   },
   {
     id: "demo",
-    title: "Demo reproducible",
-    description: "Corré la cadena completa y mirá la evidencia y el costo.",
+    title: "Reproducible demo",
+    description: "Run the whole chain and watch the evidence and the cost.",
     group: "workflows",
     icon: FlaskConical,
   },

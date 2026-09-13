@@ -28,48 +28,48 @@ export type ReproPhase = {
 export const REPRO_PHASES: readonly ReproPhase[] = [
   {
     id: "workspace",
-    title: "Workspace desechable",
-    detail: "Un proyecto Quick Session propio: nada toca tus repos.",
+    title: "Disposable workspace",
+    detail: "A Quick Session project of its own: nothing touches your repos.",
   },
   {
     id: "seed",
-    title: "Repo semilla",
-    detail: "Perfiles y el contrato de tests que el trabajo tiene que pasar.",
+    title: "Seed repository",
+    detail: "The dog profiles and the test contract the work has to pass.",
   },
   {
     id: "bot",
     title: "Bot",
-    detail: "Con el harness y el modelo que elegiste arriba.",
+    detail: "Created with the harness and the model you picked above.",
   },
   {
     id: "policy",
-    title: "Política del Work Graph",
-    detail: "Runtimes aprobados y testing adversarial acotado.",
+    title: "Work Graph policy",
+    detail: "Approved runtimes, and the bounded adversarial loop turned on.",
   },
   {
     id: "watch",
-    title: "Monitor sobre el spec",
-    detail: "Un watch de digest de archivo, aprobado por su hash exacto.",
+    title: "Watch on the spec",
+    detail: "A file-digest monitor, approved by its exact rule hash.",
   },
   {
     id: "spec",
-    title: "El spec cambia",
-    detail: "La demo escribe specs/dog-tinder.md: eso es lo que el bot verá.",
+    title: "The spec changes",
+    detail: "The demo writes specs/dog-tinder.md — that is what the bot sees.",
   },
   {
     id: "firing",
-    title: "El bot despierta",
-    detail: "El monitor observa el cambio y libera trabajo real.",
+    title: "The bot wakes itself",
+    detail: "The watch observes the change and releases real work.",
   },
   {
     id: "rounds",
-    title: "Rondas adversariales",
-    detail: "Implementar, romper, corregir y verificar, hasta el tope.",
+    title: "Adversarial rounds",
+    detail: "Implement, break, fix and verify — up to the round cap.",
   },
   {
     id: "evidence",
-    title: "Evidencia y costo",
-    detail: "Los ledgers de .drogon y el costo de lo que corrió.",
+    title: "Evidence and cost",
+    detail: "The .drogon ledgers and what the run actually cost.",
   },
 ];
 
@@ -86,9 +86,11 @@ export function initialPhaseStates(): Record<ReproPhaseId, ReproPhaseState> {
   ) as Record<ReproPhaseId, ReproPhaseState>;
 }
 
-/** One selectable runtime. The free local Pi lane is first because it is the
- *  one that costs nothing; every entry names an exact model id, never a
- *  family, so nothing is ever guessed at launch. */
+/** One selectable runtime: a harness this product can run a Work Graph node
+ *  on, plus whatever exact model id the operator types. Nothing here ships a
+ *  model id of its own — Drogon never guesses a model or a provider, and a
+ *  demo that pinned one would be choosing someone's spend for them. An empty
+ *  model means "whatever that harness is already set up to use". */
 export type ReproRuntimeChoice = {
   id: string;
   harness: string;
@@ -101,35 +103,35 @@ export type ReproRuntimeChoice = {
 
 export const REPRO_RUNTIME_CHOICES: readonly ReproRuntimeChoice[] = [
   {
-    id: "pi-dgx-spark-qwen",
-    harness: "pi",
-    model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
-    label: "Pi · dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
-    note: "Modelo local, sin facturación. El que usamos para probar.",
-    free: true,
-  },
-  {
     id: "claude",
     harness: "claude",
     model: "",
-    label: "Claude Code · modelo por defecto del harness",
-    note: "Usa tu sesión de Claude Code instalada; el proveedor factura.",
+    label: "Claude Code · the harness default model",
+    note: "Uses the Claude Code you already have set up.",
     free: false,
   },
   {
     id: "codex",
     harness: "codex",
     model: "",
-    label: "Codex · modelo por defecto del harness",
-    note: "Usa tu Codex instalado; el proveedor factura.",
+    label: "Codex · the harness default model",
+    note: "Uses the Codex you already have set up.",
     free: false,
   },
   {
     id: "opencode",
     harness: "opencode",
     model: "",
-    label: "OpenCode · elegí el id exacto",
-    note: "OpenCode necesita un id `proveedor/modelo` explícito.",
+    label: "OpenCode · give it the exact id",
+    note: "OpenCode needs an explicit `provider/model` id.",
+    free: false,
+  },
+  {
+    id: "pi",
+    harness: "pi",
+    model: "",
+    label: "Pi · give it the exact id",
+    note: "Pi needs the exact model id, `provider/model` when the id is ambiguous.",
     free: false,
   },
 ];
@@ -155,25 +157,9 @@ export type ReproRate = {
  *  measurement is reported as unpriced — never as zero. Mirrors
  *  `scripts/reproduce-model-rates.v1.json`. */
 export const REPRO_RATES: Readonly<Record<string, ReproRate>> = {
-  "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4": {
-    kind: "local_free",
-    label: "modelo local, sin facturación",
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-  },
-  "qwen3.8-flash-next-nvidia-nvfp4": {
-    kind: "local_free",
-    label: "modelo local, sin facturación",
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-  },
   "fixture/dog-tinder": {
     kind: "demo_rate",
-    label: "tarifa de demostración",
+    label: "demo rate",
     input: 3,
     output: 15,
     cacheRead: 0.3,
@@ -181,7 +167,7 @@ export const REPRO_RATES: Readonly<Record<string, ReproRate>> = {
   },
   "dog-tinder": {
     kind: "demo_rate",
-    label: "tarifa de demostración",
+    label: "demo rate",
     input: 3,
     output: 15,
     cacheRead: 0.3,
@@ -298,20 +284,20 @@ export function priceReproUsage(
 export function describeReproCost(cost: ReproCost): string {
   switch (cost.bucket) {
     case "exact":
-      return `${cost.pricedMeasurements} medición(es) tarifadas · ${cost.rateKinds.join(", ")}`;
+      return `${cost.pricedMeasurements} measurement(s) priced · ${cost.rateKinds.join(", ")}`;
     case "local_free":
-      return "modelo local declarado sin facturación";
+      return "declared-free local model";
     case "partial":
-      return `${cost.pricedMeasurements} de ${cost.measurements} tarifadas · sin tarifa: ${cost.unpricedModels.join(", ")}`;
+      return `${cost.pricedMeasurements} of ${cost.measurements} priced · no rate for: ${cost.unpricedModels.join(", ")}`;
     case "unpriced":
-      return `${cost.measurements} medición(es) sin tarifa en la tabla`;
+      return `${cost.measurements} measurement(s) with no rate in the card`;
     default:
-      return "ningún agente reportó tokens; la ausencia no es cero";
+      return "no agent reported tokens; absence is not zero";
   }
 }
 
 export function formatReproCost(cost: ReproCost): string {
-  return cost.totalUsd === null ? "no disponible" : `$${cost.totalUsd.toFixed(4)} USD`;
+  return cost.totalUsd === null ? "unavailable" : `$${cost.totalUsd.toFixed(4)} USD`;
 }
 
 // ---------------------------------------------------------------- rounds
@@ -372,16 +358,16 @@ export function isTerminalWorkflowStatus(status: string | undefined): boolean {
 export function describeWorkflowStatus(status: string | undefined): string {
   switch (status) {
     case "passed":
-      return "Pasó: el resultado sobrevivió las rondas.";
+      return "Passed: the result survived the rounds.";
     case "exhausted":
-      return "Se agotó el tope de rondas y seguía fallando.";
+      return "Stopped at the round cap, still failing.";
     case "failed":
-      return "Falló: ningún runtime configurado pudo ejecutar un rol.";
+      return "Failed: no configured runtime could execute a role.";
     case "stopped":
-      return "Detenido.";
+      return "Stopped.";
     case "unverifiable":
-      return "Sin verificar: se perdió el contacto, no se asume nada.";
+      return "Unverifiable: contact was lost, and nothing is assumed.";
     default:
-      return "Corriendo.";
+      return "Running.";
   }
 }

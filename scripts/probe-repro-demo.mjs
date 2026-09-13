@@ -211,7 +211,7 @@ export async function execute() {
     report.checks.push("the real preload exposes every channel the demo needs");
 
     await page.keyboard.press(process.platform === "darwin" ? "Meta+," : "Control+,");
-    await page.getByRole("button", { name: "Demo reproducible", exact: true }).click();
+    await page.getByRole("button", { name: "Reproducible demo", exact: true }).click();
     await page.getByTestId("repro-demo-run").waitFor();
     report.checks.push("Settings opens the Demo reproducible section");
 

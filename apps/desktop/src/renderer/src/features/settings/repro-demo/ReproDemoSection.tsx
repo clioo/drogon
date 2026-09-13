@@ -177,13 +177,13 @@ export function ReproDemoSection({
   return (
     <SettingsSection
       id="demo"
-      title="Demo reproducible"
-      description="Corré la cadena completa con un clic: un bot con un monitor sobre el spec, el cambio que lo despierta, las rondas adversariales del Work Graph, y la evidencia y el costo de lo que corrió. Todo pasa en un workspace desechable que la demo crea para sí misma, y cuando empiezan las rondas Drogon te lleva a verlas en el Work Graph."
+      title="Reproducible demo"
+      description="Run the whole chain with one click: a bot with a watch on the spec, the change that wakes it, the Work Graph's adversarial rounds, and the evidence and cost of what ran. It all happens in a disposable workspace the demo creates for itself, and it takes you along — the Bots page once the bot is configured, then the Work Graph once the rounds start."
     >
       <div className="space-y-6">
         <SettingsSubsectionHeader
-          title="Qué corre"
-          description="Elegí el harness y el modelo. El modelo local es gratis: no factura nada, y es el que usamos para probar."
+          title="What runs"
+          description="Pick the harness this run works with, and the exact model id it should use. Leave the model empty to use whatever that harness is already set up with."
         />
 
         <SettingsRow
@@ -207,7 +207,7 @@ export function ReproDemoSection({
               {REPRO_RUNTIME_CHOICES.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.label}
-                  {entry.free ? " — gratis" : ""}
+                  {entry.free ? " — free" : ""}
                 </option>
               ))}
             </select>
@@ -215,8 +215,8 @@ export function ReproDemoSection({
         />
 
         <SettingsRow
-          label="Modelo exacto"
-          description="El id exacto que el harness recibe. Drogon nunca adivina un modelo ni un proveedor."
+          label="Exact model"
+          description="The exact id the harness receives. Drogon never guesses a model or a provider."
           control={
             <input
               id="repro-demo-model"
@@ -224,15 +224,15 @@ export function ReproDemoSection({
               className="h-9 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm font-mono"
               value={model}
               disabled={state.running}
-              placeholder="por defecto del harness"
+              placeholder="harness default"
               onChange={(event) => setModel(event.target.value)}
             />
           }
         />
 
         <SettingsRow
-          label="Tope de rondas"
-          description="Cuántas veces se permite romper y corregir antes de parar. El tope es una válvula de tiempo, no de gasto."
+          label="Round cap"
+          description="How many times it may break and fix before stopping. The cap is a time valve, not a spend one."
           control={
             <div className="flex gap-2">
               {REPRO_ITERATION_CHOICES.map((value) => (
@@ -259,16 +259,16 @@ export function ReproDemoSection({
             onClick={() => void run({ runtime, iterations })}
           >
             <Play className="mr-2 size-4" aria-hidden />
-            {state.running ? "Corriendo…" : "Correr demo"}
+            {state.running ? "Running…" : "Run demo"}
           </Button>
           {state.running ? (
             <Button type="button" variant="outline" size="sm" onClick={cancel}>
-              Cancelar
+              Cancel
             </Button>
           ) : null}
           {!resolved ? (
             <span className="text-sm text-muted-foreground">
-              Esta build no expone todos los canales que la demo necesita.
+              This build does not expose every channel the demo needs.
             </span>
           ) : null}
           {state.workflowId ? (
@@ -283,7 +283,7 @@ export function ReproDemoSection({
                 requestReproTour({ kind: "focus-view", view: "graph" });
               }}
             >
-              Ver la orquestación
+              Show the orchestration
             </Button>
           ) : null}
           {state.projectName ? (
@@ -298,9 +298,10 @@ export function ReproDemoSection({
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Al empezar las rondas, Drogon abre el Work Graph de esta corrida y va
-          moviendo su vista — grafo, evidencia y uso — conforme cambian. Volvé a
-          Settings cuando quieras: el panel conserva el estado de la corrida.
+          The demo leaves Settings on its own: the Bots page once the bot and its
+          watch are configured, then this run's Work Graph once the rounds start,
+          moving its view — graph, evidence, usage — as they change. Come back to
+          Settings whenever you like: the panel keeps the run.
         </p>
 
         <Spotlight active={state.spotlight !== null && state.running} testId="repro-demo-phases">
@@ -341,8 +342,8 @@ export function ReproDemoSection({
           <Spotlight active={spotlightFor("firing") || spotlightFor("spec")} testId="repro-demo-checks">
             <div className="space-y-2">
               <SettingsSubsectionHeader
-                title="Chequeos del monitor"
-                description="Cada chequeo es del daemon, no de esta pantalla."
+                title="Watch checks"
+                description="Every check is the daemon's, not this screen's."
               />
               <ul className="space-y-1 font-mono text-xs text-muted-foreground">
                 {state.checks.map((check, index) => (
@@ -362,7 +363,7 @@ export function ReproDemoSection({
           <Spotlight active={spotlightFor("rounds")} testId="repro-demo-rounds">
             <div className="space-y-2">
               <SettingsSubsectionHeader
-                title="Rondas"
+                title="Rounds"
                 description={describeWorkflowStatus(state.workflowStatus ?? undefined)}
               />
               <ul className="space-y-1">
@@ -372,7 +373,7 @@ export function ReproDemoSection({
                     className="flex flex-wrap items-center gap-2 text-sm"
                   >
                     <span className="font-mono text-xs text-muted-foreground">
-                      ronda {round.iteration}
+                      round {round.iteration}
                     </span>
                     <span className="w-16 text-sm">{round.phase}</span>
                     <VerdictBadge verdict={round.verdict} status={round.status} />
@@ -391,8 +392,8 @@ export function ReproDemoSection({
           <Spotlight active={spotlightFor("evidence")} testId="repro-demo-evidence">
             <div className="space-y-4">
               <SettingsSubsectionHeader
-                title="Evidencia y costo"
-                description="Los mismos ledgers que viven en .drogon/ y se leen sin Drogon."
+                title="Evidence and cost"
+                description="The same ledgers that live in .drogon/ and read without Drogon."
               />
               <ul className="space-y-2">
                 {state.evidence.map((entry) => (
@@ -424,10 +425,10 @@ export function ReproDemoSection({
 
         {state.releasedBy ? (
           <p className="text-xs text-muted-foreground" data-testid="repro-demo-release">
-            Liberado por{" "}
+            Released by{" "}
             {state.releasedBy === "monitor"
-              ? "el monitor del bot"
-              : "esta pantalla (el monitor no liberó el trabajo)"}
+              ? "the bot's own watch"
+              : "this panel (the watch did not release the work)"}
             {state.releaseNote ? ` · ${state.releaseNote}` : ""}
           </p>
         ) : null}
