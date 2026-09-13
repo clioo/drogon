@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Drogon: Set the intent. Ship the proof.</title>
+  <meta name="description" content="The open-source workspace for agentic engineering. Orchestrate coding agents, isolate work in Git worktrees, and review the evidence. Built with a Rust core for macOS.">
+  <meta property="og:title" content="Drogon: Set the intent. Ship the proof.">
+  <meta property="og:description" content="Your agents. Your context. Your call. An open-source desktop workspace for agentic engineering.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/drogon.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/geist.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+  <script src="site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="header wrap">
+  <a class="brand" href="#" aria-label="Drogon home"><img src="assets/drogon.svg" width="32" height="32" alt="">drogon<span class="wordmark-period">.</span></a>
+  <nav aria-label="Main navigation"><a href="#workspace">Workspace</a><a href="#method">The method</a><a href="https://github.com/clioo/drogon">GitHub <span aria-hidden="true">↗</span></a></nav>
+  <a class="button button-small" href="#install">Get the preview <span aria-hidden="true">↗</span></a>
+</header>
+<main id="main">
+  <section class="hero wrap" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="small-rule"></span> A workspace for agentic engineering</p>
+      <h1 id="hero-title">Set the intent.<br>Ship the <em>proof.</em></h1>
+      <p class="hero-description">Give your agents room to build.<br>Keep the context, the controls, and the final call.</p>
+      <div class="hero-actions"><a class="button" href="#install">Get Drogon for macOS <span aria-hidden="true">↗</span></a><a class="text-link" href="#workspace">Explore the workspace <span aria-hidden="true">↓</span></a></div>
+      <p class="fine-print">Open source, Rust core · Early preview</p>
+    </div>
+    <figure class="hero-art"><img src="assets/dragon.webp" width="1254" height="1254" fetchpriority="high" alt="An original dragon sculpture in translucent ember-orange glass"></figure>
+  </section>
+  <section class="workspace-section wrap section" id="workspace" aria-labelledby="workspace-title">
+    <div class="section-heading"><div><p class="eyebrow">The workspace</p><h2 id="workspace-title">Many agents.<br>One clear view.</h2></div><p>Code, terminals, worktrees, and review in one place. Stay close to the work without micromanaging every step.</p></div>
+    <div class="product-tabs" role="tablist" aria-label="Explore Drogon features">
+      <button role="tab" id="tab-workspace" aria-controls="panel-workspace" aria-selected="false" tabindex="-1">Workspace</button>
+      <button role="tab" id="tab-orchestrator" aria-controls="panel-orchestrator" aria-selected="true">Orchestrator</button>
+      <button role="tab" id="tab-bots" aria-controls="panel-bots" aria-selected="false" tabindex="-1">Self-waking bots</button>
+    </div>
+    <div class="product-panel" id="panel-workspace" role="tabpanel" aria-labelledby="tab-workspace" tabindex="0" hidden><img src="assets/workspace.webp" width="1440" height="1000" loading="lazy" alt="Drogon workspace with project worktrees, a persistent terminal, and file explorer"><div class="panel-caption"><strong>A home for every task.</strong><p>Isolate changes in Git worktrees. Keep coding sessions and files together, then review the diff where the work happened.</p></div></div>
+    <div class="product-panel" id="panel-orchestrator" role="tabpanel" aria-labelledby="tab-orchestrator" tabindex="0"><img src="assets/orchestrator.webp" width="1440" height="1000" loading="lazy" alt="Drogon Work Graph showing a main agent, implementation workers, adversarial testing, and runtime policy"><div class="panel-caption"><strong>Delegate with boundaries.</strong><p>Choose approved runtimes and a bounded adversarial loop. Read attempts and verdicts on the graph, alongside the intent you set.</p></div></div>
+    <div class="product-panel" id="panel-bots" role="tabpanel" aria-labelledby="tab-bots" tabindex="0" hidden><img src="assets/bots.webp" width="1440" height="1000" loading="lazy" alt="Drogon Bots interface with bot responsibilities, monitors, and run history"><div class="panel-caption"><strong>Let the right signal start the work.</strong><p>Give bots responsibilities and approved monitors. A watched pull request can open a worktree and start a review session.</p></div></div>
+    <p class="capture-note">Real product UI. Sample workspaces and fixture runtimes. <a href="https://github.com/clioo/drogon/blob/main/docs/screenshots/MANIFEST.md">Capture details ↗</a></p>
+  </section>
+  <section class="method-section section" id="method" aria-labelledby="method-title"><div class="wrap">
+    <div class="section-heading"><div><p class="eyebrow">The method</p><h2 id="method-title">Autonomy needs<br>a feedback loop.</h2></div><p>A prompt starts the work. Context, execution policy, and verification make it something you can review.</p></div>
+    <div class="method-grid"><div class="method-intro"><span class="loop-mark" aria-hidden="true">↳</span><h3>You set the direction.<br>The work leaves a trail.</h3><p>Drogon keeps human-authored intent separate from daemon-observed state. What you asked for and what actually happened should never be the same field.</p><a class="text-link" href="https://github.com/clioo/drogon/blob/main/docs/SUBMISSION.md">Read the engineering notes <span aria-hidden="true">↗</span></a></div>
+    <ol class="method-list">
+      <li><span class="step-number">01</span><div><p class="eyebrow">Intent &amp; context engineering</p><h3>Start with a shared brief.</h3><p>Put the task in its own workspace. Give agents a version-matched CLI guide and an explicit graph policy.</p></div></li>
+      <li><span class="step-number">02</span><div><p class="eyebrow">Orchestration &amp; parallel work</p><h3>Give every worker a lane.</h3><p>Use isolated worktrees for parallel changes. Delegate to implementation workers under the runtime policy you choose.</p></div></li>
+      <li><span class="step-number">03</span><div><p class="eyebrow">Harness, backpressure &amp; recovery</p><h3>Make failure useful.</h3><p>Bound the adversarial review loop. Record runtime attempts and verdicts. Try approved runtimes in order before the configured fallback.</p></div></li>
+      <li><span class="step-number">04</span><div><p class="eyebrow">Human orchestration</p><h3>Review the evidence. Then ship.</h3><p>Inspect the changes and execution history. Keep approval of new bot watches and the decision to merge in human hands.</p></div></li>
+    </ol></div>
+  </div></section>
+  <section class="foundation wrap section" aria-labelledby="foundation-title"><div class="foundation-title"><p class="eyebrow">Under the hood</p><h2 id="foundation-title">Your workspace.<br>Not a black box.</h2><a class="text-link" href="https://github.com/clioo/drogon">Read the source <span aria-hidden="true">↗</span></a></div><div class="foundation-facts"><article><span class="fact-label">Local backbone</span><h3>The session outlives the window.</h3><p>A Rust daemon owns terminal sessions and workspace state. The Electron desktop is a view, not the lifetime of your work.</p></article><article><span class="fact-label">Bring your harness</span><h3>Your agents. Your accounts.</h3><p>Work with Claude Code, Pi, OpenCode, or a plain shell. Drogon organizes execution; your configured harness connects to its provider.</p></article><article><span class="fact-label">Inspectable by default</span><h3>Open source, down to the core.</h3><p>MIT-licensed. No app telemetry or automatic updater in the preview. Tests and reproducible build instructions live with the code.</p></article></div></section>
+  <section class="install-section wrap" id="install" aria-labelledby="install-title"><div><p class="eyebrow">Make room for the work</p><h2 id="install-title">Your next build<br>starts here.</h2><p>Drogon for macOS · Apple Silicon, macOS 14+</p><a class="button" href="https://github.com/clioo/drogon/releases/tag/v0.1.0-rc.2">Get the macOS preview <span aria-hidden="true">↗</span></a></div><div class="install-detail"><span class="terminal-label">Or install with Homebrew</span><div class="command"><code id="install-command">brew tap clioo/drogon &amp;&amp; brew install --cask clioo/drogon/drogon</code><button type="button" id="copy-command" aria-label="Copy Homebrew installation command">Copy</button></div><p id="copy-status" class="copy-status" role="status" aria-live="polite"></p><p class="install-caveat">Early preview, not a stable release. Ad-hoc signed and not notarized. Use a dedicated development profile and review the <a href="https://github.com/clioo/drogon#install-with-homebrew">installation notes</a> before running.</p></div></section>
+</main>
+<footer class="footer wrap"><div class="footer-top"><a class="brand" href="#"><img src="assets/drogon.svg" width="28" height="28" alt="">drogon<span class="wordmark-period">.</span></a><p>Less meeting. More shipping.</p><div><a href="https://github.com/clioo/drogon">GitHub ↗</a><a href="https://github.com/clioo/drogon/blob/main/LICENSE">MIT license ↗</a></div></div><div class="footer-bottom"><span>Built for HOWDY Dev Day 2026.</span><p>Drogon’s desktop UI began from Orca’s MIT-licensed source.<br><a href="https://github.com/clioo/drogon/blob/main/THIRD_PARTY_NOTICES.md">MIT Copyright (c) 2026 Lovecast Inc. · Third-party notices</a></p></div></footer>
+</body>
+</html>
