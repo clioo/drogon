@@ -6,6 +6,13 @@
 #   make install BUNDLE=<path>   install an already-packaged Drogon.app
 #   make install-test            run the installer's tests
 #
+#   make repro                   reproduce a whole run: pick the harnesses,
+#                                watch the adversarial rounds, read the
+#                                receipt with the evidence and the cost.
+#                                Every invocation is a new run.
+#   make repro-list              every run this checkout has produced
+#   make repro-test              run the reproducible run's own tests
+#
 # Extra flags reach the installer through FLAGS, e.g.
 #   make install FLAGS=--no-restart
 #   make install FLAGS="--applications $HOME/Applications --keep 3"
@@ -28,7 +35,9 @@ INSTALLER := scripts/install-drogon.mjs
 FLAGS ?=
 BUNDLE ?=
 
-.PHONY: help install install-main install-test pnpm-toolchain
+.PHONY: help install install-main install-test pnpm-toolchain repro repro-list repro-test
+
+REPRO := scripts/reproduce-adversarial-run.mjs
 
 help:
 	@awk '/^#/ { sub(/^# ?/, ""); print; next } { exit }' Makefile
@@ -61,3 +70,15 @@ install-main:
 
 install-test:
 	@PATH="$(PATH)"; export PATH; node --test scripts/install-drogon.test.mjs
+
+# The reproducible demonstration run. It asks which harnesses to use, builds the
+# core if this checkout has not built it yet, and leaves a receipt behind. It
+# never touches the developer's own Drogon, data directory or sessions.
+repro:
+	@PATH="$(PATH)"; export PATH; node $(REPRO) $(FLAGS)
+
+repro-list:
+	@PATH="$(PATH)"; export PATH; node $(REPRO) --list
+
+repro-test:
+	@PATH="$(PATH)"; export PATH; node --test scripts/reproduce-adversarial-run.test.mjs

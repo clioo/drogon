@@ -59,6 +59,19 @@ notarized: on first launch, right-click `Drogon.app` and choose **Open**.
   a terminal, harness, model or web server. The 3:45–4:30 segment is the Work
   Graph and the Orchestrator — designing nodes, the subagent-policy failover
   order, and the bounded adversarial loop.
+- Reproduce a whole run: `make repro`. It asks which harnesses to use, then
+  runs the chain end to end in a disposable world of its own — a bot with a
+  `local_file_digest.v1` monitor over `specs/dog-tinder.md`, the spec change
+  that wakes it, the worktree its released session opens, and the bounded
+  adversarial rounds the daemon drives there. It leaves a receipt in
+  `.preflight/reproduce/<run>/` with the verdict of every round, the evidence
+  and usage ledgers, an independent `node --test` of the work product, and the
+  cost of what ran. Every invocation is a NEW run (`make repro-list` shows
+  them all), and the default lane runs local fixtures: the product executes
+  for real, no model inference happens, and nothing is billed. The same demo
+  runs from the app in **Settings → Demo reproducible**, which walks the
+  viewer through the phases and moves the focus to whatever is changing.
+  Tests: `make repro-test` and `node scripts/probe-repro-demo.mjs`.
 - Screenshots: [docs/screenshots/](screenshots/) — 23 images of every surface
   (workspace, Orchestrator off and on, Bots, Meetings, Automations, Tasks,
   Settings; light and dark; one at 760px), all captured from the real packaged

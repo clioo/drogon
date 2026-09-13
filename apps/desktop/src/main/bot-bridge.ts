@@ -18,6 +18,8 @@ import {
   botMonitorListResultSchema,
   botMonitorApproveInputSchema,
   botMonitorApproveResultSchema,
+  botMonitorCreateInputSchema,
+  botMonitorCreateResultSchema,
 } from "../shared/bot-validation";
 import type { Result } from "../shared/session-contract";
 import type {
@@ -27,6 +29,7 @@ import type {
   BotHistoryResult,
   BotMonitorListResult,
   BotMonitorApproveResult,
+  BotMonitorCreateResult,
   BotResponsibilityCreateInput,
   BotResponsibilityCreateResult,
   BotResponsibilityDeleteInput,
@@ -56,6 +59,7 @@ resultSchemas["bot.responsibility_delete"] = botResponsibilityDeleteResultSchema
 resultSchemas["bot.delete"] = botDeleteResultSchema;
 resultSchemas["bot.monitor_list"] = botMonitorListResultSchema;
 resultSchemas["bot.monitor_approve"] = botMonitorApproveResultSchema;
+resultSchemas["bot.monitor_create"] = botMonitorCreateResultSchema;
 
 type NativeCall = (
   method: string,
@@ -396,6 +400,35 @@ export async function dispatchBotDelete(
   return { ok: true, result: checked.data };
 }
 
+export async function dispatchBotMonitorCreate(
+  input: unknown,
+  call: NativeCall = callNative,
+): Promise<Result<BotMonitorCreateResult>> {
+  const parsed = botMonitorCreateInputSchema.safeParse(input);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: {
+        code: "invalid_argument",
+        message: "Invalid Bot monitor request.",
+        retryable: false,
+      },
+    };
+  const result = await call("bot.monitor_create", parsed.data);
+  if (!result.ok) return result;
+  const checked = botMonitorCreateResultSchema.safeParse(result.result);
+  if (!checked.success || checked.data.botId !== parsed.data.botId)
+    return {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message: "The created monitor does not match its requested bot or contract.",
+        retryable: false,
+      },
+    };
+  return { ok: true, result: checked.data };
+}
+
 /**
  * Registers `drogon:botCreate`/`drogon:botRun`/`drogon:botHistory`/
  * `drogon:botResponsibilityCreate`/`drogon:botResponsibilityDelete`/
@@ -436,4 +469,5 @@ export function registerBotBridge(getWindow: () => BrowserWindow | null): void {
     "drogon:botMonitorApprove",
     guarded(dispatchBotMonitorApprove),
   );
+  ipcMain.handle("drogon:botMonitorCreate", guarded(dispatchBotMonitorCreate));
 }

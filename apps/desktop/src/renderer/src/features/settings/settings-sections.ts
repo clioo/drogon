@@ -18,6 +18,7 @@
 import {
   Bell,
   Bot,
+  FlaskConical,
   GitBranch,
   Keyboard,
   Palette,
@@ -72,6 +73,13 @@ export const SETTINGS_SECTIONS: readonly SettingsNavEntry[] = [
     description: "Shells, renderer, sessions, and terminal behavior.",
     group: "workflows",
     icon: SquareTerminal,
+  },
+  {
+    id: "demo",
+    title: "Demo reproducible",
+    description: "Corré la cadena completa y mirá la evidencia y el costo.",
+    group: "workflows",
+    icon: FlaskConical,
   },
   {
     id: "appearance",

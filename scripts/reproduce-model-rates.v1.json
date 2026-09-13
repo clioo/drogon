@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "updatedAt": "2026-09-13",
+  "note": "USD per million tokens. Drogon does not ship provider list prices: a paid model has no entry until someone adds one, and an unpriced measurement is reported as unpriced, never as zero. Override the whole card with --rates <PATH>.",
+  "rates": {
+    "fixture/dog-tinder": {
+      "kind": "demo_rate",
+      "label": "tarifa de demostración",
+      "input": 3.0,
+      "output": 15.0,
+      "cacheRead": 0.3,
+      "cacheWrite": 3.75
+    },
+    "fixture-dog-tinder": {
+      "kind": "demo_rate",
+      "label": "tarifa de demostración",
+      "input": 3.0,
+      "output": 15.0,
+      "cacheRead": 0.3,
+      "cacheWrite": 3.75
+    },
+    "qwen3.8-flash-next-nvidia-nvfp4": {
+      "kind": "local_free",
+      "label": "modelo local, sin facturación",
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4": {
+      "kind": "local_free",
+      "label": "modelo local, sin facturación",
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "dog-tinder": {
+      "kind": "demo_rate",
+      "label": "tarifa de demostración",
+      "input": 3.0,
+      "output": 15.0,
+      "cacheRead": 0.3,
+      "cacheWrite": 3.75
+    }
+  }
+}

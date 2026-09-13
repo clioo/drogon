@@ -592,17 +592,19 @@ fn drain_delegations(engine: &Engine, now_ms: f64, summary: &mut TickSummary) {
         || delegation.skipped_stale > 0
         || delegation.failed > 0
         || delegation.refused > 0
+        || delegation.dispatch_failed > 0
     {
         eprintln!(
             "[delegation] drain: {} claimed, {} dispatched, {} joined, {} stale-skipped, \
-             {} cap-exceeded, {} refused, {} failed",
+             {} cap-exceeded, {} refused, {} failed, {} dispatch-refused",
             delegation.claimed,
             delegation.dispatched,
             delegation.joined_existing,
             delegation.skipped_stale,
             delegation.cap_exceeded,
             delegation.refused,
-            delegation.failed
+            delegation.failed,
+            delegation.dispatch_failed
         );
     }
 }

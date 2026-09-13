@@ -651,17 +651,44 @@ fn harness_overrides_make_every_admitted_harness_unattended() {
             Some("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
         ));
         assert_eq!(resolved.harness_id, harness);
-        assert_eq!(resolved.provider.as_deref(), Some("dgx-spark"));
-        assert_eq!(
-            resolved.model.as_deref(),
-            Some("qwen3.8-flash-next-nvidia-nvfp4")
-        );
+        // Only Pi takes a provider at launch; `harness.start` refuses one for
+        // every other harness, and OpenCode ids are natively `provider/model`.
+        if harness == "pi" {
+            assert_eq!(resolved.provider.as_deref(), Some("dgx-spark"));
+            assert_eq!(
+                resolved.model.as_deref(),
+                Some("qwen3.8-flash-next-nvidia-nvfp4")
+            );
+        } else {
+            assert_eq!(
+                resolved.provider, None,
+                "{harness} must not be launched with a provider it would refuse"
+            );
+            assert_eq!(
+                resolved.model.as_deref(),
+                Some("dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"),
+                "{harness} keeps the stored model id exactly as configured"
+            );
+        }
         assert_eq!(
             resolved.permission_mode.as_deref(),
             Some("unattended"),
             "headless harness {harness} must not inherit an approval prompt"
         );
     }
+}
+
+#[test]
+fn a_non_pi_bot_keeps_its_provider_qualified_model_whole() {
+    // Regression: an OpenCode bot's own id shape (`provider/model`) used to be
+    // split into a provider the launch layer refuses, so every monitor-released
+    // run of that bot failed with "Provider selection is available only for Pi".
+    let resolved = policy::harness_overrides(&bot_with_policy(
+        "opencode",
+        Some("anthropic/claude-sonnet-4"),
+    ));
+    assert_eq!(resolved.provider, None);
+    assert_eq!(resolved.model.as_deref(), Some("anthropic/claude-sonnet-4"));
 }
 
 #[test]

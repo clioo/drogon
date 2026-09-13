@@ -58,6 +58,7 @@ describe("settings search filter (sidebar + pane share this)", () => {
       "general",
       "git",
       "terminal",
+      "demo",
       "appearance",
       "notifications",
       "shortcuts",

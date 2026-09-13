@@ -4,6 +4,7 @@ import type {
   BotDeleteInput,
   BotHistoryInput,
   BotMonitorApproveInput,
+  BotMonitorCreateInput,
   BotMonitorListInput,
   BotResponsibilityCreateInput,
   BotResponsibilityDeleteInput,
@@ -36,4 +37,6 @@ export const botBridgeExtras = {
    *  approval — the same call the CLI sends, never a second path. */
   botMonitorApprove: (value: BotMonitorApproveInput) =>
     ipcRenderer.invoke("drogon:botMonitorApprove", value),
+  botMonitorCreate: (value: BotMonitorCreateInput) =>
+    ipcRenderer.invoke("drogon:botMonitorCreate", value),
 };

@@ -1826,8 +1826,13 @@ fn editing_the_bot_applies_to_existing_responsibilities() {
     .unwrap();
 
     let plan = prepare(&c, "a1", &harness_params());
-    assert_eq!(plan.params["model"], json!("model-b"));
     assert_eq!(plan.params["harnessId"], json!("claude"));
+    // Pi is the only harness whose stored id is split into provider + model:
+    // `harness.start` refuses a provider for every other harness, so a non-Pi
+    // bot dispatches the id exactly as configured instead of a pair the launch
+    // would reject.
+    assert_eq!(plan.params["model"], json!("dgx-spark/model-b"));
+    assert!(plan.params.get("provider").is_none());
     // Only Pi runs go unattended.
     assert!(plan.params.get("permissionMode").is_none());
 }

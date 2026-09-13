@@ -179,6 +179,12 @@ export interface BotBridge {
   botMonitorApprove?(
     input: BotMonitorApproveInput,
   ): Promise<Result<BotMonitorApproveResult>>;
+  /** Create one of the Bot's own file watches. OPTIONAL: a build whose
+   *  preload predates the channel reports the watch surface as unavailable
+   *  instead of throwing. */
+  botMonitorCreate?(
+    input: BotMonitorCreateInput,
+  ): Promise<Result<BotMonitorCreateResult>>;
 }
 
 // R7-E additive types: a scheduled responsibility is an automation owned by
@@ -326,6 +332,31 @@ export type BotMonitorListResult = {
 export type BotMonitorApproveInput = BotScope & {
   botId: string;
   monitorId: string;
+};
+
+// A Bot's own file watch: the daemon digests `resource` inside the Bot's
+// owning workspace on the `cron` cadence, and a change releases the reactive
+// responsibility `responsibilityName` mints. Created unapproved on purpose —
+// the caller approves the exact rule hash through `botMonitorApprove`, the
+// same single consent point the CLI uses.
+export type BotMonitorCreateInput = BotScope & {
+  botId: string;
+  /** Workspace-relative path, e.g. `specs/dog-tinder.md`. */
+  resource: string;
+  /** 5-field UTC cron; the daemon defaults to every minute. */
+  cron?: string;
+  responsibilityName?: string;
+  instructions?: string;
+};
+
+export type BotMonitorCreateResult = {
+  monitorId: string;
+  botId: string;
+  ruleKind: string;
+  approvalHash: string;
+  approved: boolean;
+  trigger?: unknown;
+  responsibilityId?: string | null;
 };
 
 export type BotMonitorApproveResult = BotScope & {

@@ -1,11 +1,12 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
 // Work Graph has one surface: the daemon-owned orchestrator.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FileBridge } from "../../../../shared/file-contract";
 import type { GraphBridge } from "../../../../shared/graph-contract";
 import type { Session } from "../../../../shared/session-contract";
 import { Button } from "../../components/ui/button";
 import { OrchestratorCanvas } from "../work-graph-workflows/OrchestratorCanvas";
+import { onReproTour } from "../../repro-demo-tour";
 import { SubagentPolicyPanel } from "../work-graph-workflows/SubagentPolicyPanel";
 import { useOrchestratorRun } from "../work-graph-workflows/use-orchestrator-run";
 import { useGraphObservability } from "../work-graph-workflows/use-graph-observability";
@@ -55,6 +56,13 @@ export function WorkGraphPane({
   const [activeView, setActiveView] = useState<"graph" | "evidence" | "usage">(
     "graph",
   );
+  // The reproducible demo's tour moves this pane's own view as its run
+  // advances (graph while the rounds run, then evidence and usage). Advisory
+  // and unconditional by design: whoever is looking at this pane sees what
+  // changed, and a stray request can only ever select one of these views.
+  useEffect(() => onReproTour((request) => {
+    if (request.kind === "focus-view") setActiveView(request.view);
+  }), []);
   const [mainDraft, setMainDraft] = useState<{
     workspaceId: string;
     task: { harness: string; model: string; prompt: string };
