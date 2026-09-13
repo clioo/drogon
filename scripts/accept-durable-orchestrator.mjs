@@ -118,7 +118,7 @@ const prompt = args.at(-1);
 const target = prompt.match(/Write (\\.drogon\\/evaluations\\/[^ ]+\\.json) as JSON/)?.[1];
 const scenario = fs.readFileSync(process.env.DROGON_FIXTURE_SCENARIO, 'utf8').trim();
 fs.appendFileSync(process.env.DROGON_FIXTURE_LOG, JSON.stringify({ model, target: target ?? 'main' }) + '\\n');
-await new Promise(resolve => setTimeout(resolve, target ? 1100 : 300));
+await new Promise(resolve => setTimeout(resolve, target ? 1100 : 5000));
 if (scenario === 'fallback' && model !== 'fixture/main' && model !== 'fixture/fallback') process.exit(9);
 if (target) {
   fs.mkdirSync('.drogon/evaluations', { recursive: true });
@@ -183,6 +183,16 @@ console.log(prompt.match(/DROGON_NODE_[A-Z0-9_]+_DONE/g)?.at(-1) ?? 'fixture com
     return (await cliJson(["graph", "orchestrator-status", "--workspace", workspaceId])).run;
   };
   await page.getByTestId("orchestrator-run-workflow").click();
+  const workflowRow = page.getByRole("button", { name: "Work Graph · Running", exact: true });
+  await workflowRow.waitFor();
+  await workflowRow.click();
+  await page.getByText("Background workflow · no terminal", { exact: true }).waitFor();
+  await page.getByText("Main agent · running", { exact: true }).waitFor();
+  assert.equal((await cliJson(["terminal", "list", "--workspace", workspaceId])).sessions.length, 0);
+  const sidebarShot = path.join(output, "headless-workflow-sidebar.png");
+  await page.screenshot({ path: sidebarShot, animations: "disabled" });
+  report.screenshots.push(sidebarShot);
+  report.checks.push("headless-workflow-visible-in-sidebar-without-a-terminal-session");
   const baseOnly = await until(async () => { const r = await status(); return r?.status !== "running" && r; }, "base-only run");
   assert.equal(baseOnly.status, "passed", JSON.stringify(baseOnly));
   assert.equal(baseOnly.steps.length, 1);

@@ -270,7 +270,7 @@ impl Engine {
             &cwd,
             &plan.harness.command,
             &plan.harness.args,
-            None,
+            Some(plan.preferences.harness_id.clone()),
             None,
             None,
             100,
