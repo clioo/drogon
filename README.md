@@ -307,12 +307,10 @@ Homebrew stops the detached Drogon daemon before uninstall and upgrade; to recov
 a Homebrew-managed data directory after a downgrade refusal, use
 `brew reinstall --cask clioo/drogon/drogon` or install the previous cask version.
 
-> **Gatekeeper:** release bundles are currently ad-hoc signed, not notarized. On
-> Homebrew versions that still support it, install with
-> `brew install --cask --no-quarantine clioo/drogon/drogon`. Homebrew 6 removed
-> that option; install normally, try to open `Drogon.app`, then choose **Open
-> Anyway** in System Settings → Privacy & Security. The cask caveat will be
-> updated when Developer ID notarization is configured.
+> **Signing:** release casks are Developer ID signed and notarized, so the
+> installed app launches without Gatekeeper prompts. Cask versions older than
+> v0.1.0-rc.3 were ad-hoc signed and may need **Open Anyway** once in
+> System Settings → Privacy & Security.
 
 > **Gatekeeper:** the preview is ad-hoc signed, not notarized. On first launch,
 > right-click `Drogon.app` and choose **Open** (or allow it in
