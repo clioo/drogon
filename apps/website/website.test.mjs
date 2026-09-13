@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, access } from 'node:fs/promises';
 import { scenarios, stages, initialState, verify, recover, approve, sessionPrompt } from './dist/story-model.mjs';
+import { loopFrames } from './dist/loop-model.mjs';
 const root = new URL('./dist/', import.meta.url);
 const html = await readFile(new URL('index.html', root), 'utf8');
 test('local assets and section links resolve; no image-based content', async () => {
@@ -56,4 +57,17 @@ test('exhausted budget escalates and incorrect project scope cannot pass', () =>
 test('source attribution and limits remain visible without compliance claims', () => {
   for (const text of ['not a stable release', 'not a substitute', 'MIT Copyright (c) 2026 Lovecast Inc.', 'not a live connection', 'no connected agents']) assert.ok(html.includes(text), text);
   assert.doesNotMatch(html, /100% compliant/);
+});
+test('mixed-harness loop recovers, escalates, and preserves human approval', () => {
+  const recovery = loopFrames('recover');
+  assert.deepEqual(recovery.filter(f => f.node === 'adversary').map(f => f.state), ['fail', 'pass']);
+  assert.equal(recovery.at(-1).verified, true);
+  assert.equal(recovery.at(-1).state, 'ready');
+  assert.equal(loopFrames('escalate').at(-1).verified, false);
+  assert.equal(loopFrames('escalate').some(f => f.node === 'reviewer'), false);
+  assert.equal(loopFrames('pass').some(f => f.state === 'fail'), false);
+  assert.throws(() => loopFrames('unknown'));
+  for (const id of ['claude', 'codex', 'pi', 'agy']) assert.ok(html.includes(`data-harness="${id}"`));
+  assert.match(html, /Harness-agnostic. Bring your own subscriptions/);
+  assert.match(html, /authentication, billing, and usage limits/);
 });
