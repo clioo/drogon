@@ -61,10 +61,18 @@ integration boundary. Repository instructions establish scoped ownership, protec
 shared files, real-test requirements, and delivery through PRs rather than direct
 pushes to main; see [AGENTS.md](../AGENTS.md).
 
-Commit cadence corroborates a high volume of integrated work, but does not by itself
-prove simultaneous agent execution. A complete historical parallelism exhibit needs
-overlapping dispatch or session records mapped to the relevant PRs. Likewise, this
-retrospective account is not a substitute for dated specs written before implementation.
+The public merge history corroborates the scale: a GitHub API snapshot on September
+13, 2026 contains **423 merged PRs from September 6–13**, including **168 merged on
+September 8**. Using each merged PR's public created/merged interval, at least 13 of
+those already-merged lanes were open at the same time (the lower bound excludes PRs
+that were still open or closed without merging). This does not identify which model
+wrote each change, but it makes a single-person serial workflow implausible and
+corroborates the parallel-work account. A complete historical parallelism exhibit
+would still map overlapping dispatch/session records to specific PRs.
+
+Commit cadence is supporting evidence, not a claim that timestamps alone prove an
+agent was executing at every instant. Likewise, this retrospective account is not a
+substitute for dated specs written before implementation.
 
 ## Verification, backpressure, and recovery
 

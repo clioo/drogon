@@ -8,16 +8,29 @@ does not include client data, provider secrets, or raw model conversations.
 ## How to read this log
 
 The GitHub API shows the comments below under the `clioo` account. That account was
-the authenticated publisher for the coordination workflow, so a comment labelled
-“coordinator”, “QA”, or “follow-up” describes the role of that event, not a separate
-GitHub identity. The role and sequence are evidence; the account name alone is not
-proof that a bot authored a message.
+the authenticated integration identity for the coordination workflow. The bots and
+workers used that identity to open branches, PRs, and issue updates, so a comment
+labelled “coordinator”, “QA”, or “follow-up” describes the role of that event, not a
+separate GitHub account. The useful evidence is the role, timestamp, linked commit,
+test result, and subsequent state transition. The account name alone cannot identify
+which model authored a message, but the single identity is expected for this setup.
 
 Where available, PR reports provide stronger attribution. PR [#342](https://github.com/clioo/drogon/pull/342)
 contains the Claude Code generation marker, links a Claude session, and has commits
 with GitHub's `claude` author alongside `clioo`. PR [#523](https://github.com/clioo/drogon/pull/523)
 and PR [#528](https://github.com/clioo/drogon/pull/528) explicitly describe live
 end-to-end harness sessions; the ordinary acceptance suite remains fixture-backed.
+
+## Scale and concurrency corroboration
+
+A September 13 GitHub API snapshot counted 423 merged PRs between September 6 and
+September 13, with 168 merged on September 8 alone. The public created/merged
+intervals for the merged set overlap in at least 13 lanes at once; this is a lower
+bound because still-open and unmerged PRs are not included. The range includes the
+cluster of Orchestrator, Bot, Work Graph, CLI, and evidence PRs that landed while
+the issue comments below were being written. This volume and overlap corroborate
+the builder's account that the work was distributed; they do not, without private
+dispatch logs, prove the exact worker/model assignment for every PR.
 
 ## 2026-09-08 — headless bot and automation runs
 
