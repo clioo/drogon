@@ -72,9 +72,11 @@ function newestScopedRunSnapshot(
     snapshots.set(workspaceId, next);
     if (snapshots.size > MAX_CACHED_WORKSPACES) {
       const oldest = snapshots.keys().next().value;
-      if (oldest) {
+      if (oldest !== undefined) {
         snapshots.delete(oldest);
-        unavailableRunScopes.get(bridge)?.delete(oldest);
+        const unavailable = unavailableRunScopes.get(bridge);
+        unavailable?.delete(oldest);
+        if (unavailable?.size === 0) unavailableRunScopes.delete(bridge);
       }
     }
     latestRunSnapshots.set(bridge, snapshots);
@@ -128,6 +130,9 @@ export function useOrchestratorRun(
     return () => {
       observers.delete(observe);
       if (observers.size === 0) scopes.delete(workspaceId);
+      if (!mutatingScopes.current.has(workspaceId)) {
+        pollVersions.current.delete(workspaceId);
+      }
       if (scopes.size === 0) runObservers.delete(bridge);
     };
   }, [bridge, workspaceId]);
@@ -216,7 +221,12 @@ export function useOrchestratorRun(
     );
     const remaining = (mutatingScopes.current.get(workspaceId) ?? 1) - 1;
     if (remaining > 0) mutatingScopes.current.set(workspaceId, remaining);
-    else mutatingScopes.current.delete(workspaceId);
+    else {
+      mutatingScopes.current.delete(workspaceId);
+      if (scope.current !== workspaceId) {
+        pollVersions.current.delete(workspaceId);
+      }
+    }
   };
   const applyMutationResult = (observed: OrchestratorRun | null) => {
     const next = newestScopedRunSnapshot(

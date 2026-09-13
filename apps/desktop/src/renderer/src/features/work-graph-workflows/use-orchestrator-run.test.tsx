@@ -71,6 +71,45 @@ it("retains durable evidence across a full unmount and empty remount poll", asyn
   expect(restored.result.current.run?.id).toBe("run-1");
 });
 
+it("bounds retained workspace snapshots and evicts the oldest", async () => {
+  let returnSnapshots = true;
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async ({ workspaceId }) => ({
+      ok: true,
+      result: {
+        run: returnSnapshots
+          ? { ...run, id: `run-${workspaceId}`, workspaceId }
+          : null,
+      },
+    })),
+  } as unknown as GraphBridge;
+  for (let index = 0; index <= 256; index++) {
+    const workspaceId = `ws-${index}`;
+    const view = renderHook(() =>
+      useOrchestratorRun(bridge, workspaceId, 10_000),
+    );
+    await act(async () => {});
+    expect(view.result.current.run?.workspaceId).toBe(workspaceId);
+    view.unmount();
+  }
+  returnSnapshots = false;
+
+  const evicted = renderHook(() =>
+    useOrchestratorRun(bridge, "ws-0", 10_000),
+  );
+  await act(async () => {});
+  expect(evicted.result.current.run).toBeNull();
+  evicted.unmount();
+
+  const retained = renderHook(() =>
+    useOrchestratorRun(bridge, "ws-256", 10_000),
+  );
+  await waitFor(() =>
+    expect(retained.result.current.error).toContain("status is unavailable"),
+  );
+  expect(retained.result.current.run?.workspaceId).toBe("ws-256");
+});
+
 it("starts concrete main work with optional adversarial mode off", async () => {
   const start = vi.fn(async () => ({ ok: true, result: { run } }));
   const bridge = { graphOrchestratorStart: start } as unknown as GraphBridge;

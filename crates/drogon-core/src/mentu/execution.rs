@@ -27,9 +27,9 @@ use crate::error;
 use super::run_record::WorkspaceAttestation;
 use super::{run_record, storage};
 
-/// Watchdog for recipes that declare no step budgets. A fully explicit recipe
-/// gets the sum of its runtime-owned attempt, retry, verification, and hook
-/// limits plus cleanup grace, so the daemon never preempts valid work.
+/// The pinned runtime's per-attempt allowance when a step omits `timeout`.
+/// Recipe watchdogs sum that default or each explicit positive bound with all
+/// other bounded runtime phases, then add cleanup grace.
 const DEFAULT_RUN_TIMEOUT: Duration =
     Duration::from_secs(super::recipe::DEFAULT_STEP_TIMEOUT_SECONDS);
 const DECLARED_TIMEOUT_GRACE: Duration = Duration::from_secs(60);
