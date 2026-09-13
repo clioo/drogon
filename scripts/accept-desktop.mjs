@@ -33,7 +33,7 @@ import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
 import { probeRenderedMentuTab } from "./probe-rendered-mentu-tab.mjs";
-import { probeGraphDesigner } from "./probe-graph-designer.mjs";
+import { probeOrchestrator } from "./probe-orchestrator.mjs";
 import { probeRenderedDaemonRestart } from "./probe-rendered-daemon-restart.mjs";
 import { probeRenderedChangedDaemonBinary } from "./probe-rendered-changed-daemon-binary.mjs";
 import {
@@ -967,16 +967,17 @@ try {
     report.checks.push(
       ...(await probeRenderedTabs({ page, workspace, output })),
     );
-    // The graph-design probe runs FIRST: it needs a workspace with NO
-    // .drogon/graph.json (the honest empty state and the design journey).
-    // The Mentu tab probe below then writes its own fixture graph.
+    // The orchestrator probe runs FIRST: it needs a workspace with NO
+    // .drogon/graph.json (the honest initial state and the configure-and-run
+    // journey). The Mentu tab probe below then writes its own fixture graph.
     report.checks.push(
-      ...(await probeGraphDesigner({
+      ...(await probeOrchestrator({
         page,
         workspace,
         output,
         cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
         dataDir,
+        workspaceId: registered.id,
       })),
     );
     // Mentu-as-tab: the reported bug (the "+" menu's Mentu entry used to
