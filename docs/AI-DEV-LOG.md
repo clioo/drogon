@@ -1,190 +1,181 @@
 # AI development log
 
-Draft for the hackathon submission. This is a compact reconstruction of the
-important development loops from the public GitHub issue/PR trail, supplemented by
-the builder's account in `docs/SYSTEM.md`. It is intentionally not a transcript and
-does not include client data, provider secrets, or raw model conversations.
+Prepared in English on September 13, 2026 from dated repository artifacts, public
+PR/issue records and the builder's account in [SYSTEM.md](SYSTEM.md).
+This is a curated development log, not a fabricated transcript. All times below
+are UTC. Historical test results apply to their linked revisions, not a fresh run
+of the submission branch.
 
-## How to read this log
+## Reading the evidence
 
-The GitHub API shows the comments below under the `clioo` account. That account was
-the authenticated integration identity for the coordination workflow. The bots and
-workers used that identity to open branches, PRs, and issue updates, so a comment
-labelled “coordinator”, “QA”, or “follow-up” describes the role of that event, not a
-separate GitHub account. The useful evidence is the role, timestamp, linked commit,
-test result, and subsequent state transition. The account name alone cannot identify
-which model authored a message, but the single identity is expected for this setup.
+Agents and bots used the authenticated `clioo` account to publish work. A
+coordinator, QA or worker label describes an event's role, not a distinct GitHub
+identity. The builder confirms that review-to-fix follow-ups ran under the existing
+orchestration rather than requiring a new manual prompt at every step. The public
+record supplies the corresponding comments, subsequent commits and checks.
 
-Where available, PR reports provide stronger attribution. PR [#342](https://github.com/clioo/drogon/pull/342)
-contains the Claude Code generation marker, links a Claude session, and has commits
-with GitHub's `claude` author alongside `clioo`. PR [#523](https://github.com/clioo/drogon/pull/523)
-and PR [#528](https://github.com/clioo/drogon/pull/528) explicitly describe live
-end-to-end harness sessions; the ordinary acceptance suite remains fixture-backed.
+Model names in task reports and commit coauthor metadata are attribution records,
+not independent identity verification. We retain this distinction without requiring
+private client data, credentials or full provider transcripts.
 
-## Scale and concurrency corroboration
+## September 5–7 — intent, specifications and dispatch
 
-A September 13 GitHub API snapshot counted 423 merged PRs between September 6 and
-September 13, with 168 merged on September 8 alone. The public created/merged
-intervals for the merged set overlap in at least 13 lanes at once; this is a lower
-bound because still-open and unmerged PRs are not included. The range includes the
-cluster of Orchestrator, Bot, Work Graph, CLI, and evidence PRs that landed while
-the issue comments below were being written. This volume and overlap corroborate
-the builder's account that the work was distributed; they do not, without private
-dispatch logs, prove the exact worker/model assignment for every PR.
+| Event | Evidence | Why it matters |
+| --- | --- | --- |
+| September 5, 19:10:59: goal recorded before product implementation | [Goal at c6189dac](https://github.com/clioo/drogon/blob/c6189dac9b9ec5d6d2eff30be2639a8a935db9df/docs/migration/rewrite-goal.md) | Defines architecture, coordinator responsibility, three worker lanes and acceptance before expansion. Explicitly states implementation had not started. |
+| September 5, 19:56:20: foundation implementation | [c3eb8802](https://github.com/clioo/drogon/commit/c3eb8802a8a1731fce0f5bd37e14531a1eeb2373) | Protocol and desktop work follows the recorded goal. |
+| September 7, 18:19:24: MVP plan refined | [Plan at ec8dd5ba](https://github.com/clioo/drogon/blob/ec8dd5ba72eb6aaad44587538ad8bfb7497a16f4/docs/migration/rewrite-mvp-plan.md), [PR #16](https://github.com/clioo/drogon/pull/16) | Twelve journeys, exclusions, four waves, ownership and dependency gates. Commit credits Claude Fable 5.1. |
+| September 7, 18:48:00: simultaneous lanes recorded | [Status at 9c92b5e9](https://github.com/clioo/drogon/blob/9c92b5e95f1e759b323b42c331de8c94cd3324cb/docs/migration/rewrite-mvp-plan.md) | Palette/review/sidebar work is merged while backbone/CLI, automation and browser work remains in progress in separate lanes. |
 
-The first 200 PR numbers show the same pattern at the beginning of the build, not
-only in its final week. The public closed-PR history contains 156 merged PRs in that
-range (all 156 were merged); 71 of them landed on September 8. Their public
-created-to-merged intervals overlap in at least six lanes. In the matching early
-issue trail, 45 coordinator assignment/update comments for issues numbered 1–200
-landed during the September 8 QA wave, including a stated nine-worker cap and named
-R16 lanes. These counts describe repository activity; they are not a claim that a
-particular model authored every PR.
+The MVP plan refined an existing foundation; it was not the first specification.
+[SPEC.md](SPEC.md) provides the English consolidation and links present behavior to
+existing implementation and tests.
 
-## 2026-09-06/08 — the first 200 PRs: foundation, review lanes, and handoffs
+## Primary autonomous loop: PR #5
 
-The early PRs contain direct orchestration evidence before the Work Graph existed as
-a product surface:
+Task: preserve provider-record extensions without allowing them to override typed
+or reserved authority. All events in this table occurred on September 6.
 
-- PR [#9](https://github.com/clioo/drogon/pull/9) describes 18 typed coordination
-  entry points, durable runs/tasks/receipts, bounded mail and groups, question/reply
-  recovery, and a worker-lifecycle review. Its report names three supplemental
-  read-only Tasks split by dimension: Sonnet security/mail, OpenCode with ZAI
-  GLM-5.3-Flash for CLI/integration, and a root reconciliation pass.
-- PR [#10](https://github.com/clioo/drogon/pull/10) closes a five-vertical checkpoint
-  stage with an 86-row audit disposition and a sanitized 126-task worker inventory.
-  It records five leader tasks, explicit capability-loss recovery, a coordinator
-  handoff, and packaged acceptance. This is a planning and delegation artifact, not
-  merely a feature PR.
-- PR [#2](https://github.com/clioo/drogon/pull/2) records three independent review
-  tasks — Sonnet correctness, Kimi security, and Muse tests — all settled against a
-  clean head, with carry-forward gates instead of a blanket approval. PRs
-  [#3](https://github.com/clioo/drogon/pull/3), [#4](https://github.com/clioo/drogon/pull/4),
-  [#5](https://github.com/clioo/drogon/pull/5), and [#6](https://github.com/clioo/drogon/pull/6)
-  repeat that multi-lane pattern with different findings and named correction work.
-  Their follow-up comments show genuine RED → correction → re-run transitions, not
-  only green summaries: [#3 correction](https://github.com/clioo/drogon/pull/3#issuecomment-5561902884),
-  [#5 correction](https://github.com/clioo/drogon/pull/5#issuecomment-5562316669),
-  and [#7 packaging failure](https://github.com/clioo/drogon/pull/7#issuecomment-5562324531).
-- PR [#7](https://github.com/clioo/drogon/pull/7) is a useful harness/backpressure
-  example: fixture-only checks passed, but actual packaging exposed a signing failure;
-  the candidate was rejected, rebuilt, and sealed again. PR [#8](https://github.com/clioo/drogon/pull/8)
-  then records three independent read-only reviews, a Linux listener race, and a
-  corrected readiness predicate validated against the real packaged app.
-- PR [#16](https://github.com/clioo/drogon/pull/16) establishes the coordinator's
-  rewrite MVP plan and current repository rules. PR [#37](https://github.com/clioo/drogon/pull/37)
-  adds source-anchored fidelity and process-hygiene rules. The recurring status PRs
-  (#20, #23, #26, #28, #31, #32, #34, #39, and #45) record which R1–R6 lanes were
-  merged or still in flight, making the coordination state visible in Git.
-- Issue comments from the R16 wave show the coordinator distributing work by fit:
-  Muse for copy/token or visual parity, Sonnet for editor behavior, Kimi for shell
-  and settings lanes, and a nine-worker cap before new work could launch. Examples:
-  [copy/token lane](https://github.com/clioo/drogon/issues/124#issuecomment-5578419535),
-  [editor lane](https://github.com/clioo/drogon/issues/133#issuecomment-5578420623),
-  [nine-worker cap](https://github.com/clioo/drogon/issues/156#issuecomment-5578798907),
-  and [follow-up after a completed worker](https://github.com/clioo/drogon/issues/185#issuecomment-5579686793).
-- The early QA comments are not “all passed” summaries. Round 2 recorded partial
-  verification and explicit unverifiable boundaries for live Pi hook states
-  ([#118](https://github.com/clioo/drogon/issues/118#issuecomment-5578648636));
-  Round 3 re-ran the oracle and kept residuals open
-  ([#136](https://github.com/clioo/drogon/issues/136#issuecomment-5578974947)).
-  That honesty is part of the recovery loop.
+| Stage | Time | Recorded event |
+| --- | --- | --- |
+| Act | 21:05:59 | [Implementation 3c91fff9](https://github.com/clioo/drogon/commit/3c91fff97cfe7df95564a2836a465513d6b5b004). |
+| Verify and observe | 21:22:05 | [Independent review](https://github.com/clioo/drogon/pull/5#issuecomment-5562259983) finds that `launchEnv` is rejected on input but can still be serialized through extensions. Existing green checks missed this boundary. |
+| Fix | 21:28:58 | [Correction 5e0f57ae](https://github.com/clioo/drogon/commit/5e0f57ae91c7f54ae5eea2ded5d836f08f68087c) reserves the key and adds regression coverage and a RED receipt. It follows the review comment. |
+| Verify again | 21:30:35–21:30:44 | [CI run 34061203435](https://github.com/clioo/drogon/actions/runs/34061203435) passes Windows compilation, macOS native tests and Ubuntu native tests on the corrected SHA. |
+| Record the outcome | 21:31:56 | [Follow-up report](https://github.com/clioo/drogon/pull/5#issuecomment-5562316669) records the genuine RED, passing correction, 379 workspace tests, clippy/fmt and green CI. |
 
-## 2026-09-08 — headless bot and automation runs
+The review records run `run_ddca7735397e` and three scoped read-only tasks:
+Muse correctness (`task_0c89c05e28c9`), Sonnet authority
+(`task_c8915bdd6b14`) and Kimi evidence (`task_48a381a99d95`).
+The coordinator reconciled their findings and accepted the serialization defect;
+approval was not decided by majority vote.
 
-1. **Act — assign the failure.** The coordinator assigned the headless-launch slice
-   to the running R16-S task and made the automation lane depend on it
-   ([assignment](https://github.com/clioo/drogon/issues/186#issuecomment-5579679347)).
-   A worker then pushed the first `plan_launch` headless slice
-   ([implementation](https://github.com/clioo/drogon/issues/186#issuecomment-5579825778)).
-2. **Verify — reproduce the real break.** QA ran a Pi automation and observed
-   `agent=needs_input`, a run row stuck at `Launched`, zero completed work, and raw Pi
-   TUI escape codes in the run detail. The session was killed manually after the
-   observation ([QA r2](https://github.com/clioo/drogon/issues/186#issuecomment-5580354718)).
-3. **Observe problem → fix.** The follow-up identified the cause: daemon runs passed
-   the prompt as a positional argument, while Pi requested tool approvals that a
-   headless PTY could not answer. The fix added explicit headless modes (`Pi -p`,
-   `Claude -p`, `OpenCode run`, `Antigravity -p`), bypassed interactive hook waits,
-   threaded the mode through bot/automation/scheduler paths, and persisted terminal
-   state ([root cause and PR #227](https://github.com/clioo/drogon/issues/186#issuecomment-5580587630)).
-4. **Verify again.** The same report records a live DGX-Spark run: `HEADLESS_OK`,
-   completed bot responsibility and scheduler work, answered/exited chat turns, and
-   zero sessions at `needs_input`. A later note records re-verification on the
-   installed build and deliberately leaves the separate bot harness-policy issue
-   open ([closure note](https://github.com/clioo/drogon/issues/186#issuecomment-5584609271)).
+The [committed RED output](https://github.com/clioo/drogon/blob/5e0f57ae91c7f54ae5eea2ded5d836f08f68087c/tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/red-round-launchenv.txt)
+records 10 passed and one failed test:
+`source_refused_launch_env_never_persists_through_extensions_smuggling`.
+The [acceptance record](https://github.com/clioo/drogon/blob/5e0f57ae91c7f54ae5eea2ded5d836f08f68087c/docs/migration/provider-extension-roundtrip-admission.md)
+records 11/11 after the correction, 227 core tests and 379 workspace tests.
+The RED output has no separate wall-clock timestamp; its placement in the correction
+commit is not presented as a timestamp for when the failing test ran.
 
-This is the clearest issue-level example of **act → verify → observe → fix → verify**.
-The linked comments do not establish that no human prompt occurred between every
-step; that boundary must be shown by a redacted session/run record if the submission
-requires proof of a fully unattended loop.
+This is the submission's clearest Act → Verify → Observe → Fix → Verify example:
+a concrete task, a missed failure found by another agent, a subsequent correction,
+a failing regression receipt and independently recorded CI on the corrected commit.
+The builder's account supplies the unattended-operation context.
 
-## 2026-09-08 — CI failure, mitigation, and recovery
+## Early foundation: additional independent review and recovery
 
-Issue #312 shows a longer feedback loop rather than a convenient green-only story:
+- **PR #3 — startup permission boundary.** A
+  [19:53:40 review](https://github.com/clioo/drogon/pull/3#issuecomment-5561758097)
+  identified missing hardening when startup fails before the database gate.
+  [Correction 1a812ed9](https://github.com/clioo/drogon/commit/1a812ed998dbed65d313e083d144ee908b034b29)
+  followed at 20:16:46. The
+  [20:18:21 report](https://github.com/clioo/drogon/pull/3#issuecomment-5561902884)
+  records the regression and 368 passing tests. CI was still pending in that report.
+- **PR #7 — fixture success was insufficient.**
+  [Real packaging failed](https://github.com/clioo/drogon/pull/7#issuecomment-5562457806)
+  and the candidate had to be corrected and rebuilt. The
+  [later report](https://github.com/clioo/drogon/pull/7#issuecomment-5564784748)
+  records packaging and acceptance results, including a Pi empty-profile fixture;
+  that fixture is not a live-model inference result.
+- **PR #8 — readiness race.** The
+  [review and correction trail](https://github.com/clioo/drogon/pull/8#issuecomment-5564768275)
+  records listener-readiness reproduction and packaged-app checks with screenshots.
+- **PR #9 — specialist reviewers.** The
+  [PR report](https://github.com/clioo/drogon/pull/9) names three supplemental tasks:
+  two Sonnet review dimensions and one OpenCode/ZAI GLM lane. Root reconciliation
+  follows those three reviews; it is not the third reviewer.
+- **PR #10 — coordinated checkpoint.** The
+  [report](https://github.com/clioo/drogon/pull/10) records five leader tasks,
+  an 86-row audit and a 126-task inventory, including recovery and handoffs.
 
-- The investigation measured an external Ubuntu SIGTERM around the Vitest worker
-  recycle boundary and linked the first fix in PR #325
-  ([root cause](https://github.com/clioo/drogon/issues/312#issuecomment-5587612596)).
-- The first green run was followed by a residual failure with the same boundary
-  signature ([follow-up](https://github.com/clioo/drogon/issues/312#issuecomment-5587938606)).
-- The issue was reopened when current main reproduced the failure
-  ([reopen](https://github.com/clioo/drogon/issues/312#issuecomment-5589713766)).
-- A new mitigation sharded the desktop suite and made the remaining timeout/module
-  pollution visible instead of hiding it ([mitigation in #342](https://github.com/clioo/drogon/issues/312#issuecomment-5591122750)).
-- The issue closed only after three consecutive green main runs, while preserving the
-  residual-risk explanation ([closure](https://github.com/clioo/drogon/issues/312#issuecomment-5592145226)).
+The early-history review covered repository numbers #1–200, containing 156 merged
+PRs in the inspected snapshot. GitHub issues and PRs share a number sequence: this
+is not a claim to have inspected 200 separate PRs. Status/documentation PRs are
+coordination evidence, not additional product features.
 
-PR #342 is especially useful submission evidence: its body reports repeated full-suite
-measurements and an honest residual; the PR is marked “Generated with Claude Code”;
-and the commit metadata includes the `claude` author. This supports model-assisted
-work on that lane, while not proving that every historical comment or line came from
-Claude.
+## September 8 — assignment, capacity and QA boundaries
 
-## 2026-09-10 — adversarial lifecycle hardening
+R16 comments show explicit dispatch by specialization:
+[Muse copy/token work](https://github.com/clioo/drogon/issues/124#issuecomment-5578419535),
+[Sonnet editor work](https://github.com/clioo/drogon/issues/133#issuecomment-5578420623),
+[a nine-worker cap](https://github.com/clioo/drogon/issues/156#issuecomment-5578798907)
+and [follow-up to an existing worker](https://github.com/clioo/drogon/issues/185#issuecomment-5579686793).
+These complement the dated parallel-lane status, rather than relying on commit
+cadence alone.
 
-The adversarial pass in PR [#409](https://github.com/clioo/drogon/pull/409#issuecomment-5615172599)
-reported five concrete lifecycle breaks beyond the happy path: disable-mid-turn
-state, Stop while disabled, disable/re-enable state, restart durability, and
-foreign-harness hook events. It mapped each finding to a code correction and a
-red-first regression test, and also stabilized the fixture under parallel execution.
+QA reported partial results when that was all it could establish:
+[issue #118](https://github.com/clioo/drogon/issues/118#issuecomment-5578648636)
+retains unverifiable live Pi hook states, while
+[issue #136](https://github.com/clioo/drogon/issues/136#issuecomment-5578974947)
+records a rerun and remaining failures. Incomplete verification was not converted
+into a blanket pass.
 
-The next round in PR [#417](https://github.com/clioo/drogon/pull/417#issuecomment-5616145127)
-closed two additional races and the forged-event path with named tests. The interlock
-resolution then recorded the rebase and post-fix suites
-([verification](https://github.com/clioo/drogon/pull/417#issuecomment-5617869726)).
-The sequence demonstrates adversarial backpressure: a passing happy path was not
-accepted as done, and each observed break became a regression.
+### Headless automation: issue #186
 
-## Other corroborating trails
+1. **Act:** [Assign the headless-launch slice](https://github.com/clioo/drogon/issues/186#issuecomment-5579679347)
+   to the running task and make the dependent automation lane wait.
+2. **Verify and observe:** [QA reproduces the break](https://github.com/clioo/drogon/issues/186#issuecomment-5580354718):
+   Pi remains at `needs_input`, the run says `Launched`, no work completes,
+   and the detail contains interactive TUI output.
+3. **Fix:** [The worker report and PR #227](https://github.com/clioo/drogon/issues/186#issuecomment-5580587630)
+   identify positional prompting and interactive approvals as incompatible with
+   the unattended path, and introduce explicit headless launch behavior.
+4. **Verify again:** That report records a live DGX-Spark run with
+   `HEADLESS_OK`, completed scheduled work and no sessions at `needs_input`.
+   The [later closure note](https://github.com/clioo/drogon/issues/186#issuecomment-5584609271)
+   requests installed-build re-verification and keeps a separate policy gap in
+   #188. The request is not itself evidence that this additional QA passed.
 
-- PR [#523](https://github.com/clioo/drogon/pull/523) reports all three Orchestrator
-  modes driven through the real desktop, fixes discovered by those runs, and checks
-  that requested artifacts and evidence landed.
-- PR [#527](https://github.com/clioo/drogon/pull/527) reports 53 of 55 inventoried
-  Orchestrator controls driven, plus defects found in delegated-child instructions,
-  completion verification, and Main-agent projection. The 53/55 figure is not whole
-  product coverage.
-- PR [#528](https://github.com/clioo/drogon/pull/528) reports a bot creating its own
-  monitor and automation with the DGX-local model, the monitor firing real delegated
-  work, and a UI contradiction corrected after the run.
-- The browser trail is similarly honest: triage assigned the work, a PR reported a
-  sealed acceptance result, and a later QA round still found blank embedded content
-  ([issue #279](https://github.com/clioo/drogon/issues/279#issuecomment-5584564399),
-  [follow-up QA](https://github.com/clioo/drogon/issues/279#issuecomment-5584846071)).
+### CI recovery: issue #312
 
-## Human-in-the-loop boundary
+The [reopened issue](https://github.com/clioo/drogon/issues/312#issuecomment-5589713766)
+shows that an earlier mitigation did not eliminate the failure. The investigation
+evolved; the external signal sender was not established, so the initial diagnosis
+is not presented here as a proven final cause.
 
-The human builder supplied intent and constraints, selected the deadline scope,
-used Drogon in real client work, filed usability issues, and decided what was ready
-to ship. The coordinator and workers handled decomposition, implementation, and
-verification inside those boundaries. The process therefore demonstrates autonomous
-work in bounded loops, not a claim that the repository was built without human
-direction.
+The [subsequent mitigation report](https://github.com/clioo/drogon/issues/312#issuecomment-5591122750)
+and [PR #342](https://github.com/clioo/drogon/pull/342) discuss remaining timeout
+and module-pollution failures rather than hiding them. The
+[closure](https://github.com/clioo/drogon/issues/312#issuecomment-5592145226)
+records three consecutive green main runs. This is recovery through revised
+hypotheses and repeated verification, not a claim that the first fix solved it.
 
-## Evidence to attach for a strict autonomy claim
+## September 10 — adversarial lifecycle hardening
 
-Before submission, attach one redacted chronological run record showing the initial
-task, failed verification, observed failure, corrective action, and successful
-re-verification with no intervening human prompt. Also retain the dated initial spec
-and one overlapping worker/dispatch record. Commit timestamps and the landing-page
-animation are useful context, but neither proves unattended execution by itself.
+[PR #409's adversarial follow-up](https://github.com/clioo/drogon/pull/409#issuecomment-5615172599)
+maps five observed breaks to corrections and red-first regressions: disable-mid-turn,
+Stop while disabled, disable/re-enable state, restart durability and foreign-harness
+hook events.
+
+[PR #417's next round](https://github.com/clioo/drogon/pull/417#issuecomment-5616145127)
+addresses two additional races and a forged-event path. The
+[integration follow-up](https://github.com/clioo/drogon/pull/417#issuecomment-5617869726)
+records the rebase and post-fix tests. A passing happy path did not end the review;
+newly observed failures became regression coverage.
+
+## Later dogfooding — Drogon building Drogon
+
+The builder places the final three days of development inside Drogon itself.
+These reports document concrete use of the resulting execution paths:
+
+| Report | What the run exposed | Recorded result |
+| --- | --- | --- |
+| [PR #523](https://github.com/clioo/drogon/pull/523) | Real Pi/Luna runs across three orchestration modes exposed drift handling, unwanted runtime commits, missing CLI access and editor persistence problems. | Corrections plus requested artifacts, execution evidence and repository commit-count checks. |
+| [PR #527](https://github.com/clioo/drogon/pull/527) | UI testing exposed conflicting child-worker instructions, fragile completion keywords and missing live-session projection. | Role-specific context, artifact verification, 18 reported acceptance checks and 53/55 inventoried Orchestrator controls exercised. This is not whole-product coverage. |
+| [PR #528](https://github.com/clioo/drogon/pull/528) | DGX-backed bot work created monitor/scheduled execution while the UI incorrectly reported a disconnected adapter. | UI correction and nine reported checks covering monitoring, scheduled work, resulting files and UI. |
+
+Ordinary acceptance uses fixtures, as documented in [acceptance.md](acceptance.md).
+These historical live-model reports are labeled separately and do not authorize
+real inference during current contributor validation.
+
+## Human decisions and lessons
+
+The human supplied intent, chose the deadline scope and tested usability in real
+work. Browser work was deferred rather than declared complete; the CLI was
+prioritized so bots could create workspaces and delegate without manual handoffs.
+
+The practical lesson was that orchestration needed both a clear brief and a way to
+return observed failures. Independent reviews found defects that existing green
+tests missed. Corrective commits and regression results, not completion messages,
+closed the loop.

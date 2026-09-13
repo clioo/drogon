@@ -246,6 +246,24 @@ test windows stay inactive and never steal focus. Surfaces are compared against 
 own recorded baselines, pixel- and accessibility-tree-level; every reported difference
 becomes a tracked fix.
 
+## Hackathon engineering evidence
+
+The submission separates the product specification from the process used to build it:
+[SPEC.md](docs/SPEC.md) links requirements to implementation and tests;
+[SYSTEM.md](docs/SYSTEM.md) explains context, specialist workers, parallel worktrees,
+QA and human decisions; [AI-DEV-LOG.md](docs/AI-DEV-LOG.md) traces failures through
+corrective commits and re-verification.
+
+The development gates above supplied machine-readable feedback to the agents.
+Independent reviews and rendered Electron QA supplied failures those checks missed.
+The coordinator returned that evidence to implementation workers, who corrected the
+behavior and added regressions before re-verification. PR #5 is a dated example in
+the log: review finding, subsequent correction, committed failing-test output and
+green CI on the corrected SHA. Ordinary acceptance uses fixtures; historical
+live-model exploratory runs are labeled separately. The spec links the original
+pre-implementation goal rather than presenting this retrospective documentation as
+the original plan.
+
 ## Install it in one command
 
 `make install` packages this checkout, replaces the installed app, and brings

@@ -1,198 +1,182 @@
 # How Drogon was built
 
-Submission draft, reconstructed on September 13, 2026 from the builder's account,
-repository sources, and linked pull-request reports. This describes the development
-process, not just capabilities demonstrated by the finished product. Historical
-practices attributed to the builder are not independently verified session records.
+Prepared in English on September 13, 2026. This document combines the builder's
+account with dated planning artifacts, implementation commits, and public review
+and verification records. [SPEC.md](SPEC.md) defines the product and acceptance
+criteria; [AI-DEV-LOG.md](AI-DEV-LOG.md) follows the actual iterations.
 
-## Why this system
+## Why Drogon
 
-I liked Orca, but my everyday development workflow was split between Orca for
-orchestration, Codex for quick chats, and Hermes for bots. Drogon grew from wanting
-those workflows in one developer workspace. Its desktop began as a component-level
-port of Orca's MIT-licensed source; the attribution remains in
+I liked Orca, but my everyday workflow was split between Orca for orchestration,
+Codex for quick chats, and Hermes for bots. Drogon grew from wanting those workflows
+in one developer workspace. Its desktop began as a component-level port of Orca's
+MIT-licensed source; attribution remains in
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
-The development workflow became the product's proving ground. I initially used
-Orca to coordinate the work. During the final three days described in my account,
-I used Drogon itself to build Drogon: coordinating agents, watching work with bots,
-and routing follow-up fixes. I used the app in real client work, filed GitHub issues
-when I found problems, and had the bots take those issues into implementation and
-regression testing. Client data and private transcripts are not submission evidence.
+I initially used Orca to coordinate development. During the final three days
+described in my account, Drogon was built with Drogon: its sessions, orchestration
+and bots handled ongoing work. I used it with real client projects, reported
+usability problems as GitHub issues, and had bots take those issues into fixes and
+regression tests. Client data and private conversations are not submission artifacts.
 
-## People, agents, and tools
+## Specification before implementation
 
-The following allocation is my account of the actual development setup. Model names
-are the labels I used, not a verified inventory of provider API identifiers.
+The [September 5 goal](https://github.com/clioo/drogon/blob/c6189dac9b9ec5d6d2eff30be2639a8a935db9df/docs/migration/rewrite-goal.md)
+was committed at 19:10:59 UTC and explicitly states that product implementation had
+not started. It defines the independent Rust core/service/CLI, Electron desktop,
+licensing, coordinator responsibilities, three worker lanes and acceptance gates.
+The [protocol and desktop implementation](https://github.com/clioo/drogon/commit/c3eb8802a8a1731fce0f5bd37e14531a1eeb2373)
+followed at 19:56:20 UTC.
+
+The [September 7 MVP plan](https://github.com/clioo/drogon/blob/ec8dd5ba72eb6aaad44587538ad8bfb7497a16f4/docs/migration/rewrite-mvp-plan.md)
+refined that foundation into twelve journeys, exclusions, four implementation waves,
+ownership and dependencies. Shared contracts came first; dependent UI work followed.
+[PR #16](https://github.com/clioo/drogon/pull/16) records the plan, whose commit
+credits Claude Fable 5.1 as a coauthor. The original planning documents are Spanish;
+the submission specification summarizes them in English without backdating it.
+
+## Roles, harnesses and models
 
 | Role | Responsibility |
 | --- | --- |
-| Human builder | Set direction, constrain scope, use Drogon in real work, report usability issues, and decide readiness. |
-| Coordinator, identified as Fable 5.1 | Decompose work into detailed specs, assign scopes, choose harnesses and models, integrate QA findings, and reassign work when usage limits were reached. |
-| Implementation workers | Execute distinct specs in parallel, make scoped changes, and add or update tests. |
-| QA agents | Exercise affected features, inspect sandbox logs, interact with the Electron UI, and send actionable failures back to the coordinator. |
-| Drogon bots, in the later phase | Watch incoming work and delegate it into the appropriate project and agent workflow. |
+| Human builder | Set intent, prioritize scope, use the product in real work, report usability failures and decide readiness. |
+| Coordinator, Fable 5.1 in the builder's account | Break the goal into scoped specifications, choose workers, manage dependencies, integrate QA findings and reassign work when usage limits were reached. |
+| Implementation workers | Execute separate tasks in isolated worktrees, implement behavior and add regression tests. |
+| QA and adversarial reviewers | Exercise affected behavior, inspect sandbox logs and rendered Electron UI, challenge assumptions and return reproducible failures. |
+| Drogon bots in the later phase | Watch incoming work and delegate it into the appropriate project and session workflow. |
 
-The reported model pool included Z.ai GLM 5.3 Flash; GPT-5.6 Sol and Luna;
-Opus, Sonnet, and Fable through Claude Code; and
-`qwen3.8-flash-next-nvidia-nvfp4` on my own DGX Spark. These are models and harnesses,
-not interchangeable terms: a harness supplies the execution interface, while the
-model supplies reasoning. I used local inference to reduce metered provider spend
-during repeated internal QA, not to claim that compute had no cost.
+My model pool included Z.ai GLM 5.3 Flash; GPT-5.6 Sol and Luna; Opus, Sonnet and
+Fable through Claude Code; and `qwen3.8-flash-next-nvidia-nvfp4` on my DGX Spark.
+These are the labels I used, not an exact provider-ID inventory. Historical task
+reports also name Muse and Kimi review lanes. A harness is the execution interface;
+a model is the reasoning engine used through it.
 
-The coordinator selected workers based on observed suitability and available usage.
-Reassigning work at a usage limit was part of that coordination practice; this is
-not a measured claim of 100% token utilization or proof that every such reassignment
-was a daemon-level automatic failover.
+The coordinator selected workers by observed suitability and available usage.
+Local inference reduced metered provider spending during repeated internal QA;
+it did not make hardware or computation free. Reassignment at usage limits was a
+coordination practice, not a measured claim of perfect token utilization or a
+claim that every reassignment used Drogon's runtime failover machinery.
 
-## Context and parallel execution
+## Context engineering and parallel execution
 
-Context had two complementary sources:
+Each worker received a detailed task brief: intended behavior, owned paths,
+constraints, dependencies and verification expectations. QA supplied a second kind
+of context: logs, observed UI behavior and reproducible failures from controlled
+environments. The coordinator fed those observations into the next implementation
+task. Intent and observations served different purposes.
 
-1. **Task intent:** the coordinator supplied detailed specs, constraints, rules,
-   and implementation scope to each worker.
-2. **Observed behavior:** QA agents inspected controlled feature environments and
-   their logs, then reported failures to the coordinator. The coordinator passed
-   the relevant evidence into subsequent implementation work.
+Parallelism is visible in planning records, not only commit volume. The
+[September 7 status update at 18:48 UTC](https://github.com/clioo/drogon/blob/9c92b5e95f1e759b323b42c331de8c94cd3324cb/docs/migration/rewrite-mvp-plan.md)
+records merged palette, review and sidebar lanes while the Sonnet backbone/CLI
+work and the Muse automation and browser lanes were still in progress.
 
-Features and tests were developed concurrently rather than as a single serial
-conversation. Separate tasks and worktrees bounded changes; pull requests were the
-integration boundary. Repository instructions establish scoped ownership, protected
-shared files, real-test requirements, and delivery through PRs rather than direct
-pushes to main; see [AGENTS.md](../AGENTS.md).
+The initial MVP plan allocated four workers. Later R16 issue comments record
+specialist assignments and a nine-worker cap:
+[Muse copy/token work](https://github.com/clioo/drogon/issues/124#issuecomment-5578419535),
+[Sonnet editor work](https://github.com/clioo/drogon/issues/133#issuecomment-5578420623),
+and [capacity backpressure](https://github.com/clioo/drogon/issues/156#issuecomment-5578798907).
+These describe different stages of the build, not one constant worker count.
 
-The public merge history corroborates the scale: a GitHub API snapshot on September
-13, 2026 contains **423 merged PRs from September 6–13**, including **168 merged on
-September 8**. Using each merged PR's public created/merged interval, at least 13 of
-those already-merged lanes were open at the same time (the lower bound excludes PRs
-that were still open or closed without merging). This does not identify which model
-wrote each change, but it makes a single-person serial workflow implausible and
-corroborates the parallel-work account. A complete historical parallelism exhibit
-would still map overlapping dispatch/session records to specific PRs.
+Worktrees bounded simultaneous changes; PRs were the integration boundary.
+[AGENTS.md](../AGENTS.md) records path ownership, protected shared files, real-test
+requirements and delivery through PRs. In the early foundation wave,
+[PR #9](https://github.com/clioo/drogon/pull/9) reports three supplemental review
+tasks: two Sonnet dimensions and one OpenCode/ZAI GLM lane, followed by root
+reconciliation. [PR #10](https://github.com/clioo/drogon/pull/10) reports five leader
+tasks, an 86-row audit and a 126-task inventory.
 
-Commit cadence is supporting evidence, not a claim that timestamps alone prove an
-agent was executing at every instant. Likewise, this retrospective account is not a
-substitute for dated specs written before implementation.
+## The execution and recovery loop
 
-## Verification, backpressure, and recovery
+The standing process was:
 
-My coordination rule was to launch end-to-end QA after every three or four merged
-PRs. QA selected affected surfaces from those changes and checked the rendered UI,
-not just assertions about its internal state. Obvious defects were often caught
-before I encountered them; my own findings increasingly concerned usability in real
-work. This cadence is my recollection, not a claim that every historical batch has
-been audited.
+1. Act on the scoped task.
+2. Verify through tests, independent review or rendered QA.
+3. Observe the actual failure and return its evidence to the coordinator.
+4. Fix the failure and add a regression.
+5. Verify again before accepting the result.
 
-The evidence distinguishes two test layers:
+As the builder, I confirm that the agent review comments and corrective follow-up
+work described here happened within the ongoing orchestration. I did not manually
+write a new prompt for each intermediate review-to-fix transition. My interventions
+were direction, scope decisions, real-world issues and readiness decisions.
 
-- **Deterministic checks:** Rust and desktop tests, renderer contracts, packaging
-  checks, and acceptance using shell or sealed provider fixtures. The fixture
-  provider is documented in [acceptance.md](acceptance.md). These validate repeatable
-  behavior without depending on a model's answer.
-- **Live-model exploratory and integration QA:** separate runs exercised real
-  harness sessions and their behavior through the desktop. PR [#523](https://github.com/clioo/drogon/pull/523)
-  reports Pi with `openai-codex/gpt-5.6-luna:low` for the three orchestration modes.
-  PR [#528](https://github.com/clioo/drogon/pull/528) reports Pi with the DGX model
-  for bot monitoring and scheduled execution. Their assertions can be deterministic;
-  model generation itself is not.
+The public record makes those transitions inspectable. In
+[PR #5](https://github.com/clioo/drogon/pull/5), a review at 21:22:05 UTC identified
+a reserved-key serialization hole despite green checks. A corrective commit
+followed at 21:28:58. Its committed RED receipt contains the failing regression;
+CI on the corrected SHA then passed the Ubuntu native, macOS native and Windows
+compilation jobs. The [development log](AI-DEV-LOG.md) links each event.
 
-Those historical live-model reports must not be confused with permission to run
-inference during ordinary validation today. Current contributor instructions require
-shell fixtures and prohibit real model inference from inside the app.
+That is the distinction between the two sources of evidence: the builder attests
+to how the agents were operated; GitHub preserves the review, subsequent code,
+failure receipt and verification. Shared-account timestamps alone are not used to
+identify a model or prove the absence of private human input.
 
-Backpressure meant observing failures and missing artifacts rather than accepting an
-agent's completion message as sufficient evidence. The reported workflow sent QA
-findings back through the coordinator for correction and another check. Repository
-controls additionally require isolated background test instances, preservation of
-the developer's foreground focus, and cleanup of test-owned processes.
+## Verification strategy and backpressure
 
-Concrete linked examples:
+My later coordination rule was to launch end-to-end QA after every three or four
+merged PRs. QA selected affected surfaces from those changes and inspected the
+rendered UI. This is my account of the later cadence; earlier planning records
+used different batching and worker limits.
 
-| Report | Observation and correction | Reported verification |
-| --- | --- | --- |
-| [#523](https://github.com/clioo/drogon/pull/523) | E2E runs exposed drift handling, unintended runtime commits, missing CLI access, and task-editor persistence problems. The PR records corresponding fixes. | Three execution modes, requested output artifacts, run evidence, and unchanged repository commit count. |
-| [#527](https://github.com/clioo/drogon/pull/527) | Expanded UI testing found conflicting worker instructions, fragile completion keywords, and an unreachable live-session projection. Fixes added role-specific context and artifact-based verification. | Reported 18 acceptance checks plus regression suites; 53 of 55 inventoried Orchestrator controls exercised, not 96% coverage of the entire product. |
-| [#528](https://github.com/clioo/drogon/pull/528) | A bot's monitor dispatched work successfully, while its card incorrectly said the adapter was disconnected. The card and regression assertion were corrected. | Reported nine checks covering the bot's monitor, scheduled automation, resulting files, and UI. |
+Two test layers mattered:
 
-These are PR-authored reports of checks performed at those revisions, not a new run
-of the current branch and not proof that every current check passes.
+- **Repeatable acceptance:** Rust and desktop tests, renderer contracts, packaging
+  checks and shell/sealed provider fixtures. See [acceptance.md](acceptance.md).
+  These validate behavior without relying on a model's answer.
+- **Historical live-model QA:** separate sessions exercised real harness behavior.
+  [PR #523](https://github.com/clioo/drogon/pull/523) reports Pi with
+  `openai-codex/gpt-5.6-luna:low` across three orchestration modes.
+  [PR #528](https://github.com/clioo/drogon/pull/528) reports DGX-local inference
+  for bot monitoring and scheduled execution. Assertions about their outputs can
+  be deterministic; model generation itself is not.
 
-### Issue-to-PR-to-QA trails
+Today's contributor rules prohibit real model inference inside app validation and
+require shell fixtures. The historical live-model reports are evidence of past
+work, not permission to bypass those rules now.
 
-The public issue trail supplies a more useful audit than commit cadence alone. It
-contains coordinator assignment, a worker's implementation result, and a later QA
-verdict. For example:
+Backpressure meant rejecting missing artifacts, failed packaging and incomplete QA
+instead of accepting an agent's completion message. [PR #7](https://github.com/clioo/drogon/pull/7)
+records a real packaging failure after fixture checks;
+[PR #409](https://github.com/clioo/drogon/pull/409#issuecomment-5615172599) and
+[PR #417](https://github.com/clioo/drogon/pull/417#issuecomment-5616145127)
+turn adversarial lifecycle failures into regressions.
+[PR #527](https://github.com/clioo/drogon/pull/527) reports replacing fragile
+completion-keyword handling with artifact verification.
 
-- [Issue #186: QA reproduction](https://github.com/clioo/drogon/issues/186#issuecomment-5580354718)
-  records a Pi automation stuck at `needs_input` with a `Launched` row and raw TUI
-  output. [The follow-up](https://github.com/clioo/drogon/issues/186#issuecomment-5580587630)
-  identifies the positional-prompt/headless-approval root cause, links PR #227, and
-  reports a live DGX-Spark run with `HEADLESS_OK`, completed scheduler work, and zero
-  sessions at `needs_input`. [The later closure note](https://github.com/clioo/drogon/issues/186#issuecomment-5584609271)
-  records re-verification on the installed build and keeps a separate scheduler-policy
-  gap open in #188.
-- [Issue #312](https://github.com/clioo/drogon/issues/312#issuecomment-5587612596)
-  records a CI failure, its measured cause, and PR #325. Later comments record a
-  residual failure after the first mitigation
-  ([follow-up](https://github.com/clioo/drogon/issues/312#issuecomment-5587938606)),
-  a reopened issue when the failure returned
-  ([reopen](https://github.com/clioo/drogon/issues/312#issuecomment-5589713766)),
-  a shard-based mitigation ([#342](https://github.com/clioo/drogon/issues/312#issuecomment-5591122750)),
-  and closure after three consecutive green main runs
-  ([closure](https://github.com/clioo/drogon/issues/312#issuecomment-5592145226)).
-- [PR #409's adversarial follow-up](https://github.com/clioo/drogon/pull/409#issuecomment-5615172599)
-  maps five discovered lifecycle breaks to fixes and red-first regression tests.
-  [PR #417's next round](https://github.com/clioo/drogon/pull/417#issuecomment-5616145127)
-  closes two races and a forged-event path, and [the interlock resolution](https://github.com/clioo/drogon/pull/417#issuecomment-5617869726)
-  records the rebase and post-fix test results.
+Validation also had operational boundaries: isolated profiles, background windows,
+preserved developer focus and cleanup of test-owned processes. Passing assertions
+did not authorize disruption of the developer's working sessions.
 
-GitHub exposes these comments under the `clioo` account because that account was the
-authenticated publisher for the coordination workflow. They are therefore evidence
-of the chronological work trail, not independent author identities. One stronger
-attribution signal is [PR #342](https://github.com/clioo/drogon/pull/342): its body
-contains the Claude Code generation marker, links a Claude session, and its commits
-include GitHub's `claude` author alongside `clioo`. This is still not a cryptographic
-proof of which model wrote every line.
+The [CI workflow](../.github/workflows/foundation.yml) runs executable checks,
+including Rust tests, type checks, renderer contracts, packaging tests and desktop
+test shards. These produce deterministic pass/fail signals. Path ownership and
+review expectations in AGENTS.md are instructions; this submission does not claim
+that every such instruction was enforced by an access-control system. The builder
+also used Electron-testing skills for human-like UI exploration; the recorded
+rendered-validation interface is Playwright over CDP.
 
-The same trail begins in the first foundation wave. PR [#9](https://github.com/clioo/drogon/pull/9)
-records 18 coordination entry points and three supplemental review Tasks split across
-Sonnet, OpenCode/ZAI GLM-5.3-Flash, and a root reconciliation pass. PR
-[#10](https://github.com/clioo/drogon/pull/10) records five leader tasks, an 86-row
-audit, and a 126-task worker inventory. Early review PRs #2–#8 repeatedly record
-multi-provider review lanes, explicit RED findings, correction ownership, and fresh
-verification. During the R16 issue wave, the coordinator assigned issues to named
-lanes/models and enforced a nine-worker cap (for example [R16-C](https://github.com/clioo/drogon/issues/124#issuecomment-5578419535)
-and [R16-L](https://github.com/clioo/drogon/issues/156#issuecomment-5578798907)).
-These artifacts show that orchestration was present before the later Work Graph UI.
+To reproduce the workflow pattern, start from a scoped requirement and acceptance
+criteria, assign independent paths to separate worktrees, and keep contract changes
+ahead of dependent work. Run the gates listed in [SPEC.md](SPEC.md), return failing
+output to the responsible worker, require a regression and rerun the affected checks.
+Integrate through a reviewed PR, then validate the integrated desktop using isolated
+fixtures. This reconstructs the method; exact historical model responses are not
+required to reproduce the tests.
 
-## The human's decisions
+## Human judgment and scope
 
-The hardest decision was scope. After the first three or four days, I recognized
-that the original ambition would miss the deadline. I deferred some Hermes- and
-Codex-inspired functionality. In particular, the browser was not fully finished;
-I chose to leave further work for later rather than make it the submission's core.
+The hardest decision was reducing scope after the first three or four days.
+I deferred some Hermes- and Codex-inspired functionality to meet the deadline.
+The browser remained incomplete in my assessment; it was part of the original
+product plan, but not a mandatory hackathon feature, so I did not make it the core
+submission demonstration.
 
-Another important decision was adapting the CLI for bots. A bot needed to invoke
-the CLI, create worktrees, and delegate to coordinator sessions as I would when
-prompting manually. That changed the CLI from a convenience for an interactive
-user into an interface usable by delegated work. PR
-[#525](https://github.com/clioo/drogon/pull/525) documents teaching bots to delegate;
-[#528](https://github.com/clioo/drogon/pull/528) provides a concrete monitor-to-work
-integration report.
+The other major decision was making the CLI usable by bots. Bots needed to invoke
+commands, create worktrees and delegate to coordinator sessions as I would when
+prompting manually. [PR #525](https://github.com/clioo/drogon/pull/525) documents
+bot delegation; [PR #528](https://github.com/clioo/drogon/pull/528) reports a
+monitor-to-work integration run.
 
-My role was not absence. It was direction, scope, real-world feedback, and judgment
-about whether the result served a developer. Autonomous execution happened inside
-that human-directed process.
-
-## Evidence still needed before calling the submission complete
-
-The linked reports support a development sequence of **act → verify → observe a
-problem → fix → verify again**. They do not, on their own, establish that there was
-no new human instruction inside a particular sequence.
-
-For the autonomous-loop requirement, attach one redacted, chronological run or
-session excerpt to the development log: initial task, failed verification, observed
-problem, corrective action, successful re-verification, and the boundaries showing
-no intervening human prompt. Also attach a dated pre-implementation spec and one
-overlapping-worker record for the planning and parallelism claims. Do not infer
-these facts solely from commit timestamps or from the landing-page demonstration.
+My role was not absence. It was direction, tradeoffs, real-world feedback and
+judgment. Autonomous execution happened inside that human-directed process.
