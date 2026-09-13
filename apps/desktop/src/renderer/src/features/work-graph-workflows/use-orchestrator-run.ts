@@ -18,6 +18,24 @@ const unavailableRunScopes = new WeakMap<GraphBridge, Set<string>>();
 const RUN_STATUS_UNAVAILABLE = "Latest Work Graph status is unavailable.";
 const MAX_CACHED_WORKSPACES = 256;
 
+function cachedRunSnapshot(
+  bridge: GraphBridge | null,
+  workspaceId: string,
+): OrchestratorRun | null {
+  return bridge
+    ? (latestRunSnapshots.get(bridge)?.get(workspaceId) ?? null)
+    : null;
+}
+
+function cachedRunError(
+  bridge: GraphBridge | null,
+  workspaceId: string,
+): string | null {
+  return bridge && unavailableRunScopes.get(bridge)?.has(workspaceId)
+    ? RUN_STATUS_UNAVAILABLE
+    : null;
+}
+
 function publishRefresh(bridge: GraphBridge, workspaceId: string): void {
   for (const observer of runObservers.get(bridge)?.get(workspaceId) ?? []) {
     observer();
@@ -90,12 +108,28 @@ export function useOrchestratorRun(
   pollMs = 1000,
   inactivePollMs = pollMs,
 ) {
-  const [run, setRun] = useState<OrchestratorRun | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Render same-scope durable evidence immediately while a remount or workspace
+  // switch waits for its first poll; never reuse state from another scope.
+  const [storedRun, setStoredRun] = useState<OrchestratorRun | null>(() =>
+    cachedRunSnapshot(bridge, workspaceId),
+  );
+  const storedRunScope = useRef({ bridge, workspaceId });
+  const runScopeMatches =
+    storedRunScope.current.bridge === bridge &&
+    storedRunScope.current.workspaceId === workspaceId;
+  const run = runScopeMatches
+    ? storedRun
+    : cachedRunSnapshot(bridge, workspaceId);
+  const [storedError, setError] = useState<string | null>(() =>
+    cachedRunError(bridge, workspaceId),
+  );
+  const error = runScopeMatches
+    ? storedError
+    : cachedRunError(bridge, workspaceId);
   const [busy, setBusy] = useState(false);
   const [refreshEpoch, setRefreshEpoch] = useState(0);
   const scope = useRef(workspaceId);
-  const durableRun = useRef<OrchestratorRun | null>(null);
+  const durableRun = useRef<OrchestratorRun | null>(run);
   const pollVersions = useRef(new Map<string, number>());
   const mutatingScopes = useRef(new Map<string, number>());
   const mounted = useRef(false);
@@ -137,13 +171,11 @@ export function useOrchestratorRun(
     };
   }, [bridge, workspaceId]);
   useEffect(() => {
-    durableRun.current = null;
-    setRun(null);
-    setError(
-      bridge && unavailableRunScopes.get(bridge)?.has(workspaceId)
-        ? RUN_STATUS_UNAVAILABLE
-        : null,
-    );
+    const cached = cachedRunSnapshot(bridge, workspaceId);
+    durableRun.current = cached;
+    storedRunScope.current = { bridge, workspaceId };
+    setStoredRun(cached);
+    setError(cachedRunError(bridge, workspaceId));
     setBusy(false);
   }, [bridge, workspaceId]);
   useEffect(() => {
@@ -172,7 +204,8 @@ export function useOrchestratorRun(
               observed,
             );
             durableRun.current = next;
-            setRun(next);
+            storedRunScope.current = { bridge, workspaceId };
+            setStoredRun(next);
             setError(observed || !next ? null : RUN_STATUS_UNAVAILABLE);
             publishAvailability(bridge, workspaceId, !observed && !!next);
             const active =
@@ -239,7 +272,8 @@ export function useOrchestratorRun(
     publishRefresh(bridge as GraphBridge, workspaceId);
     if (!mounted.current || scope.current !== workspaceId) return;
     durableRun.current = next;
-    setRun(next);
+    storedRunScope.current = { bridge, workspaceId };
+    setStoredRun(next);
     setError(observed ? null : RUN_STATUS_UNAVAILABLE);
   };
   const start = useCallback(

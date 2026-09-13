@@ -52,23 +52,44 @@ it("observes a daemon run after remount and never stops it on unmount", async ()
 
 it("retains durable evidence across a full unmount and empty remount poll", async () => {
   let current: OrchestratorRun | null = run;
+  let holdRemountPoll = false;
+  let finishRemountPoll:
+    ((value: { ok: true; result: { run: null } }) => void) | undefined;
   const bridge = {
-    graphOrchestratorStatus: vi.fn(async () => ({
-      ok: true,
-      result: { run: current },
-    })),
+    graphOrchestratorStatus: vi.fn(() => {
+      if (holdRemountPoll) {
+        return new Promise((resolve) => {
+          finishRemountPoll = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true, result: { run: current } });
+    }),
   } as unknown as GraphBridge;
   const first = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
   await waitFor(() => expect(first.result.current.run?.id).toBe("run-1"));
   first.unmount();
   current = null;
+  holdRemountPoll = true;
 
   const restored = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
 
+  expect(restored.result.current.run?.id).toBe("run-1");
+  await act(async () => {
+    finishRemountPoll?.({ ok: true, result: { run: null } });
+  });
   await waitFor(() =>
     expect(restored.result.current.error).toContain("status is unavailable"),
   );
   expect(restored.result.current.run?.id).toBe("run-1");
+  restored.unmount();
+
+  const unavailableRestored = renderHook(() =>
+    useOrchestratorRun(bridge, "ws", 10),
+  );
+  expect(unavailableRestored.result.current.run?.id).toBe("run-1");
+  expect(unavailableRestored.result.current.error).toContain(
+    "status is unavailable",
+  );
 });
 
 it("bounds retained workspace snapshots and evicts the oldest", async () => {
@@ -315,6 +336,52 @@ it("keeps shared snapshots scoped while switching workspaces", async () => {
 
   await waitFor(() => expect(view.result.current.run?.id).toBe("run-2"));
   expect(view.result.current.run?.workspaceId).toBe("ws-2");
+});
+
+it("shows cached evidence immediately while switching workspaces", async () => {
+  const second = {
+    ...run,
+    id: "run-2",
+    workspaceId: "ws-2",
+    updatedAt: "2026-09-13T00:00:02Z",
+  };
+  let holdSecondPoll = false;
+  let finishSecondPoll:
+    ((value: { ok: true; result: { run: null } }) => void) | undefined;
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(({ workspaceId }) => {
+      if (workspaceId === "ws-2" && holdSecondPoll) {
+        return new Promise((resolve) => {
+          finishSecondPoll = resolve;
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        result: { run: workspaceId === "ws" ? run : second },
+      });
+    }),
+  } as unknown as GraphBridge;
+  const seed = renderHook(() => useOrchestratorRun(bridge, "ws-2", 10_000));
+  await waitFor(() => expect(seed.result.current.run?.id).toBe("run-2"));
+  seed.unmount();
+
+  const view = renderHook(
+    ({ workspaceId }) => useOrchestratorRun(bridge, workspaceId, 10_000),
+    { initialProps: { workspaceId: "ws" } },
+  );
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-1"));
+  holdSecondPoll = true;
+
+  view.rerender({ workspaceId: "ws-2" });
+
+  expect(view.result.current.run?.id).toBe("run-2");
+  await act(async () => {
+    finishSecondPoll?.({ ok: true, result: { run: null } });
+  });
+  await waitFor(() =>
+    expect(view.result.current.error).toContain("status is unavailable"),
+  );
+  expect(view.result.current.run?.id).toBe("run-2");
 });
 
 it("polls a new workspace while an old workspace mutation is pending", async () => {
