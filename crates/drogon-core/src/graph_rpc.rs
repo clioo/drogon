@@ -604,7 +604,14 @@ impl Engine {
             let conn = self.db.lock().unwrap();
             mentu_storage::insert_approval(&conn, &approval)?;
         }
-        let run = self.launch_approved_recipe(workspace_id, &compiled.recipe_id, &approval.id)?;
+        // A graph node's agent is expected to change the workspace; the
+        // runtime's drift attestation is informational for these runs.
+        let run = self.launch_approved_recipe(
+            workspace_id,
+            &compiled.recipe_id,
+            &approval.id,
+            crate::mentu::run_record::WorkspaceAttestation::Advisory,
+        )?;
         {
             let conn = self.db.lock().unwrap();
             storage::record_node_run(

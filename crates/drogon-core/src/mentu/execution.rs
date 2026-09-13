@@ -23,6 +23,7 @@ use sha2::Digest as _;
 
 use crate::error;
 
+use super::run_record::WorkspaceAttestation;
 use super::{run_record, storage};
 
 /// Wall-clock budget for one `mentu-recipes` invocation before this process
@@ -308,6 +309,8 @@ pub fn launch_run(
     retry_of: Option<String>,
     invocation: Invocation,
     snapshot: Option<StagedSnapshot>,
+    attestation: WorkspaceAttestation,
+    data_dir: &Path,
 ) -> Result<MentuRun, RpcError> {
     if matches!(
         invocation,
@@ -360,6 +363,10 @@ pub fn launch_run(
     let mut command = Command::new(&runtime_path);
     #[cfg(unix)]
     detach_process_group(&mut command);
+    // The runtime and the agent it launches see this daemon's CLI shims
+    // first on PATH, bound to this data dir and workspace, and no session
+    // identity (see `session_env::apply_to_workspace_process`).
+    crate::session_env::apply_to_workspace_process(&mut command, data_dir, &workspace_id);
     let before_run_ids = match &invocation {
         Invocation::Run { recipe_path } => {
             // A staged snapshot overrides the caller path: the runtime
@@ -486,6 +493,7 @@ pub fn launch_run(
             &stdout_buf,
             &stderr_buf,
             attest_resources,
+            attestation,
         );
         progress_done.store(true, Ordering::SeqCst);
     });
@@ -506,6 +514,7 @@ fn finish(
     stdout_buf: &Arc<Mutex<Vec<u8>>>,
     stderr_buf: &Arc<Mutex<Vec<u8>>>,
     attest_resources: Vec<(String, String)>,
+    attestation: WorkspaceAttestation,
 ) {
     let ended_at = crate::now_rfc3339();
     if matches!(outcome, WaitOutcome::Cancelled) || was_cancelled {
@@ -581,7 +590,7 @@ fn finish(
             let status = if keyword_warning.is_some() {
                 MentuRunStatus::Failed
             } else {
-                run_record::overall_status(&run_json, &steps)
+                run_record::overall_status_with(&run_json, &steps, attestation)
             };
             let ended = run_record::ended_at(&run_json).unwrap_or_else(|| ended_at.clone());
             // Post-run attestation: resources pinned at approval are
@@ -597,7 +606,7 @@ fn finish(
             let error_message = match (
                 keyword_warning
                     .clone()
-                    .or_else(|| run_record::unresolved_warning(&run_json))
+                    .or_else(|| run_record::unresolved_warning_with(&run_json, attestation))
                     .or_else(|| first_step_error(&steps, status)),
                 drift.is_empty(),
             ) {

@@ -17,6 +17,7 @@ use drogon_protocol::mentu::{
 use drogon_protocol::{Request, RpcError};
 use serde_json::Value;
 
+use crate::mentu::run_record::WorkspaceAttestation;
 use crate::mentu::{execution, recipe, run_record, runtime, runtime_install, storage};
 use crate::{Engine, error, workspace};
 
@@ -146,6 +147,7 @@ impl Engine {
             &parsed.workspace_id,
             &parsed.recipe_id,
             &parsed.approval_id,
+            WorkspaceAttestation::RuntimeDrift,
         )?;
         to_value(MentuRunResult { run })
     }
@@ -159,6 +161,7 @@ impl Engine {
         workspace_id: &str,
         recipe_id: &str,
         approval_id: &str,
+        attestation: WorkspaceAttestation,
     ) -> Result<MentuRun, RpcError> {
         let workspace_path = {
             let conn = self.db.lock().unwrap();
@@ -207,6 +210,8 @@ impl Engine {
                 recipe_path: &recipe_path,
             },
             Some(staged),
+            attestation,
+            self.data_dir(),
         )
     }
 
@@ -341,6 +346,18 @@ impl Engine {
                 mentu_run_id: &mentu_run_id,
             },
         };
+        // A prior run that came from the work graph keeps the graph's
+        // reading of runtime drift (advisory) on relaunch, whichever verb
+        // (mentu.retry/retry_step or graph.*) relaunches it.
+        let graph_nodes = {
+            let conn = self.db.lock().unwrap();
+            crate::graph::storage::nodes_for_run(&conn, &prior.workspace_id, &prior.id)?
+        };
+        let attestation = if graph_nodes.is_empty() {
+            WorkspaceAttestation::RuntimeDrift
+        } else {
+            WorkspaceAttestation::Advisory
+        };
         let run = execution::launch_run(
             self.db_handle(),
             runtime_path,
@@ -353,23 +370,21 @@ impl Engine {
             // A retry re-enters runtime-side state; approved bytes ride
             // the original run's snapshot, not a new staging.
             None,
+            attestation,
+            self.data_dir(),
         )?;
         // If the prior run came from the work graph, the node→run mapping
         // follows the relaunch so the graph's observed state stays truthful
         // no matter which verb (mentu.retry/retry_step or graph.*) did it.
-        {
+        if !graph_nodes.is_empty() {
             let conn = self.db.lock().unwrap();
-            let nodes =
-                crate::graph::storage::nodes_for_run(&conn, &prior.workspace_id, &prior.id)?;
-            if !nodes.is_empty() {
-                crate::graph::storage::record_node_run(
-                    &conn,
-                    &prior.workspace_id,
-                    &run.id,
-                    &crate::now_rfc3339(),
-                    &nodes,
-                )?;
-            }
+            crate::graph::storage::record_node_run(
+                &conn,
+                &prior.workspace_id,
+                &run.id,
+                &crate::now_rfc3339(),
+                &graph_nodes,
+            )?;
         }
         Ok(run)
     }

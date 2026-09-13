@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
+  within,
   fireEvent,
   render,
   screen,
@@ -171,6 +172,82 @@ describe("WorkGraphPane durable orchestrator", () => {
         screen.getByTestId("orchestrator-save-status").textContent,
       ).toContain("Saved automatically"),
     );
+  });
+  it("keeps a runtime chosen before the task in the draft instead of writing an empty main node", async () => {
+    // Picking the main agent's model first is a natural order; it must not
+    // send a main node with an empty prompt (which the daemon refuses and
+    // which then blocks Run behind "Resolve the policy save error").
+    const document = graphWithAdversarialPolicy();
+    const { bridge } = mutableOrchestratorGraphBridge(document);
+    const write = vi.fn(async (input: GraphWritePolicyParams) => ({
+      ok: true as const,
+      result: {
+        graph: {
+          ...document,
+          intent: {
+            nodes: input.main ? [input.main] : [],
+            policy: input.policy,
+          },
+        },
+      },
+    }));
+    bridge.graphWritePolicy = write;
+    const fileBridge = {
+      fileRead: async () => ({
+        ok: false,
+        error: { code: "not_found", message: "missing", retryable: false },
+      }),
+    } as unknown as FileBridge;
+    render(
+      <WorkGraphPane
+        fileBridge={fileBridge}
+        graphBridge={bridge}
+        hostId="host"
+        workspaceId="ws"
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("textbox", {
+            name: "Main task",
+          }) as HTMLTextAreaElement
+        ).disabled,
+      ).toBe(false),
+    );
+    const modelRow = screen.getByTestId("main-task-model-value")
+      .parentElement as HTMLElement;
+    fireEvent.click(
+      within(modelRow).getByRole("button", { name: "Browse models" }),
+    );
+    const search = await screen.findByRole("combobox", {
+      name: "Search models",
+    });
+    fireEvent.change(search, {
+      target: { value: "openai-codex/gpt-5.6-luna:low" },
+    });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByTestId("main-task-model-value").textContent).toBe(
+        "openai-codex/gpt-5.6-luna:low",
+      ),
+    );
+    expect(write).not.toHaveBeenCalled();
+    expect(
+      screen.getByTestId("orchestrator-save-status").textContent,
+    ).not.toContain("Save failed");
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Main task" }), {
+      target: { value: "Create direct.txt" },
+    });
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    expect(write.mock.calls[0][0]).toMatchObject({
+      main: {
+        id: "orchestrator-main",
+        model: "openai-codex/gpt-5.6-luna:low",
+        prompt: "Create direct.txt",
+      },
+    });
   });
   it("retries the unsaved main task with the next policy edit before reporting Saved", async () => {
     const document = graphWithAdversarialPolicy();
