@@ -936,6 +936,114 @@ fn open_session_materializes_the_identity_files_the_harness_reads() {
     );
 }
 
+/// Execute the skill's actual extraction in a real Bot PTY, then use ONLY
+/// those discovered values against the real self-management service. The
+/// home handle and record workspace deliberately differ from the needed IDs.
+#[test]
+fn bot_discovers_its_id_from_refreshed_context_and_lists_its_own_resources() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    let guide = include_str!("../../../skill-guides/drogon-cli.md");
+    let recipe = guide
+        .split_once("```sh\nBOT_ID=")
+        .expect("the shipped guide contains the discovery recipe")
+        .1
+        .split_once("\n```")
+        .unwrap()
+        .0;
+    let recipe = format!("BOT_ID={recipe}");
+    let extraction = recipe.split_once("\ndrogon-cli bot list").unwrap().0;
+    // No real harness or CLI substitute: the fixture executes just the
+    // documented shell extraction. The read-only RPC below tests its values.
+    std::fs::write(
+        bin.path().join("pi"),
+        format!(
+            "#!/bin/sh\nset -eu\n{extraction}\nprintf 'DISCOVERED:%s:%s\\n' \"$BOT_ID\" \"$DROGON_WORKSPACE_ID\"\ntrap 'exit 0' TERM INT\nwhile IFS= read -r line; do :; done\n"
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(
+        bin.path().join("pi"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    prepend_fixture_bin(bin.path());
+
+    // Simulate a home left by a pre-fix build: opening must refresh it,
+    // not preserve a context file that only exposes the display identity.
+    ok(
+        &fx.engine,
+        "bot.self_provision",
+        "req-provision-discovery",
+        json!({"botId": "bot-1", "actorBotId": "bot-1",
+            "workspaceId": fx.record_workspace_id, "hostId": fx.host}),
+    );
+    std::fs::write(fx.home_dir().join("AGENTS.md"), "# Arya Stark\n").unwrap();
+    let receipt = ok(
+        &fx.engine,
+        "bot.run",
+        "req-open-discovery",
+        fx.open_session_params(),
+    );
+    let session_id = receipt["session"]["sessionId"].as_str().unwrap();
+    let incarnation = receipt["session"]["incarnation"].as_str().unwrap();
+    struct Cleanup<'a>(&'a Engine, &'a str, &'a str);
+    impl Drop for Cleanup<'_> {
+        fn drop(&mut self) {
+            let response = self.0.dispatch(req(
+                "session.stop",
+                "req-stop-discovery",
+                json!({"sessionId": self.1, "incarnation": self.2}),
+            ));
+            let exited = response.ok
+                && response
+                    .result
+                    .as_ref()
+                    .is_some_and(|r| r["verdict"] == "exited");
+            if !std::thread::panicking() {
+                assert!(exited, "test-owned Bot session did not exit: {response:?}");
+            } else if !exited {
+                eprintln!("test-owned Bot session cleanup unverifiable: {response:?}");
+            }
+        }
+    }
+    let _cleanup = Cleanup(&fx.engine, session_id, incarnation);
+    let (output, verdict) = read_until(
+        &fx.engine,
+        session_id,
+        incarnation,
+        |text| {
+            text.split_inclusive('\n')
+                .any(|line| line.starts_with("DISCOVERED:") && line.ends_with('\n'))
+        },
+        Duration::from_secs(20),
+    );
+    assert_eq!(verdict, "live", "{output}");
+    let discovered = output
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("DISCOVERED:"))
+        .expect("the fixture read its own identity");
+    let (bot_id, workspace_id) = discovered.split_once(':').unwrap();
+    assert_eq!(bot_id, "bot-1");
+    assert_ne!(bot_id, "arya-stark");
+    assert_ne!(workspace_id, fx.record_workspace_id);
+    assert_eq!(receipt["workspaceId"], workspace_id);
+    let listed = ok(
+        &fx.engine,
+        "bot.self_list",
+        "req-list-discovered",
+        json!({"botId": bot_id, "actorBotId": bot_id,
+            "workspaceId": workspace_id, "hostId": fx.host}),
+    );
+    assert_eq!(listed["botId"], bot_id);
+    assert_eq!(listed["home"]["homeWorkspaceId"], workspace_id);
+    assert!(listed["automations"].is_array());
+    assert!(listed["monitors"].is_array());
+}
+
 /// Gap 1's second half: an edit to the Bot's display name, instructions or
 /// memories must be reflected in the NEXT session's context files, with the
 /// stale identity gone -- never two contradictory files on disk.

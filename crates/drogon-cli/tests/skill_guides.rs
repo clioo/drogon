@@ -181,6 +181,12 @@ fn guides_cover_the_contracted_surface() {
         "agent-context",
         "harness start",
         "session.agent-state.v1",
+        "Find your own Bot ID",
+        "- Bot ID: <ID>",
+        "DROGON_WORKSPACE_ID",
+        ".result.botId",
+        ".result.home.homeWorkspaceId",
+        "update Drogon and reopen the Bot session",
     ] {
         assert!(
             cli.markdown.contains(needle),
@@ -199,6 +205,52 @@ fn guides_cover_the_contracted_surface() {
             orch.markdown.contains(needle),
             "orchestration guide is missing {needle:?}"
         );
+    }
+}
+
+#[test]
+fn bot_identity_recipe_stops_on_missing_context_without_calling_the_cli() {
+    let guides = canonical_guides();
+    let guide = guides.iter().find(|g| g.name == "drogon-cli").unwrap();
+    let recipe = format!(
+        "BOT_ID={}",
+        guide
+            .markdown
+            .split_once("```sh\nBOT_ID=")
+            .unwrap()
+            .1
+            .split_once("\n```")
+            .unwrap()
+            .0
+    );
+    let directory = tempfile::tempdir().unwrap();
+    for (context, workspace, expected_error) in [
+        (
+            "# Arya Stark\n- Handle: @bot-175f377c\n",
+            Some("ws-1"),
+            "Missing Bot ID",
+        ),
+        (
+            "# Arya Stark\n- Bot ID: bot-1\n",
+            None,
+            "Run this inside the Drogon Bot session",
+        ),
+    ] {
+        std::fs::write(directory.path().join("AGENTS.md"), context).unwrap();
+        let mut command = std::process::Command::new("/bin/sh");
+        command
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(directory.path())
+            .args(["-c", &recipe]);
+        if let Some(workspace) = workspace {
+            command.env("DROGON_WORKSPACE_ID", workspace);
+        }
+        let output = command.output().unwrap();
+        assert!(!output.status.success());
+        assert!(stdout(&output).is_empty());
+        assert!(stderr(&output).contains(expected_error), "{output:?}");
+        assert!(!stderr(&output).contains("drogon-cli: not found"));
     }
 }
 

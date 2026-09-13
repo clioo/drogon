@@ -82,6 +82,7 @@ pub fn render_agents_md(bot: &Bot) -> String {
          in this workspace.\n\n"
     ));
     out.push_str("## Identity\n\n");
+    out.push_str(&format!("- Bot ID: {}\n", document_identity_text(&bot.id)));
     out.push_str(&format!("- Name: {name}\n"));
     if let Some(handle) = &bot.display_identity.handle {
         out.push_str(&format!("- Handle: @{}\n", document_identity_text(handle)));
@@ -89,7 +90,14 @@ pub fn render_agents_md(bot: &Bot) -> String {
     if let Some(title) = &bot.display_identity.title {
         out.push_str(&format!("- Role: {}\n", document_identity_text(title)));
     }
-    out.push('\n');
+    out.push_str(
+        "\nYour exact `--bot` value is the Bot ID above, not your name, handle, \
+         home folder basename, or `DROGON_SESSION_ID`. For `--workspace`, use \
+         `DROGON_WORKSPACE_ID` from this Bot session's environment. Read the \
+         \"Find your own Bot ID\" section of `drogon-cli skills get --topic drogon-cli` \
+         for the extraction and validation steps. Do not ask the owner to copy \
+         these IDs from the desktop.\n\n",
+    );
 
     out.push_str(ROLE_SECTION);
     out.push_str(&render_delegation_recipe(bot));
@@ -374,12 +382,25 @@ mod tests {
         let rendered = render_agents_md(&subject);
         assert!(rendered.starts_with("# Arya Stark\n"));
         assert!(rendered.contains("- Name: Arya Stark"));
+        assert!(rendered.contains("- Bot ID: bot-1\n"));
         assert!(rendered.contains("- Handle: @arya-stark"));
         assert!(rendered.contains("- Role: Scout"));
         assert!(rendered.contains("## Standing instructions\n\nReview incoming PRs."));
         assert!(rendered.contains("## Memories\n\n- Prefers terse replies."));
         // Blank memory entries never become bullets.
         assert!(!rendered.contains("- \n"));
+    }
+
+    #[test]
+    fn bot_id_is_stable_across_display_identity_changes() {
+        let mut subject = bot("Arya Stark", Some("bot-175f377c"), None);
+        subject.id = "bot_0123456789abcdef".to_string();
+        for name in ["Arya Stark", "Arya of Winterfell"] {
+            subject.display_identity.display_name = name.to_string();
+            let rendered = render_agents_md(&subject);
+            assert!(rendered.contains("- Bot ID: bot_0123456789abcdef\n"));
+            assert!(!rendered.contains("- Bot ID: bot-175f377c"));
+        }
     }
 
     #[test]
