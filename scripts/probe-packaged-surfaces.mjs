@@ -200,12 +200,6 @@ export function folderViewSettled({ headings, tabCount, headerNames, workspaceNa
   return tabCount > 0 && headerNames.includes(workspaceName);
 }
 
-const MENTU_FIXTURE_RECIPE = {
-  name: "acceptance-hello",
-  description: "packaged acceptance probe",
-  steps: [{ label: "say-hello", backend: "shell", prompt: "echo hi", timeout: 30 }],
-};
-
 /** Opens the right sidebar on Explorer from any state (chord, not click). */
 async function ensureRightSidebar(page) {
   const mod = process.platform === "darwin" ? "Meta" : "Control";
@@ -248,64 +242,6 @@ async function probeExplorerSurface({ page, workspace, output }) {
     animations: "disabled",
   });
   return ["right-sidebar-explorer-opens-fixture-file-into-editor"];
-}
-
-/** Mentu (right sidebar): the fixture recipe lists, its steps render, and a
- *  recipe written while the panel is up appears without a reload. */
-async function probeMentuSurface({ page, workspace, output }) {
-  const recipesDir = path.join(workspace, ".mentu", "recipes");
-  await mkdir(recipesDir, { recursive: true });
-  await writeFile(
-    path.join(recipesDir, "acceptance-hello.json"),
-    JSON.stringify(MENTU_FIXTURE_RECIPE, null, 2) + "\n",
-  );
-  await page
-    .locator('.right-sidebar-header-drag button[aria-label="Work Graph"]')
-    .click();
-  const panel = page.locator('[data-testid="mentu-panel"]');
-  await panel.waitFor();
-  // R11-D ported the fork's Radix Select: the trigger is a combobox that stays
-  // disabled until discovery finishes and the items live in a portal listbox,
-  // so there are no <option> elements to read.
-  const recipeSelect = panel.getByRole("combobox", { name: "Recipe", exact: true });
-  await recipeSelect.waitFor();
-  await recipeSelect.click({ timeout: 15000 });
-  await page.getByRole("option", { name: "acceptance-hello", exact: true }).click();
-  await panel.getByText("say-hello", { exact: true }).waitFor();
-  await page.screenshot({
-    path: path.join(output, "mentu.png"),
-    animations: "disabled",
-  });
-
-  // The catalog is a property of the DIRECTORY, not of when this panel
-  // mounted: the right-sidebar Mentu panel is keep-alive, so earlier
-  // journeys in this run already mounted it with the recipes that existed
-  // then. A second plain root-level recipe must therefore become selectable
-  // with NO reload — otherwise a user cannot see a recipe a Bot just wrote
-  // (the report this check exists for).
-  await writeFile(
-    path.join(recipesDir, "acceptance-live.json"),
-    JSON.stringify(
-      {
-        name: "acceptance-live",
-        description: "written while the panel is up",
-        steps: [
-          { label: "live-step", backend: "shell", prompt: "echo live", timeout: 30 },
-        ],
-      },
-      null,
-      2,
-    ) + "\n",
-  );
-  await recipeSelect.click({ timeout: 15000 });
-  await page.getByRole("option", { name: "acceptance-live", exact: true }).click();
-  // The step name proves the SECOND recipe is the one loaded, not a stale
-  // selection still showing the first recipe's steps.
-  await panel.getByText("live-step", { exact: true }).waitFor();
-  return [
-    "right-sidebar-mentu-lists-fixture-recipe-with-steps",
-    "right-sidebar-mentu-discovers-a-recipe-written-while-mounted",
-  ];
 }
 
 /** Source Control (right sidebar): the unstaged edit stages into Staged. */
@@ -1169,8 +1105,17 @@ export async function probePackagedSurfaces({
   // Right sidebar: Explorer opens the fixture tree file into the editor.
   checks.push(...(await probeExplorerSurface({ page, workspace, output })));
 
-  // Right sidebar: Mentu lists the fixture recipe with its steps.
-  checks.push(...(await probeMentuSurface({ page, workspace, output })));
+  // Right sidebar: Mentu was retired as a right-sidebar surface by
+  // 854c330b ("make orchestrator the only graph interface"). `<MentuPanel>`
+  // (the recipe select/steps UI this used to drive through
+  // `.right-sidebar-header-drag button[aria-label="Work Graph"]` ->
+  // `[data-testid="mentu-panel"]`) is mounted nowhere outside its own test
+  // files any more (grep confirms it) — the "Work Graph" activity tab now
+  // renders `WorkGraphPanel`, a single button that opens the Orchestrator
+  // tab. Owner-confirmed intentional: a recipe is a compilation target the
+  // graph emits, never something hand-run from this panel. Dropped rather
+  // than kept as a dead locator; probe-rendered-mentu-tab.mjs's `mentu
+  // status`/`mentu open` checks still cover the CLI-facing half.
 
   // Changes renders the unstaged edit of the fixture repo. (R6-B hosts it
   // in the right activity bar as "Source Control"; the bare "Changes" name
