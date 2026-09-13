@@ -154,6 +154,17 @@ contains the Claude Code generation marker, links a Claude session, and its comm
 include GitHub's `claude` author alongside `clioo`. This is still not a cryptographic
 proof of which model wrote every line.
 
+The same trail begins in the first foundation wave. PR [#9](https://github.com/clioo/drogon/pull/9)
+records 18 coordination entry points and three supplemental review Tasks split across
+Sonnet, OpenCode/ZAI GLM-5.3-Flash, and a root reconciliation pass. PR
+[#10](https://github.com/clioo/drogon/pull/10) records five leader tasks, an 86-row
+audit, and a 126-task worker inventory. Early review PRs #2–#8 repeatedly record
+multi-provider review lanes, explicit RED findings, correction ownership, and fresh
+verification. During the R16 issue wave, the coordinator assigned issues to named
+lanes/models and enforced a nine-worker cap (for example [R16-C](https://github.com/clioo/drogon/issues/124#issuecomment-5578419535)
+and [R16-L](https://github.com/clioo/drogon/issues/156#issuecomment-5578798907)).
+These artifacts show that orchestration was present before the later Work Graph UI.
+
 ## The human's decisions
 
 The hardest decision was scope. After the first three or four days, I recognized

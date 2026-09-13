@@ -32,6 +32,64 @@ the issue comments below were being written. This volume and overlap corroborate
 the builder's account that the work was distributed; they do not, without private
 dispatch logs, prove the exact worker/model assignment for every PR.
 
+The first 200 PR numbers show the same pattern at the beginning of the build, not
+only in its final week. The public closed-PR history contains 156 merged PRs in that
+range (all 156 were merged); 71 of them landed on September 8. Their public
+created-to-merged intervals overlap in at least six lanes. In the matching early
+issue trail, 45 coordinator assignment/update comments for issues numbered 1–200
+landed during the September 8 QA wave, including a stated nine-worker cap and named
+R16 lanes. These counts describe repository activity; they are not a claim that a
+particular model authored every PR.
+
+## 2026-09-06/08 — the first 200 PRs: foundation, review lanes, and handoffs
+
+The early PRs contain direct orchestration evidence before the Work Graph existed as
+a product surface:
+
+- PR [#9](https://github.com/clioo/drogon/pull/9) describes 18 typed coordination
+  entry points, durable runs/tasks/receipts, bounded mail and groups, question/reply
+  recovery, and a worker-lifecycle review. Its report names three supplemental
+  read-only Tasks split by dimension: Sonnet security/mail, OpenCode with ZAI
+  GLM-5.3-Flash for CLI/integration, and a root reconciliation pass.
+- PR [#10](https://github.com/clioo/drogon/pull/10) closes a five-vertical checkpoint
+  stage with an 86-row audit disposition and a sanitized 126-task worker inventory.
+  It records five leader tasks, explicit capability-loss recovery, a coordinator
+  handoff, and packaged acceptance. This is a planning and delegation artifact, not
+  merely a feature PR.
+- PR [#2](https://github.com/clioo/drogon/pull/2) records three independent review
+  tasks — Sonnet correctness, Kimi security, and Muse tests — all settled against a
+  clean head, with carry-forward gates instead of a blanket approval. PRs
+  [#3](https://github.com/clioo/drogon/pull/3), [#4](https://github.com/clioo/drogon/pull/4),
+  [#5](https://github.com/clioo/drogon/pull/5), and [#6](https://github.com/clioo/drogon/pull/6)
+  repeat that multi-lane pattern with different findings and named correction work.
+  Their follow-up comments show genuine RED → correction → re-run transitions, not
+  only green summaries: [#3 correction](https://github.com/clioo/drogon/pull/3#issuecomment-5561902884),
+  [#5 correction](https://github.com/clioo/drogon/pull/5#issuecomment-5562316669),
+  and [#7 packaging failure](https://github.com/clioo/drogon/pull/7#issuecomment-5562324531).
+- PR [#7](https://github.com/clioo/drogon/pull/7) is a useful harness/backpressure
+  example: fixture-only checks passed, but actual packaging exposed a signing failure;
+  the candidate was rejected, rebuilt, and sealed again. PR [#8](https://github.com/clioo/drogon/pull/8)
+  then records three independent read-only reviews, a Linux listener race, and a
+  corrected readiness predicate validated against the real packaged app.
+- PR [#16](https://github.com/clioo/drogon/pull/16) establishes the coordinator's
+  rewrite MVP plan and current repository rules. PR [#37](https://github.com/clioo/drogon/pull/37)
+  adds source-anchored fidelity and process-hygiene rules. The recurring status PRs
+  (#20, #23, #26, #28, #31, #32, #34, #39, and #45) record which R1–R6 lanes were
+  merged or still in flight, making the coordination state visible in Git.
+- Issue comments from the R16 wave show the coordinator distributing work by fit:
+  Muse for copy/token or visual parity, Sonnet for editor behavior, Kimi for shell
+  and settings lanes, and a nine-worker cap before new work could launch. Examples:
+  [copy/token lane](https://github.com/clioo/drogon/issues/124#issuecomment-5578419535),
+  [editor lane](https://github.com/clioo/drogon/issues/133#issuecomment-5578420623),
+  [nine-worker cap](https://github.com/clioo/drogon/issues/156#issuecomment-5578798907),
+  and [follow-up after a completed worker](https://github.com/clioo/drogon/issues/185#issuecomment-5579686793).
+- The early QA comments are not “all passed” summaries. Round 2 recorded partial
+  verification and explicit unverifiable boundaries for live Pi hook states
+  ([#118](https://github.com/clioo/drogon/issues/118#issuecomment-5578648636));
+  Round 3 re-ran the oracle and kept residuals open
+  ([#136](https://github.com/clioo/drogon/issues/136#issuecomment-5578974947)).
+  That honesty is part of the recovery loop.
+
 ## 2026-09-08 — headless bot and automation runs
 
 1. **Act — assign the failure.** The coordinator assigned the headless-launch slice
