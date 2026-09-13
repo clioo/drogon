@@ -15,29 +15,49 @@ SHELL := /bin/bash
 # Node 24 lives outside PATH on the maintainer machine; prefer it when present
 # and otherwise trust whatever `node` the caller has (the workspace needs >=24).
 NODE_RUNTIME := $(HOME)/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin
-ifneq ($(wildcard $(NODE_RUNTIME)/node),)
-export PATH := $(NODE_RUNTIME):$(PATH)
-endif
+# Keep the package manager project-local as well. Some Node distributions do
+# not ship Corepack, and `packageManager` alone does not put pnpm on PATH.
+PNPM_TOOLCHAIN_DIR ?= $(CURDIR)/.mentu/runtime/toolchain
+PNPM_BIN := $(PNPM_TOOLCHAIN_DIR)/node_modules/.bin
+# A missing directory in PATH is harmless, and keeping this unconditional
+# also works with the BSD make shipped by macOS (which does not implement
+# GNU make's `wildcard` conditional function).
+export PATH := $(PNPM_BIN):$(NODE_RUNTIME):$(PATH)
 
 INSTALLER := scripts/install-drogon.mjs
 FLAGS ?=
 BUNDLE ?=
 
-.PHONY: help install install-main install-test
+.PHONY: help install install-main install-test pnpm-toolchain
 
 help:
 	@awk '/^#/ { sub(/^# ?/, ""); print; next } { exit }' Makefile
 
 # Packaging imports the workspace's dev dependencies; a fresh worktree would
 # otherwise fail deep inside the packager instead of here.
-node_modules:
-	pnpm install --frozen-lockfile
+# Resolve the exact package manager declared by package.json before any
+# packaging command runs. This is intentionally local and ignored by git.
+pnpm-toolchain:
+	@PATH="$(PATH)"; export PATH; \
+	manager="$$(node -p 'require("./package.json").packageManager')"; \
+	printf '%s' "$$manager" | grep -Eq '^pnpm@[0-9]+\.[0-9]+\.[0-9]+$$' || { \
+		echo "package.json must declare a pinned pnpm version" >&2; exit 1; }; \
+	expected="$${manager#pnpm@}"; \
+	if [ ! -x "$(PNPM_BIN)/pnpm" ] || [ "$$("$(PNPM_BIN)/pnpm" --version 2>/dev/null || true)" != "$$expected" ]; then \
+		echo "Installing $$manager in $(PNPM_TOOLCHAIN_DIR)" >&2; \
+		npm install --prefix "$(PNPM_TOOLCHAIN_DIR)" --no-audit --no-fund --ignore-scripts "$$manager"; \
+	fi; \
+	resolved="$$("$(PNPM_BIN)/pnpm" --version)"; \
+	[ "$$resolved" = "$$expected" ] || { echo "packageManager pins $$manager but resolved pnpm is $$resolved" >&2; exit 1; }
 
-install: $(if $(BUNDLE),,| node_modules)
-	@node $(INSTALLER) $(if $(BUNDLE),--bundle "$(BUNDLE)") $(FLAGS)
+node_modules: pnpm-toolchain
+	@PATH="$(PATH)"; export PATH; "$(PNPM_BIN)/pnpm" install --frozen-lockfile
+
+install: $(if $(BUNDLE),,pnpm-toolchain | node_modules)
+	@PATH="$(PATH)"; export PATH; node $(INSTALLER) $(if $(BUNDLE),--bundle "$(BUNDLE)") $(FLAGS)
 
 install-main:
-	@node $(INSTALLER) --from-main $(FLAGS)
+	@PATH="$(PATH)"; export PATH; node $(INSTALLER) --from-main $(FLAGS)
 
 install-test:
-	@node --test scripts/install-drogon.test.mjs
+	@PATH="$(PATH)"; export PATH; node --test scripts/install-drogon.test.mjs
