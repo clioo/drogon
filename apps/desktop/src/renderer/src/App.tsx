@@ -1047,9 +1047,7 @@ export function App() {
   // (an old preload has no graph namespace); WorkGraphPane then renders the
   // honest "unavailable in this build" notice instead of a broken canvas.
   const graphGateRef = useRef(false);
-  useEffect(() => {
-    graphGateRef.current = isWorkGraphAuthoringAvailable(liveCapabilities);
-  }, [liveCapabilities]);
+  graphGateRef.current = isWorkGraphAuthoringAvailable(liveCapabilities);
   const graphGatedBridge = useMemo(() => {
     const source = windowGraphBridge();
     return source ? createGatedGraphBridge(source, () => graphGateRef.current) : null;

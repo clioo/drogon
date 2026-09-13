@@ -26,11 +26,13 @@ use crate::error;
 use super::run_record::WorkspaceAttestation;
 use super::{run_record, storage};
 
-/// Watchdog for recipes that declare no step budgets. A recipe with explicit
-/// `timeout` values gets their sum plus cleanup grace instead: the outer daemon
-/// must never kill a valid 60-minute graph step at the old 30-minute default.
+/// Watchdog for recipes that declare no step budgets. A fully explicit recipe
+/// gets the sum of its runtime-owned attempt, retry, verification, and hook
+/// limits plus cleanup grace, so the daemon never preempts valid work.
 const DEFAULT_RUN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const DECLARED_TIMEOUT_GRACE: Duration = Duration::from_secs(60);
+const VERIFY_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
+const HOOK_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 /// A malformed or hostile recipe cannot turn the daemon's safety watchdog off.
 const MAX_RUN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -217,21 +219,40 @@ enum WaitOutcome {
     Cancelled,
 }
 
-fn step_run_budget(step: &super::recipe::RecipeStepBudget) -> Option<Duration> {
-    let timeout_seconds = step.timeout_seconds.filter(|seconds| *seconds > 0)?;
+fn step_run_budget(
+    step: &super::recipe::RecipeStepBudget,
+    recipe: &super::recipe::RecipeBudget,
+) -> (Duration, bool) {
+    let declared_timeout = step.timeout_seconds.filter(|seconds| *seconds > 0);
     let attempts = step.max_retries.saturating_add(1);
-    let timeout_ms = timeout_seconds
+    let timeout_ms = declared_timeout
+        .unwrap_or(0)
         .saturating_mul(1_000)
         .saturating_mul(attempts);
     let backoff_ms = step.retry_backoff_ms.saturating_mul(step.max_retries);
-    Some(Duration::from_millis(timeout_ms.saturating_add(backoff_ms)))
+    let verification =
+        VERIFY_COMMAND_TIMEOUT.saturating_mul(step.verify_commands.try_into().unwrap_or(u32::MAX));
+    let terminal_hooks = recipe.after_step_hooks.max(recipe.on_error_hooks);
+    let hooks = HOOK_COMMAND_TIMEOUT.saturating_mul(
+        recipe
+            .before_step_hooks
+            .saturating_add(terminal_hooks)
+            .try_into()
+            .unwrap_or(u32::MAX),
+    );
+    (
+        Duration::from_millis(timeout_ms.saturating_add(backoff_ms))
+            .saturating_add(verification)
+            .saturating_add(hooks),
+        declared_timeout.is_some(),
+    )
 }
 
-fn parsed_recipe_budgets(recipe_bytes: &[u8]) -> Option<Vec<super::recipe::RecipeStepBudget>> {
+fn parsed_recipe_budget(recipe_bytes: &[u8]) -> Option<super::recipe::RecipeBudget> {
     std::str::from_utf8(recipe_bytes)
         .ok()
-        .and_then(|source| super::recipe::parse_recipe_step_budgets(source).ok())
-        .filter(|steps| !steps.is_empty())
+        .and_then(|source| super::recipe::parse_recipe_budget(source).ok())
+        .filter(|recipe| !recipe.steps.is_empty())
 }
 
 fn bounded_declared_timeout(declared: Duration, every_step_declared: bool) -> Duration {
@@ -249,26 +270,24 @@ fn bounded_declared_timeout(declared: Duration, every_step_declared: bool) -> Du
 }
 
 fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
-    let Some(steps) = parsed_recipe_budgets(recipe_bytes) else {
+    let Some(recipe) = parsed_recipe_budget(recipe_bytes) else {
         return DEFAULT_RUN_TIMEOUT;
     };
-    let mut declared = Duration::ZERO;
+    let run_hooks = HOOK_COMMAND_TIMEOUT.saturating_mul(
+        recipe
+            .before_run_hooks
+            .saturating_add(recipe.after_run_hooks)
+            .try_into()
+            .unwrap_or(u32::MAX),
+    );
+    let mut declared = run_hooks;
     let mut every_step_declared = true;
-    for step in &steps {
-        let step_budget = step_run_budget(step);
-        every_step_declared &= step_budget.is_some();
-        declared = declared.saturating_add(step_budget.unwrap_or_default());
+    for step in &recipe.steps {
+        let (step_budget, is_declared) = step_run_budget(step, &recipe);
+        every_step_declared &= is_declared;
+        declared = declared.saturating_add(step_budget);
     }
     bounded_declared_timeout(declared, every_step_declared)
-}
-
-fn recipe_step_timeout(recipe_bytes: &[u8], label: &str) -> Duration {
-    let Some(step) = parsed_recipe_budgets(recipe_bytes)
-        .and_then(|steps| steps.into_iter().find(|step| step.label == label))
-    else {
-        return DEFAULT_RUN_TIMEOUT;
-    };
-    bounded_declared_timeout(step_run_budget(&step).unwrap_or_default(), true)
 }
 
 fn read_snapshot_file(path: &Path) -> Option<Vec<u8>> {
@@ -307,16 +326,34 @@ fn read_snapshot_file(path: &Path) -> Option<Vec<u8>> {
     (bytes.len() as u64 <= SNAPSHOT_MAX_RECIPE_BYTES).then_some(bytes)
 }
 
+fn is_plain_snapshot_directory(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.is_dir() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return false;
+        }
+    }
+    true
+}
+
 fn read_original_snapshot_recipe(workspace_root: &Path, run_id: &str) -> Option<Vec<u8>> {
     if !valid_run_id(run_id) {
         return None;
     }
     let root = snapshot_root(workspace_root);
-    if !fs::symlink_metadata(&root).ok()?.is_dir() {
+    if !is_plain_snapshot_directory(&root) {
         return None;
     }
     let dir = root.join(run_id);
-    if !fs::symlink_metadata(&dir).ok()?.is_dir() {
+    if !is_plain_snapshot_directory(&dir) {
         return None;
     }
     let manifest_bytes = read_snapshot_file(&dir.join("manifest.json"))?;
@@ -372,11 +409,8 @@ fn invocation_run_timeout(
         // Resume and retry re-enter runtime-side state. Reuse the exact
         // approved bytes retained for the original run; an absent or changed
         // snapshot falls back to the historical bounded default, never 24 h.
-        Invocation::Resume { .. } => retry_recipe
+        Invocation::Resume { .. } | Invocation::RetryStep { .. } => retry_recipe
             .map(recipe_run_timeout)
-            .unwrap_or(DEFAULT_RUN_TIMEOUT),
-        Invocation::RetryStep { step, .. } => retry_recipe
-            .map(|recipe| recipe_step_timeout(recipe, step))
             .unwrap_or(DEFAULT_RUN_TIMEOUT),
     }
 }
@@ -1894,14 +1928,29 @@ mod timeout_tests {
             recipe_run_timeout(recipe),
             Duration::from_secs(95) + DECLARED_TIMEOUT_GRACE
         );
-        assert_eq!(
-            recipe_step_timeout(recipe, "main"),
-            Duration::from_secs(95) + DECLARED_TIMEOUT_GRACE
-        );
     }
 
     #[test]
-    fn retry_step_uses_only_the_selected_steps_budget() {
+    fn verification_and_hook_limits_are_part_of_the_outer_budget() {
+        let recipe = br#"{
+            "hooks": {
+                "before_run": ["a"],
+                "after_run": ["b"],
+                "before_step": ["c"],
+                "after_step": ["d", "e"],
+                "on_error": ["f"]
+            },
+            "steps": [{
+                "label": "main",
+                "timeout": 30,
+                "verify": {"commands": ["one", "two"]}
+            }]
+        }"#;
+        assert_eq!(recipe_run_timeout(recipe), Duration::from_secs(1_290));
+    }
+
+    #[test]
+    fn retry_step_keeps_the_recipe_budget_for_reexecuted_dependents() {
         let recipe =
             br#"{"steps":[{"label":"main","timeout":45},{"label":"verify","timeout":900}]}"#;
         let retry = Invocation::RetryStep {
@@ -1910,7 +1959,7 @@ mod timeout_tests {
         };
         assert_eq!(
             invocation_run_timeout(&retry, None, Some(recipe)),
-            Duration::from_secs(45) + DECLARED_TIMEOUT_GRACE
+            Duration::from_secs(945) + DECLARED_TIMEOUT_GRACE
         );
         assert_eq!(
             invocation_run_timeout(&retry, None, None),

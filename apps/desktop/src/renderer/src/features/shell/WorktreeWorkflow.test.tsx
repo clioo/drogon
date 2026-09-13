@@ -112,7 +112,9 @@ it("shows a bot-dispatched headless workflow on an unselected card with no termi
 
 it("does not bypass the app capability gate through the raw window bridge", async () => {
   const rawBridge = bridgeFor();
-  window.drogon = { graph: rawBridge } as unknown as typeof window.drogon;
+  vi.stubGlobal("drogon", {
+    graph: rawBridge,
+  } as unknown as typeof window.drogon);
   const view = render(
     <TooltipProvider>
       <WorktreeCard

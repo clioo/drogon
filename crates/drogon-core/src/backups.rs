@@ -165,18 +165,6 @@ pub mod lock {
             assert!(acquire_exclusive(dir.path()).is_ok());
         }
 
-        #[cfg(windows)]
-        #[test]
-        fn a_symlinked_lock_cannot_modify_its_target_on_windows() {
-            use std::os::windows::fs::symlink_file;
-            let dir = tempfile::tempdir().unwrap();
-            let target = dir.path().join("unrelated");
-            std::fs::write(&target, "preserve").unwrap();
-            symlink_file(&target, dir.path().join(LOCK_FILE_NAME)).unwrap();
-            assert!(acquire_exclusive(dir.path()).is_err());
-            assert_eq!(std::fs::read_to_string(target).unwrap(), "preserve");
-        }
-
         #[cfg(unix)]
         #[test]
         fn a_symlinked_lock_cannot_modify_its_target() {

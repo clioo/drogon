@@ -225,38 +225,67 @@ fn parse_steps(recipe: &Value) -> Result<Vec<MentuStep>, String> {
 /// for one parsed step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RecipeStepBudget {
-    pub label: String,
     pub timeout_seconds: Option<u64>,
     pub max_retries: u64,
     pub retry_backoff_ms: u64,
+    pub verify_commands: u64,
 }
 
-/// Extends the same typed step parse used by `mentu.recipe` with the pinned
-/// runtime's retry timing fields. Mentu defaults to no retries and a
-/// one-second backoff.
-pub(crate) fn parse_recipe_step_budgets(source: &str) -> Result<Vec<RecipeStepBudget>, String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecipeBudget {
+    pub steps: Vec<RecipeStepBudget>,
+    pub before_run_hooks: u64,
+    pub after_run_hooks: u64,
+    pub before_step_hooks: u64,
+    pub after_step_hooks: u64,
+    pub on_error_hooks: u64,
+}
+
+fn string_array_len(value: Option<&Value>) -> u64 {
+    value
+        .and_then(Value::as_array)
+        .map_or(0, |values| values.len() as u64)
+}
+
+/// Extends the same typed step parse used by `mentu.recipe` with every timing
+/// field owned by the pinned runtime. Mentu defaults to no retries and a
+/// one-second retry backoff.
+pub(crate) fn parse_recipe_budget(source: &str) -> Result<RecipeBudget, String> {
     let recipe = parse_recipe_json(source)?;
     let steps = parse_steps(&recipe)?;
     let values = recipe
         .get("steps")
         .and_then(Value::as_array)
         .ok_or_else(|| "Recipe has no \"steps\" array.".to_string())?;
-    Ok(steps
-        .into_iter()
-        .zip(values)
-        .map(|(step, value)| RecipeStepBudget {
-            label: step.label,
-            timeout_seconds: step.timeout_seconds,
-            max_retries: value
-                .get("max_retries")
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
-            retry_backoff_ms: value
-                .get("retry_backoff_ms")
-                .and_then(Value::as_u64)
-                .unwrap_or(1_000),
-        })
-        .collect())
+    let hooks = recipe.get("hooks");
+    let hook_count = |name| string_array_len(hooks.and_then(|value| value.get(name)));
+    Ok(RecipeBudget {
+        steps: steps
+            .into_iter()
+            .zip(values)
+            .map(|(step, value)| RecipeStepBudget {
+                timeout_seconds: step.timeout_seconds,
+                max_retries: value
+                    .get("max_retries")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                retry_backoff_ms: value
+                    .get("retry_backoff_ms")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1_000),
+                verify_commands: string_array_len(
+                    value
+                        .get("verify")
+                        .and_then(|verify| verify.get("commands")),
+                ),
+            })
+            .collect(),
+        before_run_hooks: hook_count("before_run"),
+        after_run_hooks: hook_count("after_run"),
+        before_step_hooks: hook_count("before_step"),
+        after_step_hooks: hook_count("after_step"),
+        on_error_hooks: hook_count("on_error"),
+    })
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
