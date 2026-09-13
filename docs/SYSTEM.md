@@ -109,6 +109,43 @@ Concrete linked examples:
 These are PR-authored reports of checks performed at those revisions, not a new run
 of the current branch and not proof that every current check passes.
 
+### Issue-to-PR-to-QA trails
+
+The public issue trail supplies a more useful audit than commit cadence alone. It
+contains coordinator assignment, a worker's implementation result, and a later QA
+verdict. For example:
+
+- [Issue #186: QA reproduction](https://github.com/clioo/drogon/issues/186#issuecomment-5580354718)
+  records a Pi automation stuck at `needs_input` with a `Launched` row and raw TUI
+  output. [The follow-up](https://github.com/clioo/drogon/issues/186#issuecomment-5580587630)
+  identifies the positional-prompt/headless-approval root cause, links PR #227, and
+  reports a live DGX-Spark run with `HEADLESS_OK`, completed scheduler work, and zero
+  sessions at `needs_input`. [The later closure note](https://github.com/clioo/drogon/issues/186#issuecomment-5584609271)
+  records re-verification on the installed build and keeps a separate scheduler-policy
+  gap open in #188.
+- [Issue #312](https://github.com/clioo/drogon/issues/312#issuecomment-5587612596)
+  records a CI failure, its measured cause, and PR #325. Later comments record a
+  residual failure after the first mitigation
+  ([follow-up](https://github.com/clioo/drogon/issues/312#issuecomment-5587938606)),
+  a reopened issue when the failure returned
+  ([reopen](https://github.com/clioo/drogon/issues/312#issuecomment-5589713766)),
+  a shard-based mitigation ([#342](https://github.com/clioo/drogon/issues/312#issuecomment-5591122750)),
+  and closure after three consecutive green main runs
+  ([closure](https://github.com/clioo/drogon/issues/312#issuecomment-5592145226)).
+- [PR #409's adversarial follow-up](https://github.com/clioo/drogon/pull/409#issuecomment-5615172599)
+  maps five discovered lifecycle breaks to fixes and red-first regression tests.
+  [PR #417's next round](https://github.com/clioo/drogon/pull/417#issuecomment-5616145127)
+  closes two races and a forged-event path, and [the interlock resolution](https://github.com/clioo/drogon/pull/417#issuecomment-5617869726)
+  records the rebase and post-fix test results.
+
+GitHub exposes these comments under the `clioo` account because that account was the
+authenticated publisher for the coordination workflow. They are therefore evidence
+of the chronological work trail, not independent author identities. One stronger
+attribution signal is [PR #342](https://github.com/clioo/drogon/pull/342): its body
+contains the Claude Code generation marker, links a Claude session, and its commits
+include GitHub's `claude` author alongside `clioo`. This is still not a cryptographic
+proof of which model wrote every line.
+
 ## The human's decisions
 
 The hardest decision was scope. After the first three or four days, I recognized
