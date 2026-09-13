@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Drogon: Your signals. The right sessions.</title>
+  <title>Drogon — Less meeting. More shipping.</title>
   <meta name="description" content="The open-source workspace for agentic engineering. Orchestrate coding agents, isolate work in Git worktrees, and review the evidence. Built with a Rust core for macOS.">
   <meta property="og:title" content="Drogon: Set the intent. Ship the proof.">
   <meta property="og:description" content="Your agents. Your context. Your call. An open-source desktop workspace for agentic engineering.">
@@ -12,137 +12,65 @@
   <link rel="icon" href="assets/drogon.svg" type="image/svg+xml">
   <link rel="preload" href="assets/geist.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="story.css">
-  <link rel="stylesheet" href="loop.css">
+  <link rel="stylesheet" href="product-widgets.css">
   <script src="site.js" defer></script>
-  <script type="module" src="story.mjs"></script>
-  <script type="module" src="loop.mjs"></script>
+  <script type="module" src="product-widgets.mjs"></script>
   <script type="module" src="harness-marks.mjs"></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="header wrap">
   <a class="brand" href="#" aria-label="Drogon home"><span class="lettermark" aria-hidden="true">D</span>drogon<span class="wordmark-period">.</span></a>
-  <nav aria-label="Main navigation"><a href="#workspace">Workspace</a><a href="#method">The method</a><a href="https://github.com/clioo/drogon">GitHub <span aria-hidden="true">↗</span></a></nav>
+  <nav aria-label="Main navigation"><a href="#workspace">Workspace</a><a href="#method">Work Graph</a><a href="https://github.com/clioo/drogon">GitHub <span aria-hidden="true">↗</span></a></nav>
   <a class="button button-small" href="#install">Get the preview <span aria-hidden="true">↗</span></a>
 </header>
 <main id="main">
   <section class="hero wrap" aria-labelledby="hero-title">
     <div class="hero-copy">
-      <p class="eyebrow"><span class="small-rule"></span> A workspace for agentic engineering</p>
-      <h1 id="hero-title">Your signals.<br>The right <em>sessions.</em></h1>
-      <p class="hero-description">Turn an approved signal into scoped agent work.<br>The right project. The right context. Your final call.</p>
+      <p class="eyebrow"><span class="small-rule"></span> The open-source developer workspace</p>
+      <h1 id="hero-title">Less meeting.<br>More shipping.</h1>
+      <p class="hero-description">Run coding agents side by side. Let bots pick up pull requests.<br>Review the work without switching between apps.</p>
       <div class="hero-actions"><a class="button" href="#install">Get Drogon for macOS <span aria-hidden="true">↗</span></a><a class="text-link" href="#workspace">Try the workspace <span aria-hidden="true">↓</span></a></div>
       <p class="fine-print">Open source, Rust core · Early preview</p>
     </div>
-    <div class="hero-routing" aria-label="Example signal routing"><div class="hero-routing-title"><span class="lettermark" aria-hidden="true">D</span><strong>Signal received. Work routed.</strong><span>Demo</span></div><a href="#workspace" data-hero-signal="pr"><span class="signal-glyph" aria-hidden="true">⑂</span><span>Review requested<small>atlas/checkout · PR #42</small></span><span class="hero-destination">Atlas <b>→</b></span></a><a href="#workspace" data-hero-signal="ticket"><span class="signal-glyph" aria-hidden="true">#</span><span>Ticket assigned<small>beacon/api · Issue #108</small></span><span class="hero-destination">Beacon <b>→</b></span></a><a href="#workspace" data-hero-signal="mention"><span class="signal-glyph" aria-hidden="true">@</span><span>Bot mentioned<small>atlas/checkout · thread #42</small></span><span class="hero-destination">Atlas <b>→</b></span></a><div class="hero-routing-bottom"><span>Monitor → route → brief → session</span><small>Illustrative signal types. Explore below.</small></div></div>
+
   </section>
-  <section class="story-section" id="workspace" aria-labelledby="story-heading">
-    <div class="wrap">
-      <div class="story-heading"><p>From event to execution</p><h2 id="story-heading">The signal finds its team.</h2><span>A bot that routes work, carries context, and keeps the loop moving.</span></div>
-      <div class="story-tabs" role="tablist" aria-label="The Drogon engineering story">
-        <button role="tab" id="tab-monitor" aria-controls="story-panel" aria-selected="true" data-stage="0">Monitor</button>
-        <button role="tab" id="tab-specify" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-stage="1">Specify</button>
-        <button role="tab" id="tab-context" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-stage="2">Context</button>
-        <button role="tab" id="tab-dispatch" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-stage="3">Dispatch</button>
-        <button role="tab" id="tab-verify" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-stage="4">Verify</button>
-        <button role="tab" id="tab-recover" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-stage="5">Recover</button>
-        <button role="tab" id="tab-approve" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-stage="6">Approve</button>
+  <section class="product-tour" id="workspace" aria-labelledby="tour-title"><div class="wrap">
+    <h2 id="tour-title">Your work. In one place.</h2>
+    <div class="product-tabs" role="tablist" aria-label="Explore Drogon"><button role="tab" id="tab-bots" aria-controls="panel-bots" aria-selected="false" tabindex="-1">Bots</button><button role="tab" id="tab-graph" aria-controls="panel-graph" aria-selected="true">Work Graph</button><button role="tab" id="tab-evidence" aria-controls="panel-evidence" aria-selected="false" tabindex="-1">Evidence</button></div>
+    <div id="method" class="product-layout"><div class="product-copy"><h3 id="feature-title">Put your agents<br>to work together.</h3><p id="feature-description">Give the main agent a task. It delegates the work, runs adversarial tests, and sends findings back for review. You decide what ships.</p><p class="bring-harness">Your agents. Your subscriptions.</p><div class="harness-roster" aria-label="Supported harness examples"><span data-harness="claude">Claude Code</span><span data-harness="codex">Codex</span><span data-harness="pi">Pi</span><span data-harness="agy">Agy</span></div></div>
+    <!-- MIT Copyright (c) 2026 Lovecast Inc. HTML adaptation of Drogon's OrchestratorCanvas.tsx, BotMonitorCardItem.tsx and ObservabilityViews.tsx. Sample data, no desktop bridge. -->
+    <div class="product-stage">
+      <div class="drogon-widget" id="panel-graph" role="tabpanel" aria-labelledby="tab-graph">
+        <div class="app-toolbar"><strong>Work Graph</strong><div class="app-view-tabs"><span class="selected">Graph</span><button data-open-evidence>Evidence <span class="evidence-count"></span></button><button id="show-usage" aria-expanded="false">Usage</button></div><button class="app-button" id="run-workflow">▷ Run workflow</button></div>
+        <div id="usage-readout" hidden>Usage is not reported in this demo. No models are running.</div>
+        <div class="graph-canvas" id="graph-canvas"><div class="graph-flow">
+          <div class="app-node main-node" data-node="plan"><div class="app-node-title"><span data-icon="bot"></span>Main agent<span class="activity" aria-hidden="true"></span></div><div class="node-chips"><span data-harness="claude">Claude Code</span><span>Director</span></div><p>Fix checkout retries. Add failure-path tests.</p><span class="node-state">Ready</span></div>
+          <span class="graph-arrow" data-edge="workers" aria-hidden="true">↓</span>
+          <div class="app-node workers-node" data-node="workers"><div class="app-node-title"><span data-icon="users"></span>Implementation workers<span class="activity" aria-hidden="true"></span></div><div class="node-chips"><span>Depth 1</span><span>Subagent policy</span></div><p>Planned and supervised by the main agent</p><div class="worker-harnesses"><span data-harness="codex">Codex</span><span data-harness="pi">Pi</span></div><span class="node-state">Queued</span></div>
+          <span class="graph-arrow" data-edge="test" aria-hidden="true">↓</span>
+          <div class="adversarial-group"><span class="adversarial-label">Adversarial loop <span>Depth 1</span></span>
+            <div class="app-node test-node" data-node="test"><div class="app-node-title"><span data-icon="shield"></span>Adversarial test<span class="activity" aria-hidden="true"></span></div><p>Find edge cases and failure</p><div class="node-chips"><span data-harness="agy">Agy</span><span>Harness default</span></div><span class="node-state">Queued</span></div>
+            <span class="graph-arrow" data-edge="review" aria-hidden="true">→</span>
+            <div class="app-node review-node" data-node="review"><div class="app-node-title"><span data-icon="file"></span>Code review<span class="activity" aria-hidden="true"></span></div><p>Review changes and verify fixes</p><div class="node-chips"><span data-harness="claude">Claude Code</span></div><span class="node-state">Queued</span></div>
+            <svg class="graph-return" viewBox="0 0 360 28" preserveAspectRatio="none" aria-label="Return to adversarial testing when findings remain"><path d="M350 0 V14 Q350 22 342 22 H18 Q10 22 10 14 V4 M5 9 L10 4 L15 9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+          </div><span class="graph-arrow" data-edge="merge" aria-hidden="true">↓</span>
+          <div class="app-node terminal-node" data-node="merge"><span data-icon="check"></span><span class="node-state">Awaiting checks</span></div><span class="repeat-caption">Repeat up to 2×</span>
+        </div></div>
+        <div class="widget-status"><span id="workflow-status" role="status" aria-live="polite">Sample workflow · no agents connected</span><button id="reset-workflow" aria-label="Reset workflow">Reset</button></div>
       </div>
-      <div class="story-layout" id="story-panel" role="tabpanel" aria-labelledby="tab-monitor" tabindex="0">
-        <div class="story-copy"><span class="story-criterion" id="story-criterion">Event-driven work</span><h3 id="story-title">A signal.<br>Not another interruption.</h3><p id="story-description">A pull request needs review. The bot recognizes the event, matches the configured project, and prepares scoped work.</p><div class="story-outcome" id="story-outcome">You define the responsibility. The monitor supplies the trigger.</div>
-          <div class="story-navigation"><button id="story-back" aria-label="Previous story step">←</button><span id="story-position">1 of 7</span><button id="story-next" aria-label="Next story step">→</button></div>
-        </div>
-        <div class="story-widget">
-          <div class="story-widget-bar"><span class="demo-brand"><span class="lettermark" aria-hidden="true">D</span> Sentinel <span>/ Drogon bot</span></span><span id="signal-label">PR #42</span></div>
-          <div class="scene" id="scene-monitor">
-            <div class="signal-type-picker" role="group" aria-label="Choose a sample signal"><button data-signal="pr" aria-pressed="true">Pull request</button><button data-signal="ticket" aria-pressed="false">Ticket</button><button data-signal="comment" aria-pressed="false">Comment</button><button data-signal="mention" aria-pressed="false">Mention</button></div>
-            <div class="signal-event"><div><span id="event-type">review_requested</span><span class="scene-badge">Sample signal</span></div><h4 id="event-title">Review the checkout retry policy</h4><p id="event-description">A pull request is waiting for review in atlas/checkout.</p><code id="event-repo">atlas/checkout · pull/42</code></div>
-            <div class="route-connector" aria-hidden="true"><span></span>↓<span></span></div>
-            <div class="routing-result"><div class="project-initial" id="project-initial">A</div><div><span>Configured destination</span><strong id="project-name">Atlas Checkout</strong><code id="project-path">projects/atlas-checkout</code></div><span class="route-match">Matched</span></div>
-            <p class="scene-footnote" id="signal-capability">PR monitoring and project-scoped session dispatch are implemented. This is a scripted illustration, not a live connection.</p>
-          </div>
-          <div class="scene" id="scene-specify" hidden>
-            <div class="scene-heading"><span>Intent → durable brief</span><span class="scene-badge">Human constraints</span></div><h4 id="spec-title">Make checkout retries predictable.</h4>
-            <dl class="spec-grid"><dt>Requirement</dt><dd>Recover transient failures without charging twice.</dd><dt>Constraint</dt><dd>At most 2 attempts. No payment credentials in context.</dd><dt>Architecture</dt><dd>Keep retry policy separate from the gateway adapter.</dd><dt>Definition of done</dt><dd>Failure-path tests pass; changes are reviewed before merge.</dd></dl>
-            <div class="spec-footer"><span class="mini-file">brief.md</span><span>One reference for every session.</span></div>
-          </div>
-          <div class="scene" id="scene-context" hidden>
-            <div class="scene-heading"><span>Context packet</span><span class="scene-badge">Scoped, not everything</span></div>
-            <div class="context-files"><div><span class="mini-file">SPEC</span><span>Goal, constraints, acceptance criteria</span><b>Included</b></div><div><span class="mini-file">RULES</span><span>Repository instructions + protected paths</span><b>Included</b></div><div><span class="mini-file">DIFF</span><span>Changed files and referenced test output</span><b>Included</b></div><div class="context-excluded"><span class="mini-file">DATA</span><span>Secrets, unrelated projects, raw inbox history</span><b>Excluded</b></div></div>
-            <div class="context-boundary"><strong>An event is data, not authority.</strong><p>The prompt references an event ID. A comment or mention does not get to overwrite project instructions.</p></div>
-          </div>
-          <div class="scene" id="scene-dispatch" hidden>
-            <div class="scene-heading"><span id="dispatch-project">Atlas Checkout / scoped sessions</span><span class="scene-badge">Parallel work</span></div>
-            <div class="session-picker" role="group" aria-label="Inspect a session prompt"><button data-session="implementation" aria-pressed="true"><span class="session-initial">I</span><span>Implementation<small>fix/retry-policy</small></span></button><button data-session="tests" aria-pressed="false"><span class="session-initial">T</span><span>Verification<small>test/checkout-recovery</small></span></button></div>
-            <div class="prompt-packet"><div><strong id="prompt-session">Prompt → implementation session</strong><span>Prepared</span></div><pre id="dispatch-prompt">PROJECT Atlas Checkout
-EVENT pull/42
-GOAL Correct the bounded retry policy.
-READ brief.md, repository instructions, scoped diff.
-WRITE src/checkout/retry.ts only.
-RETURN diff + verification evidence.</pre></div>
-            <button class="scene-action dispatch-action" id="dispatch-sessions">Dispatch sample prompts <span>→</span></button>
-            <p class="scene-footnote">Separate write scopes let implementation and failure-path tests progress independently. Their outputs meet at verification.</p>
-          </div>
-          <div class="scene" id="scene-verify" hidden>
-            <div class="scene-heading"><span>Acceptance gate</span><span class="scene-badge">Deterministic fixture</span></div>
-            <div class="check-row"><span>retry limit ≤ 2</span><strong id="retry-check">Not run</strong></div><div class="check-row"><span>project scope matches event</span><strong id="scope-check">Not run</strong></div><div class="check-row"><span>human approval before merge</span><strong id="approval-check">Required</strong></div>
-            <pre class="check-output" id="check-output">Run the browser fixture to inspect the result.</pre><button class="scene-action" id="run-checks">Run verification <span>→</span></button><p class="scene-footnote">These small checks execute in your browser. They illustrate the feedback mechanism, not Drogon’s full test harness.</p>
-          </div>
-          <div class="scene" id="scene-recover" hidden>
-            <div class="scene-heading"><span>Observe → fix → verify again</span><span class="scene-badge">Bounded recovery</span></div>
-            <div class="repair-diff"><div><span>src/checkout/retry.ts</span><span>Sample correction</span></div><code class="removed">− const maxAttempts = 3;</code><code class="added">+ const maxAttempts = 2;</code></div>
-            <div class="recovery-controls"><label for="recovery-limit">Recovery budget</label><select id="recovery-limit"><option value="1">1 correction</option><option value="0">0 corrections: escalate</option></select></div>
-            <p class="recovery-message" id="recovery-message">Run verification first. A failure gives the loop something specific to fix.</p><button class="scene-action" id="run-recovery">Run recovery demo <span>↻</span></button>
-            <p class="scene-footnote">The correction is scripted, not generated by an AI. If the budget is exhausted, the demo stops for human judgment.</p>
-          </div>
-          <div class="scene" id="scene-approve" hidden>
-            <div class="scene-heading"><span>Engineer’s review</span><span class="scene-badge">The final call</span></div>
-            <h4>Evidence before approval.</h4><div class="approval-summary"><span>Verification</span><strong id="final-verdict">Not verified</strong><span>Destination</span><strong id="final-project">Atlas Checkout</strong><span>Integration</span><strong>Review both workstreams</strong></div>
-            <div class="approval-lock" id="approval-lock">Run the checks and close the recovery loop before approving.</div><button class="scene-action" id="approve-result" disabled>Approve sample result <span>✓</span></button><p class="scene-footnote">This action changes only the demo. No real branch or pull request is merged.</p>
-          </div>
-          <div class="story-widget-footer"><span id="story-run-state" role="status" aria-live="polite">Scripted demo · no connected agents</span><button id="story-reset">Reset story</button></div>
-        </div>
+      <div class="drogon-widget" id="panel-bots" role="tabpanel" aria-labelledby="tab-bots" hidden><div class="app-toolbar"><strong>Bots</strong><span class="app-pill">1 active</span></div><div class="bot-surface">
+        <div class="bot-heading"><span class="bot-avatar" data-icon="bot"></span><div><strong>PR reviewer</strong><span class="app-pill">@reviewer</span><p>Reviews pull requests for Atlas Checkout</p></div></div>
+        <div class="bot-facts"><div><span>Harness</span><b data-harness="codex">Codex</b></div><div><span>Model policy</span><b>Harness default</b></div></div><p class="responsibility-line">Responsibilities: <span class="app-pill">Review incoming PRs</span></p>
+        <div class="monitor-heading">Monitors <span class="app-pill">1 watching</span></div><div class="monitor-card"><div class="monitor-title"><code>atlas/checkout</code><span class="app-pill">Watching</span></div>
+          <dl><div><dt>Source</dt><dd>github_pr.v1</dd></div><div><dt>Trigger</dt><dd>Every 5 minutes</dd></div><div><dt>Action</dt><dd>Review incoming PRs</dd></div><div><dt>Failure threshold</dt><dd>3 consecutive errors</dd></div><div><dt>Last check</dt><dd><span class="health-dot"></span>Healthy · now</dd></div><div><dt>Last firing</dt><dd id="monitor-firing">Never fired</dd></div></dl>
+          <div class="monitor-footer"><span id="monitor-count">0/10 delegations today</span><span>pr-review</span></div>
+        </div></div><div class="widget-status"><span id="monitor-status" role="status">Sample monitor · no GitHub connection</span><button id="play-monitor">Play example →</button></div>
       </div>
-      <div class="story-controls"><span>One continuous handoff. Seven moments you can inspect.</span><button class="play-story" id="play-story">Play the story <span aria-hidden="true">→</span></button></div>
-    </div>
-  </section>
-  <section class="loop-section wrap section" id="method" aria-labelledby="loop-heading">
-    <div class="loop-heading"><div><p class="eyebrow">The system at work</p><h2 id="loop-heading">The loop runs.<br>You make the call.</h2></div><p>One signal starts the handoff. Agents build, challenge, and correct. You review the evidence when the work is ready, or step in when the system reaches a limit.</p></div>
-    <div class="loop-console" id="loop-console">
-      <div class="loop-console-header"><span><span class="lettermark" aria-hidden="true">D</span> Checkout recovery <small>/ workflow demo</small></span><span class="loop-runtime" id="loop-runtime">Ready to receive a signal</span></div>
-      <div class="harness-statement"><div><strong>Harness-agnostic. Bring your own subscriptions.</strong><p>Your tools, your accounts. Drogon coordinates the work.<br>Each harness keeps its own authentication, billing, and usage limits.</p></div><div class="harness-roster" aria-label="Example harnesses"><span data-harness="claude">Claude Code</span><span data-harness="codex">Codex</span><span data-harness="pi">Pi</span><span data-harness="agy">Agy</span></div></div>
-      <div class="loop-settings"><label for="loop-scenario">Scenario<select id="loop-scenario"><option value="recover">Adversarial finding → recovery</option><option value="pass">Checks pass on the first run</option><option value="escalate">Recovery budget exhausted</option></select></label><div class="loop-playback"><button id="loop-play" class="loop-primary">Run the loop <span aria-hidden="true">→</span></button><button id="loop-reset">Reset</button></div></div>
-      <div class="loop-map" aria-label="Monitor to bot to workflow to human review">
-        <div class="intake-lane">
-          <button class="flow-node" data-loop-node="monitor" aria-pressed="false"><span class="flow-node-header"><span class="flow-icon">⑂</span><span class="node-status">Watching</span></span><strong>Monitor</strong><small>PR #42 · review requested</small><span class="mini-event">atlas/checkout</span></button>
-          <div class="flow-wire vertical" data-wire="intake" aria-hidden="true"><i></i><span>↓</span></div>
-          <button class="flow-node" data-loop-node="bot" aria-pressed="false"><span class="flow-node-header"><span class="flow-icon">S</span><span class="node-status">On standby</span></span><strong>Sentinel</strong><span data-harness="claude">Claude Code</span><small>Match project. Prepare context.</small><span class="bot-packet"><span>Atlas Checkout</span><span>Scoped brief + event reference</span></span></button>
-        </div>
-        <div class="lane-wire flow-wire" data-wire="dispatch" aria-hidden="true"><i></i><span>→</span></div>
-        <div class="execution-lane"><div class="execution-title"><span>Agent workflow</span><span id="loop-iteration">Iteration 0 / 2</span></div>
-          <button class="flow-node worker-node" data-loop-node="build" aria-pressed="false"><span class="flow-node-header"><span class="flow-icon">⌘</span><span class="node-status">Queued</span></span><strong>Implementation sessions</strong><span class="parallel-sessions"><span><b>API worker</b><span data-harness="codex">Codex</span><small>fix/retry-policy</small></span><span><b>Test worker</b><span data-harness="pi">Pi</span><small>test/recovery</small></span></span></button>
-          <div class="flow-wire vertical" data-wire="verify" aria-hidden="true"><i></i><span>↓</span></div>
-          <button class="flow-node" data-loop-node="adversary" aria-pressed="false"><span class="flow-node-header"><span class="flow-icon">↯</span><span class="node-status">Queued</span></span><strong>Adversarial testing</strong><span data-harness="agy">Agy</span><small>Challenge the implementation.</small><code id="adversary-result">retry-limit.test · awaiting work</code></button>
-          <div class="flow-wire vertical" data-wire="correction" aria-hidden="true"><i></i><span>↓</span></div>
-          <button class="flow-node" data-loop-node="reviewer" aria-pressed="false"><span class="flow-node-header"><span class="flow-icon">✓</span><span class="node-status">Queued</span></span><strong>Code review &amp; correction</strong><span data-harness="claude">Claude Code</span><small>Inspect finding. Patch. Verify again.</small><code id="loop-patch">maxAttempts: 3 → 2</code></button>
-          <div class="return-wire" data-wire="return"><span aria-hidden="true">↶</span><span id="return-label">Failure returns to verification</span><i aria-hidden="true"></i></div>
-        </div>
-        <div class="lane-wire flow-wire" data-wire="handoff" aria-hidden="true"><i></i><span>→</span></div>
-        <div class="human-lane"><div class="human-caption">Human in the loop</div><button class="flow-node human-node" data-loop-node="human" aria-pressed="false"><span class="flow-node-header"><span class="flow-icon">You</span><span class="node-status">Not needed yet</span></span><strong>The final review</strong><small id="human-description">The system will bring you the result, not every next step.</small><span class="human-evidence"><span>Verification <b id="human-check">Pending</b></span><span>Changes <b id="human-changes">Pending</b></span></span></button><button class="loop-approval" id="loop-approve" disabled>Review &amp; approve sample <span aria-hidden="true">↗</span></button><p id="human-note">Approval unlocks only after checks pass.</p></div>
-      </div>
-      <div class="loop-bottom"><div class="loop-inspector"><span id="loop-inspector-label">System observation</span><h3 id="loop-inspector-title">Ready for the next signal.</h3><p id="loop-inspector-text">Run the loop to watch one event become scoped work. Click any node to inspect its role.</p></div><div class="loop-log-panel"><span>Run history <small>Scripted example</small></span><ol id="loop-log" tabindex="0" aria-label="Demo run history"><li><span>READY</span><span>No external connection. Waiting for a sample event.</span></li></ol></div></div>
-      <div class="loop-disclaimer"><span id="loop-announcement" role="status" aria-live="polite">Interactive illustration. No agents or external services are connected.</span><a href="https://github.com/clioo/drogon/blob/main/docs/SUBMISSION.md">Inspect the implementation ↗</a></div>
-    </div>
-    <details class="engineering-evidence"><summary>How this maps to the hackathon’s six capabilities</summary><div class="engineering-map">
-      <a href="https://github.com/clioo/drogon/blob/main/docs/SUBMISSION.md"><span>Intent + specification</span><p>Requirements, architecture, constraints, and definition of done.</p><small>Required evidence: engineering spec</small></a>
-      <a href="https://github.com/clioo/drogon/blob/main/AGENTS.md"><span>Context engineering</span><p>Scoped instructions, tools, source references, and handoffs.</p><small>Inspect repository instructions ↗</small></a>
-      <a href="https://github.com/clioo/drogon/tree/main/crates/drogon-orchestration"><span>Orchestration + parallel work</span><p>Independent scopes, dependencies, and integration points.</p><small>Inspect the orchestration core ↗</small></a>
-      <a href="https://github.com/clioo/drogon/tree/main/scripts"><span>Harness + backpressure</span><p>Tests, type checks, builds, and rendered acceptance.</p><small>Inspect validation scripts ↗</small></a>
-      <a href="https://github.com/clioo/drogon/blob/main/docs/SUBMISSION.md"><span>Autonomous loops + recovery</span><p>A real failure, correction, and recheck without a new human prompt.</p><small>Required evidence: a recorded closed loop</small></a>
-      <a href="https://github.com/clioo/drogon/pull/536"><span>Human as orchestrator</span><p>The engineer chooses scope, constraints, tradeoffs, and readiness.</p><small>Inspect this website’s review ↗</small></a>
-    </div><p class="engineering-note">This animation is not a substitute for execution evidence. The submission must show a real closed loop and the engineer’s decisions. Demo video: up to 3 minutes, roughly 90 seconds on the product and 90 on its engineering.</p></details>
-  </section>
+      <div class="drogon-widget" id="panel-evidence" role="tabpanel" aria-labelledby="tab-evidence" hidden><div class="app-toolbar"><strong>Work Graph</strong><div class="app-view-tabs"><button data-open-graph>Graph</button><span class="selected">Evidence <span class="evidence-count"></span></span></div></div><div class="evidence-surface" id="evidence-entries"><div class="evidence-empty"><span data-icon="file"></span><h4>No evidence recorded yet</h4><p>Run the example to see the test result, the finding, and the fix.</p><button class="app-button" data-open-graph>Go to graph →</button></div></div><div class="widget-status"><span>Sample run · nothing is committed or merged</span><button data-open-graph>Back to graph</button></div></div>
+      <p class="demo-caption">Drogon UI, adapted to HTML. Sample data. <a href="https://github.com/clioo/drogon/tree/main/apps/desktop/src/renderer/src/features/work-graph-workflows">View source ↗</a></p>
+    </div></div>
+  </div></section>
   <section class="foundation wrap section" aria-labelledby="foundation-title"><div class="foundation-title"><p class="eyebrow">Under the hood</p><h2 id="foundation-title">Your workspace.<br>Not a black box.</h2><a class="text-link" href="https://github.com/clioo/drogon">Read the source <span aria-hidden="true">↗</span></a></div><div class="foundation-facts"><article><span class="fact-label">Local backbone</span><h3>The session outlives the window.</h3><p>A Rust daemon owns terminal sessions and workspace state. The Electron desktop is a view, not the lifetime of your work.</p></article><article><span class="fact-label">Bring your harness</span><h3>Your agents. Your accounts.</h3><p>Bring Claude Code, Codex, Pi, Agy, or another configured harness. Use your own subscriptions or provider access; Drogon coordinates the work, not your billing.</p></article><article><span class="fact-label">Inspectable by default</span><h3>Open source, down to the core.</h3><p>MIT-licensed. No app telemetry or automatic updater in the preview. Tests and reproducible build instructions live with the code.</p></article></div></section>
   <section class="install-section wrap" id="install" aria-labelledby="install-title"><div><p class="eyebrow">Make room for the work</p><h2 id="install-title">Your next build<br>starts here.</h2><p>Drogon for macOS · Apple Silicon, macOS 14+</p><a class="button" href="https://github.com/clioo/drogon/releases/tag/v0.1.0-rc.2">Get the macOS preview <span aria-hidden="true">↗</span></a></div><div class="install-detail"><span class="terminal-label">Or install with Homebrew</span><div class="command"><code id="install-command">brew tap clioo/drogon &amp;&amp; brew install --cask clioo/drogon/drogon</code><button type="button" id="copy-command" aria-label="Copy Homebrew installation command">Copy</button></div><p id="copy-status" class="copy-status" role="status" aria-live="polite"></p><p class="install-caveat">Early preview, not a stable release. Ad-hoc signed and not notarized. Use a dedicated development profile and review the <a href="https://github.com/clioo/drogon#install-with-homebrew">installation notes</a> before running.</p></div></section>
 </main>

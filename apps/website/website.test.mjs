@@ -1,73 +1,45 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, access } from 'node:fs/promises';
-import { scenarios, stages, initialState, verify, recover, approve, sessionPrompt } from './dist/story-model.mjs';
-import { loopFrames } from './dist/loop-model.mjs';
+import { workflowSteps, monitorEvent } from './dist/product-demo-model.mjs';
 const root = new URL('./dist/', import.meta.url);
 const html = await readFile(new URL('index.html', root), 'utf8');
-test('local assets and section links resolve; no image-based content', async () => {
-  assert.doesNotMatch(html, /<img\b|\.(png|jpe?g|webp)\b/i);
-  for (const [, value] of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
-    if (value.startsWith('https:') || value === '#') continue;
-    if (value.startsWith('#')) assert.ok(html.includes(`id="${value.slice(1)}"`), value);
-    else await access(new URL(value, root));
-  }
+test('all local assets and navigation targets resolve', async () => {
+ for(const [,v] of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
+  if(v.startsWith('https:')||v==='#')continue;
+  if(v.startsWith('#'))assert.ok(html.includes('id="'+v.slice(1)+'"'),v);
+  else await access(new URL(v,root));
+ }
+ assert.doesNotMatch(html,/<img\b/);
 });
-test('seven stages map to the six mandatory engineering capabilities', () => {
-  assert.equal(stages.length, 7);
-  assert.deepEqual(stages.slice(1).map(s => s.criterion), ['Intent + specification', 'Context engineering', 'Orchestration + parallel work', 'Harness + backpressure', 'Autonomous loops + recovery', 'Human as orchestrator']);
-  assert.equal((html.match(/role="tab"/g) || []).length, 7);
-  assert.equal((html.match(/aria-selected="true"/g) || []).length, 1);
-  for (const s of stages) assert.ok(html.includes(`id="scene-${s.id}"`));
+test('three product views replace the invented diagram and rubric narrative',()=>{
+ assert.equal((html.match(/role="tab"/g)||[]).length,3);
+ for(const name of ['panel-bots','panel-graph','panel-evidence'])assert.ok(html.includes('id="'+name+'"'));
+ assert.doesNotMatch(html,/loop-console|story-criterion|engineering-map|Your signals/);
+ for(const label of ['Main agent','Implementation workers','Adversarial test','Code review','Repeat up to 2×','Last firing'])assert.ok(html.includes(label));
+ assert.match(html,/MIT Copyright \(c\) 2026 Lovecast Inc/);
 });
-test('signals route to defined projects and prompt only the selected session scope', () => {
-  assert.equal(scenarios.ticket.project, 'Beacon API');
-  assert.equal(scenarios.pr.project, 'Atlas Checkout');
-  assert.match(sessionPrompt('ticket', 'tests'), /PROJECT Beacon API/);
-  assert.match(sessionPrompt('ticket', 'tests'), /WRITE tests\/checkout-recovery.test.ts only/);
-  assert.doesNotMatch(sessionPrompt('pr', 'implementation'), /@sentinel/);
-  assert.throws(() => sessionPrompt('unknown', 'tests'));
+test('the restored execution sequence includes parallel work and a verification return',()=>{
+ const steps=workflowSteps();
+ assert.deepEqual(steps[1].active,['api','tests']);
+ assert.deepEqual(steps.map(s=>s.kind),['PLAN','DISPATCH','CHECK','FAIL','RECOVER','VERIFY','REVIEW']);
+ assert.equal(steps.at(-1).terminal,'review');
+ assert.ok(!steps.some(s=>s.terminal==='approved'));
 });
-test('concept adapters are explicitly distinguished from implemented PR path', () => {
-  assert.equal(scenarios.pr.supported, true);
-  for (const key of ['ticket', 'comment', 'mention']) assert.equal(scenarios[key].supported, false);
+test('iteration cap blocks work; clean runs do not invent a failure',()=>{
+ assert.equal(workflowSteps({limit:1}).at(-1).terminal,'blocked');
+ assert.equal(workflowSteps({failure:false}).some(s=>s.kind==='FAIL'),false);
+ assert.throws(()=>workflowSteps({limit:0}));
 });
-test('failed verification blocks approval; one correction closes the fixture loop', () => {
-  const initial = initialState();
-  assert.throws(() => approve(initial));
-  const failed = verify(initial);
-  assert.equal(failed.verified, false);
-  assert.equal(failed.scopePassed, true);
-  assert.throws(() => approve(failed));
-  const corrected = recover(failed, 1);
-  assert.equal(corrected.attempts, 2);
-  assert.equal(corrected.verified, true);
-  assert.equal(approve(corrected).approved, true);
+test('monitor approval and deduplication are preserved',()=>{
+ assert.equal(monitorEvent({approved:false,handled:false}).work,false);
+ const first=monitorEvent({approved:true,handled:false});
+ assert.equal(first.handled,true);
+ assert.equal(monitorEvent({approved:true,handled:first.handled}).state,'Already handled');
 });
-test('exhausted budget escalates and incorrect project scope cannot pass', () => {
-  const blocked = recover(verify(initialState()), 0);
-  assert.equal(blocked.blocked, true);
-  assert.equal(blocked.attempts, 3);
-  assert.throws(() => approve(blocked));
-  const wrong = verify({ ...initialState(), attempts: 2, project: 'Wrong Project' });
-  assert.equal(wrong.verified, false);
-  assert.equal(wrong.scopePassed, false);
-  assert.deepEqual(recover(initialState(), 1), initialState());
-});
-test('source attribution and limits remain visible without compliance claims', () => {
-  for (const text of ['not a stable release', 'not a substitute', 'MIT Copyright (c) 2026 Lovecast Inc.', 'not a live connection', 'no connected agents']) assert.ok(html.includes(text), text);
-  assert.doesNotMatch(html, /100% compliant/);
-});
-test('mixed-harness loop recovers, escalates, and preserves human approval', () => {
-  const recovery = loopFrames('recover');
-  assert.deepEqual(recovery.filter(f => f.node === 'adversary').map(f => f.state), ['fail', 'pass']);
-  assert.equal(recovery.at(-1).verified, true);
-  assert.equal(recovery.at(-1).state, 'ready');
-  assert.equal(loopFrames('escalate').at(-1).verified, false);
-  assert.equal(loopFrames('escalate').some(f => f.node === 'reviewer'), false);
-  assert.equal(loopFrames('pass').some(f => f.state === 'fail'), false);
-  assert.throws(() => loopFrames('unknown'));
-  for (const id of ['claude', 'codex', 'pi', 'agy']) assert.ok(html.includes(`data-harness="${id}"`));
-  assert.match(html, /Harness-agnostic. Bring your own subscriptions/);
-  assert.match(html, /authentication, billing, and usage limits/);
+test('harness marks and sample boundaries remain explicit',()=>{
+ for(const name of ['claude','codex','pi','agy'])assert.ok(html.includes('data-harness="'+name+'"'));
+ assert.match(html,/Your agents. Your subscriptions/);
+ assert.match(html,/Sample data/);
+ assert.match(html,/nothing is committed or merged/);
 });

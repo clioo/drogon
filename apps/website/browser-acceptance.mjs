@@ -1,73 +1,75 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
 const { chromium } = await import(process.env.DROGON_WEBSITE_PLAYWRIGHT || 'playwright');
+const profile = await mkdtemp(join(tmpdir(), 'drogon-loop-cdp-'));
+const child = spawn(chromium.executablePath(), ['--headless', '--no-sandbox', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], {stdio:['ignore','ignore','pipe']});
 let browser;
 try {
-  browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, colorScheme: 'light' });
-  const errors = [];
-  page.on('pageerror', e => errors.push(e.message));
+  const endpoint = await new Promise((resolve,reject)=>{
+    let output=''; const timeout=setTimeout(()=>reject(new Error('CDP launch timeout')),15000);
+    child.stderr.on('data', chunk=>{output+=chunk;const match=output.match(/DevTools listening on (ws:\/\/[^\s]+)/);if(match){clearTimeout(timeout);resolve(match[1]);}});
+    child.once('error',error=>{clearTimeout(timeout);reject(error);});
+  });
+  browser=await chromium.connectOverCDP(endpoint);
+  const page=await browser.newPage({viewport:{width:1440,height:1100},reducedMotion:'reduce'});
+  const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+  page.on('response',r=>{if(r.status()>=400)errors.push(r.status()+' '+r.url());});
   await page.goto(process.env.DROGON_WEBSITE_URL || 'http://127.0.0.1:4178/');
-  await page.waitForFunction(() => document.querySelector('#story-title').textContent.includes('interruption'));
-  assert.equal(await page.locator('img').count(), 0);
-  await page.locator('[data-signal="ticket"]').click();
-  assert.equal(await page.locator('#project-name').textContent(), 'Beacon API');
-  assert.match(await page.locator('#signal-capability').textContent(), /Concept scenario/);
-  await page.locator('#tab-dispatch').click();
-  await page.locator('[data-session="tests"]').click();
-  assert.match(await page.locator('#dispatch-prompt').textContent(), /PROJECT Beacon API/);
-  assert.match(await page.locator('#dispatch-prompt').textContent(), /WRITE tests/);
-  await page.locator('#dispatch-sessions').click();
-  assert.ok(await page.locator('#dispatch-sessions').isDisabled());
-  await page.locator('#tab-monitor').focus();
-  await page.keyboard.press('ArrowRight');
-  assert.ok(await page.locator('#scene-specify').isVisible());
-  await page.locator('#tab-approve').click();
-  assert.ok(await page.locator('#approve-result').isDisabled());
-  await page.locator('#tab-verify').click();
-  await page.locator('#run-checks').click();
-  assert.equal(await page.locator('#retry-check').textContent(), 'FAIL');
-  await page.locator('#tab-recover').click();
-  await page.locator('#recovery-limit').selectOption('0');
-  await page.locator('#run-recovery').click();
-  assert.match(await page.locator('#recovery-message').textContent(), /Budget exhausted/);
-  await page.locator('#tab-approve').click();
-  assert.ok(await page.locator('#approve-result').isDisabled());
-  await page.locator('#tab-recover').click();
-  await page.locator('#recovery-limit').selectOption('1');
-  await page.locator('#run-recovery').click();
-  assert.match(await page.locator('#recovery-message').textContent(), /checks passed/);
-  await page.locator('#tab-approve').click();
-  await page.locator('#approve-result').click();
-  assert.match(await page.locator('#approval-lock').textContent(), /Sample approved/);
-  await page.locator('#story-reset').click();
-  await page.locator('#play-story').click();
-  await page.waitForFunction(() => document.querySelector('#story-position').textContent === '7 of 7', { timeout: 25000 });
-  assert.equal(await page.locator('#final-verdict').textContent(), 'Checks passed');
-  assert.ok(await page.locator('#approve-result').isEnabled());
-  await page.locator('#story-reset').click();
-  await page.locator('#play-story').click();
-  await page.locator('#story-reset').click();
-  await page.waitForTimeout(2800);
-  assert.equal(await page.locator('#story-position').textContent(), '1 of 7');
-  for (const width of [320, 390, 768, 1024, 1440]) {
-    await page.setViewportSize({ width, height: 1000 });
-    for (const stage of ['monitor', 'specify', 'context', 'dispatch', 'verify', 'recover', 'approve']) {
-      await page.locator('#tab-' + stage).click();
-      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), stage + ' overflow at ' + width);
-    }
+  await page.locator('#workspace').scrollIntoViewIfNeeded();
+  await page.clock.install();
+  assert.equal(await page.locator('[data-node] .harness-badge').count(),5);
+  assert.equal(await page.locator('[role=tabpanel]:visible').count(),1);
+  await page.click('#run-workflow');
+  await page.clock.runFor(1250);
+  assert.equal(await page.locator('[data-node=workers].is-active').count(),1);
+  await page.click('#run-workflow');
+  const paused=await page.locator('#workflow-status').innerText();
+  await page.clock.runFor(3000);
+  assert.equal(await page.locator('#workflow-status').innerText(),paused);
+  await page.click('#run-workflow');
+  await page.clock.runFor(1250);
+  assert.equal(await page.locator('[data-node=test].has-failed').count(),1);
+  await page.clock.runFor(1200);
+  assert.equal(await page.locator('.graph-return.is-active').count(),1);
+  if(process.env.DROGON_WEBSITE_SCREENSHOTS)await page.locator('.product-layout').screenshot({path:join(process.env.DROGON_WEBSITE_SCREENSHOTS,'drogon-real-widgets.png'),animations:'disabled'});
+  await page.clock.runFor(4000);
+  assert.match(await page.locator('[data-node=merge]').innerText(),/Ready to merge/);
+  await page.click('#panel-graph [data-open-evidence]');
+  assert.equal(await page.locator('.evidence-entry').count(),4);
+  assert.match(await page.locator('.evidence-entry').first().innerText(),/Ready to merge/);
+  await page.click('#tab-bots');
+  await page.click('#play-monitor');
+  assert.equal(await page.locator('#monitor-firing').innerText(),'Prompt sent · now');
+  await page.click('#play-monitor');
+  assert.match(await page.locator('#monitor-status').innerText(),/Duplicate skipped/);
+  await page.locator('#tab-bots').focus();await page.keyboard.press('ArrowRight');
+  assert.equal(await page.locator('#tab-graph').getAttribute('aria-selected'),'true');
+  await page.click('#reset-workflow');
+  assert.equal(await page.locator('[data-node].is-active').count(),0);
+  await page.click('#show-usage');
+  assert.match(await page.locator('#usage-readout').innerText(),/No models/);
+  await page.click('#show-usage');
+  for(const width of [320,390,768,884,1024,1440]){
+   await page.setViewportSize({width,height:1100});
+   for(const tab of ['bots','graph','evidence']){
+    await page.click('#tab-'+tab);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,tab+' fits '+width);
+    const overflow=await page.locator('#panel-'+tab).evaluate(root=>[...root.querySelectorAll('.app-node,.monitor-card')].some(n=>n.scrollWidth>n.clientWidth+2));
+    assert.equal(overflow,false,'widget text fits '+width);
+   }
   }
-  await page.locator('#story-reset').click();
-  if (process.env.DROGON_WEBSITE_SCREENSHOTS) {
-    const dir = process.env.DROGON_WEBSITE_SCREENSHOTS;
-    await page.screenshot({ path: dir + '/story-desktop.png', fullPage: true, animations: 'disabled' });
-    await page.locator('#tab-dispatch').click();
-    await page.locator('#workspace').screenshot({ path: dir + '/story-dispatch.png', animations: 'disabled' });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.screenshot({ path: dir + '/story-mobile.png', fullPage: true, animations: 'disabled' });
-    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.screenshot({ path: dir + '/story-dark.png', fullPage: true, animations: 'disabled' });
-  }
-  assert.deepEqual(errors, []);
-  console.log('PASS: all seven stages, routing, session prompts, keyboard tabs, verification, recovery limits, approval, autoplay, reset cancellation, five viewport widths, zero images or page errors.');
-} finally { if (browser) await browser.close(); }
+  await page.setViewportSize({width:390,height:1000});await page.click('#tab-graph');
+  if(process.env.DROGON_WEBSITE_SCREENSHOTS)await page.locator('#panel-graph').screenshot({path:join(process.env.DROGON_WEBSITE_SCREENSHOTS,'drogon-real-widgets-mobile.png'),animations:'disabled'});
+  assert.deepEqual(errors,[]);
+  console.log('PASS: source-derived widgets, restored graph animation, pause/reset, failure/recovery, evidence, monitor deduplication, keyboard tabs, six widths, no asset or runtime errors.');
+} finally {
+  await browser?.close();
+  if(child.exitCode===null){const exited=once(child,'exit');child.kill('SIGTERM');await Promise.race([exited,new Promise(r=>setTimeout(r,3000))]);}
+  if(child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await once(child,'exit');}
+  await rm(profile,{recursive:true,force:true});
+  console.log(`Test-owned Chromium PID ${child.pid}: exited (${child.exitCode ?? child.signalCode}).`);
+}
