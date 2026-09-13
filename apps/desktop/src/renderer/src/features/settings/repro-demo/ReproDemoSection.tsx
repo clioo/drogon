@@ -21,6 +21,7 @@ import {
   type ReproPhaseId,
   type ReproPhaseState,
 } from "./repro-demo-plan";
+import { requestReproTour } from "../../../repro-demo-tour";
 import { useReproDemo, type ReproDemoBridge } from "./use-repro-demo";
 
 /** The bridges the demo needs, gathered from the frozen `window.drogon`
@@ -171,7 +172,7 @@ export function ReproDemoSection({
     <SettingsSection
       id="demo"
       title="Demo reproducible"
-      description="Corré la cadena completa con un clic: un bot con un monitor sobre el spec, el cambio que lo despierta, las rondas adversariales del Work Graph, y la evidencia y el costo de lo que corrió. Todo pasa en un workspace desechable que la demo crea para sí misma."
+      description="Corré la cadena completa con un clic: un bot con un monitor sobre el spec, el cambio que lo despierta, las rondas adversariales del Work Graph, y la evidencia y el costo de lo que corrió. Todo pasa en un workspace desechable que la demo crea para sí misma, y cuando empiezan las rondas Drogon te lleva a verlas en el Work Graph."
     >
       <div className="space-y-6">
         <SettingsSubsectionHeader
@@ -264,12 +265,33 @@ export function ReproDemoSection({
               Esta build no expone todos los canales que la demo necesita.
             </span>
           ) : null}
+          {state.workflowId ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="repro-demo-show-orchestration"
+              onClick={() => {
+                if (!state.workspaceId) return;
+                requestReproTour({ kind: "open-work-graph", workspaceId: state.workspaceId });
+                requestReproTour({ kind: "focus-view", view: "graph" });
+              }}
+            >
+              Ver la orquestación
+            </Button>
+          ) : null}
           {state.workspaceId ? (
             <span className="font-mono text-xs text-muted-foreground">
               workspace {state.workspaceId}
             </span>
           ) : null}
         </div>
+
+        <p className="text-xs text-muted-foreground">
+          Al empezar las rondas, Drogon abre el Work Graph de esta corrida y va
+          moviendo su vista — grafo, evidencia y uso — conforme cambian. Volvé a
+          Settings cuando quieras: el panel conserva el estado de la corrida.
+        </p>
 
         <Spotlight active={state.spotlight !== null && state.running} testId="repro-demo-phases">
           <ol className="space-y-1" data-testid="repro-demo-phase-list">

@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { ReproDemoSection } from "./ReproDemoSection";
-import type { ReproDemoBridge } from "./use-repro-demo";
+import { resetReproDemo, type ReproDemoBridge } from "./use-repro-demo";
 
 afterEach(cleanup);
+// The demo's run state outlives this component on purpose (the tour unmounts
+// the panel mid-run), so each case starts from a cleared store.
+beforeEach(() => resetReproDemo());
 
 const ok = <T,>(result: T) => ({ ok: true as const, result });
 

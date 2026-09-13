@@ -534,7 +534,7 @@ async function ensureCore() {
  *  optional in the product since #533, so this resolves it without ever
  *  writing into the developer's installed Drogon: whatever verified copy the
  *  host already has is copied into this run's own data directory. */
-async function resolveRuntime(dataDir) {
+export async function resolveRuntime(dataDir) {
   const candidates = [
     process.env.DROGON_MENTU_RUNTIME,
     path.join(root, "apps/desktop/resources/mentu-runtime", MENTU_LOCK_REVISION, "bin/mentu-recipes"),

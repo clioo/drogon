@@ -12,14 +12,17 @@
 // Modes: --help | --check (read-only) | (default) execute.
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { startAcceptanceProcess } from "./acceptance-process.mjs";
+import { runAcceptanceProcess, startAcceptanceProcess } from "./acceptance-process.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
+import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
+import { resolveRuntime } from "./reproduce-adversarial-run.mjs";
 
 const STAGE_TIMEOUT_MS = 120_000;
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -96,14 +99,54 @@ export async function execute() {
   const electronBinary = appRequire("electron");
   await mkdir(evidenceDir, { recursive: true });
   const fixture = await mkdtemp(path.join(evidenceDir, "repro-demo-"));
-  const dataDir = path.join(fixture, "data");
-  const profileDir = path.join(fixture, "electron");
+  // The daemon's unix socket lives under the data directory, and that path has
+  // a hard length limit: a repository-relative fixture blows past it, so the
+  // disposable world goes to the system temp dir and only the evidence stays
+  // here.
+  const world = await mkdtemp(path.join(tmpdir(), "rpd-"));
+  const dataDir = path.join(world, "data");
+  const profileDir = path.join(world, "electron");
   await mkdir(dataDir, { recursive: true });
   await mkdir(profileDir, { recursive: true });
+  report.world = world;
 
   let desktop = null;
   let browser = null;
+  let daemon = null;
+  let daemonHandle = null;
   try {
+    // The demo talks to the daemon through the app's bridges, so this probe
+    // owns one for its isolated data directory — the same binary this tree
+    // builds, never the developer's running service.
+    const cliPath = path.join(root, "target/debug/drogon-cli");
+    const daemonPath = path.join(root, "target/debug/drogond");
+    // The Work Graph tab is gated on the service advertising `mentu.v1`, which
+    // needs the pinned recipe runtime. Same resolution `make repro` uses: a
+    // verified copy, into this run's own data directory, never the developer's.
+    const runtime = await resolveRuntime(dataDir);
+    report.checks.push(`pinned runtime ${runtime.revision.slice(0, 12)} staged for this fixture`);
+    daemon = startAcceptanceProcess(daemonPath, ["--data-dir", dataDir], {
+      cwd: fixture,
+      stdio: ["ignore", "ignore", "ignore"],
+      env: { ...process.env, DROGON_MENTU_RUNTIME: runtime.path },
+    });
+    const daemonDeadline = Date.now() + 30_000;
+    for (;;) {
+      const answered = await runAcceptanceProcess(
+        cliPath,
+        ["--data-dir", dataDir, "--json", "status"],
+        { timeout: 10_000 },
+      )
+        .then(() => true)
+        .catch(() => false);
+      if (answered) break;
+      if (Date.now() > daemonDeadline) throw new Error("the probe's daemon never answered");
+      await delay(200);
+    }
+    daemonHandle = packagedFixtureDaemon(daemonPath, cliPath, dataDir);
+    await daemonHandle.capture();
+    report.checks.push("the probe owns a daemon on its own data directory");
+
     desktop = startAcceptanceProcess(electronBinary, [appDir, "--remote-debugging-port=0"], {
       stdio: ["ignore", "ignore", "pipe"],
       env: {
@@ -111,6 +154,7 @@ export async function execute() {
         DROGON_DATA_DIR: dataDir,
         DROGON_ELECTRON_PROFILE: profileDir,
         DROGON_BACKGROUND_WINDOW: "1",
+        DROGON_MENTU_RUNTIME: runtime.path,
         ...(process.platform !== "win32" ? { SHELL: "/bin/sh" } : {}),
       },
     });
@@ -204,6 +248,50 @@ export async function execute() {
     await page.screenshot({ path: shot, animations: "disabled" });
     report.screenshots.push(shot);
 
+    // The tour: the panel cannot navigate, so it asks and App answers. The
+    // request names a workspace this window has never listed — exactly what a
+    // run does, since the demo creates its own Quick Session — so this also
+    // proves App reloads its workspaces before navigating. Driving the request
+    // directly proves the seam in seconds; the run itself waits on
+    // cron-cadence monitor ticks and `make repro` covers it end to end.
+    const created = await page.evaluate(async () => {
+      const result = await window.drogon.project.quickSessionCreate({
+        name: "repro-demo-probe",
+      });
+      return result.ok ? result.result.workspaceId : null;
+    });
+    assert.ok(created, "the probe must be able to create its own Quick Session workspace");
+    await page.evaluate((id) => {
+      window.dispatchEvent(
+        new CustomEvent("drogon:repro-demo-tour", {
+          detail: { kind: "open-work-graph", workspaceId: id },
+        }),
+      );
+    }, created);
+    await page.getByTestId("orchestrator-canvas").waitFor();
+    report.checks.push(
+      "the tour leaves Settings and opens the Work Graph of a workspace App had not listed",
+    );
+
+    for (const [view, label] of [
+      ["evidence", "Evidence"],
+      ["usage", "Usage"],
+      ["graph", "Graph"],
+    ]) {
+      await page.evaluate((name) => {
+        window.dispatchEvent(
+          new CustomEvent("drogon:repro-demo-tour", {
+            detail: { kind: "focus-view", view: name },
+          }),
+        );
+      }, view);
+      await page
+        .getByRole("tab", { name: new RegExp(`^${label}`) })
+        .and(page.locator('[data-state="active"]'))
+        .waitFor();
+    }
+    report.checks.push("the tour moves the Work Graph's own view to what changed");
+
     // The background window must still be hidden: a probe never raises it.
     const hidden = await page.evaluate(() => document.visibilityState);
     report.checks.push(`page visibility stayed '${hidden}' (background window)`);
@@ -212,6 +300,17 @@ export async function execute() {
   } finally {
     if (browser) await browser.close().catch(() => {});
     await stopOwned(desktop, report);
+    if (daemonHandle) {
+      const stopped = await daemonHandle
+        .stop()
+        .then(() => "exited (quiescent shutdown, kernel-confirmed)")
+        .catch((error) => `unverifiable: ${error.message}`);
+      report.cleanup.push(`daemon: ${stopped}`);
+      if (!stopped.startsWith("exited")) report.status = "FAILED";
+    } else if (daemon) {
+      await stopOwned(daemon, report);
+    }
+    if (report.status === "PASSED") await rm(world, { recursive: true, force: true });
     report.finishedAt = new Date().toISOString();
     await writeFile(
       path.join(fixture, "report.json"),

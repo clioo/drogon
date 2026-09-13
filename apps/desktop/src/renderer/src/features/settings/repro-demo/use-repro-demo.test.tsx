@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 
 import {
+  resetReproDemo,
   mainNodeFor,
   policyFor,
   releaseInstructions,
@@ -107,6 +108,10 @@ function makeBridge(fakes: Fakes) {
 }
 
 const runtime = { ...DEFAULT_REPRO_RUNTIME, harness: "opencode", model: "fixture/dog-tinder" };
+
+// The run state lives outside React so the tour can unmount the panel; each
+// case therefore starts by clearing it.
+beforeEach(() => resetReproDemo());
 
 describe("the in-app demo run", () => {
   test("arms the watch before the spec exists, then lets the firing release the work", async () => {
@@ -252,6 +257,62 @@ describe("the in-app demo run", () => {
     });
     expect(result.current.state.running).toBe(false);
     expect(result.current.state.workspaceId).toBeNull();
+  });
+});
+
+describe("the guided tour", () => {
+  test("opens the Work Graph when the rounds start, then follows the views", async () => {
+    const clock = fakeClock();
+    const tour: unknown[] = [];
+    const { bridge } = makeBridge({
+      monitorViews: [
+        {
+          monitorId: "mon-1",
+          lastCheckOutcome: "changed",
+          lastEventId: "mev_1",
+          firing: { lastEventId: "mev_1", lastOutcome: "dispatched" },
+        },
+      ],
+      runStates: [{ id: "run-1", status: "passed", steps: [] }],
+    });
+
+    const { result } = renderHook(() =>
+      useReproDemo(bridge, { ...clock, tour: (request) => tour.push(request) }),
+    );
+    await act(async () => {
+      await result.current.run({ runtime, iterations: 1 });
+    });
+
+    // The orchestration is the point: the viewer is taken to the real canvas
+    // once the rounds begin, and the ledgers' own tabs at the end.
+    expect(tour).toEqual([
+      { kind: "open-work-graph", workspaceId: "ws-1" },
+      { kind: "focus-view", view: "graph" },
+      { kind: "focus-view", view: "evidence" },
+      { kind: "focus-view", view: "usage" },
+    ]);
+  });
+
+  test("a run that fails before the rounds never navigates away", async () => {
+    const clock = fakeClock();
+    const tour: unknown[] = [];
+    const { bridge } = makeBridge({ monitorViews: [], runStates: [] });
+    const failing: ReproDemoBridge = {
+      ...bridge,
+      botCreate: async () => ({
+        ok: false as const,
+        error: { code: "invalid_argument", message: "no bot", retryable: false },
+      }),
+    };
+
+    const { result } = renderHook(() =>
+      useReproDemo(failing, { ...clock, tour: (request) => tour.push(request) }),
+    );
+    await act(async () => {
+      await result.current.run({ runtime, iterations: 1 });
+    });
+    expect(tour).toEqual([]);
+    expect(result.current.state.failure).toMatch(/no bot/);
   });
 });
 

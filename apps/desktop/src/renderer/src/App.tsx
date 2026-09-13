@@ -344,6 +344,7 @@ import {
 } from "./theme";
 import type { HarnessAgentDefault, Theme, TerminalGpuAcceleration } from "./settings-store";
 import { SettingsPage } from "./features/settings/SettingsPage";
+import { onReproTour } from "./repro-demo-tour";
 import { SETTINGS_ROUTE_ID } from "./features/settings/settings-route";
 import type { SettingsSectionId } from "./features/settings/settings-sections";
 import { StatusBar } from "./components/status-bar/StatusBar";
@@ -4242,6 +4243,55 @@ export function App() {
     });
     return off;
   }, []);
+  // Settings → Demo reproducible asks to SHOW the orchestration once its run
+  // reaches the rounds: the panel cannot select a workspace or open a tab, so
+  // it requests and App answers — the same steps the relayed `mentu.open`
+  // above takes, plus a workspace reload, because the demo created its own
+  // Quick Session workspace behind this window's list. Advisory: a workspace
+  // this window does not know, or a service without the graph capability,
+  // simply leaves the viewer where they are.
+  useEffect(() => {
+    return onReproTour((request) => {
+      if (request.kind !== "open-work-graph") return;
+      const workspaceId = request.workspaceId;
+      void (async () => {
+        // The reload updates App's own list for the sidebar, but its state has
+        // not re-rendered by the time this continues — so membership is read
+        // from the service's answer, not from a ref that is still one render
+        // behind.
+        if (!workspacesRef.current.some((item) => item.id === workspaceId))
+          await reloadWorkspaces();
+        const listed = await window.drogon.workspaces().catch(() => null);
+        const known = listed?.ok
+          ? listed.result.workspaces.some((item) => item.id === workspaceId)
+          : workspacesRef.current.some((item) => item.id === workspaceId);
+        if (!known) return;
+        if (!mentuGateRef.current) return;
+        const stored = loadTabStripState(window.localStorage, workspaceId);
+        if (!stored.mentu)
+          saveTabStripState(window.localStorage, workspaceId, {
+            ...stored,
+            mentu: true,
+          });
+        if (selectedRef.current !== workspaceId) {
+          pendingMentuOpenRef.current = workspaceId;
+          setRoute(null);
+          setSelected(workspaceId);
+          return;
+        }
+        const current = tabStripRef.current;
+        if (!current.mentu) {
+          const next = { ...current, mentu: true };
+          tabStripRef.current = next;
+          setTabStrip(next);
+        }
+        setRoute(null);
+        setActiveBrowserTabId(null);
+        setActiveEditorTabId(null);
+        setActiveMentuTab(true);
+      })();
+    });
+  }, [reloadWorkspaces]);
   // Completes a relayed `mentu.open` for another workspace: the strip load
   // for that workspace has landed and the membership is there, so the
   // selection can be applied without racing the workspace-switch reset.
