@@ -9,7 +9,7 @@
 //! separately-grouped step shells) with a SIGKILL escalation when the tree
 //! refuses to die.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -218,46 +218,102 @@ enum WaitOutcome {
 }
 
 fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
-    let declared_seconds = serde_json::from_slice::<serde_json::Value>(recipe_bytes)
+    let Some(steps) = serde_json::from_slice::<serde_json::Value>(recipe_bytes)
         .ok()
-        .and_then(|recipe| {
-            recipe
-                .get("steps")
-                .and_then(serde_json::Value::as_array)
-                .map(|steps| {
-                    steps.iter().fold(0_u64, |total, step| {
-                        total.saturating_add(
-                            step.get("timeout")
-                                .and_then(serde_json::Value::as_u64)
-                                .unwrap_or(0),
-                        )
-                    })
-                })
-        })
-        .unwrap_or(0);
+        .and_then(|recipe| recipe.get("steps")?.as_array().cloned())
+        .filter(|steps| !steps.is_empty())
+    else {
+        return DEFAULT_RUN_TIMEOUT;
+    };
+    let mut declared_seconds = 0_u64;
+    let mut every_step_declared = true;
+    for step in steps {
+        let declared = step
+            .get("timeout")
+            .and_then(serde_json::Value::as_u64)
+            .filter(|seconds| *seconds > 0);
+        every_step_declared &= declared.is_some();
+        declared_seconds = declared_seconds.saturating_add(declared.unwrap_or(0));
+    }
     if declared_seconds == 0 {
         return DEFAULT_RUN_TIMEOUT;
     }
-    Duration::from_secs(declared_seconds)
+    let declared = Duration::from_secs(declared_seconds)
         .saturating_add(DECLARED_TIMEOUT_GRACE)
-        .max(DEFAULT_RUN_TIMEOUT)
-        .min(MAX_RUN_TIMEOUT)
+        .min(MAX_RUN_TIMEOUT);
+    if every_step_declared {
+        declared
+    } else {
+        declared.max(DEFAULT_RUN_TIMEOUT)
+    }
+}
+
+fn read_original_snapshot_recipe(workspace_root: &Path, run_id: &str) -> Option<Vec<u8>> {
+    if !valid_run_id(run_id) {
+        return None;
+    }
+    let dir = snapshot_root(workspace_root).join(run_id);
+    let manifest_path = dir.join("manifest.json");
+    let manifest_metadata = fs::symlink_metadata(&manifest_path).ok()?;
+    if !manifest_metadata.is_file() || manifest_metadata.len() > SNAPSHOT_MAX_RECIPE_BYTES {
+        return None;
+    }
+    let manifest =
+        serde_json::from_slice::<serde_json::Value>(&fs::read(manifest_path).ok()?).ok()?;
+    let recorded_path = PathBuf::from(manifest.get("recipePath")?.as_str()?);
+    let file_name = recorded_path.file_name()?;
+    let recipe_path = dir.join(file_name);
+    if recorded_path != recipe_path {
+        return None;
+    }
+    let metadata = fs::symlink_metadata(&recipe_path).ok()?;
+    if !metadata.is_file() || metadata.len() > SNAPSHOT_MAX_RECIPE_BYTES {
+        return None;
+    }
+    let recipe_bytes = fs::read(recipe_path).ok()?;
+    let recorded_hash = manifest.get("contentHash")?.as_str()?;
+    (sha256_hex(&recipe_bytes) == recorded_hash).then_some(recipe_bytes)
+}
+
+fn read_retry_chain_snapshot(
+    db: &Arc<Mutex<rusqlite::Connection>>,
+    workspace_root: &Path,
+    workspace_id: &str,
+    run_id: &str,
+) -> Option<Vec<u8>> {
+    let mut current = run_id.to_string();
+    let mut visited = HashSet::new();
+    while visited.len() < 64 && visited.insert(current.clone()) {
+        if let Some(bytes) = read_original_snapshot_recipe(workspace_root, &current) {
+            return Some(bytes);
+        }
+        let prior = storage::get_run(&db.lock().unwrap(), &current).ok()??;
+        if prior.workspace_id != workspace_id {
+            return None;
+        }
+        current = prior.retry_of?;
+    }
+    None
 }
 
 fn invocation_run_timeout(
     invocation: &Invocation<'_>,
     snapshot: Option<&StagedSnapshot>,
+    retry_recipe: Option<&[u8]>,
 ) -> Duration {
     if let Some(snapshot) = snapshot {
         return recipe_run_timeout(&snapshot.recipe_bytes);
     }
     match invocation {
-        Invocation::Run { recipe_path } => fs::read(recipe_path)
-            .map(|bytes| recipe_run_timeout(&bytes))
+        // A fresh run without approved staged bytes is a legacy caller. Never
+        // derive its watchdog from a second read of the mutable recipe path.
+        Invocation::Run { .. } => DEFAULT_RUN_TIMEOUT,
+        // Resume and retry re-enter runtime-side state. Reuse the exact
+        // approved bytes retained for the original run; an absent or changed
+        // snapshot falls back to the historical bounded default, never 24 h.
+        Invocation::Resume { .. } | Invocation::RetryStep { .. } => retry_recipe
+            .map(recipe_run_timeout)
             .unwrap_or(DEFAULT_RUN_TIMEOUT),
-        // Runtime-side state owns the original recipe on a resume/retry. Keep
-        // the daemon bounded without reinterpreting mutable historical files.
-        Invocation::Resume { .. } | Invocation::RetryStep { .. } => MAX_RUN_TIMEOUT,
     }
 }
 
@@ -372,7 +428,18 @@ pub fn launch_run(
             "Snapshots ride fresh runs; retry resumes runtime-side state.",
         ));
     }
-    let run_timeout = invocation_run_timeout(&invocation, snapshot.as_ref());
+    let retry_recipe = if matches!(
+        &invocation,
+        Invocation::Resume { .. } | Invocation::RetryStep { .. }
+    ) {
+        retry_of.as_deref().and_then(|run_id| {
+            read_retry_chain_snapshot(&db, &workspace_root, &workspace_id, run_id)
+        })
+    } else {
+        None
+    };
+    let run_timeout =
+        invocation_run_timeout(&invocation, snapshot.as_ref(), retry_recipe.as_deref());
     let internal_id = uuid::Uuid::new_v4().to_string();
     let started_at = crate::now_rfc3339();
 
@@ -1744,6 +1811,18 @@ mod timeout_tests {
     }
 
     #[test]
+    fn short_explicit_and_partially_undeclared_budgets_stay_safe() {
+        assert_eq!(
+            recipe_run_timeout(br#"{"steps":[{"timeout":30}]}"#),
+            Duration::from_secs(30) + DECLARED_TIMEOUT_GRACE
+        );
+        assert_eq!(
+            recipe_run_timeout(br#"{"steps":[{"timeout":30},{}]}"#),
+            DEFAULT_RUN_TIMEOUT
+        );
+    }
+
+    #[test]
     fn absent_and_hostile_budgets_stay_bounded() {
         assert_eq!(
             recipe_run_timeout(br#"{"steps":[{}]}"#),
@@ -1754,6 +1833,85 @@ mod timeout_tests {
             recipe_run_timeout(&serde_json::to_vec(&hostile).unwrap()),
             MAX_RUN_TIMEOUT
         );
+    }
+
+    #[test]
+    fn resume_and_retry_reuse_the_original_approved_budget() {
+        let workspace = tempfile::tempdir().unwrap();
+        let original_run_id = "original-run";
+        let dir = snapshot_root(workspace.path()).join(original_run_id);
+        fs::create_dir_all(&dir).unwrap();
+        let recipe_path = dir.join("approved.json");
+        let recipe_bytes = br#"{"steps":[{"timeout":45}]}"#;
+        fs::write(&recipe_path, recipe_bytes).unwrap();
+        fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "recipePath": recipe_path,
+                "contentHash": sha256_hex(recipe_bytes),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let resume = Invocation::Resume {
+            mentu_run_id: "runtime-run",
+        };
+        let approved = read_original_snapshot_recipe(workspace.path(), original_run_id).unwrap();
+        assert_eq!(
+            invocation_run_timeout(&resume, None, Some(&approved)),
+            Duration::from_secs(45) + DECLARED_TIMEOUT_GRACE
+        );
+        assert_eq!(
+            invocation_run_timeout(&resume, None, None),
+            DEFAULT_RUN_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn retry_chain_recovers_the_first_runs_snapshot() {
+        let workspace = tempfile::tempdir().unwrap();
+        let dir = snapshot_root(workspace.path()).join("original");
+        fs::create_dir_all(&dir).unwrap();
+        let recipe_path = dir.join("approved.json");
+        let recipe_bytes = br#"{"steps":[{"timeout":75}]}"#;
+        fs::write(&recipe_path, recipe_bytes).unwrap();
+        fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "recipePath": recipe_path,
+                "contentHash": sha256_hex(recipe_bytes),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        let tx = conn.transaction().unwrap();
+        storage::apply_pending_steps_in_tx(&tx).unwrap();
+        tx.commit().unwrap();
+        for (id, retry_of) in [
+            ("original", None),
+            ("retry-one", Some("original")),
+            ("retry-two", Some("retry-one")),
+        ] {
+            storage::insert_run(
+                &conn,
+                &storage::NewRun {
+                    id,
+                    workspace_id: "workspace",
+                    recipe_id: "recipe",
+                    approval_id: "approval",
+                    started_at: "2026-09-13T00:00:00Z",
+                    retry_of,
+                },
+            )
+            .unwrap();
+        }
+        let db = Arc::new(Mutex::new(conn));
+        let recovered =
+            read_retry_chain_snapshot(&db, workspace.path(), "workspace", "retry-two").unwrap();
+        assert_eq!(recovered, recipe_bytes);
     }
 }
 

@@ -29,7 +29,7 @@ export function WorktreeWorkflow({
   workspaceId: string;
   bridge: GraphBridge | null;
 }) {
-  const { run, error } = useOrchestratorRun(bridge, workspaceId, 3000);
+  const { run, error } = useOrchestratorRun(bridge, workspaceId, 3000, 30_000);
   const labelId = useId();
   const [expanded, setExpanded] = useState(false);
   if (!run || run.workspaceId !== workspaceId) return null;
@@ -53,7 +53,6 @@ export function WorktreeWorkflow({
       </button>
       <div
         id={labelId}
-        hidden={!expanded}
         className={
           expanded ? "flex min-w-0 flex-col gap-1 px-2 py-1" : "hidden"
         }

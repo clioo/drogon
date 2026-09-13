@@ -15,6 +15,7 @@
 import { Fragment, useState, useSyncExternalStore } from "react";
 import { MoreHorizontal, StickyNote } from "lucide-react";
 import { cn } from "../../lib/utils";
+import type { GraphBridge } from "../../../../shared/graph-contract";
 import type { Session, Worktree } from "../../../../shared/session-contract";
 import { AgentStateIcon } from "./AgentStateIcon";
 import { HarnessMenuIcon } from "./TabCreateMenuIcons";
@@ -32,7 +33,6 @@ import { WorktreeTitleInlineRename } from "./WorktreeTitleInlineRename";
 import { WorktreeCardMetaBadges } from "./WorktreeCardMetaBadges";
 import { WorktreeCardLinkedMetadata } from "./WorktreeCardLinkedMetadata";
 import { WorktreeWorkflow } from "./WorktreeWorkflow";
-import { windowGraphBridge } from "../../work-graph-mount";
 import {
   cardIdentitySession,
   formatWorktreeCardSummaryLine,
@@ -161,6 +161,7 @@ export function WorktreeCard({
   ports = [],
   issueLinks = [],
   agentActivityDisplayMode = "full",
+  graphBridge = null,
 }: {
   worktree: Worktree;
   workspaces: Workspace[];
@@ -205,6 +206,8 @@ export function WorktreeCard({
   agentActivityDisplayMode?: "compact" | "full";
   ports?: readonly number[];
   issueLinks?: readonly WorktreeIssueLink[];
+  /** App-owned graph bridge, already gated by the live daemon capability. */
+  graphBridge?: GraphBridge | null;
 }) {
   const [beginEditing, setBeginEditing] = useState(false);
   const attached = sessions.filter(
@@ -388,7 +391,7 @@ export function WorktreeCard({
           <WorktreeCardLinkedMetadata worktree={worktree} properties={showProperties} ports={ports} issueLinks={issueLinks} />
           <WorktreeWorkflow
             workspaceId={worktree.workspaceId}
-            bridge={typeof window !== "undefined" && window.drogon ? windowGraphBridge() : null}
+            bridge={graphBridge}
           />
           {/* Nested session rows (the fork's WorktreeCardAgents inline list):
             one row per session, outside the select button so rows stay real

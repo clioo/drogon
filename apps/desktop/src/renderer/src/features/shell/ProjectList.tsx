@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { DropdownMenu, Tooltip } from "radix-ui";
+import type { GraphBridge } from "../../../../shared/graph-contract";
 import type {
   Project,
   Session,
@@ -407,6 +408,7 @@ export function ProjectList({
   onSubmitRemove,
   onSubmitRemoveProject,
   onSubmitRename,
+  graphBridge = null,
 }: {
   groups: ProjectGroup[];
   workspaces: Workspace[];
@@ -443,6 +445,7 @@ export function ProjectList({
   /** Removes the project registration (never files); resolves an error verbatim, or null. */
   onSubmitRemoveProject: (project: Project) => Promise<string | null>;
   onSubmitRename: (worktree: Worktree, name: string) => Promise<string | null>;
+  graphBridge?: GraphBridge | null;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -1061,6 +1064,7 @@ export function ProjectList({
               onRemoveWorktree={handleRemoveWorktree}
               onRenameWorktree={(worktree, name) => onSubmitRename(worktree, name)}
               onRemoveProject={handleRemoveProject}
+              graphBridge={graphBridge}
             />
           ),
         )
@@ -1097,6 +1101,7 @@ export function ProjectList({
             onRenameWorktree={(worktree, name) => onSubmitRename(worktree, name)}
             onOpenProjectSettings={onOpenProjectSettings}
             onRemoveProject={handleRemoveProject}
+            graphBridge={graphBridge}
           />
         ))
       )}
@@ -1205,6 +1210,7 @@ function EntryGroupRow({
   showBranch = true,
   showPr = true,
   cardLayout = "comfortable",
+  graphBridge = null,
 }: {
   group: WorkspaceEntryGroup;
   issueLinksByWorktree?: ReadonlyMap<string, readonly WorktreeIssueLink[]>;
@@ -1229,6 +1235,7 @@ function EntryGroupRow({
   showBranch?: boolean;
   showPr?: boolean;
   cardLayout?: "comfortable" | "compact";
+  graphBridge?: GraphBridge | null;
 }) {
   return (
     <div className="shell-project">
@@ -1271,6 +1278,7 @@ function EntryGroupRow({
                 ports={portsByWorkspaceId?.get(worktree.workspaceId)}
                 issueLinks={issueLinksByWorktree?.get(worktree.id)}
                 pr={resolveCardPullRequest(worktree, pullsByProjectId?.get(project.id) ?? [])}
+                graphBridge={graphBridge}
                 {...cardOptions}
                 onRemove={
                   !worktreesAvailable
@@ -1323,6 +1331,7 @@ function ProjectRow({
   showBranch = true,
   showPr = true,
   cardLayout = "comfortable",
+  graphBridge = null,
 }: {
   group: ProjectGroup;
   issueLinksByWorktree?: ReadonlyMap<string, readonly WorktreeIssueLink[]>;
@@ -1376,6 +1385,7 @@ function ProjectRow({
   /** Workspace options "Card layout": toggles a density class on each
    *  card's wrapper only -- WorktreeCard's own markup is untouched. */
   cardLayout?: "comfortable" | "compact";
+  graphBridge?: GraphBridge | null;
 }) {
   const project: Project = group.project;
   // Kind decides the control's copy, never its presence (Orca's
@@ -1526,6 +1536,7 @@ function ProjectRow({
                   ports={portsByWorkspaceId?.get(worktree.workspaceId)}
                   issueLinks={issueLinksByWorktree?.get(worktree.id)}
                   pr={resolveCardPullRequest(worktree, pullsByProjectId?.get(project.id) ?? [])}
+                  graphBridge={graphBridge}
                   {...cardOptions}
                   onRemove={
                     !worktreesAvailable

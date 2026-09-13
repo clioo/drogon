@@ -9,6 +9,7 @@ export function useOrchestratorRun(
   bridge: GraphBridge | null,
   workspaceId: string,
   pollMs = 1000,
+  inactivePollMs = pollMs,
 ) {
   const [run, setRun] = useState<OrchestratorRun | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +27,7 @@ export function useOrchestratorRun(
     if (!bridge?.graphOrchestratorStatus) return;
     const poll = async () => {
       const version = mutation.current;
+      let nextPollMs = pollMs;
       try {
         const result = await bridge?.graphOrchestratorStatus?.({ workspaceId });
         if (
@@ -35,21 +37,28 @@ export function useOrchestratorRun(
           version === mutation.current
         ) {
           if (result.ok) {
-            setRun(result.result.run);
+            const observed = result.result.run;
+            setRun(observed);
             setError(null);
+            if (
+              !observed ||
+              (observed.status !== "running" && observed.status !== "stopping")
+            ) {
+              nextPollMs = inactivePollMs;
+            }
           } else setError(result.error.message);
         }
       } catch (reason) {
         if (!cancelled) setError(String(reason));
       }
-      if (!cancelled) timer = setTimeout(() => void poll(), pollMs);
+      if (!cancelled) timer = setTimeout(() => void poll(), nextPollMs);
     };
     void poll();
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [bridge, workspaceId, pollMs]);
+  }, [bridge, workspaceId, pollMs, inactivePollMs]);
   const start = useCallback(
     async (main: DesignableIntentNode) => {
       if (!bridge?.graphOrchestratorStart) return;

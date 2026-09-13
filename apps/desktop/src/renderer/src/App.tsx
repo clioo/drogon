@@ -4602,6 +4602,7 @@ export function App() {
             onOpenPalette={openCommandPalette}
             showTasksButton={appearanceFlags.tasksButtonVisible}
             showAutomationsButton={appearanceFlags.automationsButtonVisible}
+            graphBridge={graphGatedBridge}
             groups={projectGroups}
             workspaces={workspaces}
             // R16-N: split second panes are not sidebar rows either. This is
