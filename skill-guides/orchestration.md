@@ -205,6 +205,27 @@ report rather than inferring success from `terminal wait --for exited`.
 Liveness verdicts on the underlying sessions stay `live`,
 `unverifiable` or `exited`, and loss of contact never proves exit.
 
+## Validation lanes
+
+The committed CI-safe journey uses shell fixtures only:
+`node scripts/accept-orchestration-e2e.mjs`. It proves the daemon/CLI boundary,
+policy selection, failover, concurrent attribution, ask/reply/resume, honest
+missing reports, and Claude/OpenCode context delivery without provider
+inference.
+
+Real Pi/Luna dogfood is intentionally opt-in and never runs in CI:
+
+```text
+DROGON_E2E_REAL_HARNESS=1 node scripts/e2e-orchestration-real.mjs
+```
+
+That run uses only `pi --provider openai-codex --model gpt-5.6-luna
+--thinking low`, disposable Drogon data/profile directories, a background
+window, bounded redacted evidence, and identity-scoped process cleanup. It
+must report model confusion rather than turning a claimed PTY line into a
+worker completion. Real Claude/OpenCode inference is outside the approved
+model lane; their adapter delivery remains covered by the fixture journey.
+
 ## Next Action
 
 Confirm `drogon-cli status --json` unless already checked this turn, then

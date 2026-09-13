@@ -118,9 +118,12 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
             "- **Mode: DELEGATE (Adversarial testing is mutually exclusive and OFF).** Act only \
              as planner and director; do not implement the task yourself. Read `.drogon` first, \
              split the task into independent depth-one children, and supervise their results. \
-             Write declared intent nodes with `drogon-cli graph write-intent --workspace \
-             {workspace_id} --file graph-intent.json` and launch them through the approved \
-             runtime policy. Children must not delegate further. No automatic tester is added.\n"
+             Use `drogon-cli orchestration run-create`, `task-create`, and `worker-start` with no \
+             fresh runtime flags so the approved provider/model policy selects each child; \
+             observe reports with `orchestration check` and `worker-show`. Children must not \
+             delegate further. No automatic tester is added. Authored graph nodes may still use \
+             the separate `graph run-node-failover` verb; it is not a substitute for a native \
+             orchestration worker task.\n"
         ));
     } else {
         out.push_str(
@@ -159,11 +162,13 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
                 })
                 .unwrap_or_default();
             out.push_str(&format!(
-                "- **Approved runtimes, in failover order:** {listed}. Launch a subagent node \
-                 through that exact order with `drogon-cli graph run-node-failover --workspace \
-                 {workspace_id} --node <NODE_ID> --follow`; it tries each approved runtime and \
-                 only reaches the fallback once every approved runtime has failed. The result \
-                 names the runtime that actually ran, never a guess.{fallback_text}\n"
+                "- **Approved runtimes, in failover order:** {listed}. For native delegated \
+                 work, use `drogon-cli orchestration worker-start --task <TASK_ID> --workspace \
+                 {workspace_id}` without fresh runtime flags; it tries each approved runtime \
+                 and only reaches the fallback once every approved runtime has failed. The \
+                 result names the provider/model that actually ran, never a guess.{fallback_text} \
+                 Authored graph nodes use the separate `drogon-cli graph run-node-failover` \
+                 verb.\n"
             ));
         }
     }
@@ -355,16 +360,23 @@ mod tests {
     }
 
     #[test]
-    fn delegate_on_names_the_real_write_intent_verb() {
-        let rendered = render_policy_section("ws-1", &policy_delegate_on());
+    fn delegate_on_names_native_orchestration_verbs() {
+        let policy = GraphPolicy {
+            delegate: true,
+            approved_runtimes: vec![GraphRuntimeRef {
+                harness: "pi".into(),
+                model: "gpt-5.6-luna".into(),
+                provider: Some("openai-codex".into()),
+            }],
+            ..GraphPolicy::default()
+        };
+        let rendered = render_policy_section("ws-1", &policy);
         assert!(rendered.contains("Mode: DELEGATE"));
         assert!(rendered.contains("do not implement the task yourself"));
         assert!(rendered.contains("Children must not delegate further"));
-        assert!(
-            rendered.contains(
-                "drogon-cli graph write-intent --workspace ws-1 --file graph-intent.json"
-            )
-        );
+        assert!(rendered.contains("drogon-cli orchestration run-create"));
+        assert!(rendered.contains("drogon-cli orchestration worker-start"));
+        assert!(rendered.contains("drogon-cli graph run-node-failover"));
     }
 
     #[test]
@@ -429,7 +441,11 @@ mod tests {
         };
         let rendered = render_policy_section("ws-1", &policy);
         assert!(rendered.contains("codex/gpt-5.3-codex, opencode/claude-sonnet-4"));
-        assert!(rendered.contains("drogon-cli graph run-node-failover --workspace ws-1"));
+        assert!(
+            rendered.contains(
+                "drogon-cli orchestration worker-start --task <TASK_ID> --workspace ws-1"
+            )
+        );
     }
 
     /// The property this whole module exists to guarantee: every
@@ -449,11 +465,15 @@ mod tests {
             ..GraphPolicy::default()
         };
         let rendered = render_policy_section("ws-1", &policy);
-        let guide = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../skill-guides/drogon-cli.md"
-        ))
-        .expect("bundled drogon-cli guide source beside the crate");
+        let guide_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../skill-guides/");
+        let guide = ["drogon-cli.md", "orchestration.md"]
+            .into_iter()
+            .map(|name| {
+                std::fs::read_to_string(format!("{guide_root}{name}"))
+                    .expect("bundled guide source beside the crate")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         let collapse =
             |text: &str| -> String { text.split_whitespace().collect::<Vec<_>>().join(" ") };
         let guide_corpus = collapse(&guide);
