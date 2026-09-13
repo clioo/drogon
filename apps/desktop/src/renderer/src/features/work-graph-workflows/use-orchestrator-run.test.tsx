@@ -136,12 +136,13 @@ it("refreshes instead of regressing peers to a delayed mutation snapshot", async
     updatedAt: "2026-09-13T00:00:02Z",
   };
   let current = older;
+  let holdStatus = false;
   let finishStart: ((value: unknown) => void) | undefined;
   const bridge = {
-    graphOrchestratorStatus: vi.fn(async () => ({
-      ok: true,
-      result: { run: current },
-    })),
+    graphOrchestratorStatus: vi.fn(async () => {
+      if (holdStatus) await new Promise(() => {});
+      return { ok: true, result: { run: current } };
+    }),
     graphOrchestratorStart: vi.fn(
       () =>
         new Promise((resolve) => {
@@ -152,6 +153,7 @@ it("refreshes instead of regressing peers to a delayed mutation snapshot", async
   const controller = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
   const observer = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
   await waitFor(() => expect(observer.result.current.run?.phase).toBe("main"));
+  expect(controller.result.current.run?.phase).toBe("main");
   let launch: Promise<void>;
   act(() => {
     launch = controller.result.current.start(main);
@@ -160,13 +162,12 @@ it("refreshes instead of regressing peers to a delayed mutation snapshot", async
   await waitFor(() =>
     expect(observer.result.current.run?.phase).toBe("review"),
   );
+  holdStatus = true;
   await act(async () => {
     finishStart?.({ ok: true, result: { run: older } });
     await launch;
   });
-  await waitFor(() =>
-    expect(observer.result.current.run?.phase).toBe("review"),
-  );
+  expect(controller.result.current.run?.phase).toBe("review");
 });
 
 it("does not regress the controller to a stale non-null mutation reply", async () => {

@@ -301,9 +301,6 @@ fn parsed_recipe_budget(recipe_bytes: &[u8]) -> Option<super::recipe::RecipeBudg
 }
 
 fn bounded_declared_timeout(declared: Duration, every_step_declared: bool) -> Duration {
-    if declared.is_zero() {
-        return DEFAULT_RUN_TIMEOUT;
-    }
     let declared = declared
         .saturating_add(DECLARED_TIMEOUT_GRACE)
         .min(MAX_RUN_TIMEOUT);
@@ -321,7 +318,12 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
     // Compound, pipeline and parallel recipes resolve child recipe files at
     // runtime. Their nested timing declarations are not part of the approved
     // parent bytes, so only the hard outer cap can conservatively cover them.
-    if recipe.has_recipe_nodes {
+    if recipe.has_recipe_nodes
+        || recipe
+            .steps
+            .iter()
+            .any(|step| step.timeout_seconds.is_none())
+    {
         return MAX_RUN_TIMEOUT;
     }
     let run_hooks = repeated_runtime_process(
@@ -2075,6 +2077,18 @@ mod timeout_tests {
     }
 
     #[test]
+    fn explicitly_unbounded_steps_keep_the_hard_outer_cap() {
+        assert_eq!(
+            recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":0}]}"#),
+            MAX_RUN_TIMEOUT
+        );
+        assert_eq!(
+            recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":-1}]}"#),
+            MAX_RUN_TIMEOUT
+        );
+    }
+
+    #[test]
     fn child_recipe_graphs_keep_the_hard_outer_cap() {
         let recipe = br#"{
             "type": "compound",
@@ -2198,6 +2212,25 @@ mod timeout_tests {
             invocation_run_timeout(&resume, None, None),
             DEFAULT_RUN_TIMEOUT
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn snapshot_reader_rejects_windows_reparse_points() {
+        use std::os::windows::fs::{symlink_dir, symlink_file};
+
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("recipe.json");
+        fs::write(&file, b"{}").unwrap();
+        let file_link = root.path().join("recipe-link.json");
+        symlink_file(&file, &file_link).unwrap();
+        assert!(read_snapshot_file(&file_link, SNAPSHOT_MAX_RECIPE_BYTES).is_none());
+
+        let directory = root.path().join("snapshot");
+        fs::create_dir(&directory).unwrap();
+        let directory_link = root.path().join("snapshot-link");
+        symlink_dir(&directory, &directory_link).unwrap();
+        assert!(!is_plain_snapshot_directory(&directory_link));
     }
 
     #[cfg(unix)]
