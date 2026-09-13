@@ -36,6 +36,11 @@ const DECLARED_TIMEOUT_GRACE: Duration = Duration::from_secs(60);
 const VERIFY_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const HOOK_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 const CLOUD_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const GIT_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+const GIT_DIFF_TIMEOUT: Duration = Duration::from_secs(20);
+const GIT_ADD_TIMEOUT: Duration = Duration::from_secs(30);
+const GIT_COMMIT_TIMEOUT: Duration = Duration::from_secs(60);
+const PI_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 const RUNTIME_PROCESS_TEARDOWN: Duration = Duration::from_secs(4);
 /// A malformed or hostile recipe cannot turn the daemon's safety watchdog off.
 const MAX_RUN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
@@ -229,6 +234,21 @@ fn repeated_runtime_process(timeout: Duration, count: u64) -> Duration {
         .saturating_mul(count.try_into().unwrap_or(u32::MAX))
 }
 
+fn workspace_baseline_budget() -> Duration {
+    // repository root, HEAD and porcelain status are three sequential probes.
+    repeated_runtime_process(GIT_PROBE_TIMEOUT, 3)
+}
+
+fn git_finalize_budget() -> Duration {
+    // Repository root + post-step baseline + optional quarantine diff, add,
+    // commit and final HEAD. Branches that skip work are shorter than this.
+    repeated_runtime_process(GIT_PROBE_TIMEOUT, 2)
+        .saturating_add(workspace_baseline_budget())
+        .saturating_add(repeated_runtime_process(GIT_DIFF_TIMEOUT, 1))
+        .saturating_add(repeated_runtime_process(GIT_ADD_TIMEOUT, 1))
+        .saturating_add(repeated_runtime_process(GIT_COMMIT_TIMEOUT, 1))
+}
+
 fn step_run_budget(
     step: &super::recipe::RecipeStepBudget,
     recipe: &super::recipe::RecipeBudget,
@@ -237,8 +257,26 @@ fn step_run_budget(
     let attempts = step.max_retries.saturating_add(1);
     let attempt_budget =
         repeated_runtime_process(Duration::from_secs(timeout.unwrap_or(0)), attempts);
+    let pi_preflight = if step.pi_preflight {
+        // Pi checks both the Pi and Node versions before every attempt.
+        repeated_runtime_process(PI_VERSION_TIMEOUT, attempts.saturating_mul(2))
+    } else {
+        Duration::ZERO
+    };
     let backoff = Duration::from_millis(step.retry_backoff_ms.saturating_mul(step.max_retries));
     let verification = repeated_runtime_process(VERIFY_COMMAND_TIMEOUT, step.verify_commands);
+    let bookkeeping = workspace_baseline_budget()
+        .saturating_mul(2)
+        .saturating_add(if step.verify_git_clean {
+            workspace_baseline_budget()
+        } else {
+            Duration::ZERO
+        })
+        .saturating_add(if step.expected_changes {
+            git_finalize_budget()
+        } else {
+            Duration::ZERO
+        });
     let terminal_hooks = recipe.after_step_hooks.max(recipe.on_error_hooks);
     let hooks = repeated_runtime_process(
         HOOK_COMMAND_TIMEOUT,
@@ -246,8 +284,10 @@ fn step_run_budget(
     );
     (
         attempt_budget
+            .saturating_add(pi_preflight)
             .saturating_add(backoff)
             .saturating_add(verification)
+            .saturating_add(bookkeeping)
             .saturating_add(hooks),
         timeout.is_some(),
     )
@@ -300,7 +340,11 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
     } else {
         Duration::ZERO
     };
-    let mut declared = run_hooks.saturating_add(cloud_requests);
+    // Fresh runs take one baseline before any steps. Resume/retry do not, but
+    // retaining this bounded allowance is safer than consulting mutable state.
+    let mut declared = run_hooks
+        .saturating_add(cloud_requests)
+        .saturating_add(workspace_baseline_budget());
     let mut every_step_declared = true;
     for step in &recipe.steps {
         let (step_budget, is_declared) = step_run_budget(step, &recipe);
@@ -1929,7 +1973,7 @@ mod timeout_tests {
                     + crate::graph::compiler::SHELL_STEP_TIMEOUT_SECONDS
                     + (2 * RUNTIME_PROCESS_TEARDOWN.as_secs())
                     + DECLARED_TIMEOUT_GRACE.as_secs()
-            )
+            ) + workspace_baseline_budget().saturating_mul(5)
         );
         assert!(
             timeout > Duration::from_secs(crate::graph::compiler::AGENT_STEP_TIMEOUT_SECONDS),
@@ -1941,13 +1985,17 @@ mod timeout_tests {
     fn short_explicit_and_partially_undeclared_budgets_stay_safe() {
         assert_eq!(
             recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":30}]}"#),
-            Duration::from_secs(30) + RUNTIME_PROCESS_TEARDOWN + DECLARED_TIMEOUT_GRACE
+            Duration::from_secs(30)
+                + RUNTIME_PROCESS_TEARDOWN
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
         );
         assert_eq!(
             recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":30},{"label":"verify"}]}"#),
             Duration::from_secs(30 + 30 * 60)
                 + (2 * RUNTIME_PROCESS_TEARDOWN)
                 + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(5)
         );
     }
 
@@ -1957,7 +2005,10 @@ mod timeout_tests {
             br#"{"steps":[{"label":"main","timeout":30,"max_retries":2,"retry_backoff_ms":2500}]}"#;
         assert_eq!(
             recipe_run_timeout(recipe),
-            Duration::from_secs(95) + (3 * RUNTIME_PROCESS_TEARDOWN) + DECLARED_TIMEOUT_GRACE
+            Duration::from_secs(95)
+                + (3 * RUNTIME_PROCESS_TEARDOWN)
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
         );
     }
 
@@ -1977,7 +2028,10 @@ mod timeout_tests {
                 "verify": {"commands": ["one", "two"]}
             }]
         }"#;
-        assert_eq!(recipe_run_timeout(recipe), Duration::from_secs(1_322));
+        assert_eq!(
+            recipe_run_timeout(recipe),
+            Duration::from_secs(1_322) + workspace_baseline_budget().saturating_mul(3)
+        );
     }
 
     #[test]
@@ -1990,7 +2044,10 @@ mod timeout_tests {
             "steps": steps,
         }))
         .unwrap();
-        assert_eq!(recipe_run_timeout(&recipe), Duration::from_secs(380));
+        assert_eq!(
+            recipe_run_timeout(&recipe),
+            Duration::from_secs(380) + workspace_baseline_budget().saturating_mul(41)
+        );
 
         let local_only = br#"{
             "cloud": {"enabled": false, "evaluate_steps": true},
@@ -1998,8 +2055,31 @@ mod timeout_tests {
         }"#;
         assert_eq!(
             recipe_run_timeout(local_only),
-            Duration::from_secs(1) + RUNTIME_PROCESS_TEARDOWN + DECLARED_TIMEOUT_GRACE
+            Duration::from_secs(1)
+                + RUNTIME_PROCESS_TEARDOWN
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
         );
+    }
+
+    #[test]
+    fn pi_preflight_and_git_bookkeeping_limits_are_part_of_the_outer_budget() {
+        let recipe = br#"{
+            "providers": {"pinned-pi": {"agent": "pi"}},
+            "cloud": {"enabled": true, "evaluate_steps": true},
+            "steps": [{
+                "label": "main",
+                "backend": "pinned-pi",
+                "timeout": 1,
+                "max_retries": 1,
+                "expected_changes": ["src"],
+                "verify": {"git_clean_outside": ["src"]}
+            }]
+        }"#;
+        // Two adapter attempts: 10 s including teardown. Each attempt checks
+        // Pi and Node (36 s including teardown), then 1 s retry backoff.
+        // Baselines/bookkeeping are 360 s, cloud requests 30 s, grace 60 s.
+        assert_eq!(recipe_run_timeout(recipe), Duration::from_secs(497));
     }
 
     #[test]
@@ -2012,7 +2092,10 @@ mod timeout_tests {
         };
         assert_eq!(
             invocation_run_timeout(&retry, None, Some(recipe)),
-            Duration::from_secs(945) + (2 * RUNTIME_PROCESS_TEARDOWN) + DECLARED_TIMEOUT_GRACE
+            Duration::from_secs(945)
+                + (2 * RUNTIME_PROCESS_TEARDOWN)
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(5)
         );
         assert_eq!(
             invocation_run_timeout(&retry, None, None),
@@ -2024,7 +2107,10 @@ mod timeout_tests {
     fn absent_and_hostile_budgets_stay_bounded() {
         assert_eq!(
             recipe_run_timeout(br#"{"steps":[{"label":"main"}]}"#),
-            DEFAULT_RUN_TIMEOUT + RUNTIME_PROCESS_TEARDOWN + DECLARED_TIMEOUT_GRACE
+            DEFAULT_RUN_TIMEOUT
+                + RUNTIME_PROCESS_TEARDOWN
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
         );
         assert_eq!(recipe_run_timeout(br#"{}"#), DEFAULT_RUN_TIMEOUT);
         let hostile = serde_json::json!({ "steps": [{ "label": "main", "timeout": u64::MAX }] });
@@ -2070,7 +2156,10 @@ mod timeout_tests {
         let approved = read_original_snapshot_recipe(workspace.path(), original_run_id).unwrap();
         assert_eq!(
             invocation_run_timeout(&resume, None, Some(&approved)),
-            Duration::from_secs(45) + RUNTIME_PROCESS_TEARDOWN + DECLARED_TIMEOUT_GRACE
+            Duration::from_secs(45)
+                + RUNTIME_PROCESS_TEARDOWN
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
         );
         assert_eq!(
             invocation_run_timeout(&resume, None, None),

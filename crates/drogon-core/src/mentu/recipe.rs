@@ -231,6 +231,9 @@ pub(crate) struct RecipeStepBudget {
     pub max_retries: u64,
     pub retry_backoff_ms: u64,
     pub verify_commands: u64,
+    pub verify_git_clean: bool,
+    pub expected_changes: bool,
+    pub pi_preflight: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -290,6 +293,18 @@ pub(crate) fn parse_recipe_budget(source: &str) -> Result<RecipeBudget, String> 
                         .get("verify")
                         .and_then(|verify| verify.get("commands")),
                 ),
+                verify_git_clean: value
+                    .get("verify")
+                    .and_then(|verify| verify.get("git_clean_outside"))
+                    .is_some(),
+                expected_changes: value.get("expected_changes").is_some(),
+                pi_preflight: step.backend.eq_ignore_ascii_case("pi")
+                    || recipe
+                        .get("providers")
+                        .and_then(|providers| providers.get(&step.backend))
+                        .and_then(|provider| provider.get("agent"))
+                        .and_then(Value::as_str)
+                        == Some("pi"),
             })
             .collect(),
         cloud_enabled: cloud
