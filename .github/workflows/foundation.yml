@@ -82,8 +82,8 @@ jobs:
         run: |
           cargo build --workspace --locked
           cargo test -p drogond --locked
-          # --lib avoids compiling Unix-only integration fixtures on Windows.
-          cargo test -p drogon-core --lib mentu::execution::timeout_tests::snapshot_reader_rejects_windows_reparse_points --locked
+          # Run every library test without compiling Unix-only integration fixtures.
+          cargo test -p drogon-core --lib --locked
       - name: Windows named-pipe cross-process acceptance
         run: node --test scripts/windows-named-pipe-acceptance.test.mjs
       - name: Install pinned JavaScript dependencies
