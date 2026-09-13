@@ -160,9 +160,15 @@ export function ReproDemoSection({
     [bridge],
   );
   const { state, run, cancel } = useReproDemo(resolved);
-  const [runtimeId, setRuntimeId] = useState(DEFAULT_REPRO_RUNTIME.id);
-  const [model, setModel] = useState(DEFAULT_REPRO_RUNTIME.model);
-  const [iterations, setIterations] = useState<number>(DEFAULT_REPRO_ITERATIONS);
+  // Reopening the panel after the tour must show what RAN, not the defaults:
+  // the store remembers the selection across the unmount the tour causes.
+  const [runtimeId, setRuntimeId] = useState(
+    state.selection?.runtimeId ?? DEFAULT_REPRO_RUNTIME.id,
+  );
+  const [model, setModel] = useState(state.selection?.model ?? DEFAULT_REPRO_RUNTIME.model);
+  const [iterations, setIterations] = useState<number>(
+    state.selection?.iterations ?? DEFAULT_REPRO_ITERATIONS,
+  );
 
   const choice = REPRO_RUNTIME_CHOICES.find((entry) => entry.id === runtimeId) ?? DEFAULT_REPRO_RUNTIME;
   const runtime = { ...choice, model: model.trim() };
@@ -280,9 +286,13 @@ export function ReproDemoSection({
               Ver la orquestación
             </Button>
           ) : null}
-          {state.workspaceId ? (
-            <span className="font-mono text-xs text-muted-foreground">
-              workspace {state.workspaceId}
+          {state.projectName ? (
+            <span
+              data-testid="repro-demo-run-name"
+              className="rounded-md border border-border/60 px-2 py-1 font-mono text-xs"
+              title={state.workspaceId ?? undefined}
+            >
+              {state.projectName}
             </span>
           ) : null}
         </div>
