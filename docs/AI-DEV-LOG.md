@@ -22,12 +22,12 @@ private client data, credentials or full provider transcripts.
 
 | Event | Evidence | Why it matters |
 | --- | --- | --- |
-| September 5, 19:10:59: goal recorded before product implementation | [Goal at c6189dac](https://github.com/clioo/drogon/blob/c6189dac9b9ec5d6d2eff30be2639a8a935db9df/docs/migration/rewrite-goal.md) | Defines architecture, coordinator responsibility, three worker lanes and acceptance before expansion. Explicitly states implementation had not started. |
+| September 5, 19:10:59: goal recorded before product implementation | [Goal at c6189dac](https://github.com/clioo/drogon/commit/c6189dac9b9ec5d6d2eff30be2639a8a935db9df) | Defines architecture, coordinator responsibility, three worker lanes and acceptance before expansion. Explicitly states implementation had not started. |
 | September 5, 19:56:20: foundation implementation | [c3eb8802](https://github.com/clioo/drogon/commit/c3eb8802a8a1731fce0f5bd37e14531a1eeb2373) | Protocol and desktop work follows the recorded goal. |
-| September 7, 18:19:24: MVP plan refined | [Plan at ec8dd5ba](https://github.com/clioo/drogon/blob/ec8dd5ba72eb6aaad44587538ad8bfb7497a16f4/docs/migration/rewrite-mvp-plan.md), [PR #16](https://github.com/clioo/drogon/pull/16) | Twelve journeys, exclusions, four waves, ownership and dependency gates. Commit credits Claude Fable 5.1. |
-| September 7, 18:48:00: simultaneous lanes recorded | [Status at 9c92b5e9](https://github.com/clioo/drogon/blob/9c92b5e95f1e759b323b42c331de8c94cd3324cb/docs/migration/rewrite-mvp-plan.md) | Palette/review/sidebar work is merged while backbone/CLI, automation and browser work remains in progress in separate lanes. |
+| September 7, 18:19:24: initial scope plan refined | [PR #16](https://github.com/clioo/drogon/pull/16) | Twelve journeys, exclusions, four waves, ownership and dependency gates. Commit credits Claude Fable 5.1. |
+| September 7, 18:48:00: simultaneous lanes recorded | [Status commit 9c92b5e9](https://github.com/clioo/drogon/commit/9c92b5e95f1e759b323b42c331de8c94cd3324cb) | Palette/review/sidebar work is merged while backbone/CLI, automation and browser work remains in progress in separate lanes. |
 
-The MVP plan refined an existing foundation; it was not the first specification.
+The initial scope plan refined an existing foundation; it was not the first specification.
 [SPEC.md](SPEC.md) provides the English consolidation and links present behavior to
 existing implementation and tests.
 
@@ -53,7 +53,7 @@ approval was not decided by majority vote.
 The [committed RED output](https://github.com/clioo/drogon/blob/5e0f57ae91c7f54ae5eea2ded5d836f08f68087c/tests/parity/ports/WP-ENG-RUNTIME/native-session-authority/provider-record/red-round-launchenv.txt)
 records 10 passed and one failed test:
 `source_refused_launch_env_never_persists_through_extensions_smuggling`.
-The [acceptance record](https://github.com/clioo/drogon/blob/5e0f57ae91c7f54ae5eea2ded5d836f08f68087c/docs/migration/provider-extension-roundtrip-admission.md)
+The [acceptance record at the corrected commit](https://github.com/clioo/drogon/commit/5e0f57ae91c7f54ae5eea2ded5d836f08f68087c)
 records 11/11 after the correction, 227 core tests and 379 workspace tests.
 The RED output has no separate wall-clock timestamp; its placement in the correction
 commit is not presented as a timestamp for when the failing test ran.

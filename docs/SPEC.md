@@ -13,14 +13,13 @@ The project had written intent before its first substantial implementation wave:
 
 | Recorded artifact | What it established | Chronology |
 | --- | --- | --- |
-| [Approved goal, c6189dac](https://github.com/clioo/drogon/blob/c6189dac9b9ec5d6d2eff30be2639a8a935db9df/docs/migration/rewrite-goal.md) | Independent Rust core, service and CLI; Electron/React desktop; licensing; coordinator ownership; three scoped worker lanes; lifecycle and rendered acceptance before expansion. | September 5, 19:10:59 UTC. It explicitly records that product implementation had not started at activation. |
+| [Approved goal, c6189dac](https://github.com/clioo/drogon/commit/c6189dac9b9ec5d6d2eff30be2639a8a935db9df) | Independent Rust core, service and CLI; Electron/React desktop; licensing; coordinator ownership; three scoped worker lanes; lifecycle and rendered acceptance before expansion. | September 5, 19:10:59 UTC. It explicitly records that product implementation had not started at activation. |
 | [Protocol and desktop implementation, c3eb8802](https://github.com/clioo/drogon/commit/c3eb8802a8a1731fce0f5bd37e14531a1eeb2373) | Execution contract, desktop client and foundation acceptance. | September 5, 19:56:20 UTC, after the approved goal. |
-| [MVP plan, ec8dd5ba](https://github.com/clioo/drogon/blob/ec8dd5ba72eb6aaad44587538ad8bfb7497a16f4/docs/migration/rewrite-mvp-plan.md) | Twelve journeys, explicit exclusions, architecture dependencies, four implementation waves, owners and validation gates. Its initial status table marks the upcoming journeys pending. | September 7, 18:19:24 UTC, in [PR #16](https://github.com/clioo/drogon/pull/16). This refined an existing foundation; it was not the start of all development. |
+| [Initial scope plan, PR #16](https://github.com/clioo/drogon/pull/16) | Twelve journeys, explicit exclusions, architecture dependencies, four implementation waves, owners and validation gates. Its initial status table marks the upcoming journeys pending. | September 7, 18:19:24 UTC. This refined an existing foundation; it was not the start of all development. |
 
-The original MVP plan is Spanish; this document summarizes its requirements in
-English. Historical links pin the original revisions even though the migration
-corpus was later retired. They establish what was planned at that time, not a
-requirement to restore the old scope or architecture.
+The source planning record was later retired from the product tree. This document
+keeps an English summary of the scope that was recorded at that time; it does not
+restore a retired plan or impose a separate architecture on the shipped product.
 
 ## Objective and intended user
 
@@ -53,8 +52,8 @@ in the linked PRs and development log.
 | Packaged desktop | The packaged app launches against an isolated profile, runs acceptance journeys and identifies its source revision and bundle. | [Packager](../scripts/package-desktop.mjs), [desktop acceptance](../scripts/accept-desktop.mjs), [acceptance guide](acceptance.md). |
 
 The original twelve journeys also covered embedded browsing, command palette and
-quick open, settings, and the status bar. The [original plan](https://github.com/clioo/drogon/blob/ec8dd5ba72eb6aaad44587538ad8bfb7497a16f4/docs/migration/rewrite-mvp-plan.md)
-defines their initial scope; the [README](../README.md) describes their current
+quick open, settings, and the status bar. The [initial scope plan](https://github.com/clioo/drogon/pull/16)
+defines their recorded scope; the [README](../README.md) describes their current
 surfaces. The table emphasizes the developer and automation path central to this
 submission.
 

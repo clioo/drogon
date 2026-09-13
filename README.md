@@ -17,7 +17,7 @@ came from the Drogon fork of Orca. It has since grown its own surfaces — the W
 and its Orchestrator, self-waking Bots, Meetings — and depends on no other runtime to
 execute anything.
 
-[Run locally](#run-locally) · [Install with Homebrew](#install-with-homebrew) · [Install the macOS preview](#install-the-macos-preview) · [Feature tour](#feature-tour-the-twelve-mvp-journeys) · [Use it with agents](#using-drogon-with-agents) · [Contribute](#contributing)
+[Run locally](#run-locally) · [Install with Homebrew](#install-with-homebrew) · [Install the macOS preview](#install-the-macos-preview) · [Feature tour](#feature-tour-the-twelve-core-journeys) · [Use it with agents](#using-drogon-with-agents) · [Contribute](#contributing)
 
 ![Drogon workspace in the light theme: project sidebar with a worktree card, a persistent terminal session, and the file explorer](docs/screenshots/workspace-light.png)
 
@@ -38,7 +38,7 @@ Your next step should be visible in the workspace—not buried in a meeting reca
 - **Preview without leaving the task.** Open the embedded browser alongside your work. Agents can navigate, inspect, click, and fill through `drogon-cli` while the desktop is connected.
 - **Make recurring work explicit.** Schedule automations, give bots responsibilities and the monitors that wake them, and inspect every run. Design the work itself in the Work Graph: nodes with their own harness and model, an approved-runtime order to fall back through, and an optional bounded adversarial review before anything is called done.
 
-## Feature tour: the twelve MVP journeys
+## Feature tour: the twelve core journeys
 
 Drogon grew as twelve end-to-end journeys. Each one ships with automated acceptance;
 the packaged build is validated as a whole before every release.
@@ -56,7 +56,7 @@ the packaged build is validated as a whole before every release.
 11. **Packaging.** An ad-hoc-signed, sealed `Drogon.app` with verified build info, packaged acceptance against a disposable profile, and a per-user installer that preserves previous builds.
 12. **Status bar.** The Orca bottom bar: settings and help on the left, per-provider usage meters with refresh, and on the right awake on/off, memory, terminal and port counts, and the daemon connection segment.
 
-## What came after the MVP
+## What came after the core journeys
 
 The twelve journeys were the scope. Three things grew out of using them.
 

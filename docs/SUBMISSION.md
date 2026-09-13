@@ -52,7 +52,7 @@ notarized: on first launch, right-click `Drogon.app` and choose **Open**.
 ## Demo
 
 - Script: [docs/demo-script.md](demo-script.md) — a presenter-ready,
-  five-minute path through the twelve MVP journeys, with timings, fallbacks
+  five-minute path through the twelve core journeys, with timings, fallbacks
   and teardown. Prepare it with `node scripts/demo-fixture.mjs --qa` (or
   `--data-dir`/`--cli` against a non-QA daemon); the fixture creates a
   disposable project, worktree, bot, automation and work graph and never starts
@@ -66,7 +66,7 @@ notarized: on first launch, right-click `Drogon.app` and choose **Open**.
   `node scripts/doc-screenshots.mjs`. [MANIFEST.md](screenshots/MANIFEST.md)
   states what each one shows and the seeding step that produced it.
 
-## Beyond the MVP
+## Beyond the core journeys
 
 Three capabilities grew past the original twelve journeys and are worth a judge's
 minute:
@@ -96,6 +96,6 @@ binary changed instead of silently attaching to the old one.
 
 Remote SSH targets, Linear/Jira/GitLab integrations, voice,
 computer use, emulator, mobile, AI Vault, plugins and cloud are outside the
-MVP. Every shipped journey is covered by automated acceptance, plus a rendered oracle
+current scope. Every shipped journey is covered by automated acceptance, plus a rendered oracle
 that diffs named UI surfaces against their recorded baselines. Feature history
 is in [CHANGELOG.md](../CHANGELOG.md), one line per merged PR.

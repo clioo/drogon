@@ -9,7 +9,7 @@ Method: the SOURCE OF TRUTH is the reference source code. Expected structure, cl
 
 ## 1. Source component inventory (reference)
 
-| MVP surface | Reference source (exists?) | Expected-value probes | Candidate owner |
+| Core surface | Reference source (exists?) | Expected-value probes | Candidate owner |
 |---|---|---|---|
 | Shell + sidebar | src/renderer/src/components/Sidebar.tsx<br>src/renderer/src/components/sidebar/index.tsx<br>src/renderer/src/components/sidebar/SidebarNav.tsx<br>src/renderer/src/components/sidebar/workspace-chrome-metrics.ts<br>src/renderer/src/components/sidebar/SidebarHeader.tsx | sidebar: export { default } from './sidebar/index'<br>width: document.documentElement.style.setProperty('--workspace-sidebar-live-width', `${width}px`)<br>sidebarWidth: const sidebarWidth = useAppStore((s) => s.sidebarWidth) | apps/desktop/src/renderer/src/features/shell/Sidebar.tsx |
 | Tab bar | src/renderer/src/components/tab-bar/TabBar.tsx<br>src/renderer/src/components/tab-bar/tab-bar-surface.tsx<br>src/renderer/src/components/tab-bar/tab-width-rules.ts<br>src/renderer/src/components/tab-bar/SortableTab.tsx | h-: className="flex items-stretch h-full overflow-hidden flex-1 min-w-0"<br>aria-label: aria-label={translate(<br>h-: className="mx-0.5 my-auto h-6 w-5 text-muted-foreground hover:bg-accent/50 hover:text-foreground disabled:opacity-35" | apps/desktop/src/renderer/src/features/shell/TabBar.tsx |

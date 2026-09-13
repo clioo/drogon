@@ -1,6 +1,6 @@
 # Drogon demo script (5 minutes)
 
-A presenter-ready path through the twelve MVP journeys in five minutes. Timings are
+A presenter-ready path through the twelve core journeys in five minutes. Timings are
 cumulative; prepare the disposable fixture before the audience arrives.
 
 ## Before you go on stage (not timed)

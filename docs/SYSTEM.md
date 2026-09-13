@@ -21,14 +21,14 @@ regression tests. Client data and private conversations are not submission artif
 
 ## Specification before implementation
 
-The [September 5 goal](https://github.com/clioo/drogon/blob/c6189dac9b9ec5d6d2eff30be2639a8a935db9df/docs/migration/rewrite-goal.md)
+The [September 5 goal](https://github.com/clioo/drogon/commit/c6189dac9b9ec5d6d2eff30be2639a8a935db9df)
 was committed at 19:10:59 UTC and explicitly states that product implementation had
 not started. It defines the independent Rust core/service/CLI, Electron desktop,
 licensing, coordinator responsibilities, three worker lanes and acceptance gates.
 The [protocol and desktop implementation](https://github.com/clioo/drogon/commit/c3eb8802a8a1731fce0f5bd37e14531a1eeb2373)
 followed at 19:56:20 UTC.
 
-The [September 7 MVP plan](https://github.com/clioo/drogon/blob/ec8dd5ba72eb6aaad44587538ad8bfb7497a16f4/docs/migration/rewrite-mvp-plan.md)
+The [September 7 initial scope plan](https://github.com/clioo/drogon/pull/16)
 refined that foundation into twelve journeys, exclusions, four implementation waves,
 ownership and dependencies. Shared contracts came first; dependent UI work followed.
 [PR #16](https://github.com/clioo/drogon/pull/16) records the plan, whose commit
@@ -66,11 +66,11 @@ environments. The coordinator fed those observations into the next implementatio
 task. Intent and observations served different purposes.
 
 Parallelism is visible in planning records, not only commit volume. The
-[September 7 status update at 18:48 UTC](https://github.com/clioo/drogon/blob/9c92b5e95f1e759b323b42c331de8c94cd3324cb/docs/migration/rewrite-mvp-plan.md)
+[September 7 status update at 18:48 UTC](https://github.com/clioo/drogon/commit/9c92b5e95f1e759b323b42c331de8c94cd3324cb)
 records merged palette, review and sidebar lanes while the Sonnet backbone/CLI
 work and the Muse automation and browser lanes were still in progress.
 
-The initial MVP plan allocated four workers. Later R16 issue comments record
+The initial scope plan allocated four workers. Later R16 issue comments record
 specialist assignments and a nine-worker cap:
 [Muse copy/token work](https://github.com/clioo/drogon/issues/124#issuecomment-5578419535),
 [Sonnet editor work](https://github.com/clioo/drogon/issues/133#issuecomment-5578420623),
