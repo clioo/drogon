@@ -458,6 +458,14 @@ test("previous preview without the icon warns instead of refusing", async (conte
   );
 });
 
+test("desktop packaging neither downloads nor bundles Mentu", async () => {
+  const packaged = await readFile(path.join(root, "scripts", "package-desktop.mjs"), "utf8");
+  assert.doesNotMatch(packaged, /ensureOfficialMentuRuntime/);
+  assert.doesNotMatch(packaged, /bundledMentuRuntime/);
+  assert.doesNotMatch(packaged, /mentuRuntimeSignIgnore/);
+  assert.match(packaged, /extraResource: \[binaries, infoPath, notices\]/);
+});
+
 // R16-BO (#319): the three scripts stay wired to the shared invariant.
 test("packaging, acceptance and install-preview stay wired to the icon invariant", async () => {
   const scripts = path.join(root, "scripts");

@@ -78,7 +78,7 @@ import {
 import { startSessionStatePush } from "./session-state-bridge";
 import { startBrowserRelay } from "./browser/relay-poller";
 import { dispatchBotSnapshot, registerBotBridge } from "./bot-bridge";
-import { autoInstallBundledMentuRuntime, registerMentuBridge } from "./mentu-bridge";
+import { registerMentuBridge } from "./mentu-bridge";
 // Work-graph authoring (graph.*): the designer's write/compile/run seam.
 import { registerGraphBridge } from "./graph-bridge";
 import { openMentuTabInBoundWindow } from "./mentu-open-relay";
@@ -952,7 +952,6 @@ if (!holdsSingleInstanceLock) {
       onEvent: observeAgentStateForNotification,
     });
     await bootstrapDaemon();
-    void autoInstallBundledMentuRuntime();
     if (backgroundWindow && process.platform === "darwin")
       app.setActivationPolicy("prohibited");
     createWindow();

@@ -34,6 +34,7 @@ import {
 } from "../shell/DeleteWorktreeSkipConfirmOption";
 import { CliSection } from "./cli-section";
 import { BrowserSearchEngineSetting } from "./browser-search-engine-setting";
+import { MentuRuntimeSetting } from "./mentu-runtime-setting";
 import {
   SettingsRow,
   SettingsSection,
@@ -125,6 +126,7 @@ export function GeneralSection(): React.JSX.Element {
           />
           <BrowserSearchEngineSetting />
         </div>
+        <MentuRuntimeSetting />
         <div className="space-y-2 pt-4">
           <SettingsSubsectionHeader title="Support Drogon" />
           <SettingsRow

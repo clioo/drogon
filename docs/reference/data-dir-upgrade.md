@@ -83,7 +83,7 @@ anything — the directory is untouched.
 |---|---|---|---|
 | `drogon-cli` / `drogon` shims | `<data-dir>/bin/` | no | reinstalled by every `Engine::open` (idempotent) |
 | Harness hook overlays | `<data-dir>/harness-hooks/<harness>/<nonce>/` | no | per-session, nonce-scoped, cleaned up with the session; a newer build simply writes new nonces |
-| Mentu runtime | `<data-dir>/mentu/runtime/` | sha-verified on install | `mentu.runtime_install` verifies the pinned sha before swapping; a newer build provisions only if the hash differs |
+| Mentu runtime | `<data-dir>/mentu/runtime/` | optional; sha-verified on install | Apple silicon macOS users install it explicitly in Settings; `mentu.runtime_install` verifies the pinned sha before swapping |
 | Pre-migration backups | `<data-dir>/backups/pre-migration-*/` | n/a (manifest) | see §3 |
 | Session scrollback | in-memory only (`ring.rs`, 1 MiB/session) | n/a | daemon-owned PTYs die with the daemon by design; session *records* (sqlite) restore verdict/state across restart |
 

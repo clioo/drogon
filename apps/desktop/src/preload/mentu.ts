@@ -6,15 +6,21 @@ import {
   mentuOpenTabResultSchema,
   type MentuBridge,
   type MentuOpenTabRequest,
+  type MentuRuntimeResult,
   type MentuOpenTabResult,
 } from "../shared/mentu-contract";
+import type { Result } from "../shared/session-contract";
 
 /** `window.drogon.mentu.*` namespace; channels are handled by main/mentu-bridge.ts. */
-export const mentu: MentuBridge = {
+export const mentu: MentuBridge & {
+  /** Optional on-demand installer; absent from older preload builds. */
+  mentuInstall(): Promise<Result<MentuRuntimeResult>>;
+} = {
   mentuRecipes: (value) => ipcRenderer.invoke("drogon:mentuRecipes", value),
   mentuRecipe: (value) => ipcRenderer.invoke("drogon:mentuRecipe", value),
   mentuRecipeSave: (value) => ipcRenderer.invoke("drogon:mentuRecipeSave", value),
   mentuRuntime: () => ipcRenderer.invoke("drogon:mentuRuntime", {}),
+  mentuInstall: () => ipcRenderer.invoke("drogon:mentuInstall"),
   mentuApprove: (value) => ipcRenderer.invoke("drogon:mentuApprove", value),
   mentuRun: (value) => ipcRenderer.invoke("drogon:mentuRun", value),
   mentuRuns: (value) => ipcRenderer.invoke("drogon:mentuRuns", value),

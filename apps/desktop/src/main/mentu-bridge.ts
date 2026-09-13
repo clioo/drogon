@@ -1,10 +1,13 @@
-import { app, ipcMain } from "electron";
-import type { BrowserWindow } from "electron";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { ipcMain } from "electron";
+import type { BrowserWindow } from "electron";
 import {
   mentuBridgeSchemas,
   mentuResultSchemas,
+  type MentuRuntimeResult,
 } from "../shared/mentu-contract";
 import { resultSchemas } from "../shared/result-validation";
 import type { Result } from "../shared/session-contract";
@@ -105,77 +108,164 @@ export function registerMentuBridge(
   for (const method of Object.keys(mentuBridgeSchemas) as MentuMethod[]) {
     ipcMain.handle(channelFor[method], async (event, input: unknown) => {
       const window = getWindow();
-      if (
-        !window ||
-        event.sender !== window.webContents ||
-        event.senderFrame !== window.webContents.mainFrame
-      )
-        return { ...invalid };
+      if (!isTrustedRenderer(window, event)) return { ...invalid };
       return dispatchMentuRequest(method, input);
     });
   }
+  ipcMain.handle("drogon:mentuInstall", async (event) => {
+    const window = getWindow();
+    if (!isTrustedRenderer(window, event)) return { ...invalid };
+    return installOfficialMentuRuntime();
+  });
 }
 
-// Must match `MENTU_LOCK_REVISION` in `crates/drogon-core/src/mentu/runtime.rs`
-// and `scripts/mentu-runtime-provision.mjs`.
-const MENTU_RUNTIME_LOCK_REVISION = "c82ccfa0ebbe77d62193e068821ba6e74f87a8d3";
-
-/**
- * Where `scripts/mentu-runtime-provision.mjs` staged a runtime for this
- * build: `process.resourcesPath` once packaged (populated by
- * `scripts/package-desktop.mjs`), or the repo's own resources in dev.
- * Apple Silicon packages include the verified official release by default.
- */
-function bundledMentuRuntimeSourcePath(): string {
-  const resourcesRoot = app.isPackaged
-    ? process.resourcesPath
-    : path.join(app.getAppPath(), "resources");
-  const executable = process.platform === "win32" ? "mentu-recipes.exe" : "mentu-recipes";
-  return path.join(
-    resourcesRoot,
-    "mentu-runtime",
-    MENTU_RUNTIME_LOCK_REVISION,
-    "bin",
-    executable,
+function isTrustedRenderer(
+  window: BrowserWindow | null,
+  event: Electron.IpcMainInvokeEvent,
+): boolean {
+  return Boolean(
+    window &&
+    event.sender === window.webContents &&
+    event.senderFrame === window.webContents.mainFrame,
   );
 }
 
+// Must match `crates/drogon-core/src/mentu/runtime.rs` and
+// `scripts/mentu-runtime-provision.mjs`.
+export const MENTU_RUNTIME_LOCK_REVISION =
+  "c82ccfa0ebbe77d62193e068821ba6e74f87a8d3";
+export const MENTU_RUNTIME_LOCK_SHA256 =
+  "f00528a940185e9433ad65b02e7de251d7d3d856c9d24d38f8b1474a1ca8bc5d";
+export const MENTU_RUNTIME_RELEASE_URL =
+  "https://github.com/mentu-ai/mentu-recipes/releases/download/v0.5.0/mentu-recipes-macos-arm64";
+const MAX_MENTU_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+
+type MentuInstallDeps = {
+  call?: NativeCall;
+  fetchImpl?: typeof fetch;
+  platform?: NodeJS.Platform;
+  arch?: string;
+  releaseUrl?: string;
+  expectedSha256?: string;
+};
+
+function installError(
+  code: string,
+  message: string,
+  retryable: boolean,
+): Result<never> {
+  return { ok: false, error: { code, message, retryable } };
+}
+
+function checkedRuntimeResult(value: unknown): Result<MentuRuntimeResult> {
+  const parsed = mentuResultSchemas["mentu.runtime"].safeParse(value);
+  if (!parsed.success)
+    return installError(
+      "internal_error",
+      "The Mentu runtime response does not match its contract.",
+      false,
+    );
+  return { ok: true, result: parsed.data };
+}
+
 /**
- * One-time, local-only provisioning of the pinned Mentu runtime (journey J9
- * fresh-install usability) from this build's bundled copy, when one exists.
- * No-ops when absent in an unprovisioned dev checkout. Never touches the
- * network, `PATH` or Homebrew: `mentu.runtime_install` only copies local
- * bytes that already match the lock's sha256. There is no renderer-facing
- * install affordance to wire this through: the read-only reference's own
- * `MentuRuntimeMessage`/`recipe-pane-controller.ts` have no install button
- * either, since the fork instead bakes its runtime into the app bundle at
- * build time (see the PR for the full comparison).
- *
- * `sourcePath`/`call`/`retryDelayMs`/`attempts` are overridable for tests,
- * so they never touch the real `electron` app, a real daemon connection, or
- * a real clock delay.
+ * User-initiated installation of the pinned runtime. Drogon never downloads
+ * Mentu during packaging or startup: this path runs only from the macOS
+ * Settings action, verifies the release bytes, and lets the daemon perform
+ * its own lock verification before activating them.
  */
-export async function autoInstallBundledMentuRuntime(
-  call: NativeCall = callNative,
-  sourcePath: string = bundledMentuRuntimeSourcePath(),
-  retryDelayMs = 500,
-  // `bootstrapDaemon()` already waited for the daemon to answer once before
-  // this runs, but a cold first-run daemon (fresh SQLite schema, a loaded
-  // dev machine) can still take a beat past that to accept a second
-  // connection; retry generously rather than silently skipping install.
-  attempts = 10,
-): Promise<void> {
-  if (!existsSync(sourcePath)) return;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    const result = await call("mentu.runtime_install", { sourcePath });
-    if (result.ok) {
-      console.log(`[drogon] mentu runtime auto-install: ${JSON.stringify(result.result)}`);
-      return;
-    }
-    if (!result.error.retryable || attempt === attempts) {
-      console.error(`[drogon] mentu runtime auto-install failed: ${result.error.message}`);
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+export async function installOfficialMentuRuntime(
+  deps: MentuInstallDeps = {},
+): Promise<Result<MentuRuntimeResult>> {
+  const platform = deps.platform ?? process.platform;
+  const arch = deps.arch ?? process.arch;
+  if (platform !== "darwin" || arch !== "arm64")
+    return installError(
+      "mentu_install_unsupported",
+      "Mentu installation is available only on Apple silicon Macs.",
+      false,
+    );
+
+  const call = deps.call ?? callNative;
+  const current = await call("mentu.runtime", {});
+  if (!current.ok) return current as Result<MentuRuntimeResult>;
+  const checkedCurrent = checkedRuntimeResult(current.result);
+  if (!checkedCurrent.ok) return checkedCurrent;
+  if (
+    checkedCurrent.result.runtime.expectedRevision !==
+      MENTU_RUNTIME_LOCK_REVISION ||
+    checkedCurrent.result.runtime.expectedSha256 !== MENTU_RUNTIME_LOCK_SHA256
+  )
+    return installError(
+      "mentu_runtime_lock_mismatch",
+      "The running Drogon service expects a different Mentu runtime. Restart Drogon and try again.",
+      false,
+    );
+  if (
+    checkedCurrent.result.runtime.available &&
+    checkedCurrent.result.runtime.lockMatches
+  )
+    return checkedCurrent;
+
+  const temporary = await mkdtemp(path.join(tmpdir(), "drogon-mentu-install-"));
+  try {
+    const response = await (deps.fetchImpl ?? fetch)(
+      deps.releaseUrl ?? MENTU_RUNTIME_RELEASE_URL,
+      { signal: AbortSignal.timeout(120_000) },
+    );
+    if (!response.ok)
+      return installError(
+        "mentu_download_failed",
+        `Mentu download failed (${response.status}).`,
+        true,
+      );
+    const declaredSize = Number(response.headers.get("content-length"));
+    if (
+      Number.isFinite(declaredSize) &&
+      declaredSize > MAX_MENTU_DOWNLOAD_BYTES
+    )
+      return installError(
+        "mentu_download_invalid",
+        "The Mentu download exceeded the allowed size.",
+        false,
+      );
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.byteLength > MAX_MENTU_DOWNLOAD_BYTES)
+      return installError(
+        "mentu_download_invalid",
+        "The Mentu download exceeded the allowed size.",
+        false,
+      );
+    const actualSha256 = createHash("sha256").update(bytes).digest("hex");
+    const expectedSha256 = deps.expectedSha256 ?? MENTU_RUNTIME_LOCK_SHA256;
+    if (actualSha256 !== expectedSha256)
+      return installError(
+        "mentu_download_invalid",
+        "The Mentu download did not match Drogon's approved runtime.",
+        false,
+      );
+
+    const sourcePath = path.join(temporary, "mentu-recipes");
+    await writeFile(sourcePath, bytes, { mode: 0o755 });
+    const installed = await call("mentu.runtime_install", { sourcePath });
+    if (!installed.ok) return installed as Result<MentuRuntimeResult>;
+    const checkedInstall = mentuResultSchemas[
+      "mentu.runtime_install"
+    ].safeParse(installed.result);
+    if (!checkedInstall.success)
+      return installError(
+        "internal_error",
+        "The Mentu installation response does not match its contract.",
+        false,
+      );
+    return { ok: true, result: { runtime: checkedInstall.data.runtime } };
+  } catch (error) {
+    return installError(
+      "mentu_download_failed",
+      error instanceof Error ? error.message : "Mentu download failed.",
+      true,
+    );
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
   }
 }

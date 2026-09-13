@@ -16,8 +16,8 @@ use drogon_protocol::mentu::MentuRuntimeInfo;
 use sha2::{Digest, Sha256};
 
 /// Official mentu-ai/mentu-recipes v0.5.0, macos-arm64 release and checksum.
-/// Packaging downloads and verifies these exact bytes; the desktop installs
-/// its bundled copy through `mentu.runtime_install`, without PATH or network.
+/// The user-initiated Settings installer verifies these exact bytes before the
+/// daemon verifies them again through `mentu.runtime_install`.
 pub const MENTU_LOCK_REVISION: &str = "c82ccfa0ebbe77d62193e068821ba6e74f87a8d3";
 pub const MENTU_LOCK_VERSION: &str = "0.5.0";
 pub const MENTU_LOCK_SHA256: &str =

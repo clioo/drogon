@@ -104,7 +104,7 @@ test("the official release pin agrees across packaging, daemon and desktop", () 
   assert.equal(MENTU_RELEASE_URL, "https://github.com/mentu-ai/mentu-recipes/releases/download/v0.5.0/mentu-recipes-macos-arm64");
 });
 
-test("download failure is fatal, not a package without a runtime", async () => {
+test("the explicit provisioning helper reports download failures", async () => {
   const root = fixtureRoot();
   await assert.rejects(ensureOfficialMentuRuntime(root, async () => new Response("missing", { status: 404 })), /download failed/);
   assert.equal(existsSync(bundledRuntimeDestination(root)), false);
