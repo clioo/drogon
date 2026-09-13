@@ -239,6 +239,7 @@ pub(crate) struct RecipeStepBudget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RecipeBudget {
     pub steps: Vec<RecipeStepBudget>,
+    pub has_recipe_nodes: bool,
     pub cloud_enabled: bool,
     pub cloud_evaluate_steps: bool,
     pub before_run_hooks: u64,
@@ -326,6 +327,10 @@ pub(crate) fn parse_recipe_budget(source: &str) -> Result<RecipeBudget, String> 
                 pi_preflight: step_uses_pi(&recipe, &step.backend),
             })
             .collect(),
+        has_recipe_nodes: recipe
+            .get("recipes")
+            .and_then(Value::as_array)
+            .is_some_and(|nodes| !nodes.is_empty()),
         cloud_enabled: cloud
             .and_then(|value| value.get("enabled"))
             .and_then(Value::as_bool)

@@ -169,6 +169,36 @@ it("refreshes instead of regressing peers to a delayed mutation snapshot", async
   );
 });
 
+it("does not regress the controller to a stale non-null mutation reply", async () => {
+  const older: OrchestratorRun = {
+    ...run,
+    phase: "main",
+    updatedAt: "2026-09-13T00:00:01Z",
+  };
+  const newer: OrchestratorRun = {
+    ...run,
+    phase: "review",
+    updatedAt: "2026-09-13T00:00:02Z",
+  };
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async () => ({
+      ok: true,
+      result: { run: newer },
+    })),
+    graphOrchestratorStop: vi.fn(async () => ({
+      ok: true,
+      result: { run: older },
+    })),
+  } as unknown as GraphBridge;
+  const view = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+  await waitFor(() => expect(view.result.current.run?.phase).toBe("review"));
+
+  await act(async () => view.result.current.stop());
+
+  expect(view.result.current.run?.phase).toBe("review");
+  expect(view.result.current.run?.updatedAt).toBe(newer.updatedAt);
+});
+
 it("reports lost contact without converting a running run to exited or passed", async () => {
   const bridge = {
     graphOrchestratorStart: async () => ({ ok: true, result: { run } }),
@@ -232,6 +262,7 @@ it("keeps active polling after a transient empty observation", async () => {
   });
   expect(status).toHaveBeenCalledTimes(2);
   expect(view.result.current.run?.status).toBe("running");
+  expect(view.result.current.error).toContain("status is unavailable");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2999);
   });
@@ -240,6 +271,7 @@ it("keeps active polling after a transient empty observation", async () => {
     await vi.advanceTimersByTimeAsync(1);
   });
   expect(status).toHaveBeenCalledTimes(3);
+  expect(view.result.current.error).toBeNull();
 });
 
 it("backs off a terminal run even when its last step was dispatching", async () => {

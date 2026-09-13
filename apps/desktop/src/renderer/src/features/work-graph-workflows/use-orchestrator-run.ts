@@ -7,9 +7,24 @@ import type {
 
 type RunObserver = (workspaceId: string) => void;
 const runObservers = new WeakMap<GraphBridge, Set<RunObserver>>();
+const RUN_STATUS_UNAVAILABLE = "Latest Work Graph status is unavailable.";
 
 function publishRefresh(bridge: GraphBridge, workspaceId: string): void {
   for (const observer of runObservers.get(bridge) ?? []) observer(workspaceId);
+}
+
+function newestRunSnapshot(
+  current: OrchestratorRun | null,
+  observed: OrchestratorRun | null,
+): OrchestratorRun | null {
+  if (!observed) return current;
+  if (!current) return observed;
+  const currentTime = Date.parse(current.updatedAt);
+  const observedTime = Date.parse(observed.updatedAt);
+  if (Number.isFinite(currentTime) && Number.isFinite(observedTime)) {
+    return observedTime >= currentTime ? observed : current;
+  }
+  return observed.updatedAt >= current.updatedAt ? observed : current;
 }
 
 export function useOrchestratorRun(
@@ -69,10 +84,10 @@ export function useOrchestratorRun(
             const observed = result.result.run;
             // Orchestrator runs are durable. A later empty observation cannot
             // erase already-seen evidence; workspace/bridge changes reset it.
-            const next = observed ?? durableRun.current;
+            const next = newestRunSnapshot(durableRun.current, observed);
             durableRun.current = next;
             setRun(next);
-            setError(null);
+            setError(observed || !next ? null : RUN_STATUS_UNAVAILABLE);
             const active =
               next?.status === "running" || next?.status === "stopping";
             if (
@@ -109,10 +124,13 @@ export function useOrchestratorRun(
         });
         if (scope.current !== workspaceId) return;
         if (result.ok) {
-          const next = result.result.run ?? durableRun.current;
+          const next = newestRunSnapshot(
+            durableRun.current,
+            result.result.run,
+          );
           durableRun.current = next;
           setRun(next);
-          setError(null);
+          setError(result.result.run ? null : RUN_STATUS_UNAVAILABLE);
           publishRefresh(bridge, workspaceId);
         } else setError(result.error.message);
       } catch (reason) {
@@ -136,9 +154,10 @@ export function useOrchestratorRun(
       });
       if (scope.current !== workspaceId) return;
       if (result.ok) {
-        const next = result.result.run ?? durableRun.current;
+        const next = newestRunSnapshot(durableRun.current, result.result.run);
         durableRun.current = next;
         setRun(next);
+        setError(result.result.run ? null : RUN_STATUS_UNAVAILABLE);
         publishRefresh(bridge, workspaceId);
       } else setError(result.error.message);
     } catch (reason) {
@@ -160,10 +179,10 @@ export function useOrchestratorRun(
       });
       if (scope.current !== workspaceId) return;
       if (result.ok) {
-        const next = result.result.run ?? durableRun.current;
+        const next = newestRunSnapshot(durableRun.current, result.result.run);
         durableRun.current = next;
         setRun(next);
-        setError(null);
+        setError(result.result.run ? null : RUN_STATUS_UNAVAILABLE);
         publishRefresh(bridge, workspaceId);
       } else setError(result.error.message);
     } catch (reason) {

@@ -297,7 +297,7 @@ fn parsed_recipe_budget(recipe_bytes: &[u8]) -> Option<super::recipe::RecipeBudg
     std::str::from_utf8(recipe_bytes)
         .ok()
         .and_then(|source| super::recipe::parse_recipe_budget(source).ok())
-        .filter(|recipe| !recipe.steps.is_empty())
+        .filter(|recipe| !recipe.steps.is_empty() || recipe.has_recipe_nodes)
 }
 
 fn bounded_declared_timeout(declared: Duration, every_step_declared: bool) -> Duration {
@@ -318,6 +318,12 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
     let Some(recipe) = parsed_recipe_budget(recipe_bytes) else {
         return DEFAULT_RUN_TIMEOUT;
     };
+    // Compound, pipeline and parallel recipes resolve child recipe files at
+    // runtime. Their nested timing declarations are not part of the approved
+    // parent bytes, so only the hard outer cap can conservatively cover them.
+    if recipe.has_recipe_nodes {
+        return MAX_RUN_TIMEOUT;
+    }
     let run_hooks = repeated_runtime_process(
         HOOK_COMMAND_TIMEOUT,
         recipe
@@ -2066,6 +2072,16 @@ mod timeout_tests {
                 + DECLARED_TIMEOUT_GRACE
                 + workspace_baseline_budget().saturating_mul(3)
         );
+    }
+
+    #[test]
+    fn child_recipe_graphs_keep_the_hard_outer_cap() {
+        let recipe = br#"{
+            "type": "compound",
+            "steps": [],
+            "recipes": [{"recipe": "long-running-child"}]
+        }"#;
+        assert_eq!(recipe_run_timeout(recipe), MAX_RUN_TIMEOUT);
     }
 
     #[test]
