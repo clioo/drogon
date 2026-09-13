@@ -95,14 +95,20 @@ pub mod lock {
     mod platform {
         use std::fs::{File, OpenOptions};
         use std::io;
-        use std::os::windows::fs::OpenOptionsExt;
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
         use std::path::Path;
 
         use super::LOCK_FILE_NAME;
 
+        const ERROR_ACCESS_DENIED: i32 = 5;
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
         /// A share-denying handle interoperates with the daemon's
         /// `LockFileEx` handle: either holder makes the other's open/lock
-        /// fail, and dropping this file releases ownership.
+        /// fail, and dropping this file releases ownership. Open the lock
+        /// itself and reject reparse points rather than following them.
         pub struct DataDirLock {
             _file: File,
         }
@@ -115,20 +121,28 @@ pub mod lock {
                 .create(true)
                 .truncate(false)
                 .share_mode(0)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
                 .open(path)
-                .map_err(|error| {
-                    if error.kind() == io::ErrorKind::PermissionDenied {
-                        io::Error::new(
-                            io::ErrorKind::AddrInUse,
-                            format!(
-                                "another drogond instance already holds the exclusive lock on this data directory: {error}"
-                            ),
-                        )
-                    } else {
-                        error
-                    }
+                .map_err(|error| match error.raw_os_error() {
+                    Some(ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION) => lock_held_error(error),
+                    _ => error,
                 })?;
+            if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "the data-directory lock must not be a reparse point",
+                ));
+            }
             Ok(DataDirLock { _file: file })
+        }
+
+        fn lock_held_error(error: io::Error) -> io::Error {
+            io::Error::new(
+                io::ErrorKind::AddrInUse,
+                format!(
+                    "another drogond instance already holds the exclusive lock on this data directory: {error}"
+                ),
+            )
         }
     }
 
@@ -143,9 +157,24 @@ pub mod lock {
             let dir = tempfile::tempdir().unwrap();
             let first = acquire_exclusive(dir.path()).unwrap();
             let second = acquire_exclusive(dir.path());
-            assert!(second.is_err());
+            assert_eq!(
+                second.err().map(|error| error.kind()),
+                Some(std::io::ErrorKind::AddrInUse)
+            );
             drop(first);
             assert!(acquire_exclusive(dir.path()).is_ok());
+        }
+
+        #[cfg(windows)]
+        #[test]
+        fn a_symlinked_lock_cannot_modify_its_target_on_windows() {
+            use std::os::windows::fs::symlink_file;
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("unrelated");
+            std::fs::write(&target, "preserve").unwrap();
+            symlink_file(&target, dir.path().join(LOCK_FILE_NAME)).unwrap();
+            assert!(acquire_exclusive(dir.path()).is_err());
+            assert_eq!(std::fs::read_to_string(target).unwrap(), "preserve");
         }
 
         #[cfg(unix)]

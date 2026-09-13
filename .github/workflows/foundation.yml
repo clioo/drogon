@@ -82,6 +82,7 @@ jobs:
         run: |
           cargo build --workspace --locked
           cargo test -p drogond --locked
+          cargo test -p drogon-core --lib backups::lock::tests --locked
       - name: Windows named-pipe cross-process acceptance
         run: node --test scripts/windows-named-pipe-acceptance.test.mjs
       - name: Install pinned JavaScript dependencies

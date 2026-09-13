@@ -6,10 +6,16 @@ import type {
 } from "../../../../shared/graph-contract";
 
 type RunObserver = (workspaceId: string, run: OrchestratorRun | null) => void;
-const runObservers = new Set<RunObserver>();
+const runObservers = new WeakMap<GraphBridge, Set<RunObserver>>();
 
-function publishRun(workspaceId: string, run: OrchestratorRun | null): void {
-  for (const observer of runObservers) observer(workspaceId, run);
+function publishRun(
+  bridge: GraphBridge,
+  workspaceId: string,
+  run: OrchestratorRun | null,
+): void {
+  for (const observer of runObservers.get(bridge) ?? []) {
+    observer(workspaceId, run);
+  }
 }
 
 export function useOrchestratorRun(
@@ -23,23 +29,31 @@ export function useOrchestratorRun(
   const [busy, setBusy] = useState(false);
   const [refreshEpoch, setRefreshEpoch] = useState(0);
   const scope = useRef(workspaceId);
+  const durableRun = useRef<OrchestratorRun | null>(null);
   const mutation = useRef(0);
   const mutating = useRef(false);
   scope.current = workspaceId;
   useEffect(() => {
+    if (!bridge) return;
     const observe: RunObserver = (observedWorkspaceId, observed) => {
       if (observedWorkspaceId !== scope.current) return;
       mutation.current++;
-      setRun(observed);
+      const next = observed ?? durableRun.current;
+      durableRun.current = next;
+      setRun(next);
       setError(null);
       setRefreshEpoch((epoch) => epoch + 1);
     };
-    runObservers.add(observe);
+    const observers = runObservers.get(bridge) ?? new Set<RunObserver>();
+    observers.add(observe);
+    runObservers.set(bridge, observers);
     return () => {
-      runObservers.delete(observe);
+      observers.delete(observe);
+      if (observers.size === 0) runObservers.delete(bridge);
     };
-  }, []);
+  }, [bridge]);
   useEffect(() => {
+    durableRun.current = null;
     setRun(null);
     setError(null);
     setBusy(false);
@@ -63,14 +77,18 @@ export function useOrchestratorRun(
             const observed = result.result.run;
             // Orchestrator runs are durable. A later empty observation cannot
             // erase already-seen evidence; workspace/bridge changes reset it.
-            setRun((current) => observed ?? current);
+            const next = observed ?? durableRun.current;
+            durableRun.current = next;
+            setRun(next);
             setError(null);
-            if (observed?.steps.some((step) => step.status === "dispatching")) {
-              nextPollMs = Math.min(pollMs, 100);
-            } else if (
-              !observed ||
-              (observed.status !== "running" && observed.status !== "stopping")
+            const active =
+              next?.status === "running" || next?.status === "stopping";
+            if (
+              active &&
+              next.steps.some((step) => step.status === "dispatching")
             ) {
+              nextPollMs = Math.min(pollMs, 100);
+            } else if (!active) {
               nextPollMs = inactivePollMs;
             }
           } else setError(result.error.message);
@@ -99,9 +117,11 @@ export function useOrchestratorRun(
         });
         if (scope.current !== workspaceId) return;
         if (result.ok) {
-          setRun(result.result.run);
+          const next = result.result.run ?? durableRun.current;
+          durableRun.current = next;
+          setRun(next);
           setError(null);
-          publishRun(workspaceId, result.result.run);
+          publishRun(bridge, workspaceId, next);
         } else setError(result.error.message);
       } catch (reason) {
         if (scope.current === workspaceId) setError(String(reason));
@@ -124,8 +144,10 @@ export function useOrchestratorRun(
       });
       if (scope.current !== workspaceId) return;
       if (result.ok) {
-        setRun(result.result.run);
-        publishRun(workspaceId, result.result.run);
+        const next = result.result.run ?? durableRun.current;
+        durableRun.current = next;
+        setRun(next);
+        publishRun(bridge, workspaceId, next);
       } else setError(result.error.message);
     } catch (reason) {
       if (scope.current === workspaceId) setError(String(reason));
@@ -146,9 +168,11 @@ export function useOrchestratorRun(
       });
       if (scope.current !== workspaceId) return;
       if (result.ok) {
-        setRun(result.result.run);
+        const next = result.result.run ?? durableRun.current;
+        durableRun.current = next;
+        setRun(next);
         setError(null);
-        publishRun(workspaceId, result.result.run);
+        publishRun(bridge, workspaceId, next);
       } else setError(result.error.message);
     } catch (reason) {
       if (scope.current === workspaceId) setError(String(reason));

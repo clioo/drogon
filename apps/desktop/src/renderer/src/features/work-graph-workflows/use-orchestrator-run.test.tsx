@@ -59,7 +59,17 @@ it("starts concrete main work with optional adversarial mode off", async () => {
   expect(view.result.current.run?.policy.adversarial.enabled).toBe(false);
 });
 
-it("publishes a successful launch to other mounted workflow observers", async () => {
+it("publishes a successful launch to observers using the same gated bridge", async () => {
+  const start = vi.fn(async () => ({ ok: true, result: { run } }));
+  const bridge = { graphOrchestratorStart: start } as unknown as GraphBridge;
+  const launcher = renderHook(() => useOrchestratorRun(bridge, "ws"));
+  const observer = renderHook(() => useOrchestratorRun(bridge, "ws"));
+  await act(async () => {});
+  await act(async () => launcher.result.current.start(main));
+  expect(observer.result.current.run?.id).toBe("run-1");
+});
+
+it("does not publish run evidence across separate bridge capability scopes", async () => {
   const start = vi.fn(async () => ({ ok: true, result: { run } }));
   const launcher = renderHook(() =>
     useOrchestratorRun(
@@ -67,13 +77,39 @@ it("publishes a successful launch to other mounted workflow observers", async ()
       "ws",
     ),
   );
-  const observerBridge = {} as GraphBridge;
   const observer = renderHook(() =>
-    useOrchestratorRun(observerBridge, "ws"),
+    useOrchestratorRun({} as GraphBridge, "ws"),
   );
   await act(async () => {});
   await act(async () => launcher.result.current.start(main));
-  expect(observer.result.current.run?.id).toBe("run-1");
+  expect(observer.result.current.run).toBeNull();
+});
+
+it("publishes stop and resume results within one gated bridge scope", async () => {
+  const stopped: OrchestratorRun = { ...run, status: "stopped" };
+  const resumed: OrchestratorRun = { ...run, id: "run-2" };
+  let current = run;
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async () => ({
+      ok: true,
+      result: { run: current },
+    })),
+    graphOrchestratorStop: vi.fn(async () => {
+      current = stopped;
+      return { ok: true, result: { run: current } };
+    }),
+    graphOrchestratorResume: vi.fn(async () => {
+      current = resumed;
+      return { ok: true, result: { run: current } };
+    }),
+  } as unknown as GraphBridge;
+  const controller = renderHook(() => useOrchestratorRun(bridge, "ws"));
+  const observer = renderHook(() => useOrchestratorRun(bridge, "ws"));
+  await waitFor(() => expect(controller.result.current.run?.id).toBe("run-1"));
+  await act(async () => controller.result.current.stop());
+  expect(observer.result.current.run?.status).toBe("stopped");
+  await act(async () => controller.result.current.resume());
+  expect(observer.result.current.run?.id).toBe("run-2");
 });
 
 it("reports lost contact without converting a running run to exited or passed", async () => {
@@ -116,6 +152,64 @@ it("polls promptly while a run is still dispatching", async () => {
   expect(status).toHaveBeenCalledTimes(1);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(99);
+  });
+  expect(status).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(status).toHaveBeenCalledTimes(2);
+});
+
+it("keeps active polling after a transient empty observation", async () => {
+  vi.useFakeTimers();
+  const status = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: true, result: { run } })
+    .mockResolvedValueOnce({ ok: true, result: { run: null } })
+    .mockResolvedValue({ ok: true, result: { run } });
+  const bridge = { graphOrchestratorStatus: status } as unknown as GraphBridge;
+  const view = renderHook(() => useOrchestratorRun(bridge, "ws", 3000, 10_000));
+  await act(async () => {});
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  expect(status).toHaveBeenCalledTimes(2);
+  expect(view.result.current.run?.status).toBe("running");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2999);
+  });
+  expect(status).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(status).toHaveBeenCalledTimes(3);
+});
+
+it("backs off a terminal run even when its last step was dispatching", async () => {
+  vi.useFakeTimers();
+  const unverifiable: OrchestratorRun = {
+    ...run,
+    status: "unverifiable",
+    steps: [
+      {
+        nodeId: main.id,
+        phase: "main",
+        iteration: 1,
+        status: "dispatching",
+        isFallback: false,
+        attempts: [],
+      },
+    ],
+  };
+  const status = vi.fn(async () => ({
+    ok: true,
+    result: { run: unverifiable },
+  }));
+  const bridge = { graphOrchestratorStatus: status } as unknown as GraphBridge;
+  renderHook(() => useOrchestratorRun(bridge, "ws", 3000, 10_000));
+  await act(async () => {});
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(9999);
   });
   expect(status).toHaveBeenCalledTimes(1);
   await act(async () => {

@@ -221,12 +221,42 @@ fn parse_steps(recipe: &Value) -> Result<Vec<MentuStep>, String> {
         .collect()
 }
 
-/// Parses the runtime recipe's step schema into the same typed shape used by
-/// `mentu.recipe`. Execution watchdogs consume this instead of maintaining a
-/// second, looser interpretation of recipe fields.
-pub(crate) fn parse_recipe_steps(source: &str) -> Result<Vec<MentuStep>, String> {
+/// Timing fields that bound every attempt the pinned Mentu runtime may make
+/// for one parsed step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecipeStepBudget {
+    pub label: String,
+    pub timeout_seconds: Option<u64>,
+    pub max_retries: u64,
+    pub retry_backoff_ms: u64,
+}
+
+/// Extends the same typed step parse used by `mentu.recipe` with the pinned
+/// runtime's retry timing fields. Mentu defaults to no retries and a
+/// one-second backoff.
+pub(crate) fn parse_recipe_step_budgets(source: &str) -> Result<Vec<RecipeStepBudget>, String> {
     let recipe = parse_recipe_json(source)?;
-    parse_steps(&recipe)
+    let steps = parse_steps(&recipe)?;
+    let values = recipe
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Recipe has no \"steps\" array.".to_string())?;
+    Ok(steps
+        .into_iter()
+        .zip(values)
+        .map(|(step, value)| RecipeStepBudget {
+            label: step.label,
+            timeout_seconds: step.timeout_seconds,
+            max_retries: value
+                .get("max_retries")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            retry_backoff_ms: value
+                .get("retry_backoff_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(1_000),
+        })
+        .collect())
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

@@ -10,7 +10,7 @@
 //! refuses to die.
 
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -217,25 +217,28 @@ enum WaitOutcome {
     Cancelled,
 }
 
-fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
-    let Some(steps) = std::str::from_utf8(recipe_bytes)
+fn step_run_budget(step: &super::recipe::RecipeStepBudget) -> Option<Duration> {
+    let timeout_seconds = step.timeout_seconds.filter(|seconds| *seconds > 0)?;
+    let attempts = step.max_retries.saturating_add(1);
+    let timeout_ms = timeout_seconds
+        .saturating_mul(1_000)
+        .saturating_mul(attempts);
+    let backoff_ms = step.retry_backoff_ms.saturating_mul(step.max_retries);
+    Some(Duration::from_millis(timeout_ms.saturating_add(backoff_ms)))
+}
+
+fn parsed_recipe_budgets(recipe_bytes: &[u8]) -> Option<Vec<super::recipe::RecipeStepBudget>> {
+    std::str::from_utf8(recipe_bytes)
         .ok()
-        .and_then(|source| super::recipe::parse_recipe_steps(source).ok())
+        .and_then(|source| super::recipe::parse_recipe_step_budgets(source).ok())
         .filter(|steps| !steps.is_empty())
-    else {
-        return DEFAULT_RUN_TIMEOUT;
-    };
-    let mut declared_seconds = 0_u64;
-    let mut every_step_declared = true;
-    for step in steps {
-        let declared = step.timeout_seconds.filter(|seconds| *seconds > 0);
-        every_step_declared &= declared.is_some();
-        declared_seconds = declared_seconds.saturating_add(declared.unwrap_or(0));
-    }
-    if declared_seconds == 0 {
+}
+
+fn bounded_declared_timeout(declared: Duration, every_step_declared: bool) -> Duration {
+    if declared.is_zero() {
         return DEFAULT_RUN_TIMEOUT;
     }
-    let declared = Duration::from_secs(declared_seconds)
+    let declared = declared
         .saturating_add(DECLARED_TIMEOUT_GRACE)
         .min(MAX_RUN_TIMEOUT);
     if every_step_declared {
@@ -245,29 +248,86 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
     }
 }
 
+fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
+    let Some(steps) = parsed_recipe_budgets(recipe_bytes) else {
+        return DEFAULT_RUN_TIMEOUT;
+    };
+    let mut declared = Duration::ZERO;
+    let mut every_step_declared = true;
+    for step in &steps {
+        let step_budget = step_run_budget(step);
+        every_step_declared &= step_budget.is_some();
+        declared = declared.saturating_add(step_budget.unwrap_or_default());
+    }
+    bounded_declared_timeout(declared, every_step_declared)
+}
+
+fn recipe_step_timeout(recipe_bytes: &[u8], label: &str) -> Duration {
+    let Some(step) = parsed_recipe_budgets(recipe_bytes)
+        .and_then(|steps| steps.into_iter().find(|step| step.label == label))
+    else {
+        return DEFAULT_RUN_TIMEOUT;
+    };
+    bounded_declared_timeout(step_run_budget(&step).unwrap_or_default(), true)
+}
+
+fn read_snapshot_file(path: &Path) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > SNAPSHOT_MAX_RECIPE_BYTES {
+        return None;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return None;
+        }
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(SNAPSHOT_MAX_RECIPE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() as u64 <= SNAPSHOT_MAX_RECIPE_BYTES).then_some(bytes)
+}
+
 fn read_original_snapshot_recipe(workspace_root: &Path, run_id: &str) -> Option<Vec<u8>> {
     if !valid_run_id(run_id) {
         return None;
     }
-    let dir = snapshot_root(workspace_root).join(run_id);
-    let manifest_path = dir.join("manifest.json");
-    let manifest_metadata = fs::symlink_metadata(&manifest_path).ok()?;
-    if !manifest_metadata.is_file() || manifest_metadata.len() > SNAPSHOT_MAX_RECIPE_BYTES {
+    let root = snapshot_root(workspace_root);
+    if !fs::symlink_metadata(&root).ok()?.is_dir() {
         return None;
     }
-    let manifest =
-        serde_json::from_slice::<serde_json::Value>(&fs::read(manifest_path).ok()?).ok()?;
+    let dir = root.join(run_id);
+    if !fs::symlink_metadata(&dir).ok()?.is_dir() {
+        return None;
+    }
+    let manifest_bytes = read_snapshot_file(&dir.join("manifest.json"))?;
+    let manifest = serde_json::from_slice::<serde_json::Value>(&manifest_bytes).ok()?;
     let recorded_path = PathBuf::from(manifest.get("recipePath")?.as_str()?);
     let file_name = recorded_path.file_name()?;
     let recipe_path = dir.join(file_name);
     if recorded_path != recipe_path {
         return None;
     }
-    let metadata = fs::symlink_metadata(&recipe_path).ok()?;
-    if !metadata.is_file() || metadata.len() > SNAPSHOT_MAX_RECIPE_BYTES {
-        return None;
-    }
-    let recipe_bytes = fs::read(recipe_path).ok()?;
+    let recipe_bytes = read_snapshot_file(&recipe_path)?;
     let recorded_hash = manifest.get("contentHash")?.as_str()?;
     (sha256_hex(&recipe_bytes) == recorded_hash).then_some(recipe_bytes)
 }
@@ -312,8 +372,11 @@ fn invocation_run_timeout(
         // Resume and retry re-enter runtime-side state. Reuse the exact
         // approved bytes retained for the original run; an absent or changed
         // snapshot falls back to the historical bounded default, never 24 h.
-        Invocation::Resume { .. } | Invocation::RetryStep { .. } => retry_recipe
+        Invocation::Resume { .. } => retry_recipe
             .map(recipe_run_timeout)
+            .unwrap_or(DEFAULT_RUN_TIMEOUT),
+        Invocation::RetryStep { step, .. } => retry_recipe
+            .map(|recipe| recipe_step_timeout(recipe, step))
             .unwrap_or(DEFAULT_RUN_TIMEOUT),
     }
 }
@@ -1824,6 +1887,38 @@ mod timeout_tests {
     }
 
     #[test]
+    fn declared_retries_and_backoff_are_part_of_the_outer_budget() {
+        let recipe =
+            br#"{"steps":[{"label":"main","timeout":30,"max_retries":2,"retry_backoff_ms":2500}]}"#;
+        assert_eq!(
+            recipe_run_timeout(recipe),
+            Duration::from_secs(95) + DECLARED_TIMEOUT_GRACE
+        );
+        assert_eq!(
+            recipe_step_timeout(recipe, "main"),
+            Duration::from_secs(95) + DECLARED_TIMEOUT_GRACE
+        );
+    }
+
+    #[test]
+    fn retry_step_uses_only_the_selected_steps_budget() {
+        let recipe =
+            br#"{"steps":[{"label":"main","timeout":45},{"label":"verify","timeout":900}]}"#;
+        let retry = Invocation::RetryStep {
+            mentu_run_id: "runtime-run",
+            step: "main",
+        };
+        assert_eq!(
+            invocation_run_timeout(&retry, None, Some(recipe)),
+            Duration::from_secs(45) + DECLARED_TIMEOUT_GRACE
+        );
+        assert_eq!(
+            invocation_run_timeout(&retry, None, None),
+            DEFAULT_RUN_TIMEOUT
+        );
+    }
+
+    #[test]
     fn absent_and_hostile_budgets_stay_bounded() {
         assert_eq!(
             recipe_run_timeout(br#"{"steps":[{"label":"main"}]}"#),
@@ -1833,6 +1928,17 @@ mod timeout_tests {
         assert_eq!(
             recipe_run_timeout(&serde_json::to_vec(&hostile).unwrap()),
             MAX_RUN_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn a_legacy_fresh_run_without_staged_bytes_keeps_the_default_bound() {
+        let run = Invocation::Run {
+            recipe_path: Path::new("mutable.json"),
+        };
+        assert_eq!(
+            invocation_run_timeout(&run, None, None),
+            DEFAULT_RUN_TIMEOUT
         );
     }
 
@@ -1867,6 +1973,21 @@ mod timeout_tests {
             invocation_run_timeout(&resume, None, None),
             DEFAULT_RUN_TIMEOUT
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_wait_stops_and_reaps_a_timed_out_fixture_process() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 60"]);
+        detach_process_group(&mut command);
+        let child = Arc::new(Mutex::new(command.spawn().unwrap()));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        assert!(matches!(
+            wait_bounded(&child, &cancelled, Duration::from_millis(20)),
+            WaitOutcome::TimedOut
+        ));
+        assert!(child.lock().unwrap().try_wait().unwrap().is_some());
     }
 
     #[test]
@@ -1924,6 +2045,21 @@ mod timeout_tests {
         let recovered =
             read_retry_chain_snapshot(&db, workspace.path(), "workspace", "retry-two").unwrap();
         assert_eq!(recovered, recipe_bytes);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let alternate = dir.join("alternate.json");
+            fs::write(&alternate, recipe_bytes).unwrap();
+            fs::remove_file(&recipe_path).unwrap();
+            symlink(&alternate, &recipe_path).unwrap();
+            assert!(
+                read_retry_chain_snapshot(&db, workspace.path(), "workspace", "retry-two")
+                    .is_none(),
+                "matching approved bytes reached through a symlink must still be refused"
+            );
+            fs::remove_file(&recipe_path).unwrap();
+        }
 
         let changed = br#"{"steps":[{"label":"main","timeout":999}]}"#;
         fs::write(&recipe_path, changed).unwrap();
