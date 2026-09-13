@@ -9,7 +9,7 @@
 //! separately-grouped step shells) with a SIGKILL escalation when the tree
 //! refuses to die.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use drogon_protocol::RpcError;
 use drogon_protocol::mentu::{MentuRun, MentuRunStatus};
+use rusqlite::OptionalExtension as _;
 use sha2::Digest as _;
 
 use crate::error;
@@ -29,10 +30,12 @@ use super::{run_record, storage};
 /// Watchdog for recipes that declare no step budgets. A fully explicit recipe
 /// gets the sum of its runtime-owned attempt, retry, verification, and hook
 /// limits plus cleanup grace, so the daemon never preempts valid work.
-const DEFAULT_RUN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const DEFAULT_RUN_TIMEOUT: Duration =
+    Duration::from_secs(super::recipe::DEFAULT_STEP_TIMEOUT_SECONDS);
 const DECLARED_TIMEOUT_GRACE: Duration = Duration::from_secs(60);
 const VERIFY_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const HOOK_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+const RUNTIME_PROCESS_TEARDOWN: Duration = Duration::from_secs(4);
 /// A malformed or hostile recipe cannot turn the daemon's safety watchdog off.
 const MAX_RUN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -219,32 +222,33 @@ enum WaitOutcome {
     Cancelled,
 }
 
+fn repeated_runtime_process(timeout: Duration, count: u64) -> Duration {
+    timeout
+        .saturating_add(RUNTIME_PROCESS_TEARDOWN)
+        .saturating_mul(count.try_into().unwrap_or(u32::MAX))
+}
+
 fn step_run_budget(
     step: &super::recipe::RecipeStepBudget,
     recipe: &super::recipe::RecipeBudget,
 ) -> (Duration, bool) {
-    let declared_timeout = step.timeout_seconds.filter(|seconds| *seconds > 0);
+    let timeout = step.timeout_seconds.filter(|seconds| *seconds > 0);
     let attempts = step.max_retries.saturating_add(1);
-    let timeout_ms = declared_timeout
-        .unwrap_or(0)
-        .saturating_mul(1_000)
-        .saturating_mul(attempts);
-    let backoff_ms = step.retry_backoff_ms.saturating_mul(step.max_retries);
-    let verification =
-        VERIFY_COMMAND_TIMEOUT.saturating_mul(step.verify_commands.try_into().unwrap_or(u32::MAX));
+    let attempt_budget =
+        repeated_runtime_process(Duration::from_secs(timeout.unwrap_or(0)), attempts);
+    let backoff = Duration::from_millis(step.retry_backoff_ms.saturating_mul(step.max_retries));
+    let verification = repeated_runtime_process(VERIFY_COMMAND_TIMEOUT, step.verify_commands);
     let terminal_hooks = recipe.after_step_hooks.max(recipe.on_error_hooks);
-    let hooks = HOOK_COMMAND_TIMEOUT.saturating_mul(
-        recipe
-            .before_step_hooks
-            .saturating_add(terminal_hooks)
-            .try_into()
-            .unwrap_or(u32::MAX),
+    let hooks = repeated_runtime_process(
+        HOOK_COMMAND_TIMEOUT,
+        recipe.before_step_hooks.saturating_add(terminal_hooks),
     );
     (
-        Duration::from_millis(timeout_ms.saturating_add(backoff_ms))
+        attempt_budget
+            .saturating_add(backoff)
             .saturating_add(verification)
             .saturating_add(hooks),
-        declared_timeout.is_some(),
+        timeout.is_some(),
     )
 }
 
@@ -273,12 +277,11 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
     let Some(recipe) = parsed_recipe_budget(recipe_bytes) else {
         return DEFAULT_RUN_TIMEOUT;
     };
-    let run_hooks = HOOK_COMMAND_TIMEOUT.saturating_mul(
+    let run_hooks = repeated_runtime_process(
+        HOOK_COMMAND_TIMEOUT,
         recipe
             .before_run_hooks
-            .saturating_add(recipe.after_run_hooks)
-            .try_into()
-            .unwrap_or(u32::MAX),
+            .saturating_add(recipe.after_run_hooks),
     );
     let mut declared = run_hooks;
     let mut every_step_declared = true;
@@ -369,29 +372,37 @@ fn read_original_snapshot_recipe(workspace_root: &Path, run_id: &str) -> Option<
     (sha256_hex(&recipe_bytes) == recorded_hash).then_some(recipe_bytes)
 }
 
-fn read_retry_chain_snapshot(
+fn read_retry_snapshot(
     db: &Arc<Mutex<rusqlite::Connection>>,
     workspace_root: &Path,
     workspace_id: &str,
     run_id: &str,
 ) -> Option<Vec<u8>> {
-    let mut current = run_id.to_string();
-    let mut visited = HashSet::new();
-    while visited.len() < 64 && visited.insert(current.clone()) {
-        let snapshot = read_original_snapshot_recipe(workspace_root, &current);
+    if !valid_run_id(run_id) {
+        return None;
+    }
+    // Every wrapper retry retains the original approval id. Resolve the one
+    // fresh run that materialized that approval directly instead of walking an
+    // arbitrarily deep retry_of chain and eventually losing its safe budget.
+    let (source_run_id, approved_hash) = {
         let conn = db.lock().unwrap();
-        let prior = storage::get_run(&conn, &current).ok()??;
+        let prior = storage::get_run(&conn, run_id).ok()??;
         if prior.workspace_id != workspace_id {
             return None;
         }
-        if let Some(bytes) = snapshot {
-            let approved_hash =
-                storage::approval_content_hash(&conn, &prior.approval_id).ok()??;
-            return (sha256_hex(&bytes) == approved_hash).then_some(bytes);
-        }
-        current = prior.retry_of?;
-    }
-    None
+        let source_run_id = conn
+            .query_row(
+                "SELECT id FROM mentu_runs WHERE workspace_id = ?1 AND approval_id = ?2 AND retry_of IS NULL ORDER BY rowid LIMIT 1",
+                rusqlite::params![workspace_id, prior.approval_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .ok()??;
+        let approved_hash = storage::approval_content_hash(&conn, &prior.approval_id).ok()??;
+        (source_run_id, approved_hash)
+    };
+    let bytes = read_original_snapshot_recipe(workspace_root, &source_run_id)?;
+    (sha256_hex(&bytes) == approved_hash).then_some(bytes)
 }
 
 fn invocation_run_timeout(
@@ -530,9 +541,9 @@ pub fn launch_run(
         &invocation,
         Invocation::Resume { .. } | Invocation::RetryStep { .. }
     ) {
-        retry_of.as_deref().and_then(|run_id| {
-            read_retry_chain_snapshot(&db, &workspace_root, &workspace_id, run_id)
-        })
+        retry_of
+            .as_deref()
+            .and_then(|run_id| read_retry_snapshot(&db, &workspace_root, &workspace_id, run_id))
     } else {
         None
     };
@@ -1899,6 +1910,7 @@ mod timeout_tests {
             Duration::from_secs(
                 crate::graph::compiler::AGENT_STEP_TIMEOUT_SECONDS
                     + crate::graph::compiler::SHELL_STEP_TIMEOUT_SECONDS
+                    + (2 * RUNTIME_PROCESS_TEARDOWN.as_secs())
                     + DECLARED_TIMEOUT_GRACE.as_secs()
             )
         );
@@ -1912,11 +1924,13 @@ mod timeout_tests {
     fn short_explicit_and_partially_undeclared_budgets_stay_safe() {
         assert_eq!(
             recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":30}]}"#),
-            Duration::from_secs(30) + DECLARED_TIMEOUT_GRACE
+            Duration::from_secs(30) + RUNTIME_PROCESS_TEARDOWN + DECLARED_TIMEOUT_GRACE
         );
         assert_eq!(
             recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":30},{"label":"verify"}]}"#),
-            DEFAULT_RUN_TIMEOUT
+            Duration::from_secs(30 + 30 * 60)
+                + (2 * RUNTIME_PROCESS_TEARDOWN)
+                + DECLARED_TIMEOUT_GRACE
         );
     }
 
@@ -1926,7 +1940,7 @@ mod timeout_tests {
             br#"{"steps":[{"label":"main","timeout":30,"max_retries":2,"retry_backoff_ms":2500}]}"#;
         assert_eq!(
             recipe_run_timeout(recipe),
-            Duration::from_secs(95) + DECLARED_TIMEOUT_GRACE
+            Duration::from_secs(95) + (3 * RUNTIME_PROCESS_TEARDOWN) + DECLARED_TIMEOUT_GRACE
         );
     }
 
@@ -1946,7 +1960,7 @@ mod timeout_tests {
                 "verify": {"commands": ["one", "two"]}
             }]
         }"#;
-        assert_eq!(recipe_run_timeout(recipe), Duration::from_secs(1_290));
+        assert_eq!(recipe_run_timeout(recipe), Duration::from_secs(1_322));
     }
 
     #[test]
@@ -1959,7 +1973,7 @@ mod timeout_tests {
         };
         assert_eq!(
             invocation_run_timeout(&retry, None, Some(recipe)),
-            Duration::from_secs(945) + DECLARED_TIMEOUT_GRACE
+            Duration::from_secs(945) + (2 * RUNTIME_PROCESS_TEARDOWN) + DECLARED_TIMEOUT_GRACE
         );
         assert_eq!(
             invocation_run_timeout(&retry, None, None),
@@ -1971,8 +1985,9 @@ mod timeout_tests {
     fn absent_and_hostile_budgets_stay_bounded() {
         assert_eq!(
             recipe_run_timeout(br#"{"steps":[{"label":"main"}]}"#),
-            DEFAULT_RUN_TIMEOUT
+            DEFAULT_RUN_TIMEOUT + RUNTIME_PROCESS_TEARDOWN + DECLARED_TIMEOUT_GRACE
         );
+        assert_eq!(recipe_run_timeout(br#"{}"#), DEFAULT_RUN_TIMEOUT);
         let hostile = serde_json::json!({ "steps": [{ "label": "main", "timeout": u64::MAX }] });
         assert_eq!(
             recipe_run_timeout(&serde_json::to_vec(&hostile).unwrap()),
@@ -2016,7 +2031,7 @@ mod timeout_tests {
         let approved = read_original_snapshot_recipe(workspace.path(), original_run_id).unwrap();
         assert_eq!(
             invocation_run_timeout(&resume, None, Some(&approved)),
-            Duration::from_secs(45) + DECLARED_TIMEOUT_GRACE
+            Duration::from_secs(45) + RUNTIME_PROCESS_TEARDOWN + DECLARED_TIMEOUT_GRACE
         );
         assert_eq!(
             invocation_run_timeout(&resume, None, None),
@@ -2040,7 +2055,7 @@ mod timeout_tests {
     }
 
     #[test]
-    fn retry_chain_recovers_the_first_runs_snapshot() {
+    fn deep_retry_history_recovers_the_approved_snapshot_directly() {
         let workspace = tempfile::tempdir().unwrap();
         let dir = snapshot_root(workspace.path()).join("original");
         fs::create_dir_all(&dir).unwrap();
@@ -2072,27 +2087,37 @@ mod timeout_tests {
             },
         )
         .unwrap();
-        for (id, retry_of) in [
-            ("original", None),
-            ("retry-one", Some("original")),
-            ("retry-two", Some("retry-one")),
-        ] {
+        storage::insert_run(
+            &conn,
+            &storage::NewRun {
+                id: "original",
+                workspace_id: "workspace",
+                recipe_id: "recipe",
+                approval_id: "approval",
+                started_at: "2026-09-13T00:00:00Z",
+                retry_of: None,
+            },
+        )
+        .unwrap();
+        let mut previous = "original".to_string();
+        for index in 0..70 {
+            let id = format!("retry-{index}");
             storage::insert_run(
                 &conn,
                 &storage::NewRun {
-                    id,
+                    id: &id,
                     workspace_id: "workspace",
                     recipe_id: "recipe",
                     approval_id: "approval",
                     started_at: "2026-09-13T00:00:00Z",
-                    retry_of,
+                    retry_of: Some(&previous),
                 },
             )
             .unwrap();
+            previous = id;
         }
         let db = Arc::new(Mutex::new(conn));
-        let recovered =
-            read_retry_chain_snapshot(&db, workspace.path(), "workspace", "retry-two").unwrap();
+        let recovered = read_retry_snapshot(&db, workspace.path(), "workspace", &previous).unwrap();
         assert_eq!(recovered, recipe_bytes);
 
         #[cfg(unix)]
@@ -2103,8 +2128,7 @@ mod timeout_tests {
             fs::remove_file(&recipe_path).unwrap();
             symlink(&alternate, &recipe_path).unwrap();
             assert!(
-                read_retry_chain_snapshot(&db, workspace.path(), "workspace", "retry-two")
-                    .is_none(),
+                read_retry_snapshot(&db, workspace.path(), "workspace", &previous).is_none(),
                 "matching approved bytes reached through a symlink must still be refused"
             );
             fs::remove_file(&recipe_path).unwrap();
@@ -2122,7 +2146,7 @@ mod timeout_tests {
         )
         .unwrap();
         assert!(
-            read_retry_chain_snapshot(&db, workspace.path(), "workspace", "retry-two").is_none(),
+            read_retry_snapshot(&db, workspace.path(), "workspace", &previous).is_none(),
             "workspace-owned snapshot edits must not replace the approved durable hash"
         );
     }

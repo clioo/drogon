@@ -59,14 +59,25 @@ it("starts concrete main work with optional adversarial mode off", async () => {
   expect(view.result.current.run?.policy.adversarial.enabled).toBe(false);
 });
 
-it("publishes a successful launch to observers using the same gated bridge", async () => {
-  const start = vi.fn(async () => ({ ok: true, result: { run } }));
-  const bridge = { graphOrchestratorStart: start } as unknown as GraphBridge;
+it("refreshes observers through the same gated bridge after launch", async () => {
+  let current: OrchestratorRun | null = null;
+  const start = vi.fn(async () => {
+    current = run;
+    return { ok: true, result: { run } };
+  });
+  const bridge = {
+    graphOrchestratorStart: start,
+    graphOrchestratorStatus: vi.fn(async () => ({
+      ok: true,
+      result: { run: current },
+    })),
+  } as unknown as GraphBridge;
   const launcher = renderHook(() => useOrchestratorRun(bridge, "ws"));
   const observer = renderHook(() => useOrchestratorRun(bridge, "ws"));
   await act(async () => {});
+  expect(observer.result.current.run).toBeNull();
   await act(async () => launcher.result.current.start(main));
-  expect(observer.result.current.run?.id).toBe("run-1");
+  await waitFor(() => expect(observer.result.current.run?.id).toBe("run-1"));
 });
 
 it("does not publish run evidence across separate bridge capability scopes", async () => {
@@ -107,9 +118,55 @@ it("publishes stop and resume results within one gated bridge scope", async () =
   const observer = renderHook(() => useOrchestratorRun(bridge, "ws"));
   await waitFor(() => expect(controller.result.current.run?.id).toBe("run-1"));
   await act(async () => controller.result.current.stop());
-  expect(observer.result.current.run?.status).toBe("stopped");
+  await waitFor(() =>
+    expect(observer.result.current.run?.status).toBe("stopped"),
+  );
   await act(async () => controller.result.current.resume());
-  expect(observer.result.current.run?.id).toBe("run-2");
+  await waitFor(() => expect(observer.result.current.run?.id).toBe("run-2"));
+});
+
+it("refreshes instead of regressing peers to a delayed mutation snapshot", async () => {
+  const older: OrchestratorRun = {
+    ...run,
+    updatedAt: "2026-09-13T00:00:01Z",
+  };
+  const newer: OrchestratorRun = {
+    ...run,
+    phase: "review",
+    updatedAt: "2026-09-13T00:00:02Z",
+  };
+  let current = older;
+  let finishStart: ((value: unknown) => void) | undefined;
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async () => ({
+      ok: true,
+      result: { run: current },
+    })),
+    graphOrchestratorStart: vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishStart = resolve;
+        }),
+    ),
+  } as unknown as GraphBridge;
+  const controller = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+  const observer = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+  await waitFor(() => expect(observer.result.current.run?.phase).toBe("main"));
+  let launch: Promise<void>;
+  act(() => {
+    launch = controller.result.current.start(main);
+  });
+  current = newer;
+  await waitFor(() =>
+    expect(observer.result.current.run?.phase).toBe("review"),
+  );
+  await act(async () => {
+    finishStart?.({ ok: true, result: { run: older } });
+    await launch;
+  });
+  await waitFor(() =>
+    expect(observer.result.current.run?.phase).toBe("review"),
+  );
 });
 
 it("reports lost contact without converting a running run to exited or passed", async () => {

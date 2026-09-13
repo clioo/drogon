@@ -5,17 +5,11 @@ import type {
   OrchestratorRun,
 } from "../../../../shared/graph-contract";
 
-type RunObserver = (workspaceId: string, run: OrchestratorRun | null) => void;
+type RunObserver = (workspaceId: string) => void;
 const runObservers = new WeakMap<GraphBridge, Set<RunObserver>>();
 
-function publishRun(
-  bridge: GraphBridge,
-  workspaceId: string,
-  run: OrchestratorRun | null,
-): void {
-  for (const observer of runObservers.get(bridge) ?? []) {
-    observer(workspaceId, run);
-  }
+function publishRefresh(bridge: GraphBridge, workspaceId: string): void {
+  for (const observer of runObservers.get(bridge) ?? []) observer(workspaceId);
 }
 
 export function useOrchestratorRun(
@@ -35,13 +29,11 @@ export function useOrchestratorRun(
   scope.current = workspaceId;
   useEffect(() => {
     if (!bridge) return;
-    const observe: RunObserver = (observedWorkspaceId, observed) => {
+    const observe: RunObserver = (observedWorkspaceId) => {
       if (observedWorkspaceId !== scope.current) return;
+      // Invalidate an older in-flight read, then ask the daemon for its latest
+      // durable snapshot instead of publishing a possibly stale mutation reply.
       mutation.current++;
-      const next = observed ?? durableRun.current;
-      durableRun.current = next;
-      setRun(next);
-      setError(null);
       setRefreshEpoch((epoch) => epoch + 1);
     };
     const observers = runObservers.get(bridge) ?? new Set<RunObserver>();
@@ -121,7 +113,7 @@ export function useOrchestratorRun(
           durableRun.current = next;
           setRun(next);
           setError(null);
-          publishRun(bridge, workspaceId, next);
+          publishRefresh(bridge, workspaceId);
         } else setError(result.error.message);
       } catch (reason) {
         if (scope.current === workspaceId) setError(String(reason));
@@ -147,7 +139,7 @@ export function useOrchestratorRun(
         const next = result.result.run ?? durableRun.current;
         durableRun.current = next;
         setRun(next);
-        publishRun(bridge, workspaceId, next);
+        publishRefresh(bridge, workspaceId);
       } else setError(result.error.message);
     } catch (reason) {
       if (scope.current === workspaceId) setError(String(reason));
@@ -172,7 +164,7 @@ export function useOrchestratorRun(
         durableRun.current = next;
         setRun(next);
         setError(null);
-        publishRun(bridge, workspaceId, next);
+        publishRefresh(bridge, workspaceId);
       } else setError(result.error.message);
     } catch (reason) {
       if (scope.current === workspaceId) setError(String(reason));

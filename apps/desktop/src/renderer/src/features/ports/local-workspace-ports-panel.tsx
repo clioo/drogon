@@ -48,13 +48,15 @@ export function LocalWorkspacePortsPanel({
   isVisible,
   workspace,
   onOpenInBrowserTab,
-  bridge = window.drogon.workspacePorts
+  bridge = window.drogon.workspacePorts,
+  notifications = toast
 }: {
   isVisible: boolean
   workspace: Workspace | null
   /** Creates a browser tab owned by the workspace's tab strip (the "+" menu path). */
   onOpenInBrowserTab: (url: string) => void
   bridge?: WorkspacePortsBridge
+  notifications?: Pick<typeof toast, 'error' | 'success'>
 }): React.JSX.Element {
   const [scan, setScan] = useState<WorkspacePortsSnapshot | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -73,13 +75,13 @@ export function LocalWorkspacePortsPanel({
       setScan(result.result)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      toast.error('Failed to refresh ports', {
+      notifications.error('Failed to refresh ports', {
         description: message || 'Workspace port scan failed.'
       })
     } finally {
       setRefreshing(false)
     }
-  }, [bridge, workspace])
+  }, [bridge, notifications, workspace])
 
   // Poll while visible (source cadence); stop when hidden or unmounted.
   useEffect(() => {
@@ -109,24 +111,24 @@ export function LocalWorkspacePortsPanel({
           port: port.port
         })
         if (!result.ok) {
-          toast.error(result.error.message)
+          notifications.error(result.error.message)
           return
         }
         const killResult = result.result
         if (!killResult.ok) {
-          toast.error(killResult.reason ?? 'Failed to stop the process.')
+          notifications.error(killResult.reason ?? 'Failed to stop the process.')
           return
         }
-        toast.success(`Stopped process on :${port.port}`)
+        notifications.success(`Stopped process on :${port.port}`)
         await refresh()
         window.setTimeout(() => void refresh(), WORKSPACE_PORT_STOP_SETTLE_MS)
       } catch (error) {
-        toast.error('Failed to stop the process.', {
+        notifications.error('Failed to stop the process.', {
           description: error instanceof Error ? error.message : String(error)
         })
       }
     },
-    [bridge, workspace, refresh]
+    [bridge, workspace, refresh, notifications]
   )
 
   const handleOpenPortInBrowser = useCallback(
@@ -137,7 +139,7 @@ export function LocalWorkspacePortsPanel({
         // once here (same posture as App's open-external handler).
         const shell = (window.drogon as unknown as { shell?: ShellBridge }).shell
         if (!shell || typeof shell.openExternal !== 'function') {
-          toast.error('Failed to open browser', {
+          notifications.error('Failed to open browser', {
             description: 'The shell bridge is not exposed.'
           })
           return
@@ -145,7 +147,7 @@ export function LocalWorkspacePortsPanel({
         try {
           await shell.openExternal(url)
         } catch (error) {
-          toast.error('Failed to open browser', {
+          notifications.error('Failed to open browser', {
             description: error instanceof Error ? error.message : String(error)
           })
         }
@@ -153,7 +155,7 @@ export function LocalWorkspacePortsPanel({
       }
       onOpenInBrowserTab(url)
     },
-    [onOpenInBrowserTab]
+    [notifications, onOpenInBrowserTab]
   )
 
   const { activePorts, otherWorkspacePorts, externalPorts } = useMemo(

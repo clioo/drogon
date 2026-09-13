@@ -100,7 +100,6 @@ pub mod lock {
 
         use super::LOCK_FILE_NAME;
 
-        const ERROR_ACCESS_DENIED: i32 = 5;
         const ERROR_SHARING_VIOLATION: i32 = 32;
         const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
@@ -124,7 +123,7 @@ pub mod lock {
                 .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
                 .open(path)
                 .map_err(|error| match error.raw_os_error() {
-                    Some(ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION) => lock_held_error(error),
+                    Some(ERROR_SHARING_VIOLATION) => lock_held_error(error),
                     _ => error,
                 })?;
             if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {

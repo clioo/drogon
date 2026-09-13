@@ -15,6 +15,7 @@ use drogon_protocol::graph::{
 };
 use drogon_protocol::mentu::MentuRunStatus;
 use drogon_protocol::{Request, RpcError};
+use rusqlite::OptionalExtension as _;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -127,6 +128,23 @@ impl Engine {
         .collect()
     }
 
+    fn orchestrator_run_for_workspace(&self, workspace_id: &str) -> Result<Option<Run>, RpcError> {
+        let db = self.db.lock().unwrap();
+        let payload = db
+            .query_row(
+                "SELECT payload FROM graph_orchestrator_runs WHERE workspace_id = ?1 ORDER BY rowid DESC LIMIT 1",
+                [workspace_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| error::internal_error(e.to_string()))?;
+        payload
+            .map(|payload| {
+                serde_json::from_str(&payload).map_err(|e| error::internal_error(e.to_string()))
+            })
+            .transpose()
+    }
+
     pub(crate) fn graph_write_policy(&self, request: &Request) -> Result<Value, RpcError> {
         self.mutating(request, |engine, params| {
             let parsed: Policy = parse(params)?;
@@ -217,9 +235,9 @@ impl Engine {
         let parsed: Workspace = parse(params)?;
         self.workspace_path(&parsed.workspace_id)?;
         let _gate = self.graph_orchestrator_gate.lock().unwrap();
-        Ok(
-            json!({"run":self.orchestrator_runs()?.into_iter().find(|run| run.workspace_id == parsed.workspace_id)}),
-        )
+        Ok(json!({
+            "run": self.orchestrator_run_for_workspace(&parsed.workspace_id)?
+        }))
     }
 
     pub(crate) fn graph_orchestrator_stop(&self, request: &Request) -> Result<Value, RpcError> {

@@ -1453,14 +1453,14 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "mentu retry-step",
             &["mentu", "retry-step"],
-            "Rerun exactly ONE step of a past run, by label",
+            "Retry one labeled step, then continue any invalidated or unfinished dependents",
             "drogon-cli mentu retry-step --run <ID> --step <LABEL> [--follow] [--timeout-ms <MS>]",
             &["follow", "run", "step", "timeout-ms"],
             &[],
             &["drogon-cli mentu retry-step --run run-row-1 --step n2 --follow"],
             &[
                 "Requires mentu.v1. This is the runtime's own retry-step: the graph compiler emits each node id as its step label, so a graph node retries with --step <node id>.",
-                "The rest of the run is left alone: a succeeded step is never redone.",
+                "Successful predecessors are not redone; invalidated dependents or later unfinished steps may continue after the target succeeds.",
             ],
         ),
         entry(

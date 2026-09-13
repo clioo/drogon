@@ -221,6 +221,8 @@ fn parse_steps(recipe: &Value) -> Result<Vec<MentuStep>, String> {
         .collect()
 }
 
+pub(crate) const DEFAULT_STEP_TIMEOUT_SECONDS: u64 = 30 * 60;
+
 /// Timing fields that bound every attempt the pinned Mentu runtime may make
 /// for one parsed step.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -264,7 +266,14 @@ pub(crate) fn parse_recipe_budget(source: &str) -> Result<RecipeBudget, String> 
             .into_iter()
             .zip(values)
             .map(|(step, value)| RecipeStepBudget {
-                timeout_seconds: step.timeout_seconds,
+                // The pinned runtime gives every omitted step timeout its own
+                // 30-minute allowance. Explicit zero/negative values disable
+                // that inner bound and remain unusable for watchdog sizing.
+                timeout_seconds: if value.get("timeout").is_none() {
+                    Some(DEFAULT_STEP_TIMEOUT_SECONDS)
+                } else {
+                    step.timeout_seconds.filter(|seconds| *seconds > 0)
+                },
                 max_retries: value
                     .get("max_retries")
                     .and_then(Value::as_u64)
