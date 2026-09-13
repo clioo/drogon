@@ -100,6 +100,11 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
          --workspace {workspace_id} --json` so your delegation plan uses the saved policy, \
          prior human-visible evidence, and actual work already reported in `.drogon`.\n\n"
     ));
+    out.push_str(
+        "- **Who this mode is addressed to: the workspace's MAIN agent.** A Work Graph node \
+         Drogon dispatches is a depth-one worker; its own task prompt says so, and that prompt \
+         wins over this block. A worker implements its own task and dispatches nothing.\n",
+    );
     if policy.adversarial.enabled {
         out.push_str(&format!(
             "- **Mode: ADVERSARIAL (Delegate is mutually exclusive and OFF), up to {} \
@@ -356,6 +361,26 @@ mod tests {
         GraphPolicy {
             delegate: true,
             ..GraphPolicy::default()
+        }
+    }
+
+    #[test]
+    fn the_brief_says_the_mode_is_for_the_main_agent_not_a_dispatched_worker() {
+        for policy in [policy_delegate_on(), {
+            let mut adversarial = GraphPolicy::default();
+            adversarial.adversarial.enabled = true;
+            adversarial
+        }] {
+            let rendered = render_policy_section("ws-1", &policy);
+            assert!(
+                rendered.contains("addressed to: the workspace's MAIN agent"),
+                "{rendered}"
+            );
+            assert!(
+                rendered
+                    .contains("its own task prompt says so, and that prompt wins over this block"),
+                "{rendered}"
+            );
         }
     }
 

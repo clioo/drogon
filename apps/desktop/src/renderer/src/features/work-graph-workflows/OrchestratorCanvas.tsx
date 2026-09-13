@@ -101,6 +101,23 @@ function Chip({ children }: { children: React.ReactNode }): React.JSX.Element {
   );
 }
 
+/** The last runtime attempt that failed in the run's last step, trimmed to
+ *  a receipt-sized line; null when no attempt recorded a reason (a clean
+ *  pass, a stop, or a run that never launched). */
+function lastFailedAttemptReason(run: OrchestratorRun): string | null {
+  const step = run.steps[run.steps.length - 1];
+  if (!step) return null;
+  for (let index = step.attempts.length - 1; index >= 0; index--) {
+    const attempt = step.attempts[index];
+    if (attempt.outcome === "succeeded" || attempt.outcome === "launched")
+      continue;
+    const reason = attempt.reason?.trim();
+    if (!reason) continue;
+    return reason.length > 280 ? `${reason.slice(0, 277)}…` : reason;
+  }
+  return null;
+}
+
 /** F0: BEFORE "Run workflow" launches anything that is not the free local
  *  default, the canvas must say which runtime will be spawned and that it
  *  is paid/external — never a silent spawn. Shows when the policy's
@@ -144,11 +161,19 @@ function RuntimeDisclosure({
  *  treated as safely stoppable while a real process might still be
  *  running. Only a CONFIRMED exit lifts the guard. */
 function MainAgentNode({
+  task,
+  director = false,
   mainSession,
   stale,
   onStopMainSession,
   stoppingMainSession,
 }: {
+  /** What the NEXT run will execute (the configured main task). The
+   *  session's own harness is a different fact and lives in the inspector. */
+  task?: { harness: string; model: string; prompt: string };
+  /** Delegate/adversarial preview: the main agent directs instead of
+   *  implementing. */
+  director?: boolean;
   mainSession: Session | null;
   /** True when `mainSession` is the last OBSERVED record, not a fresh
    *  read (see `OrchestratorCanvas`'s `lastKnownRef`) — live can never be
@@ -159,20 +184,42 @@ function MainAgentNode({
   stoppingMainSession?: boolean;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
+  // The configured task, rendered identically whether or not a session
+  // exists, so the node never changes shape when one appears.
+  const taskBody = task ? (
+    <>
+      <div className="flex flex-wrap gap-1">
+        <Chip>{task.harness}</Chip>
+        <Chip>{task.model || "Harness default"}</Chip>
+        {director ? <Chip>Director</Chip> : null}
+      </div>
+      <p className="line-clamp-3 text-xs text-muted-foreground">
+        {task.prompt || "Configure the main task"}
+      </p>
+    </>
+  ) : null;
   if (!mainSession) {
     return (
       <div
-        className="flex w-56 flex-col gap-1 rounded-lg border-2 border-dashed border-muted-foreground/40 bg-muted/20 p-3"
+        className={`flex w-56 flex-col gap-1 rounded-lg border-2 p-3 ${
+          task
+            ? "border-purple-500 bg-purple-500/5"
+            : "border-dashed border-muted-foreground/40 bg-muted/20"
+        }`}
         data-testid="orchestrator-main-agent"
         data-state="no-session"
       >
         <div className="flex items-center gap-2">
           <Bot className="size-4 text-muted-foreground" aria-hidden />
-          <span className="text-sm font-medium text-muted-foreground">
+          <span
+            className={`text-sm font-medium ${task ? "" : "text-muted-foreground"}`}
+          >
             Main agent
           </span>
         </div>
-        <p className="text-[11px] text-muted-foreground">No session yet.</p>
+        {taskBody ?? (
+          <p className="text-[11px] text-muted-foreground">No session yet.</p>
+        )}
       </div>
     );
   }
@@ -205,10 +252,12 @@ function MainAgentNode({
             />
             <span className="text-sm font-medium">Main agent</span>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            <Chip>{mainSession.harnessId ?? "shell"}</Chip>
-            <Chip>model not tracked</Chip>
-          </div>
+          {taskBody ?? (
+            <div className="flex flex-wrap gap-1.5">
+              <Chip>{mainSession.harnessId ?? "shell"}</Chip>
+              <Chip>model not tracked</Chip>
+            </div>
+          )}
           {!live ? (
             <p className="text-[11px] text-amber-700 dark:text-amber-400">
               {exited
@@ -757,29 +806,20 @@ export function OrchestratorCanvas({
               data-testid="orchestrator-flow-sequence"
               data-direction={narrow ? "vertical" : "horizontal"}
             >
-              {effectiveMain ? (
-                <div
-                  className="flex w-56 flex-col gap-2 rounded-lg border-2 border-purple-500 bg-purple-500/5 p-3"
-                  data-testid="orchestrator-main-agent"
-                >
-                  <span className="text-sm font-medium">Main agent</span>
-                  <div className="flex flex-wrap gap-1">
-                    <Chip>{effectiveMain.harness}</Chip>
-                    <Chip>{effectiveMain.model || "Harness default"}</Chip>
-                    {previewDelegates ? <Chip>Director</Chip> : null}
-                  </div>
-                  <p className="line-clamp-3 text-xs text-muted-foreground">
-                    {effectiveMain.prompt || "Configure the main task"}
-                  </p>
-                </div>
-              ) : (
-                <MainAgentNode
-                  mainSession={displaySession}
-                  stale={stale}
-                  onStopMainSession={onStopMainSession}
-                  stoppingMainSession={stoppingMainSession}
-                />
-              )}
+              {/* One node, both facts: the task that will run and the live
+                  session behind it. Branching to a task-only card (the
+                  shape this canvas shipped with) made the session
+                  projection — and with it the inspector's harness-lock,
+                  delete-refusal and real stop action — unreachable in the
+                  app, because the pane always supplies a task object. */}
+              <MainAgentNode
+                task={effectiveMain}
+                director={previewDelegates}
+                mainSession={displaySession}
+                stale={stale}
+                onStopMainSession={onStopMainSession}
+                stoppingMainSession={stoppingMainSession}
+              />
               {previewDelegates ? (
                 <>
                   <ArrowRight
@@ -885,7 +925,10 @@ export function OrchestratorCanvas({
                       ? "in-progress"
                       : durableRun.status === "passed"
                         ? "ready"
-                        : "failed"
+                        : durableRun.status === "stopped" ||
+                            durableRun.status === "unverifiable"
+                          ? durableRun.status
+                          : "failed"
                   }
                 >
                   {!running ? "Last run: " : ""}
@@ -897,6 +940,17 @@ export function OrchestratorCanvas({
                   {durableRun.error ? (
                     <p className="mt-1 text-xs text-destructive">
                       {durableRun.error}
+                    </p>
+                  ) : null}
+                  {!running && lastFailedAttemptReason(durableRun) ? (
+                    // The daemon's summary says every runtime failed; the
+                    // runtime's own last words say why (a missing model, a
+                    // refused account), which is what the owner can act on.
+                    <p
+                      className="mt-1 break-words text-xs text-muted-foreground"
+                      data-testid="orchestrator-terminal-reason"
+                    >
+                      {lastFailedAttemptReason(durableRun)}
                     </p>
                   ) : null}
                 </div>

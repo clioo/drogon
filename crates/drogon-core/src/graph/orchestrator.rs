@@ -447,10 +447,14 @@ impl Engine {
             policy: run.policy.clone(),
         };
         let launched = (|| {
-            let mut compiled = compiler::compile(
+            let mut compiled = compiler::compile_for(
                 &intent,
                 &compiler::Selection::Target(node.id.clone()),
                 &compiler::PiProviderDefaults::from_env(),
+                // The main phase IS this workspace's main agent: its prompt
+                // already carries the mode. The test and review roles are
+                // dispatched workers like any other node.
+                (run.phase == "main").then_some(node.id.as_str()),
             )?;
             let runtime = crate::mentu::runtime::require_verified_runtime(self.data_dir())?;
             // No `expected_changes` on any phase, on purpose. The main and
@@ -658,7 +662,14 @@ fn node_for_step(run: &Run, candidate: &GraphRuntimeRef) -> GraphNodeIntent {
             "Code review and corrections"
         }
         .into();
-        node.verify_commands.clear();
+        // Deterministic completion for a role: the evaluation file the role
+        // was asked to write. A 60-character completion keyword is a
+        // transcription task for the agent, and a cheap model gets one hex
+        // digit wrong (observed: a tester wrote a valid verdict, mistyped the
+        // keyword, and the whole iteration was thrown away). The artifact is
+        // the real contract, `read_verdict` validates its content below, and
+        // a missing file still fails the step with the runtime's own message.
+        node.verify_commands = vec![format!("test -s '{}'", result_path(&node.id))];
         let role = if run.phase == "test" {
             "Test adversarially. Run real tests and record reproducible findings. Do not modify product code."
         } else {
