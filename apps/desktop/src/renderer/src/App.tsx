@@ -4252,6 +4252,22 @@ export function App() {
   // simply leaves the viewer where they are.
   useEffect(() => {
     return onReproTour((request) => {
+      if (request.kind === "open-bots") {
+        // Leave Settings for the page that shows the bot the demo configured,
+        // with its responsibilities and its watch. The bot lives in the
+        // workspace the demo just created, which this window has never listed,
+        // so the list is reloaded and that workspace selected first.
+        const workspaceId = request.workspaceId;
+        void (async () => {
+          await reloadWorkspaces();
+          const listed = await window.drogon.workspaces().catch(() => null);
+          if (listed?.ok && listed.result.workspaces.some((item) => item.id === workspaceId)) {
+            if (selectedRef.current !== workspaceId) setSelected(workspaceId);
+          }
+          setRoute(BOTS_ROUTE_ID);
+        })();
+        return;
+      }
       if (request.kind !== "open-work-graph") return;
       const workspaceId = request.workspaceId;
       void (async () => {

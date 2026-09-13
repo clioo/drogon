@@ -267,9 +267,12 @@ function release() {
   // would for a real agent: when the responsibility names the exact command to
   // run (the in-app demo does, so a small local model can follow it), run THAT
   // in this workspace instead of opening a worktree of our own.
-  const direct = prompt.match(
-    /drogon-cli graph orchestrator-start --workspace (\S+) --file (\S+)/,
-  );
+  // A CONCRETE command only: instructions that spell the shape with
+  // placeholders (`--workspace <id>`) are guidance, not something to run, and
+  // running them verbatim is exactly how this fixture used to fail.
+  const direct = [
+    ...prompt.matchAll(/drogon-cli graph orchestrator-start --workspace (\S+) --file (\S+)/g),
+  ].find(([, workspaceId, file]) => !/[<>]/.test(workspaceId) && !/[<>]/.test(file));
   if (direct) {
     const [, workspaceId, file] = direct;
     const scoped = { ...context, workspaceId };

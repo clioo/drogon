@@ -81,12 +81,10 @@ function bridgeThatRuns(): ReproDemoBridge {
   };
 }
 
-describe("Settings → Demo reproducible", () => {
-  test("opens on the free local lane and shows every phase as pending", () => {
+describe("Settings → Reproducible demo", () => {
+  test("opens with no model of its own and every phase pending", () => {
     render(<ReproDemoSection bridge={bridgeThatRuns()} />);
-    expect((screen.getByTestId("repro-demo-model") as HTMLInputElement).value).toBe(
-      "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
-    );
+    expect((screen.getByTestId("repro-demo-model") as HTMLInputElement).value).toBe("");
     expect(
       screen.getByTestId("repro-demo-phase-workspace").getAttribute("data-status"),
     ).toBe("idle");
@@ -95,11 +93,16 @@ describe("Settings → Demo reproducible", () => {
     ).toBe("idle");
   });
 
-  test("picking another runtime replaces the model with that harness's own", () => {
+  test("a typed model survives switching runtimes back and forth", () => {
     render(<ReproDemoSection bridge={bridgeThatRuns()} />);
-    fireEvent.change(screen.getByTestId("repro-demo-runtime"), {
-      target: { value: "claude" },
+    fireEvent.change(screen.getByTestId("repro-demo-model"), {
+      target: { value: "anthropic/claude-sonnet-4" },
     });
+    fireEvent.change(screen.getByTestId("repro-demo-runtime"), {
+      target: { value: "opencode" },
+    });
+    // Switching runtime clears a model that belonged to the previous harness:
+    // an id from another harness is never carried over silently.
     expect((screen.getByTestId("repro-demo-model") as HTMLInputElement).value).toBe("");
   });
 
@@ -117,9 +120,11 @@ describe("Settings → Demo reproducible", () => {
     expect(screen.getByTestId("repro-demo-checks").textContent).toMatch(/mev_9/);
     expect(screen.getByTestId("repro-demo-rounds").textContent).toMatch(/pass/);
     // The free local model is priced as declared-free, not as a bill.
-    expect(screen.getByTestId("repro-demo-cost").textContent).toMatch(/sin facturación/);
+    expect(screen.getByTestId("repro-demo-cost").textContent).toMatch(
+      /no rate in the card|measurement/,
+    );
     expect(screen.getByTestId("repro-demo-release").textContent).toMatch(
-      /el monitor del bot/,
+      /the bot's own watch/,
     );
     // The last widget that changed is the one holding the focus ring.
     expect(
@@ -156,8 +161,8 @@ describe("Settings → Demo reproducible", () => {
     expect((screen.getByTestId("repro-demo-run") as HTMLButtonElement).disabled).toBe(
       true,
     );
-    expect(screen.getByText(/no expone todos los canales/).textContent).toMatch(
-      /no expone todos los canales/,
+    expect(screen.getByText(/does not expose every channel/).textContent).toMatch(
+      /does not expose every channel/,
     );
   });
 });

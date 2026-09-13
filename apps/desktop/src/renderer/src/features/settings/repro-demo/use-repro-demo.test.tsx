@@ -193,7 +193,7 @@ describe("the in-app demo run", () => {
     const state = result.current.state;
     expect(state.releasedBy).toBe("panel");
     expect(state.phases.firing.status).toBe("failed");
-    expect(state.phases.firing.note).toMatch(/no disparó/);
+    expect(state.phases.firing.note).toMatch(/never fired/);
     expect(calls).toContain("graphOrchestratorStart");
     expect(state.workflowStatus).toBe("exhausted");
     expect(state.failure).toBeNull();
@@ -260,6 +260,59 @@ describe("the in-app demo run", () => {
   });
 });
 
+describe("running it again", () => {
+  test("every run takes its own identity, so a second run never collides", async () => {
+    const clock = fakeClock();
+    const handles: string[] = [];
+    const names: string[] = [];
+    const capture = (): ReproDemoBridge => {
+      const { bridge } = makeBridge({
+        monitorViews: [
+          {
+            monitorId: "mon-1",
+            lastCheckOutcome: "changed",
+            lastEventId: "mev_1",
+            firing: { lastEventId: "mev_1", lastOutcome: "dispatched" },
+          },
+        ],
+        runStates: [{ id: "run-1", status: "passed", steps: [] }],
+      });
+      return {
+        ...bridge,
+        quickSessionCreate: async (input) => {
+          names.push(input.name ?? "");
+          return ok({
+            project: { id: "p1", name: input.name ?? "" },
+            workspaceId: "ws-1",
+          });
+        },
+        botCreate: async (input) => {
+          const body = (input as { botId: string; body: { displayIdentity: { handle: string } } });
+          handles.push(`${body.botId}|${body.body.displayIdentity.handle}`);
+          return ok({ id: body.botId });
+        },
+      };
+    };
+
+    for (const _ of [0, 1]) {
+      resetReproDemo();
+      const { result } = renderHook(() => useReproDemo(capture(), { ...clock, tour: () => {} }));
+      await act(async () => {
+        await result.current.run({ runtime, iterations: 1 });
+      });
+      await waitFor(() => expect(result.current.state.running).toBe(false));
+    }
+
+    expect(handles).toHaveLength(2);
+    // The bot handle is an identity the daemon refuses to reuse: a fixed one
+    // made the second run fail with "handle is already owned".
+    expect(handles[0]).not.toBe(handles[1]);
+    for (const entry of handles) expect(entry).toMatch(/^dog-tinder-[0-9a-f]{6}\|dog-tinder-[0-9a-f]{6}$/);
+    expect(names[0]).not.toBe(names[1]);
+    for (const name of names) expect(name).toMatch(/^dog-tinder-[0-9a-f]{6}$/);
+  });
+});
+
 describe("the guided tour", () => {
   test("opens the Work Graph when the rounds start, then follows the views", async () => {
     const clock = fakeClock();
@@ -283,9 +336,11 @@ describe("the guided tour", () => {
       await result.current.run({ runtime, iterations: 1 });
     });
 
-    // The orchestration is the point: the viewer is taken to the real canvas
-    // once the rounds begin, and the ledgers' own tabs at the end.
+    // The viewer is shown what was configured (the Bots page) as soon as the
+    // bot and its watch exist, then the real canvas once the rounds begin, and
+    // the ledgers' own tabs at the end.
     expect(tour).toEqual([
+      { kind: "open-bots", workspaceId: "ws-1" },
       { kind: "open-work-graph", workspaceId: "ws-1" },
       { kind: "focus-view", view: "graph" },
       { kind: "focus-view", view: "evidence" },
@@ -322,7 +377,7 @@ describe("what the released session is told", () => {
     expect(instructions).toContain(
       "drogon-cli graph orchestrator-start --workspace ws-7 --file .drogon/repro-main-node.json",
     );
-    expect(instructions).toMatch(/No implementes el deck vos/);
+    expect(instructions).toMatch(/Do not implement the deck yourself/);
   });
 
   test("the policy turns the bounded adversarial loop on, and never delegate too", () => {
