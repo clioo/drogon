@@ -91,7 +91,8 @@ fn project_node(
     {
         state.harness = Some(runtime.harness.clone());
         state.model = Some(runtime.model.clone());
-        state.is_free_default_runtime = Some(*runtime == super::failover::default_free_runtime());
+        state.provider = runtime.provider.clone();
+        state.is_free_default_runtime = Some(super::failover::is_free_default_runtime(runtime));
     }
     state
 }
@@ -123,6 +124,7 @@ fn project_node_status_and_error(
             },
             harness: None,
             model: None,
+            provider: None,
             is_free_default_runtime: None,
         };
     };
@@ -249,6 +251,7 @@ fn base(
         last_error: None,
         harness: None,
         model: None,
+        provider: None,
         is_free_default_runtime: None,
     }
 }
@@ -372,6 +375,39 @@ mod tests {
         assert_eq!(state.nodes[0].status, GraphNodeStatus::Succeeded);
         // n2 is part of the same compiled run but has not started: idle.
         assert_eq!(state.nodes[1].status, GraphNodeStatus::Idle);
+    }
+
+    #[test]
+    fn failover_projection_keeps_provider_paired_with_model() {
+        let mapping = NodeRunMapping {
+            node_id: "n1".into(),
+            run_id: "r1".into(),
+            step_label: "n1".into(),
+        };
+        let mut runtimes = HashMap::new();
+        runtimes.insert(
+            "n1".into(),
+            GraphRuntimeRef {
+                harness: "pi".into(),
+                model: "gpt-5.6-luna".into(),
+                provider: Some("openai-codex".into()),
+            },
+        );
+        let state = project(
+            &intent(&["n1"]),
+            &[mapping],
+            &runs(vec![run(
+                "r1",
+                MentuRunStatus::Succeeded,
+                vec![step("n1", MentuRunStatus::Succeeded)],
+            )]),
+            &runtimes,
+            &live_always,
+            "now",
+        );
+        assert_eq!(state.nodes[0].harness.as_deref(), Some("pi"));
+        assert_eq!(state.nodes[0].model.as_deref(), Some("gpt-5.6-luna"));
+        assert_eq!(state.nodes[0].provider.as_deref(), Some("openai-codex"));
     }
 
     #[test]

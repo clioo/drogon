@@ -587,6 +587,7 @@ impl LocalModelInference {
             effort: None,
             provider: Some(ANALYSIS_PROVIDER.to_string()),
             prompt: Some(prompt.to_string()),
+            append_system_prompt: None,
             permission_mode: PermissionMode::Unattended,
             headless: true,
             resume: false,

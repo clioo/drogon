@@ -65,6 +65,7 @@ mod ports;
 mod ring;
 mod session;
 mod session_env;
+mod worker_brief;
 mod workspace;
 mod workspace_file_rpc;
 mod workspace_files;

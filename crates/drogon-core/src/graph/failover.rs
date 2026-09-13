@@ -29,6 +29,7 @@ pub fn default_free_runtime() -> GraphRuntimeRef {
     GraphRuntimeRef {
         harness: "pi".to_string(),
         model: "qwen3.8-flash-next-nvidia-nvfp4".to_string(),
+        provider: Some("dgx-spark".to_string()),
     }
 }
 
@@ -36,6 +37,20 @@ pub fn default_free_runtime() -> GraphRuntimeRef {
 /// the zero-cost default when none are configured), then the fallback last
 /// when one is set. `approvedRuntimes` order IS the failover order — this
 /// is the one place that ordering is turned into an actual sequence.
+/// Provider identity was added after the first graph state projection. An
+/// attributed historical attempt may therefore omit it while still being the
+/// free default runtime; compare the stable harness/model pair and treat the
+/// omitted provider as the known local provider.
+pub fn is_free_default_runtime(runtime: &GraphRuntimeRef) -> bool {
+    let default = default_free_runtime();
+    runtime.harness == default.harness
+        && runtime.model == default.model
+        && runtime
+            .provider
+            .as_deref()
+            .is_none_or(|provider| Some(provider) == default.provider.as_deref())
+}
+
 pub fn attempt_sequence(policy: &GraphPolicy) -> Vec<GraphRuntimeRef> {
     let mut sequence: Vec<GraphRuntimeRef> = if policy.approved_runtimes.is_empty() {
         vec![default_free_runtime()]
@@ -74,6 +89,7 @@ mod tests {
         GraphRuntimeRef {
             harness: harness.into(),
             model: model.into(),
+            provider: None,
         }
     }
 
@@ -82,6 +98,11 @@ mod tests {
         let policy = GraphPolicy::default();
         assert_eq!(attempt_sequence(&policy), vec![default_free_runtime()]);
         assert_eq!(next_runtime(&policy, &[]), Some(default_free_runtime()));
+        assert!(is_free_default_runtime(&GraphRuntimeRef {
+            harness: "pi".into(),
+            model: "qwen3.8-flash-next-nvidia-nvfp4".into(),
+            provider: None,
+        }));
         assert_eq!(next_runtime(&policy, &[default_free_runtime()]), None);
     }
 

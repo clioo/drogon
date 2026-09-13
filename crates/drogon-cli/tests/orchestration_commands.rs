@@ -743,6 +743,42 @@ async fn worker_start_fresh_maps_launch_and_never_carries_command_or_credential(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_start_without_runtime_flags_selects_the_workspace_policy() {
+    let dir = temp_dir("worker-start-policy");
+    let result = json!({
+        "runId": "run-1", "taskId": "task-1", "dispatchId": "dispatch-policy",
+        "consumerGeneration": 3, "workspaceId": "ws-1",
+        "assignmentState": "ready", "readiness": "promptObserved",
+        "processVerdict": "live", "effects": [], "residualResources": []
+    });
+    let mock = MockService::start(
+        &dir,
+        mock_behavior(true, vec![("orchestration.workerStart", result)]),
+    );
+    let mut args = vec![
+        "orchestration",
+        "worker-start",
+        "--json",
+        "--task",
+        "task-1",
+        "--workspace",
+        "ws-1",
+    ];
+    args.extend(coordinator_args());
+    let invocation = run_cli(&dir, &args, &[]);
+    assert_eq!(invocation.exit_code, 0, "stderr: {}", invocation.stderr);
+    let start = mock
+        .captured()
+        .into_iter()
+        .find(|r| r["method"] == "orchestration.workerStart")
+        .expect("workerStart sent");
+    assert_eq!(start["params"]["mode"], json!("policy"));
+    assert!(start["params"].get("launch").is_none());
+    drop(mock);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn worker_start_reuse_maps_exact_session_identity() {
     let dir = temp_dir("worker-reuse");
     let result = json!({

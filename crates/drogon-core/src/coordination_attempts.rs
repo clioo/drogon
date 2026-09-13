@@ -98,6 +98,26 @@ pub(crate) struct HistoryEntry {
     pub(crate) active: bool,
 }
 
+/// Launch preferences that already failed for a task, in durable attempt
+/// order. Policy-driven worker starts use this list to advance through the
+/// approved runtimes and only then the fallback; an explicit retry remains the
+/// coordinator's decision, never an automatic respawn.
+pub(crate) fn failed_policy_launches(
+    tx: &Transaction<'_>,
+    scope: &CoordinatorScope,
+    task_id: &str,
+) -> Result<Vec<LaunchPreferences>, RpcError> {
+    Ok(history(tx, scope, task_id)?
+        .into_iter()
+        .filter(|entry| {
+            !entry.active
+                && (entry.attempt.result.assignment_state == AssignmentState::Failed
+                    || entry.attempt.outcome == Some(ReportOutcome::Failed))
+        })
+        .map(|entry| entry.attempt.launch)
+        .collect())
+}
+
 pub(crate) fn history(
     tx: &Transaction<'_>,
     scope: &CoordinatorScope,

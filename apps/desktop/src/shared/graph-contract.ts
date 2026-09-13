@@ -233,6 +233,7 @@ export const graphRunResultSchema = z.object({
 export const graphFailoverAttemptRecordSchema = z.object({
   harness: z.string(),
   model: z.string(),
+  provider: z.string().nullable().optional(),
   outcome: z.string(),
   reason: z.string().nullable().optional(),
 });

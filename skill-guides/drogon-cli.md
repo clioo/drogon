@@ -584,14 +584,21 @@ without touching owner content:
 - When both flags are false, the main agent works directly and must not dispatch
   subagents. A policy with both flags true is invalid and is refused.
 - `policy.approvedRuntimes` (an ordered list) and `policy.fallbackRuntime`
-  are the runtimes a subagent node may run under, in priority order.
-  Launch a node through that exact order with
+  are the runtimes a subagent node may run under, in priority order. Each
+  runtime stores `harness`, `provider`, and `model` together. Provider and
+  model are an inseparable selection; a worker must never guess a provider
+  for an ambiguous model id. Launch a graph node through that exact order with
   `drogon-cli graph run-node-failover --workspace <ID> --node <ID> --follow`:
   it tries each approved runtime and only reaches the fallback once every
   approved runtime has failed; an empty policy tries only the free local
   `pi` model, so this never costs anything by default. The result names
   the runtime that actually ran, whether it was the fallback, and the full
   attempt history — never a guess at what "should" have run.
+- For native orchestration, the same policy-aware choice is the default:
+  `drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID>`.
+  An explicit `--harness --provider --model` is an intentional override;
+  omitting those fresh flags is what makes the daemon select the ordered
+  policy and record the actual pair.
 
 The Orchestrator uses a main-task node (the normal `GraphNodeIntent` JSON
 shape: id, title, harness, model, prompt, enabled, and no dependencies).
@@ -667,6 +674,13 @@ actually run. Launch one with
 `drogon-cli harness start --workspace <ID> --harness <HARNESS> --prompt <PROMPT>`,
 optionally pinning the model and permission mode:
 `drogon-cli harness start --workspace <ID> --harness <HARNESS> --model <MODEL> --permission-mode unattended --prompt <PROMPT>`.
+The daemon injects Drogon runtime context on the first turn of every harness
+without creating a policy file in an unconfigured workspace. That context says
+that delegation goes through the managed `drogon-cli`, directs the harness to
+read `drogon-cli skills get --topic orchestration`, and includes the Work Graph
+provider/model order. A harness must use `orchestration worker-start` without
+fresh runtime flags to honor that policy; children finish with
+`drogon-cli orchestration send --kind worker_done --subject <TEXT> --outcome succeeded --body <TEXT>`.
 The service resolves the host executable, so there is never a local binary
 to point at. A harness id is server-authoritative: pass it through
 verbatim as advertised by `harness list`.

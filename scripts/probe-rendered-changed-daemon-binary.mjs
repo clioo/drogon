@@ -20,11 +20,16 @@ import { chmod, copyFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { runAcceptanceProcess, startAcceptanceProcess } from "./acceptance-process.mjs";
+import {
+  runAcceptanceProcess,
+  startAcceptanceProcess,
+} from "./acceptance-process.mjs";
 import { startExitObserver } from "./live-child-crash-fixture.mjs";
 
-const OBSERVER_SCRIPT = new URL("./live-child-exit-observer.py", import.meta.url)
-  .pathname;
+const OBSERVER_SCRIPT = new URL(
+  "./live-child-exit-observer.py",
+  import.meta.url,
+).pathname;
 
 function sha256File(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -80,11 +85,10 @@ async function waitForHealthyDaemon(cli, dataDir, deadlineMs = 30_000) {
  * checks; this module never signals.
  */
 async function spawnIncumbentDaemon(binaryPath, dataDir, cli) {
-  const child = startAcceptanceProcess(
-    binaryPath,
-    ["--data-dir", dataDir],
-    { detached: true, stdio: "ignore" },
-  );
+  const child = startAcceptanceProcess(binaryPath, ["--data-dir", dataDir], {
+    detached: true,
+    stdio: "ignore",
+  });
   child.unref();
   const pid = child.pid;
   assert.ok(pid, "incumbent daemon spawn must produce a pid");
@@ -201,14 +205,16 @@ export async function probeRenderedChangedDaemonBinary({
       "the incumbent must report the skew variant's digest",
     );
     const beforeServiceInstanceId = skew.status.serviceInstanceId;
-    logStep(`phase 1: incumbent ${beforeServiceInstanceId} pid ${skew.pid}; relaunching the app`);
+    logStep(
+      `phase 1: incumbent ${beforeServiceInstanceId} pid ${skew.pid}; relaunching the app`,
+    );
     const relaunched = await relaunch();
     logStep("phase 1: app relaunched");
 
     // The honest, visible notice — never a silent attach.
     logStep("phase 1: waiting for the updated banner");
     await relaunched
-      .locator('[data-daemon-update-banner="updated"]')
+      .getByText("Drogon updated", { exact: true })
       .waitFor({ timeout: 45_000 });
     logStep("phase 1: updated banner visible");
     checks.push("changed-binary-launch-shows-updated-notice-not-silent-attach");
@@ -246,15 +252,23 @@ export async function probeRenderedChangedDaemonBinary({
         cli,
         dataDir,
       );
-      assert.equal(liveSession.verdict, "live", "the fixture session must be live");
+      assert.equal(
+        liveSession.verdict,
+        "live",
+        "the fixture session must be live",
+      );
       const liveSessionId = liveSession.id;
 
       const pendingServiceInstanceId = skew2.status.serviceInstanceId;
-      logStep(`phase 2: incumbent ${pendingServiceInstanceId} pid ${skew2.pid} live session ${liveSessionId}; relaunching the app`);
+      logStep(
+        `phase 2: incumbent ${pendingServiceInstanceId} pid ${skew2.pid} live session ${liveSessionId}; relaunching the app`,
+      );
       const relaunched2 = await relaunch();
       logStep("phase 2: app relaunched");
 
-      const banner = relaunched2.locator('[data-daemon-update-banner="pending"]');
+      const banner = relaunched2.getByText("Service update pending", {
+        exact: true,
+      });
       await banner.waitFor({ timeout: 45_000 });
       checks.push("cannot-quiesce-launch-shows-honest-update-pending-state");
       await relaunched2.screenshot({
@@ -277,7 +291,9 @@ export async function probeRenderedChangedDaemonBinary({
       // respawn bundled). Drive the same bridge the button calls, but log
       // main's exact result so a failure names its reason. The button is
       // still asserted enabled first — that is what the user clicks.
-      const restartButton = banner.getByRole("button", { name: "Restart service" });
+      const restartButton = relaunched2.getByRole("button", {
+        name: "Restart service",
+      });
       await restartButton.waitFor({ timeout: 10_000 });
       assert.equal(
         await restartButton.isEnabled(),
@@ -287,10 +303,12 @@ export async function probeRenderedChangedDaemonBinary({
       const restartResult = await relaunched2.evaluate(() =>
         window.drogon.daemon.restart(),
       );
-      logStep(
-        `banner restart bridge result: ${JSON.stringify(restartResult)}`,
+      logStep(`banner restart bridge result: ${JSON.stringify(restartResult)}`);
+      assert.equal(
+        restartResult.restarted,
+        true,
+        "the user-chosen restart must succeed",
       );
-      assert.equal(restartResult.restarted, true, "the user-chosen restart must succeed");
       const deadline = Date.now() + 45_000;
       for (;;) {
         const status = await rpcStatus(cli, dataDir);
@@ -306,12 +324,7 @@ export async function probeRenderedChangedDaemonBinary({
       await skew2.exitProof();
       checks.push("user-chosen-banner-restart-resolves-the-pending-update");
 
-      const sessions = await rpc(
-        "session.list",
-        { workspaceId },
-        cli,
-        dataDir,
-      );
+      const sessions = await rpc("session.list", { workspaceId }, cli, dataDir);
       const row = sessions.sessions.find((item) => item.id === liveSessionId);
       assert.ok(row, "the fixture session row must survive the restart");
       assert.equal(
@@ -324,7 +337,11 @@ export async function probeRenderedChangedDaemonBinary({
       // ladder owns the timing, so bound it generously.
       const clearedDeadline = Date.now() + 60_000;
       for (;;) {
-        if ((await relaunched2.locator("[data-daemon-update-banner]").count()) === 0)
+        if (
+          (await relaunched2
+            .getByText("Service update pending", { exact: true })
+            .count()) === 0
+        )
           break;
         if (Date.now() >= clearedDeadline)
           throw new Error("the update banner outlived the resolved update");
@@ -354,7 +371,8 @@ export async function probeRenderedChangedDaemonBinary({
 /** Gracefully stops the current bundled daemon through its own managed
  *  shutdown (stop-all → runtime.shutdown), scoped to this probe. */
 async function stopBundledDaemon(daemonBinary, cli, dataDir) {
-  const { packagedFixtureDaemon } = await import("./packaged-fixture-daemon.mjs");
+  const { packagedFixtureDaemon } =
+    await import("./packaged-fixture-daemon.mjs");
   const incumbent = packagedFixtureDaemon(daemonBinary, cli, dataDir);
   await incumbent.capture();
   await incumbent.stop();

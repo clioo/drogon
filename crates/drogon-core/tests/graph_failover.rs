@@ -260,9 +260,9 @@ fn failover_tries_approved_runtimes_in_order_and_only_then_the_fallback() {
         "policy": {
             "approvedRuntimes": [
                 {"harness": "mystery-unsupported", "model": "whatever"},
-                {"harness": "pi", "model": "bad-model"},
+                {"harness": "pi", "model": "bad-model", "provider": "fixture-provider"},
             ],
-            "fallbackRuntime": {"harness": "pi", "model": "good-model"},
+            "fallbackRuntime": {"harness": "pi", "model": "good-model", "provider": "fixture-fallback"},
             "adversarial": {"enabled": false, "maxIterations": 3},
             "delegate": false,
         },
@@ -275,6 +275,7 @@ fn failover_tries_approved_runtimes_in_order_and_only_then_the_fallback() {
     let first = fixture.run_failover("n1");
     assert_eq!(first["runtime"]["harness"], "pi");
     assert_eq!(first["runtime"]["model"], "bad-model");
+    assert_eq!(first["runtime"]["provider"], "fixture-provider");
     assert_eq!(first["isFallback"], false);
     assert_eq!(first["attemptNumber"], 2);
     let attempts = first["attempts"].as_array().unwrap();
@@ -290,6 +291,7 @@ fn failover_tries_approved_runtimes_in_order_and_only_then_the_fallback() {
         attempts[0]["reason"]
     );
     assert_eq!(attempts[1]["harness"], "pi");
+    assert_eq!(attempts[1]["provider"], "fixture-provider");
     assert_eq!(attempts[1]["outcome"], "launched");
 
     // While attempt 2 (bad-model) is what's actually running, a second call
@@ -308,6 +310,7 @@ fn failover_tries_approved_runtimes_in_order_and_only_then_the_fallback() {
     let second = fixture.run_failover("n1");
     assert_eq!(second["runtime"]["harness"], "pi");
     assert_eq!(second["runtime"]["model"], "good-model");
+    assert_eq!(second["runtime"]["provider"], "fixture-fallback");
     assert_eq!(second["isFallback"], true, "the fallback is used last");
     assert_eq!(second["attemptNumber"], 3);
     let attempts = second["attempts"].as_array().unwrap();
@@ -329,9 +332,11 @@ fn failover_tries_approved_runtimes_in_order_and_only_then_the_fallback() {
     );
     assert_eq!(attempts[2]["harness"], "pi");
     assert_eq!(attempts[2]["model"], "good-model");
+    assert_eq!(attempts[2]["provider"], "fixture-fallback");
     assert_eq!(attempts[2]["outcome"], "launched");
 
-    fixture.wait_node_status("n1", "succeeded");
+    let state = fixture.wait_node_status("n1", "succeeded");
+    assert_eq!(state["provider"], "fixture-fallback");
 
     // The episode is done: failover on an already-succeeded node refuses
     // rather than silently starting a fresh one.

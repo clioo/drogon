@@ -305,16 +305,19 @@ pub struct GraphIntent {
     pub policy: GraphPolicy,
 }
 
-/// One (harness, model) pair a subagent may run under. The exact model id
-/// from the per-harness catalog, or the compiler-level `provider/model`
-/// string the graph already accepts elsewhere — this type does not
-/// re-validate that split; `graph/compiler.rs` owns it.
+/// One (harness, provider, model) runtime a subagent may run under. The
+/// provider is optional for older graph files, but new policy-driven launches
+/// preserve it beside the exact model id so an ambiguous id is never guessed.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphRuntimeRef {
     pub harness: String,
     #[serde(default)]
     pub model: String,
+    /// Provider identity paired with `model` for harnesses (notably Pi) where
+    /// a model id may exist in more than one authenticated provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
 }
 
 impl GraphRuntimeRef {
@@ -325,6 +328,13 @@ impl GraphRuntimeRef {
                 "invalid_argument",
                 "A policy runtime model id is too long or carries NUL.",
             ));
+        }
+        if let Some(provider) = &self.provider {
+            validate_opaque_token(
+                provider,
+                MAX_GRAPH_ID_BYTES,
+                "A policy runtime provider is empty, too long, or contains whitespace.",
+            )?;
         }
         Ok(())
     }
@@ -529,6 +539,10 @@ pub struct GraphNodeState {
     pub harness: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Provider paired with the attributed model when the harness needs an
+    /// explicit catalog identity (notably Pi); absent in older graph state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     /// Whether the attributed runtime above is this build's free, local,
     /// never-billed default (`failover::default_free_runtime()`) — the one
     /// fact the canvas needs to disclose a paid/external spawn honestly,
@@ -800,6 +814,10 @@ pub struct GraphResumeResult {
 pub struct GraphFailoverAttemptRecord {
     pub harness: String,
     pub model: String,
+    /// Provider paired with the model that was actually attempted. Older
+    /// ledger rows legitimately deserialize with no provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     /// `launched`, `launch_failed`, or `failed` — see
     /// `drogon_core::graph::storage::FailoverAttempt` for the exact meaning
     /// of each.
@@ -1091,6 +1109,7 @@ mod tests {
                 last_error: None,
                 harness: None,
                 model: None,
+                provider: None,
                 is_free_default_runtime: None,
             }],
         };
@@ -1141,15 +1160,18 @@ mod tests {
                     GraphRuntimeRef {
                         harness: "opencode".into(),
                         model: "claude-sonnet-4".into(),
+                        provider: Some("openai-codex".into()),
                     },
                     GraphRuntimeRef {
                         harness: "codex".into(),
                         model: "gpt-5.3-codex".into(),
+                        provider: None,
                     },
                 ],
                 fallback_runtime: Some(GraphRuntimeRef {
                     harness: "custom".into(),
                     model: "qwen3-coder".into(),
+                    provider: None,
                 }),
                 adversarial: GraphAdversarialPolicy {
                     enabled: true,
@@ -1163,6 +1185,10 @@ mod tests {
         assert_eq!(
             value["policy"]["approvedRuntimes"][0]["harness"],
             "opencode"
+        );
+        assert_eq!(
+            value["policy"]["approvedRuntimes"][0]["provider"],
+            "openai-codex"
         );
         assert_eq!(value["policy"]["fallbackRuntime"]["model"], "qwen3-coder");
         assert_eq!(value["policy"]["adversarial"]["maxIterations"], 10);
@@ -1223,6 +1249,7 @@ mod tests {
                 .map(|i| GraphRuntimeRef {
                     harness: "shell".into(),
                     model: format!("m{i}"),
+                    provider: None,
                 })
                 .collect(),
             ..GraphPolicy::default()
@@ -1235,11 +1262,13 @@ mod tests {
         let bad = GraphRuntimeRef {
             harness: "Not A Valid Harness!".into(),
             model: String::new(),
+            provider: None,
         };
         assert!(bad.validate().is_err());
         let good = GraphRuntimeRef {
             harness: "opencode".into(),
             model: "claude-sonnet-4".into(),
+            provider: None,
         };
         good.validate().unwrap();
     }

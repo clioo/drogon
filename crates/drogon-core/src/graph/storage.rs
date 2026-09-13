@@ -13,7 +13,7 @@ use drogon_protocol::RpcError;
 use crate::error;
 
 pub const GRAPH_SCHEMA_COMPONENT: &str = "graph";
-pub const GRAPH_SCHEMA_VERSION: i64 = 3;
+pub const GRAPH_SCHEMA_VERSION: i64 = 4;
 
 /// One recorded launch of a node: the daemon run it went into and the step
 /// label that run carries for it.
@@ -32,6 +32,7 @@ pub struct NodeRunMapping {
 pub struct FailoverAttempt {
     pub harness: String,
     pub model: String,
+    pub provider: Option<String>,
     /// One of `launched` (compiled and started a real run — its own
     /// eventual pass/fail is tracked by the run itself, not here),
     /// `launch_failed` (never started: a compile-time refusal) or `failed`
@@ -85,6 +86,13 @@ fn migrate_v1_to_v2(tx: &Transaction) -> rusqlite::Result<()> {
     )
 }
 
+/// Additive provider attribution for failover attempts. Version 2 rows were
+/// already durable and must remain readable; nullable preserves their honest
+/// "provider not recorded" meaning.
+fn migrate_v3_to_v4(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE graph_node_failover_attempts ADD COLUMN provider TEXT;")
+}
+
 /// Applies every pending `graph` migration step inside the caller's already
 /// -open transaction; never opens or commits one of its own.
 pub fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()> {
@@ -118,6 +126,7 @@ pub fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()> {
             1 => create_v1_tables(tx)?,
             2 => migrate_v1_to_v2(tx)?,
             3 => tx.execute_batch("CREATE TABLE graph_orchestrator_runs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE INDEX graph_orchestrator_workspace ON graph_orchestrator_runs(workspace_id);")?,
+            4 => migrate_v3_to_v4(tx)?,
             _ => unreachable!("no migration step defined for version {next_version}"),
         }
         tx.execute(
@@ -261,6 +270,7 @@ pub fn record_failover_attempt(
     node_id: &str,
     harness: &str,
     model: &str,
+    provider: Option<&str>,
     outcome: &str,
     reason: Option<&str>,
     run_id: Option<&str>,
@@ -268,13 +278,14 @@ pub fn record_failover_attempt(
 ) -> Result<(), RpcError> {
     conn.execute(
         "INSERT INTO graph_node_failover_attempts
-            (workspace_id, node_id, harness, model, outcome, reason, run_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (workspace_id, node_id, harness, model, provider, outcome, reason, run_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             workspace_id,
             node_id,
             harness,
             model,
+            provider,
             outcome,
             reason,
             run_id,
@@ -297,7 +308,7 @@ pub fn failover_attempts_for_node(
 ) -> Result<Vec<FailoverAttempt>, RpcError> {
     let mut stmt = conn
         .prepare(
-            "SELECT harness, model, outcome, reason, run_id, created_at
+            "SELECT harness, model, provider, outcome, reason, run_id, created_at
                FROM graph_node_failover_attempts
               WHERE workspace_id = ?1 AND node_id = ?2
               ORDER BY id ASC",
@@ -308,10 +319,11 @@ pub fn failover_attempts_for_node(
             Ok(FailoverAttempt {
                 harness: r.get(0)?,
                 model: r.get(1)?,
-                outcome: r.get(2)?,
-                reason: r.get(3)?,
-                run_id: r.get(4)?,
-                created_at: r.get(5)?,
+                provider: r.get(2)?,
+                outcome: r.get(3)?,
+                reason: r.get(4)?,
+                run_id: r.get(5)?,
+                created_at: r.get(6)?,
             })
         })
         .map_err(error::from_sqlite)?;
@@ -401,6 +413,34 @@ mod tests {
     }
 
     #[test]
+    fn a_database_at_version_3_gains_nullable_provider_attribution() {
+        let conn = Connection::open_in_memory().unwrap();
+        {
+            let tx = conn.unchecked_transaction().unwrap();
+            create_v1_tables(&tx).unwrap();
+            migrate_v1_to_v2(&tx).unwrap();
+            tx.execute_batch(
+                "CREATE TABLE graph_orchestrator_runs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL);
+                 CREATE TABLE schema_versions (component TEXT PRIMARY KEY, version INTEGER NOT NULL);
+                 INSERT INTO schema_versions(component, version) VALUES ('graph', 3);",
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let tx = conn.unchecked_transaction().unwrap();
+        apply_pending_steps_in_tx(&tx).unwrap();
+        tx.commit().unwrap();
+        let provider_column: Option<String> = conn
+            .prepare("PRAGMA table_info(graph_node_failover_attempts)")
+            .unwrap()
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|name| name == "provider");
+        assert_eq!(provider_column.as_deref(), Some("provider"));
+    }
+
+    #[test]
     fn failover_attempts_are_recorded_in_order_with_their_outcome_and_reason() {
         let conn = conn();
         record_failover_attempt(
@@ -409,6 +449,7 @@ mod tests {
             "n1",
             "opencode",
             "claude-sonnet-4",
+            Some("anthropic"),
             FAILOVER_OUTCOME_LAUNCH_FAILED,
             Some("harness not registered on this host"),
             None,
@@ -421,6 +462,7 @@ mod tests {
             "n1",
             "codex",
             "gpt-5.3-codex",
+            None,
             FAILOVER_OUTCOME_LAUNCHED,
             None,
             Some("run-1"),
@@ -430,6 +472,7 @@ mod tests {
         let attempts = failover_attempts_for_node(&conn, "ws1", "n1").unwrap();
         assert_eq!(attempts.len(), 2);
         assert_eq!(attempts[0].harness, "opencode");
+        assert_eq!(attempts[0].provider.as_deref(), Some("anthropic"));
         assert_eq!(attempts[0].outcome, FAILOVER_OUTCOME_LAUNCH_FAILED);
         assert_eq!(
             attempts[0].reason.as_deref(),

@@ -280,6 +280,11 @@ fn resolve_pi_model(node_id: &str, raw: &str) -> Result<(String, Option<GraphFin
     ))
 }
 
+/// Context delivered in the recipe prompt because graph nodes run through
+/// the recipe runtime rather than `harness.start`. It is intentionally not a
+/// workspace context file: an unconfigured workspace must remain byte-clean.
+const GRAPH_HARNESS_CONTEXT: &str = "You are running inside Drogon. Drogon is the source of truth for delegation: use the managed `drogon-cli`, never an internal Agent tool or a raw hidden session. Before delegating, read `drogon-cli skills get --topic orchestration`; use the Work Graph policy's provider and model together, and report child completion through `drogon-cli orchestration send --kind worker_done`.";
+
 /// Emits one recipe step plus, for Pi, the provider-map entry and any
 /// compile-time finding (the provider/model split is surfaced, never
 /// silent). The backend mapping is explicit; an unsupported harness refuses
@@ -287,9 +292,14 @@ fn resolve_pi_model(node_id: &str, raw: &str) -> Result<(String, Option<GraphFin
 type NodeStep = (Value, Option<(String, Value)>, Vec<GraphFinding>);
 
 fn node_step(node: &GraphNodeIntent, defaults: &PiProviderDefaults) -> Result<NodeStep, RpcError> {
+    let prompt = if node.harness == "shell" {
+        node.prompt.clone()
+    } else {
+        format!("{GRAPH_HARNESS_CONTEXT}\n\nTask:\n{}", node.prompt)
+    };
     let mut step = json!({
         "label": node.id,
-        "prompt": node.prompt,
+        "prompt": prompt,
         "timeout": AGENT_STEP_TIMEOUT_SECONDS,
     });
     let mut provider = None;
@@ -408,7 +418,11 @@ fn node_step(node: &GraphNodeIntent, defaults: &PiProviderDefaults) -> Result<No
                 "\n\nWhen this task is complete, end your final message with exactly this \
                  line:\n{sentinel}\n"
             );
-            let prompt = format!("{}{}", node.prompt, instruction);
+            let prompt = format!(
+                "{}{}",
+                step["prompt"].as_str().expect("step prompt is a string"),
+                instruction
+            );
             if prompt.len() > drogon_protocol::graph::MAX_GRAPH_PROMPT_BYTES {
                 return Err(node_error(
                     &node.id,
@@ -712,6 +726,12 @@ mod tests {
         assert_eq!(steps[1]["backend"], "drogon-pi-n2");
         assert_eq!(steps[1]["depends_on"], json!(["n1"]));
         assert_eq!(steps[1]["model"], "qwen3.8-flash-next-nvidia-nvfp4");
+        assert!(
+            steps[1]["prompt"]
+                .as_str()
+                .unwrap()
+                .contains("drogon-cli skills get --topic orchestration")
+        );
         assert!(steps[1]["completion_keyword"].is_string());
         assert!(
             steps[1]["prompt"]
@@ -992,7 +1012,13 @@ mod tests {
         let step = &compiled.recipe["steps"][0];
         assert_eq!(step["verify"]["commands"], json!(["test -f out.txt"]));
         assert!(step.get("completion_keyword").is_none());
-        assert_eq!(step["prompt"], "do n1");
+        assert!(
+            step["prompt"]
+                .as_str()
+                .unwrap()
+                .starts_with(GRAPH_HARNESS_CONTEXT)
+        );
+        assert!(step["prompt"].as_str().unwrap().contains("Task:\ndo n1"));
     }
 
     /// Regression for the QA finding "the model syntax the product teaches

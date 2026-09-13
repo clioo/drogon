@@ -189,7 +189,7 @@ impl Fixture {
 /// context files are always created and a reset leaves stale policy text):
 /// with Delegate ON, a freshly launched session's own `AGENTS.md`/`CLAUDE.md`
 /// -- read by the harness itself, not merely present on disk -- names the
-/// delegate instruction and a real, existing `drogon-cli` verb. With
+/// delegate instruction and the native orchestration worker-start verb. With
 /// Delegate OFF, a later session removes the managed block and Drogon-created
 /// files, leaving the workspace clean.
 #[test]
@@ -209,12 +209,9 @@ fn delegate_toggle_reaches_the_next_sessions_own_brief() {
         "the harness's own AGENTS.md snapshot must show the mutually exclusive Delegate mode: {with_delegate_on:?}"
     );
     assert!(
-        with_delegate_on.contains(&format!(
-            "drogon-cli graph write-intent --workspace {} --file graph-intent.json",
-            fx.workspace_id
-        )),
-        "the delegate instruction must name the real, workspace-scoped write-intent verb: \
-         {with_delegate_on:?}"
+        with_delegate_on.contains("drogon-cli orchestration run-create")
+            && with_delegate_on.contains("`worker-start` with no fresh runtime flags"),
+        "the delegate instruction must name the native orchestration verbs: {with_delegate_on:?}"
     );
     fx.set_delegate(false);
     let with_delegate_off = fx.launch_and_capture();

@@ -21,6 +21,11 @@ pub struct HarnessLaunchRequest {
     pub effort: Option<String>,
     pub provider: Option<String>,
     pub prompt: Option<String>,
+    /// Service-authored context appended to harness system prompts where the
+    /// host CLI exposes a portable flag. Other adapters receive the same
+    /// context as a prefixed first-turn prompt at the daemon boundary.
+    #[serde(default)]
+    pub append_system_prompt: Option<String>,
     #[serde(default)]
     pub permission_mode: PermissionMode,
     /// Daemon-run mode (bot/automation runs): consume the prompt
@@ -115,6 +120,26 @@ pub fn plan_launch_with_args(
     // TUI remains the bare `codex` command.
     if request.headless && request.harness_id == HarnessId::Codex {
         args.push("exec".into());
+    }
+    if let Some(system_prompt) = &request.append_system_prompt {
+        if system_prompt.trim().is_empty()
+            || system_prompt.len() > 32_768
+            || system_prompt.contains('\0')
+        {
+            return Err(invalid(
+                "Appended system prompt must contain 1..32768 UTF-8 bytes without NUL",
+            ));
+        }
+        match request.harness_id {
+            HarnessId::Claude | HarnessId::Pi => {
+                args.extend(["--append-system-prompt".into(), system_prompt.clone()]);
+            }
+            HarnessId::Codex | HarnessId::Opencode | HarnessId::Antigravity => {
+                return Err(invalid(
+                    "This harness has no portable appended-system-prompt launch flag",
+                ));
+            }
+        }
     }
     // Reopen the harness's own most recent conversation in the cwd. Codex's
     // resume is a SUBCOMMAND, so it must lead the argv like `exec` above;
@@ -589,6 +614,7 @@ mod tests {
             effort: None,
             provider: None,
             prompt: Some(prompt.to_string()),
+            append_system_prompt: None,
             permission_mode: PermissionMode::Inherit,
             headless,
             resume: false,
@@ -709,6 +735,7 @@ mod tests {
             effort: None,
             provider: None,
             prompt: None,
+            append_system_prompt: None,
             permission_mode: PermissionMode::Inherit,
             headless: false,
             resume: false,

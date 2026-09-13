@@ -8,6 +8,7 @@ fn request(id: HarnessId) -> HarnessLaunchRequest {
         effort: None,
         provider: None,
         prompt: None,
+        append_system_prompt: None,
         permission_mode: PermissionMode::Inherit,
         headless: false,
         resume: false,
