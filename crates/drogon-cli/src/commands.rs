@@ -119,6 +119,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Automation { action } => automation(&client, &request_id, json, action).await,
         Command::Meeting { action } => meeting(&client, &request_id, json, action).await,
         Command::Bot { action } => match action {
+            BotAction::Whoami => bot_whoami(&client, &request_id, json).await,
             // User-only secret-grant verbs: no Bot-actor scope is asserted
             // anywhere on this surface, and they preflight their own
             // capability (bot.secrets.v1), so they skip the bot.self.v1
@@ -2314,6 +2315,83 @@ fn emit_raw(call: CallOk) -> Result<RunOutcome, CliError> {
     })
 }
 
+/// Uses the existing snapshot capability so a new CLI also works with a
+/// daemon/session started before identity was added to generated AGENTS.md.
+async fn bot_whoami(client: &Client, request_id: &str, json: bool) -> Result<RunOutcome, CliError> {
+    let workspace = std::env::var("DROGON_WORKSPACE_ID")
+        .ok()
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| {
+            CliError::Usage(
+                "Run bot whoami inside a Drogon Bot session: DROGON_WORKSPACE_ID is missing".into(),
+            )
+        })?;
+    let status = capability_preflight(
+        client,
+        request_id,
+        "bot.snapshot.v1",
+        "Bot identity discovery",
+    )
+    .await?;
+    // Bot records may belong to a different workspace than their provisioned
+    // homes. A home-scoped snapshot would incorrectly return no Bot.
+    let mut call = client
+        .call(
+            "bot.snapshot",
+            json!({"hostId": status.host_id, "workspaceId": "", "locale": "en"}),
+            request_id,
+            DEFAULT_TIMEOUT,
+        )
+        .await?;
+    let identity = bot_identity_from_snapshot(&call.result, &status.host_id, &workspace)
+        .map_err(|error| CliError::local(error, request_id))?;
+    let bot_id = identity["botId"].as_str().unwrap().to_string();
+    // Return only the resolved identity, never other Bots' instructions or history.
+    call.raw["result"] = identity.clone();
+    call.result = identity;
+    emit(
+        call,
+        json,
+        || format!("bot {bot_id}\nworkspace {workspace}"),
+        0,
+        None,
+    )
+}
+
+fn bot_identity_from_snapshot(
+    snapshot: &serde_json::Value,
+    host_id: &str,
+    workspace: &str,
+) -> Result<serde_json::Value, drogon_protocol::RpcError> {
+    let malformed =
+        || crate::error::invalid_argument("Malformed Bot identity snapshot from daemon");
+    if snapshot["hostId"].as_str() != Some(host_id) || snapshot["workspaceId"].as_str() != Some("")
+    {
+        return Err(malformed());
+    }
+    let bots = snapshot["bots"].as_array().ok_or_else(malformed)?;
+    let mut matches = bots
+        .iter()
+        .filter(|bot| bot["home"]["homeWorkspaceId"].as_str() == Some(workspace));
+    let Some(bot) = matches.next() else {
+        return Err(drogon_protocol::RpcError::new(
+            "bot_identity_unavailable",
+            "No Bot home matches DROGON_WORKSPACE_ID on this daemon. Run in the Bot's own Drogon session and check the selected CLI/data directory; do not guess an ID from a name or context file.",
+        ));
+    };
+    if matches.next().is_some() {
+        return Err(drogon_protocol::RpcError::new(
+            "bot_identity_ambiguous",
+            "Multiple Bots claim this session's home workspace; refusing to guess a Bot ID",
+        ));
+    }
+    let bot_id = bot["id"]
+        .as_str()
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(malformed)?;
+    Ok(json!({"botId": bot_id, "workspaceId": workspace, "hostId": host_id}))
+}
+
 /// Scoped Bot self-management: every call asserts actor == target (the
 /// service denies cross-Bot scope, stale revisions and scope escape) and
 /// preflights the `bot.self.v1` capability first, like the harness and
@@ -2335,8 +2413,8 @@ async fn bot(
     };
     match action {
         // Routed to its own user-lane flow before this function is reached.
-        BotAction::WatchPullRequest { .. } => {
-            unreachable!("watch-pr is served by bot_watch_pull_request")
+        BotAction::Whoami | BotAction::WatchPullRequest { .. } => {
+            unreachable!("identity discovery and watch-pr have their own routes")
         }
         BotAction::Provision { bot, workspace } => {
             let call = client

@@ -465,6 +465,18 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &["Requires the service capability automation.v1."],
         ),
         entry(
+            "bot whoami",
+            &["bot", "whoami"],
+            "Resolve this session's Bot ID and workspace from the daemon without reading context files",
+            "drogon-cli bot whoami",
+            &[],
+            &[],
+            &["drogon-cli bot whoami --json"],
+            &[
+                "Uses DROGON_WORKSPACE_ID and the existing bot.snapshot.v1 capability. Returns result.botId and result.workspaceId. Works in already-open Bot sessions; does not restart or mutate them.",
+            ],
+        ),
+        entry(
             "bot provision",
             &["bot", "provision"],
             "Provision the Bot's dedicated working folder and profile",

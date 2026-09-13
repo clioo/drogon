@@ -91,12 +91,13 @@ pub fn render_agents_md(bot: &Bot) -> String {
         out.push_str(&format!("- Role: {}\n", document_identity_text(title)));
     }
     out.push_str(
-        "\nYour exact `--bot` value is the Bot ID above, not your name, handle, \
-         home folder basename, or `DROGON_SESSION_ID`. For `--workspace`, use \
-         `DROGON_WORKSPACE_ID` from this Bot session's environment. Read the \
-         \"Find your own Bot ID\" section of `drogon-cli skills get --topic drogon-cli` \
-         for the extraction and validation steps. Do not ask the owner to copy \
-         these IDs from the desktop.\n\n",
+        "\nRun `drogon-cli bot whoami --json` to resolve your Bot ID and workspace \
+         from the daemon in this session, even if this file is stale. Use its \
+         `result.botId` for `--bot` and `result.workspaceId` for `--workspace`, \
+         not your name, handle, home folder basename, or `DROGON_SESSION_ID`. \
+         Read the \"Find your own Bot ID\" section of \
+         `drogon-cli skills get --topic drogon-cli` for details. Do not ask the \
+         owner to reopen a live Bot or copy these IDs from the desktop.\n\n",
     );
 
     out.push_str(ROLE_SECTION);

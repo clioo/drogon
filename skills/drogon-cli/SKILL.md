@@ -51,10 +51,10 @@ DROGON skills get --topic drogon-cli
 That prints the complete, version-matched guide for the exact binary that will handle your
 next commands — worktrees, handoffs, terminals, automations, and the built-in browser.
 Read it first, then run the specific command you need. For Bot self-management,
-start with its **Find your own Bot ID** section: it explains how to read the exact
-ID from your generated Bot-home `AGENTS.md`, pair it with the session workspace,
-and validate both. Do not guess the ID from a name or folder, or ask the owner
-to copy it from the desktop.
+start with its **Find your own Bot ID** section: it explains how to query your
+identity from the daemon in the current session, even if your generated
+`AGENTS.md` is old or missing. Do not guess the ID from a name or folder, or
+ask the owner to reopen a live Bot or copy an ID from the desktop.
 
 Don't guess subcommands or flags from memory or from a cached copy of this stub. They
 change between Drogon releases, and this file deliberately no longer lists them. Confirm
