@@ -29,8 +29,11 @@ import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import { MentuPanel } from "./MentuPanel";
 
 beforeEach(installRadixJsdomStubs);
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // Radix FocusScope restores focus on its next timer tick. Let that owned
+  // cleanup finish before Vitest replaces this file's jsdom Event realm.
+  await new Promise((resolve) => setTimeout(resolve, 0));
   delete (window as unknown as { drogon?: unknown }).drogon;
 });
 

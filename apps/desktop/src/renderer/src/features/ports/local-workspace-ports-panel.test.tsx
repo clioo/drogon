@@ -189,6 +189,28 @@ describe("LocalWorkspacePortsPanel", () => {
     );
   });
 
+  it("cancels the delayed post-stop scan when the panel unmounts", async () => {
+    const bridge = fakeBridge();
+    const view = render(
+      <LocalWorkspacePortsPanel
+        isVisible
+        workspace={WORKSPACE}
+        onOpenInBrowserTab={() => {}}
+        bridge={bridge}
+        notifications={notifications}
+      />,
+    );
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText("Stop Process")).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByLabelText("Stop Process"));
+    await vi.waitFor(() => expect(bridge.list).toHaveBeenCalledTimes(2));
+
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(bridge.list).toHaveBeenCalledTimes(2);
+  });
+
   it("Stop Process toasts the daemon's refusal reason and does not rescan", async () => {
     const bridge = fakeBridge({
       kill: vi.fn().mockResolvedValue({

@@ -12,7 +12,7 @@
 //  - refresh and system-browser-open failures toast like the source
 //    (sonner landed with r13-c); Stop Process rides this repo's additive
 //    workspacePorts.kill bridge to the daemon's ports.kill (R16-BC).
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw, Server } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Workspace } from '../../../../shared/session-contract'
@@ -42,6 +42,7 @@ import { LocalPortDetailsDialog } from './local-port-details-dialog'
 // Why: the source's panel scopes WorkspacePortScanner's 30s all-worktree
 // poll; this panel owns the same cadence for its own channel.
 const PORTS_POLL_MS = 30_000
+const WORKSPACE_PORT_STOP_SETTLE_MS = 500
 
 /** Right-sidebar Ports panel scoped to the active workspace. */
 export function LocalWorkspacePortsPanel({
@@ -65,21 +66,34 @@ export function LocalWorkspacePortsPanel({
     other: true,
     external: true
   })
+  const mountedRef = useRef(true)
+  const settleTimersRef = useRef<Set<number>>(new Set())
+
+  useEffect(() => {
+    mountedRef.current = true
+    const settleTimers = settleTimersRef.current
+    return () => {
+      mountedRef.current = false
+      for (const timer of settleTimers) window.clearTimeout(timer)
+      settleTimers.clear()
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
-    if (!workspace) return
+    if (!workspace || !mountedRef.current) return
     setRefreshing(true)
     try {
       const result = await bridge.list({ workspaceId: workspace.id })
       if (!result.ok) throw new Error(result.error.message)
-      setScan(result.result)
+      if (mountedRef.current) setScan(result.result)
     } catch (error) {
+      if (!mountedRef.current) return
       const message = error instanceof Error ? error.message : String(error)
       notifications.error('Failed to refresh ports', {
         description: message || 'Workspace port scan failed.'
       })
     } finally {
-      setRefreshing(false)
+      if (mountedRef.current) setRefreshing(false)
     }
   }, [bridge, notifications, workspace])
 
@@ -100,7 +114,6 @@ export function LocalWorkspacePortsPanel({
   // daemon re-proves ownership), success toasts the source's copy, then a
   // re-scan runs immediately and again after the source's settle window
   // (SIGTERM can leave the listener visible briefly).
-  const WORKSPACE_PORT_STOP_SETTLE_MS = 500
   const handleStopPort = useCallback(
     async (port: WorkspacePortRow) => {
       if (!workspace || !port.pid) return
@@ -121,7 +134,12 @@ export function LocalWorkspacePortsPanel({
         }
         notifications.success(`Stopped process on :${port.port}`)
         await refresh()
-        window.setTimeout(() => void refresh(), WORKSPACE_PORT_STOP_SETTLE_MS)
+        if (!mountedRef.current) return
+        const timer = window.setTimeout(() => {
+          settleTimersRef.current.delete(timer)
+          void refresh()
+        }, WORKSPACE_PORT_STOP_SETTLE_MS)
+        settleTimersRef.current.add(timer)
       } catch (error) {
         notifications.error('Failed to stop the process.', {
           description: error instanceof Error ? error.message : String(error)
