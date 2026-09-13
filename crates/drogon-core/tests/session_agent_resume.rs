@@ -19,7 +19,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use drogon_core::Engine;
+use drogon_core::bots::records::{Bot, BotSession, DisplayIdentity, HarnessModelPolicy};
+use drogon_core::bots::storage as bots_storage;
+use drogon_core::{DB_FILE_NAME, Engine};
 use drogon_protocol::{PROTOCOL_VERSION, Request, Response};
 use serde_json::{Value, json};
 
@@ -277,6 +279,165 @@ fn the_reported_provider_session_id_survives_a_daemon_restart_and_names_the_resu
                 }),
             );
             assert_eq!(stopped["verdict"], "exited");
+            restore_path();
+        },
+    );
+}
+
+#[test]
+fn terminal_resume_relinks_a_bot_to_the_replacement_session() {
+    let fixture_dir = fake_harness_dir("claude");
+    let config_root = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    with_env(
+        &[
+            ("PATH", Some(fixture_dir.as_path())),
+            ("CLAUDE_CONFIG_DIR", Some(config_root.path())),
+        ],
+        || {
+            let restore_path = with_fixture_path(&fixture_dir);
+            let data_dir = tempfile::tempdir().unwrap();
+            let provider_id = "bot-conversation-arya";
+            let transcript_root = tempfile::tempdir().unwrap();
+            let transcript = transcript_root.path().join("arya.jsonl");
+            std::fs::write(&transcript, "{}\n").unwrap();
+            let folder = project.path().to_string_lossy().to_string();
+
+            let (workspace_id, host_id, detached_session_id) = {
+                let engine = Engine::open(data_dir.path()).unwrap();
+                let workspace_id = registered(&engine, project.path());
+                let launched = ok(
+                    &engine,
+                    &unique("bot-harness-start"),
+                    "harness.start",
+                    json!({
+                        "workspaceId": workspace_id,
+                        "harnessId": "claude",
+                        "permissionMode": "inherit",
+                    }),
+                );
+                let host_id = launched["hostId"].as_str().unwrap().to_string();
+                let prior_session_id = launched["id"].as_str().unwrap().to_string();
+                let conn = rusqlite::Connection::open(data_dir.path().join(DB_FILE_NAME)).unwrap();
+                bots_storage::create_bot(
+                    &conn,
+                    &host_id,
+                    &folder,
+                    &Bot {
+                        id: "bot-arya".to_string(),
+                        character_preset: "arya".to_string(),
+                        display_identity: DisplayIdentity {
+                            display_name: "Arya Stark".to_string(),
+                            handle: Some("arya".to_string()),
+                            title: None,
+                        },
+                        harness_policy: HarnessModelPolicy {
+                            default_harness: "claude".to_string(),
+                            explicit_model: None,
+                        },
+                        instructions: String::new(),
+                        memories: Vec::new(),
+                        responsibilities: Vec::new(),
+                        current_session: Some(BotSession {
+                            session_id: prior_session_id.clone(),
+                            harness: "claude".to_string(),
+                            model: None,
+                            started_at: 1.0,
+                            rotated_at: None,
+                            agent_session_id: None,
+                            agent_session_transcript_path: None,
+                        }),
+                        created_at: 1.0,
+                        updated_at: 1.0,
+                    },
+                )
+                .unwrap();
+                ok(
+                    &engine,
+                    &unique("bot-hook"),
+                    "session.hook_event",
+                    json!({
+                        "sessionId": prior_session_id,
+                        "incarnation": launched["incarnation"],
+                        "event": "SessionStart",
+                        "agentSessionId": provider_id,
+                        "agentSessionTranscriptPath": transcript.to_string_lossy(),
+                    }),
+                );
+
+                // Simulate the state an older build left behind: a terminal
+                // already resumed the same provider conversation, but the Bot
+                // record still points at the first Drogon session id.
+                let detached = ok(
+                    &engine,
+                    &unique("legacy-detached-resume"),
+                    "harness.start",
+                    json!({
+                        "workspaceId": workspace_id,
+                        "harnessId": "claude",
+                        "permissionMode": "inherit",
+                    }),
+                );
+                ok(
+                    &engine,
+                    &unique("legacy-detached-hook"),
+                    "session.hook_event",
+                    json!({
+                        "sessionId": detached["id"],
+                        "incarnation": detached["incarnation"],
+                        "event": "SessionStart",
+                        "agentSessionId": provider_id,
+                        "agentSessionTranscriptPath": transcript.to_string_lossy(),
+                    }),
+                );
+                (
+                    workspace_id,
+                    host_id,
+                    detached["id"].as_str().unwrap().to_string(),
+                )
+            };
+
+            let engine = Engine::open(data_dir.path()).unwrap();
+            let resumed = ok(
+                &engine,
+                &unique("bot-terminal-resume"),
+                "harness.start",
+                json!({
+                    "workspaceId": workspace_id,
+                    "harnessId": "claude",
+                    "permissionMode": "inherit",
+                    "resume": true,
+                    "resumeSessionId": detached_session_id,
+                }),
+            );
+            assert_eq!(resumed["agentResume"], "resumed");
+            let replacement_id = resumed["id"].as_str().unwrap();
+            assert_ne!(replacement_id, detached_session_id);
+
+            let conn = rusqlite::Connection::open(data_dir.path().join(DB_FILE_NAME)).unwrap();
+            let bot = bots_storage::get_bot(&conn, &host_id, &folder, "bot-arya")
+                .unwrap()
+                .expect("Bot must survive the daemon restart");
+            let current = bot.current_session.expect("Bot must stay linked");
+            assert_eq!(
+                current.session_id, replacement_id,
+                "the generic terminal Resume must move the Bot link to the live replacement"
+            );
+            assert_eq!(current.agent_session_id.as_deref(), Some(provider_id));
+            assert_eq!(
+                current.agent_session_transcript_path.as_deref(),
+                transcript.to_str()
+            );
+
+            ok(
+                &engine,
+                &unique("stop-resumed-bot"),
+                "session.stop",
+                json!({
+                    "sessionId": resumed["id"],
+                    "incarnation": resumed["incarnation"],
+                }),
+            );
             restore_path();
         },
     );

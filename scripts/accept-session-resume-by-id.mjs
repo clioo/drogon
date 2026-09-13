@@ -18,12 +18,11 @@
 //      the recovered session → the pane says it is SLEEPING and offers
 //      "Resume session" → resuming lands `--resume <that id>` and the prior
 //      conversation's content, with the "session restored" banner.
-//   B. a Bot session: the same, plus the Bot-record latch. After the daemon
-//      restart the Drogon session row is REMOVED (an explicit close), so the
-//      only place the conversation identity survives is the Bot record — and
-//      the Bot's Open Session must still resume it instead of refusing with
-//      "the daemon has not reported whether this Bot's session is still
-//      running".
+//   B. a Bot session: the terminal overlay's generic Resume must rotate the
+//      durable Bot link so the replacement stays in Chats and Open Session
+//      focuses it instead of duplicating it. After another restart the Drogon
+//      row is removed too, proving the preserved Bot-record identity can still
+//      reopen the same provider conversation on its own.
 //
 // Usage: node scripts/accept-session-resume-by-id.mjs
 import assert from "node:assert/strict";
@@ -740,6 +739,15 @@ try {
     { id: botSession.sessionId, incarnation: botSession.incarnation },
     "CONVERSATION-ID:",
   );
+  const botHomePath = await page.evaluate(async (workspaceId) => {
+    const response = await window.drogon.workspaces();
+    if (!response.ok) throw new Error(response.error.message);
+    const workspace = response.result.workspaces.find(
+      (candidate) => candidate.id === workspaceId,
+    );
+    if (!workspace) throw new Error(`no Bot home workspace ${workspaceId}`);
+    return workspace.path;
+  }, botSession.workspaceId);
   const botMatch = botOutput.match(/CONVERSATION-ID:(conv-\d+)/);
   assert.ok(botMatch, `the Bot's harness must report its conversation id: ${botOutput}`);
   const botConversation = botMatch[1];
@@ -765,7 +773,7 @@ try {
     {
       session_id: botConversation,
       transcript_path: path.join(
-        botProjectDir,
+        botHomePath,
         `.drogon-conversation-${botConversation}`,
       ),
       hook_event_name: "SessionStart",
@@ -779,9 +787,11 @@ try {
   assert.equal(latched.agentSessionId, botConversation);
   report.checks.push("bot-record-latches-the-harness-conversation");
 
-  // Hard restart, then REMOVE the Drogon session row: from here on the Bot
-  // record is the only place the conversation identity exists. This is the
-  // dead end the owner hit -- and it must now be a real recovery.
+  // Hard restart, then use the TERMINAL overlay's generic Resume action --
+  // the owner's exact trigger. That path calls harness.start directly rather
+  // than bot.run; it must still move the durable Bot link to the replacement,
+  // otherwise the Bot disappears from Chats and Open Session starts a duplicate
+  // of the conversation that is already on screen.
   daemon.kill("SIGKILL");
   const botKilled = await stopAcceptanceProcess(daemon).catch(() => ({
     verdict: "exited",
@@ -796,14 +806,91 @@ try {
     (item) => item.id === botSession.sessionId && item.verdict === "unverifiable",
     "the recovered Bot session stub",
   );
+  const recoveredBotTab = page.locator(
+    `[role="tablist"][aria-label="Sessions"] [data-tab-id="${botRecovered.id}"]`,
+  );
+  await recoveredBotTab.waitFor({ timeout: 20000 });
+  await recoveredBotTab.click();
+  const botSleepingAlert = panel
+    .getByRole("alert")
+    .filter({ hasText: "This session is sleeping" });
+  await botSleepingAlert.waitFor();
+  await botSleepingAlert
+    .getByRole("button", { name: "Resume session", exact: true })
+    .click();
+  const terminalResumedBot = await waitForBotSession(
+    botId,
+    (current) =>
+      current.verdict === "live" && current.sessionId !== botSession.sessionId,
+    "the Bot link relinked by terminal Resume",
+  );
+  ownedSessions.push({
+    id: terminalResumedBot.sessionId,
+    incarnation: terminalResumedBot.incarnation,
+  });
+  const terminalResumedText = await waitForSessionOutput(
+    {
+      id: terminalResumedBot.sessionId,
+      incarnation: terminalResumedBot.incarnation,
+    },
+    `RESUMED:${botConversation}`,
+  );
+  assert.ok(
+    terminalResumedText.includes(`the first turn of ${botConversation}`),
+    `terminal Resume must restore the Bot conversation content: ${terminalResumedText}`,
+  );
+  const chatRowAfterResume = page
+    .locator("[data-bot-session-row]")
+    .filter({ hasText: BOT_NAME })
+    .first();
+  await chatRowAfterResume.waitFor({ timeout: 20000 });
+  report.checks.push("terminal-resume-keeps-the-bot-linked-in-chats");
+
+  const liveBeforeOpen = (await hostSessions())
+    .filter((item) => item.verdict === "live")
+    .map((item) => item.id)
+    .sort();
+  await page.getByRole("button", { name: "Bots", exact: true }).first().click();
+  await card.waitFor();
+  await openBotSession(botId);
+  await delay(1000);
+  const liveAfterOpen = (await hostSessions())
+    .filter((item) => item.verdict === "live")
+    .map((item) => item.id)
+    .sort();
+  assert.deepEqual(
+    liveAfterOpen,
+    liveBeforeOpen,
+    "Open Session after terminal Resume must focus the linked session, not dispatch a duplicate",
+  );
+  report.checks.push("open-session-after-terminal-resume-focuses-without-duplicate");
+
+  // Restart once more, then REMOVE the replacement row: from here on the
+  // Bot record is the only place the conversation identity exists. Resume
+  // preserved that identity while rotating the link, so the original
+  // bot-record-only recovery must still work.
+  daemon.kill("SIGKILL");
+  const resumedBotKilled = await stopAcceptanceProcess(daemon).catch(() => ({
+    verdict: "exited",
+  }));
+  daemon = null;
+  assert.equal(resumedBotKilled.verdict, "exited");
+  const resumedBotRestarted = await startDaemon();
+  daemon = resumedBotRestarted.child;
+  serviceInstanceId = resumedBotRestarted.status.serviceInstanceId;
+  const resumedBotRecovered = await waitForSession(
+    (item) =>
+      item.id === terminalResumedBot.sessionId && item.verdict === "unverifiable",
+    "the terminal-resumed Bot session stub",
+  );
   await closeSession({
-    id: botRecovered.id,
-    incarnation: botRecovered.incarnation,
+    id: resumedBotRecovered.id,
+    incarnation: resumedBotRecovered.incarnation,
   });
   const remaining = await hostSessions();
   assert.ok(
-    !remaining.some((item) => item.id === botSession.sessionId),
-    "the durable row must be gone, leaving the Bot record as the only source",
+    !remaining.some((item) => item.id === terminalResumedBot.sessionId),
+    "the replacement row must be gone, leaving the Bot record as the only source",
   );
   const withoutRow = await botSnapshotBot(botId);
   assert.equal(

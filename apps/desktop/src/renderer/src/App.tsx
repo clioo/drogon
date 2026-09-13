@@ -251,6 +251,7 @@ import { BotSessionHeader } from "./features/bots/BotSessionHeader";
 import { BotSessionInspector } from "./features/bots/BotSessionInspector";
 import {
   botSessionTitle,
+  linkedBotSessionMeta,
   type BotSessionMeta,
 } from "./features/bots/bot-session-chrome";
 import {
@@ -2514,7 +2515,9 @@ export function App() {
   // The `sessionId` guard on the state write means a stale in-flight read
   // for a since-switched-away session can never paint over the currently
   // focused one's pid.
-  const activeBotMeta = terminal ? (botSessions.get(terminal.id) ?? null) : null;
+  const activeBotMeta = terminal
+    ? (botSessions.get(terminal.id) ?? linkedBotSessionMeta(loadedBots, terminal))
+    : null;
   useEffect(() => {
     if (!activeBotMeta || !status?.hostId || !terminal) {
       setBotSessionPid(null);

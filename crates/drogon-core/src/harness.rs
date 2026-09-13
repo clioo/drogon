@@ -174,8 +174,10 @@ impl Engine {
         // for the same conversation instead of the most recent one in the
         // directory. A row that recorded no identity leaves the explicit
         // locator unset and the launch degrades exactly as before.
+        let requested_resume = request.resume;
+        let resume_session_id = crate::optional_str(params, "resumeSessionId")?.map(str::to_owned);
         let mut locator_from_row = false;
-        if let Some(prior) = crate::optional_str(params, "resumeSessionId")? {
+        if let Some(prior) = resume_session_id.as_deref() {
             let recorded = {
                 let conn = self.db.lock().unwrap();
                 crate::session::recorded_agent_session(&conn, prior)?
@@ -587,9 +589,59 @@ impl Engine {
         self.sessions
             .lock()
             .unwrap()
-            .insert(session_id, handle.clone());
+            .insert(session_id.clone(), handle.clone());
         // Retain ownership even when the post-spawn durable transition fails.
         crate::session::persist_admission(&handle)?;
+
+        // A sleeping Bot session resumed from its terminal overlay bypasses
+        // `bot.run`, so its normal finalize phase cannot rotate the Bot's
+        // `current_session`. Relink that durable association here, at the
+        // generic resume boundary that knows both the prior and replacement
+        // Drogon session ids. This makes the replacement appear in Chats and
+        // makes the Bot page focus it instead of opening the same provider
+        // conversation in another tab.
+        if requested_resume
+            && !request.headless
+            && let Some(prior_session_id) = resume_session_id.as_deref()
+        {
+            let observed_at = crate::now_unix_ms() as f64 / 1000.0;
+            let preserve_identity = agent_resume != "fresh";
+            let replacement = crate::bots::records::BotSession {
+                session_id: session_id.clone(),
+                harness: harness_id_wire(request.harness_id).to_string(),
+                model: request.model.clone(),
+                started_at: observed_at,
+                rotated_at: Some(observed_at),
+                agent_session_id: preserve_identity
+                    .then(|| request.agent_session_id.clone())
+                    .flatten(),
+                agent_session_transcript_path: preserve_identity
+                    .then(|| request.agent_session_transcript_path.clone())
+                    .flatten(),
+            };
+            let relinked = {
+                let conn = self.db.lock().unwrap();
+                crate::bots::storage::relink_resumed_session(
+                    &conn,
+                    &self.host_id,
+                    prior_session_id,
+                    request.agent_session_id.as_deref(),
+                    &replacement,
+                    observed_at,
+                )
+            };
+            if let Err(relink_error) = relinked {
+                // Never return an error while leaving an unreported live PTY
+                // behind. The old Bot link remains intact and a later retry
+                // can resume it again.
+                let _ = crate::session::stop(&handle);
+                self.sessions.lock().unwrap().remove(&session_id);
+                return Err(error::internal_error(format!(
+                    "failed to relink the resumed Bot session: {relink_error}"
+                )));
+            }
+        }
+
         let mut value = crate::session::snapshot(&handle);
         value["agentResume"] = json!(agent_resume);
         Ok(value)
