@@ -28,6 +28,7 @@
    list. */
 import { useState } from "react";
 import { SquarePen } from "lucide-react";
+import type { GraphBridge } from "../../../../shared/graph-contract";
 import type {
   Project,
   Session,
@@ -54,6 +55,7 @@ export function ChatsList({
   onOpenBotSession,
   onSubmitRemove,
   onCreate,
+  graphBridge = null,
 }: {
   /** Every quick-session group, unfiltered by the caller's own criteria —
    *  Sidebar passes `groups.filter((g) => g.project.quickSession)`. */
@@ -81,6 +83,7 @@ export function ChatsList({
    *  "New session" trigger. Null hides the header button (parity with
    *  Sidebar's own `onNewSession && <RecentSessions .../>` guard). */
   onCreate: (() => void) | null;
+  graphBridge?: GraphBridge | null;
 }): React.JSX.Element {
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   return (
@@ -152,6 +155,7 @@ export function ChatsList({
             tabStrip={tabStrip}
             onRemove={() => setRemoveTarget(group.project)}
             onRename={null}
+            graphBridge={graphBridge}
           />
         );
       })}

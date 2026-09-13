@@ -298,10 +298,10 @@ impl Engine {
         to_value(MentuRunResult { run })
     }
 
-    /// `mentu.retry_step`: rerun ONE step of a past run via the runtime's own
-    /// `retry-step <run-id> <label>`. No second engine; the same run row
-    /// (and its `mentu-recipes` run id) is reused, exactly as the runtime's
-    /// own `retry-step` appends an attempt to the existing run directory.
+    /// `mentu.retry_step`: target one step of a past run via the runtime's
+    /// own `retry-step <run-id> <label>`. Successful predecessors stay put;
+    /// invalidated dependents or later unfinished steps may then continue in
+    /// the same run directory. No second engine is involved.
     pub(crate) fn mentu_retry_step(&self, request: &Request) -> Result<Value, RpcError> {
         self.mutating(request, Self::do_mentu_retry_step)
     }

@@ -221,6 +221,132 @@ fn parse_steps(recipe: &Value) -> Result<Vec<MentuStep>, String> {
         .collect()
 }
 
+pub(crate) const DEFAULT_STEP_TIMEOUT_SECONDS: u64 = 30 * 60;
+
+/// Timing fields that bound every attempt the pinned Mentu runtime may make
+/// for one parsed step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecipeStepBudget {
+    pub timeout_seconds: Option<u64>,
+    pub max_retries: u64,
+    pub retry_backoff_ms: u64,
+    pub verify_commands: u64,
+    pub verify_git_clean: bool,
+    pub expected_changes: bool,
+    pub pi_preflight: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecipeBudget {
+    pub steps: Vec<RecipeStepBudget>,
+    pub has_recipe_nodes: bool,
+    pub cloud_enabled: bool,
+    pub cloud_evaluate_steps: bool,
+    pub before_run_hooks: u64,
+    pub after_run_hooks: u64,
+    pub before_step_hooks: u64,
+    pub after_step_hooks: u64,
+    pub on_error_hooks: u64,
+}
+
+fn string_array_len(value: Option<&Value>) -> u64 {
+    value
+        .and_then(Value::as_array)
+        .map_or(0, |values| values.len() as u64)
+}
+
+fn normalize_backend_name(value: &str) -> String {
+    value.trim().to_lowercase().replace('_', "-")
+}
+
+fn step_uses_pi(recipe: &Value, backend: &str) -> bool {
+    let normalized = normalize_backend_name(backend);
+    let provider = recipe.get("providers").and_then(|providers| {
+        providers
+            .get(backend)
+            .or_else(|| providers.get(&normalized))
+    });
+    let Some(provider) = provider else {
+        return normalized == "pi";
+    };
+    if provider.get("api").and_then(Value::as_str) != Some("cli") {
+        return false;
+    }
+    normalize_backend_name(
+        provider
+            .get("agent")
+            .and_then(Value::as_str)
+            .unwrap_or(backend),
+    ) == "pi"
+}
+
+/// Extends the same typed step parse used by `mentu.recipe` with every timing
+/// field owned by the pinned runtime. Mentu defaults to no retries and a
+/// one-second retry backoff.
+pub(crate) fn parse_recipe_budget(source: &str) -> Result<RecipeBudget, String> {
+    let recipe = parse_recipe_json(source)?;
+    let steps = parse_steps(&recipe)?;
+    let values = recipe
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Recipe has no \"steps\" array.".to_string())?;
+    let hooks = recipe.get("hooks");
+    let hook_count = |name| string_array_len(hooks.and_then(|value| value.get(name)));
+    let cloud = recipe.get("cloud");
+    Ok(RecipeBudget {
+        steps: steps
+            .into_iter()
+            .zip(values)
+            .map(|(step, value)| RecipeStepBudget {
+                // The pinned runtime gives every omitted step timeout its own
+                // 30-minute allowance. Explicit zero/negative values disable
+                // that inner bound and remain unusable for watchdog sizing.
+                timeout_seconds: if value.get("timeout").is_none() {
+                    Some(DEFAULT_STEP_TIMEOUT_SECONDS)
+                } else {
+                    step.timeout_seconds.filter(|seconds| *seconds > 0)
+                },
+                max_retries: value
+                    .get("max_retries")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                retry_backoff_ms: value
+                    .get("retry_backoff_ms")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1_000),
+                verify_commands: string_array_len(
+                    value
+                        .get("verify")
+                        .and_then(|verify| verify.get("commands")),
+                ),
+                verify_git_clean: value
+                    .get("verify")
+                    .and_then(|verify| verify.get("git_clean_outside"))
+                    .is_some(),
+                expected_changes: value.get("expected_changes").is_some(),
+                pi_preflight: step_uses_pi(&recipe, &step.backend),
+            })
+            .collect(),
+        has_recipe_nodes: recipe
+            .get("recipes")
+            .and_then(Value::as_array)
+            .is_some_and(|nodes| !nodes.is_empty()),
+        cloud_enabled: cloud
+            .and_then(|value| value.get("enabled"))
+            .and_then(Value::as_bool)
+            == Some(true),
+        cloud_evaluate_steps: cloud
+            .and_then(|value| value.get("evaluate_steps"))
+            .and_then(Value::as_bool)
+            == Some(true),
+        before_run_hooks: hook_count("before_run"),
+        after_run_hooks: hook_count("after_run"),
+        before_step_hooks: hook_count("before_step"),
+        after_step_hooks: hook_count("after_step"),
+        on_error_hooks: hook_count("on_error"),
+    })
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|b| format!("{b:02x}")).collect()

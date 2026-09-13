@@ -752,8 +752,9 @@ impl GraphRetryStepParams {
     }
 }
 
-/// Params for the run-scoped `mentu.retry_step`: rerun one step of a past
-/// run by its daemon run id, without redoing the rest of the graph.
+/// Params for the run-scoped `mentu.retry_step`: target one step of a past
+/// run by its daemon run id. Successful predecessors stay complete while
+/// invalidated dependents or later unfinished steps may continue.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MentuRetryStepParams {

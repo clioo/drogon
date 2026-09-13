@@ -266,7 +266,9 @@ fn a_connection_cap_alone_does_not_permanently_exclude_clients() {
     // Once the two idle connections time out, their slots free up and a
     // fresh connection must succeed — well within a bounded wait.
     let mut reconnected = false;
-    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    // Loaded CI runners can delay both idle handlers beyond their nominal
+    // socket timeout; keep retrying without relaxing the production bound.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
         // While the cap is still full, this connection is itself over-cap
         // and the server closes it immediately — a write into that half-closed

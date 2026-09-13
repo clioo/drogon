@@ -5,9 +5,13 @@ import { probePiShiftEnter } from "./probe-pi-terminal-input.mjs";
 
 export async function probePiLayout({ page, session, output, getFixtureReceipt }) {
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
-  const initialCols = await page.evaluate((id) => window.__drogonTerminals.get(id).cols, session.id);
   const beforeRequests = getFixtureReceipt().totalRequests;
   try {
+    // Earlier responsive probes intentionally finish at 760px. Establish an
+    // observed wide terminal before proving that the narrow resize changes it.
+    await page.setViewportSize({ width: Math.max(viewport.width, 1440), height: Math.max(viewport.height, 600) });
+    await page.waitForFunction((id) => window.__drogonTerminals?.get(id)?.cols > 100, session.id);
+    const initialCols = await page.evaluate((id) => window.__drogonTerminals.get(id).cols, session.id);
     await page.setViewportSize({ width: 760, height: 600 });
     await page.waitForFunction(({ id, initialCols }) => window.__drogonTerminals?.get(id)?.cols < initialCols, { id: session.id, initialCols });
     // A renderer reload drops the transport and rebuilds the TUI from real

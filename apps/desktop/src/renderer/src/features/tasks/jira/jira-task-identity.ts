@@ -49,6 +49,12 @@ function foldAuthorityCase(normalized: string): string {
   return `${scheme}${host.toLowerCase()}${path}`;
 }
 
+/** Canonical endpoint material used before asynchronous identity hashing. */
+export function canonicalJiraEndpointUrl(input: string): string | null {
+  const normalized = normalizeJiraSiteUrl(input);
+  return normalized ? foldAuthorityCase(normalized) : null;
+}
+
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -67,9 +73,8 @@ async function sha256(text: string): Promise<Uint8Array> {
  * actual instance. Null when the site URL cannot be normalized.
  */
 export async function provisionalEndpointId(siteUrl: string): Promise<string | null> {
-  const normalized = normalizeJiraSiteUrl(siteUrl);
-  if (!normalized) return null;
-  const canonical = foldAuthorityCase(normalized);
+  const canonical = canonicalJiraEndpointUrl(siteUrl);
+  if (!canonical) return null;
   const digest = await sha256(`${ENDPOINT_ID_DOMAIN}\n${canonical}`);
   return base64Url(digest).slice(0, 24);
 }
@@ -162,12 +167,12 @@ export async function resolveProvisionalJiraTaskIdentity(
 ): Promise<JiraTaskIdentity | null> {
   const parts = validateTaskParts(issue.issueId, issue.key);
   if (!parts) return null;
-  const normalized = normalizeJiraSiteUrl(siteUrl ?? "");
-  if (!normalized) return null;
-  const endpointId = await provisionalEndpointId(normalized);
+  const endpointUrl = canonicalJiraEndpointUrl(siteUrl ?? "");
+  if (!endpointUrl) return null;
+  const endpointId = await provisionalEndpointId(endpointUrl);
   if (!endpointId) return null;
   return {
-    instance: { kind: "provisional", endpointId, endpointUrl: foldAuthorityCase(normalized) },
+    instance: { kind: "provisional", endpointId, endpointUrl },
     issueId: parts.issueId,
     key: parts.key,
   };

@@ -98,6 +98,7 @@ pub use unix::{DataDirLock, acquire_exclusive};
 mod windows {
     use std::fs::OpenOptions;
     use std::io;
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
     use std::os::windows::io::AsRawHandle;
     use std::path::Path;
 
@@ -108,6 +109,10 @@ mod windows {
     use windows_sys::Win32::System::IO::OVERLAPPED;
 
     use super::LOCK_FILE_NAME;
+
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 
     /// Held for as long as this value is alive; dropping it (process exit
     /// included) closes the handle, which releases the lock — Windows
@@ -126,7 +131,18 @@ mod windows {
             .write(true)
             .create(true)
             .truncate(false)
-            .open(&path)?;
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(&path)
+            .map_err(|error| match error.raw_os_error() {
+                Some(ERROR_SHARING_VIOLATION) => lock_held_error(error),
+                _ => error,
+            })?;
+        if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "the data-directory lock must not be a reparse point",
+            ));
+        }
         let handle = file.as_raw_handle() as HANDLE;
         // Safety: `handle` is open for the duration of this call;
         // `overlapped` is required by `LockFileEx`'s signature even for a
@@ -148,15 +164,18 @@ mod windows {
             )
         };
         if ok == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::AddrInUse,
-                format!(
-                    "another drogond instance already holds the exclusive lock on this data directory: {}",
-                    io::Error::last_os_error()
-                ),
-            ));
+            return Err(lock_held_error(io::Error::last_os_error()));
         }
         Ok(DataDirLock { _file: file })
+    }
+
+    fn lock_held_error(error: io::Error) -> io::Error {
+        io::Error::new(
+            io::ErrorKind::AddrInUse,
+            format!(
+                "another drogond instance already holds the exclusive lock on this data directory: {error}"
+            ),
+        )
     }
 }
 

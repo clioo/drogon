@@ -204,36 +204,29 @@ describe("startWorkspaceFromJiraIssue", () => {
     expect(outcome).toMatchObject({ ok: true, identity: null });
   });
 
-  it("coalesces a double click into one start operation", async () => {
-    const jiraStartIssue = vi.fn().mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          setTimeout(
-            () =>
-              resolve({
-                ok: true,
-                result: {
-                  ok: true,
-                  key: "DROG-42",
-                  url: "u",
-                  displayName: "DROG-42",
-                  seedName: "drog-42",
-                  worktree: {
-                    id: "wt-1",
-                    workspaceId: "ws-1",
-                    repoPath: "/r",
-                    branch: "b",
-                    title: "DROG-42",
-                    createdAt: "2026-01-01T00:00:00Z",
-                    lastSessionAt: null,
-                    baseRef: "main",
-                  },
-                },
-              }),
-            5,
-          );
-        }),
-    );
+  it("coalesces a double click before async identity hashing completes", async () => {
+    // Resolve immediately: the coalescing claim must already exist while both
+    // calls are still deriving their provisional endpoint identities.
+    const jiraStartIssue = vi.fn().mockResolvedValue({
+      ok: true,
+      result: {
+        ok: true,
+        key: "DROG-42",
+        url: "u",
+        displayName: "DROG-42",
+        seedName: "drog-42",
+        worktree: {
+          id: "wt-1",
+          workspaceId: "ws-1",
+          repoPath: "/r",
+          branch: "b",
+          title: "DROG-42",
+          createdAt: "2026-01-01T00:00:00Z",
+          lastSessionAt: null,
+          baseRef: "main",
+        },
+      },
+    });
     const bridge = { jiraStartIssue } as unknown as JiraBridge;
     const input = {
       projectId: "p1",
@@ -242,7 +235,10 @@ describe("startWorkspaceFromJiraIssue", () => {
     };
     const [first, second] = await Promise.all([
       startWorkspaceFromJiraIssue(bridge, input),
-      startWorkspaceFromJiraIssue(bridge, input),
+      startWorkspaceFromJiraIssue(bridge, {
+        ...input,
+        siteUrl: "https://ACME.atlassian.net/",
+      }),
     ]);
     expect(jiraStartIssue).toHaveBeenCalledTimes(1);
     expect(first).toEqual(second);

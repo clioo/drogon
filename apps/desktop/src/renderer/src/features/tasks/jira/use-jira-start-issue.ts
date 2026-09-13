@@ -15,7 +15,7 @@
 import type { JiraBridge, JiraIssue } from "../../../../../shared/jira-contract";
 import { getJiraIssueWorkspaceSeed } from "./jira-workspace-seed";
 import {
-  jiraTaskLinkId,
+  canonicalJiraEndpointUrl,
   resolveProvisionalJiraTaskIdentity,
   type JiraTaskIdentity,
 } from "./jira-task-identity";
@@ -63,8 +63,23 @@ function newIntentId(): string {
   );
 }
 
-/** In-flight coalescing: identity+project → the one running start promise. */
+/** In-flight coalescing: identity material + project → one start promise. */
 const inFlightStarts = new Map<string, Promise<JiraStartIssueOutcome>>();
+
+function startDedupKey(input: {
+  projectId: string;
+  issue: Pick<JiraIssue, "key" | "title"> & Partial<JiraIssue>;
+  siteUrl?: string | null;
+}): string {
+  const issueId = input.issue.id?.trim() ?? "";
+  const key = input.issue.key.trim();
+  const endpointUrl = canonicalJiraEndpointUrl(input.siteUrl ?? "");
+  const task =
+    endpointUrl && issueId && issueId.length <= 64 && key && key.length <= 64
+      ? `provisional:${endpointUrl}:${issueId}`
+      : `key:${key}`;
+  return JSON.stringify([input.projectId, task]);
+}
 
 /**
  * Turns a Jira issue into work through the shared daemon path. Idempotent
@@ -89,22 +104,23 @@ export async function startWorkspaceFromJiraIssue(
     intentId?: string;
   },
 ): Promise<JiraStartIssueOutcome> {
-  const identity = await resolveProvisionalJiraTaskIdentity(
-    {
-      issueId: input.issue.id ?? "",
-      key: input.issue.key,
-    },
-    input.siteUrl ?? null,
-  );
-  // Concurrent starts for the SAME task in the SAME project coalesce: the
-  // second click awaits the first instead of issuing a second operation.
-  const dedupKey = `${input.projectId}::${identity ? jiraTaskLinkId(identity) : `key:${input.issue.key}`}`;
+  // Claim the in-flight key before asynchronous identity hashing. Otherwise
+  // a fast daemon reply can finish before a concurrent click hashes the same
+  // task, allowing that second click to start another operation.
+  const dedupKey = startDedupKey(input);
   const running = inFlightStarts.get(dedupKey);
   if (running) {
     return running;
   }
   const intentId = input.intentId ?? newIntentId();
   const operation = (async (): Promise<JiraStartIssueOutcome> => {
+    const identity = await resolveProvisionalJiraTaskIdentity(
+      {
+        issueId: input.issue.id ?? "",
+        key: input.issue.key,
+      },
+      input.siteUrl ?? null,
+    );
     const fallbackSeed = getJiraIssueWorkspaceSeed({
       key: input.issue.key,
       title: input.issue.title,

@@ -12,7 +12,7 @@
 //  - refresh and system-browser-open failures toast like the source
 //    (sonner landed with r13-c); Stop Process rides this repo's additive
 //    workspacePorts.kill bridge to the daemon's ports.kill (R16-BC).
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw, Server } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Workspace } from '../../../../shared/session-contract'
@@ -42,19 +42,22 @@ import { LocalPortDetailsDialog } from './local-port-details-dialog'
 // Why: the source's panel scopes WorkspacePortScanner's 30s all-worktree
 // poll; this panel owns the same cadence for its own channel.
 const PORTS_POLL_MS = 30_000
+const WORKSPACE_PORT_STOP_SETTLE_MS = 500
 
 /** Right-sidebar Ports panel scoped to the active workspace. */
 export function LocalWorkspacePortsPanel({
   isVisible,
   workspace,
   onOpenInBrowserTab,
-  bridge = window.drogon.workspacePorts
+  bridge = window.drogon.workspacePorts,
+  notifications = toast
 }: {
   isVisible: boolean
   workspace: Workspace | null
   /** Creates a browser tab owned by the workspace's tab strip (the "+" menu path). */
   onOpenInBrowserTab: (url: string) => void
   bridge?: WorkspacePortsBridge
+  notifications?: Pick<typeof toast, 'error' | 'success'>
 }): React.JSX.Element {
   const [scan, setScan] = useState<WorkspacePortsSnapshot | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -63,23 +66,36 @@ export function LocalWorkspacePortsPanel({
     other: true,
     external: true
   })
+  const mountedRef = useRef(true)
+  const settleTimersRef = useRef<Set<number>>(new Set())
+
+  useEffect(() => {
+    mountedRef.current = true
+    const settleTimers = settleTimersRef.current
+    return () => {
+      mountedRef.current = false
+      for (const timer of settleTimers) window.clearTimeout(timer)
+      settleTimers.clear()
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
-    if (!workspace) return
+    if (!workspace || !mountedRef.current) return
     setRefreshing(true)
     try {
       const result = await bridge.list({ workspaceId: workspace.id })
       if (!result.ok) throw new Error(result.error.message)
-      setScan(result.result)
+      if (mountedRef.current) setScan(result.result)
     } catch (error) {
+      if (!mountedRef.current) return
       const message = error instanceof Error ? error.message : String(error)
-      toast.error('Failed to refresh ports', {
+      notifications.error('Failed to refresh ports', {
         description: message || 'Workspace port scan failed.'
       })
     } finally {
-      setRefreshing(false)
+      if (mountedRef.current) setRefreshing(false)
     }
-  }, [bridge, workspace])
+  }, [bridge, notifications, workspace])
 
   // Poll while visible (source cadence); stop when hidden or unmounted.
   useEffect(() => {
@@ -98,7 +114,6 @@ export function LocalWorkspacePortsPanel({
   // daemon re-proves ownership), success toasts the source's copy, then a
   // re-scan runs immediately and again after the source's settle window
   // (SIGTERM can leave the listener visible briefly).
-  const WORKSPACE_PORT_STOP_SETTLE_MS = 500
   const handleStopPort = useCallback(
     async (port: WorkspacePortRow) => {
       if (!workspace || !port.pid) return
@@ -109,24 +124,29 @@ export function LocalWorkspacePortsPanel({
           port: port.port
         })
         if (!result.ok) {
-          toast.error(result.error.message)
+          notifications.error(result.error.message)
           return
         }
         const killResult = result.result
         if (!killResult.ok) {
-          toast.error(killResult.reason ?? 'Failed to stop the process.')
+          notifications.error(killResult.reason ?? 'Failed to stop the process.')
           return
         }
-        toast.success(`Stopped process on :${port.port}`)
+        notifications.success(`Stopped process on :${port.port}`)
         await refresh()
-        window.setTimeout(() => void refresh(), WORKSPACE_PORT_STOP_SETTLE_MS)
+        if (!mountedRef.current) return
+        const timer = window.setTimeout(() => {
+          settleTimersRef.current.delete(timer)
+          void refresh()
+        }, WORKSPACE_PORT_STOP_SETTLE_MS)
+        settleTimersRef.current.add(timer)
       } catch (error) {
-        toast.error('Failed to stop the process.', {
+        notifications.error('Failed to stop the process.', {
           description: error instanceof Error ? error.message : String(error)
         })
       }
     },
-    [bridge, workspace, refresh]
+    [bridge, workspace, refresh, notifications]
   )
 
   const handleOpenPortInBrowser = useCallback(
@@ -137,7 +157,7 @@ export function LocalWorkspacePortsPanel({
         // once here (same posture as App's open-external handler).
         const shell = (window.drogon as unknown as { shell?: ShellBridge }).shell
         if (!shell || typeof shell.openExternal !== 'function') {
-          toast.error('Failed to open browser', {
+          notifications.error('Failed to open browser', {
             description: 'The shell bridge is not exposed.'
           })
           return
@@ -145,7 +165,7 @@ export function LocalWorkspacePortsPanel({
         try {
           await shell.openExternal(url)
         } catch (error) {
-          toast.error('Failed to open browser', {
+          notifications.error('Failed to open browser', {
             description: error instanceof Error ? error.message : String(error)
           })
         }
@@ -153,7 +173,7 @@ export function LocalWorkspacePortsPanel({
       }
       onOpenInBrowserTab(url)
     },
-    [onOpenInBrowserTab]
+    [notifications, onOpenInBrowserTab]
   )
 
   const { activePorts, otherWorkspacePorts, externalPorts } = useMemo(

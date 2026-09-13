@@ -423,7 +423,7 @@ fn the_whole_graph_lifecycle_runs_through_the_real_daemon() {
         "succeeded"
     );
 
-    // 6. Retry ONLY n2, through the runtime's own `retry-step`.
+    // 6. Retry n2 through the runtime's own `retry-step`; n1 stays complete.
     let retried = ok(
         &fixture.engine,
         "graph.retry_step",
@@ -434,7 +434,7 @@ fn the_whole_graph_lifecycle_runs_through_the_real_daemon() {
     let argv = fixture.wait_argv_contains(&format!("retry-step {mentu_run_id} n2"));
     assert!(
         argv.contains(&format!("retry-step {mentu_run_id} n2")),
-        "retry-step must target the SAME mentu run and only n2; argv log:\n{argv}"
+        "retry-step must target n2 in the SAME mentu run; argv log:\n{argv}"
     );
     fixture.wait_status(&retry_run, "succeeded");
     let retried_state = fixture.wait_node_status("n2", "succeeded");

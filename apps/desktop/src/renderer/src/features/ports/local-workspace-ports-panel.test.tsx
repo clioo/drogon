@@ -7,9 +7,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
-
-import { toast } from "sonner";
 import type {
   WorkspacePortsBridge,
   WorkspacePortsSnapshot,
@@ -18,9 +15,12 @@ import type { Workspace } from "../../../../shared/session-contract";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import { LocalWorkspacePortsPanel } from "./local-workspace-ports-panel";
 
+const notifications = { error: vi.fn(), success: vi.fn() };
+
 beforeEach(() => {
   installRadixJsdomStubs();
-  vi.mocked(toast.error).mockClear();
+  notifications.error.mockClear();
+  notifications.success.mockClear();
 });
 afterEach(cleanup);
 
@@ -58,7 +58,11 @@ function snapshot(): WorkspacePortsSnapshot {
         processName: "node",
         protocol: "http",
         kind: "workspace",
-        owner: { workspaceId: "ws-2", displayName: "main", confidence: "command" },
+        owner: {
+          workspaceId: "ws-2",
+          displayName: "main",
+          confidence: "command",
+        },
       },
       {
         id: "127.0.0.1:17500:33",
@@ -75,7 +79,9 @@ function snapshot(): WorkspacePortsSnapshot {
   };
 }
 
-function fakeBridge(over: Partial<WorkspacePortsBridge> = {}): WorkspacePortsBridge {
+function fakeBridge(
+  over: Partial<WorkspacePortsBridge> = {},
+): WorkspacePortsBridge {
   return {
     list: vi.fn().mockResolvedValue({ ok: true, result: snapshot() }),
     kill: vi.fn().mockResolvedValue({ ok: true, result: { ok: true } }),
@@ -94,9 +100,13 @@ describe("LocalWorkspacePortsPanel", () => {
         bridge={bridge}
       />,
     );
-    await vi.waitFor(() => expect(bridge.list).toHaveBeenCalledWith({ workspaceId: "ws-1" }));
+    await vi.waitFor(() =>
+      expect(bridge.list).toHaveBeenCalledWith({ workspaceId: "ws-1" }),
+    );
     expect(screen.getByText("Active Workspace")).toBeTruthy();
-    await vi.waitFor(() => expect(screen.getByLabelText("Port 3000 menu")).toBeTruthy());
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText("Port 3000 menu")).toBeTruthy(),
+    );
     // Other Workspaces and External start collapsed (source defaults).
     expect(screen.queryByLabelText("Port 4000 menu")).toBeNull();
     expect(screen.queryByLabelText("Port 17500 menu")).toBeNull();
@@ -141,7 +151,9 @@ describe("LocalWorkspacePortsPanel", () => {
         bridge={bridge}
       />,
     );
-    await vi.waitFor(() => expect(screen.getByLabelText("Open in Browser")).toBeTruthy());
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText("Open in Browser")).toBeTruthy(),
+    );
     fireEvent.click(screen.getByLabelText("Open in Browser"));
     await vi.waitFor(() =>
       expect(onOpenInBrowserTab).toHaveBeenCalledWith("http://127.0.0.1:3000"),
@@ -156,23 +168,57 @@ describe("LocalWorkspacePortsPanel", () => {
         workspace={WORKSPACE}
         onOpenInBrowserTab={() => {}}
         bridge={bridge}
+        notifications={notifications}
       />,
     );
-    await vi.waitFor(() => expect(screen.getByLabelText("Stop Process")).toBeTruthy());
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText("Stop Process")).toBeTruthy(),
+    );
     fireEvent.click(screen.getByLabelText("Stop Process"));
     await vi.waitFor(() =>
-      expect(bridge.kill).toHaveBeenCalledWith({ workspaceId: "ws-1", pid: 11, port: 3000 }),
+      expect(bridge.kill).toHaveBeenCalledWith({
+        workspaceId: "ws-1",
+        pid: 11,
+        port: 3000,
+      }),
     );
     await vi.waitFor(() =>
-      expect(toast.success).toHaveBeenCalledWith("Stopped process on :3000"),
+      expect(notifications.success).toHaveBeenCalledWith(
+        "Stopped process on :3000",
+      ),
     );
+  });
+
+  it("cancels the delayed post-stop scan when the panel unmounts", async () => {
+    const bridge = fakeBridge();
+    const view = render(
+      <LocalWorkspacePortsPanel
+        isVisible
+        workspace={WORKSPACE}
+        onOpenInBrowserTab={() => {}}
+        bridge={bridge}
+        notifications={notifications}
+      />,
+    );
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText("Stop Process")).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByLabelText("Stop Process"));
+    await vi.waitFor(() => expect(bridge.list).toHaveBeenCalledTimes(2));
+
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(bridge.list).toHaveBeenCalledTimes(2);
   });
 
   it("Stop Process toasts the daemon's refusal reason and does not rescan", async () => {
     const bridge = fakeBridge({
       kill: vi.fn().mockResolvedValue({
         ok: true,
-        result: { ok: false, reason: "Only workspace-owned local processes can be stopped here." },
+        result: {
+          ok: false,
+          reason: "Only workspace-owned local processes can be stopped here.",
+        },
       }),
     });
     render(
@@ -181,13 +227,16 @@ describe("LocalWorkspacePortsPanel", () => {
         workspace={WORKSPACE}
         onOpenInBrowserTab={() => {}}
         bridge={bridge}
+        notifications={notifications}
       />,
     );
-    await vi.waitFor(() => expect(screen.getByLabelText("Stop Process")).toBeTruthy());
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText("Stop Process")).toBeTruthy(),
+    );
     const listsAfterInitial = vi.mocked(bridge.list).mock.calls.length;
     fireEvent.click(screen.getByLabelText("Stop Process"));
     await vi.waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith(
+      expect(notifications.error).toHaveBeenCalledWith(
         "Only workspace-owned local processes can be stopped here.",
       ),
     );
@@ -216,7 +265,9 @@ describe("LocalWorkspacePortsPanel", () => {
     );
     await vi.waitFor(() =>
       expect(
-        screen.getByText("Port scan unavailable on win32: Port scan needs macOS or Linux."),
+        screen.getByText(
+          "Port scan unavailable on win32: Port scan needs macOS or Linux.",
+        ),
       ).toBeTruthy(),
     );
   });
@@ -225,7 +276,11 @@ describe("LocalWorkspacePortsPanel", () => {
     const bridge = fakeBridge({
       list: vi.fn().mockResolvedValue({
         ok: false,
-        error: { code: "internal_error", message: "scan failed", retryable: false },
+        error: {
+          code: "internal_error",
+          message: "scan failed",
+          retryable: false,
+        },
       }),
     });
     render(
@@ -234,12 +289,16 @@ describe("LocalWorkspacePortsPanel", () => {
         workspace={WORKSPACE}
         onOpenInBrowserTab={() => {}}
         bridge={bridge}
+        notifications={notifications}
       />,
     );
     await vi.waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("Failed to refresh ports", {
-        description: "scan failed",
-      }),
+      expect(notifications.error).toHaveBeenCalledWith(
+        "Failed to refresh ports",
+        {
+          description: "scan failed",
+        },
+      ),
     );
   });
 });

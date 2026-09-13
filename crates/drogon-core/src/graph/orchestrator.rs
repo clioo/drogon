@@ -1,20 +1,22 @@
 //! Durable, depth-one orchestration. The daemon advances receipts, never a UI timer.
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::{compiler, failover, store};
 use crate::mentu::{execution, run_record, storage};
 use crate::{Engine, error};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use drogon_protocol::graph::{
     GraphFailoverAttemptRecord, GraphIntent, GraphNodeIntent, GraphOrchestratorRun as Run,
     GraphOrchestratorStep as Step, GraphPolicy, GraphRuntimeRef,
 };
 use drogon_protocol::mentu::MentuRunStatus;
 use drogon_protocol::{Request, RpcError};
+use rusqlite::OptionalExtension as _;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -41,6 +43,67 @@ struct Policy {
     workspace_id: String,
     policy: GraphPolicy,
     main: Option<GraphNodeIntent>,
+}
+
+// Independent pollers merge snapshots by this value, so every save needs a
+// distinct revision even though the shared product clock is second-resolution.
+static LAST_ORCHESTRATOR_UPDATE_NANOS: AtomicU64 = AtomicU64::new(0);
+
+fn timestamp_nanos(value: &str) -> Option<u64> {
+    let timestamp = DateTime::parse_from_rfc3339(value).ok()?;
+    u64::try_from(timestamp.timestamp())
+        .ok()?
+        .checked_mul(1_000_000_000)?
+        .checked_add(timestamp.timestamp_subsec_nanos().into())
+}
+
+fn next_orchestrator_updated_at(previous: &str) -> Result<String, RpcError> {
+    let now: u64 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .try_into()
+        .unwrap_or(u64::MAX);
+    let previous_floor = match timestamp_nanos(previous) {
+        Some(value) => value
+            .checked_add(1)
+            .ok_or_else(|| error::internal_error("Workflow timestamp range exhausted."))?,
+        None => 0,
+    };
+    let floor = previous_floor.max(now);
+    let mut observed = LAST_ORCHESTRATOR_UPDATE_NANOS.load(Ordering::Acquire);
+    let reserved = loop {
+        let next = floor.max(
+            observed
+                .checked_add(1)
+                .ok_or_else(|| error::internal_error("Workflow timestamp range exhausted."))?,
+        );
+        match LAST_ORCHESTRATOR_UPDATE_NANOS.compare_exchange_weak(
+            observed,
+            next,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => break next,
+            Err(actual) => observed = actual,
+        }
+    };
+    let seconds = i64::try_from(reserved / 1_000_000_000)
+        .map_err(|_| error::internal_error("Workflow timestamp exceeded RFC3339 range."))?;
+    DateTime::<Utc>::from_timestamp(seconds, (reserved % 1_000_000_000) as u32)
+        .map(|timestamp| {
+            format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:09}Z",
+                timestamp.year(),
+                timestamp.month(),
+                timestamp.day(),
+                timestamp.hour(),
+                timestamp.minute(),
+                timestamp.second(),
+                timestamp.nanosecond()
+            )
+        })
+        .ok_or_else(|| error::internal_error("Workflow timestamp exceeded RFC3339 range."))
 }
 
 fn parse<T: serde::de::DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
@@ -104,7 +167,7 @@ fn reject_ambiguous_pi_model(catalog: &Value, model: &str) -> Result<(), RpcErro
 
 impl Engine {
     fn save_orchestrator(&self, run: &mut Run) -> Result<(), RpcError> {
-        run.updated_at = crate::now_rfc3339();
+        run.updated_at = next_orchestrator_updated_at(&run.updated_at)?;
         let payload =
             serde_json::to_string(run).map_err(|e| error::internal_error(e.to_string()))?;
         self.db.lock().unwrap().execute("INSERT INTO graph_orchestrator_runs(id, workspace_id, payload, updated_at) VALUES(?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at", rusqlite::params![run.id, run.workspace_id, payload, run.updated_at])
@@ -125,6 +188,23 @@ impl Engine {
             serde_json::from_str(&payload).map_err(|e| error::internal_error(e.to_string()))
         })
         .collect()
+    }
+
+    fn orchestrator_run_for_workspace(&self, workspace_id: &str) -> Result<Option<Run>, RpcError> {
+        let db = self.db.lock().unwrap();
+        let payload = db
+            .query_row(
+                "SELECT payload FROM graph_orchestrator_runs WHERE workspace_id = ?1 ORDER BY rowid DESC LIMIT 1",
+                [workspace_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| error::internal_error(e.to_string()))?;
+        payload
+            .map(|payload| {
+                serde_json::from_str(&payload).map_err(|e| error::internal_error(e.to_string()))
+            })
+            .transpose()
     }
 
     pub(crate) fn graph_write_policy(&self, request: &Request) -> Result<Value, RpcError> {
@@ -173,7 +253,8 @@ impl Engine {
             }
             let _gate = engine.graph_orchestrator_gate.lock().unwrap();
             let path = engine.workspace_path(&parsed.workspace_id)?;
-            if engine.orchestrator_runs()?.iter().any(|run| {
+            let prior_runs = engine.orchestrator_runs()?;
+            if prior_runs.iter().any(|run| {
                 run.workspace_id == parsed.workspace_id
                     && matches!(run.status.as_str(), "running" | "stopping" | "unverifiable")
             }) {
@@ -181,6 +262,10 @@ impl Engine {
                     "This workspace already has an active or unverifiable workflow.",
                 ));
             }
+            let prior_updated_at = prior_runs
+                .iter()
+                .find(|run| run.workspace_id == parsed.workspace_id)
+                .map(|run| run.updated_at.clone());
             let policy = store::read_graph(&path)?.intent.policy;
             policy.validate()?;
             let mut model_refs: Vec<(&str, &str)> = policy
@@ -204,7 +289,7 @@ impl Engine {
                 iteration: 1,
                 steps: vec![],
                 started_at: now.clone(),
-                updated_at: now,
+                updated_at: prior_updated_at.unwrap_or(now),
                 error: None,
             };
             run.steps.push(new_step(&run));
@@ -217,9 +302,9 @@ impl Engine {
         let parsed: Workspace = parse(params)?;
         self.workspace_path(&parsed.workspace_id)?;
         let _gate = self.graph_orchestrator_gate.lock().unwrap();
-        Ok(
-            json!({"run":self.orchestrator_runs()?.into_iter().find(|run| run.workspace_id == parsed.workspace_id)}),
-        )
+        Ok(json!({
+            "run": self.orchestrator_run_for_workspace(&parsed.workspace_id)?
+        }))
     }
 
     pub(crate) fn graph_orchestrator_stop(&self, request: &Request) -> Result<Value, RpcError> {
@@ -729,6 +814,14 @@ pub fn spawn(engine: Arc<Engine>) -> Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn orchestrator_update_timestamps_are_strictly_monotonic() {
+        let first = next_orchestrator_updated_at("").unwrap();
+        let second = next_orchestrator_updated_at(&first).unwrap();
+        assert!(timestamp_nanos(&second).unwrap() > timestamp_nanos(&first).unwrap());
+        assert!(first.ends_with('Z') && first.contains('.'));
+    }
 
     #[test]
     fn ambiguous_pi_models_name_qualified_alternatives() {

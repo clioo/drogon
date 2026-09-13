@@ -126,6 +126,15 @@ fn get_approval_row(conn: &Connection, id: &str) -> Result<Option<ApprovalRow>, 
     .map_err(error::from_sqlite)
 }
 
+/// Returns the durable hash an approval was bound to, including after the
+/// approval has been consumed by its original run.
+pub fn approval_content_hash(
+    conn: &Connection,
+    approval_id: &str,
+) -> Result<Option<String>, RpcError> {
+    Ok(get_approval_row(conn, approval_id)?.map(|row| row.content_hash))
+}
+
 /// Validates that `approval_id` names a not-yet-consumed approval for the
 /// exact `(workspace_id, recipe_id)` pair, then atomically marks it
 /// consumed (`UPDATE ... WHERE consumed_at IS NULL`, so a concurrent second

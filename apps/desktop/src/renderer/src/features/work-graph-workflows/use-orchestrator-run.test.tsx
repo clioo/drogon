@@ -8,7 +8,10 @@ import type {
 import { DEFAULT_GRAPH_POLICY } from "../../../../shared/graph-contract";
 import { useOrchestratorRun } from "./use-orchestrator-run";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 const main = {
   id: "orchestrator-main",
   title: "Main agent",
@@ -28,7 +31,7 @@ const run: OrchestratorRun = {
   iteration: 1,
   steps: [],
   startedAt: "now",
-  updatedAt: "now",
+  updatedAt: "2026-09-13T00:00:00Z",
 };
 
 it("observes a daemon run after remount and never stops it on unmount", async () => {
@@ -47,6 +50,87 @@ it("observes a daemon run after remount and never stops it on unmount", async ()
   );
 });
 
+it("retains durable evidence across a full unmount and empty remount poll", async () => {
+  let current: OrchestratorRun | null = run;
+  let holdRemountPoll = false;
+  let finishRemountPoll:
+    ((value: { ok: true; result: { run: null } }) => void) | undefined;
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(() => {
+      if (holdRemountPoll) {
+        return new Promise((resolve) => {
+          finishRemountPoll = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true, result: { run: current } });
+    }),
+  } as unknown as GraphBridge;
+  const first = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+  await waitFor(() => expect(first.result.current.run?.id).toBe("run-1"));
+  first.unmount();
+  current = null;
+  holdRemountPoll = true;
+
+  const restored = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+
+  expect(restored.result.current.run?.id).toBe("run-1");
+  await act(async () => {
+    finishRemountPoll?.({ ok: true, result: { run: null } });
+  });
+  await waitFor(() =>
+    expect(restored.result.current.error).toContain("status is unavailable"),
+  );
+  expect(restored.result.current.run?.id).toBe("run-1");
+  restored.unmount();
+
+  const unavailableRestored = renderHook(() =>
+    useOrchestratorRun(bridge, "ws", 10),
+  );
+  expect(unavailableRestored.result.current.run?.id).toBe("run-1");
+  expect(unavailableRestored.result.current.error).toContain(
+    "status is unavailable",
+  );
+});
+
+it("bounds retained workspace snapshots and evicts the oldest", async () => {
+  let returnSnapshots = true;
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async ({ workspaceId }) => ({
+      ok: true,
+      result: {
+        run: returnSnapshots
+          ? { ...run, id: `run-${workspaceId}`, workspaceId }
+          : null,
+      },
+    })),
+  } as unknown as GraphBridge;
+  for (let index = 0; index <= 256; index++) {
+    const workspaceId = `ws-${index}`;
+    const view = renderHook(() =>
+      useOrchestratorRun(bridge, workspaceId, 10_000),
+    );
+    await act(async () => {});
+    expect(view.result.current.run?.workspaceId).toBe(workspaceId);
+    view.unmount();
+  }
+  returnSnapshots = false;
+
+  const evicted = renderHook(() =>
+    useOrchestratorRun(bridge, "ws-0", 10_000),
+  );
+  await act(async () => {});
+  expect(evicted.result.current.run).toBeNull();
+  evicted.unmount();
+
+  const retained = renderHook(() =>
+    useOrchestratorRun(bridge, "ws-256", 10_000),
+  );
+  await waitFor(() =>
+    expect(retained.result.current.error).toContain("status is unavailable"),
+  );
+  expect(retained.result.current.run?.workspaceId).toBe("ws-256");
+});
+
 it("starts concrete main work with optional adversarial mode off", async () => {
   const start = vi.fn(async () => ({ ok: true, result: { run } }));
   const bridge = { graphOrchestratorStart: start } as unknown as GraphBridge;
@@ -54,6 +138,339 @@ it("starts concrete main work with optional adversarial mode off", async () => {
   await act(async () => view.result.current.start(main));
   expect(start).toHaveBeenCalledWith({ workspaceId: "ws", main });
   expect(view.result.current.run?.policy.adversarial.enabled).toBe(false);
+});
+
+it("refreshes observers through the same gated bridge after launch", async () => {
+  let current: OrchestratorRun | null = null;
+  const start = vi.fn(async () => {
+    current = run;
+    return { ok: true, result: { run } };
+  });
+  const bridge = {
+    graphOrchestratorStart: start,
+    graphOrchestratorStatus: vi.fn(async () => ({
+      ok: true,
+      result: { run: current },
+    })),
+  } as unknown as GraphBridge;
+  const launcher = renderHook(() => useOrchestratorRun(bridge, "ws"));
+  const observer = renderHook(() => useOrchestratorRun(bridge, "ws"));
+  await act(async () => {});
+  expect(observer.result.current.run).toBeNull();
+  await act(async () => launcher.result.current.start(main));
+  await waitFor(() => expect(observer.result.current.run?.id).toBe("run-1"));
+});
+
+it("publishes a successful mutation after its launcher unmounts", async () => {
+  let current: OrchestratorRun | null = null;
+  let finishStart: ((value: unknown) => void) | undefined;
+  const bridge = {
+    graphOrchestratorStart: vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishStart = resolve;
+        }),
+    ),
+    graphOrchestratorStatus: vi.fn(async () => ({
+      ok: true,
+      result: { run: current },
+    })),
+  } as unknown as GraphBridge;
+  const launcher = renderHook(() => useOrchestratorRun(bridge, "ws", 10_000));
+  const observer = renderHook(() => useOrchestratorRun(bridge, "ws", 10_000));
+  await act(async () => {});
+  let launch: Promise<void>;
+  act(() => {
+    launch = launcher.result.current.start(main);
+  });
+  launcher.unmount();
+  current = run;
+
+  await act(async () => {
+    finishStart?.({ ok: true, result: { run } });
+    await launch;
+  });
+  await waitFor(() => expect(observer.result.current.run?.id).toBe("run-1"));
+});
+
+it("does not publish run evidence across separate bridge capability scopes", async () => {
+  const start = vi.fn(async () => ({ ok: true, result: { run } }));
+  const launcher = renderHook(() =>
+    useOrchestratorRun(
+      { graphOrchestratorStart: start } as unknown as GraphBridge,
+      "ws",
+    ),
+  );
+  const observer = renderHook(() =>
+    useOrchestratorRun({} as GraphBridge, "ws"),
+  );
+  await act(async () => {});
+  await act(async () => launcher.result.current.start(main));
+  expect(observer.result.current.run).toBeNull();
+});
+
+it("publishes stop and resume results within one gated bridge scope", async () => {
+  const stopped: OrchestratorRun = {
+    ...run,
+    status: "stopped",
+    updatedAt: "2026-09-13T00:00:00.000000001Z",
+  };
+  const resumed: OrchestratorRun = {
+    ...run,
+    id: "run-2",
+    updatedAt: "2026-09-13T00:00:00.000000002Z",
+  };
+  let current = run;
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async () => ({
+      ok: true,
+      result: { run: current },
+    })),
+    graphOrchestratorStop: vi.fn(async () => {
+      current = stopped;
+      return { ok: true, result: { run: current } };
+    }),
+    graphOrchestratorResume: vi.fn(async () => {
+      current = resumed;
+      return { ok: true, result: { run: current } };
+    }),
+  } as unknown as GraphBridge;
+  const controller = renderHook(() => useOrchestratorRun(bridge, "ws"));
+  const observer = renderHook(() => useOrchestratorRun(bridge, "ws"));
+  await waitFor(() => expect(controller.result.current.run?.id).toBe("run-1"));
+  await act(async () => controller.result.current.stop());
+  await waitFor(() =>
+    expect(observer.result.current.run?.status).toBe("stopped"),
+  );
+  await act(async () => controller.result.current.resume());
+  await waitFor(() => expect(observer.result.current.run?.id).toBe("run-2"));
+});
+
+it("refreshes instead of regressing peers to a delayed mutation snapshot", async () => {
+  const older: OrchestratorRun = {
+    ...run,
+    updatedAt: "2026-09-13T00:00:00.000000001Z",
+  };
+  const newer: OrchestratorRun = {
+    ...run,
+    phase: "review",
+    updatedAt: "2026-09-13T00:00:00.000000002Z",
+  };
+  let current = older;
+  let holdStatus = false;
+  let finishStart: ((value: unknown) => void) | undefined;
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async () => {
+      if (holdStatus) await new Promise(() => {});
+      return { ok: true, result: { run: current } };
+    }),
+    graphOrchestratorStart: vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishStart = resolve;
+        }),
+    ),
+  } as unknown as GraphBridge;
+  const controller = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+  const observer = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+  await waitFor(() => expect(observer.result.current.run?.phase).toBe("main"));
+  expect(controller.result.current.run?.phase).toBe("main");
+  let launch: Promise<void>;
+  act(() => {
+    launch = controller.result.current.start(main);
+  });
+  current = newer;
+  await waitFor(() =>
+    expect(observer.result.current.run?.phase).toBe("review"),
+  );
+  holdStatus = true;
+  await act(async () => {
+    finishStart?.({ ok: true, result: { run: older } });
+    await launch;
+  });
+  expect(controller.result.current.run?.phase).toBe("review");
+});
+
+it("does not regress the controller to a stale non-null mutation reply", async () => {
+  const older: OrchestratorRun = {
+    ...run,
+    phase: "main",
+    updatedAt: "2026-09-13T00:00:00.000000002Z",
+  };
+  const newer: OrchestratorRun = {
+    ...run,
+    phase: "review",
+    updatedAt: "2026-09-13T00:00:00.000000002Z",
+  };
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async () => ({
+      ok: true,
+      result: { run: newer },
+    })),
+    graphOrchestratorStop: vi.fn(async () => ({
+      ok: true,
+      result: { run: older },
+    })),
+  } as unknown as GraphBridge;
+  const view = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+  await waitFor(() => expect(view.result.current.run?.phase).toBe("review"));
+
+  await act(async () => view.result.current.stop());
+
+  expect(view.result.current.run?.phase).toBe("review");
+  expect(view.result.current.run?.updatedAt).toBe(newer.updatedAt);
+});
+
+it("keeps nanosecond peer polls monotonic when responses arrive out of order", async () => {
+  const older: OrchestratorRun = {
+    ...run,
+    updatedAt: "2026-09-13T00:00:00.000000001Z",
+  };
+  const newer: OrchestratorRun = {
+    ...run,
+    phase: "review",
+    updatedAt: "2026-09-13T00:00:00.000000002Z",
+  };
+  const finishPolls: Array<
+    (value: { ok: true; result: { run: OrchestratorRun } }) => void
+  > = [];
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishPolls.push(resolve);
+        }),
+    ),
+  } as unknown as GraphBridge;
+  const first = renderHook(() =>
+    useOrchestratorRun(bridge, "ws", 10_000),
+  );
+  const second = renderHook(() =>
+    useOrchestratorRun(bridge, "ws", 10_000),
+  );
+  await waitFor(() => expect(finishPolls).toHaveLength(2));
+
+  await act(async () => {
+    finishPolls[1]?.({ ok: true, result: { run: newer } });
+  });
+  await waitFor(() => expect(second.result.current.run?.phase).toBe("review"));
+  await act(async () => {
+    finishPolls[0]?.({ ok: true, result: { run: older } });
+  });
+
+  expect(first.result.current.run?.phase).toBe("review");
+  expect(second.result.current.run?.phase).toBe("review");
+});
+
+it("keeps shared snapshots scoped while switching workspaces", async () => {
+  const second = {
+    ...run,
+    id: "run-2",
+    workspaceId: "ws-2",
+    updatedAt: "2026-09-13T00:00:02Z",
+  };
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async ({ workspaceId }) => ({
+      ok: true,
+      result: { run: workspaceId === "ws" ? run : second },
+    })),
+  } as unknown as GraphBridge;
+  const view = renderHook(
+    ({ workspaceId }) => useOrchestratorRun(bridge, workspaceId, 10),
+    { initialProps: { workspaceId: "ws" } },
+  );
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-1"));
+
+  view.rerender({ workspaceId: "ws-2" });
+
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-2"));
+  expect(view.result.current.run?.workspaceId).toBe("ws-2");
+});
+
+it("shows cached evidence immediately while switching workspaces", async () => {
+  const second = {
+    ...run,
+    id: "run-2",
+    workspaceId: "ws-2",
+    updatedAt: "2026-09-13T00:00:02Z",
+  };
+  let holdSecondPoll = false;
+  let finishSecondPoll:
+    ((value: { ok: true; result: { run: null } }) => void) | undefined;
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(({ workspaceId }) => {
+      if (workspaceId === "ws-2" && holdSecondPoll) {
+        return new Promise((resolve) => {
+          finishSecondPoll = resolve;
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        result: { run: workspaceId === "ws" ? run : second },
+      });
+    }),
+  } as unknown as GraphBridge;
+  const seed = renderHook(() => useOrchestratorRun(bridge, "ws-2", 10_000));
+  await waitFor(() => expect(seed.result.current.run?.id).toBe("run-2"));
+  seed.unmount();
+
+  const view = renderHook(
+    ({ workspaceId }) => useOrchestratorRun(bridge, workspaceId, 10_000),
+    { initialProps: { workspaceId: "ws" } },
+  );
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-1"));
+  holdSecondPoll = true;
+
+  view.rerender({ workspaceId: "ws-2" });
+
+  expect(view.result.current.run?.id).toBe("run-2");
+  await act(async () => {
+    finishSecondPoll?.({ ok: true, result: { run: null } });
+  });
+  await waitFor(() =>
+    expect(view.result.current.error).toContain("status is unavailable"),
+  );
+  expect(view.result.current.run?.id).toBe("run-2");
+});
+
+it("polls a new workspace while an old workspace mutation is pending", async () => {
+  const second = {
+    ...run,
+    id: "run-2",
+    workspaceId: "ws-2",
+    updatedAt: "2026-09-13T00:00:02Z",
+  };
+  let finishStart: ((value: unknown) => void) | undefined;
+  const bridge = {
+    graphOrchestratorStart: vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishStart = resolve;
+        }),
+    ),
+    graphOrchestratorStatus: vi.fn(async ({ workspaceId }) => ({
+      ok: true,
+      result: { run: workspaceId === "ws" ? run : second },
+    })),
+  } as unknown as GraphBridge;
+  const view = renderHook(
+    ({ workspaceId }) => useOrchestratorRun(bridge, workspaceId, 10),
+    { initialProps: { workspaceId: "ws" } },
+  );
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-1"));
+  let launch!: Promise<void>;
+  act(() => {
+    launch = view.result.current.start(main);
+  });
+
+  view.rerender({ workspaceId: "ws-2" });
+
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-2"));
+  await act(async () => {
+    finishStart?.({ ok: true, result: { run } });
+    await launch;
+  });
+  expect(view.result.current.run?.id).toBe("run-2");
 });
 
 it("reports lost contact without converting a running run to exited or passed", async () => {
@@ -69,6 +486,139 @@ it("reports lost contact without converting a running run to exited or passed", 
     expect(view.result.current.error).toContain("contact lost"),
   );
   expect(view.result.current.run?.status).toBe("running");
+});
+
+it("polls promptly while a run is still dispatching", async () => {
+  vi.useFakeTimers();
+  const dispatching: OrchestratorRun = {
+    ...run,
+    steps: [
+      {
+        nodeId: main.id,
+        phase: "main",
+        iteration: 1,
+        status: "dispatching",
+        isFallback: false,
+        attempts: [],
+      },
+    ],
+  };
+  const status = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: true, result: { run: dispatching } })
+    .mockResolvedValue({ ok: true, result: { run } });
+  const bridge = { graphOrchestratorStatus: status } as unknown as GraphBridge;
+  renderHook(() => useOrchestratorRun(bridge, "ws", 3000, 10_000));
+  await act(async () => {});
+  expect(status).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(99);
+  });
+  expect(status).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(status).toHaveBeenCalledTimes(2);
+});
+
+it("keeps active polling after a transient empty observation", async () => {
+  vi.useFakeTimers();
+  const status = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: true, result: { run } })
+    .mockResolvedValueOnce({ ok: true, result: { run: null } })
+    .mockResolvedValue({ ok: true, result: { run } });
+  const bridge = { graphOrchestratorStatus: status } as unknown as GraphBridge;
+  const view = renderHook(() => useOrchestratorRun(bridge, "ws", 3000, 10_000));
+  await act(async () => {});
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  expect(status).toHaveBeenCalledTimes(2);
+  expect(view.result.current.run?.status).toBe("running");
+  expect(view.result.current.error).toContain("status is unavailable");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2999);
+  });
+  expect(status).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(status).toHaveBeenCalledTimes(3);
+  expect(view.result.current.error).toBeNull();
+});
+
+it("backs off a terminal run even when its last step was dispatching", async () => {
+  vi.useFakeTimers();
+  const unverifiable: OrchestratorRun = {
+    ...run,
+    status: "unverifiable",
+    steps: [
+      {
+        nodeId: main.id,
+        phase: "main",
+        iteration: 1,
+        status: "dispatching",
+        isFallback: false,
+        attempts: [],
+      },
+    ],
+  };
+  const status = vi.fn(async () => ({
+    ok: true,
+    result: { run: unverifiable },
+  }));
+  const bridge = { graphOrchestratorStatus: status } as unknown as GraphBridge;
+  renderHook(() => useOrchestratorRun(bridge, "ws", 3000, 10_000));
+  await act(async () => {});
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(9999);
+  });
+  expect(status).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(status).toHaveBeenCalledTimes(2);
+});
+
+it("ignores an invalidated poll rejection while launch is pending", async () => {
+  let finishStart: ((value: unknown) => void) | undefined;
+  let rejectPoll: ((reason: Error) => void) | undefined;
+  const status = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: true, result: { run } })
+    .mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectPoll = reject;
+        }),
+    );
+  const bridge = {
+    graphOrchestratorStart: () =>
+      new Promise((resolve) => {
+        finishStart = resolve;
+      }),
+    graphOrchestratorStatus: status,
+  } as unknown as GraphBridge;
+  const view = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-1"));
+  await waitFor(() => expect(rejectPoll).toBeDefined());
+
+  let launching!: Promise<void>;
+  act(() => {
+    launching = view.result.current.start(main);
+  });
+  await act(async () => {
+    rejectPoll?.(new Error("stale contact loss"));
+    await Promise.resolve();
+  });
+
+  expect(view.result.current.error).toBeNull();
+  await act(async () => {
+    finishStart?.({ ok: true, result: { run } });
+    await launching;
+  });
+  expect(view.result.current.run?.id).toBe("run-1");
 });
 
 it("ignores a stale poll started during launch that resolves after the launch", async () => {

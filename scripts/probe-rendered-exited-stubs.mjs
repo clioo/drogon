@@ -219,27 +219,21 @@ export async function probeRenderedExitedStubs({
   // 1) Retry: the click refreshes; the fresh list confirms the stubs are
   // still unverifiable, so the pane offers the recovery overlay (the
   // fork's exited-overlay structure) with its Restart action — a retry
-  // must never stay a silent no-op. While the list is momentarily empty
-  // the strip resets its selection and on the fresh list re-selects the
-  // last listed session (pre-existing restore behavior), so the overlay
-  // can appear on either stub — read the selected tab's session id.
+  // must never stay a silent no-op. The re-list can restore the previously
+  // persisted active tab while React replaces the session rows, so select
+  // this exact surviving stub again before asserting its pane state.
   await stubATab.click();
-  await page
-    .getByRole("button", { name: "Retry connection" })
-    .first()
+  await stubATab
+    .getByRole("button", { name: "Retry connection", exact: true })
     .click();
+  await stubATab.waitFor();
+  await stubATab.click();
   const overlay = page
     .locator('[role="alert"]')
     .filter({ hasText: "Could not reconnect to terminal" })
     .first();
   await overlay.waitFor();
-  // The reset→reselect pass can momentarily render two tabs with
-  // aria-selected (the fork's restore keeps the prior selection for one
-  // frame); either stub is acceptable here, so read the first.
-  const overlayTabLabel = await page
-    .locator('[role="tab"][aria-selected="true"]')
-    .first()
-    .getAttribute("aria-label");
+  const overlayTabLabel = await stubATab.getAttribute("aria-label");
   const revivedFromId =
     /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/.exec(
       overlayTabLabel ?? "",

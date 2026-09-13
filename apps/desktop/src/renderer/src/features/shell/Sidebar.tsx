@@ -5,6 +5,7 @@
    Like the source this is a plain div, not a landmark: the reference
    sidebar carries no complementary role. */
 import { useRef, useState } from "react";
+import type { GraphBridge } from "../../../../shared/graph-contract";
 import type {
   Project,
   Session,
@@ -63,6 +64,7 @@ export function Sidebar({
   onOpenSettings,
   showTasksButton = true,
   showAutomationsButton = true,
+  graphBridge = null,
 }: {
   open: boolean;
   width: number;
@@ -115,6 +117,8 @@ export function Sidebar({
   /** Appearance flags (source showTasksButton / showAutomationsButton, default-on). */
   showTasksButton?: boolean;
   showAutomationsButton?: boolean;
+  /** App-owned graph bridge, gated by the daemon capability. */
+  graphBridge?: GraphBridge | null;
 }) {
   const [resizing, setResizing] = useState(false);
   const dragRef = useRef({ startX: 0, startWidth: width });
@@ -189,6 +193,7 @@ export function Sidebar({
               onSubmitRemoveProject={onSubmitRemoveProject}
               onSubmitRename={onSubmitRenameWorktree}
               onOpenProjectSettings={onOpenProjectSettings}
+              graphBridge={graphBridge}
             />
             <ChatsList
               groups={groups.filter((group) => group.project.quickSession)}
@@ -204,6 +209,7 @@ export function Sidebar({
               onOpenBotSession={onOpenBotSession}
               onSubmitRemove={onSubmitRemoveProject}
               onCreate={onNewSession ?? null}
+              graphBridge={graphBridge}
             />
           </div>
           <SidebarFooter

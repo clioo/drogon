@@ -39,52 +39,113 @@ pub const PRE_RESTORE_MANIFEST_KIND: &str = "drogon-pre-restore-backup";
 /// end-to-end acceptance drives a real `drogond` against a restore to pin
 /// the two implementations to each other.
 pub mod lock {
-    use std::fs::{File, OpenOptions};
-    use std::io;
-    use std::os::unix::io::AsRawFd;
-    use std::path::Path;
-
     /// Same file `drogond::lock::LOCK_FILE_NAME` guards. Keep identical.
     pub const LOCK_FILE_NAME: &str = ".drogond.lock";
 
-    /// Held for as long as this value is alive; dropping it (process exit
-    /// included) releases the lock. Never remove the lock file itself —
-    /// only the flock state matters (same rationale as `drogond::lock`).
-    pub struct DataDirLock {
-        _file: File,
-    }
+    #[cfg(unix)]
+    mod platform {
+        use std::fs::{File, OpenOptions};
+        use std::io;
+        use std::os::unix::io::AsRawFd;
+        use std::path::Path;
 
-    /// Mirrors `drogond::lock::acquire_exclusive`: create-or-open
-    /// `.drogond.lock` (0600, never following symlinks) and take
-    /// `LOCK_EX | LOCK_NB` so a held directory fails immediately.
-    pub fn acquire_exclusive(data_dir: &Path) -> io::Result<DataDirLock> {
-        let path = data_dir.join(LOCK_FILE_NAME);
-        use std::os::unix::fs::OpenOptionsExt;
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(&path)?;
-        {
-            use std::os::unix::fs::PermissionsExt;
-            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        use super::LOCK_FILE_NAME;
+
+        /// Held for as long as this value is alive; dropping it (process exit
+        /// included) releases the lock. Never remove the lock file itself.
+        pub struct DataDirLock {
+            _file: File,
         }
-        // SAFETY: `file`'s fd is valid for the duration of this call and the
-        // lock is released only when `file` is dropped or the process exits.
-        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if rc != 0 {
-            return Err(io::Error::new(
+
+        pub fn acquire_exclusive(data_dir: &Path) -> io::Result<DataDirLock> {
+            let path = data_dir.join(LOCK_FILE_NAME);
+            use std::os::unix::fs::OpenOptionsExt;
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&path)?;
+            {
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+            }
+            // SAFETY: `file`'s fd is valid for the duration of this call and
+            // dropping it releases the lock.
+            let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if rc != 0 {
+                return Err(lock_held_error());
+            }
+            Ok(DataDirLock { _file: file })
+        }
+
+        fn lock_held_error() -> io::Error {
+            io::Error::new(
                 io::ErrorKind::AddrInUse,
                 format!(
                     "another drogond instance already holds the exclusive lock on this data directory: {}",
                     io::Error::last_os_error()
                 ),
-            ));
+            )
         }
-        Ok(DataDirLock { _file: file })
     }
+
+    #[cfg(windows)]
+    mod platform {
+        use std::fs::{File, OpenOptions};
+        use std::io;
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        use std::path::Path;
+
+        use super::LOCK_FILE_NAME;
+
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+        /// A share-denying handle interoperates with the daemon's
+        /// `LockFileEx` handle: either holder makes the other's open/lock
+        /// fail, and dropping this file releases ownership. Open the lock
+        /// itself and reject reparse points rather than following them.
+        pub struct DataDirLock {
+            _file: File,
+        }
+
+        pub fn acquire_exclusive(data_dir: &Path) -> io::Result<DataDirLock> {
+            let path = data_dir.join(LOCK_FILE_NAME);
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .share_mode(0)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(path)
+                .map_err(|error| match error.raw_os_error() {
+                    Some(ERROR_SHARING_VIOLATION) => lock_held_error(error),
+                    _ => error,
+                })?;
+            if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "the data-directory lock must not be a reparse point",
+                ));
+            }
+            Ok(DataDirLock { _file: file })
+        }
+
+        fn lock_held_error(error: io::Error) -> io::Error {
+            io::Error::new(
+                io::ErrorKind::AddrInUse,
+                format!(
+                    "another drogond instance already holds the exclusive lock on this data directory: {error}"
+                ),
+            )
+        }
+    }
+
+    pub use platform::{DataDirLock, acquire_exclusive};
 
     #[cfg(test)]
     mod tests {
@@ -95,11 +156,15 @@ pub mod lock {
             let dir = tempfile::tempdir().unwrap();
             let first = acquire_exclusive(dir.path()).unwrap();
             let second = acquire_exclusive(dir.path());
-            assert!(second.is_err());
+            assert_eq!(
+                second.err().map(|error| error.kind()),
+                Some(std::io::ErrorKind::AddrInUse)
+            );
             drop(first);
             assert!(acquire_exclusive(dir.path()).is_ok());
         }
 
+        #[cfg(unix)]
         #[test]
         fn a_symlinked_lock_cannot_modify_its_target() {
             use std::os::unix::fs::{PermissionsExt, symlink};

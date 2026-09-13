@@ -463,9 +463,9 @@ pub enum MentuAction {
         #[arg(long, value_name = "MS", default_value_t = 900_000)]
         timeout_ms: u64,
     },
-    /// Rerun exactly ONE step of a past run, through the runtime's own
-    /// `retry-step <run-id> <label>`. The failing node is fixed without
-    /// redoing the rest of the graph.
+    /// Target one step of a past run through the runtime's own
+    /// `retry-step <run-id> <label>`. Successful predecessors stay complete;
+    /// invalidated dependents or later unfinished steps may continue.
     #[command(
         args_override_self = true,
         override_usage = "drogon-cli mentu retry-step --run <ID> --step <LABEL> [--follow] [--timeout-ms <MS>]\nValid flags: --data-dir, --follow, --help, --json, --request-id, --retry-request, --run, --step, --timeout-ms"

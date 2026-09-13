@@ -66,7 +66,6 @@ function bridgeFor(observed: OrchestratorRun | null = run) {
 
 it("shows a bot-dispatched headless workflow on an unselected card with no terminal sessions", async () => {
   const bridge = bridgeFor();
-  window.drogon = { graph: bridge } as unknown as typeof window.drogon;
   const onSelect = vi.fn();
   const view = render(
     <TooltipProvider>
@@ -90,6 +89,7 @@ it("shows a bot-dispatched headless workflow on an unselected card with no termi
         onSelect={onSelect}
         onRemove={null}
         onRename={null}
+        graphBridge={bridge}
       />
     </TooltipProvider>,
   );
@@ -108,6 +108,42 @@ it("shows a bot-dispatched headless workflow on an unselected card with no termi
   view.unmount();
   expect(bridge.graphOrchestratorStop).not.toHaveBeenCalled();
   expect(bridge.graphOrchestratorStart).not.toHaveBeenCalled();
+});
+
+it("does not bypass the app capability gate through the raw window bridge", async () => {
+  const rawBridge = bridgeFor();
+  vi.stubGlobal("drogon", {
+    graph: rawBridge,
+  } as unknown as typeof window.drogon);
+  const view = render(
+    <TooltipProvider>
+      <WorktreeCard
+        worktree={{
+          id: "wt",
+          projectId: "p",
+          workspaceId: "ws",
+          path: "/fixture",
+          branch: "bootstrap",
+          head: "",
+          baseRef: null,
+          createdAt: run.startedAt,
+        }}
+        workspaces={[]}
+        sessions={[]}
+        selected={false}
+        disabled={false}
+        projectKind="folder"
+        implicitFolderWorktree
+        onSelect={vi.fn()}
+        onRemove={null}
+        onRename={null}
+        graphBridge={null}
+      />
+    </TooltipProvider>,
+  );
+  await act(async () => {});
+  expect(rawBridge.graphOrchestratorStatus).not.toHaveBeenCalled();
+  expect(view.container.textContent).not.toContain("Work Graph");
 });
 
 it("retains evidence but marks loss of contact unverifiable and recovers on the next poll", async () => {
@@ -134,6 +170,23 @@ it("retains evidence but marks loss of contact unverifiable and recovers on the 
     await vi.advanceTimersByTimeAsync(9000);
   });
   expect(status).toHaveBeenCalledTimes(calls);
+});
+
+it("backs off card polling while no workflow is active", async () => {
+  vi.useFakeTimers();
+  const bridge = bridgeFor(null);
+  const status = vi.mocked(bridge.graphOrchestratorStatus!);
+  render(<WorktreeWorkflow workspaceId="ws" bridge={bridge} />);
+  await act(async () => {});
+  expect(status).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(9_999);
+  });
+  expect(status).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(status).toHaveBeenCalledTimes(2);
 });
 
 it("does not display a different workspace's delayed result", async () => {

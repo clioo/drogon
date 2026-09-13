@@ -10,7 +10,7 @@
 //! refuses to die.
 
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use drogon_protocol::RpcError;
 use drogon_protocol::mentu::{MentuRun, MentuRunStatus};
+use rusqlite::OptionalExtension as _;
 use sha2::Digest as _;
 
 use crate::error;
@@ -26,10 +27,23 @@ use crate::error;
 use super::run_record::WorkspaceAttestation;
 use super::{run_record, storage};
 
-/// Wall-clock budget for one `mentu-recipes` invocation before this process
-/// kills it. Generous: a real recipe can run long individual steps, but an
-/// unbounded child is never acceptable.
-const RUN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// The pinned runtime's per-attempt allowance when a step omits `timeout`.
+/// Recipe watchdogs sum that default or each explicit positive bound with all
+/// other bounded runtime phases, then add cleanup grace.
+const DEFAULT_RUN_TIMEOUT: Duration =
+    Duration::from_secs(super::recipe::DEFAULT_STEP_TIMEOUT_SECONDS);
+const DECLARED_TIMEOUT_GRACE: Duration = Duration::from_secs(60);
+const VERIFY_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
+const HOOK_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+const CLOUD_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const GIT_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+const GIT_DIFF_TIMEOUT: Duration = Duration::from_secs(20);
+const GIT_ADD_TIMEOUT: Duration = Duration::from_secs(30);
+const GIT_COMMIT_TIMEOUT: Duration = Duration::from_secs(60);
+const PI_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+const RUNTIME_PROCESS_TEARDOWN: Duration = Duration::from_secs(4);
+/// A malformed or hostile recipe cannot turn the daemon's safety watchdog off.
+const MAX_RUN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Combined stdout+stderr retained for diagnostics only (never shown as the
 /// evidence of record — that is always the per-step files run.json points
@@ -214,7 +228,276 @@ enum WaitOutcome {
     Cancelled,
 }
 
-fn wait_bounded(child: &Arc<Mutex<Child>>, cancelled: &Arc<AtomicBool>) -> WaitOutcome {
+fn repeated_runtime_process(timeout: Duration, count: u64) -> Duration {
+    timeout
+        .saturating_add(RUNTIME_PROCESS_TEARDOWN)
+        .saturating_mul(count.try_into().unwrap_or(u32::MAX))
+}
+
+fn workspace_baseline_budget() -> Duration {
+    // repository root, HEAD and porcelain status are three sequential probes.
+    repeated_runtime_process(GIT_PROBE_TIMEOUT, 3)
+}
+
+fn git_finalize_budget() -> Duration {
+    // Repository root + post-step baseline + optional quarantine diff, add,
+    // commit and final HEAD. Branches that skip work are shorter than this.
+    repeated_runtime_process(GIT_PROBE_TIMEOUT, 2)
+        .saturating_add(workspace_baseline_budget())
+        .saturating_add(repeated_runtime_process(GIT_DIFF_TIMEOUT, 1))
+        .saturating_add(repeated_runtime_process(GIT_ADD_TIMEOUT, 1))
+        .saturating_add(repeated_runtime_process(GIT_COMMIT_TIMEOUT, 1))
+}
+
+fn step_run_budget(
+    step: &super::recipe::RecipeStepBudget,
+    recipe: &super::recipe::RecipeBudget,
+) -> Duration {
+    let timeout = step.timeout_seconds.filter(|seconds| *seconds > 0);
+    let attempts = step.max_retries.saturating_add(1);
+    let attempt_budget =
+        repeated_runtime_process(Duration::from_secs(timeout.unwrap_or(0)), attempts);
+    let pi_preflight = if step.pi_preflight {
+        // Pi checks both the Pi and Node versions before every attempt.
+        repeated_runtime_process(PI_VERSION_TIMEOUT, attempts.saturating_mul(2))
+    } else {
+        Duration::ZERO
+    };
+    let backoff = Duration::from_millis(step.retry_backoff_ms.saturating_mul(step.max_retries));
+    let verification = repeated_runtime_process(VERIFY_COMMAND_TIMEOUT, step.verify_commands);
+    let bookkeeping = workspace_baseline_budget()
+        .saturating_mul(2)
+        .saturating_add(if step.verify_git_clean {
+            workspace_baseline_budget()
+        } else {
+            Duration::ZERO
+        })
+        .saturating_add(if step.expected_changes {
+            git_finalize_budget()
+        } else {
+            Duration::ZERO
+        });
+    let terminal_hooks = recipe.after_step_hooks.max(recipe.on_error_hooks);
+    let hooks = repeated_runtime_process(
+        HOOK_COMMAND_TIMEOUT,
+        recipe.before_step_hooks.saturating_add(terminal_hooks),
+    );
+    attempt_budget
+        .saturating_add(pi_preflight)
+        .saturating_add(backoff)
+        .saturating_add(verification)
+        .saturating_add(bookkeeping)
+        .saturating_add(hooks)
+}
+
+fn parsed_recipe_budget(recipe_bytes: &[u8]) -> Option<super::recipe::RecipeBudget> {
+    std::str::from_utf8(recipe_bytes)
+        .ok()
+        .and_then(|source| super::recipe::parse_recipe_budget(source).ok())
+        .filter(|recipe| !recipe.steps.is_empty() || recipe.has_recipe_nodes)
+}
+
+fn bounded_declared_timeout(declared: Duration) -> Duration {
+    declared
+        .saturating_add(DECLARED_TIMEOUT_GRACE)
+        .min(MAX_RUN_TIMEOUT)
+}
+
+fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
+    let Some(recipe) = parsed_recipe_budget(recipe_bytes) else {
+        return DEFAULT_RUN_TIMEOUT;
+    };
+    // Compound, pipeline and parallel recipes resolve child recipe files at
+    // runtime. Their nested timing declarations are not part of the approved
+    // parent bytes, so only the hard outer cap can conservatively cover them.
+    if recipe.has_recipe_nodes
+        || recipe
+            .steps
+            .iter()
+            .any(|step| step.timeout_seconds.is_none())
+    {
+        return MAX_RUN_TIMEOUT;
+    }
+    let run_hooks = repeated_runtime_process(
+        HOOK_COMMAND_TIMEOUT,
+        recipe
+            .before_run_hooks
+            .saturating_add(recipe.after_run_hooks),
+    );
+    // The pinned runtime gives each cloud request a 10-second inactivity
+    // timeout. A cloud-enabled fresh run can start and end its remote run;
+    // step evaluation adds one request for every locally completed step.
+    // Resume/retry skip start/end, but this conservative count avoids deriving
+    // invocation-specific state from mutable files.
+    let cloud_requests = if recipe.cloud_enabled {
+        let evaluations = if recipe.cloud_evaluate_steps {
+            recipe.steps.len() as u64
+        } else {
+            0
+        };
+        CLOUD_REQUEST_TIMEOUT
+            .saturating_mul(evaluations.saturating_add(2).try_into().unwrap_or(u32::MAX))
+    } else {
+        Duration::ZERO
+    };
+    // Fresh runs take one baseline before any steps. Resume/retry do not, but
+    // retaining this bounded allowance is safer than consulting mutable state.
+    let mut declared = run_hooks
+        .saturating_add(cloud_requests)
+        .saturating_add(workspace_baseline_budget());
+    for step in &recipe.steps {
+        declared = declared.saturating_add(step_run_budget(step, &recipe));
+    }
+    // URLRequest.timeoutInterval can reset when more response data arrives; it
+    // is not a hard whole-resource deadline. Only the approved 24-hour outer
+    // safety cap can conservatively bound a cloud-enabled runtime invocation.
+    if recipe.cloud_enabled {
+        MAX_RUN_TIMEOUT
+    } else {
+        bounded_declared_timeout(declared)
+    }
+}
+
+fn read_snapshot_file(path: &Path) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        // O_NOFOLLOW rejects symlinks; O_NONBLOCK keeps a planted FIFO or
+        // device node from blocking before the post-open regular-file check.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > SNAPSHOT_MAX_RECIPE_BYTES {
+        return None;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return None;
+        }
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(SNAPSHOT_MAX_RECIPE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() as u64 <= SNAPSHOT_MAX_RECIPE_BYTES).then_some(bytes)
+}
+
+fn is_plain_snapshot_directory(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.is_dir() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return false;
+        }
+    }
+    true
+}
+
+fn read_original_snapshot_recipe(workspace_root: &Path, run_id: &str) -> Option<Vec<u8>> {
+    if !valid_run_id(run_id) {
+        return None;
+    }
+    let root = snapshot_root(workspace_root);
+    if !is_plain_snapshot_directory(&root) {
+        return None;
+    }
+    let dir = root.join(run_id);
+    if !is_plain_snapshot_directory(&dir) {
+        return None;
+    }
+    let manifest_bytes = read_snapshot_file(&dir.join("manifest.json"))?;
+    let manifest = serde_json::from_slice::<serde_json::Value>(&manifest_bytes).ok()?;
+    let recorded_path = PathBuf::from(manifest.get("recipePath")?.as_str()?);
+    let file_name = recorded_path.file_name()?;
+    let recipe_path = dir.join(file_name);
+    if recorded_path != recipe_path {
+        return None;
+    }
+    let recipe_bytes = read_snapshot_file(&recipe_path)?;
+    let recorded_hash = manifest.get("contentHash")?.as_str()?;
+    (sha256_hex(&recipe_bytes) == recorded_hash).then_some(recipe_bytes)
+}
+
+fn read_retry_snapshot(
+    db: &Arc<Mutex<rusqlite::Connection>>,
+    workspace_root: &Path,
+    workspace_id: &str,
+    run_id: &str,
+) -> Option<Vec<u8>> {
+    if !valid_run_id(run_id) {
+        return None;
+    }
+    // Every wrapper retry retains the original approval id. Resolve the one
+    // fresh run that materialized that approval directly instead of walking an
+    // arbitrarily deep retry_of chain and eventually losing its safe budget.
+    let (source_run_id, approved_hash) = {
+        let conn = db.lock().unwrap();
+        let prior = storage::get_run(&conn, run_id).ok()??;
+        if prior.workspace_id != workspace_id {
+            return None;
+        }
+        let source_run_id = conn
+            .query_row(
+                "SELECT id FROM mentu_runs WHERE workspace_id = ?1 AND approval_id = ?2 AND retry_of IS NULL ORDER BY rowid LIMIT 1",
+                rusqlite::params![workspace_id, prior.approval_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .ok()??;
+        let approved_hash = storage::approval_content_hash(&conn, &prior.approval_id).ok()??;
+        (source_run_id, approved_hash)
+    };
+    let bytes = read_original_snapshot_recipe(workspace_root, &source_run_id)?;
+    (sha256_hex(&bytes) == approved_hash).then_some(bytes)
+}
+
+fn invocation_run_timeout(
+    invocation: &Invocation<'_>,
+    snapshot: Option<&StagedSnapshot>,
+    retry_recipe: Option<&[u8]>,
+) -> Duration {
+    if let Some(snapshot) = snapshot {
+        return recipe_run_timeout(&snapshot.recipe_bytes);
+    }
+    match invocation {
+        // A fresh run without approved staged bytes is a legacy caller. Never
+        // derive its watchdog from a second read of the mutable recipe path.
+        Invocation::Run { .. } => DEFAULT_RUN_TIMEOUT,
+        // Resume and retry re-enter runtime-side state. Reuse the exact
+        // approved bytes retained for the original run; an absent or changed
+        // snapshot falls back to the historical bounded default, never 24 h.
+        Invocation::Resume { .. } | Invocation::RetryStep { .. } => retry_recipe
+            .map(recipe_run_timeout)
+            .unwrap_or(DEFAULT_RUN_TIMEOUT),
+    }
+}
+
+fn wait_bounded(
+    child: &Arc<Mutex<Child>>,
+    cancelled: &Arc<AtomicBool>,
+    run_timeout: Duration,
+) -> WaitOutcome {
     const COOPERATIVE_GRACE: Duration = Duration::from_secs(2);
     const REAP_GRACE: Duration = Duration::from_secs(2);
     const TIMEOUT_GRACE: Duration = Duration::from_secs(5);
@@ -237,7 +520,7 @@ fn wait_bounded(child: &Arc<Mutex<Child>>, cancelled: &Arc<AtomicBool>) -> WaitO
             exited_within(child, REAP_GRACE);
             return WaitOutcome::Cancelled;
         }
-        if start.elapsed() >= RUN_TIMEOUT {
+        if start.elapsed() >= run_timeout {
             // Same two-phase stop as cancel: TERM first so the supervisor
             // reaps its steps, KILL only on refusal.
             term_tree(child);
@@ -321,6 +604,18 @@ pub fn launch_run(
             "Snapshots ride fresh runs; retry resumes runtime-side state.",
         ));
     }
+    let retry_recipe = if matches!(
+        &invocation,
+        Invocation::Resume { .. } | Invocation::RetryStep { .. }
+    ) {
+        retry_of
+            .as_deref()
+            .and_then(|run_id| read_retry_snapshot(&db, &workspace_root, &workspace_id, run_id))
+    } else {
+        None
+    };
+    let run_timeout =
+        invocation_run_timeout(&invocation, snapshot.as_ref(), retry_recipe.as_deref());
     let internal_id = uuid::Uuid::new_v4().to_string();
     let started_at = crate::now_rfc3339();
 
@@ -480,7 +775,7 @@ pub fn launch_run(
         }
     });
     std::thread::spawn(move || {
-        let outcome = wait_bounded(&child_arc, &cancelled);
+        let outcome = wait_bounded(&child_arc, &cancelled, run_timeout);
         registry().remove(&watch_id);
         finish(
             &watcher_db,
@@ -1662,6 +1957,418 @@ pub fn materialize_snapshot(
         return Err(error::io_error("cannot write snapshot manifest."));
     }
     Ok(MaterializedSnapshot { dir, recipe_path })
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_step_budgets_outlive_the_recipe_they_guard() {
+        let recipe = serde_json::json!({
+            "steps": [
+                { "label": "main", "timeout": crate::graph::compiler::AGENT_STEP_TIMEOUT_SECONDS },
+                { "label": "verify", "timeout": crate::graph::compiler::SHELL_STEP_TIMEOUT_SECONDS }
+            ]
+        });
+        let timeout = recipe_run_timeout(&serde_json::to_vec(&recipe).unwrap());
+        assert_eq!(
+            timeout,
+            Duration::from_secs(
+                crate::graph::compiler::AGENT_STEP_TIMEOUT_SECONDS
+                    + crate::graph::compiler::SHELL_STEP_TIMEOUT_SECONDS
+                    + (2 * RUNTIME_PROCESS_TEARDOWN.as_secs())
+                    + DECLARED_TIMEOUT_GRACE.as_secs()
+            ) + workspace_baseline_budget().saturating_mul(5)
+        );
+        assert!(
+            timeout > Duration::from_secs(crate::graph::compiler::AGENT_STEP_TIMEOUT_SECONDS),
+            "the daemon watchdog must not preempt a valid graph step"
+        );
+    }
+
+    #[test]
+    fn short_explicit_and_partially_undeclared_budgets_stay_safe() {
+        assert_eq!(
+            recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":30}]}"#),
+            Duration::from_secs(30)
+                + RUNTIME_PROCESS_TEARDOWN
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
+        );
+        assert_eq!(
+            recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":30},{"label":"verify"}]}"#),
+            Duration::from_secs(30 + 30 * 60)
+                + (2 * RUNTIME_PROCESS_TEARDOWN)
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(5)
+        );
+    }
+
+    #[test]
+    fn declared_retries_and_backoff_are_part_of_the_outer_budget() {
+        let recipe =
+            br#"{"steps":[{"label":"main","timeout":30,"max_retries":2,"retry_backoff_ms":2500}]}"#;
+        assert_eq!(
+            recipe_run_timeout(recipe),
+            Duration::from_secs(95)
+                + (3 * RUNTIME_PROCESS_TEARDOWN)
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
+        );
+    }
+
+    #[test]
+    fn verification_and_hook_limits_are_part_of_the_outer_budget() {
+        let recipe = br#"{
+            "hooks": {
+                "before_run": ["a"],
+                "after_run": ["b"],
+                "before_step": ["c"],
+                "after_step": ["d", "e"],
+                "on_error": ["f"]
+            },
+            "steps": [{
+                "label": "main",
+                "timeout": 30,
+                "verify": {"commands": ["one", "two"]}
+            }]
+        }"#;
+        assert_eq!(
+            recipe_run_timeout(recipe),
+            Duration::from_secs(1_322) + workspace_baseline_budget().saturating_mul(3)
+        );
+    }
+
+    #[test]
+    fn cloud_request_limits_keep_the_hard_outer_cap() {
+        let steps: Vec<_> = (0..20)
+            .map(|index| serde_json::json!({"label": format!("step-{index}"), "timeout": 1}))
+            .collect();
+        let recipe = serde_json::to_vec(&serde_json::json!({
+            "cloud": {"enabled": true, "evaluate_steps": true},
+            "steps": steps,
+        }))
+        .unwrap();
+        assert_eq!(recipe_run_timeout(&recipe), MAX_RUN_TIMEOUT);
+
+        let local_only = br#"{
+            "cloud": {"enabled": false, "evaluate_steps": true},
+            "steps": [{"label": "main", "timeout": 1}]
+        }"#;
+        assert_eq!(
+            recipe_run_timeout(local_only),
+            Duration::from_secs(1)
+                + RUNTIME_PROCESS_TEARDOWN
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
+        );
+    }
+
+    #[test]
+    fn explicitly_unbounded_steps_keep_the_hard_outer_cap() {
+        assert_eq!(
+            recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":0}]}"#),
+            MAX_RUN_TIMEOUT
+        );
+        assert_eq!(
+            recipe_run_timeout(br#"{"steps":[{"label":"main","timeout":-1}]}"#),
+            MAX_RUN_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn child_recipe_graphs_keep_the_hard_outer_cap() {
+        let recipe = br#"{
+            "type": "compound",
+            "steps": [],
+            "recipes": [{"recipe": "long-running-child"}]
+        }"#;
+        assert_eq!(recipe_run_timeout(recipe), MAX_RUN_TIMEOUT);
+    }
+
+    #[test]
+    fn pi_preflight_and_git_bookkeeping_limits_are_part_of_the_outer_budget() {
+        let recipe = br#"{
+            "providers": {"pinned-pi": {"api": "cli", "agent": " PI "}},
+            "steps": [{
+                "label": "main",
+                "backend": "PINNED_PI",
+                "timeout": 1,
+                "max_retries": 1,
+                "expected_changes": ["src"],
+                "verify": {"git_clean_outside": ["src"]}
+            }]
+        }"#;
+        // Two adapter attempts: 10 s including teardown. Each attempt checks
+        // Pi and Node (36 s including teardown), then 1 s retry backoff.
+        // Baselines/bookkeeping are 360 s and grace is 60 s.
+        assert_eq!(recipe_run_timeout(recipe), Duration::from_secs(467));
+
+        let chat_provider = br#"{
+            "providers": {"pinned-pi": {"agent": "pi"}},
+            "steps": [{"label": "main", "backend": "pinned-pi", "timeout": 1}]
+        }"#;
+        assert_eq!(
+            recipe_run_timeout(chat_provider),
+            Duration::from_secs(1)
+                + RUNTIME_PROCESS_TEARDOWN
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
+        );
+    }
+
+    #[test]
+    fn retry_step_keeps_the_recipe_budget_for_reexecuted_dependents() {
+        let recipe =
+            br#"{"steps":[{"label":"main","timeout":45},{"label":"verify","timeout":900}]}"#;
+        let retry = Invocation::RetryStep {
+            mentu_run_id: "runtime-run",
+            step: "main",
+        };
+        assert_eq!(
+            invocation_run_timeout(&retry, None, Some(recipe)),
+            Duration::from_secs(945)
+                + (2 * RUNTIME_PROCESS_TEARDOWN)
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(5)
+        );
+        assert_eq!(
+            invocation_run_timeout(&retry, None, None),
+            DEFAULT_RUN_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn absent_and_hostile_budgets_stay_bounded() {
+        assert_eq!(
+            recipe_run_timeout(br#"{"steps":[{"label":"main"}]}"#),
+            DEFAULT_RUN_TIMEOUT
+                + RUNTIME_PROCESS_TEARDOWN
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
+        );
+        assert_eq!(recipe_run_timeout(br#"{}"#), DEFAULT_RUN_TIMEOUT);
+        let hostile = serde_json::json!({ "steps": [{ "label": "main", "timeout": u64::MAX }] });
+        assert_eq!(
+            recipe_run_timeout(&serde_json::to_vec(&hostile).unwrap()),
+            MAX_RUN_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn a_legacy_fresh_run_without_staged_bytes_keeps_the_default_bound() {
+        let run = Invocation::Run {
+            recipe_path: Path::new("mutable.json"),
+        };
+        assert_eq!(
+            invocation_run_timeout(&run, None, None),
+            DEFAULT_RUN_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn resume_and_retry_reuse_the_original_approved_budget() {
+        let workspace = tempfile::tempdir().unwrap();
+        let original_run_id = "original-run";
+        let dir = snapshot_root(workspace.path()).join(original_run_id);
+        fs::create_dir_all(&dir).unwrap();
+        let recipe_path = dir.join("approved.json");
+        let recipe_bytes = br#"{"steps":[{"label":"main","timeout":45}]}"#;
+        fs::write(&recipe_path, recipe_bytes).unwrap();
+        fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "recipePath": recipe_path,
+                "contentHash": sha256_hex(recipe_bytes),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let resume = Invocation::Resume {
+            mentu_run_id: "runtime-run",
+        };
+        let approved = read_original_snapshot_recipe(workspace.path(), original_run_id).unwrap();
+        assert_eq!(
+            invocation_run_timeout(&resume, None, Some(&approved)),
+            Duration::from_secs(45)
+                + RUNTIME_PROCESS_TEARDOWN
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
+        );
+        assert_eq!(
+            invocation_run_timeout(&resume, None, None),
+            DEFAULT_RUN_TIMEOUT
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn snapshot_reader_rejects_windows_reparse_points() {
+        use std::os::windows::fs::{symlink_dir, symlink_file};
+
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("recipe.json");
+        fs::write(&file, b"{}").unwrap();
+        let file_link = root.path().join("recipe-link.json");
+        symlink_file(&file, &file_link).unwrap();
+        assert!(read_snapshot_file(&file_link).is_none());
+
+        let directory = root.path().join("snapshot");
+        fs::create_dir(&directory).unwrap();
+        let directory_link = root.path().join("snapshot-link");
+        symlink_dir(&directory, &directory_link).unwrap();
+        assert!(!is_plain_snapshot_directory(&directory_link));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_reader_rejects_a_fifo_without_blocking() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt as _;
+        use std::sync::mpsc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("manifest.json");
+        let fifo_name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) }, 0);
+
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let read_path = fifo.clone();
+        let reader = std::thread::spawn(move || {
+            sender.send(read_snapshot_file(&read_path)).unwrap();
+        });
+        let result = match receiver.recv_timeout(Duration::from_secs(1)) {
+            Ok(result) => result,
+            Err(error) => {
+                // O_RDWR opens a FIFO without waiting and unblocks a broken
+                // read-only implementation before the test fails.
+                let unblock = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&fifo)
+                    .unwrap();
+                reader.join().unwrap();
+                drop(unblock);
+                panic!("snapshot FIFO read did not fail promptly: {error}");
+            }
+        };
+        reader.join().unwrap();
+        assert!(result.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_wait_stops_and_reaps_a_timed_out_fixture_process() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 60"]);
+        detach_process_group(&mut command);
+        let child = Arc::new(Mutex::new(command.spawn().unwrap()));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        assert!(matches!(
+            wait_bounded(&child, &cancelled, Duration::from_millis(20)),
+            WaitOutcome::TimedOut
+        ));
+        assert!(child.lock().unwrap().try_wait().unwrap().is_some());
+    }
+
+    #[test]
+    fn deep_retry_history_recovers_the_approved_snapshot_directly() {
+        let workspace = tempfile::tempdir().unwrap();
+        let dir = snapshot_root(workspace.path()).join("original");
+        fs::create_dir_all(&dir).unwrap();
+        let recipe_path = dir.join("approved.json");
+        let recipe_bytes = br#"{"steps":[{"label":"main","timeout":75}]}"#;
+        fs::write(&recipe_path, recipe_bytes).unwrap();
+        fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "recipePath": recipe_path,
+                "contentHash": sha256_hex(recipe_bytes),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        let tx = conn.transaction().unwrap();
+        storage::apply_pending_steps_in_tx(&tx).unwrap();
+        tx.commit().unwrap();
+        storage::insert_approval(
+            &conn,
+            &drogon_protocol::mentu::MentuApproval {
+                id: "approval".into(),
+                workspace_id: "workspace".into(),
+                recipe_id: "recipe".into(),
+                content_hash: sha256_hex(recipe_bytes),
+                approved_at: "2026-09-13T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        storage::insert_run(
+            &conn,
+            &storage::NewRun {
+                id: "original",
+                workspace_id: "workspace",
+                recipe_id: "recipe",
+                approval_id: "approval",
+                started_at: "2026-09-13T00:00:00Z",
+                retry_of: None,
+            },
+        )
+        .unwrap();
+        let mut previous = "original".to_string();
+        for index in 0..70 {
+            let id = format!("retry-{index}");
+            storage::insert_run(
+                &conn,
+                &storage::NewRun {
+                    id: &id,
+                    workspace_id: "workspace",
+                    recipe_id: "recipe",
+                    approval_id: "approval",
+                    started_at: "2026-09-13T00:00:00Z",
+                    retry_of: Some(&previous),
+                },
+            )
+            .unwrap();
+            previous = id;
+        }
+        let db = Arc::new(Mutex::new(conn));
+        let recovered = read_retry_snapshot(&db, workspace.path(), "workspace", &previous).unwrap();
+        assert_eq!(recovered, recipe_bytes);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let alternate = dir.join("alternate.json");
+            fs::write(&alternate, recipe_bytes).unwrap();
+            fs::remove_file(&recipe_path).unwrap();
+            symlink(&alternate, &recipe_path).unwrap();
+            assert!(
+                read_retry_snapshot(&db, workspace.path(), "workspace", &previous).is_none(),
+                "matching approved bytes reached through a symlink must still be refused"
+            );
+            fs::remove_file(&recipe_path).unwrap();
+        }
+
+        let changed = br#"{"steps":[{"label":"main","timeout":999}]}"#;
+        fs::write(&recipe_path, changed).unwrap();
+        fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "recipePath": recipe_path,
+                "contentHash": sha256_hex(changed),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            read_retry_snapshot(&db, workspace.path(), "workspace", &previous).is_none(),
+            "workspace-owned snapshot edits must not replace the approved durable hash"
+        );
+    }
 }
 
 #[cfg(test)]
