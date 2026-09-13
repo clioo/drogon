@@ -52,6 +52,36 @@ function bot(overrides: Partial<BotsPanelBot> = {}): BotsPanelBot {
   };
 }
 
+function monitorView(
+  overrides: Partial<BotMonitorView> = {},
+): BotMonitorView {
+  return {
+    monitorId: "mon-1",
+    version: 1,
+    ruleKind: "local_file_digest.v1",
+    projectId: "proj-1",
+    enabled: true,
+    approved: true,
+    responsibilityId: null,
+    cursor: "crc-1",
+    lastEventId: null,
+    health: "healthy",
+    trigger: { kind: "scheduled", cron: "* * * * *" },
+    consecutiveErrors: 0,
+    lastError: null,
+    lastNotice: null,
+    failureThreshold: 3,
+    lastCheckAtMs: 1_000_000,
+    lastCheckOutcome: "no_change",
+    incidentCount: 0,
+    delegationsToday: { used: 0, max: 10 },
+    firing: null,
+    resource: "watched/state.txt",
+    maxBytes: 65536,
+    ...overrides,
+  };
+}
+
 function automation(
   overrides: Partial<AutomationSummary> = {},
 ): AutomationSummary {
@@ -297,6 +327,37 @@ describe("BotResponsibilityCard", () => {
     ).toContain('data-testid="new-session-bot-1"');
   });
 
+  it("says which monitor releases a reactive responsibility instead of calling every one disconnected", () => {
+    // Found by scripts/accept-bot-monitors.mjs: a monitor had just
+    // dispatched this responsibility while the chip read "Event adapter
+    // not connected".
+    const reactive = responsibility({
+      id: "resp-1",
+      name: "React to the watched file",
+      kind: "reactive",
+      trigger: { kind: "reactive", event: "monitor.changed" },
+    });
+    const watching = render({
+      bot: bot({ responsibilities: [reactive] }),
+      monitors: [
+        monitorView({ monitorId: "mon-1", responsibilityId: "resp-1" }),
+      ],
+    });
+    expect(watching).toContain("released by watched/state.txt");
+    expect(watching).not.toContain("Event adapter not connected");
+
+    const unbound = render({
+      bot: bot({ responsibilities: [reactive] }),
+      monitors: [monitorView({ monitorId: "mon-2", responsibilityId: null })],
+    });
+    expect(unbound).toContain("no monitor bound yet");
+
+    const unknown = render({
+      bot: bot({ responsibilities: [reactive] }),
+      monitors: null,
+    });
+    expect(unknown).toContain("monitor binding unknown");
+  });
   it("renders the responsibilities chip row, with the run payload on the automation card", () => {
     const markup = render({
       bot: bot({ responsibilities: [responsibility()] }),
@@ -311,7 +372,7 @@ describe("BotResponsibilityCard", () => {
     expect(markup).toContain('data-testid="add-responsibility-bot-1"');
   });
 
-  it("renders reactive chips without a run control and with the adapter note", () => {
+  it("renders reactive chips without a run control and with their real source", () => {
     const markup = render({
       bot: bot({
         responsibilities: [
@@ -325,7 +386,9 @@ describe("BotResponsibilityCard", () => {
       }),
     });
     expect(markup).toContain("Mention duty");
-    expect(markup).toContain("Event adapter not connected");
+    // No monitor data source at all: say the binding is unknown rather
+    // than claiming the responsibility is disconnected.
+    expect(markup).toContain("monitor binding unknown");
     expect(markup).not.toContain("Run Mention duty");
   });
 
