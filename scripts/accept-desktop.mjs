@@ -759,6 +759,27 @@ try {
     await page.getByRole("tab").first().waitFor();
   }
   report.checks.push("keyboard-tab-navigation-and-sibling-close");
+  if (process.platform === "darwin") {
+    await page.keyboard.press("Meta+,");
+    const settings = page.locator('section[aria-label="Settings"]');
+    await settings.waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "General", exact: true }).click({ timeout: 10000 });
+    const mentuSetting = page.getByTestId("mentu-runtime-setting");
+    await mentuSetting.waitFor({ timeout: 10000 });
+    await page.waitForFunction(() => {
+      const setting = document.querySelector('[data-testid="mentu-runtime-setting"]');
+      return [...(setting?.querySelectorAll("button, span") ?? [])].some(
+        (element) => element.textContent?.trim() === "Installed" || element.textContent?.trim() === "Install",
+      );
+    });
+    await mentuSetting.screenshot({
+      path: path.join(output, "settings-optional-mentu.png"),
+      animations: "disabled",
+    });
+    await page.getByRole("button", { name: "Back to app", exact: true }).click({ timeout: 10000 });
+    await settings.waitFor({ state: "hidden", timeout: 10000 });
+    report.checks.push("macos-settings-shows-mentu-as-an-explicit-optional-install");
+  }
   report.themeCaptures = await captureSettingsThemes(page, output);
   verifyThemeCaptures(report.themeCaptures);
   report.checks.push("real-settings-light-dark-captures");

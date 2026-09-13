@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
 import {
-  autoInstallBundledMentuRuntime,
   dispatchMentuRequest,
+  installOfficialMentuRuntime,
+  MENTU_RUNTIME_LOCK_REVISION,
+  MENTU_RUNTIME_LOCK_SHA256,
   type MentuMethod,
 } from "./mentu-bridge";
 import type { Result } from "../shared/session-contract";
@@ -159,71 +159,111 @@ describe("mentu bridge admission", () => {
   });
 });
 
-describe("mentu runtime auto-install (journey J9 fresh-install usability)", () => {
-  const scratch: string[] = [];
-  afterEach(() => {
-    for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
+describe("optional Mentu runtime installation", () => {
+  const missingRuntime = {
+    available: false,
+    path: null,
+    version: null,
+    expectedRevision: MENTU_RUNTIME_LOCK_REVISION,
+    expectedSha256: MENTU_RUNTIME_LOCK_SHA256,
+    actualSha256: null,
+    lockMatches: false,
+    message: "not installed",
+  };
+  const installedRuntime = {
+    ...missingRuntime,
+    available: true,
+    path: "/fixture/mentu-recipes",
+    version: "0.5.0",
+    actualSha256: MENTU_RUNTIME_LOCK_SHA256,
+    lockMatches: true,
+    message: null,
+  };
+
+  it("refuses non-Apple-silicon hosts without downloading or calling the daemon", async () => {
+    const call = vi.fn();
+    const fetchImpl = vi.fn();
+    const result = await installOfficialMentuRuntime({
+      platform: "linux",
+      arch: "x64",
+      call,
+      fetchImpl,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "mentu_install_unsupported" },
+    });
+    expect(call).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  function fixtureSourcePath(): string {
-    const dir = mkdtempSync(join(tmpdir(), "mentu-auto-install-"));
-    scratch.push(dir);
-    const source = join(dir, "mentu-recipes");
-    writeFileSync(source, "#!/bin/sh\necho fixture\n");
-    return source;
-  }
-
-  it("does nothing when no bundled runtime exists at the source path", async () => {
-    let called = false;
-    await autoInstallBundledMentuRuntime(async () => {
-      called = true;
-      return { ok: true, result: {} };
-    }, join(tmpdir(), "does-not-exist", "mentu-recipes"));
-    expect(called).toBe(false);
+  it("does not download when the verified runtime is already installed", async () => {
+    const call = vi.fn(async () => ({
+      ok: true as const,
+      result: { runtime: installedRuntime },
+    }));
+    const fetchImpl = vi.fn();
+    const result = await installOfficialMentuRuntime({
+      platform: "darwin",
+      arch: "arm64",
+      call,
+      fetchImpl,
+    });
+    expect(result).toEqual({ ok: true, result: { runtime: installedRuntime } });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("installs a bundled runtime and logs the result", async () => {
-    const source = fixtureSourcePath();
-    const seen: Array<[string, unknown]> = [];
-    await autoInstallBundledMentuRuntime(async (method, params) => {
+  it("downloads on explicit request, verifies the bytes, then asks the daemon to install", async () => {
+    const bytes = Buffer.from("fixture mentu runtime");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const seen: Array<[string, object]> = [];
+    const call = vi.fn(async (method: string, params: object) => {
       seen.push([method, params]);
-      return { ok: true, result: { status: "installed" } };
-    }, source);
-    expect(seen).toEqual([["mentu.runtime_install", { sourcePath: source }]]);
-  });
-
-  it("retries a retryable failure, then gives up and logs the failure", async () => {
-    const source = fixtureSourcePath();
-    let calls = 0;
-    await autoInstallBundledMentuRuntime(
-      async () => {
-        calls += 1;
-        return {
-          ok: false,
-          error: { code: "unverifiable", message: "daemon not ready", retryable: true },
-        };
-      },
-      source,
-      0,
-      3,
-    );
-    expect(calls).toBe(3);
-  });
-
-  it("gives up immediately on a non-retryable failure", async () => {
-    const source = fixtureSourcePath();
-    let calls = 0;
-    await autoInstallBundledMentuRuntime(async () => {
-      calls += 1;
+      if (method === "mentu.runtime")
+        return { ok: true as const, result: { runtime: missingRuntime } };
       return {
-        ok: false,
-        error: {
-          code: "mentu_runtime_lock_mismatch",
-          message: "does not match the lock",
-          retryable: false,
-        },
+        ok: true as const,
+        result: { status: "installed", runtime: installedRuntime },
       };
-    }, source);
-    expect(calls).toBe(1);
+    });
+    const fetchImpl = vi.fn(async () => new Response(bytes));
+
+    const result = await installOfficialMentuRuntime({
+      platform: "darwin",
+      arch: "arm64",
+      call,
+      fetchImpl,
+      expectedSha256: digest,
+      releaseUrl: "https://example.invalid/mentu-recipes",
+    });
+
+    expect(result).toEqual({ ok: true, result: { runtime: installedRuntime } });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(seen.map(([method]) => method)).toEqual([
+      "mentu.runtime",
+      "mentu.runtime_install",
+    ]);
+    expect(seen[1]?.[1]).toMatchObject({
+      sourcePath: expect.stringContaining("drogon-mentu-install-"),
+    });
+  });
+
+  it("rejects altered downloads before the daemon install call", async () => {
+    const call = vi.fn(async () => ({
+      ok: true as const,
+      result: { runtime: missingRuntime },
+    }));
+    const result = await installOfficialMentuRuntime({
+      platform: "darwin",
+      arch: "arm64",
+      call,
+      fetchImpl: async () => new Response("altered"),
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "mentu_download_invalid", retryable: false },
+    });
+    expect(call).toHaveBeenCalledTimes(1);
   });
 });

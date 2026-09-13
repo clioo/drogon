@@ -6,10 +6,9 @@
 //! given a candidate binary already on disk, verify its sha256 against the
 //! lock and, only on a match, atomically copy it into the fixed runtime
 //! path. This module never fetches, clones or builds anything itself and
-//! never touches `PATH` or Homebrew — the caller (this repo's
-//! `scripts/mentu-runtime-provision.mjs`, or the desktop app's one-time
-//! bundled-runtime install) is responsible for how `source_path` came to
-//! exist locally.
+//! never touches `PATH` or Homebrew — the caller (this repo's explicit
+//! provisioning helper or the user-initiated desktop Settings installer) is
+//! responsible for how `source_path` came to exist locally.
 
 use std::fs;
 use std::path::Path;

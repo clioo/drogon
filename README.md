@@ -52,7 +52,7 @@ the packaged build is validated as a whole before every release.
 7. **Automations.** A cron scheduler runs inside the daemon on top of the automation runner, with an editor, local-time schedules, a Runs dashboard, run detail, and history — including runs by a real coding agent.
 8. **Bots.** Create bots with presets and give them responsibilities (cron-backed), chat over visible `bot.run` execution, and browse per-bot history. A bot owns its own **monitors** — a file digest, an HTTP poll, a script, or a `github_pr.v1` watch on a repository — and a monitor that fires can release real work: a watched pull request opens a worktree and starts a review session, with the firing evidence recorded and deduplicated by case.
 9. **Work Graph.** The Orchestrator is the graph's one interface: a **Main agent** bound to the workspace's live session, the **Implementation workers** it plans and supervises at depth 1, and — when you switch it on — a dashed **adversarial loop** (an *Adversarial test* node that tries to break the result, then a *Code review* node that fixes what is real and verifies each fix), repeating up to the iteration bound and ending at *Ready to merge*. The **Subagent policy** beside it decides what those workers may run on: approved runtimes tried in order, a fallback marked *Not approved* that is used only after every approved one fails, and the two execution modes — **Adversarial testing** and **Delegate** — of which you pick at most one; with both off the main agent works directly. `.drogon/graph.json` keeps a strict split: `intent` is yours, `state` is what the daemon observed, and every runtime attempt and pass/fail verdict shows on the node itself and in the *Evidence* tab.
-10. **Settings.** Theme (system/light/dark), default harness, rebindable shortcuts, notifications, and Git/GitHub auth panes — all persisted and taking effect immediately, including “Restart daemon”.
+10. **Settings.** Theme (system/light/dark), default harness, rebindable shortcuts, notifications, Git/GitHub auth panes, and an optional Mentu runtime installer on Apple silicon macOS — all persisted and taking effect immediately, including “Restart daemon”.
 11. **Packaging.** An ad-hoc-signed, sealed `Drogon.app` with verified build info, packaged acceptance against a disposable profile, and a per-user installer that preserves previous builds.
 12. **Status bar.** The Orca bottom bar: settings and help on the left, per-provider usage meters with refresh, and on the right awake on/off, memory, terminal and port counts, and the daemon connection segment.
 
@@ -128,7 +128,7 @@ Drogon is split so the desktop is a view, not the lifetime of your work.
 └────────────────────────────┘
 ```
 
-- **`crates/drogon-core`** — domain state: sessions/PTYs, workspaces, worktrees, files, git, bots and their monitors, automations, the work graph and its failover episodes, meetings, orchestration records. The graph is what you design; the pinned Mentu runtime (revision-locked, provisioned at install) is what executes a compiled graph.
+- **`crates/drogon-core`** — domain state: sessions/PTYs, workspaces, worktrees, files, git, bots and their monitors, automations, the work graph and its failover episodes, meetings, orchestration records. The graph is what you design; when installed, the revision-locked Mentu runtime executes a compiled graph.
 - **`crates/drogon-protocol`** — the versioned wire protocol; daemon and CLI negotiate it on connect.
 - **`crates/drogond`** — the daemon: owns runtime state, listens on a local Unix socket (Windows named pipe in progress), and survives desktop restarts.
 - **`crates/drogon-harness`** — discovery and launch of Claude Code, Pi, OpenCode, and plain shells, with state hooks that report `working` / `needs_input` from each harness.
@@ -138,7 +138,7 @@ Drogon is split so the desktop is a view, not the lifetime of your work.
 
 Two rules fall out of this shape. First, **liveness is a verdict, not a guess**: sessions report `live`, `unverifiable`, or `exited`, and losing contact never proves exit. Second, **no telemetry and no updater** in the preview: the only network use is yours (git, `gh`, harnesses, and the pages you open).
 
-**No real model inference runs inside the app's own test and acceptance paths** — they use shell fixtures. Coding harnesses and their provider accounts are configured separately; their network use and data policies still apply. GitHub features require `gh` and appropriate authentication. Mentu execution requires its pinned runtime.
+**No real model inference runs inside the app's own test and acceptance paths** — they use shell fixtures. Coding harnesses and their provider accounts are configured separately; their network use and data policies still apply. GitHub features require `gh` and appropriate authentication. Mentu is not downloaded during packaging or startup; Mentu execution requires its optional pinned runtime, which Apple silicon macOS users can install explicitly in Settings.
 
 ## Using Drogon with agents
 

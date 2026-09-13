@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // MIT Copyright (c) 2026 Lovecast Inc.
 //
-// Stage the unmodified official mentu-ai release at build time. Downloads
-// and cached copies must match the pinned digest; installed apps stay offline.
+// Explicitly stage the unmodified official mentu-ai release for development
+// and acceptance fixtures. Desktop packaging never invokes this helper.
 // Keep the lock in sync with crates/drogon-core/src/mentu/runtime.rs and
 // apps/desktop/src/main/mentu-bridge.ts.
 
@@ -30,7 +30,7 @@ export const MENTU_LOCK_SHA256 =
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
-/** Where `scripts/package-desktop.mjs` looks for a bundled runtime to ship, and where the dev app looks for one at `apps/desktop/resources/...` when unpackaged. */
+/** Legacy fixture destination used by explicit development and acceptance tooling. */
 export function bundledRuntimeDestination(projectRoot = repoRoot) {
   return join(
     projectRoot,
@@ -106,7 +106,7 @@ async function downloadVerified(url, digest, fetchImpl) {
   return bytes;
 }
 
-/** Required for Apple Silicon packages; never trust an unchecked cached runtime. */
+/** Explicit fixture helper; never trust an unchecked cached runtime. */
 export async function ensureOfficialMentuRuntime(projectRoot = repoRoot, fetchImpl = fetch) {
   const destination = bundledRuntimeDestination(projectRoot);
   const licensePath = join(dirname(dirname(destination)), "LICENSE");

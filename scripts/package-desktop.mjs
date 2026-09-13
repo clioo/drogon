@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,13 +13,8 @@ import {
   bundlePaths,
   ensureAppIcon,
   fingerprintBundle,
-  mentuRuntimeSignIgnore,
   verifiedBuildInfo,
 } from "./desktop-artifacts.mjs";
-import {
-  MENTU_LOCK_REVISION,
-  ensureOfficialMentuRuntime,
-} from "./mentu-runtime-provision.mjs";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
 import { writePackageNotices } from "./package-notices.mjs";
 import {
@@ -92,10 +86,8 @@ assert.ok(
   !signingIdentity || signingIdentity === "-" || developerSigning,
   "A non-ad-hoc signing identity requires DROGON_RELEASE_SIGNING=developer-id-notarized",
 );
-// The supported macOS package must never silently ship without Mentu.
-if (process.platform === "darwin" && process.arch === "arm64") {
-  await ensureOfficialMentuRuntime(root);
-}
+// Mentu is intentionally not provisioned while packaging. Apple silicon
+// users can choose to download the pinned runtime from Settings.
 const desktopManifest = manifests.desktop;
 await runAcceptanceProcess(
   "cargo",
@@ -181,15 +173,6 @@ const info = {
 };
 const infoPath = path.join(staging, "build-info.json");
 await writeFile(infoPath, JSON.stringify(info, null, 2) + "\n");
-// Apple Silicon is provisioned above, including the official license.
-// Other platforms retain their existing optional-runtime packaging.
-const bundledMentuRuntime = path.join(
-  root,
-  "apps",
-  "desktop",
-  "resources",
-  "mentu-runtime",
-);
 // R16-Z2 (#201) + R16-BO (#319): original Drogon icon. The .icns is a
 // committed build artifact of apps/desktop/resources/icon.svg — a missing
 // icon or one older than the SVG (or the builder) is rebuilt in-process
@@ -217,9 +200,7 @@ const [packagedDirectory] = await packager({
   overwrite: false,
   asar: false,
   prune: false,
-  extraResource: existsSync(bundledMentuRuntime)
-    ? [binaries, infoPath, notices, bundledMentuRuntime]
-    : [binaries, infoPath, notices],
+  extraResource: [binaries, infoPath, notices],
   ...(process.platform === "darwin"
     ? {
         darwinDarkModeSupport: true,
@@ -229,11 +210,6 @@ const [packagedDirectory] = await packager({
           identityValidation: false,
           // osx-sign applies runtime policy per file, including helpers.
           optionsForFile: () => ({ hardenedRuntime: developerSigning }),
-          // The pinned Mentu runtime ships byte-identical to the lock the
-          // daemon verifies at install: signing it would append an
-          // LC_CODE_SIGNATURE and break `mentu.runtime_install` (fork
-          // parity: reference `mentuRuntimeSignIgnore` boundary).
-          ignore: mentuRuntimeSignIgnore(MENTU_LOCK_REVISION),
         },
       }
     : {}),
