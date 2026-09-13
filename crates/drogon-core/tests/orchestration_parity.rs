@@ -158,7 +158,7 @@ fn policy_worker_gets_structured_brief_and_exact_provider_model() {
     write_executable(&worker_cli, "#!/bin/sh\nexit 0\n");
     let _path_guard = PathGuard(prepend_path(&bin));
 
-    let result = (|| {
+    {
         let workspace = root.path().join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
         let data = root.path().join("data");
@@ -285,7 +285,5 @@ fn policy_worker_gets_structured_brief_and_exact_provider_model() {
         assert_eq!(shown["launch"]["provider"], "openai-codex");
         assert_eq!(shown["launch"]["model"], "gpt-5.6-luna");
         assert_eq!(shown["assignmentState"], "ready");
-    })();
-
-    result
+    }
 }

@@ -114,7 +114,7 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
             policy.adversarial.max_iterations
         ));
     } else if policy.delegate {
-        out.push_str(&format!(
+        out.push_str(
             "- **Mode: DELEGATE (Adversarial testing is mutually exclusive and OFF).** Act only \
              as planner and director; do not implement the task yourself. Read `.drogon` first, \
              split the task into independent depth-one children, and supervise their results. \
@@ -123,8 +123,8 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
              observe reports with `orchestration check` and `worker-show`. Children must not \
              delegate further. No automatic tester is added. Authored graph nodes may still use \
              the separate `graph run-node-failover` verb; it is not a substitute for a native \
-             orchestration worker task.\n"
-        ));
+             orchestration worker task.\n",
+        );
     } else {
         out.push_str(
             "- **Mode: DIRECT (Delegate and adversarial testing are OFF).** Do the work directly \
