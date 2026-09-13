@@ -56,7 +56,7 @@ import {
   isBotUnconfigured,
 } from "./bots-page-model";
 import { DrogonBotAvatar } from "./DrogonBotAvatar";
-import { botHarnessLabel } from "./bots-page-model";
+import { botHarnessLabel, monitorSourceLabel } from "./bots-page-model";
 import type { DrogonBotCharacterPreset } from "./bot-characters";
 import { AgentIcon } from "../settings/agent-catalog";
 import { BotAutomationCardItem } from "./BotAutomationCardItem";
@@ -100,6 +100,22 @@ function InfoTile({
       </div>
     </div>
   );
+}
+
+/** What releases a reactive responsibility, from the monitors this card
+ *  was given: the watched source when one is bound, an honest "not bound"
+ *  when none is, and an honest "unknown" when there is no monitor data. */
+function reactiveSourceLabel(
+  responsibilityId: string,
+  monitors: BotMonitorView[] | null,
+): string {
+  if (monitors === null) return "monitor binding unknown";
+  const bound = monitors.filter(
+    (monitor) => monitor.responsibilityId === responsibilityId,
+  );
+  if (bound.length === 0) return "no monitor bound yet";
+  if (bound.length === 1) return `released by ${monitorSourceLabel(bound[0])}`;
+  return `released by ${bound.length} monitors`;
 }
 
 export function BotResponsibilityCard({
@@ -371,8 +387,14 @@ export function BotResponsibilityCard({
               {responsibility.kind === "scheduled" ? (
                 <span className="text-muted-foreground">scheduled</span>
               ) : (
+                // A reactive responsibility is released by a monitor, and
+                // this card already holds them: say which one watches it,
+                // or that none does yet. Claiming "not connected" for every
+                // reactive responsibility told owners their working
+                // automation was disconnected while its monitor was
+                // dispatching it.
                 <span className="text-muted-foreground">
-                  Event adapter not connected
+                  {reactiveSourceLabel(responsibility.id, monitors)}
                 </span>
               )}
             </div>
