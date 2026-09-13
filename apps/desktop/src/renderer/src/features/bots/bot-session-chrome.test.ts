@@ -7,7 +7,9 @@ import {
   formatBotSessionStarted,
   formatElapsedClock,
   harnessProviderLabel,
+  linkedBotSessionMeta,
 } from "./bot-session-chrome";
+import type { BotsPanelBot } from "../../../../shared/bot-contract";
 import type { Session } from "../../../../shared/session-contract";
 
 function session(overrides: Partial<Session> = {}): Session {
@@ -82,5 +84,42 @@ describe("bot-session-chrome", () => {
     expect(
       botSessionState(session({ verdict: "exited", agentState: "working" })),
     ).toBe("exited");
+  });
+
+  it("recovers Bot chrome from the durable session link after reload or Resume", () => {
+    const bot = {
+      id: "bot-arya",
+      displayIdentity: {
+        displayName: "Arya Stark",
+        handle: "arya",
+        title: "No One",
+      },
+      harnessPolicy: { defaultHarness: "claude", explicitModel: null },
+      currentSession: {
+        sessionId: "sess-resumed",
+        harness: "claude",
+        model: "sonnet",
+      },
+    } as BotsPanelBot;
+    const resumed = session({
+      id: "sess-resumed",
+      workspaceId: "bot-home",
+      hostId: "host-1",
+      incarnation: "inc-resumed",
+      harnessId: "claude",
+    });
+
+    expect(linkedBotSessionMeta([bot], resumed)).toEqual({
+      botId: "bot-arya",
+      incarnation: "inc-resumed",
+      displayName: "Arya Stark",
+      handle: "arya",
+      title: "No One",
+      harnessId: "claude",
+      model: "sonnet",
+      workspaceId: "bot-home",
+      hostId: "host-1",
+    });
+    expect(linkedBotSessionMeta([bot], session({ id: "other" }))).toBeNull();
   });
 });

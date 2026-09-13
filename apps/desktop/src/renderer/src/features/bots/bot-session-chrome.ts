@@ -5,7 +5,12 @@
 // here -- every value is derived from data the caller already has (a real
 // Session and/or the identity the dispatched open-session turn echoed),
 // never invented.
-import type { AgentState, HarnessId, Session } from "../../../../shared/session-contract";
+import type { BotsPanelBot } from "../../../../shared/bot-contract";
+import type {
+  AgentState,
+  HarnessId,
+  Session,
+} from "../../../../shared/session-contract";
 import { formatRowHarnessLabel } from "../shell/worktree-agent-rows";
 import { agentStateOf } from "../shell/agent-state";
 
@@ -98,6 +103,35 @@ export type BotSessionMeta = {
   workspaceId: string;
   hostId: string;
 };
+
+/** Rebuilds Bot chrome from the daemon's durable Bot→session link. The
+ * callback path still supplies metadata immediately after Open Session, but
+ * that renderer-only map starts empty after an app reinstall/reload and a
+ * generic terminal Resume creates a new Drogon session outside `bot.run`.
+ * The durable link is the recovery authority in both cases. */
+export function linkedBotSessionMeta(
+  bots: readonly BotsPanelBot[],
+  session: Session,
+): BotSessionMeta | null {
+  const bot = bots.find(
+    (candidate) => candidate.currentSession?.sessionId === session.id,
+  );
+  if (!bot?.currentSession) return null;
+  const recordedHarness = bot.currentSession.harness.trim();
+  const harnessId = (session.harnessId ??
+    (recordedHarness || bot.harnessPolicy.defaultHarness)) as HarnessId;
+  return {
+    botId: bot.id,
+    incarnation: session.incarnation,
+    displayName: bot.displayIdentity.displayName,
+    handle: bot.displayIdentity.handle,
+    title: bot.displayIdentity.title,
+    harnessId,
+    model: bot.currentSession.model,
+    workspaceId: session.workspaceId,
+    hostId: session.hostId,
+  };
+}
 
 export function formatBotSessionStarted(
   startedAtMs: number,

@@ -905,6 +905,66 @@ pub fn rotate_session(
     })
 }
 
+/// Moves every Bot link that names `prior_session_id` to the replacement
+/// session created by `harness.start`'s Resume action. Resume is a generic
+/// terminal operation, so it does not pass through `bot.run` (whose finalize
+/// phase normally rotates `current_session`); without this bridge the new
+/// live terminal becomes detached from its Bot, disappears from Chats, and
+/// the Bot page can open a duplicate of the same provider conversation.
+///
+/// `prior_agent_session_id` repairs records already detached by an older
+/// build: a resumed Drogon row may no longer be the id the Bot points at, but
+/// both records still carry the same harness-owned conversation identity.
+/// Harness equality fences that fallback so coincident ids from different
+/// providers cannot cross-link. The scan is same-host and the writes commit
+/// together. A healthy database has at most one matching Bot, but updating
+/// every match repairs legacy data that linked more than one Bot to the same
+/// terminal.
+pub fn relink_resumed_session(
+    conn: &Connection,
+    host_id: &str,
+    prior_session_id: &str,
+    prior_agent_session_id: Option<&str>,
+    new_session: &super::records::BotSession,
+    new_updated_at: f64,
+) -> Result<bool> {
+    let tx = conn.unchecked_transaction()?;
+    let candidates = {
+        let mut stmt = tx.prepare(
+            "SELECT folder, payload_json, rev FROM bots WHERE host_id = ?1 ORDER BY rowid",
+        )?;
+        stmt.query_map(params![host_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut changed = false;
+    for (folder, payload, expected_rev) in candidates {
+        let mut bot = row_to_bot(payload)?;
+        let Some(current) = bot.current_session.as_ref() else {
+            continue;
+        };
+        let exact_session = current.session_id == prior_session_id;
+        let same_conversation = prior_agent_session_id.is_some_and(|identity| {
+            current.harness == new_session.harness
+                && current.agent_session_id.as_deref() == Some(identity)
+        });
+        if !exact_session && !same_conversation {
+            continue;
+        }
+        bot.current_session = Some(new_session.clone());
+        bot.updated_at = new_updated_at;
+        cas_write(&tx, host_id, &folder, &bot, expected_rev)?;
+        changed = true;
+    }
+    tx.commit()?;
+    Ok(changed)
+}
+
 /// Deletes the Bot together with every automation it owns (each with its
 /// automation runs, via [`automations_storage::delete_automation`]):
 /// Bot-owned automations only ever exist as a scheduled responsibility's
