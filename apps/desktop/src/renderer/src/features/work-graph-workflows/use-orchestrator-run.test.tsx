@@ -50,6 +50,27 @@ it("observes a daemon run after remount and never stops it on unmount", async ()
   );
 });
 
+it("retains durable evidence across a full unmount and empty remount poll", async () => {
+  let current: OrchestratorRun | null = run;
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(async () => ({
+      ok: true,
+      result: { run: current },
+    })),
+  } as unknown as GraphBridge;
+  const first = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+  await waitFor(() => expect(first.result.current.run?.id).toBe("run-1"));
+  first.unmount();
+  current = null;
+
+  const restored = renderHook(() => useOrchestratorRun(bridge, "ws", 10));
+
+  await waitFor(() =>
+    expect(restored.result.current.error).toContain("status is unavailable"),
+  );
+  expect(restored.result.current.run?.id).toBe("run-1");
+});
+
 it("starts concrete main work with optional adversarial mode off", async () => {
   const start = vi.fn(async () => ({ ok: true, result: { run } }));
   const bridge = { graphOrchestratorStart: start } as unknown as GraphBridge;
@@ -77,6 +98,38 @@ it("refreshes observers through the same gated bridge after launch", async () =>
   await act(async () => {});
   expect(observer.result.current.run).toBeNull();
   await act(async () => launcher.result.current.start(main));
+  await waitFor(() => expect(observer.result.current.run?.id).toBe("run-1"));
+});
+
+it("publishes a successful mutation after its launcher unmounts", async () => {
+  let current: OrchestratorRun | null = null;
+  let finishStart: ((value: unknown) => void) | undefined;
+  const bridge = {
+    graphOrchestratorStart: vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishStart = resolve;
+        }),
+    ),
+    graphOrchestratorStatus: vi.fn(async () => ({
+      ok: true,
+      result: { run: current },
+    })),
+  } as unknown as GraphBridge;
+  const launcher = renderHook(() => useOrchestratorRun(bridge, "ws", 10_000));
+  const observer = renderHook(() => useOrchestratorRun(bridge, "ws", 10_000));
+  await act(async () => {});
+  let launch: Promise<void>;
+  act(() => {
+    launch = launcher.result.current.start(main);
+  });
+  launcher.unmount();
+  current = run;
+
+  await act(async () => {
+    finishStart?.({ ok: true, result: { run } });
+    await launch;
+  });
   await waitFor(() => expect(observer.result.current.run?.id).toBe("run-1"));
 });
 

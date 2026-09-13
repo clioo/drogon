@@ -252,7 +252,7 @@ fn git_finalize_budget() -> Duration {
 fn step_run_budget(
     step: &super::recipe::RecipeStepBudget,
     recipe: &super::recipe::RecipeBudget,
-) -> (Duration, bool) {
+) -> Duration {
     let timeout = step.timeout_seconds.filter(|seconds| *seconds > 0);
     let attempts = step.max_retries.saturating_add(1);
     let attempt_budget =
@@ -282,15 +282,12 @@ fn step_run_budget(
         HOOK_COMMAND_TIMEOUT,
         recipe.before_step_hooks.saturating_add(terminal_hooks),
     );
-    (
-        attempt_budget
-            .saturating_add(pi_preflight)
-            .saturating_add(backoff)
-            .saturating_add(verification)
-            .saturating_add(bookkeeping)
-            .saturating_add(hooks),
-        timeout.is_some(),
-    )
+    attempt_budget
+        .saturating_add(pi_preflight)
+        .saturating_add(backoff)
+        .saturating_add(verification)
+        .saturating_add(bookkeeping)
+        .saturating_add(hooks)
 }
 
 fn parsed_recipe_budget(recipe_bytes: &[u8]) -> Option<super::recipe::RecipeBudget> {
@@ -300,15 +297,10 @@ fn parsed_recipe_budget(recipe_bytes: &[u8]) -> Option<super::recipe::RecipeBudg
         .filter(|recipe| !recipe.steps.is_empty() || recipe.has_recipe_nodes)
 }
 
-fn bounded_declared_timeout(declared: Duration, every_step_declared: bool) -> Duration {
-    let declared = declared
+fn bounded_declared_timeout(declared: Duration) -> Duration {
+    declared
         .saturating_add(DECLARED_TIMEOUT_GRACE)
-        .min(MAX_RUN_TIMEOUT);
-    if every_step_declared {
-        declared
-    } else {
-        declared.max(DEFAULT_RUN_TIMEOUT)
-    }
+        .min(MAX_RUN_TIMEOUT)
 }
 
 fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
@@ -353,11 +345,8 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
     let mut declared = run_hooks
         .saturating_add(cloud_requests)
         .saturating_add(workspace_baseline_budget());
-    let mut every_step_declared = true;
     for step in &recipe.steps {
-        let (step_budget, is_declared) = step_run_budget(step, &recipe);
-        every_step_declared &= is_declared;
-        declared = declared.saturating_add(step_budget);
+        declared = declared.saturating_add(step_run_budget(step, &recipe));
     }
     // URLRequest.timeoutInterval can reset when more response data arrives; it
     // is not a hard whole-resource deadline. Only the approved 24-hour outer
@@ -365,7 +354,7 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
     if recipe.cloud_enabled {
         MAX_RUN_TIMEOUT
     } else {
-        bounded_declared_timeout(declared, every_step_declared)
+        bounded_declared_timeout(declared)
     }
 }
 
