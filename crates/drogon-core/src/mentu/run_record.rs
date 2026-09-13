@@ -439,7 +439,33 @@ fn scrub_diagnostic_tail(text: &str) -> String {
 /// deterministic, honest mapping is a non-clean `failed` verdict with the
 /// warning named by [`unresolved_warning`] — never a silent `succeeded`.
 pub fn overall_status(run_json: &Value, steps: &[MentuStepRun]) -> MentuRunStatus {
-    let warned = unresolved_warning(run_json).is_some();
+    overall_status_with(run_json, steps, WorkspaceAttestation::RuntimeDrift)
+}
+
+/// How the daemon reads the runtime's workspace-drift attestation for one
+/// run. Everything else the runtime records (bookkeeping, step warnings,
+/// verification warnings, quarantined files) is read the same way under
+/// both policies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkspaceAttestation {
+    /// Mentu recipe runs: a path created outside the step's
+    /// `expected_changes` is an unresolved warning (the reference's
+    /// `hasRunWarnings`), so the run is never a clean success.
+    RuntimeDrift,
+    /// Work Graph / Orchestrator runs: an agent's job is to change the
+    /// workspace, so runtime drift is informational only. Declaring
+    /// `expected_changes` instead is not an option: the pinned runtime
+    /// auto-commits every matching change as `chore: mentu-recipes step …`,
+    /// and Drogon must never commit on the owner's behalf.
+    Advisory,
+}
+
+pub fn overall_status_with(
+    run_json: &Value,
+    steps: &[MentuStepRun],
+    attestation: WorkspaceAttestation,
+) -> MentuRunStatus {
+    let warned = unresolved_warning_with(run_json, attestation).is_some();
     let step_failed = steps
         .iter()
         .any(|s| matches!(s.status, MentuRunStatus::Failed));
@@ -460,6 +486,13 @@ pub fn overall_status(run_json: &Value, steps: &[MentuStepRun]) -> MentuRunStatu
 /// exists only as a keyword match is handled separately by the completion
 /// re-check.
 pub fn unresolved_warning(run_json: &Value) -> Option<String> {
+    unresolved_warning_with(run_json, WorkspaceAttestation::RuntimeDrift)
+}
+
+pub fn unresolved_warning_with(
+    run_json: &Value,
+    attestation: WorkspaceAttestation,
+) -> Option<String> {
     if run_json.get("outcome").and_then(Value::as_str) == Some("warn_bookkeeping") {
         return Some(
             "The run completed, but mentu-recipes recorded unresolved bookkeeping warnings."
@@ -497,10 +530,11 @@ pub fn unresolved_warning(run_json: &Value) -> Option<String> {
                     .join("; ")
             ));
         }
-        if let Some(paths) = step
-            .get("drift")
-            .and_then(|drift| drift.get("unexpected_paths"))
-            .and_then(Value::as_array)
+        if attestation == WorkspaceAttestation::RuntimeDrift
+            && let Some(paths) = step
+                .get("drift")
+                .and_then(|drift| drift.get("unexpected_paths"))
+                .and_then(Value::as_array)
             && !paths.is_empty()
         {
             return Some(format!(
@@ -918,6 +952,58 @@ mod tests {
             unresolved_warning(&run_json).is_some_and(|warning| warning.contains("bookkeeping")),
             "the warning must be named: {:?}",
             unresolved_warning(&run_json)
+        );
+    }
+
+    #[test]
+    fn unexpected_drift_fails_a_recipe_run_but_is_advisory_for_graph_runs() {
+        // The runtime records every path a step created outside its
+        // `expected_changes`; a recipe run reads that as an unresolved
+        // warning, while an orchestrator run — whose agent was asked to
+        // change the workspace — must not fail on the very work it did.
+        let mut run_json = sample_run_json();
+        run_json["steps"][0]["drift"] = json!({
+            "created_paths": ["direct.txt"],
+            "expected_paths": [],
+            "unexpected_paths": ["direct.txt"]
+        });
+        let steps = parse_steps(&run_json, "run_20260907202509_15F1772D");
+        assert_eq!(overall_status(&run_json, &steps), MentuRunStatus::Failed);
+        assert!(
+            unresolved_warning(&run_json).is_some_and(|w| w.contains("unexpected paths")),
+            "{:?}",
+            unresolved_warning(&run_json)
+        );
+        assert_eq!(
+            overall_status_with(&run_json, &steps, WorkspaceAttestation::Advisory),
+            MentuRunStatus::Succeeded
+        );
+        assert_eq!(
+            unresolved_warning_with(&run_json, WorkspaceAttestation::Advisory),
+            None
+        );
+    }
+
+    #[test]
+    fn advisory_attestation_still_reports_every_other_warning() {
+        let mut run_json = sample_run_json();
+        run_json["steps"][0]["warnings"] = json!(["Completion policy was not satisfied"]);
+        run_json["steps"][0]["drift"] = json!({ "unexpected_paths": ["direct.txt"] });
+        let steps = parse_steps(&run_json, "run_20260907202509_15F1772D");
+        assert_eq!(
+            overall_status_with(&run_json, &steps, WorkspaceAttestation::Advisory),
+            MentuRunStatus::Failed
+        );
+        let warning = unresolved_warning_with(&run_json, WorkspaceAttestation::Advisory).unwrap();
+        assert!(
+            warning.contains("Completion policy was not satisfied"),
+            "{warning}"
+        );
+        let mut quarantined = sample_run_json();
+        quarantined["steps"][0]["git"] = json!({ "quarantine_files": ["patch.diff"] });
+        assert!(
+            unresolved_warning_with(&quarantined, WorkspaceAttestation::Advisory)
+                .is_some_and(|w| w.contains("quarantined"))
         );
     }
 

@@ -739,6 +739,19 @@ describe("OrchestratorCanvas", () => {
     expect(disclosure.textContent).not.toContain("paid");
   });
 
+  it("discloses the policy runtime for Delegate too, since the leader dispatches children on it", () => {
+    const policy: GraphPolicy = {
+      ...policyWithAdversarial(false),
+      delegate: true,
+      approvedRuntimes: [{ harness: "pi", model: "openai-codex/gpt-5.6-luna:low" }],
+    };
+    render(<OrchestratorCanvas {...baseProps()} policy={policy} />);
+    const disclosure = screen.getByTestId("orchestrator-runtime-disclosure");
+    expect(disclosure.getAttribute("data-free-default")).toBe("false");
+    expect(disclosure.textContent).toContain("pi/openai-codex/gpt-5.6-luna:low");
+    expect(disclosure.textContent).toContain("paid/external");
+  });
+
   it("discloses a paid/external runtime plainly before Run workflow can launch it", () => {
     const policy: GraphPolicy = {
       ...policyWithAdversarial(true),

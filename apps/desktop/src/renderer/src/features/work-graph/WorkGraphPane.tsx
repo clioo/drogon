@@ -79,6 +79,11 @@ export function WorkGraphPane({
   const mainForPolicySave = configuredMain.prompt.trim() ? mainNode : undefined;
   const updateMainTask = (task: typeof configuredMain) => {
     setMainDraft({ workspaceId, task });
+    // The daemon refuses a main node without a prompt. A harness or model
+    // chosen before the task is typed stays in the draft and is persisted
+    // with the first prompt keystroke, instead of surfacing "Save failed"
+    // (which also blocks Run) for an edit the user has not finished.
+    if (!task.prompt.trim()) return;
     subagentPolicy.save(subagentPolicy.policy, { ...mainNode, ...task });
   };
   const start = () => {

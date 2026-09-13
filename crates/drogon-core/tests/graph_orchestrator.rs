@@ -31,6 +31,9 @@ while [ $# -gt 0 ]; do
  case "$1" in --workspace) workspace="$2"; shift 2;; *) shift;; esac
 done
 label=$(sed -n 's/.*"label": *"\([^"]*\)".*/\1/p' "$recipe" | head -1)
+# What a node's runtime (and the agent it launches) can see: the daemon's own
+# CLI shims first on PATH, bound to this data dir and workspace, no session.
+printf '%s\n%s\n%s\n%s\n' "$DROGON_DATA_DIR" "$DROGON_WORKSPACE_ID" "${PATH%%:*}" "${DROGON_SESSION_ID:-unset}" > "$workspace/env-seen"
 if [ -f "$workspace/pause-fixture" ]; then
  sleep 60 &
  child=$!
@@ -45,14 +48,15 @@ run_id="run_fixture_$$"
 run_dir="$workspace/.mentu/runs/$run_id"
 mkdir -p "$run_dir"
 touch "$run_dir/out" "$run_dir/err"
-bookkeeping=''
-case "$label" in
- *-1-test)
-  if ! grep -q '"expected_changes"' "$recipe"; then
-   bookkeeping=',"warnings":["role evidence was not declared"],"drift":{"created_paths":[".drogon/evaluations/'"$label"'.json"],"expected_paths":[],"unexpected_paths":[".drogon/evaluations/'"$label"'.json"]}'
-  fi
-  ;;
-esac
+# Every real step changes the workspace (the main agent does the work, the
+# tester writes its evidence, the reviewer fixes findings) and the pinned
+# runtime reports each created path as drift. The daemon must read that as
+# advisory for orchestrator runs — and must never declare `expected_changes`,
+# which makes the runtime auto-commit the matching changes in the owner's repo.
+bookkeeping=',"drift":{"created_paths":["work.txt",".drogon/evaluations/'"$label"'.json"],"expected_paths":[],"unexpected_paths":["work.txt",".drogon/evaluations/'"$label"'.json"]}'
+if grep -q '"expected_changes"' "$recipe"; then
+ bookkeeping=',"warnings":["expected_changes declared: the runtime would auto-commit"]'
+fi
 printf '{"run_id":"%s","recipe_name":"fixture","started_at":"2026-01-01T00:00:00Z","ended_at":"2026-01-01T00:00:01Z","outcome":"ok","cloud_mode":"local-only","steps":[{"label":"%s","backend":"shell","outcome":"ok","exit_code":0,"duration_seconds":0,"attempts":1,"output_file":"out","error_file":"err"%s}],"hooks":[]}' "$run_id" "$label" "$bookkeeping" > "$run_dir/run.json"
 echo "Run record: $run_dir/run.json"
 "#;
@@ -189,6 +193,28 @@ fn daemon_runs_off_mode_and_both_roles_with_snapshot_policy_and_fallback() {
     let off = fixture.settled();
     assert_eq!(off["status"], "passed");
     assert_eq!(off["steps"].as_array().unwrap().len(), 1);
+    // The daemon binds its canonical data dir (macOS tempdirs live under /private).
+    let data_dir = fixture.root.path().join("data").canonicalize().unwrap();
+    let env_seen = fs::read_to_string(fixture.root.path().join("workspace/env-seen")).unwrap();
+    let seen: Vec<&str> = env_seen.lines().collect();
+    assert_eq!(
+        seen[0],
+        data_dir.to_str().unwrap(),
+        "DROGON_DATA_DIR reaches the node runtime"
+    );
+    assert_eq!(
+        seen[1], fixture.workspace,
+        "DROGON_WORKSPACE_ID reaches the node runtime"
+    );
+    assert_eq!(
+        seen[2],
+        data_dir.join("bin").to_str().unwrap(),
+        "the daemon's CLI shims lead the node runtime's PATH"
+    );
+    assert_eq!(
+        seen[3], "unset",
+        "a node runtime carries no session identity"
+    );
 
     fixture.policy(true, 2);
     fixture.start();

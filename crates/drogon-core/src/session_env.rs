@@ -163,24 +163,7 @@ fn session_env_assignments(
     inherited_path_value: Option<&str>,
     path_delimiter: char,
 ) -> Vec<(String, String)> {
-    let shim = format!("{data_dir}/bin");
-    let path_value = match inherited_path_value {
-        Some(current) if !current.is_empty() => {
-            let rest: Vec<&str> = current
-                .split(path_delimiter)
-                .filter(|entry| !entry.is_empty() && *entry != shim)
-                .collect();
-            if rest.is_empty() {
-                shim
-            } else {
-                format!(
-                    "{shim}{path_delimiter}{}",
-                    rest.join(&path_delimiter.to_string())
-                )
-            }
-        }
-        _ => shim,
-    };
+    let path_value = shim_first_path(data_dir, inherited_path_value, path_delimiter);
     vec![
         (path_key.to_string(), path_value),
         ("DROGON_DATA_DIR".to_string(), data_dir.to_string()),
@@ -198,6 +181,68 @@ fn session_env_assignments(
         // `supports-hyperlinks` gate that would otherwise drop them.
         ("FORCE_HYPERLINK".to_string(), "1".to_string()),
     ]
+}
+
+/// The inherited `PATH` with this data dir's shim directory first (and any
+/// earlier copy of it dropped), so `drogon-cli` resolves to the shims the
+/// daemon installed for exactly this data dir.
+fn shim_first_path(
+    data_dir: &str,
+    inherited_path_value: Option<&str>,
+    path_delimiter: char,
+) -> String {
+    let shim = format!("{data_dir}/bin");
+    match inherited_path_value {
+        Some(current) if !current.is_empty() => {
+            let rest: Vec<&str> = current
+                .split(path_delimiter)
+                .filter(|entry| !entry.is_empty() && *entry != shim)
+                .collect();
+            if rest.is_empty() {
+                shim
+            } else {
+                format!(
+                    "{shim}{path_delimiter}{}",
+                    rest.join(&path_delimiter.to_string())
+                )
+            }
+        }
+        _ => shim,
+    }
+}
+
+/// Environment for a process the daemon runs on a workspace's behalf that
+/// is not a session: a Work Graph node's runtime and the agent it launches.
+/// The daemon's own CLI shims come first on `PATH`, bound to this data dir
+/// and workspace, so the `drogon-cli graph …` verbs the node prompts name
+/// resolve without the owner installing anything. No session identity is
+/// exported: a parent session the daemon itself inherited must never become
+/// the recorded parent of what the node creates. Everything else the daemon
+/// holds is inherited unchanged (fixture scenarios ride the daemon env).
+pub(crate) fn apply_to_workspace_process(
+    cmd: &mut std::process::Command,
+    data_dir: &Path,
+    workspace_id: &str,
+) {
+    let data_dir_text = data_dir.to_string_lossy();
+    let (path_key, inherited) = inherited_path();
+    #[cfg(windows)]
+    let delimiter = ';';
+    #[cfg(not(windows))]
+    let delimiter = ':';
+    cmd.env(
+        &path_key,
+        shim_first_path(&data_dir_text, inherited.as_deref(), delimiter),
+    );
+    cmd.env("DROGON_DATA_DIR", data_dir_text.as_ref());
+    cmd.env("DROGON_WORKSPACE_ID", workspace_id);
+    for key in [
+        "DROGON_SESSION_ID",
+        "DROGON_TERMINAL",
+        "DROGON_SESSION_INCARNATION",
+    ] {
+        cmd.env_remove(key);
+    }
 }
 
 /// Applies the session environment to a PTY command: strips inherited
@@ -385,6 +430,43 @@ pub(crate) fn harness_hook_env(cli: &str, incarnation: &str) -> Vec<(String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_process_env_binds_the_daemon_cli_without_a_session_identity() {
+        let mut cmd = std::process::Command::new("true");
+        cmd.env("DROGON_SESSION_ID", "inherited-session");
+        cmd.env("DROGON_TERMINAL", "1");
+        cmd.env("DROGON_FIXTURE_SCENARIO", "kept");
+        apply_to_workspace_process(&mut cmd, Path::new("/data/x"), "ws-1");
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        let get = |name: &str| envs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+        assert_eq!(get("DROGON_DATA_DIR"), Some(Some("/data/x".into())));
+        assert_eq!(get("DROGON_WORKSPACE_ID"), Some(Some("ws-1".into())));
+        assert_eq!(get("DROGON_FIXTURE_SCENARIO"), Some(Some("kept".into())));
+        assert_eq!(
+            get("DROGON_SESSION_ID"),
+            Some(None),
+            "removed, never inherited"
+        );
+        assert_eq!(get("DROGON_TERMINAL"), Some(None));
+        let path = envs
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+            .and_then(|(_, v)| v.clone())
+            .expect("PATH is set");
+        assert!(
+            path.starts_with("/data/x/bin"),
+            "the daemon's shim dir leads PATH: {path}"
+        );
+    }
     use std::os::unix::fs::PermissionsExt;
 
     fn assignments(data_dir: &str, inherited: Option<&str>) -> Vec<(String, String)> {

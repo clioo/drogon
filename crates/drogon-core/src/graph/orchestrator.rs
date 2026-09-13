@@ -434,8 +434,7 @@ impl Engine {
             return Ok(());
         };
         let node = node_for_step(run, &candidate);
-        let result_relative_path = result_path(&node.id);
-        let result_path = root.join(&result_relative_path);
+        let result_path = root.join(result_path(&node.id));
         std::fs::create_dir_all(result_path.parent().unwrap())
             .map_err(|e| error::io_error(e.to_string()))?;
         // Each attempt must write fresh evidence; an earlier attempt cannot certify it.
@@ -453,12 +452,13 @@ impl Engine {
                 &compiler::PiProviderDefaults::from_env(),
             )?;
             let runtime = crate::mentu::runtime::require_verified_runtime(self.data_dir())?;
-            // Role agents are explicitly instructed to create this evidence file. The
-            // runtime's workspace attestation must know that file is an intentional
-            // output; main tasks remain unconstrained and advisory as before.
-            if run.phase != "main" {
-                compiled.recipe["steps"][0]["expected_changes"] = json!([result_relative_path]);
-            }
+            // No `expected_changes` on any phase, on purpose. The main and
+            // review agents change the workspace by design and the test
+            // agent writes its evidence file; the daemon reads the runtime's
+            // drift as advisory for graph runs (`WorkspaceAttestation`) and
+            // reads the verdict from `result_path` itself. Declaring paths
+            // here would make the pinned runtime auto-commit every matching
+            // change as `chore: mentu-recipes step …` in the owner's repo.
             compiler::validate_and_persist(&runtime, &root, &mut compiled)?;
             if let Some(finding) = compiled.findings.iter().find(|finding| finding.is_error()) {
                 return Err(error::invalid_argument(finding.message.clone()));

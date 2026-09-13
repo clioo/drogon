@@ -103,14 +103,17 @@ function Chip({ children }: { children: React.ReactNode }): React.JSX.Element {
 
 /** F0: BEFORE "Run workflow" launches anything that is not the free local
  *  default, the canvas must say which runtime will be spawned and that it
- *  is paid/external — never a silent spawn. Shows only when the adversarial
- *  loop is actually configured to run (nothing automated otherwise). */
+ *  is paid/external — never a silent spawn. Shows when the policy's
+ *  runtimes will actually be spawned: the adversarial loop's testers and
+ *  reviewers, or the depth-one children a Delegate leader dispatches on
+ *  the same approved runtimes. Direct mode runs only the main agent, whose
+ *  runtime the owner picked by hand right above. */
 function RuntimeDisclosure({
   policy,
 }: {
   policy: GraphPolicy;
 }): React.JSX.Element | null {
-  if (!policy.adversarial.enabled) return null;
+  if (!policy.adversarial.enabled && !policy.delegate) return null;
   const runtime = policyFirstRuntime(policy);
   const free = isFreeDefaultRuntime(runtime);
   return (
@@ -877,6 +880,13 @@ export function OrchestratorCanvas({
                 <div
                   className="w-40 rounded-lg border border-border p-3 text-sm"
                   data-testid="orchestrator-terminal"
+                  data-state={
+                    running
+                      ? "in-progress"
+                      : durableRun.status === "passed"
+                        ? "ready"
+                        : "failed"
+                  }
                 >
                   {!running ? "Last run: " : ""}
                   {durableRun.status === "passed"
