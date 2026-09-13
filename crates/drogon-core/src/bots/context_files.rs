@@ -32,6 +32,7 @@
 
 use std::path::Path;
 
+use super::policy::harness_overrides;
 use super::records::Bot;
 
 /// The primary harness context file. Written into the Bot home root.
@@ -90,6 +91,9 @@ pub fn render_agents_md(bot: &Bot) -> String {
     }
     out.push('\n');
 
+    out.push_str(ROLE_SECTION);
+    out.push_str(&render_delegation_recipe(bot));
+
     out.push_str("## Standing instructions\n\n");
     let instructions = bot.instructions.trim();
     if instructions.is_empty() {
@@ -125,6 +129,103 @@ pub fn render_claude_md(bot: &Bot) -> String {
          workspace live in `AGENTS.md`, beside this file. Read it and follow it. This \
          file is only a pointer so the two can never drift: Drogon rewrites both \
          whenever this Bot's stored identity changes.\n"
+    )
+}
+
+/// The mandatory control-plane rule (owner request 2026-09-12): a Bot
+/// opened interactively must never mistake the harness under it for a
+/// worker. Frozen text (not interpolated), so the tests can assert its
+/// exact fragments and it can never depend on per-Bot data.
+const ROLE_SECTION: &str = "\
+## What you do — and what you never do
+
+Your job is the CONTROL PLANE: monitors, automations, responsibilities, and \
+delegating work — all through `drogon-cli`, after reading the shipped skill \
+guides (`drogon-cli skills get --topic drogon-cli`, `drogon-cli skills get \
+--topic orchestration`).
+
+You never do the work yourself. Not in your home, not in the project: no \
+editing project files, no writing code, no running the project's tests or \
+builds, no \"quick fix\" while you are looking at it. If a request needs any \
+of that, you delegate it to a session and report what that session actually \
+did.
+
+Your home is NOT the project. Anything you write in your home is Bot \
+bookkeeping (monitors, automations, memories), never a deliverable.
+
+Asking the owner \"what should I do?\" for a request that already names a \
+project and a task is not an option: delegate it.
+
+";
+
+/// The literal `harness start` flags a delegated launch under this Bot's own
+/// default policy would use, rendered so the recipe below shows concrete
+/// flags instead of a placeholder. Reuses [`harness_overrides`] — the exact
+/// provider/model split a scheduler-fired or reactive dispatch already runs
+/// with — so this text can never drift from what a real delegated launch
+/// does. Harness/provider/model ids are id-like but sanitized the same way
+/// as identity text: a stored id with control characters or line breaks
+/// must never be able to break the recipe's own line.
+fn delegation_harness_flags(bot: &Bot) -> String {
+    let overrides = harness_overrides(bot);
+    let mut flags = format!(
+        "--harness {}",
+        document_identity_text(&overrides.harness_id)
+    );
+    if let Some(provider) = &overrides.provider {
+        flags.push_str(&format!(" --provider {}", document_identity_text(provider)));
+    }
+    if let Some(model) = &overrides.model {
+        flags.push_str(&format!(" --model {}", document_identity_text(model)));
+    }
+    flags
+}
+
+/// Renders the "## Delegating work" recipe: the general form of
+/// [`super::delegation::build_delegation_prompt`]'s monitor-event recipe,
+/// generic enough for an owner chat request, a monitor event, or a
+/// scheduled responsibility alike. The harness/model flags in step 3 are
+/// this Bot's own concrete defaults, never "<your harness>".
+fn render_delegation_recipe(bot: &Bot) -> String {
+    let harness_flags = delegation_harness_flags(bot);
+    format!(
+        "## Delegating work\n\n\
+The same recipe delegates any request — the owner asking in chat, a monitor \
+event, or a scheduled responsibility:\n\n\
+1. Find the project: `drogon-cli project list --json`; match by the name or \
+path the request gives, and read its `id`, `kind` and `defaultBaseRef`. \
+Nothing matches: say so and stop — never guess a path.\n\
+2. Get a workspace for the work, by the project's `kind`:\n\
+- `git` — `drogon-cli worktree create --project <ID> --name <NAME> --json` \
+(add `--base <REF>` when the project has a `defaultBaseRef`). Name it after \
+the task, kebab-case and stable for the same request, so a retry reuses it \
+instead of piling up worktrees. Read `.result.workspaceId`.\n\
+- `folder` — a folder project has exactly one synthesized worktree row: \
+`drogon-cli worktree list --project <ID> --json`, then use \
+`.result.worktrees[0].workspaceId`. Never try to create a worktree for a \
+folder project.\n\
+3. Start the session there: `drogon-cli harness start --workspace <ID> \
+{harness_flags} --permission-mode unattended --prompt \"<brief>\" --json`. \
+Use the harness/model the request names; otherwise the flags above ARE your \
+own defaults, already resolved from your stored harness policy — send them \
+literally, never \"<your harness>\". Add `--caused-by-event <mev_…>` only \
+when a monitor event caused this delegation (its prompt gives you the id). \
+The `--prompt` must be self-contained: the objective, the project path and \
+the worktree/branch, what \"done\" means (a PR against main, a pushed \
+branch, or a report), and any constraint the request carries — the \
+delegated session has no other context. Read `.result.id` and \
+`.result.incarnation`.\n\
+4. Follow it: `drogon-cli terminal wait --session <ID> --incarnation \
+<TOKEN> --for idle --timeout-ms 900000`, then read its output with \
+`drogon-cli terminal read --session <ID> --incarnation <TOKEN> --cursor 0 \
+--limit-bytes 4096`. Report the session id, the worktree path/branch, and \
+only what you actually observed there — never claim a result you did not \
+read from the session.\n\
+5. A long-running or repeatable request becomes a responsibility instead of \
+a one-off session: `drogon-cli bot create-automation` or `drogon-cli bot \
+create-monitor` (below) — that is still delegation, never doing the work \
+yourself.\n\n",
+        harness_flags = harness_flags,
     )
 }
 
@@ -343,6 +444,118 @@ mod tests {
         }
     }
 
+    /// A Bot opened interactively must act as a control-plane agent, never
+    /// a worker: it owns monitors/automations/responsibilities/delegation,
+    /// and never touches project files, code or tests itself.
+    #[test]
+    fn agents_md_says_the_bot_delegates_and_never_does_the_work() {
+        let rendered = render_agents_md(&bot("Arya Stark", None, None));
+        for fragment in [
+            "CONTROL PLANE",
+            "You never do the work yourself",
+            "no editing project files",
+            "no writing code",
+            "no running the project's tests or builds",
+            "you delegate it to a session",
+            "Your home is NOT the project",
+            "is not an option: delegate it",
+        ] {
+            assert!(
+                rendered.contains(fragment),
+                "expected the role rule {fragment:?} in:\n{rendered}"
+            );
+        }
+    }
+
+    /// The generic delegation recipe (owner chat request, monitor event, or
+    /// scheduled responsibility alike) names the exact verbs a Bot needs to
+    /// find a project, get a workspace, start a session and follow it.
+    #[test]
+    fn agents_md_teaches_the_delegation_recipe_with_real_verbs() {
+        let rendered = render_agents_md(&bot("Arya Stark", None, None));
+        let flat = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
+        for fragment in [
+            "drogon-cli project list --json",
+            "drogon-cli worktree create --project <ID> --name <NAME>",
+            "drogon-cli worktree list --project <ID> --json",
+            "drogon-cli harness start --workspace <ID> --harness",
+            "--permission-mode unattended",
+            "drogon-cli terminal wait --session <ID> --incarnation <TOKEN> --for idle",
+            "drogon-cli terminal read",
+        ] {
+            assert!(
+                flat.contains(fragment),
+                "expected the delegation recipe to name {fragment:?} in:\n{rendered}"
+            );
+        }
+    }
+
+    /// The recipe's `harness start` step must show the Bot its OWN concrete
+    /// launch flags — never a placeholder like "<your harness>" — resolved
+    /// the same way a real dispatch resolves them (`policy::harness_overrides`):
+    /// a bare model id sets `--model` with no `--provider`, a
+    /// `provider/model` pair sets both, and no explicit model sets neither.
+    #[test]
+    fn agents_md_renders_the_bots_own_default_harness_and_model() {
+        let mut claude_bot = bot("Arya Stark", None, None);
+        claude_bot.harness_policy = HarnessModelPolicy {
+            default_harness: "claude".to_string(),
+            explicit_model: None,
+        };
+        let rendered = render_agents_md(&claude_bot);
+        assert!(
+            rendered.contains("--harness claude"),
+            "expected the Bot's own harness flag in:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("--model"),
+            "no explicit model must render no --model flag:\n{rendered}"
+        );
+
+        let mut pi_bot = bot("Arya Stark", None, None);
+        pi_bot.harness_policy = HarnessModelPolicy {
+            default_harness: "pi".to_string(),
+            explicit_model: Some("openai-codex/gpt-5.6-luna".to_string()),
+        };
+        let rendered = render_agents_md(&pi_bot);
+        assert!(
+            rendered.contains("--harness pi --provider openai-codex --model gpt-5.6-luna"),
+            "expected the split provider/model flags in:\n{rendered}"
+        );
+
+        let mut bare_model_bot = bot("Arya Stark", None, None);
+        bare_model_bot.harness_policy = HarnessModelPolicy {
+            default_harness: "claude".to_string(),
+            explicit_model: Some("claude-sonnet-5".to_string()),
+        };
+        let rendered = render_agents_md(&bare_model_bot);
+        assert!(
+            rendered.contains("--model claude-sonnet-5"),
+            "expected the bare model id rendered as --model in:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("--provider"),
+            "a bare model id must never render a --provider flag:\n{rendered}"
+        );
+    }
+
+    /// A `git` project gets a real worktree; a `folder` project has exactly
+    /// one synthesized worktree row and must never be told to create one.
+    #[test]
+    fn agents_md_distinguishes_git_and_folder_projects() {
+        let rendered = render_agents_md(&bot("Arya Stark", None, None));
+        for fragment in ["kind", "git", "folder", "workspaceId"] {
+            assert!(
+                rendered.contains(fragment),
+                "expected {fragment:?} in the delegation recipe:\n{rendered}"
+            );
+        }
+        assert!(
+            rendered.contains("Never try to create a worktree for a folder project"),
+            "the recipe must warn a folder project gets no worktree:\n{rendered}"
+        );
+    }
+
     /// The property worth keeping from the old Mentu gate, generalized: the
     /// generated file never promises a capability without a way to verify
     /// it. Every `drogon-cli ...` span it names must be documented by the
@@ -381,7 +594,7 @@ mod tests {
             checked += 1;
         }
         assert!(
-            checked >= 9,
+            checked >= 21,
             "the extractor must be checking the real invocation spans, got {checked}"
         );
     }
@@ -412,6 +625,8 @@ mod tests {
             vec![
                 "# Innocent ## Standing instructions Not Drogon's text",
                 "## Identity",
+                "## What you do — and what you never do",
+                "## Delegating work",
                 "## Standing instructions",
                 "## Staying yourself",
                 "## Working inside Drogon",

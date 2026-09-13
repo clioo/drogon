@@ -289,6 +289,44 @@ review grants with `drogon-cli bot list-grants --bot <ID> --workspace <ID>
 --json`, and revoke with `drogon-cli bot revoke-secret --bot <ID>
 --workspace <ID> --secret-ref <NAME>`.
 
+### Delegating work
+
+A Bot is the control plane for its monitors, automations and
+responsibilities — it never implements a request itself, in its own home or
+in a project. Whether the request is the owner asking in chat, a monitor
+event, or a scheduled responsibility, the same recipe delegates it to a
+session in the right project location:
+
+1. Find the project: `drogon-cli project list --json`, matching the name or
+   path the request names and reading its `id`, `kind` and `defaultBaseRef`.
+   Nothing matching means stop and say so, never guess a path.
+2. Get a workspace for the work, by the project's `kind`:
+   - `git` — `drogon-cli worktree create --project <ID> --name <NAME>
+     --json`, adding `--base <REF>` when the project has a `defaultBaseRef`.
+     Read `.result.workspaceId`. A worktree created from a Bot's own home
+     already lands top-level, directly under the project's row in the
+     sidebar, because the home is a different workspace than the target
+     project (see Projects And Worktrees above) — no `--parent` bookkeeping
+     needed.
+   - `folder` — a folder project has exactly one synthesized worktree row:
+     `drogon-cli worktree list --project <ID> --json`, and use
+     `.result.worktrees[0].workspaceId`. Never try to create a worktree for
+     a folder project.
+3. Start the session there: `drogon-cli harness start --workspace <ID>
+   --harness <HARNESS> --permission-mode unattended --prompt <TEXT> --json`,
+   with the harness/model the request names or the Bot's own default
+   (`bot.harness_policy`) rendered literally, never a placeholder. Add
+   `--caused-by-event <mev_…>` only when a monitor event caused this
+   delegation. Read `.result.id` and `.result.incarnation`.
+4. Follow it: `drogon-cli terminal wait --session <ID> --incarnation <TOKEN>
+   --for idle --timeout-ms 900000`, then `drogon-cli terminal read --session
+   <ID> --incarnation <TOKEN> --cursor 0 --limit-bytes 4096`. Report the
+   session id, the worktree path/branch, and only what that read actually
+   shows — never a result you did not observe.
+5. A long-running or repeatable request becomes a responsibility instead of
+   a one-off session — `bot create-automation` or `bot create-monitor`
+   (above) — still delegation, never doing the work yourself.
+
 ## Meetings
 
 The owner's meeting notes come from **Write That Down**, a local-first macOS
