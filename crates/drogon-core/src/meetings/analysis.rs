@@ -956,6 +956,7 @@ mod tests {
     /// One real one-shot run against a shell fixture: the argv planner, the
     /// spawn, the bounded read and the exit-code handling are all exercised
     /// for real, and no model is invoked.
+    #[cfg(unix)]
     mod local_run {
         use super::*;
         use std::os::unix::fs::PermissionsExt as _;

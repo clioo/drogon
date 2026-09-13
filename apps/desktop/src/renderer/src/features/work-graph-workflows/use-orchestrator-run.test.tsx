@@ -317,6 +317,46 @@ it("keeps shared snapshots scoped while switching workspaces", async () => {
   expect(view.result.current.run?.workspaceId).toBe("ws-2");
 });
 
+it("polls a new workspace while an old workspace mutation is pending", async () => {
+  const second = {
+    ...run,
+    id: "run-2",
+    workspaceId: "ws-2",
+    updatedAt: "2026-09-13T00:00:02Z",
+  };
+  let finishStart: ((value: unknown) => void) | undefined;
+  const bridge = {
+    graphOrchestratorStart: vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishStart = resolve;
+        }),
+    ),
+    graphOrchestratorStatus: vi.fn(async ({ workspaceId }) => ({
+      ok: true,
+      result: { run: workspaceId === "ws" ? run : second },
+    })),
+  } as unknown as GraphBridge;
+  const view = renderHook(
+    ({ workspaceId }) => useOrchestratorRun(bridge, workspaceId, 10),
+    { initialProps: { workspaceId: "ws" } },
+  );
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-1"));
+  let launch!: Promise<void>;
+  act(() => {
+    launch = view.result.current.start(main);
+  });
+
+  view.rerender({ workspaceId: "ws-2" });
+
+  await waitFor(() => expect(view.result.current.run?.id).toBe("run-2"));
+  await act(async () => {
+    finishStart?.({ ok: true, result: { run } });
+    await launch;
+  });
+  expect(view.result.current.run?.id).toBe("run-2");
+});
+
 it("reports lost contact without converting a running run to exited or passed", async () => {
   const bridge = {
     graphOrchestratorStart: async () => ({ ok: true, result: { run } }),

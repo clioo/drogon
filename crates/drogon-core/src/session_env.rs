@@ -467,6 +467,7 @@ mod tests {
             "the daemon's shim dir leads PATH: {path}"
         );
     }
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     fn assignments(data_dir: &str, inherited: Option<&str>) -> Vec<(String, String)> {
@@ -738,6 +739,7 @@ mod tests {
     fn install_is_idempotent_and_replaces_stale_shims() {
         let data = tempfile::tempdir().unwrap();
         install_shims(data.path()).unwrap();
+        #[cfg(unix)]
         for name in ["drogon-cli", "drogon"] {
             let path = bin_dir(data.path()).join(name);
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
