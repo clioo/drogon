@@ -35,6 +35,7 @@ const DEFAULT_RUN_TIMEOUT: Duration =
 const DECLARED_TIMEOUT_GRACE: Duration = Duration::from_secs(60);
 const VERIFY_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const HOOK_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+const CLOUD_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const RUNTIME_PROCESS_TEARDOWN: Duration = Duration::from_secs(4);
 /// A malformed or hostile recipe cannot turn the daemon's safety watchdog off.
 const MAX_RUN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
@@ -283,7 +284,23 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
             .before_run_hooks
             .saturating_add(recipe.after_run_hooks),
     );
-    let mut declared = run_hooks;
+    // The pinned runtime gives each cloud request a 10-second URLSession
+    // timeout. A cloud-enabled fresh run can start and end its remote run;
+    // step evaluation adds one request for every locally completed step.
+    // Resume/retry skip start/end, but this conservative envelope stays
+    // bounded and avoids deriving invocation-specific state from mutable files.
+    let cloud_requests = if recipe.cloud_enabled {
+        let evaluations = if recipe.cloud_evaluate_steps {
+            recipe.steps.len() as u64
+        } else {
+            0
+        };
+        CLOUD_REQUEST_TIMEOUT
+            .saturating_mul(evaluations.saturating_add(2).try_into().unwrap_or(u32::MAX))
+    } else {
+        Duration::ZERO
+    };
+    let mut declared = run_hooks.saturating_add(cloud_requests);
     let mut every_step_declared = true;
     for step in &recipe.steps {
         let (step_budget, is_declared) = step_run_budget(step, &recipe);
@@ -1961,6 +1978,28 @@ mod timeout_tests {
             }]
         }"#;
         assert_eq!(recipe_run_timeout(recipe), Duration::from_secs(1_322));
+    }
+
+    #[test]
+    fn cloud_request_limits_are_part_of_the_outer_budget() {
+        let steps: Vec<_> = (0..20)
+            .map(|index| serde_json::json!({"label": format!("step-{index}"), "timeout": 1}))
+            .collect();
+        let recipe = serde_json::to_vec(&serde_json::json!({
+            "cloud": {"enabled": true, "evaluate_steps": true},
+            "steps": steps,
+        }))
+        .unwrap();
+        assert_eq!(recipe_run_timeout(&recipe), Duration::from_secs(380));
+
+        let local_only = br#"{
+            "cloud": {"enabled": false, "evaluate_steps": true},
+            "steps": [{"label": "main", "timeout": 1}]
+        }"#;
+        assert_eq!(
+            recipe_run_timeout(local_only),
+            Duration::from_secs(1) + RUNTIME_PROCESS_TEARDOWN + DECLARED_TIMEOUT_GRACE
+        );
     }
 
     #[test]

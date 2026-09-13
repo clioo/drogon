@@ -236,6 +236,8 @@ pub(crate) struct RecipeStepBudget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RecipeBudget {
     pub steps: Vec<RecipeStepBudget>,
+    pub cloud_enabled: bool,
+    pub cloud_evaluate_steps: bool,
     pub before_run_hooks: u64,
     pub after_run_hooks: u64,
     pub before_step_hooks: u64,
@@ -261,6 +263,7 @@ pub(crate) fn parse_recipe_budget(source: &str) -> Result<RecipeBudget, String> 
         .ok_or_else(|| "Recipe has no \"steps\" array.".to_string())?;
     let hooks = recipe.get("hooks");
     let hook_count = |name| string_array_len(hooks.and_then(|value| value.get(name)));
+    let cloud = recipe.get("cloud");
     Ok(RecipeBudget {
         steps: steps
             .into_iter()
@@ -289,6 +292,14 @@ pub(crate) fn parse_recipe_budget(source: &str) -> Result<RecipeBudget, String> 
                 ),
             })
             .collect(),
+        cloud_enabled: cloud
+            .and_then(|value| value.get("enabled"))
+            .and_then(Value::as_bool)
+            == Some(true),
+        cloud_evaluate_steps: cloud
+            .and_then(|value| value.get("evaluate_steps"))
+            .and_then(Value::as_bool)
+            == Some(true),
         before_run_hooks: hook_count("before_run"),
         after_run_hooks: hook_count("after_run"),
         before_step_hooks: hook_count("before_step"),
