@@ -67,7 +67,9 @@
 //!   rows.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime};
+#[cfg(unix)]
+use std::time::Instant;
+use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
 
@@ -469,6 +471,7 @@ pub fn probe_host_catalog_with_config(
     }
     #[cfg(not(unix))]
     {
+        let _ = config;
         CatalogProbe {
             catalog: HostCatalog {
                 harness,

@@ -20,10 +20,12 @@ mod mentu_contract;
 mod resume_store;
 mod selection;
 
+#[cfg(unix)]
+pub use catalog::PI_PROBE_LINK_FILES;
 pub use catalog::{
-    CatalogEntry, CatalogProbe, EnumerationStatus, HostCatalog, PI_PROBE_LINK_FILES,
-    PROBE_OUTPUT_CAP, PROBE_RESERVED_CLEANUP, PROBE_TIMEOUT_DEFAULT, PendingProbeChild,
-    ProbeChildRole, ProbeConfigSources, ProbeProvenance, freshness_token, probe_host_catalog,
+    CatalogEntry, CatalogProbe, EnumerationStatus, HostCatalog, PROBE_OUTPUT_CAP,
+    PROBE_RESERVED_CLEANUP, PROBE_TIMEOUT_DEFAULT, PendingProbeChild, ProbeChildRole,
+    ProbeConfigSources, ProbeProvenance, freshness_token, probe_host_catalog,
     probe_host_catalog_with_budget, probe_host_catalog_with_config,
 };
 pub use discovery::{HarnessAvailability, HarnessInstallation, discover, resolve_executable};

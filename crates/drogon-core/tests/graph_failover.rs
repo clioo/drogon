@@ -33,20 +33,38 @@ use sha2::{Digest, Sha256};
 static SERIAL: Mutex<()> = Mutex::new(());
 
 struct RuntimeOverride {
+    previous_path: Option<std::ffi::OsString>,
     _lock: MutexGuard<'static, ()>,
 }
 
 impl RuntimeOverride {
-    fn set(expected_sha256: Option<String>) -> Self {
+    fn set(expected_sha256: Option<String>, fixture_bin: &std::path::Path) -> Self {
         let lock = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         runtime::set_expected_sha256_override(expected_sha256);
-        Self { _lock: lock }
+        let previous_path = std::env::var_os("PATH");
+        let mut paths = vec![fixture_bin.to_path_buf()];
+        if let Some(existing) = &previous_path {
+            paths.extend(std::env::split_paths(existing));
+        }
+        let fixture_path = std::env::join_paths(paths).unwrap();
+        // This integration-test binary serializes every test for the entire
+        // lifetime of the override. The PATH fixture cannot race another
+        // test here and is restored before releasing the lock.
+        unsafe { std::env::set_var("PATH", fixture_path) };
+        Self {
+            previous_path,
+            _lock: lock,
+        }
     }
 }
 
 impl Drop for RuntimeOverride {
     fn drop(&mut self) {
         runtime::set_expected_sha256_override(None);
+        match &self.previous_path {
+            Some(path) => unsafe { std::env::set_var("PATH", path) },
+            None => unsafe { std::env::remove_var("PATH") },
+        }
     }
 }
 
@@ -147,7 +165,10 @@ impl Fixture {
         let bin_path = bin_dir.join("mentu-recipes");
         fs::write(&bin_path, FIXTURE_SCRIPT).unwrap();
         fs::set_permissions(&bin_path, fs::Permissions::from_mode(0o755)).unwrap();
-        let _override = RuntimeOverride::set(Some(sha256_hex(FIXTURE_SCRIPT.as_bytes())));
+        let pi_path = bin_dir.join("pi");
+        fs::write(&pi_path, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&pi_path, fs::Permissions::from_mode(0o755)).unwrap();
+        let _override = RuntimeOverride::set(Some(sha256_hex(FIXTURE_SCRIPT.as_bytes())), &bin_dir);
 
         let engine = Engine::open(&data_dir).unwrap();
         let workspace_dir = root.path().join("workspace");
