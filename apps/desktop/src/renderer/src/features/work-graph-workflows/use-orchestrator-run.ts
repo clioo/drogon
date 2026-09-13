@@ -5,6 +5,13 @@ import type {
   OrchestratorRun,
 } from "../../../../shared/graph-contract";
 
+type RunObserver = (workspaceId: string, run: OrchestratorRun | null) => void;
+const runObservers = new Set<RunObserver>();
+
+function publishRun(workspaceId: string, run: OrchestratorRun | null): void {
+  for (const observer of runObservers) observer(workspaceId, run);
+}
+
 export function useOrchestratorRun(
   bridge: GraphBridge | null,
   workspaceId: string,
@@ -14,16 +21,32 @@ export function useOrchestratorRun(
   const [run, setRun] = useState<OrchestratorRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [refreshEpoch, setRefreshEpoch] = useState(0);
   const scope = useRef(workspaceId);
   const mutation = useRef(0);
   const mutating = useRef(false);
   scope.current = workspaceId;
   useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
+    const observe: RunObserver = (observedWorkspaceId, observed) => {
+      if (observedWorkspaceId !== scope.current) return;
+      mutation.current++;
+      setRun(observed);
+      setError(null);
+      setRefreshEpoch((epoch) => epoch + 1);
+    };
+    runObservers.add(observe);
+    return () => {
+      runObservers.delete(observe);
+    };
+  }, []);
+  useEffect(() => {
     setRun(null);
     setError(null);
     setBusy(false);
+  }, [bridge, workspaceId]);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
     if (!bridge?.graphOrchestratorStatus) return;
     const poll = async () => {
       const version = mutation.current;
@@ -38,9 +61,13 @@ export function useOrchestratorRun(
         ) {
           if (result.ok) {
             const observed = result.result.run;
-            setRun(observed);
+            // Orchestrator runs are durable. A later empty observation cannot
+            // erase already-seen evidence; workspace/bridge changes reset it.
+            setRun((current) => observed ?? current);
             setError(null);
-            if (
+            if (observed?.steps.some((step) => step.status === "dispatching")) {
+              nextPollMs = Math.min(pollMs, 100);
+            } else if (
               !observed ||
               (observed.status !== "running" && observed.status !== "stopping")
             ) {
@@ -58,7 +85,7 @@ export function useOrchestratorRun(
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [bridge, workspaceId, pollMs, inactivePollMs]);
+  }, [bridge, workspaceId, pollMs, inactivePollMs, refreshEpoch]);
   const start = useCallback(
     async (main: DesignableIntentNode) => {
       if (!bridge?.graphOrchestratorStart) return;
@@ -74,6 +101,7 @@ export function useOrchestratorRun(
         if (result.ok) {
           setRun(result.result.run);
           setError(null);
+          publishRun(workspaceId, result.result.run);
         } else setError(result.error.message);
       } catch (reason) {
         if (scope.current === workspaceId) setError(String(reason));
@@ -95,8 +123,10 @@ export function useOrchestratorRun(
         runId: run.id,
       });
       if (scope.current !== workspaceId) return;
-      if (result.ok) setRun(result.result.run);
-      else setError(result.error.message);
+      if (result.ok) {
+        setRun(result.result.run);
+        publishRun(workspaceId, result.result.run);
+      } else setError(result.error.message);
     } catch (reason) {
       if (scope.current === workspaceId) setError(String(reason));
     } finally {
@@ -118,6 +148,7 @@ export function useOrchestratorRun(
       if (result.ok) {
         setRun(result.result.run);
         setError(null);
+        publishRun(workspaceId, result.result.run);
       } else setError(result.error.message);
     } catch (reason) {
       if (scope.current === workspaceId) setError(String(reason));

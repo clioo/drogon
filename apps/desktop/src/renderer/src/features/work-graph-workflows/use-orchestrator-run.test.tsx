@@ -8,7 +8,10 @@ import type {
 import { DEFAULT_GRAPH_POLICY } from "../../../../shared/graph-contract";
 import { useOrchestratorRun } from "./use-orchestrator-run";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 const main = {
   id: "orchestrator-main",
   title: "Main agent",
@@ -56,6 +59,23 @@ it("starts concrete main work with optional adversarial mode off", async () => {
   expect(view.result.current.run?.policy.adversarial.enabled).toBe(false);
 });
 
+it("publishes a successful launch to other mounted workflow observers", async () => {
+  const start = vi.fn(async () => ({ ok: true, result: { run } }));
+  const launcher = renderHook(() =>
+    useOrchestratorRun(
+      { graphOrchestratorStart: start } as unknown as GraphBridge,
+      "ws",
+    ),
+  );
+  const observerBridge = {} as GraphBridge;
+  const observer = renderHook(() =>
+    useOrchestratorRun(observerBridge, "ws"),
+  );
+  await act(async () => {});
+  await act(async () => launcher.result.current.start(main));
+  expect(observer.result.current.run?.id).toBe("run-1");
+});
+
 it("reports lost contact without converting a running run to exited or passed", async () => {
   const bridge = {
     graphOrchestratorStart: async () => ({ ok: true, result: { run } }),
@@ -69,6 +89,39 @@ it("reports lost contact without converting a running run to exited or passed", 
     expect(view.result.current.error).toContain("contact lost"),
   );
   expect(view.result.current.run?.status).toBe("running");
+});
+
+it("polls promptly while a run is still dispatching", async () => {
+  vi.useFakeTimers();
+  const dispatching: OrchestratorRun = {
+    ...run,
+    steps: [
+      {
+        nodeId: main.id,
+        phase: "main",
+        iteration: 1,
+        status: "dispatching",
+        isFallback: false,
+        attempts: [],
+      },
+    ],
+  };
+  const status = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: true, result: { run: dispatching } })
+    .mockResolvedValue({ ok: true, result: { run } });
+  const bridge = { graphOrchestratorStatus: status } as unknown as GraphBridge;
+  renderHook(() => useOrchestratorRun(bridge, "ws", 3000, 10_000));
+  await act(async () => {});
+  expect(status).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(99);
+  });
+  expect(status).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(status).toHaveBeenCalledTimes(2);
 });
 
 it("ignores a stale poll started during launch that resolves after the launch", async () => {
