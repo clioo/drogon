@@ -26,10 +26,13 @@ use crate::error;
 use super::run_record::WorkspaceAttestation;
 use super::{run_record, storage};
 
-/// Wall-clock budget for one `mentu-recipes` invocation before this process
-/// kills it. Generous: a real recipe can run long individual steps, but an
-/// unbounded child is never acceptable.
-const RUN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// Watchdog for recipes that declare no step budgets. A recipe with explicit
+/// `timeout` values gets their sum plus cleanup grace instead: the outer daemon
+/// must never kill a valid 60-minute graph step at the old 30-minute default.
+const DEFAULT_RUN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const DECLARED_TIMEOUT_GRACE: Duration = Duration::from_secs(60);
+/// A malformed or hostile recipe cannot turn the daemon's safety watchdog off.
+const MAX_RUN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Combined stdout+stderr retained for diagnostics only (never shown as the
 /// evidence of record — that is always the per-step files run.json points
@@ -214,7 +217,55 @@ enum WaitOutcome {
     Cancelled,
 }
 
-fn wait_bounded(child: &Arc<Mutex<Child>>, cancelled: &Arc<AtomicBool>) -> WaitOutcome {
+fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
+    let declared_seconds = serde_json::from_slice::<serde_json::Value>(recipe_bytes)
+        .ok()
+        .and_then(|recipe| {
+            recipe
+                .get("steps")
+                .and_then(serde_json::Value::as_array)
+                .map(|steps| {
+                    steps.iter().fold(0_u64, |total, step| {
+                        total.saturating_add(
+                            step.get("timeout")
+                                .and_then(serde_json::Value::as_u64)
+                                .unwrap_or(0),
+                        )
+                    })
+                })
+        })
+        .unwrap_or(0);
+    if declared_seconds == 0 {
+        return DEFAULT_RUN_TIMEOUT;
+    }
+    Duration::from_secs(declared_seconds)
+        .saturating_add(DECLARED_TIMEOUT_GRACE)
+        .max(DEFAULT_RUN_TIMEOUT)
+        .min(MAX_RUN_TIMEOUT)
+}
+
+fn invocation_run_timeout(
+    invocation: &Invocation<'_>,
+    snapshot: Option<&StagedSnapshot>,
+) -> Duration {
+    if let Some(snapshot) = snapshot {
+        return recipe_run_timeout(&snapshot.recipe_bytes);
+    }
+    match invocation {
+        Invocation::Run { recipe_path } => fs::read(recipe_path)
+            .map(|bytes| recipe_run_timeout(&bytes))
+            .unwrap_or(DEFAULT_RUN_TIMEOUT),
+        // Runtime-side state owns the original recipe on a resume/retry. Keep
+        // the daemon bounded without reinterpreting mutable historical files.
+        Invocation::Resume { .. } | Invocation::RetryStep { .. } => MAX_RUN_TIMEOUT,
+    }
+}
+
+fn wait_bounded(
+    child: &Arc<Mutex<Child>>,
+    cancelled: &Arc<AtomicBool>,
+    run_timeout: Duration,
+) -> WaitOutcome {
     const COOPERATIVE_GRACE: Duration = Duration::from_secs(2);
     const REAP_GRACE: Duration = Duration::from_secs(2);
     const TIMEOUT_GRACE: Duration = Duration::from_secs(5);
@@ -237,7 +288,7 @@ fn wait_bounded(child: &Arc<Mutex<Child>>, cancelled: &Arc<AtomicBool>) -> WaitO
             exited_within(child, REAP_GRACE);
             return WaitOutcome::Cancelled;
         }
-        if start.elapsed() >= RUN_TIMEOUT {
+        if start.elapsed() >= run_timeout {
             // Same two-phase stop as cancel: TERM first so the supervisor
             // reaps its steps, KILL only on refusal.
             term_tree(child);
@@ -321,6 +372,7 @@ pub fn launch_run(
             "Snapshots ride fresh runs; retry resumes runtime-side state.",
         ));
     }
+    let run_timeout = invocation_run_timeout(&invocation, snapshot.as_ref());
     let internal_id = uuid::Uuid::new_v4().to_string();
     let started_at = crate::now_rfc3339();
 
@@ -480,7 +532,7 @@ pub fn launch_run(
         }
     });
     std::thread::spawn(move || {
-        let outcome = wait_bounded(&child_arc, &cancelled);
+        let outcome = wait_bounded(&child_arc, &cancelled, run_timeout);
         registry().remove(&watch_id);
         finish(
             &watcher_db,
@@ -1662,6 +1714,47 @@ pub fn materialize_snapshot(
         return Err(error::io_error("cannot write snapshot manifest."));
     }
     Ok(MaterializedSnapshot { dir, recipe_path })
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_step_budgets_outlive_the_recipe_they_guard() {
+        let recipe = serde_json::json!({
+            "steps": [
+                { "label": "main", "timeout": crate::graph::compiler::AGENT_STEP_TIMEOUT_SECONDS },
+                { "label": "verify", "timeout": crate::graph::compiler::SHELL_STEP_TIMEOUT_SECONDS }
+            ]
+        });
+        let timeout = recipe_run_timeout(&serde_json::to_vec(&recipe).unwrap());
+        assert_eq!(
+            timeout,
+            Duration::from_secs(
+                crate::graph::compiler::AGENT_STEP_TIMEOUT_SECONDS
+                    + crate::graph::compiler::SHELL_STEP_TIMEOUT_SECONDS
+                    + DECLARED_TIMEOUT_GRACE.as_secs()
+            )
+        );
+        assert!(
+            timeout > Duration::from_secs(crate::graph::compiler::AGENT_STEP_TIMEOUT_SECONDS),
+            "the daemon watchdog must not preempt a valid graph step"
+        );
+    }
+
+    #[test]
+    fn absent_and_hostile_budgets_stay_bounded() {
+        assert_eq!(
+            recipe_run_timeout(br#"{"steps":[{}]}"#),
+            DEFAULT_RUN_TIMEOUT
+        );
+        let hostile = serde_json::json!({ "steps": [{ "timeout": u64::MAX }] });
+        assert_eq!(
+            recipe_run_timeout(&serde_json::to_vec(&hostile).unwrap()),
+            MAX_RUN_TIMEOUT
+        );
+    }
 }
 
 #[cfg(test)]
