@@ -31,7 +31,7 @@ const run: OrchestratorRun = {
   iteration: 1,
   steps: [],
   startedAt: "now",
-  updatedAt: "now",
+  updatedAt: "2026-09-13T00:00:00Z",
 };
 
 it("observes a daemon run after remount and never stops it on unmount", async () => {
@@ -210,8 +210,16 @@ it("does not publish run evidence across separate bridge capability scopes", asy
 });
 
 it("publishes stop and resume results within one gated bridge scope", async () => {
-  const stopped: OrchestratorRun = { ...run, status: "stopped" };
-  const resumed: OrchestratorRun = { ...run, id: "run-2" };
+  const stopped: OrchestratorRun = {
+    ...run,
+    status: "stopped",
+    updatedAt: "2026-09-13T00:00:00.000000001Z",
+  };
+  const resumed: OrchestratorRun = {
+    ...run,
+    id: "run-2",
+    updatedAt: "2026-09-13T00:00:00.000000002Z",
+  };
   let current = run;
   const bridge = {
     graphOrchestratorStatus: vi.fn(async () => ({
@@ -241,12 +249,12 @@ it("publishes stop and resume results within one gated bridge scope", async () =
 it("refreshes instead of regressing peers to a delayed mutation snapshot", async () => {
   const older: OrchestratorRun = {
     ...run,
-    updatedAt: "2026-09-13T00:00:01Z",
+    updatedAt: "2026-09-13T00:00:00.000000001Z",
   };
   const newer: OrchestratorRun = {
     ...run,
     phase: "review",
-    updatedAt: "2026-09-13T00:00:02Z",
+    updatedAt: "2026-09-13T00:00:00.000000002Z",
   };
   let current = older;
   let holdStatus = false;
@@ -287,12 +295,12 @@ it("does not regress the controller to a stale non-null mutation reply", async (
   const older: OrchestratorRun = {
     ...run,
     phase: "main",
-    updatedAt: "2026-09-13T00:00:01Z",
+    updatedAt: "2026-09-13T00:00:00.000000002Z",
   };
   const newer: OrchestratorRun = {
     ...run,
     phase: "review",
-    updatedAt: "2026-09-13T00:00:02Z",
+    updatedAt: "2026-09-13T00:00:00.000000002Z",
   };
   const bridge = {
     graphOrchestratorStatus: vi.fn(async () => ({
@@ -311,6 +319,47 @@ it("does not regress the controller to a stale non-null mutation reply", async (
 
   expect(view.result.current.run?.phase).toBe("review");
   expect(view.result.current.run?.updatedAt).toBe(newer.updatedAt);
+});
+
+it("keeps nanosecond peer polls monotonic when responses arrive out of order", async () => {
+  const older: OrchestratorRun = {
+    ...run,
+    updatedAt: "2026-09-13T00:00:00.000000001Z",
+  };
+  const newer: OrchestratorRun = {
+    ...run,
+    phase: "review",
+    updatedAt: "2026-09-13T00:00:00.000000002Z",
+  };
+  const finishPolls: Array<
+    (value: { ok: true; result: { run: OrchestratorRun } }) => void
+  > = [];
+  const bridge = {
+    graphOrchestratorStatus: vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishPolls.push(resolve);
+        }),
+    ),
+  } as unknown as GraphBridge;
+  const first = renderHook(() =>
+    useOrchestratorRun(bridge, "ws", 10_000),
+  );
+  const second = renderHook(() =>
+    useOrchestratorRun(bridge, "ws", 10_000),
+  );
+  await waitFor(() => expect(finishPolls).toHaveLength(2));
+
+  await act(async () => {
+    finishPolls[1]?.({ ok: true, result: { run: newer } });
+  });
+  await waitFor(() => expect(second.result.current.run?.phase).toBe("review"));
+  await act(async () => {
+    finishPolls[0]?.({ ok: true, result: { run: older } });
+  });
+
+  expect(first.result.current.run?.phase).toBe("review");
+  expect(second.result.current.run?.phase).toBe("review");
 });
 
 it("keeps shared snapshots scoped while switching workspaces", async () => {

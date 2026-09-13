@@ -59,18 +59,33 @@ function publishAvailability(
   }
 }
 
+function sortableRunTimestamp(value: string): string | null {
+  // Date.parse truncates the daemon's nanosecond revision to milliseconds.
+  const match = value.match(
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/,
+  );
+  return match ? `${match[1]}.${(match[2] ?? "").padEnd(9, "0")}Z` : null;
+}
+
 function newestRunSnapshot(
   current: OrchestratorRun | null,
   observed: OrchestratorRun | null,
 ): OrchestratorRun | null {
   if (!observed) return current;
   if (!current) return observed;
+  const currentKey = sortableRunTimestamp(current.updatedAt);
+  const observedKey = sortableRunTimestamp(observed.updatedAt);
+  if (currentKey && observedKey) {
+    if (observedKey === currentKey) return current;
+    return observedKey > currentKey ? observed : current;
+  }
   const currentTime = Date.parse(current.updatedAt);
   const observedTime = Date.parse(observed.updatedAt);
   if (Number.isFinite(currentTime) && Number.isFinite(observedTime)) {
-    return observedTime >= currentTime ? observed : current;
+    if (observedTime === currentTime) return current;
+    return observedTime > currentTime ? observed : current;
   }
-  return observed.updatedAt >= current.updatedAt ? observed : current;
+  return observed.updatedAt > current.updatedAt ? observed : current;
 }
 
 function newestScopedRunSnapshot(
