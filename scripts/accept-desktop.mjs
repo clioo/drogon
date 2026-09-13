@@ -33,7 +33,7 @@ import { probeRenderedFiles } from "./probe-rendered-files.mjs";
 import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
 import { probeRenderedMentuTab } from "./probe-rendered-mentu-tab.mjs";
-import { probeGraphDesigner } from "./probe-graph-designer.mjs";
+import { probeOrchestrator } from "./probe-orchestrator.mjs";
 import { probeRenderedDaemonRestart } from "./probe-rendered-daemon-restart.mjs";
 import { probeRenderedChangedDaemonBinary } from "./probe-rendered-changed-daemon-binary.mjs";
 import {
@@ -47,7 +47,6 @@ import {
   probeAutomationRunNowDetail,
   probeBotPresetManualRun,
   probeJumpPaletteSwitch,
-  probeMentuApproveRunEvidence,
   probePiAgentStateWorkingIdle,
   probeTasksStartIssue,
   probeThemePersistsAcrossRelaunch,
@@ -967,16 +966,17 @@ try {
     report.checks.push(
       ...(await probeRenderedTabs({ page, workspace, output })),
     );
-    // The graph-design probe runs FIRST: it needs a workspace with NO
-    // .drogon/graph.json (the honest empty state and the design journey).
-    // The Mentu tab probe below then writes its own fixture graph.
+    // The orchestrator probe runs FIRST: it needs a workspace with NO
+    // .drogon/graph.json (the honest initial state and the configure-and-run
+    // journey). The Mentu tab probe below then writes its own fixture graph.
     report.checks.push(
-      ...(await probeGraphDesigner({
+      ...(await probeOrchestrator({
         page,
         workspace,
         output,
         cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
         dataDir,
+        workspaceId: registered.id,
       })),
     );
     // Mentu-as-tab: the reported bug (the "+" menu's Mentu entry used to
@@ -1041,9 +1041,12 @@ try {
   }
   // R16-BB: sealed journeys J1 (agent state), J5 (jump palette), J6
   // (Tasks start), J7 (Automations Run now), J8 (Bots preset + manual
-  // run), J9 (Mentu approve & run) and J10 (theme across relaunch). Each
-  // probe deletes the bots/automations/worktrees it created. Runs against
-  // the sealed bundle, on --files, or with DROGON_PROBE_SURFACES=1.
+  // run) and J10 (theme across relaunch). Each probe deletes the
+  // bots/automations/worktrees it created. Runs against the sealed
+  // bundle, on --files, or with DROGON_PROBE_SURFACES=1. (J9, Mentu
+  // approve & run through the right-sidebar recipe panel, was retired by
+  // 854c330b along with `<MentuPanel>` itself — see
+  // probe-rendered-mentu-tab.mjs's header comment.)
   if (bundle || withFiles || process.env.DROGON_PROBE_SURFACES === "1") {
     const journeyCli = packaged
       ? packaged.cli
@@ -1070,16 +1073,6 @@ try {
     }
     report.checks.push(
       ...(await probeJumpPaletteSwitch({ page, root, output })),
-    );
-    report.checks.push(
-      ...(await probeMentuApproveRunEvidence({
-        page,
-        workspace,
-        output,
-        cli: journeyCli,
-        dataDir,
-        workspaceId: registered.id,
-      })),
     );
     if (process.env.DROGON_SKIP_MODEL_JOURNEYS !== "1") {
       report.checks.push(

@@ -2,9 +2,11 @@
 // (R16-BB): J1 agent state (Pi local-model session working → idle), J5 jump
 // palette workspace switch, J6 Tasks start-from-issue, J7 Automations Run
 // now with a real agent run + detail snapshot, J8 Bots preset create +
-// manual responsibility run on the owned provider fixture, J9 Mentu approve & run
-// with step evidence, and J10 Settings theme persisting across a packaged
-// relaunch. J12's segment assertions live in probe-packaged-surfaces.mjs.
+// manual responsibility run on the owned provider fixture, and J10 Settings
+// theme persisting across a packaged relaunch. J12's segment assertions
+// live in probe-packaged-surfaces.mjs. (J9, Mentu approve & run with step
+// evidence through the right-sidebar recipe panel, was retired along with
+// `<MentuPanel>` itself — see the note where it used to live, below.)
 //
 // Every probe is a real CDP journey against the running app: no mocked
 // service, no mocked UI. Inference runs only against the sealed, loopback,
@@ -860,170 +862,14 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, 
   ];
 }
 
-// ---------------------------------------------------------------------------
-// J9: Mentu — approve and run a 2-step shell recipe, assert statuses + evidence
-// ---------------------------------------------------------------------------
-
-const MENTU_TWO_STEP_RECIPE = {
-  name: "acceptance-two-step",
-  description: "sealed acceptance probe: two shell steps",
-  steps: [
-    {
-      label: "write-marker",
-      backend: "shell",
-      prompt:
-        "printf 'MENTU-STEP-ONE\\n' > mentu-step-one.txt && printf 'MENTU-STEP-ONE\\n'",
-      timeout: 30,
-    },
-    {
-      label: "read-marker",
-      backend: "shell",
-      prompt: "cat mentu-step-one.txt",
-      timeout: 30,
-    },
-  ],
-};
-
-export async function probeMentuApproveRunEvidence({
-  page,
-  workspace,
-  output,
-  cli,
-  dataDir,
-  workspaceId,
-}) {
-  await closeExitedStripTabs(page);
-  // The right sidebar collapses at the foundation probe's narrow 760px
-  // viewport; Mentu's real sidebar journey is exercised at the desktop width.
-  await page.setViewportSize({ width: 1440, height: 900 });
-  const recipesDir = path.join(workspace, ".mentu", "recipes");
-  await mkdir(recipesDir, { recursive: true });
-  await writeFile(
-    path.join(recipesDir, "acceptance-two-step.json"),
-    JSON.stringify(MENTU_TWO_STEP_RECIPE, null, 2) + "\n",
-  );
-  // The right-sidebar Mentu panel is a keep-alive mount: earlier journeys in
-  // this acceptance may already have mounted it, and the panel has no
-  // refresh affordance of its own (the catalog follows the workspace's
-  // files-changed tick, so it also picks up this file live). The reload is
-  // kept as an explicit fresh-mount guarantee for this journey — the same
-  // state a real app open produces — never as a substitute for live
-  // discovery, which the packaged surfaces journey asserts directly.
-  await page.reload();
-  await page
-    .getByRole("button", { name: "Reveal active workspace", exact: true })
-    .waitFor({ timeout: 30000 });
-  // The Run Recipe control delegates the run to the workspace's MAIN agent
-  // session: it must exist and be idle, because the UI never calls
-  // `mentu.run` itself any more. The stub harness (writeAgentSettingsFixtures)
-  // stands in for an agent that read the drogon-cli skill and answers a
-  // Mentu prompt by running the documented `drogon-cli mentu run`.
-  const started = await runCliJson(
-    cli,
-    [
-      "--data-dir",
-      dataDir,
-      "--json",
-      "harness",
-      "start",
-      "--workspace",
-      workspaceId,
-      "--harness",
-      "claude",
-    ],
-    { timeout: 30000 },
-  );
-  assert.equal(started.ok, true, JSON.stringify(started));
-  const agentSessionId = started.result.id;
-  const agentDeadline = Date.now() + 30000;
-  for (;;) {
-    const listed = await runCliJson(
-      cli,
-      [
-        "--data-dir",
-        dataDir,
-        "--json",
-        "terminal",
-        "list",
-        "--workspace",
-        workspaceId,
-      ],
-      { timeout: 30000 },
-    );
-    const agent = listed.result.sessions.find(
-      (session) => session.id === agentSessionId,
-    );
-    if (agent && agent.agentState === "idle") break;
-    if (Date.now() >= agentDeadline)
-      throw new Error(
-        `the main agent session never went idle: ${JSON.stringify(agent ?? null)}`,
-      );
-    await delay(500);
-  }
-  await page
-    .locator('.right-sidebar-header-drag button[aria-label="Work Graph"]')
-    .click();
-  const panel = page.locator('[data-testid="mentu-panel"]');
-  await panel.waitFor();
-  const recipeSelect = panel.getByRole("combobox", {
-    name: "Recipe",
-    exact: true,
-  });
-  await recipeSelect.waitFor();
-  await recipeSelect.click({ timeout: 15000 });
-  await page
-    .getByRole("option", { name: "acceptance-two-step", exact: true })
-    .click();
-  await panel.getByText("write-marker", { exact: true }).waitFor();
-  await panel.getByText("read-marker", { exact: true }).waitFor();
-  // Review → approve & run, the two-phase gating the fork renders.
-  await panel.getByRole("button", { name: "Review Run", exact: true }).click();
-  await panel
-    .getByRole("button", { name: "Approve & run", exact: true })
-    .waitFor();
-  await shot(page, output, "mentu-review.png");
-  await panel.getByRole("button", { name: "Approve & run", exact: true }).click();
-  await page
-    .locator('[data-testid="mentu-run-status"]')
-    .getByText(/Succeeded/i)
-    .waitFor({ timeout: 120000 });
-  // Evidence: per-step statuses and the captured stdout of both steps.
-  // The view toggle is a role=tab (the fork's inspector tablist), not a
-  // button. Each step card renders a `stdout output` pre holding the
-  // captured stream; there is no per-step aria-label on the streams.
-  await panel.getByRole("tab", { name: "Evidence", exact: true }).click();
-  const evidence = page.locator('[data-testid="recipe-evidence"]');
-  await evidence.waitFor();
-  await evidence.getByText("write-marker", { exact: true }).waitFor();
-  await evidence.getByText("read-marker", { exact: true }).waitFor();
-  const evidenceText = (await evidence.innerText()) ?? "";
-  assert.match(
-    evidenceText,
-    /Succeeded|passed/i,
-    "both steps must show a passing status",
-  );
-  const stdoutBlocks = await evidence
-    .locator('pre[aria-label="stdout output"]')
-    .allTextContents();
-  assert.ok(
-    stdoutBlocks.some((text) => text.includes("MENTU-STEP-ONE")),
-    "the first step's stdout evidence must carry the marker it wrote",
-  );
-  assert.ok(
-    stdoutBlocks.some((text) => text.includes("MENTU-STEP-ONE")),
-    "the second step's stdout evidence must carry the marker it read",
-  );
-  for (const colorScheme of ["light", "dark"]) {
-    const selection = await selectSettingsTheme(page, colorScheme);
-    await evidence.waitFor();
-    await captureThemeSurface(page, path.join(output, `mentu-evidence-${colorScheme}.png`), selection);
-  }
-  await selectSettingsTheme(page, "light");
-  return [
-    "mentu-approve-and-run-two-step-recipe-succeeds",
-    "mentu-evidence-shows-both-step-statuses-and-outputs",
-  ];
-}
+// J9 (Mentu — approve and run a 2-step shell recipe through the
+// right-sidebar panel) was retired by 854c330b along with `<MentuPanel>`
+// itself: the panel this journey drove
+// (`.right-sidebar-header-drag button[aria-label="Work Graph"]` ->
+// `[data-testid="mentu-panel"]`) is mounted nowhere outside its own test
+// files any more — owner-confirmed intentional (a recipe is a compilation
+// target the graph emits, never something hand-run from this panel). See
+// probe-rendered-mentu-tab.mjs's header comment for the full account.
 
 // ---------------------------------------------------------------------------
 // J7: Automations — Run now from the UI, run row + detail snapshot

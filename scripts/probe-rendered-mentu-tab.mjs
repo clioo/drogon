@@ -12,20 +12,24 @@
 // status` agrees with the daemon's runtime report (never an optimistic
 // guess) and that the workspace's recipe inventory is real.
 //
-// Since the work-graph takeover, the tab's CONTENT is the WORK GRAPH read
-// from `<workspace>/.drogon/graph.json`: this probe now also proves the
-// graph renders the real fixture DAG with the daemon's own statuses
-// (including `unverifiable`), that a node's evidence (exit code, streams,
-// drift) renders ON the node, and that the Refresh re-read flips a node's
-// status. The recipe RUN journey (select → review → approve & run →
-// per-step evidence) moved intact to the right-sidebar Mentu panel, which
-// still owns the recipe surface — same assertions, same runtime, new
-// entry point.
+// Since the work-graph takeover, the tab's CONTENT is the Orchestrator
+// (`work-graph-pane`); the multi-node fixture-DAG rendering this probe used
+// to exercise here (per-node projected statuses, a "Refresh" button, an
+// inspector), and the recipe RUN journey (select → review → approve & run →
+// per-step evidence) this probe used to drive through the right-sidebar
+// Mentu panel, were both retired by 854c330b ("make orchestrator the only
+// graph interface"): the single main-task node bound to the workspace's
+// live session replaced the per-node designer/read view (that property now
+// lives in probe-orchestrator.mjs, against the shipped UI), and
+// `<MentuPanel>` (the recipe select/run/evidence UI) is mounted nowhere
+// outside its own tests any more — the right sidebar's "Work Graph" activity
+// tab now renders a single "Open Work Graph" button to the same Orchestrator
+// tab. `drogon-cli mentu status`/`mentu open` still exercise the CLI-facing
+// half of the recipe surface, unaffected by the takeover.
 
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
 import {
   captureThemeSurface,
@@ -53,100 +57,6 @@ const MENTU_TAB_RECIPE = {
     },
   ],
 };
-
-// The work-graph fixture: the exact contract shape the daemon writes.
-// One leader (succeeded, with usage), one shell build (running first,
-// then succeeded after the Refresh flip), one agent review left
-// `unverifiable` (loss of contact — its own outcome), and one disabled
-// node (not to relaunch). The failed node carries streams + drift so the
-// inspector assertions exercise evidence ON the node.
-function workGraphFixture(buildStatus) {
-  return {
-    version: 1,
-    intent: {
-      nodes: [
-        {
-          id: "n0",
-          title: "Plan the migration",
-          harness: "pi",
-          model: "qwen3.8-flash-next-nvidia-nvfp4",
-          dependsOn: [],
-          prompt: "Read the repo and plan the migration.",
-          enabled: true,
-        },
-        {
-          id: "n1",
-          title: "Build workspace",
-          harness: "shell",
-          model: "",
-          dependsOn: ["n0"],
-          prompt: "pnpm build",
-          enabled: true,
-        },
-        {
-          id: "n2",
-          title: "Review changes",
-          harness: "pi",
-          model: "",
-          dependsOn: ["n0"],
-          prompt: "Review the diff.",
-          enabled: true,
-        },
-        {
-          id: "n3",
-          title: "Old exporter",
-          harness: "pi",
-          model: "",
-          dependsOn: ["n1"],
-          prompt: "Retired node.",
-          enabled: false,
-        },
-      ],
-    },
-    state: {
-      updatedAt: "2026-09-11T12:00:00.000Z",
-      nodes: [
-        {
-          id: "n0",
-          status: "succeeded",
-          runId: "run-accept-1",
-          mentuRunId: "run_accept_1",
-          startedAt: "2026-09-11T11:58:00.000Z",
-          endedAt: "2026-09-11T11:59:00.000Z",
-          // The daemon's real evidence shape: the run-record step.
-          evidence: {
-            runId: "run-accept-1",
-            mentuRunId: "run_accept_1",
-            step: {
-              label: "n0",
-              backend: "pi",
-              status: "succeeded",
-              exitCode: 0,
-              durationSeconds: 60,
-              attempts: 1,
-              outputPath: ".drogon/runs/run-accept-1/n0.out",
-              errorPath: null,
-              error: null,
-              model: "qwen3.8-flash-next-nvidia-nvfp4",
-              usage: {
-                inputTokens: 120,
-                outputTokens: 45,
-                usageKnown: true,
-                invalid: [],
-              },
-            },
-          },
-        },
-        { id: "n1", status: buildStatus },
-        {
-          id: "n2",
-          status: "unverifiable",
-          lastError: "contact lost mid-run",
-        },
-      ],
-    },
-  };
-}
 
 async function shot(page, output, name) {
   await page.screenshot({
@@ -182,14 +92,6 @@ async function cliJson(cli, args, timeout = 30000) {
       return JSON.parse(error.stdout);
     throw error;
   }
-}
-
-/** Waits until the locator's text contains the expected fragment. */
-async function waitForText(locator, fragment, timeout = 15000) {
-  await locator
-    .getByText(fragment, { exact: false })
-    .first()
-    .waitFor({ timeout });
 }
 
 export async function probeRenderedMentuTab({
@@ -291,15 +193,31 @@ export async function probeRenderedMentuTab({
   assert.equal(await mentuTab.getAttribute("aria-selected"), "true");
   checks.push("mentu-tab-is-focusable-like-any-other-tab");
 
-  // 4. The work-graph fixture INTENT is written into the workspace and
-  //    the tab renders it through the daemon's projecting read: the state
-  //    half is the daemon's alone, so a hand-written state fixture is
-  //    re-projected from real observation on every read (no runs in the
-  //    ledger yet → idle; the disabled node → blocked). The rich
-  //    recorded-evidence renderings (unverifiable, drift, streams, token
-  //    totals) are pinned by WorkGraphPane's own fixture tests, and the
-  //    REAL run journey is the graph-design probe, which runs a real
-  //    graph and asserts live statuses, evidence and intent immutability.
+  // 4. The probe's own recipe is discoverable in the workspace's
+  //    `.mentu/recipes` (section 7 below asserts the daemon finds it and
+  //    it is valid). (The multi-node work-graph fixture this section used
+  //    to hand-write into `.drogon/graph.json` and re-read via a
+  //    "Refresh" button rendered dead UI: 854c330b's Orchestrator
+  //    takeover replaced WorkGraphPane's per-node badges/inspector with a
+  //    single main-task node bound to the workspace's live session, so
+  //    there is no shipped surface left for a hand-authored multi-node
+  //    DAG, projected idle/blocked statuses, or a manual refresh control
+  //    — grep confirms zero remaining `work-graph-refresh`/
+  //    `data-work-graph-status`/`work-graph-totals`/
+  //    `work-graph-node-inspector` in the renderer. probe-orchestrator.mjs
+  //    now covers the real-run/real-state property this section stood
+  //    for, against the shipped single-node model. The recipe RUN journey
+  //    that used to follow here (select → review → approve & run →
+  //    per-step evidence in the right-sidebar Mentu panel) is ALSO
+  //    dropped: `<MentuPanel>` is mounted nowhere outside its own test
+  //    files any more — grep confirms it — and the right sidebar's
+  //    "Work Graph" activity tab now renders `WorkGraphPanel`
+  //    (work-graph-panel.tsx), a single "Open Work Graph" button that
+  //    only opens the SAME Orchestrator tab this probe already opened in
+  //    section 1. There is no shipped UI left to select-and-run a named
+  //    recipe by hand; `mentu status`/`mentu open` below still exercise
+  //    the CLI-facing half of that surface, which does not depend on
+  //    MentuPanel.)
   //    The viewport is normalized first — earlier probes leave narrow
   //    captures behind.
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -309,158 +227,6 @@ export async function probeRenderedMentuTab({
     path.join(recipesDir, "acceptance-mentu-tab.json"),
     `${JSON.stringify(MENTU_TAB_RECIPE, null, 2)}\n`,
   );
-  const drogonDir = path.join(workspace, ".drogon");
-  await mkdir(drogonDir, { recursive: true });
-  const graphPath = path.join(drogonDir, "graph.json");
-  await writeFile(graphPath, `${JSON.stringify(workGraphFixture("running"), null, 2)}\n`);
-  await panel.locator('[data-testid="work-graph-refresh"]').click();
-  await panel.getByText("Plan the migration", { exact: true }).waitFor({ timeout: 15000 });
-  await panel.getByText("Build workspace", { exact: true }).waitFor();
-  await panel.getByText("Review changes", { exact: true }).waitFor();
-  // The daemon's projection: no ledger entries yet → every enabled node
-  // is honestly idle, and the disabled node is blocked (never runnable).
-  const idleBadges = panel.locator('[data-work-graph-status="idle"]');
-  await idleBadges.first().waitFor({ timeout: 15000 });
-  assert.equal(
-    await idleBadges.count(),
-    3,
-    "three enabled nodes must project as idle",
-  );
-  const blockedBadge = panel.locator('[data-work-graph-status="blocked"]');
-  await blockedBadge.waitFor();
-  const totals = panel.locator('[data-testid="work-graph-totals"]');
-  await totals.waitFor();
-  assert.match((await totals.innerText()) ?? "", /Cost: unavailable/);
-  assert.match(
-    (await totals.innerText()) ?? "",
-    /4 nodes/,
-    `the aggregate strip must count the designed nodes, saw ${JSON.stringify(await totals.innerText())}`,
-  );
-  checks.push("work-graph-tab-renders-the-fixture-dag-with-projected-statuses");
-
-  // 4b. The honest never-run rendering: selecting a node with no state
-  //     record says the daemon has not recorded a run, never a made-up
-  //     outcome; the disabled node says it is not to relaunch.
-  await panel.locator('[data-work-graph-node="n0"]').click();
-  const inspector = panel.locator('[data-testid="work-graph-node-inspector"]');
-  await inspector.waitFor();
-  // The projection wrote an idle record with no evidence: the honest
-  // never-run rendering (the no-record-at-all variant is covered in the
-  // pane's own fixture tests).
-  await waitForText(inspector, "No evidence recorded yet for this node.");
-  await waitForText(inspector, "Drogon estimates nothing");
-  await panel.locator('[data-work-graph-node="n3"]').click();
-  await waitForText(inspector, "not to relaunch");
-  checks.push("work-graph-never-run-nodes-render-honestly");
-
-  // 4c. The recipe RUN journey moved intact to the right-sidebar Mentu
-  //     panel, which owns the recipe surface since the takeover: select,
-  //     review, approve & run against the pinned runtime, then per-step
-  //     evidence. Same assertions the tab used to make — new entry point.
-  await page.locator('.right-sidebar-header-drag button[aria-label="Work Graph"]').click();
-  const sidePanel = page.locator('[data-testid="mentu-panel"]');
-  await sidePanel.waitFor();
-  const recipeSelect = sidePanel.getByRole("combobox", { name: "Recipe", exact: true });
-  await recipeSelect.click({ timeout: 15000 });
-  await page
-    .getByRole("option", { name: "acceptance-mentu-tab", exact: true })
-    .click();
-  await sidePanel.getByText("tab-step-one", { exact: true }).waitFor();
-  await sidePanel.getByText("tab-step-two", { exact: true }).waitFor();
-  checks.push("a-recipe-is-visible-in-the-mentu-panel");
-
-  // 4c-pre. The panel's run control DELEGATES to the workspace's MAIN agent
-  //     session (#441), so start a real harness session first — the shared
-  //     sealed fixture (probe-agent-settings.mjs) stands in for an agent
-  //     that read the drogon-cli skill and answers the prompt by invoking
-  //     the documented command. Without a live idle agent the click has no
-  //     target and the run can never start; this is what makes the journey
-  //     prove the whole button -> session -> agent -> CLI -> daemon -> run
-  //     chain.
-  const fixtureAgent = await cliJson(cli, [
-    "--data-dir",
-    dataDir,
-    "--json",
-    "harness",
-    "start",
-    "--workspace",
-    workspaceId,
-    "--harness",
-    "claude",
-  ]);
-  assert.equal(fixtureAgent.ok, true, JSON.stringify(fixtureAgent));
-  const agentSessionId = fixtureAgent.result.id;
-  const agentDeadline = Date.now() + 30000;
-  for (;;) {
-    const listed = await cliJson(cli, [
-      "--data-dir",
-      dataDir,
-      "--json",
-      "terminal",
-      "list",
-      "--workspace",
-      workspaceId,
-    ]);
-    const agent = listed.result.sessions.find(
-      (session) => session.id === agentSessionId,
-    );
-    if (agent && agent.agentState === "idle") break;
-    if (Date.now() >= agentDeadline)
-      throw new Error(
-        `the main agent session never went idle: ${JSON.stringify(agent ?? null)}`,
-      );
-    await delay(500);
-  }
-  // The shell's own session list must have caught up before the click, or
-  // the controller still believes the workspace has no main session and
-  // refuses the delegation it was about to make.
-  await sidePanel
-    .locator('[data-testid="mentu-main-session-hint"]')
-    .waitFor({ state: "hidden", timeout: 20000 });
-  checks.push("mentu-delegation-target-agent-session-idle");
-
-  // 4c-run. Drive the SAME review -> approve & run controller from the
-  //     panel: the click stages the review, the second approves that hash
-  //     and hands the run to the main agent session.
-  const runButton = sidePanel.locator('[data-testid="mentu-run"]');
-  await runButton.click();
-  // Review stages the exact recipe bytes; the second click approves that
-  // hash and hands the run to the workspace's main agent session.
-  await sidePanel.getByRole("button", { name: "Approve & run", exact: true }).waitFor({ timeout: 15000 });
-  await sidePanel.getByRole("button", { name: "Approve & run", exact: true }).click();
-  const runStatus = sidePanel.locator('[data-testid="mentu-run-status"]');
-  await runStatus.waitFor({ timeout: 180000 });
-  // Any terminal verdict renders here; the probe asserts WHICH one, so a
-  // failed run is reported as a failed run instead of a timeout.
-  await runStatus
-    .getByText(/Succeeded|Failed|Cancelled|Unavailable/i)
-    .waitFor({ timeout: 180000 });
-  const statusText = (await runStatus.innerText()) ?? "";
-  assert.match(
-    statusText,
-    /Succeeded/i,
-    `the recipe run must succeed, saw ${JSON.stringify(statusText)}; panel text: ${JSON.stringify((await sidePanel.innerText())?.slice(0, 2000))}`,
-  );
-  await sidePanel.getByRole("tab", { name: "Evidence", exact: true }).click();
-  const evidence = sidePanel.locator('[data-testid="recipe-evidence"]');
-  await evidence.waitFor();
-  await evidence.getByText("tab-step-one", { exact: true }).waitFor();
-  await evidence.getByText("tab-step-two", { exact: true }).waitFor();
-  const stdoutBlocks = await evidence
-    .locator('pre[aria-label="stdout output"]')
-    .allTextContents();
-  assert.ok(
-    stdoutBlocks.some((text) => text.includes("MENTU-TAB-STEP-ONE")),
-    `the first step's stdout evidence must carry its marker, saw ${JSON.stringify(stdoutBlocks)}`,
-  );
-  assert.ok(
-    stdoutBlocks.some((text) => text.includes("MENTU-TAB-STEP-TWO")),
-    `the second step's stdout evidence must carry its marker, saw ${JSON.stringify(stdoutBlocks)}`,
-  );
-  checks.push("mentu-panel-runs-a-recipe-and-shows-per-step-evidence");
-
-  // Back to the Mentu tab for the chrome checks below.
-  await mentuTab.click();
 
   // 5. A real theme switch (the Settings radio, persisted) with captures
   //    whose computed background/foreground are verified, then the
