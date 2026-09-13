@@ -254,6 +254,31 @@ fn string_array_len(value: Option<&Value>) -> u64 {
         .map_or(0, |values| values.len() as u64)
 }
 
+fn normalize_backend_name(value: &str) -> String {
+    value.trim().to_lowercase().replace('_', "-")
+}
+
+fn step_uses_pi(recipe: &Value, backend: &str) -> bool {
+    let normalized = normalize_backend_name(backend);
+    let provider = recipe.get("providers").and_then(|providers| {
+        providers
+            .get(backend)
+            .or_else(|| providers.get(&normalized))
+    });
+    let Some(provider) = provider else {
+        return normalized == "pi";
+    };
+    if provider.get("api").and_then(Value::as_str) != Some("cli") {
+        return false;
+    }
+    normalize_backend_name(
+        provider
+            .get("agent")
+            .and_then(Value::as_str)
+            .unwrap_or(backend),
+    ) == "pi"
+}
+
 /// Extends the same typed step parse used by `mentu.recipe` with every timing
 /// field owned by the pinned runtime. Mentu defaults to no retries and a
 /// one-second retry backoff.
@@ -298,13 +323,7 @@ pub(crate) fn parse_recipe_budget(source: &str) -> Result<RecipeBudget, String> 
                     .and_then(|verify| verify.get("git_clean_outside"))
                     .is_some(),
                 expected_changes: value.get("expected_changes").is_some(),
-                pi_preflight: step.backend.eq_ignore_ascii_case("pi")
-                    || recipe
-                        .get("providers")
-                        .and_then(|providers| providers.get(&step.backend))
-                        .and_then(|provider| provider.get("agent"))
-                        .and_then(Value::as_str)
-                        == Some("pi"),
+                pi_preflight: step_uses_pi(&recipe, &step.backend),
             })
             .collect(),
         cloud_enabled: cloud

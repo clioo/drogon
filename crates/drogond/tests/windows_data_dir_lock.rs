@@ -17,6 +17,11 @@ fn daemon_and_restore_locks_interoperate_in_both_orders() {
 
     let daemon = drogond::lock::acquire_exclusive(dir.path()).unwrap();
     assert_lock_held(
+        drogond::lock::acquire_exclusive(dir.path())
+            .err()
+            .expect("a second daemon lock must be refused"),
+    );
+    assert_lock_held(
         drogon_core::backups::lock::acquire_exclusive(dir.path())
             .err()
             .expect("restore lock must refuse the daemon holder"),

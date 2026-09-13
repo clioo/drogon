@@ -324,11 +324,11 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
             .before_run_hooks
             .saturating_add(recipe.after_run_hooks),
     );
-    // The pinned runtime gives each cloud request a 10-second URLSession
+    // The pinned runtime gives each cloud request a 10-second inactivity
     // timeout. A cloud-enabled fresh run can start and end its remote run;
     // step evaluation adds one request for every locally completed step.
-    // Resume/retry skip start/end, but this conservative envelope stays
-    // bounded and avoids deriving invocation-specific state from mutable files.
+    // Resume/retry skip start/end, but this conservative count avoids deriving
+    // invocation-specific state from mutable files.
     let cloud_requests = if recipe.cloud_enabled {
         let evaluations = if recipe.cloud_evaluate_steps {
             recipe.steps.len() as u64
@@ -351,7 +351,14 @@ fn recipe_run_timeout(recipe_bytes: &[u8]) -> Duration {
         every_step_declared &= is_declared;
         declared = declared.saturating_add(step_budget);
     }
-    bounded_declared_timeout(declared, every_step_declared)
+    // URLRequest.timeoutInterval can reset when more response data arrives; it
+    // is not a hard whole-resource deadline. Only the approved 24-hour outer
+    // safety cap can conservatively bound a cloud-enabled runtime invocation.
+    if recipe.cloud_enabled {
+        MAX_RUN_TIMEOUT
+    } else {
+        bounded_declared_timeout(declared, every_step_declared)
+    }
 }
 
 fn read_snapshot_file(path: &Path) -> Option<Vec<u8>> {
@@ -362,7 +369,9 @@ fn read_snapshot_file(path: &Path) -> Option<Vec<u8>> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
-        options.custom_flags(libc::O_NOFOLLOW);
+        // O_NOFOLLOW rejects symlinks; O_NONBLOCK keeps a planted FIFO or
+        // device node from blocking before the post-open regular-file check.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     #[cfg(windows)]
     {
@@ -2035,7 +2044,7 @@ mod timeout_tests {
     }
 
     #[test]
-    fn cloud_request_limits_are_part_of_the_outer_budget() {
+    fn cloud_request_limits_keep_the_hard_outer_cap() {
         let steps: Vec<_> = (0..20)
             .map(|index| serde_json::json!({"label": format!("step-{index}"), "timeout": 1}))
             .collect();
@@ -2044,10 +2053,7 @@ mod timeout_tests {
             "steps": steps,
         }))
         .unwrap();
-        assert_eq!(
-            recipe_run_timeout(&recipe),
-            Duration::from_secs(380) + workspace_baseline_budget().saturating_mul(41)
-        );
+        assert_eq!(recipe_run_timeout(&recipe), MAX_RUN_TIMEOUT);
 
         let local_only = br#"{
             "cloud": {"enabled": false, "evaluate_steps": true},
@@ -2065,11 +2071,10 @@ mod timeout_tests {
     #[test]
     fn pi_preflight_and_git_bookkeeping_limits_are_part_of_the_outer_budget() {
         let recipe = br#"{
-            "providers": {"pinned-pi": {"agent": "pi"}},
-            "cloud": {"enabled": true, "evaluate_steps": true},
+            "providers": {"pinned-pi": {"api": "cli", "agent": " PI "}},
             "steps": [{
                 "label": "main",
-                "backend": "pinned-pi",
+                "backend": "PINNED_PI",
                 "timeout": 1,
                 "max_retries": 1,
                 "expected_changes": ["src"],
@@ -2078,8 +2083,20 @@ mod timeout_tests {
         }"#;
         // Two adapter attempts: 10 s including teardown. Each attempt checks
         // Pi and Node (36 s including teardown), then 1 s retry backoff.
-        // Baselines/bookkeeping are 360 s, cloud requests 30 s, grace 60 s.
-        assert_eq!(recipe_run_timeout(recipe), Duration::from_secs(497));
+        // Baselines/bookkeeping are 360 s and grace is 60 s.
+        assert_eq!(recipe_run_timeout(recipe), Duration::from_secs(467));
+
+        let chat_provider = br#"{
+            "providers": {"pinned-pi": {"agent": "pi"}},
+            "steps": [{"label": "main", "backend": "pinned-pi", "timeout": 1}]
+        }"#;
+        assert_eq!(
+            recipe_run_timeout(chat_provider),
+            Duration::from_secs(1)
+                + RUNTIME_PROCESS_TEARDOWN
+                + DECLARED_TIMEOUT_GRACE
+                + workspace_baseline_budget().saturating_mul(3)
+        );
     }
 
     #[test]
@@ -2165,6 +2182,42 @@ mod timeout_tests {
             invocation_run_timeout(&resume, None, None),
             DEFAULT_RUN_TIMEOUT
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_reader_rejects_a_fifo_without_blocking() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt as _;
+        use std::sync::mpsc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("manifest.json");
+        let fifo_name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) }, 0);
+
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let read_path = fifo.clone();
+        let reader = std::thread::spawn(move || {
+            sender.send(read_snapshot_file(&read_path)).unwrap();
+        });
+        let result = match receiver.recv_timeout(Duration::from_secs(1)) {
+            Ok(result) => result,
+            Err(error) => {
+                // O_RDWR opens a FIFO without waiting and unblocks a broken
+                // read-only implementation before the test fails.
+                let unblock = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&fifo)
+                    .unwrap();
+                reader.join().unwrap();
+                drop(unblock);
+                panic!("snapshot FIFO read did not fail promptly: {error}");
+            }
+        };
+        reader.join().unwrap();
+        assert!(result.is_none());
     }
 
     #[cfg(unix)]
