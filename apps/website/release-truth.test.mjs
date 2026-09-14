@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import {
   EXPECTED_INSTALL_COMMAND,
   EXPECTED_TAP_COMMAND,
+  EXPECTED_TRUST_COMMAND,
   readPage,
   releaseUrl,
   resolveReleaseTruth,
@@ -44,9 +45,11 @@ test('every release link points at the repo release tag', () => {
 test('the Homebrew commands match the public install path', () => {
   const command = html.match(/<code id="install-command">([^<]+)<\/code>/)?.[1].replace(/&amp;/g, '&');
   assert.ok(command, 'the page shows an install command');
-  const [tap, install] = command.split('&&').map((s) => s.trim());
-  assert.equal(tap, EXPECTED_TAP_COMMAND);
-  assert.equal(install, EXPECTED_INSTALL_COMMAND);
+  assert.deepEqual(command.trim().split('\n'), [
+    EXPECTED_TRUST_COMMAND,
+    EXPECTED_TAP_COMMAND,
+    EXPECTED_INSTALL_COMMAND,
+  ]);
 });
 
 test('the requirements line names Apple Silicon and macOS 14+', () => {

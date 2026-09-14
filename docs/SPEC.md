@@ -2,8 +2,9 @@
 
 This English specification consolidates the recorded goals, subsequent scope
 decisions, and implemented acceptance criteria. It was assembled for submission on
-September 13, 2026. The implementation references below describe the documentation
-branch's product baseline, [8c9f3550](https://github.com/clioo/drogon/commit/8c9f3550f539046c18c2d86144eee84828a33f7b).
+September 13, 2026 and updated on September 14 for the published
+[v0.1.0-rc.7 product baseline](https://github.com/clioo/drogon/commit/e30bbdc4b7b7838b132b63f25977c9903656d3bd).
+The provenance and historical results retain their original dates and revisions.
 Development process and iteration evidence are in [SYSTEM.md](SYSTEM.md) and
 [AI-DEV-LOG.md](AI-DEV-LOG.md).
 
@@ -24,15 +25,27 @@ requirement to restore the old scope or architecture.
 
 ## Objective and intended user
 
-Build a desktop workspace for a developer who needs persistent coding sessions,
-parallel Git worktrees, coordinated agents, and recurring follow-up work in one
-place. The builder previously split those activities between Orca, Codex quick
-chats, and Hermes bots. Drogon should make the task, its execution context, and its
-review evidence accessible together.
+Drogon is an open-source agentic development environment for ambitious builds:
+coordinate coding agents across the vendors you already pay for, with parallel
+Git worktrees, persistent sessions, bots, and verification in one local workspace.
+The developer keeps their preferred harness and delegates work to other configured
+harnesses through Drogon's CLI and daemon. Model access uses each harness's existing
+subscription or provider account. The builder previously split these activities
+between Orca, Codex quick chats, and Hermes bots.
 
 The workflow is: select a project, create an isolated workspace, give an agent a
 task and execution policy, inspect progress and failures, and review the resulting
 changes. Bots add monitored and scheduled entry points into that workflow.
+
+The Work Graph shows the configured orchestration structure. Agent telemetry makes
+dispatches, findings, and outcomes inspectable, while Usage shows reported token
+measurements by agent and runtime. The current orchestration policy supports
+depth-1 workers and bounded review iterations, not unlimited recursive delegation.
+Missing token measurements remain unavailable; token totals do not establish savings.
+
+Explore the product at [drogon.work](https://drogon.work),
+[watch the demo](https://youtu.be/jgnitCkmpKk), or install the
+[Apple Developer ID signed and notarized Mac release](https://github.com/clioo/drogon/releases/tag/v0.1.0-rc.7).
 
 ## Requirements and acceptance evidence
 
@@ -51,6 +64,8 @@ in the linked PRs and development log.
 | Work Graph and runtime policy | Human-authored intent is distinct from observed execution state. Policy reaches the agent brief; runtime attempts and failures can be inspected. | [Graph storage](../crates/drogon-core/src/graph/store.rs), [session-brief tests](../crates/drogon-core/tests/graph_policy_session_brief.rs), [failover tests](../crates/drogon-core/tests/graph_failover.rs). |
 | Bounded verification loop | The configured orchestration mode controls execution; adversarial findings lead into review within the configured bound, with a durable result. | [Orchestrator](../crates/drogon-core/src/graph/orchestrator.rs), [daemon orchestration tests](../crates/drogon-core/tests/graph_orchestrator.rs), [Work Graph UI tests](../apps/desktop/src/renderer/src/features/work-graph/WorkGraphPane.test.tsx). |
 | Packaged desktop | The packaged app launches against an isolated profile, runs acceptance journeys and identifies its source revision and bundle. | [Packager](../scripts/package-desktop.mjs), [desktop acceptance](../scripts/accept-desktop.mjs), [acceptance guide](acceptance.md). |
+| Agent telemetry and token usage | Local records expose agent roles, dispatches, findings, outcomes, and reported input/output/cache tokens. Missing usage is not converted to zero. | [Native ledgers and tests](../crates/drogon-core/src/graph/observability.rs), [telemetry and usage views](../apps/desktop/src/renderer/src/features/work-graph-workflows/ObservabilityViews.tsx), [view tests](../apps/desktop/src/renderer/src/features/work-graph-workflows/ObservabilityViews.test.tsx). |
+| Signed Mac distribution | The published archive passes signature and notarization validation after extraction; the Homebrew cask identifies the same version and checksum. | [Artifact verifier](../scripts/verify-release-artifact.mjs), [verifier tests](../scripts/verify-release-artifact.test.mjs), [rc.7 release evidence](https://github.com/clioo/drogon/actions/runs/34861305249). |
 
 The original twelve journeys also covered embedded browsing, command palette and
 quick open, settings, and the status bar. The [original plan](https://github.com/clioo/drogon/blob/ec8dd5ba72eb6aaad44587538ad8bfb7497a16f4/docs/migration/rewrite-mvp-plan.md)
@@ -71,9 +86,9 @@ submission.
   component tests when validating actual rendering.
 - **Harness choice.** Harness adapters connect to installed coding tools and their
   configured providers. Models are selected per task; different runtimes can serve
-  different roles. Some workflow execution at this baseline uses the configured
-  Mentu runtime; it must be provisioned for those paths. Drogon does not execute
-  through an installed Orca application.
+  different roles using their existing provider accounts. The native orchestrator
+  launches graph roles as Drogon sessions; Mentu is provisioned separately only for
+  optional recipe commands. Drogon does not execute through an installed Orca application.
 - **Agent-capable CLI.** Bots and workers need executable commands and scoped
   context to create workspaces, dispatch work and report outcomes. The builder
   prioritized this over requiring manual prompting for every handoff. [PR #200](https://github.com/clioo/drogon/pull/200)
@@ -98,9 +113,11 @@ in [SYSTEM.md](SYSTEM.md).
 
 ## Constraints and scope decisions
 
-- The initial target was a macOS desktop preview. Ad-hoc signing does not establish
-  notarization or production release readiness; Windows compilation is not Windows
-  runtime acceptance.
+- The distributed rc.7 release targets Apple Silicon and macOS Sonoma (14) or newer.
+  It is Apple Developer ID signed and notarized by Apple, with Gatekeeper acceptance
+  recorded in the release pipeline. It remains a release candidate. Local source
+  builds use ad-hoc signing unless configured otherwise; Windows compilation is not
+  Windows runtime acceptance.
 - Use installed harness/provider configuration for real agent work. Ordinary app
   acceptance uses isolated shell or sealed provider fixtures. The log identifies
   historical live-model QA separately, including DGX-local inference.
@@ -145,3 +162,10 @@ For packaged acceptance, follow [SUBMISSION.md](SUBMISSION.md) and
 rules in AGENTS.md. Historical test results in the development log apply to their
 linked commits. This specification defines acceptance; it does not assert that a
 fresh full-product run was performed while preparing these documents.
+
+The [rc.7 release run](https://github.com/clioo/drogon/actions/runs/34861305249)
+verified the published archive and tap, executed 107 packaged checks, and recorded
+eight skipped checks for missing real harnesses or an upgrade baseline. These skips
+remain unverified coverage. The developer's [three product captures](screenshots/MANIFEST.md)
+show the graph, agent telemetry, and usage from a working session; they supplement
+the linked tests rather than asserting that every displayed finding was resolved.

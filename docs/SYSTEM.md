@@ -7,6 +7,13 @@ criteria; [AI-DEV-LOG.md](AI-DEV-LOG.md) follows the actual iterations.
 
 ## Why Drogon
 
+**Put every subscription to work.** Drogon brings coding agents from configured
+harnesses and provider accounts into one local agentic development environment.
+The [landing](https://drogon.work) introduces the product; the
+[README](../README.md) shows the Work Graph, Agent telemetry, and token Usage from
+the developer's working session and links to the signed, notarized Mac download.
+The account below explains how that coordination was used to build Drogon.
+
 I liked Orca, but my everyday workflow was split between Orca for orchestration,
 Codex for quick chats, and Hermes for bots. Drogon grew from wanting those workflows
 in one developer workspace. Its desktop began as a component-level port of Orca's

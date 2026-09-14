@@ -2,7 +2,7 @@ import { workflowSteps, monitorEvent } from './product-demo-model.mjs';
 const el=id=>document.getElementById(id);
 const tabs=[...document.querySelectorAll('.product-tabs [role=tab]')];
 const nodes=[...document.querySelectorAll('[data-node]')];
-const copy={bots:['Let the bot pick it up.','Watch a repository for pull requests. When a review is needed, the bot starts a session in the configured project.'],graph:['Put your agents\nto work together.','Give the main agent a task. It delegates the work, runs adversarial tests, and sends findings back for review. You decide what ships.'],evidence:['See what happened.\nThen make the call.','Read the test findings, the fixes, and the final checks in one place. The agent does the work. You review the result.']};
+const copy={bots:['Turn a signal into action.','Let a bot watch incoming pull requests and start a review session in the right project. Give it the responsibility once; inspect the work it returns.'],graph:['Build the workflow.\nLet agents run it.','Turn a complex build into coordinated work: a main agent, parallel implementation workers, and an adversarial test-and-review loop. Assign harnesses and models to each role. You decide what ships.'],evidence:['See what happened.\nThen make the call.','Follow the findings, corrections, and verification results in one place. Review the evidence, ask for changes, and decide when the work is ready.']};
 let running=false, timer, index=0, autoStarted=false, handled=false;
 let steps=workflowSteps();
 let emptyEvidence=el('evidence-entries').innerHTML;

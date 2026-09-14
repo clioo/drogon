@@ -11,6 +11,7 @@ export const RELEASE_TAG_PREFIX = 'v';
 export const GITHUB_REPO = 'clioo/drogon';
 export const TAP = 'clioo/drogon';
 export const CASK = 'clioo/drogon/drogon';
+export const EXPECTED_TRUST_COMMAND = `brew trust --tap ${TAP}`;
 export const EXPECTED_TAP_COMMAND = `brew tap ${TAP}`;
 export const EXPECTED_INSTALL_COMMAND = `brew install --cask ${CASK}`;
 
