@@ -100,6 +100,7 @@ export const resultSchemas: Record<string, z.ZodType> = {
     // either field — still a valid status, with identity simply unknown.
     featureProtocol: z.number().int().optional(),
     daemonArtifactSha256: z.string().nullable().optional(),
+    schedulerLastTickMs: z.number().int().nonnegative().nullable().optional(),
   }),
   "workspace.register": workspace,
   "workspace.list": z.object({ workspaces: z.array(workspace) }),

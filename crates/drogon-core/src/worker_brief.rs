@@ -242,5 +242,7 @@ mod tests {
         assert!(prompt.starts_with(HARNESS_CONTEXT_MARKER));
         assert!(prompt.contains("drogon-cli"));
         assert!(prompt.contains("delega un subagente"));
+        assert!(prompt.contains("Wait for a child in the foreground"));
+        assert!(prompt.contains("check --wait --timeout-ms <ms>"));
     }
 }

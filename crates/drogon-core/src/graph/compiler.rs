@@ -1044,6 +1044,8 @@ mod tests {
         assert!(step.get("completion_keyword").is_none());
         let prompt = step["prompt"].as_str().unwrap();
         assert!(prompt.starts_with(GRAPH_HARNESS_CONTEXT));
+        assert!(prompt.contains("Wait for a child in the foreground"));
+        assert!(prompt.contains("check --wait --timeout-ms <ms>"));
         assert!(prompt.contains("Task:\ndo n1"));
         assert!(
             prompt.ends_with(WORKER_ROLE_NOTE),

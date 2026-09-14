@@ -953,9 +953,11 @@ impl Engine {
         {
             let path: Option<String> = {
                 let conn = self.db.lock().unwrap();
-                conn.query_row("SELECT path FROM projects WHERE id = ?1", [id], |r| r.get(0))
-                    .optional()
-                    .map_err(error::from_sqlite)?
+                conn.query_row("SELECT path FROM projects WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .optional()
+                .map_err(error::from_sqlite)?
             };
             let path = path.ok_or_else(|| error::not_found("project not found"))?;
             let home = std::fs::canonicalize(self.data_dir.join(PROJECTS_HOME))
@@ -984,7 +986,9 @@ impl Engine {
         }
         if let Some(folder) = managed {
             std::fs::remove_dir_all(&folder).map_err(|e| {
-                error::io_error(format!("project unregistered, but its folder was not deleted: {e}"))
+                error::io_error(format!(
+                    "project unregistered, but its folder was not deleted: {e}"
+                ))
             })?;
         }
         Ok(removed)
@@ -1081,7 +1085,9 @@ impl Engine {
                 )));
             }
             Err(e) => {
-                return Err(error::io_error(format!("cannot create the project folder: {e}")));
+                return Err(error::io_error(format!(
+                    "cannot create the project folder: {e}"
+                )));
             }
         }
         let dir_str = dir
@@ -1388,7 +1394,12 @@ mod project_create_tests {
         let path = created["project"]["path"].as_str().unwrap().to_string();
         assert!(std::path::Path::new(&path).is_dir());
         assert!(
-            path.contains(&format!("{}{}{}", super::PROJECTS_HOME, std::path::MAIN_SEPARATOR, "dog-tinder-ab12cd")),
+            path.contains(&format!(
+                "{}{}{}",
+                super::PROJECTS_HOME,
+                std::path::MAIN_SEPARATOR,
+                "dog-tinder-ab12cd"
+            )),
             "the folder lives under the projects home: {path}"
         );
         assert_eq!(created["project"]["name"], "dog-tinder-ab12cd");
@@ -1404,12 +1415,19 @@ mod project_create_tests {
     fn remove_with_delete_files_erases_only_a_folder_the_daemon_created() {
         let data = tempfile::tempdir().unwrap();
         let engine = Engine::open(data.path()).unwrap();
-        let created = engine.do_project_create(&json!({"name": "dog-tinder-ff00aa"})).unwrap();
+        let created = engine
+            .do_project_create(&json!({"name": "dog-tinder-ff00aa"}))
+            .unwrap();
         let path = created["project"]["path"].as_str().unwrap().to_string();
         let id = created["project"]["id"].as_str().unwrap().to_string();
         std::fs::write(std::path::Path::new(&path).join("specs.md"), "x").unwrap();
-        engine.do_project_remove(&json!({"id": id, "deleteFiles": true})).unwrap();
-        assert!(!std::path::Path::new(&path).exists(), "the managed folder is gone");
+        engine
+            .do_project_remove(&json!({"id": id, "deleteFiles": true}))
+            .unwrap();
+        assert!(
+            !std::path::Path::new(&path).exists(),
+            "the managed folder is gone"
+        );
 
         // The owner's own folder is never deleted, with or without the flag.
         let own = tempfile::tempdir().unwrap();
@@ -1422,7 +1440,11 @@ mod project_create_tests {
         let refused = engine
             .do_project_remove(&json!({"id": own_id, "deleteFiles": true}))
             .unwrap_err();
-        assert!(refused.message.contains("projects home"), "{}", refused.message);
+        assert!(
+            refused.message.contains("projects home"),
+            "{}",
+            refused.message
+        );
         assert!(own.path().is_dir());
         engine.do_project_remove(&json!({"id": own_id})).unwrap();
         assert!(own.path().is_dir());
@@ -1432,9 +1454,17 @@ mod project_create_tests {
     fn refuses_a_second_project_with_the_same_folder_name_and_bad_names() {
         let data = tempfile::tempdir().unwrap();
         let engine = Engine::open(data.path()).unwrap();
-        engine.do_project_create(&json!({"name": "Dog Tinder"})).unwrap();
-        let again = engine.do_project_create(&json!({"name": "Dog Tinder"})).unwrap_err();
-        assert!(again.message.contains("already exists"), "{}", again.message);
+        engine
+            .do_project_create(&json!({"name": "Dog Tinder"}))
+            .unwrap();
+        let again = engine
+            .do_project_create(&json!({"name": "Dog Tinder"}))
+            .unwrap_err();
+        assert!(
+            again.message.contains("already exists"),
+            "{}",
+            again.message
+        );
         assert!(engine.do_project_create(&json!({"name": "   "})).is_err());
         assert!(engine.do_project_create(&json!({"name": "..."})).is_err());
         assert!(engine.do_project_create(&json!({})).is_err());

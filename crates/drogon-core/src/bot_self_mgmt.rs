@@ -1221,8 +1221,7 @@ pub fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSumm
                     let mut retired = record.clone();
                     retired.enabled = false;
                     retired.last_notice = Some(
-                        "Disabled: the workspace this watch belonged to was removed."
-                            .to_string(),
+                        "Disabled: the workspace this watch belonged to was removed.".to_string(),
                     );
                     retired.updated_at_ms = now_ms;
                     match monitor_storage::cas_write(&conn, &retired, rev) {

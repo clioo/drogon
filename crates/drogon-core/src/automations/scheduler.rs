@@ -532,7 +532,9 @@ pub fn tick_once(engine: &Engine, now_ms: f64) -> TickSummary {
             Ok(list) => list,
             Err(e) => {
                 eprintln!("[automations] tick list failed: {e}");
-                return summary;
+                summary.failed += 1;
+                // Automation storage must not starve the independent monitor outbox.
+                Vec::new()
             }
         }
     };
@@ -719,9 +721,37 @@ impl SchedulerHandle {
     }
 }
 
-/// Spawns the daemon-owned tick loop on a plain OS thread (the daemon is
-/// synchronous; no async runtime is required for a 15 s poll).
+/// Contains an unwinding tick without claiming recovery of poisoned state.
+/// Failed ticks never advance the heartbeat; a blocked tick stays stale too.
+pub(crate) fn guarded_tick(label: &str, tick: impl FnOnce()) -> bool {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(tick)) {
+        Ok(()) => true,
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "non-string panic payload".to_string());
+            eprintln!(
+                "[{label}] tick panicked and was contained; the scheduler keeps running: {message}"
+            );
+            false
+        }
+    }
+}
+
+/// Spawns the daemon-owned tick loop on a plain OS thread.
 pub fn spawn(engine: Arc<Engine>, interval: Duration) -> SchedulerHandle {
+    spawn_with_tick(engine, interval, |engine, now_ms| {
+        tick_once(engine, now_ms);
+    })
+}
+
+fn spawn_with_tick(
+    engine: Arc<Engine>,
+    interval: Duration,
+    mut tick: impl FnMut(&Engine, f64) + Send + 'static,
+) -> SchedulerHandle {
     let stop = Arc::new(AtomicBool::new(false));
     let stopped = stop.clone();
     let thread = thread::Builder::new()
@@ -729,7 +759,13 @@ pub fn spawn(engine: Arc<Engine>, interval: Duration) -> SchedulerHandle {
         .spawn(move || {
             while !stopped.load(AtomicOrdering::Acquire) {
                 let now_ms = crate::now_unix_ms() as f64;
-                let _ = tick_once(&engine, now_ms);
+                if guarded_tick("automations", || {
+                    tick(&engine, now_ms);
+                }) {
+                    engine
+                        .scheduler_last_tick_ms
+                        .store(crate::now_unix_ms(), AtomicOrdering::Release);
+                }
                 if engine.is_quiescent() {
                     break;
                 }
@@ -751,6 +787,62 @@ pub fn spawn(engine: Arc<Engine>, interval: Duration) -> SchedulerHandle {
 impl Drop for SchedulerHandle {
     fn drop(&mut self) {
         self.stop.store(true, AtomicOrdering::Release);
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    #[test]
+    fn a_panicking_tick_is_contained_and_the_next_one_runs() {
+        use std::sync::{Arc, mpsc};
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Arc::new(crate::Engine::open(dir.path()).unwrap());
+        let (send, receive) = mpsc::channel();
+        let mut attempt = 0;
+        let mut scheduler = super::spawn_with_tick(
+            engine.clone(),
+            Duration::from_millis(10),
+            move |engine, now| {
+                attempt += 1;
+                if attempt == 1 {
+                    panic!("injected tick failure");
+                }
+                if attempt == 2 {
+                    assert_eq!(
+                        engine
+                            .scheduler_last_tick_ms
+                            .load(super::AtomicOrdering::Acquire),
+                        0
+                    );
+                }
+                super::tick_once(engine, now);
+                let _ = send.send(());
+            },
+        );
+        let recovered = receive.recv_timeout(Duration::from_secs(5));
+        scheduler.shutdown();
+        assert!(
+            recovered.is_ok(),
+            "the scheduler thread must survive the panic"
+        );
+        assert!(
+            engine
+                .scheduler_last_tick_ms
+                .load(super::AtomicOrdering::Acquire)
+                > 0
+        );
+        let heartbeat = engine
+            .scheduler_last_tick_ms
+            .load(super::AtomicOrdering::Acquire);
+        std::thread::sleep(Duration::from_millis(30));
+        assert_eq!(
+            engine
+                .scheduler_last_tick_ms
+                .load(super::AtomicOrdering::Acquire),
+            heartbeat
+        );
     }
 }
 

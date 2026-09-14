@@ -465,6 +465,7 @@ impl Engine {
     /// evidence ledger. Best effort by design: telemetry that cannot be
     /// written is logged, never allowed to fail the workflow it describes.
     /// Called only while `graph_orchestrator_gate` is held.
+    #[allow(clippy::too_many_arguments)] // Mirrors the evidence ledger's attribution fields.
     fn record_telemetry(
         &self,
         run: &Run,
@@ -515,9 +516,7 @@ impl Engine {
         let (status, summary) = match run.status.as_str() {
             "passed" => (
                 "completed",
-                format!(
-                    "Workflow passed: the last review found nothing left to fix · {shape}"
-                ),
+                format!("Workflow passed: the last review found nothing left to fix · {shape}"),
             ),
             "exhausted" => (
                 "blocked",
@@ -534,7 +533,10 @@ impl Engine {
             "failed" => ("failed", format!("Workflow failed · {shape}")),
             _ => return,
         };
-        let mut lines = vec![format!("Started {} · last update {}", run.started_at, run.updated_at)];
+        let mut lines = vec![format!(
+            "Started {} · last update {}",
+            run.started_at, run.updated_at
+        )];
         if let Some(error) = &run.error {
             lines.push(format!("Reason: {error}"));
         }
@@ -617,7 +619,10 @@ impl Engine {
                         step.iteration,
                         step.phase.clone(),
                         step.node_id.clone(),
-                        step.runtime.as_ref().map(describe_runtime).unwrap_or_default(),
+                        step.runtime
+                            .as_ref()
+                            .map(describe_runtime)
+                            .unwrap_or_default(),
                     );
                     let mentu_run = child.mentu_run_id.clone().unwrap_or_default();
                     finish_step(run);
@@ -640,7 +645,11 @@ impl Engine {
                             "main",
                         );
                     } else {
-                        let status = if verdict == "pass" { "completed" } else { "finding" };
+                        let status = if verdict == "pass" {
+                            "completed"
+                        } else {
+                            "finding"
+                        };
                         self.record_telemetry(
                             run,
                             status,
@@ -675,9 +684,9 @@ impl Engine {
             } else {
                 None
             };
-            let reason = stderr_reason.or(child.error).unwrap_or_else(|| {
-                "Worker did not produce a valid evaluation result.".into()
-            });
+            let reason = stderr_reason
+                .or(child.error)
+                .unwrap_or_else(|| "Worker did not produce a valid evaluation result.".into());
             if let Some(attempt) = step.attempts.last_mut() {
                 attempt.outcome = "failed".into();
                 attempt.reason = Some(reason.clone());
@@ -687,7 +696,10 @@ impl Engine {
                 step.phase.clone(),
                 step.node_id.clone(),
                 step.attempts.len(),
-                step.runtime.as_ref().map(describe_runtime).unwrap_or_default(),
+                step.runtime
+                    .as_ref()
+                    .map(describe_runtime)
+                    .unwrap_or_default(),
                 child.mentu_run_id.clone().unwrap_or_default(),
             );
             step.run_id = None;
@@ -790,7 +802,8 @@ impl Engine {
                     reason: None,
                 });
                 let role_note = match phase.as_str() {
-                    "main" => "The main agent builds what the task describes, in this workspace.".to_string(),
+                    "main" => "The main agent builds what the task describes, in this workspace."
+                        .to_string(),
                     "test" => format!(
                         "The test agent tries to break the main agent's work and writes its verdict (pass or findings, with evidence) to {}.",
                         result_path(&node_id)
@@ -1070,9 +1083,11 @@ pub fn spawn(engine: Arc<Engine>) -> Scheduler {
     let flag = stop.clone();
     let thread = thread::spawn(move || {
         while !flag.load(Ordering::Acquire) && !engine.is_quiescent() {
-            if let Err(err) = engine.tick_graph_orchestrator() {
-                eprintln!("Graph orchestrator: {}", err.message);
-            }
+            crate::automations::scheduler::guarded_tick("graph-orchestrator", || {
+                if let Err(err) = engine.tick_graph_orchestrator() {
+                    eprintln!("Graph orchestrator: {}", err.message);
+                }
+            });
             thread::park_timeout(Duration::from_millis(500));
         }
     });
@@ -1230,12 +1245,22 @@ mod tests {
         assert_eq!(entries[0]["agentId"], "or-1");
         assert_eq!(entries[0]["role"], "main");
         let outcome = entries[1]["summary"].as_str().unwrap();
-        assert!(outcome.starts_with("Workflow exhausted its 3 iteration cap"), "{outcome}");
-        assert!(outcome.contains("1 step(s)") && outcome.contains("1 round(s) with findings"), "{outcome}");
+        assert!(
+            outcome.starts_with("Workflow exhausted its 3 iteration cap"),
+            "{outcome}"
+        );
+        assert!(
+            outcome.contains("1 step(s)") && outcome.contains("1 round(s) with findings"),
+            "{outcome}"
+        );
         assert_eq!(entries[1]["status"], "blocked");
         assert_eq!(entries[1]["role"], "orchestrator");
         let detail = entries[1]["detail"].as_str().unwrap();
-        assert!(detail.contains("iteration 1 · main · succeeded · pi/dgx-spark/qwen · verdict findings"), "{detail}");
+        assert!(
+            detail
+                .contains("iteration 1 · main · succeeded · pi/dgx-spark/qwen · verdict findings"),
+            "{detail}"
+        );
 
         // A run whose status did not end never records an outcome.
         run.status = "running".into();
@@ -1260,7 +1285,10 @@ mod tests {
         let (verdict, evidence) = read_evaluation(root.path(), "node-7").unwrap().unwrap();
         assert_eq!(verdict, "findings");
         assert_eq!(evidence, "Undo after the last swipe restores nothing.");
-        assert_eq!(read_verdict(root.path(), "node-7").unwrap().as_deref(), Some("findings"));
+        assert_eq!(
+            read_verdict(root.path(), "node-7").unwrap().as_deref(),
+            Some("findings")
+        );
         assert_eq!(read_evaluation(root.path(), "absent").unwrap(), None);
     }
 

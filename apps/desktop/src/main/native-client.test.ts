@@ -59,6 +59,11 @@ describe("desktop trust boundary", () => {
       }).success,
     ).toBe(false);
     expect(resultSchemas.status.safeParse({}).success).toBe(false);
+    const status = { hostId: "host-1", serviceInstanceId: "svc-1", protocol: 1, capabilities: [], version: "test" };
+    for (const schedulerLastTickMs of [undefined, null, 1234]) {
+      expect(resultSchemas.status.parse({ ...status, schedulerLastTickMs })).toEqual({ ...status, schedulerLastTickMs });
+    }
+    expect(resultSchemas.status.safeParse({ ...status, schedulerLastTickMs: -1 }).success).toBe(false);
     expect(
       resultSchemas["session.read"].safeParse({ dataBase64: "not-base64" })
         .success,

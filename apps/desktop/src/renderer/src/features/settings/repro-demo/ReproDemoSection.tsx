@@ -476,7 +476,7 @@ export function ReproDemoSection({
           </Button>
           {state.running ? (
             <Button type="button" variant="outline" size="sm" onClick={cancel}>
-              Cancel
+              Stop following
             </Button>
           ) : null}
           {blocked && !state.running ? (

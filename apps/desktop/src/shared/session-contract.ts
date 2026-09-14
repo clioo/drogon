@@ -160,6 +160,8 @@ export type Status = {
   version: string;
   featureProtocol?: number;
   daemonArtifactSha256?: string | null;
+  /** Last completed automation scheduler tick; null before the first tick. */
+  schedulerLastTickMs?: number | null;
 };
 export type Identity = { sessionId: string; incarnation: string };
 export type HarnessId = "claude" | "pi" | "opencode" | "antigravity" | "codex";

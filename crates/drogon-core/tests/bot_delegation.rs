@@ -1646,8 +1646,11 @@ fn a_watch_whose_workspace_is_gone_retires_itself_instead_of_failing_forever() {
     let now = Fixture::now_ms();
     {
         let conn = fixture.conn();
-        conn.execute("DELETE FROM workspaces WHERE id = ?1", [&fixture.workspace_id])
-            .unwrap();
+        conn.execute(
+            "DELETE FROM workspaces WHERE id = ?1",
+            [&fixture.workspace_id],
+        )
+        .unwrap();
     }
     let summary = drogon_core::bot_self_mgmt::tick_bot_monitors(&fixture._engine, now);
     assert_eq!(summary.retired, 1, "{summary:?}");
@@ -1669,10 +1672,147 @@ fn a_watch_whose_workspace_is_gone_retires_itself_instead_of_failing_forever() {
         .or_else(|| record.get("lastNotice"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    assert!(notice.contains("workspace"), "the reason rides the card: {record}");
+    assert!(
+        notice.contains("workspace"),
+        "the reason rides the card: {record}"
+    );
 
     // Retired means retired: the next tick neither checks it nor retires it again.
     let again = drogon_core::bot_self_mgmt::tick_bot_monitors(&fixture._engine, now + 60_000.0);
     assert_eq!(again.retired, 0, "{again:?}");
     assert_eq!(again.evaluated, 0, "{again:?}");
+}
+
+#[test]
+fn unreadable_automation_storage_does_not_starve_monitor_checks() {
+    let fixture = Fixture::with_monitor(json!({"cron": "* * * * *"}));
+    fixture
+        .conn()
+        .execute(
+            "INSERT INTO automations (id, payload_json) VALUES ('broken', 'not json')",
+            [],
+        )
+        .unwrap();
+    let now = Fixture::now_ms();
+    for offset in [0.0, 60_000.0] {
+        let summary =
+            drogon_core::automations::scheduler::tick_once(&fixture._engine, now + offset);
+        assert_eq!(
+            summary.failed, 1,
+            "the storage error remains visible: {summary:?}"
+        );
+    }
+    let checked: i64 = fixture
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM bot_monitor_checks WHERE monitor_id = ?1",
+            [&fixture.monitor_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        checked, 2,
+        "monitor checks continue despite automation storage errors"
+    );
+}
+
+#[test]
+fn retiring_one_orphaned_watch_never_stops_the_others_from_being_checked() {
+    // Retiring one orphan must not prevent unrelated watches from ticking.
+    let fixture = Fixture::with_monitor(json!({"cron": "* * * * *"}));
+    let engine = &fixture._engine;
+    // A second workspace, bot and watch that must keep working.
+    let other = tempfile::tempdir().unwrap();
+    let other_folder = other.path().join("other");
+    std::fs::create_dir(&other_folder).unwrap();
+    std::fs::create_dir(other_folder.join("notes")).unwrap();
+    std::fs::write(other_folder.join(RESOURCE), b"other v1").unwrap();
+    let registered = ok(engine.dispatch(request(
+        "ws-register-other",
+        "workspace.register",
+        json!({"path": other_folder}),
+    )));
+    let other_workspace = registered["id"].as_str().unwrap().to_string();
+    ok(engine.dispatch(request(
+        "project-add-other",
+        "project.add",
+        json!({"path": other_folder}),
+    )));
+    let bot = ok(engine.dispatch(request(
+        "bot-create-other",
+        "bot.create",
+        json!({
+            "workspaceId": other_workspace,
+            "hostId": fixture.host_id,
+            "body": {
+                "characterPreset": "none",
+                "displayIdentity": {"displayName": "Other", "handle": null, "title": null},
+                "harnessPolicy": {"defaultHarness": "codex", "explicitModel": null},
+                "instructions": "Guard the other realm.",
+                "memories": [],
+            },
+        }),
+    )));
+    let other_bot = bot["id"].as_str().unwrap().to_string();
+    ok(engine.dispatch(request(
+        "m-create-other",
+        "bot.monitor_create",
+        json!({
+            "workspaceId": other_workspace,
+            "hostId": fixture.host_id,
+            "botId": other_bot,
+            "monitorId": "mon-other",
+            "resource": RESOURCE,
+            "cron": "* * * * *",
+            "responsibilityName": "triage-other",
+            "instructions": "Triage the other change.",
+        }),
+    )));
+    ok(engine.dispatch(request(
+        "m-approve-other",
+        "bot.monitor_approve",
+        json!({
+            "workspaceId": other_workspace,
+            "hostId": fixture.host_id,
+            "botId": other_bot,
+            "monitorId": "mon-other",
+        }),
+    )));
+
+    // The first workspace disappears; the tick retires its watch and checks the other.
+    {
+        let conn = fixture.conn();
+        conn.execute(
+            "DELETE FROM workspaces WHERE id = ?1",
+            [&fixture.workspace_id],
+        )
+        .unwrap();
+    }
+    let now = Fixture::now_ms();
+    let first = drogon_core::bot_self_mgmt::tick_bot_monitors(engine, now);
+    assert_eq!(first.retired, 1, "{first:?}");
+    assert_eq!(
+        first.evaluated, 1,
+        "the other watch is checked in the same tick: {first:?}"
+    );
+    // And keeps being checked on later ticks, with the retired one left alone.
+    let later = drogon_core::bot_self_mgmt::tick_bot_monitors(engine, now + 60_000.0);
+    assert_eq!(later.retired, 0, "{later:?}");
+    assert_eq!(later.checked, 2, "both records are still loaded: {later:?}");
+    assert_eq!(
+        later.evaluated, 1,
+        "the other watch is checked again: {later:?}"
+    );
+    let conn = fixture.conn();
+    let checked: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM bot_monitor_checks WHERE monitor_id = 'mon-other'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        checked >= 2,
+        "the other watch recorded its checks: {checked}"
+    );
 }
