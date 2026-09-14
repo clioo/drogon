@@ -39,6 +39,13 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm typecheck:renderer-contracts
       - run: pnpm test:renderer-contracts
+      # test:packaging runs the real scripts/package-desktop.mjs on macOS, and
+      # packaging builds the app icon through Playwright's Chromium. The release
+      # job already installs it for the same reason; foundation started needing it
+      # when the packaging suite gained the signed-bundle launch test (#556).
+      - name: Install Playwright browser for the packaging icon build
+        if: runner.os == 'macOS'
+        run: pnpm exec playwright install chromium
       - run: pnpm test:packaging
       # R16-BL (#312): ubuntu-22.04 runners can terminate the desktop test
       # step after enough files have completed. Run four independent shards so
