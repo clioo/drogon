@@ -441,7 +441,7 @@ export async function runReproDemo(
         botId: bot.id ?? botId,
         resource: REPRO_SCENARIO_SPEC_PATH,
         cron: "* * * * *",
-        responsibilityName: "Rondas adversariales de Dog Tinder",
+        responsibilityName: "Dog Tinder adversarial rounds",
         instructions: releaseInstructions(workspaceId),
       }),
       "botMonitorCreate",
