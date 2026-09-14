@@ -13,6 +13,8 @@ use crate::{Engine, error, now_rfc3339, optional_str, require_str};
 /// `<data-dir>/quick-sessions/session-<id>/` with an ownership marker the
 /// delete path verifies before removing anything.
 pub(crate) const QUICK_SESSION_ROOT: &str = "quick-sessions";
+/// Where `project.create` puts the folders it makes: `<data-dir>/projects/`.
+pub(crate) const PROJECTS_HOME: &str = "projects";
 pub(crate) const QUICK_SESSION_MARKER: &str = ".drogon-quick-session.json";
 pub(crate) const QUICK_SESSION_MARKER_OWNER: &str = "drogon";
 pub(crate) const QUICK_SESSION_DEFAULT_NAME: &str = "Quick Session";
@@ -940,6 +942,36 @@ impl Engine {
             self.validate_quick_session_scratch(id, path)?;
             self.settle_quick_session_members(path)?;
         }
+        // `deleteFiles` asks for the folder to go with the registration. Only
+        // a folder this daemon created under its own projects home qualifies
+        // (`project.create`); any other path is the owner's and stays.
+        let managed = if scratch.is_none()
+            && params
+                .get("deleteFiles")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            let path: Option<String> = {
+                let conn = self.db.lock().unwrap();
+                conn.query_row("SELECT path FROM projects WHERE id = ?1", [id], |r| r.get(0))
+                    .optional()
+                    .map_err(error::from_sqlite)?
+            };
+            let path = path.ok_or_else(|| error::not_found("project not found"))?;
+            let home = std::fs::canonicalize(self.data_dir.join(PROJECTS_HOME))
+                .map_err(|e| error::io_error(format!("cannot resolve the projects home: {e}")))?;
+            let candidate = std::fs::canonicalize(&path)
+                .map_err(|e| error::io_error(format!("cannot resolve the project folder: {e}")))?;
+            if candidate == home || !candidate.starts_with(&home) {
+                return Err(error::invalid_argument(
+                    "Drogon deletes only the folders it created under its own projects home; this project's files stay where they are.",
+                ));
+            }
+            self.settle_quick_session_members(&path)?;
+            Some(candidate)
+        } else {
+            None
+        };
         let conn = self.db.lock().unwrap();
         let removed = remove(&conn, id)?;
         drop(conn);
@@ -949,6 +981,11 @@ impl Engine {
         // quick-sessions root with a matching ownership marker.
         if let Some(path) = scratch {
             self.cleanup_quick_session_scratch(id, &path)?;
+        }
+        if let Some(folder) = managed {
+            std::fs::remove_dir_all(&folder).map_err(|e| {
+                error::io_error(format!("project unregistered, but its folder was not deleted: {e}"))
+            })?;
         }
         Ok(removed)
     }
@@ -997,6 +1034,75 @@ impl Engine {
 
     /// Quick Session (`project.quickSessionCreate`): the fork's composer
     /// footer button starts the picked harness in an app-owned scratch
+    /// `project.create`: a new empty folder under `<data-dir>/projects/`,
+    /// registered as an ordinary folder Project with its implicit Workspace.
+    /// The folder name is the display name reduced to a portable slug; a
+    /// second project with the same slug is refused rather than merged.
+    pub(super) fn do_project_create(
+        &self,
+        params: &Value,
+    ) -> Result<Value, drogon_protocol::RpcError> {
+        let decoded: drogon_protocol::project::ProjectCreateParams =
+            serde_json::from_value(params.clone())
+                .map_err(|_| error::invalid_argument("Invalid project.create parameters"))?;
+        let name = decoded.name.trim().to_string();
+        if name.is_empty() || name.chars().count() > 120 {
+            return Err(error::invalid_argument(
+                "A project needs a name of 1 to 120 characters.",
+            ));
+        }
+        let folder: String = name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>()
+            .trim_matches(|c| c == '.' || c == '-')
+            .to_string();
+        if folder.is_empty() {
+            return Err(error::invalid_argument(
+                "The project name needs at least one letter or digit.",
+            ));
+        }
+        let root = self.data_dir.join(PROJECTS_HOME);
+        std::fs::create_dir_all(&root)
+            .map_err(|e| error::io_error(format!("cannot create the projects home: {e}")))?;
+        let dir = root.join(&folder);
+        match std::fs::create_dir(&dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(error::invalid_argument(format!(
+                    "A project folder named '{folder}' already exists in {}.",
+                    root.display()
+                )));
+            }
+            Err(e) => {
+                return Err(error::io_error(format!("cannot create the project folder: {e}")));
+            }
+        }
+        let dir_str = dir
+            .to_str()
+            .ok_or_else(|| error::invalid_argument("project path is not UTF-8"))?;
+        let conn = self.db.lock().unwrap();
+        let project = add(&conn, &self.host_id, dir_str, Some(&name))?;
+        let canonical = project["path"]
+            .as_str()
+            .ok_or_else(|| error::internal_error("project registration missing path"))?
+            .to_string();
+        // Folder projects register their implicit workspace inside `add`;
+        // registering again by path is idempotent and returns that row's id.
+        let workspace = crate::workspace::register(&conn, &self.host_id, &canonical, Some(&name))?;
+        let workspace_id = workspace["id"]
+            .as_str()
+            .ok_or_else(|| error::internal_error("workspace registration missing id"))?
+            .to_string();
+        Ok(json!({ "project": project, "workspaceId": workspace_id }))
+    }
+
     /// folder. The daemon creates `<data-dir>/quick-sessions/session-<id>`
     /// (0700, with the ownership marker the delete path later checks),
     /// registers it as a folder Project — which also registers its
@@ -1264,5 +1370,73 @@ mod tests {
             empty,
             "removing the only project restores the empty revision"
         );
+    }
+}
+
+#[cfg(test)]
+mod project_create_tests {
+    use crate::Engine;
+    use serde_json::json;
+
+    #[test]
+    fn creates_an_ordinary_project_under_the_projects_home_with_its_workspace() {
+        let data = tempfile::tempdir().unwrap();
+        let engine = Engine::open(data.path()).unwrap();
+        let created = engine
+            .do_project_create(&json!({"name": "dog-tinder-ab12cd"}))
+            .unwrap();
+        let path = created["project"]["path"].as_str().unwrap().to_string();
+        assert!(std::path::Path::new(&path).is_dir());
+        assert!(
+            path.contains(&format!("{}{}{}", super::PROJECTS_HOME, std::path::MAIN_SEPARATOR, "dog-tinder-ab12cd")),
+            "the folder lives under the projects home: {path}"
+        );
+        assert_eq!(created["project"]["name"], "dog-tinder-ab12cd");
+        // An ordinary project: it lists under Projects, never as a Quick Session.
+        assert_eq!(created["project"]["quickSession"], json!(false));
+        let workspace_id = created["workspaceId"].as_str().unwrap();
+        let conn = engine.db.lock().unwrap();
+        let registered = crate::workspace::get_path(&conn, workspace_id).unwrap();
+        assert_eq!(registered, path);
+    }
+
+    #[test]
+    fn remove_with_delete_files_erases_only_a_folder_the_daemon_created() {
+        let data = tempfile::tempdir().unwrap();
+        let engine = Engine::open(data.path()).unwrap();
+        let created = engine.do_project_create(&json!({"name": "dog-tinder-ff00aa"})).unwrap();
+        let path = created["project"]["path"].as_str().unwrap().to_string();
+        let id = created["project"]["id"].as_str().unwrap().to_string();
+        std::fs::write(std::path::Path::new(&path).join("specs.md"), "x").unwrap();
+        engine.do_project_remove(&json!({"id": id, "deleteFiles": true})).unwrap();
+        assert!(!std::path::Path::new(&path).exists(), "the managed folder is gone");
+
+        // The owner's own folder is never deleted, with or without the flag.
+        let own = tempfile::tempdir().unwrap();
+        let own_path = own.path().to_str().unwrap().to_string();
+        let added = {
+            let conn = engine.db.lock().unwrap();
+            super::add(&conn, &engine.host_id, &own_path, Some("mine")).unwrap()
+        };
+        let own_id = added["id"].as_str().unwrap().to_string();
+        let refused = engine
+            .do_project_remove(&json!({"id": own_id, "deleteFiles": true}))
+            .unwrap_err();
+        assert!(refused.message.contains("projects home"), "{}", refused.message);
+        assert!(own.path().is_dir());
+        engine.do_project_remove(&json!({"id": own_id})).unwrap();
+        assert!(own.path().is_dir());
+    }
+
+    #[test]
+    fn refuses_a_second_project_with_the_same_folder_name_and_bad_names() {
+        let data = tempfile::tempdir().unwrap();
+        let engine = Engine::open(data.path()).unwrap();
+        engine.do_project_create(&json!({"name": "Dog Tinder"})).unwrap();
+        let again = engine.do_project_create(&json!({"name": "Dog Tinder"})).unwrap_err();
+        assert!(again.message.contains("already exists"), "{}", again.message);
+        assert!(engine.do_project_create(&json!({"name": "   "})).is_err());
+        assert!(engine.do_project_create(&json!({"name": "..."})).is_err());
+        assert!(engine.do_project_create(&json!({})).is_err());
     }
 }

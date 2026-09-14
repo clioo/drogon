@@ -27,7 +27,7 @@ import {
   type ReproPhaseId,
   type ReproPhaseState,
   type ReproRound,
-  type ReproRuntimeChoice,
+  type ReproRuntime,
 } from "./repro-demo-plan";
 import {
   REPRO_SCENARIO_BRIEF,
@@ -86,8 +86,8 @@ export type MonitorCheck = {
  *  reports the demo as unavailable instead of throwing at click time. */
 export type ReproDemoBridge = {
   status: () => Promise<Result<{ hostId: string }>>;
-  quickSessionCreate: (input: { name?: string }) => Promise<
-    Result<{ project: { id: string; name: string }; workspaceId: string }>
+  projectCreate: (input: { name: string }) => Promise<
+    Result<{ project: { id: string; name: string; path?: string }; workspaceId: string }>
   >;
   fileWrite: (input: {
     hostId: string;
@@ -127,13 +127,34 @@ export type ReproDemoBridge = {
   graphObservabilityStatus: (input: { workspaceId: string }) => Promise<
     Result<{ observability: { evidence: EvidenceEntry[]; usage: UsageEntry[] } }>
   >;
+
+  /** Housekeeping for the runs this demo leaves behind. Optional: a build
+   *  without them still runs the demo, it just cannot tidy up after it. */
+  botSnapshot?: (input: { hostId: string; workspaceId: string; locale: string }) => Promise<
+    Result<{ bots: { id: string; displayIdentity: { handle: string | null } }[] }>
+  >;
+  botDelete?: (input: {
+    hostId: string;
+    workspaceId: string;
+    requestId: string;
+    botId: string;
+  }) => Promise<Result<unknown>>;
+  projectList?: () => Promise<
+    Result<{ projects: { id: string; name: string; quickSession?: boolean }[] }>
+  >;
+  projectRemove?: (input: { id: string; deleteFiles?: boolean }) => Promise<Result<unknown>>;
 };
 
 export type ReproDemoState = {
   running: boolean;
   /** What the last run was started with, so the controls show what actually
    *  ran when the panel is reopened after the tour — not their defaults. */
-  selection: { runtimeId: string; harness: string; model: string; iterations: number } | null;
+  selection: {
+    harness: string;
+    model: string;
+    subagents: ReproRuntime;
+    iterations: number;
+  } | null;
   phases: Record<ReproPhaseId, ReproPhaseState>;
   /** The widget in the panel the viewer should be looking at right now. */
   spotlight: ReproPhaseId | null;
@@ -155,7 +176,11 @@ export type ReproDemoState = {
 };
 
 export type ReproDemoOptions = {
-  runtime: ReproRuntimeChoice;
+  /** The main agent's runtime: the bot's harness, and the released session. */
+  runtime: ReproRuntime;
+  /** Where the subagents run — the workers the main session dispatches and
+   *  the daemon's test and review agents. The main runtime when omitted. */
+  subagents?: ReproRuntime;
   iterations: number;
 };
 
@@ -261,21 +286,34 @@ function unwrap<T>(result: Result<T>, what: string): T {
   return result.result;
 }
 
+export function describeRuntime(runtime: ReproRuntime): string {
+  return runtime.model ? `${runtime.harness}/${runtime.model}` : `${runtime.harness} (harness default)`;
+}
+
 /** Standing instructions for the reactive responsibility the watch releases.
  *  The daemon's delegation prompt tells the session to open a worktree; these
- *  say to work right here instead, with one exact command, so even a small
- *  local model can follow it literally. */
+ *  say to work right here instead. The released session is the run's main
+ *  agent: it fans the build out to parallel workers through Drogon's own
+ *  orchestration verbs (the same ones the product's delegation guide names),
+ *  waits for their reports, and only then hands the bounded adversarial
+ *  workflow to the daemon — with one exact command, so even a small local
+ *  model can follow it literally. */
 export function releaseInstructions(workspaceId: string): string {
   return [
-    "The Dog Tinder spec changed in this very workspace.",
-    "Do not implement the deck yourself: start the durable workflow and let the Work Graph do it.",
-    "Ignore step 1 of the message (no new worktree is needed): work in this workspace.",
-    `Run exactly this and finish: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file .drogon/repro-main-node.json`,
-    "Then record a checkpoint with `drogon-cli graph evidence-add` and exit.",
+    "The Dog Tinder spec changed in this very workspace, and you are this run's main agent.",
+    "Do not implement the deck yourself: delegate the build to parallel workers, then let the Work Graph test and review it.",
+    "Ignore step 1 of the message (no new worktree is needed): work in this workspace, whose id is " + workspaceId + ".",
+    "1. Read the delegation guide: drogon-cli skills get --topic orchestration",
+    "2. Create the run: drogon-cli orchestration run-create --objective \"Dog Tinder: deck and page, built in parallel\" --host <the hostId that drogon-cli status prints>. Keep the runId, coordinatorId and consumerGeneration it returns: every orchestration command below takes --run <runId> --coordinator-id <coordinatorId> --consumer-generation <consumerGeneration>.",
+    "3. Create two tasks with drogon-cli orchestration task-create ... --spec <text> --task-title <title>: \"[deck] Implement src/deck.js and src/storage.js per specs/dog-tinder.md. You cannot dispatch another worker.\" titled \"Deck and storage\", and \"[page] Implement index.html per specs/dog-tinder.md. You cannot dispatch another worker.\" titled \"Deck page\".",
+    "4. Start one worker per task, both at once, in THIS workspace: drogon-cli orchestration worker-start ... --task <taskId> --workspace " + workspaceId + " --timeout-ms 900000. Workers run on the subagent runtime the Work Graph policy approves; do not start them any other way.",
+    "5. Wait for both workers IN THE FOREGROUND, and do not end your turn until step 6 is done: this session ends when your turn ends, and a background wait dies with it. Run drogon-cli orchestration check ... --wait --timeout-ms 600000 (it blocks until a message arrives; the workers take minutes) and repeat it until you have seen a worker_done for both tasks; drogon-cli orchestration worker-show ... --dispatch <dispatchId> confirms each outcome.",
+    `6. Then run exactly this and finish: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file .drogon/repro-main-node.json`,
+    "7. Record one checkpoint with drogon-cli graph evidence-add --workspace " + workspaceId + " --status completed --summary <what the workers built> and exit.",
   ].join("\n");
 }
 
-export function mainNodeFor(runtime: ReproRuntimeChoice, spec: string) {
+export function mainNodeFor(runtime: ReproRuntime, spec: string) {
   return {
     id: "orchestrator-main",
     title: "Dog Tinder with undo of the last swipe",
@@ -287,7 +325,7 @@ export function mainNodeFor(runtime: ReproRuntimeChoice, spec: string) {
   };
 }
 
-export function policyFor(runtime: ReproRuntimeChoice, iterations: number) {
+export function policyFor(runtime: ReproRuntime, iterations: number) {
   return {
     approvedRuntimes: [{ harness: runtime.harness, model: runtime.model }],
     adversarial: { enabled: true, maxIterations: iterations },
@@ -302,9 +340,10 @@ const POLL_MS = 1500;
 
 export async function runReproDemo(
   bridge: ReproDemoBridge | null,
-  { runtime, iterations }: ReproDemoOptions,
+  { runtime, subagents, iterations }: ReproDemoOptions,
   deps: ReproDemoDeps = {},
 ): Promise<void> {
+  const workers = subagents ?? runtime;
   if (!bridge || state.running) return;
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -316,9 +355,9 @@ export async function runReproDemo(
     ...initialState(),
     running: true,
     selection: {
-      runtimeId: runtime.id,
       harness: runtime.harness,
       model: runtime.model,
+      subagents: workers,
       iterations,
     },
   };
@@ -343,16 +382,17 @@ export async function runReproDemo(
   try {
     const { hostId } = unwrap(await bridge.status(), "status");
 
-    // Phase 1 — a workspace of the demo's own.
+    // Phase 1 — a project of the demo's own, listed under Projects like any
+    // other (a Quick Session would file it under Chats, next to the bot).
     setPhase("workspace", "running");
     const tag = shortToken();
-    const quick = unwrap(
-      await bridge.quickSessionCreate({ name: `dog-tinder-${tag}` }),
-      "quickSessionCreate",
+    const created = unwrap(
+      await bridge.projectCreate({ name: `dog-tinder-${tag}` }),
+      "projectCreate",
     );
-    const workspaceId = quick.workspaceId;
-    update({ workspaceId, projectName: quick.project.name });
-    setPhase("workspace", "done", quick.project.name);
+    const workspaceId = created.workspaceId;
+    update({ workspaceId, projectName: created.project.name });
+    setPhase("workspace", "done", created.project.name);
 
     // Phase 2 — the seed: profiles, the test contract, and the exact node the
     // released session will start.
@@ -381,9 +421,10 @@ export async function runReproDemo(
     );
     setPhase("seed", "done", `${REPRO_SCENARIO_SEED.length + 1} files`);
 
-    // Phase 3 — the bot that owns the watch.
+    // Phase 3 — the bot that owns the watch and delegates the work. It lives
+    // under Chats, so its name says what it is, not what it builds.
     setPhase("bot", "running");
-    const botId = `dog-tinder-${tag}`;
+    const botId = `white-walker-${tag}`;
     const bot = unwrap(
       await bridge.botCreate({
         hostId,
@@ -394,11 +435,11 @@ export async function runReproDemo(
         body: {
           characterPreset: "arya",
           displayIdentity: {
-            displayName: `Dog Tinder bot ${tag}`,
+            displayName: `White walker ${tag}`,
             // The handle is an identity, not a label: a fixed one makes the
             // SECOND run collide with the first ("handle is already owned").
-            handle: `dog-tinder-${tag}`,
-            title: "Watches the deck's spec",
+            handle: `white-walker-${tag}`,
+            title: "Delegates the Dog Tinder build",
           },
           harnessPolicy: {
             defaultHarness: runtime.harness,
@@ -420,7 +461,7 @@ export async function runReproDemo(
     unwrap(
       await bridge.graphWritePolicy({
         workspaceId,
-        policy: policyFor(runtime, iterations),
+        policy: policyFor(workers, iterations),
         main: mainNodeFor(runtime, REPRO_SCENARIO_SPEC),
       }),
       "graphWritePolicy",
@@ -428,7 +469,7 @@ export async function runReproDemo(
     setPhase(
       "policy",
       "done",
-      `${runtime.harness}${runtime.model ? `/${runtime.model}` : ""} · ${iterations} round(s)`,
+      `main ${describeRuntime(runtime)} · subagents ${describeRuntime(workers)} · ${iterations} round(s)`,
     );
 
     // Phase 5 — the watch, armed while the spec does not exist yet, so the
@@ -544,6 +585,12 @@ export async function runReproDemo(
       }
       update({ firingEventId: fired.lastEventId ?? null });
       setPhase("firing", "done", `${fired.lastEventId} · ${fired.lastOutcome}`);
+      // The released session exists now, and the first thing it does is fan
+      // the build out to parallel workers — so this is the moment to leave
+      // Settings for the run's own sessions: the main session and its workers,
+      // side by side as they run. The Work Graph canvas stays a tab away; it
+      // is a diagram, not the work.
+      tour({ kind: "open-sessions", workspaceId });
 
       const started = await until(
         async () => {
@@ -576,14 +623,14 @@ export async function runReproDemo(
         releasedBy: "panel",
         releaseNote: message,
       });
+      // Released by the panel instead: the daemon's rounds still run as
+      // sessions in this workspace, so the tour goes there all the same.
+      tour({ kind: "open-sessions", workspaceId });
     }
 
-    // Phase 8 — the rounds. This is the moment worth watching, so the tour
-    // leaves Settings and opens the workspace's own Work Graph: from here the
-    // viewer follows the real orchestrator canvas, not a copy of it.
+    // Phase 8 — the rounds, followed from the sessions view the tour opened
+    // at the firing; the daemon's own status is what settles them.
     setPhase("rounds", "running");
-    tour({ kind: "open-work-graph", workspaceId });
-    tour({ kind: "focus-view", view: "graph" });
     const finished = await until(
       async () => {
         const status = await bridge.graphOrchestratorStatus({ workspaceId });
@@ -605,8 +652,9 @@ export async function runReproDemo(
       finished.status ?? null,
     );
 
-    // Phase 9 — the ledgers and the cost, on the product's own tabs.
+    // Phase 9 — the telemetry and the cost, on the Work Graph's own tabs.
     setPhase("evidence", "running");
+    tour({ kind: "open-work-graph", workspaceId });
     tour({ kind: "focus-view", view: "evidence" });
     const snapshot = unwrap(
       await bridge.graphObservabilityStatus({ workspaceId }),
@@ -621,8 +669,10 @@ export async function runReproDemo(
     setPhase(
       "evidence",
       "done",
-      `${(snapshot.observability.evidence ?? []).length} checkpoints`,
+      `${(snapshot.observability.evidence ?? []).length} telemetry entries`,
     );
+    // The telemetry is worth reading before the tour's last stop, the usage.
+    await sleep(8000);
     tour({ kind: "focus-view", view: "usage" });
     update({ running: false, spotlight: "evidence" });
   } catch (error) {
@@ -636,4 +686,60 @@ export async function runReproDemo(
       return { ...previous, phases, running: false, failure: message };
     });
   }
+}
+
+/** The identities this demo mints: its bots' handles and its projects'
+ *  names, across every version of the demo that ever ran here. Nothing
+ *  else is ever touched by the cleanup. */
+export const DEMO_BOT_HANDLE = /^(white-walker|dog-tinder)-[0-9a-f]{4,6}$/;
+export const DEMO_PROJECT_NAME = /^dog-tinder-(demo-\d+|[0-9a-f]{6})$/;
+
+export type ReproCleanupReport = { bots: number; projects: number; errors: string[] };
+
+export function canRemoveDemoRuns(bridge: ReproDemoBridge | null): boolean {
+  return Boolean(
+    bridge?.botSnapshot && bridge.botDelete && bridge.projectList && bridge.projectRemove,
+  );
+}
+
+/** Removes every bot and project this demo created — and only those: the
+ *  bots whose handle is a demo handle, the projects whose name is a demo
+ *  name. Projects go with their folder when the daemon created the folder
+ *  (a Quick Session's scratch, or `projectCreate`'s home); a failure on one
+ *  item is reported and the rest still proceeds. Never runs mid-demo. */
+export async function removeDemoRuns(bridge: ReproDemoBridge | null): Promise<ReproCleanupReport> {
+  const report: ReproCleanupReport = { bots: 0, projects: 0, errors: [] };
+  if (!bridge || !canRemoveDemoRuns(bridge) || state.running) return report;
+  const status = await bridge.status();
+  if (!status.ok) {
+    report.errors.push(`status: ${status.error.message}`);
+    return report;
+  }
+  const hostId = status.result.hostId;
+  const bots = await bridge.botSnapshot!({ hostId, workspaceId: "", locale: "en-US" });
+  if (!bots.ok) report.errors.push(`bots: ${bots.error.message}`);
+  else {
+    for (const bot of bots.result.bots) {
+      if (!DEMO_BOT_HANDLE.test(bot.displayIdentity.handle ?? "")) continue;
+      const removed = await bridge.botDelete!({
+        hostId,
+        workspaceId: "",
+        requestId: requestId(),
+        botId: bot.id,
+      });
+      if (removed.ok) report.bots += 1;
+      else report.errors.push(`bot ${bot.displayIdentity.handle}: ${removed.error.message}`);
+    }
+  }
+  const projects = await bridge.projectList!();
+  if (!projects.ok) report.errors.push(`projects: ${projects.error.message}`);
+  else {
+    for (const project of projects.result.projects) {
+      if (!DEMO_PROJECT_NAME.test(project.name)) continue;
+      const removed = await bridge.projectRemove!({ id: project.id, deleteFiles: true });
+      if (removed.ok) report.projects += 1;
+      else report.errors.push(`project ${project.name}: ${removed.error.message}`);
+    }
+  }
+  return report;
 }

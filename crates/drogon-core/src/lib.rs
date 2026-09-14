@@ -583,6 +583,7 @@ impl Engine {
             "project.remove" => self.mutating(request, Self::do_project_remove),
             // R16-BM2 (additive): composer Advanced rows + Quick Session.
             "project.update" => self.mutating(request, Self::do_project_update),
+            "project.create" => self.mutating(request, Self::do_project_create),
             "project.quickSessionCreate" => {
                 self.mutating(request, Self::do_project_quick_session_create)
             }

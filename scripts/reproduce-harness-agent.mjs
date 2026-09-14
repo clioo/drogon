@@ -16,7 +16,7 @@
 // surface, because a fixture has no provider to report real ones.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, cpSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const FIXTURE_VERSION = "drogon-repro-fixture 1.0";
@@ -227,14 +227,17 @@ const runId =
   prompt.match(/for workflow ([0-9a-f]{8,})/)?.[1] ??
   null;
 const releaseEvent = prompt.match(/Monitor delegation (\S+)/)?.[1] ?? null;
+const dispatchId = process.env.DROGON_DISPATCH_ID ?? null;
 const agentId = evaluation ? path.basename(evaluation, ".json") : releaseEvent ? "monitor-release" : "orchestrator-main";
-const role = evaluation
-  ? evaluation.endsWith("-test.json")
-    ? "test"
-    : "review"
-  : releaseEvent
-    ? "release"
-    : "main";
+const role = dispatchId
+  ? "worker"
+  : evaluation
+    ? evaluation.endsWith("-test.json")
+      ? "test"
+      : "review"
+    : releaseEvent
+      ? "release"
+      : "main";
 
 log(context, {
   at: new Date().toISOString(),
@@ -259,6 +262,173 @@ if (!context.workspaceId) {
   if (resolved) context.workspaceId = resolved;
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** How long a worker keeps its session alive after doing its slice: long
+ *  enough that a viewer (and the acceptance) can see several of them live at
+ *  once, short enough not to bore anyone. */
+const WORKER_DWELL_MS = 8000;
+
+/** The worker's own turn, inside the session `worker-start` opened for it.
+ *  The task spec carries a tag the main agent chose (`[deck]`, `[page]`,
+ *  `[test]`); the worker does that slice, then reports through the dispatch
+ *  credential the daemon put in its environment — one final report, with the
+ *  outcome the work actually had. */
+function worker() {
+  const spec = prompt.match(/Exact instructions \(verbatim\):\s*\n([^\n]+)/)?.[1] ?? prompt;
+  const tag = spec.match(/^\s*\[([a-z:-]+)\]/)?.[1] ?? "deck";
+  const cwd = process.cwd();
+  let summary;
+  let outcome = "succeeded";
+  let modified = [];
+  if (tag === "deck") {
+    // The deck and its storage, at stage 1: the spec's undo is not there yet.
+    for (const file of ["src/deck.js", "src/storage.js"]) {
+      const from = path.join(context.stagesDir, "agent-stage-1", file);
+      mkdirSync(path.dirname(path.join(cwd, file)), { recursive: true });
+      cpSync(from, path.join(cwd, file));
+      modified.push(file);
+    }
+    summary = "Implemented src/deck.js and src/storage.js: swipe, match, empty-deck refusal, atomic save/load.";
+  } else if (tag === "page") {
+    cpSync(path.join(context.stagesDir, "agent-stage-1", "index.html"), path.join(cwd, "index.html"));
+    modified.push("index.html");
+    summary = "Implemented index.html: the deck page with pass and like controls.";
+  } else {
+    // A tester: run the contract and report what it says, never a guess.
+    const tests = runTests(cwd);
+    const green = tests.fail === 0 && (tests.pass ?? 0) > 0;
+    outcome = green ? "succeeded" : "failed";
+    summary = green
+      ? `Adversarial test of ${tag.split(":")[1] ?? "the deck"}: ${describeTests(tests)} — nothing left to break.`
+      : `Adversarial test of ${tag.split(":")[1] ?? "the deck"}: ${describeTests(tests)}. Findings: undo of the last swipe is missing.`;
+  }
+  process.stdout.write(`${summary}\n`);
+  // Stay visibly alive for a while: the parallelism is the point of the demo.
+  const until = Date.now() + WORKER_DWELL_MS;
+  while (Date.now() < until) {
+    spawnSync(process.execPath, ["-e", "setTimeout(()=>{}, 500)"], { timeout: 2000 });
+  }
+  reportUsage(context, { role: "worker", harness, model, runId: process.env.DROGON_RUN_ID ?? null, agentId: dispatchId });
+  const result = spawnSync(
+    process.env.DROGON_CLI_COMMAND ?? context.cli,
+    [
+      "--data-dir",
+      process.env.DROGON_DATA_DIR ?? context.dataDir,
+      "--json",
+      "orchestration",
+      "send",
+      "--kind",
+      "worker_done",
+      "--subject",
+      `[${tag}] ${outcome}`,
+      "--outcome",
+      outcome,
+      "--body",
+      summary,
+      "--result",
+      JSON.stringify({ modifiedFiles: modified, artifacts: [], summary }),
+    ],
+    { encoding: "utf8", timeout: 30_000 },
+  );
+  if (result.status !== 0) {
+    process.stderr.write(`worker_done refused: ${result.stderr || result.stdout}\n`);
+    process.exit(23);
+  }
+}
+
+/** The main agent's fan-out, done from the released session the way the
+ *  product's own brief describes: a run, depth-one implementation workers in
+ *  parallel, then a depth-one adversarial tester for each as it finishes. The
+ *  bounded whole-workflow test/review pass stays the daemon's, started last. */
+function orchestrate(scoped) {
+  const status = cliJson(scoped, ["status"]);
+  if (!status?.hostId) throw new Error("status did not name a host");
+  const created = cliJson(scoped, [
+    "orchestration",
+    "run-create",
+    "--objective",
+    "Dog Tinder: implement the deck and its page, then test them adversarially",
+    "--host",
+    status.hostId,
+  ]);
+  const run = created?.run;
+  if (!run?.runId) throw new Error("orchestration run-create did not return a run");
+  const scope = [
+    "--run",
+    run.runId,
+    "--coordinator-id",
+    run.coordinatorId,
+    "--consumer-generation",
+    String(run.consumerGeneration),
+  ];
+  const task = (spec, title) => {
+    const made = cliJson(scoped, ["orchestration", "task-create", ...scope, "--spec", spec, "--task-title", title]);
+    if (!made?.task?.taskId) throw new Error(`task-create failed for ${title}`);
+    return made.task.taskId;
+  };
+  const start = (taskId) => {
+    const started = cliJson(scoped, [
+      "orchestration",
+      "worker-start",
+      ...scope,
+      "--task",
+      taskId,
+      "--workspace",
+      scoped.workspaceId,
+      "--timeout-ms",
+      "30000",
+    ]);
+    if (!started?.dispatchId) throw new Error(`worker-start failed for ${taskId}`);
+    return started.dispatchId;
+  };
+  const settled = (dispatchIds, budgetMs) => {
+    const deadline = Date.now() + budgetMs;
+    const outcomes = {};
+    while (Date.now() < deadline) {
+      for (const id of dispatchIds) {
+        if (outcomes[id]) continue;
+        const shown = cliJson(scoped, ["orchestration", "worker-show", ...scope, "--dispatch", id]);
+        if (shown?.outcome) outcomes[id] = shown.outcome;
+      }
+      if (dispatchIds.every((id) => outcomes[id])) return outcomes;
+      spawnSync(process.execPath, ["-e", "setTimeout(()=>{}, 1000)"], { timeout: 3000 });
+    }
+    throw new Error(`workers did not report in ${budgetMs} ms: ${JSON.stringify(outcomes)}`);
+  };
+
+  // Implementation workers, in parallel: two sessions, two slices.
+  const workers = [
+    start(task("[deck] Implement src/deck.js and src/storage.js per specs/dog-tinder.md. You cannot dispatch another worker.", "Deck and storage")),
+    start(task("[page] Implement index.html per specs/dog-tinder.md. You cannot dispatch another worker.", "Deck page")),
+  ];
+  recordEvidence(scoped, {
+    status: "progress",
+    summary: `Main agent dispatched ${workers.length} implementation workers in parallel.`,
+    detail: `Run ${run.runId}: dispatches ${workers.join(", ")}.`,
+    role: "main",
+    runId: run.runId,
+    agentId: "orchestrator-main",
+  });
+  const implemented = settled(workers, 120_000);
+
+  // A depth-one adversarial tester per worker, also in parallel.
+  const testers = [
+    start(task("[test:deck] Test the deck adversarially: run node --test and report findings. Do not modify product code. You cannot dispatch another worker.", "Adversarial test: deck")),
+    start(task("[test:page] Test the page adversarially: run node --test and report findings. Do not modify product code. You cannot dispatch another worker.", "Adversarial test: page")),
+  ];
+  const tested = settled(testers, 120_000);
+  recordEvidence(scoped, {
+    status: Object.values(tested).every((outcome) => outcome === "succeeded") ? "completed" : "finding",
+    summary: `Depth-one testers reported: ${Object.values(tested).join(", ")}. Findings go to the daemon's bounded review pass.`,
+    detail: `Workers: ${JSON.stringify(implemented)}. Testers: ${JSON.stringify(tested)}.`,
+    role: "main",
+    runId: run.runId,
+    agentId: "orchestrator-main",
+  });
+  return { runId: run.runId, workers, testers, implemented, tested };
+}
+
 /** The monitor-released session: open the worktree the delegation prompt
  *  names, put this run's Subagent policy on it, and start the durable
  *  workflow there. The rounds themselves are the daemon's job. */
@@ -276,6 +446,12 @@ function release() {
   if (direct) {
     const [, workspaceId, file] = direct;
     const scoped = { ...context, workspaceId };
+    // This session IS the main agent: fan out before handing the bounded
+    // whole-workflow pass to the daemon.
+    const fanout = orchestrate(scoped);
+    process.stdout.write(
+      `Main agent: ${fanout.workers.length} workers and ${fanout.testers.length} testers ran as parallel sessions (run ${fanout.runId}).\n`,
+    );
     const started = cliJson(scoped, [
       "graph",
       "orchestrator-start",
@@ -343,6 +519,13 @@ function release() {
   ]);
   if (!wrote) throw new Error("graph write-intent refused the released policy");
 
+  // This session IS the main agent here too: fan out to parallel workers in
+  // the released worktree before handing the bounded pass to the daemon.
+  const fanout = orchestrate(scoped);
+  process.stdout.write(
+    `Main agent: ${fanout.workers.length} workers and ${fanout.testers.length} testers ran as parallel sessions (run ${fanout.runId}).\n`,
+  );
+
   let task = context.mainNode?.prompt ?? "";
   try {
     task = `${readFileSync(path.join(created.path, context.specPath ?? "specs/dog-tinder.md"), "utf8")}\n\n${task}`;
@@ -380,6 +563,11 @@ function release() {
 }
 
 try {
+  if (role === "worker") {
+    worker();
+    process.exit(0);
+  }
+
   if (role === "release") {
     release();
     if (sentinel) process.stdout.write(`${sentinel}\n`);
@@ -387,13 +575,18 @@ try {
   }
 
   if (role === "main") {
-    applyStage(context, "agent-stage-1");
+    // If the released session's workers already built the deck, this node is
+    // the director's final check, not a second implementation.
+    const alreadyBuilt = existsSync(path.join(process.cwd(), "src", "deck.js"));
+    if (!alreadyBuilt) applyStage(context, "agent-stage-1");
     const tests = runTests(process.cwd());
-    process.stdout.write(`Dog Tinder deck written (stage 1). ${describeTests(tests)}\n`);
+    process.stdout.write(`Dog Tinder deck ${alreadyBuilt ? "already built by the workers" : "written (stage 1)"}. ${describeTests(tests)}\n`);
     recordEvidence(context, {
       status: "completed",
-      summary: "Dog Tinder deck and storage implemented; page renders the profile queue.",
-      detail: `Implemented src/deck.js, src/storage.js and index.html. ${describeTests(tests)}`,
+      summary: alreadyBuilt
+        ? "Main agent verified the workers' deck and handed it to the bounded test/review pass."
+        : "Dog Tinder deck and storage implemented; page renders the profile queue.",
+      detail: `${alreadyBuilt ? "src/deck.js, src/storage.js and index.html came from the parallel workers." : "Implemented src/deck.js, src/storage.js and index.html."} ${describeTests(tests)}`,
       role: "main",
       runId,
       agentId,

@@ -21,6 +21,9 @@ export type ProjectBridge = {
   projectList(): Promise<Result<{ projects: ProjectResult[] }>>;
   projectRemove(input: {
     id: string;
+    /** Also delete the folder — honoured only for folders the daemon created
+     *  under its own projects home (`projectCreate`); refused elsewhere. */
+    deleteFiles?: boolean;
   }): Promise<Result<{ id: string; removed: boolean }>>;
   projectUpdate(input: {
     id: string;
@@ -29,6 +32,9 @@ export type ProjectBridge = {
   quickSessionCreate(input?: {
     name?: string;
   }): Promise<Result<QuickSessionResult>>;
+  /** A new empty folder under the daemon's projects home, registered as an
+   *  ordinary Project (it lists under Projects, not Chats). */
+  projectCreate(input: { name: string }): Promise<Result<QuickSessionResult>>;
   sparsePresets(input: {
     projectId: string;
   }): Promise<Result<{ presets: SparsePresetResult[] }>>;
@@ -195,7 +201,7 @@ const branchName = z
 export const projectBridgeSchemas = {
   projectAdd: z.object({ path: fsPath, name: displayName.optional() }),
   projectList: z.undefined(),
-  projectRemove: z.object({ id }),
+  projectRemove: z.object({ id, deleteFiles: z.boolean().optional() }),
   projectUpdate: z.object({
     id,
     setupScript: z
@@ -206,6 +212,7 @@ export const projectBridgeSchemas = {
       .optional(),
   }),
   quickSessionCreate: z.object({ name: displayName.optional() }).optional(),
+  projectCreate: z.object({ name: displayName }),
   sparsePresets: z.object({ projectId: id }),
   saveSparsePreset: z.object({
     projectId: id,
@@ -349,6 +356,7 @@ export const projectResultSchemas = {
   "project.remove": z.object({ id: z.string(), removed: z.boolean() }),
   "project.update": projectResult,
   "project.quickSessionCreate": quickSessionResult,
+  "project.create": quickSessionResult,
   "project.sparsePresets": z.object({ presets: z.array(sparsePresetResult) }),
   "project.saveSparsePreset": sparsePresetResult,
   "worktree.create": worktreeResult,

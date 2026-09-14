@@ -261,7 +261,9 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                     onSuppressWhenFocusedChange={props.onSuppressWhenFocusedChange}
                   />
                 ) : null}
-                {visible.includes("demo") ? <ReproDemoSection /> : null}
+                {visible.includes("demo") ? (
+                  <ReproDemoSection defaultHarnessId={props.defaultHarnessId} />
+                ) : null}
                 {visible.includes("shortcuts") ? <ShortcutsSection /> : null}
                 {showProject && props.project ? (
                   <ProjectSettingsSectionChrome project={props.project}>

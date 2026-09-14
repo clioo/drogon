@@ -1111,6 +1111,10 @@ pub struct MonitorTickSummary {
     pub skipped: usize,
     pub refused: usize,
     pub events: usize,
+    /// Monitors disabled this tick because the workspace they watch no
+    /// longer exists: there is nothing left to check, and a watch that fails
+    /// every minute forever is noise, not evidence.
+    pub retired: usize,
 }
 
 /// How many `github_pr.v1` watches one tick may read over the network. A
@@ -1211,13 +1215,23 @@ pub fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSumm
             let root = match workspace::get_path(&conn, &file_rule.project_id) {
                 Ok(root) => root,
                 Err(_) => {
-                    // Unknown workspace: an honest error check-in, committed below.
-                    out.push(Candidate {
-                        record,
-                        rev,
-                        root: String::new(),
-                        file_rule,
-                    });
+                    // The watched workspace is gone. Retire the monitor with the
+                    // reason on its card — its history stays — rather than
+                    // scheduling a check that can only ever fail.
+                    let mut retired = record.clone();
+                    retired.enabled = false;
+                    retired.last_notice = Some(
+                        "Disabled: the workspace this watch belonged to was removed."
+                            .to_string(),
+                    );
+                    retired.updated_at_ms = now_ms;
+                    match monitor_storage::cas_write(&conn, &retired, rev) {
+                        Ok(()) => summary.retired += 1,
+                        Err(e) => eprintln!(
+                            "[bot-monitors] could not retire {} (workspace gone): {e}",
+                            record.id
+                        ),
+                    }
                     continue;
                 }
             };

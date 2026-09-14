@@ -28,8 +28,8 @@ export type ReproPhase = {
 export const REPRO_PHASES: readonly ReproPhase[] = [
   {
     id: "workspace",
-    title: "Disposable workspace",
-    detail: "A Quick Session project of its own: nothing touches your repos.",
+    title: "A project of its own",
+    detail: "dog-tinder-<tag>, listed under Projects. Every run gets a new one; nothing touches your repos.",
   },
   {
     id: "seed",
@@ -38,8 +38,8 @@ export const REPRO_PHASES: readonly ReproPhase[] = [
   },
   {
     id: "bot",
-    title: "Bot",
-    detail: "Created with the harness and the model you picked above.",
+    title: "The bot that delegates",
+    detail: "White walker <tag>, under Chats, on the harness and model you picked above.",
   },
   {
     id: "policy",
@@ -64,12 +64,12 @@ export const REPRO_PHASES: readonly ReproPhase[] = [
   {
     id: "rounds",
     title: "Adversarial rounds",
-    detail: "Implement, break, fix and verify — up to the round cap.",
+    detail: "The released session fans out to parallel workers, then the daemon breaks, fixes and verifies — up to the round cap.",
   },
   {
     id: "evidence",
-    title: "Evidence and cost",
-    detail: "The .drogon ledgers and what the run actually cost.",
+    title: "Agent telemetry and cost",
+    detail: "Every attempt, verdict and dispatch the daemon recorded, and what the run actually cost.",
   },
 ];
 
@@ -86,57 +86,36 @@ export function initialPhaseStates(): Record<ReproPhaseId, ReproPhaseState> {
   ) as Record<ReproPhaseId, ReproPhaseState>;
 }
 
-/** One selectable runtime: a harness this product can run a Work Graph node
- *  on, plus whatever exact model id the operator types. Nothing here ships a
- *  model id of its own — Drogon never guesses a model or a provider, and a
- *  demo that pinned one would be choosing someone's spend for them. An empty
- *  model means "whatever that harness is already set up to use". */
-export type ReproRuntimeChoice = {
-  id: string;
-  harness: string;
-  model: string;
-  label: string;
-  note: string;
-  /** True when the provider bills nothing for this model on this host. */
-  free: boolean;
-};
+/** The runtime a run works with: a harness this product can run a Work Graph
+ *  node on, and the exact model id it receives. Both come from where the
+ *  Subagent policy takes them — the host's harness catalog and the harness's
+ *  own model list — never from a list this demo ships. */
+export type ReproRuntime = { harness: string; model: string };
 
-export const REPRO_RUNTIME_CHOICES: readonly ReproRuntimeChoice[] = [
-  {
-    id: "claude",
-    harness: "claude",
-    model: "",
-    label: "Claude Code · the harness default model",
-    note: "Uses the Claude Code you already have set up.",
-    free: false,
-  },
-  {
-    id: "codex",
-    harness: "codex",
-    model: "",
-    label: "Codex · the harness default model",
-    note: "Uses the Codex you already have set up.",
-    free: false,
-  },
-  {
-    id: "opencode",
-    harness: "opencode",
-    model: "",
-    label: "OpenCode · give it the exact id",
-    note: "OpenCode needs an explicit `provider/model` id.",
-    free: false,
-  },
-  {
-    id: "pi",
-    harness: "pi",
-    model: "",
-    label: "Pi · give it the exact id",
-    note: "Pi needs the exact model id, `provider/model` when the id is ambiguous.",
-    free: false,
-  },
-];
+/** The harnesses a Work Graph node can run on; the picker shows only those
+ *  installed here. */
+export const REPRO_SUPPORTED_HARNESSES = ["claude", "codex", "opencode", "pi"] as const;
 
-export const DEFAULT_REPRO_RUNTIME = REPRO_RUNTIME_CHOICES[0];
+/** Shell-adapter harnesses take no "harness default": the daemon refuses a
+ *  node on them without an exact model id, so the demo refuses to start one. */
+export function harnessNeedsModel(harness: string): boolean {
+  return harness === "pi" || harness === "opencode";
+}
+
+/** The model the demo proposes from a harness's own list: the entry the
+ *  host recommends, else the first one the host enumerated. Only
+ *  host-verified ids qualify — a curated or typed id that this machine never
+ *  listed is the viewer's to choose, never the demo's to assume — and the
+ *  "harness default" row (an empty id) is not a proposal. Null when the host
+ *  enumerated nothing. */
+export function pickDemoModel(
+  options: readonly { id: string; verified: boolean; recommended: boolean }[],
+): string | null {
+  const listed = options.filter(
+    (option) => option.verified && option.id.trim().length > 0,
+  );
+  return (listed.find((option) => option.recommended) ?? listed[0])?.id ?? null;
+}
 
 export const REPRO_ITERATION_CHOICES = [1, 2, 3] as const;
 export const DEFAULT_REPRO_ITERATIONS = 2;

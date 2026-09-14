@@ -11,8 +11,8 @@ import {
   type MonitorView,
   type ReproDemoBridge,
 } from "./use-repro-demo";
-import { DEFAULT_REPRO_RUNTIME } from "./repro-demo-plan";
 import { REPRO_SCENARIO_SPEC_PATH } from "./repro-demo-scenario";
+import { removeDemoRuns } from "./repro-demo-store";
 
 const ok = <T,>(result: T) => ({ ok: true as const, result });
 
@@ -41,8 +41,8 @@ function makeBridge(fakes: Fakes) {
   let runIndex = 0;
   const bridge: ReproDemoBridge = {
     status: async () => ok({ hostId: "host-1" }),
-    quickSessionCreate: async () => {
-      calls.push("quickSessionCreate");
+    projectCreate: async () => {
+      calls.push("projectCreate");
       return ok({ project: { id: "p1", name: "dog-tinder-demo" }, workspaceId: "ws-1" });
     },
     fileWrite: async (input) => {
@@ -107,7 +107,7 @@ function makeBridge(fakes: Fakes) {
   return { bridge, writes, calls };
 }
 
-const runtime = { ...DEFAULT_REPRO_RUNTIME, harness: "opencode", model: "fixture/dog-tinder" };
+const runtime = { harness: "opencode", model: "fixture/dog-tinder" };
 
 // The run state lives outside React so the tour can unmount the panel; each
 // case therefore starts by clearing it.
@@ -233,7 +233,7 @@ describe("the in-app demo run", () => {
     const { bridge } = makeBridge({ monitorViews: [], runStates: [] });
     const failing: ReproDemoBridge = {
       ...bridge,
-      quickSessionCreate: async () => ({
+      projectCreate: async () => ({
         ok: false as const,
         error: { code: "io_error", message: "disk is full", retryable: false },
       }),
@@ -279,10 +279,10 @@ describe("running it again", () => {
       });
       return {
         ...bridge,
-        quickSessionCreate: async (input) => {
-          names.push(input.name ?? "");
+        projectCreate: async (input) => {
+          names.push(input.name);
           return ok({
-            project: { id: "p1", name: input.name ?? "" },
+            project: { id: "p1", name: input.name },
             workspaceId: "ws-1",
           });
         },
@@ -307,7 +307,7 @@ describe("running it again", () => {
     // The bot handle is an identity the daemon refuses to reuse: a fixed one
     // made the second run fail with "handle is already owned".
     expect(handles[0]).not.toBe(handles[1]);
-    for (const entry of handles) expect(entry).toMatch(/^dog-tinder-[0-9a-f]{6}\|dog-tinder-[0-9a-f]{6}$/);
+    for (const entry of handles) expect(entry).toMatch(/^white-walker-[0-9a-f]{6}\|white-walker-[0-9a-f]{6}$/);
     expect(names[0]).not.toBe(names[1]);
     for (const name of names) expect(name).toMatch(/^dog-tinder-[0-9a-f]{6}$/);
   });
@@ -337,12 +337,13 @@ describe("the guided tour", () => {
     });
 
     // The viewer is shown what was configured (the Bots page) as soon as the
-    // bot and its watch exist, then the real canvas once the rounds begin, and
-    // the ledgers' own tabs at the end.
+    // bot and its watch exist, then the run's sessions once the rounds begin
+    // — the orchestration is the sessions working, not a diagram of them —
+    // and the Work Graph's telemetry and usage tabs at the end.
     expect(tour).toEqual([
       { kind: "open-bots", workspaceId: "ws-1" },
+      { kind: "open-sessions", workspaceId: "ws-1" },
       { kind: "open-work-graph", workspaceId: "ws-1" },
-      { kind: "focus-view", view: "graph" },
       { kind: "focus-view", view: "evidence" },
       { kind: "focus-view", view: "usage" },
     ]);
@@ -395,5 +396,61 @@ describe("what the released session is told", () => {
     expect(node.dependsOn).toEqual([]);
     expect(node.prompt).toMatch(/# Spec/);
     expect(node.harness).toBe("opencode");
+  });
+});
+
+describe("tidying up after the demo", () => {
+  test("removes only the demo's own bots and projects, and keeps going past a failure", async () => {
+    const { bridge } = makeBridge({ monitorViews: [], runStates: [] });
+    const deletedBots: string[] = [];
+    const removedProjects: { id: string; deleteFiles?: boolean }[] = [];
+    const housekeeping: ReproDemoBridge = {
+      ...bridge,
+      botSnapshot: async () =>
+        ok({
+          bots: [
+            { id: "b1", displayIdentity: { handle: "white-walker-ab12cd" } },
+            { id: "b2", displayIdentity: { handle: "dog-tinder-1a2b" } },
+            { id: "b3", displayIdentity: { handle: "arya" } },
+            { id: "b4", displayIdentity: { handle: null } },
+            { id: "b5", displayIdentity: { handle: "white-walker-ffffff" } },
+          ],
+        }),
+      botDelete: async (input) => {
+        if (input.botId === "b5")
+          return { ok: false as const, error: { code: "io_error", message: "busy", retryable: true } };
+        deletedBots.push(input.botId);
+        return ok({});
+      },
+      projectList: async () =>
+        ok({
+          projects: [
+            { id: "p1", name: "dog-tinder-ab12cd" },
+            { id: "p2", name: "dog-tinder-demo-20260913231828", quickSession: true },
+            { id: "p3", name: "mentu-ai" },
+            { id: "p4", name: "dog-tinder" },
+          ],
+        }),
+      projectRemove: async (input) => {
+        removedProjects.push(input);
+        return ok({});
+      },
+    };
+    const report = await removeDemoRuns(housekeeping);
+    expect(deletedBots).toEqual(["b1", "b2"]);
+    expect(removedProjects).toEqual([
+      { id: "p1", deleteFiles: true },
+      { id: "p2", deleteFiles: true },
+    ]);
+    expect(report).toEqual({
+      bots: 2,
+      projects: 2,
+      errors: ["bot white-walker-ffffff: busy"],
+    });
+  });
+
+  test("does nothing without the housekeeping channels", async () => {
+    const { bridge } = makeBridge({ monitorViews: [], runStates: [] });
+    expect(await removeDemoRuns(bridge)).toEqual({ bots: 0, projects: 0, errors: [] });
   });
 });

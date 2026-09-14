@@ -6,7 +6,7 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::{compiler, failover, store};
+use super::{compiler, failover, observability, store};
 use crate::mentu::{execution, run_record, storage};
 use crate::{Engine, error};
 use chrono::{DateTime, Datelike, Timelike, Utc};
@@ -294,6 +294,41 @@ impl Engine {
             };
             run.steps.push(new_step(&run));
             engine.save_orchestrator(&mut run)?;
+            let approved = run
+                .policy
+                .approved_runtimes
+                .iter()
+                .map(describe_runtime)
+                .collect::<Vec<_>>()
+                .join(", ");
+            engine.record_telemetry(
+                &run,
+                "progress",
+                format!(
+                    "Workflow started: main task on {} · adversarial testing {} · up to {} iteration(s)",
+                    describe_runtime(&GraphRuntimeRef {
+                        harness: run.main.harness.clone(),
+                        model: run.main.model.clone(),
+                        provider: None,
+                    }),
+                    if run.policy.adversarial.enabled { "on" } else { "off" },
+                    run.policy.adversarial.max_iterations
+                ),
+                Some(format!(
+                    "Run {}\nApproved runtimes for the test and review agents, tried in order: {}\nFallback runtime: {}\nTask:\n{}",
+                    run.id,
+                    if approved.is_empty() { "none".to_string() } else { approved },
+                    run.policy
+                        .fallback_runtime
+                        .as_ref()
+                        .map(describe_runtime)
+                        .unwrap_or_else(|| "none".to_string()),
+                    run.main.prompt
+                )),
+                vec![],
+                "orchestrator",
+                "orchestrator",
+            );
             Ok(json!({"run":run}))
         })
     }
@@ -413,13 +448,121 @@ impl Engine {
             if !matches!(run.status.as_str(), "running" | "stopping") {
                 continue;
             }
+            let before = run.status.clone();
             if let Err(err) = self.advance_orchestrator(&mut run) {
                 run.status = "failed".into();
                 run.error = Some(err.message);
             }
             self.save_orchestrator(&mut run)?;
+            if run.status != before {
+                self.record_workflow_outcome(&run);
+            }
         }
         Ok(())
+    }
+
+    /// Writes one line of the run's telemetry into the workspace's own
+    /// evidence ledger. Best effort by design: telemetry that cannot be
+    /// written is logged, never allowed to fail the workflow it describes.
+    /// Called only while `graph_orchestrator_gate` is held.
+    fn record_telemetry(
+        &self,
+        run: &Run,
+        status: &str,
+        summary: String,
+        detail: Option<String>,
+        artifacts: Vec<String>,
+        agent_id: &str,
+        role: &str,
+    ) {
+        let root = match self.workspace_path(&run.workspace_id) {
+            Ok(root) => root,
+            Err(_) => return,
+        };
+        let entry = observability::daemon_evidence(
+            status,
+            summary,
+            detail,
+            artifacts,
+            Some(run.id.clone()),
+            Some(agent_id.to_string()),
+            Some(role.to_string()),
+        );
+        if let Err(err) = observability::append_daemon_evidence(&root, entry) {
+            eprintln!(
+                "[graph-orchestrator] telemetry for run {} not recorded: {}",
+                run.id, err.message
+            );
+        }
+    }
+
+    fn record_workflow_outcome(&self, run: &Run) {
+        let attempts: usize = run.steps.iter().map(|step| step.attempts.len()).sum();
+        let fallbacks = run.steps.iter().filter(|step| step.is_fallback).count();
+        let findings = run
+            .steps
+            .iter()
+            .filter(|step| step.verdict.as_deref() == Some("findings"))
+            .count();
+        let shape = format!(
+            "{} iteration(s) · {} step(s) · {} runtime attempt(s) · {} on the fallback · {} round(s) with findings",
+            run.iteration,
+            run.steps.len(),
+            attempts,
+            fallbacks,
+            findings
+        );
+        let (status, summary) = match run.status.as_str() {
+            "passed" => (
+                "completed",
+                format!(
+                    "Workflow passed: the last review found nothing left to fix · {shape}"
+                ),
+            ),
+            "exhausted" => (
+                "blocked",
+                format!(
+                    "Workflow exhausted its {} iteration cap with findings still open · {shape}",
+                    run.policy.adversarial.max_iterations
+                ),
+            ),
+            "stopped" => ("blocked", format!("Workflow stopped on request · {shape}")),
+            "unverifiable" => (
+                "blocked",
+                format!("Workflow unverifiable: contact with a worker was lost · {shape}"),
+            ),
+            "failed" => ("failed", format!("Workflow failed · {shape}")),
+            _ => return,
+        };
+        let mut lines = vec![format!("Started {} · last update {}", run.started_at, run.updated_at)];
+        if let Some(error) = &run.error {
+            lines.push(format!("Reason: {error}"));
+        }
+        for step in &run.steps {
+            let runtime = step
+                .runtime
+                .as_ref()
+                .map(describe_runtime)
+                .unwrap_or_else(|| "no runtime".to_string());
+            lines.push(format!(
+                "iteration {} · {} · {} · {}{} · verdict {}",
+                step.iteration,
+                step.phase,
+                step.status,
+                runtime,
+                if step.is_fallback { " (fallback)" } else { "" },
+                step.verdict.as_deref().unwrap_or("—")
+            ));
+        }
+        self.record_telemetry(
+            run,
+            status,
+            summary,
+            Some(lines.join("\n")),
+            vec![],
+            "orchestrator",
+            "orchestrator",
+        );
     }
 
     fn advance_orchestrator(&self, run: &mut Run) -> Result<(), RpcError> {
@@ -458,18 +601,61 @@ impl Engine {
                 return Ok(());
             }
             if child.status == MentuRunStatus::Succeeded {
-                let verdict = if run.phase == "main" {
-                    Some("pass".to_string())
+                let evaluation = if run.phase == "main" {
+                    Some(("pass".to_string(), None))
                 } else {
-                    read_verdict(&root, &step.node_id)?
+                    read_evaluation(&root, &step.node_id)?
+                        .map(|(verdict, evidence)| (verdict, Some(evidence)))
                 };
-                if let Some(verdict) = verdict {
+                if let Some((verdict, evidence)) = evaluation {
                     step.status = "succeeded".into();
-                    step.verdict = Some(verdict);
+                    step.verdict = Some(verdict.clone());
                     if let Some(attempt) = step.attempts.last_mut() {
                         attempt.outcome = "succeeded".into();
                     }
+                    let (iteration, phase, node_id, runtime) = (
+                        step.iteration,
+                        step.phase.clone(),
+                        step.node_id.clone(),
+                        step.runtime.as_ref().map(describe_runtime).unwrap_or_default(),
+                    );
+                    let mentu_run = child.mentu_run_id.clone().unwrap_or_default();
                     finish_step(run);
+                    if phase == "main" {
+                        self.record_telemetry(
+                            run,
+                            "completed",
+                            format!("Iteration {iteration} · main agent finished its task on {runtime}"),
+                            Some(format!(
+                                "Node {node_id} · Mentu run {mentu_run}\nTask as given to the agent:\n{}\n\n{}",
+                                run.main.prompt,
+                                if run.policy.adversarial.enabled {
+                                    "Adversarial testing is on: a test agent now tries to break this work, and a review agent judges what it found."
+                                } else {
+                                    "Adversarial testing is off: the workflow ends here."
+                                }
+                            )),
+                            vec![],
+                            &node_id,
+                            "main",
+                        );
+                    } else {
+                        let status = if verdict == "pass" { "completed" } else { "finding" };
+                        self.record_telemetry(
+                            run,
+                            status,
+                            format!(
+                                "Iteration {iteration} · {phase} verdict: {verdict} · {runtime}"
+                            ),
+                            Some(format!(
+                                "Node {node_id} · Mentu run {mentu_run}\nWhat the {phase} agent reported as its evidence:\n{}",
+                                evidence.unwrap_or_default()
+                            )),
+                            vec![result_path(&node_id)],
+                            &node_id,
+                            &phase,
+                        );
+                    }
                     return Ok(());
                 }
             }
@@ -489,15 +675,37 @@ impl Engine {
             } else {
                 None
             };
+            let reason = stderr_reason.or(child.error).unwrap_or_else(|| {
+                "Worker did not produce a valid evaluation result.".into()
+            });
             if let Some(attempt) = step.attempts.last_mut() {
                 attempt.outcome = "failed".into();
-                attempt.reason =
-                    Some(stderr_reason.or(child.error).unwrap_or_else(|| {
-                        "Worker did not produce a valid evaluation result.".into()
-                    }));
+                attempt.reason = Some(reason.clone());
             }
+            let failed = (
+                step.iteration,
+                step.phase.clone(),
+                step.node_id.clone(),
+                step.attempts.len(),
+                step.runtime.as_ref().map(describe_runtime).unwrap_or_default(),
+                child.mentu_run_id.clone().unwrap_or_default(),
+            );
             step.run_id = None;
             step.status = "pending".into();
+            let (iteration, phase, node_id, attempt_no, runtime, mentu_run) = failed;
+            self.record_telemetry(
+                run,
+                "failed",
+                format!(
+                    "Iteration {iteration} · {phase}: attempt {attempt_no} on {runtime} failed"
+                ),
+                Some(format!(
+                    "Node {node_id} · Mentu run {mentu_run}\nReason: {reason}\nThe next approved runtime is tried, then the fallback; the workflow fails only when every configured runtime failed."
+                )),
+                vec![],
+                &node_id,
+                &phase,
+            );
         }
         if run.status == "stopping" {
             run.status = "stopped".into();
@@ -520,12 +728,12 @@ impl Engine {
             return Ok(());
         };
         let node = node_for_step(run, &candidate);
-        let result_path = root.join(result_path(&node.id));
-        std::fs::create_dir_all(result_path.parent().unwrap())
+        let evaluation_file = root.join(result_path(&node.id));
+        std::fs::create_dir_all(evaluation_file.parent().unwrap())
             .map_err(|e| error::io_error(e.to_string()))?;
         // Each attempt must write fresh evidence; an earlier attempt cannot certify it.
-        if result_path.exists() {
-            std::fs::remove_file(&result_path).map_err(|e| error::io_error(e.to_string()))?;
+        if evaluation_file.exists() {
+            std::fs::remove_file(&evaluation_file).map_err(|e| error::io_error(e.to_string()))?;
         }
         let intent = GraphIntent {
             nodes: vec![node.clone()],
@@ -561,8 +769,17 @@ impl Engine {
         step.runtime = Some(candidate.clone());
         step.is_fallback =
             run.phase != "main" && failover::is_fallback_attempt(&run.policy, step.attempts.len());
+        let (iteration, phase, node_id, is_fallback) = (
+            step.iteration,
+            step.phase.clone(),
+            step.node_id.clone(),
+            step.is_fallback,
+        );
+        let attempt_no = step.attempts.len() + 1;
+        let runtime = describe_runtime(&candidate);
         match launched {
             Ok(child) => {
+                let mentu_run = child.mentu_run_id.clone().unwrap_or_default();
                 step.run_id = Some(child.id);
                 step.status = "running".into();
                 step.attempts.push(GraphFailoverAttemptRecord {
@@ -572,6 +789,29 @@ impl Engine {
                     outcome: "launched".into(),
                     reason: None,
                 });
+                let role_note = match phase.as_str() {
+                    "main" => "The main agent builds what the task describes, in this workspace.".to_string(),
+                    "test" => format!(
+                        "The test agent tries to break the main agent's work and writes its verdict (pass or findings, with evidence) to {}.",
+                        result_path(&node_id)
+                    ),
+                    _ => format!(
+                        "The review agent judges the test agent's findings and writes its own verdict to {}.",
+                        result_path(&node_id)
+                    ),
+                };
+                self.record_telemetry(
+                    run,
+                    "progress",
+                    format!(
+                        "Iteration {iteration} · {phase}: attempt {attempt_no} launched on {runtime}{}",
+                        if is_fallback { " (fallback runtime)" } else { "" }
+                    ),
+                    Some(format!("Node {node_id} · Mentu run {mentu_run}\n{role_note}")),
+                    vec![],
+                    &node_id,
+                    &phase,
+                );
             }
             Err(err) => {
                 step.status = "pending".into();
@@ -580,8 +820,19 @@ impl Engine {
                     model: candidate.model,
                     provider: candidate.provider,
                     outcome: "launch_failed".into(),
-                    reason: Some(err.message),
+                    reason: Some(err.message.clone()),
                 });
+                self.record_telemetry(
+                    run,
+                    "failed",
+                    format!(
+                        "Iteration {iteration} · {phase}: attempt {attempt_no} could not launch on {runtime}"
+                    ),
+                    Some(format!("Node {node_id}\nReason: {}", err.message)),
+                    vec![],
+                    &node_id,
+                    &phase,
+                );
             }
         }
         Ok(())
@@ -646,7 +897,27 @@ fn result_path(node_id: &str) -> String {
     format!(".drogon/evaluations/{node_id}.json")
 }
 
+/// `describe_runtime` renders a runtime the way the Subagent policy shows it:
+/// `harness/model`, or the bare harness when the model is its default.
+fn describe_runtime(runtime: &GraphRuntimeRef) -> String {
+    if runtime.model.trim().is_empty() {
+        format!("{} (harness default model)", runtime.harness)
+    } else {
+        format!("{}/{}", runtime.harness, runtime.model)
+    }
+}
+
 fn read_verdict(root: &std::path::Path, node_id: &str) -> Result<Option<String>, RpcError> {
+    Ok(read_evaluation(root, node_id)?.map(|(verdict, _)| verdict))
+}
+
+/// The worker's evaluation file: its verdict and the evidence it wrote for
+/// it. Absent, oversized, malformed or evidence-less files are `None` — an
+/// attempt without a readable verdict is a failed attempt.
+fn read_evaluation(
+    root: &std::path::Path,
+    node_id: &str,
+) -> Result<Option<(String, String)>, RpcError> {
     let path = root.join(result_path(node_id));
     let metadata = match std::fs::symlink_metadata(&path) {
         Ok(m) => m,
@@ -661,18 +932,18 @@ fn read_verdict(root: &std::path::Path, node_id: &str) -> Result<Option<String>,
         Ok(value) => value,
         Err(_) => return Ok(None),
     };
-    if !value
+    let Some(evidence) = value
         .get("evidence")
         .and_then(Value::as_str)
-        .is_some_and(|evidence| !evidence.trim().is_empty())
-    {
+        .filter(|evidence| !evidence.trim().is_empty())
+    else {
         return Ok(None);
-    }
+    };
     Ok(value
         .get("verdict")
         .and_then(Value::as_str)
         .filter(|v| matches!(*v, "pass" | "findings"))
-        .map(str::to_string))
+        .map(|verdict| (verdict.to_string(), evidence.to_string())))
 }
 
 fn node_for_step(run: &Run, candidate: &GraphRuntimeRef) -> GraphNodeIntent {
@@ -894,6 +1165,103 @@ mod tests {
                 Some(verdict)
             );
         }
+    }
+
+    #[test]
+    fn the_orchestrator_writes_its_own_telemetry_into_the_evidence_ledger() {
+        let root = tempfile::tempdir().unwrap();
+        let engine = Engine::open(&root.path().join("data")).unwrap();
+        let response = engine.dispatch(Request {
+            protocol: drogon_protocol::PROTOCOL_VERSION,
+            request_id: uuid::Uuid::new_v4().to_string(),
+            auth: None,
+            method: "workspace.register".into(),
+            params: json!({"path":root.path()}),
+        });
+        let workspace = response.result.unwrap()["id"].as_str().unwrap().to_string();
+        let main: GraphNodeIntent = serde_json::from_value(
+            json!({"id":"main","title":"Task","harness":"pi","model":"dgx-spark/qwen","prompt":"Build the deck"}),
+        )
+        .unwrap();
+        let mut run = Run {
+            id: "telemetry-run".into(),
+            workspace_id: workspace.clone(),
+            main,
+            policy: GraphPolicy::default(),
+            status: "running".into(),
+            phase: "main".into(),
+            iteration: 1,
+            steps: vec![],
+            started_at: crate::now_rfc3339(),
+            updated_at: crate::now_rfc3339(),
+            error: None,
+        };
+        let mut step = new_step(&run);
+        step.runtime = Some(GraphRuntimeRef {
+            harness: "pi".into(),
+            model: "dgx-spark/qwen".into(),
+            provider: None,
+        });
+        step.status = "succeeded".into();
+        step.verdict = Some("findings".into());
+        run.steps.push(step);
+
+        // What the tick records as it goes: an attempt, then the outcome.
+        engine.record_telemetry(
+            &run,
+            "progress",
+            "Iteration 1 · main: attempt 1 launched on pi/dgx-spark/qwen".into(),
+            Some("Node or-1 · Mentu run mr-1".into()),
+            vec![],
+            "or-1",
+            "main",
+        );
+        run.status = "exhausted".into();
+        engine.record_workflow_outcome(&run);
+
+        let ledger: Value = serde_json::from_str(
+            &std::fs::read_to_string(root.path().join(".drogon/evidence.json")).unwrap(),
+        )
+        .unwrap();
+        let entries = ledger["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["status"], "progress");
+        assert_eq!(entries[0]["runId"], "telemetry-run");
+        assert_eq!(entries[0]["agentId"], "or-1");
+        assert_eq!(entries[0]["role"], "main");
+        let outcome = entries[1]["summary"].as_str().unwrap();
+        assert!(outcome.starts_with("Workflow exhausted its 3 iteration cap"), "{outcome}");
+        assert!(outcome.contains("1 step(s)") && outcome.contains("1 round(s) with findings"), "{outcome}");
+        assert_eq!(entries[1]["status"], "blocked");
+        assert_eq!(entries[1]["role"], "orchestrator");
+        let detail = entries[1]["detail"].as_str().unwrap();
+        assert!(detail.contains("iteration 1 · main · succeeded · pi/dgx-spark/qwen · verdict findings"), "{detail}");
+
+        // A run whose status did not end never records an outcome.
+        run.status = "running".into();
+        engine.record_workflow_outcome(&run);
+        let ledger: Value = serde_json::from_str(
+            &std::fs::read_to_string(root.path().join(".drogon/evidence.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ledger["entries"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn an_evaluation_yields_its_verdict_and_the_agent_evidence_behind_it() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join(result_path("node-7"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"verdict":"findings","evidence":"Undo after the last swipe restores nothing."}"#,
+        )
+        .unwrap();
+        let (verdict, evidence) = read_evaluation(root.path(), "node-7").unwrap().unwrap();
+        assert_eq!(verdict, "findings");
+        assert_eq!(evidence, "Undo after the last swipe restores nothing.");
+        assert_eq!(read_verdict(root.path(), "node-7").unwrap().as_deref(), Some("findings"));
+        assert_eq!(read_evaluation(root.path(), "absent").unwrap(), None);
     }
 
     #[test]

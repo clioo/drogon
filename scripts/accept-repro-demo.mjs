@@ -35,6 +35,7 @@ const FIXTURE_MODEL = "fixture/dog-tinder";
 /** The watch ticks on a cron minute and the released session has to open its
  *  own turn, so the whole demo is minutes, not seconds. */
 const RUN_BUDGET_MS = 12 * 60_000;
+const LIVE_RUN_BUDGET_MS = 45 * 60_000;
 
 function isMainModule() {
   return (
@@ -77,7 +78,23 @@ async function stopOwned(child, label, report) {
   report.cleanup.push(`${label}: exited on SIGTERM`);
 }
 
-export async function execute({ runs = 2 } = {}) {
+/** The display names the product's harness picker shows, by harness id. */
+const HARNESS_DISPLAY_NAMES = {
+  claude: "Claude Code",
+  codex: "Codex CLI",
+  opencode: "OpenCode",
+  pi: "Pi",
+};
+
+/**
+ * `live` runs the demo on the REAL harnesses installed on this host — real
+ * inference, real spend — instead of the local fixture: the main agent on
+ * `main`, its subagents on `subagents`. Everything the fixture lane proves
+ * about the chain still has to hold (the bot, its watch, the firing, the
+ * parallel sessions, the daemon's telemetry); what a real agent decides —
+ * whether the first round already passes — is reported, not assumed.
+ */
+export async function execute({ runs = 2, live = null } = {}) {
   const report = {
     runner: "scripts/accept-repro-demo.mjs",
     status: "FAILED",
@@ -112,7 +129,11 @@ export async function execute({ runs = 2 } = {}) {
     const cliPath = path.join(root, "target/debug/drogon-cli");
     const daemonPath = path.join(root, "target/debug/drogond");
     const runtime = await resolveRuntime(dataDir);
-    await writeHarnessFixtures(binDir, [FIXTURE_HARNESS]);
+    if (live) {
+      report.lane = `LIVE · main ${live.main.harness}/${live.main.model || "harness default"} · subagents ${live.subagents.harness}/${live.subagents.model || "harness default"} (real inference)`;
+    } else {
+      await writeHarnessFixtures(binDir, [FIXTURE_HARNESS]);
+    }
     // What the fixture agent needs to reach the CLI and its stages. The in-app
     // demo writes no context file of its own, so the daemon carries the path
     // and the fixture resolves its workspace from the registry.
@@ -135,14 +156,18 @@ export async function execute({ runs = 2 } = {}) {
     await writeFile(path.join(world, "harness-invocations.jsonl"), "");
     // The daemon resolves harnesses from ITS path, so the fixture shim has to
     // lead the daemon's own PATH — never the developer's environment.
-    const env = {
-      ...process.env,
-      PATH: [binDir, path.dirname(process.execPath), "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(
-        path.delimiter,
-      ),
-      DROGON_MENTU_RUNTIME: runtime.path,
-      DROGON_REPRO_CONTEXT: contextPath,
-    };
+    // On the live lane the daemon sees the developer's own PATH — the real
+    // harnesses live there — and no fixture context at all.
+    const env = live
+      ? { ...process.env, DROGON_MENTU_RUNTIME: runtime.path }
+      : {
+          ...process.env,
+          PATH: [binDir, path.dirname(process.execPath), "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(
+            path.delimiter,
+          ),
+          DROGON_MENTU_RUNTIME: runtime.path,
+          DROGON_REPRO_CONTEXT: contextPath,
+        };
 
     daemon = startAcceptanceProcess(daemonPath, ["--data-dir", dataDir], {
       cwd: world,
@@ -164,7 +189,11 @@ export async function execute({ runs = 2 } = {}) {
     }
     daemonHandle = packagedFixtureDaemon(daemonPath, cliPath, dataDir);
     await daemonHandle.capture();
-    report.checks.push("daemon owned by this run, with the harness fixture on its PATH");
+    report.checks.push(
+      live
+        ? "daemon owned by this run, with the real harnesses on its PATH"
+        : "daemon owned by this run, with the harness fixture on its PATH",
+    );
 
     desktop = startAcceptanceProcess(electronBinary, [appDir, "--remote-debugging-port=0"], {
       stdio: ["ignore", "ignore", "pipe"],
@@ -215,11 +244,50 @@ export async function execute({ runs = 2 } = {}) {
       await page.keyboard.press(process.platform === "darwin" ? "Meta+," : "Control+,");
       await page.getByRole("button", { name: "Reproducible demo", exact: true }).click();
       await page.getByTestId("repro-demo-run").waitFor();
-      await page.getByTestId("repro-demo-runtime").selectOption(FIXTURE_HARNESS);
-      await page.getByTestId("repro-demo-model").fill(FIXTURE_MODEL);
+      // The harness and the model come from the product's own pickers — the
+      // same controls the Subagent policy uses — never from a demo-only list.
+      // A model id is typed into the picker's search: a listed id is its
+      // catalog row, anything else rides as "typed by you".
+      const pick = async (prefix, wanted) => {
+        await page.getByTestId(`${prefix}-harness`).click();
+        await page
+          .getByRole("option", { name: HARNESS_DISPLAY_NAMES[wanted.harness], exact: true })
+          .click();
+        if (!wanted.model) return;
+        const modelField = page.getByTestId(`${prefix}-model-value`).locator("..");
+        await modelField.getByRole("button", { name: "Browse models" }).click();
+        await page.getByLabel("Search models").fill(wanted.model);
+        await page
+          .getByRole("option", { name: new RegExp(wanted.model.replace(/[/.]/g, "\\$&")) })
+          .first()
+          .click();
+        assert.equal(
+          (await page.getByTestId(`${prefix}-model-value`).innerText()).trim(),
+          wanted.model,
+          `the picked ${prefix} model must be the one the run gets`,
+        );
+      };
+      const main = live ? live.main : { harness: FIXTURE_HARNESS, model: FIXTURE_MODEL };
+      const subagents = live ? live.subagents : main;
+      await pick("repro-demo", main);
+      await pick("repro-demo-subagents", subagents);
       await page.getByRole("button", { name: "2", exact: true }).click();
+      await (async () => {
+        const stop = Date.now() + 30_000;
+        while (!(await page.getByTestId("repro-demo-run").isEnabled())) {
+          if (Date.now() > stop) {
+            const why = await page.getByTestId("repro-demo-blocked").innerText().catch(() => "");
+            throw new Error(`Run demo never became enabled: ${why}`);
+          }
+          await delay(250);
+        }
+      })();
       await page.getByTestId("repro-demo-run").click();
-      report.checks.push("the demo starts from its own button on the fixture lane");
+      report.checks.push(
+        live
+          ? `the demo starts from its own button: main ${main.harness}/${main.model}, subagents ${subagents.harness}/${subagents.model}`
+          : "the demo starts from its own button on the fixture lane",
+      );
 
       // The panel's own phase rows are NOT a reliable oracle here: the tour
       // leaves Settings as soon as the bot and its watch exist, which is
@@ -231,14 +299,14 @@ export async function execute({ runs = 2 } = {}) {
       // The page loads its bots asynchronously, and every earlier run's bot is
       // still listed — which is the point: they coexist. Wait for the one this
       // run just made, i.e. a name no earlier run in this report claimed.
-      const seenNames = new Set(report.runs.map((entry) => entry.runName));
-      const runName = await (async () => {
+      const seenTags = new Set(report.runs.map((entry) => entry.tag));
+      const { tag, botName } = await (async () => {
         const stop = Date.now() + 90_000;
         for (;;) {
           const text = await page.locator("body").innerText();
-          const found = [...text.matchAll(/dog-tinder-[0-9a-f]{6}/g)]
-            .map((match) => match[0])
-            .find((name) => !seenNames.has(name));
+          const found = [...text.matchAll(/White walker ([0-9a-f]{6})/g)]
+            .map((match) => ({ botName: match[0], tag: match[1] }))
+            .find((entry) => !seenTags.has(entry.tag));
           if (found) return found;
           if (Date.now() > stop)
             throw new Error(
@@ -247,21 +315,22 @@ export async function execute({ runs = 2 } = {}) {
           await delay(1000);
         }
       })();
-      assert.ok(
-        !seenNames.has(runName),
-        `run ${attempt} reused the name of an earlier run: ${runName}`,
-      );
+      // The bot that delegates carries the run's tag; the project it works in
+      // is named after the app it builds, with the same tag.
+      const runName = `dog-tinder-${tag}`;
+      assert.ok(!seenTags.has(tag), `run ${attempt} reused the tag of an earlier run: ${tag}`);
       report.runName = runName;
       report.checks.push(
-        `run ${attempt} left Settings for Bots, showing '${runName}' — its own short name`,
+        `run ${attempt} left Settings for Bots, showing '${botName}' — the bot of project '${runName}'`,
       );
       const botsShot = path.join(fixture, `bots-configured-${attempt}.png`);
       await page.screenshot({ path: botsShot, animations: "disabled" });
       report.screenshots.push(botsShot);
 
       // The workspace this run created, resolved through the daemon: the demo
-      // names its Quick Session project after the run, and the workspace is
-      // the one registered at that project's path.
+      // registers an ordinary project named after the run (under Projects,
+      // never a Quick Session under Chats), and the workspace is the one
+      // registered at that project's path.
       const cli = async (...args) => {
         const { stdout } = await runAcceptanceProcess(
           cliPath,
@@ -275,6 +344,10 @@ export async function execute({ runs = 2 } = {}) {
       const projects = await cli("project", "list");
       const project = (projects.projects ?? []).find((entry) => entry.name === runName);
       assert.ok(project, `the daemon must know the project '${runName}'`);
+      assert.ok(
+        !project.quickSession,
+        `'${runName}' must be an ordinary project, not a Quick Session: ${JSON.stringify(project)}`,
+      );
       const workspaces = await cli("workspace", "list");
       const demoWorkspaceId = (workspaces.workspaces ?? []).find(
         (entry) => entry.path === project.path,
@@ -286,8 +359,8 @@ export async function execute({ runs = 2 } = {}) {
       // the workspace the released session will run in. This is fixture
       // plumbing for THIS acceptance — the product ships nothing of the sort,
       // and a real agent just follows the instructions in its prompt.
-      await mkdir(path.join(project.path, ".drogon"), { recursive: true });
-      await writeFile(
+      if (!live) await mkdir(path.join(project.path, ".drogon"), { recursive: true });
+      if (!live) await writeFile(
         path.join(project.path, ".drogon/repro-context.json"),
         `${JSON.stringify(
           {
@@ -304,15 +377,13 @@ export async function execute({ runs = 2 } = {}) {
         )}\n`,
       );
 
-      // Second stop: the orchestration itself, once the watch releases the work.
-      await page.getByTestId("orchestrator-canvas").waitFor({ timeout: 240_000 });
-      report.checks.push("the app left Settings and opened the run's Work Graph by itself");
-      const canvasShot = path.join(fixture, `orchestration-running-${attempt}.png`);
-      await page.screenshot({ path: canvasShot, animations: "disabled" });
-      report.screenshots.push(canvasShot);
-
-      // The rounds run there. The daemon's own orchestrator status is the
-      // verdict — never the rendered text.
+      // Second stop of the tour: the run's own sessions. The released main
+      // session fans out to parallel workers BEFORE it starts the durable
+      // workflow, so from here until the orchestration settles this loop
+      // samples the daemon's session list and remembers the most sessions it
+      // saw alive at once: the parallelism is measured, never inferred from
+      // a screenshot. The daemon's own orchestrator status is the verdict —
+      // never the rendered text.
       const orchestratorStatus = async () => {
         const { stdout } = await runAcceptanceProcess(
           cliPath,
@@ -330,27 +401,108 @@ export async function execute({ runs = 2 } = {}) {
         const answer = JSON.parse(stdout);
         return answer.ok ? (answer.result.run ?? null) : null;
       };
+      const sessionsAlive = async () => {
+        const listed = await cli(
+          "rpc",
+          "session.list",
+          "--params",
+          JSON.stringify({ workspaceId: demoWorkspaceId }),
+        );
+        return (listed.sessions ?? []).filter((session) => session.verdict === "live");
+      };
+      let mostAlive = 0;
+      let sessionsShot = null;
       const rounds = await (async () => {
-        const stop = Date.now() + RUN_BUDGET_MS;
+        const stop = Date.now() + (live ? LIVE_RUN_BUDGET_MS : RUN_BUDGET_MS);
         for (;;) {
+          const alive = await sessionsAlive().catch(() => []);
+          if (alive.length > mostAlive) mostAlive = alive.length;
+          if (alive.length >= 2 && !sessionsShot) {
+            // The tour leaves Bots for the sessions at the firing, seconds
+            // before the workers exist: the viewer sees terminals working —
+            // not Bots, not Settings, and not the Work Graph canvas.
+            await page
+              .getByRole("heading", { name: "Bots", exact: true })
+              .waitFor({ state: "detached", timeout: 30_000 });
+            assert.equal(
+              await page.getByTestId("orchestrator-canvas").filter({ visible: true }).count(),
+              0,
+              "the tour must not show the Work Graph canvas while the sessions work",
+            );
+            assert.equal(
+              await page.getByTestId("repro-demo-run").filter({ visible: true }).count(),
+              0,
+              "the tour must have left Settings for the sessions",
+            );
+            assert.ok(
+              (await page.locator(".xterm").filter({ visible: true }).count()) >= 1,
+              "the sessions stop must show a terminal on screen",
+            );
+            sessionsShot = path.join(fixture, `sessions-running-${attempt}.png`);
+            await page.screenshot({ path: sessionsShot, animations: "disabled" });
+            report.screenshots.push(sessionsShot);
+            report.checks.push(
+              `the app left Bots for the run's sessions by itself, with ${alive.length} alive: ${alive
+                .map((session) => session.harnessId ?? session.command ?? session.id)
+                .join(", ")}`,
+            );
+          }
           const run = await orchestratorStatus().catch(() => null);
           if (run && ["passed", "exhausted", "failed", "stopped"].includes(run.status)) return run;
-          if (Date.now() > stop) throw new Error("the orchestration did not settle in budget");
-          await delay(2000);
+          if (Date.now() > stop)
+            throw new Error(
+              `the orchestration did not settle in budget (most sessions alive at once: ${mostAlive})`,
+            );
+          await delay(1000);
         }
       })();
-      assert.equal(
-        rounds.status,
-        "passed",
-        `the fixture lane must finish green, got ${rounds.status}`,
+      assert.ok(
+        mostAlive >= 2,
+        `the released session must fan out to parallel workers: most alive at once was ${mostAlive}`,
+      );
+      report.checks.push(
+        `the released session fanned out: ${mostAlive} sessions alive at once in the run's workspace`,
       );
       const roles = (rounds.steps ?? []).map((step) => `${step.iteration}:${step.phase}:${step.verdict ?? step.status}`);
-      assert.ok(
-        roles.some((entry) => entry.endsWith("findings")),
-        `the adversarial round must find the missing undo: ${roles.join(", ")}`,
-      );
+      if (live) {
+        // A real agent decides its own rounds: the run must settle without a
+        // runtime failure, and what it found is reported as it happened.
+        assert.ok(
+          ["passed", "exhausted"].includes(rounds.status),
+          `the live lane must settle on a verdict, got ${rounds.status}: ${rounds.error ?? ""} · ${roles.join(", ")}`,
+        );
+      } else {
+        assert.equal(
+          rounds.status,
+          "passed",
+          `the fixture lane must finish green, got ${rounds.status}`,
+        );
+        assert.ok(
+          roles.some((entry) => entry.endsWith("findings")),
+          `the adversarial round must find the missing undo: ${roles.join(", ")}`,
+        );
+      }
       report.rounds = roles;
-      report.checks.push(`the orchestration ran its rounds and passed: ${roles.join(" · ")}`);
+      report.checks.push(`the orchestration ran its rounds and ${rounds.status}: ${roles.join(" · ")}`);
+
+      // Third stop: the Work Graph's Agent telemetry, where the daemon itself
+      // wrote every attempt and verdict of the rounds as they happened.
+      await page.getByTestId("work-graph-evidence-view").waitFor({ timeout: 120_000 });
+      const telemetry = await page.getByTestId("work-graph-evidence-view").innerText();
+      for (const expected of live
+        ? [/Workflow started/, /verdict: /, /Workflow (passed|exhausted)/]
+        : [/Workflow started/, /verdict: findings/, /Workflow passed/]) {
+        assert.match(telemetry, expected, `the daemon's own telemetry must carry ${expected}`);
+      }
+      const telemetryShot = path.join(fixture, `telemetry-${attempt}.png`);
+      await page.screenshot({ path: telemetryShot, animations: "disabled" });
+      report.screenshots.push(telemetryShot);
+      report.checks.push(
+        "the tour showed the Work Graph's Agent telemetry, written by the daemon as the rounds ran",
+      );
+      // Last stop: the usage, after a beat on the telemetry.
+      await page.getByTestId("work-graph-usage-view").waitFor({ timeout: 60_000 });
+      report.checks.push("the tour ended on the Work Graph's Usage tab");
 
       // Back in Settings: the panel kept the run and shows what it cost.
       await page.keyboard.press(process.platform === "darwin" ? "Meta+," : "Control+,");
@@ -377,7 +529,7 @@ export async function execute({ runs = 2 } = {}) {
       assert.match(cost, /\$\d/, `the cost tile must show a real number: ${cost}`);
       report.cost = cost.replace(/\s+/g, " ").trim();
       const evidence = await page.getByTestId("repro-demo-evidence").innerText();
-      assert.match(evidence, /undo/i, "the evidence must name what the rounds found");
+      if (!live) assert.match(evidence, /undo/i, "the telemetry must name what the rounds found");
       const release = await page.getByTestId("repro-demo-release").innerText();
       assert.match(
         release,
@@ -386,7 +538,15 @@ export async function execute({ runs = 2 } = {}) {
       );
       report.checks.push("the bot's own watch released the work — not the panel's fallback");
       report.checks.push(`the panel survived the tour and reports the cost: ${report.cost}`);
-        report.runs.push({ attempt, runName, rounds: roles, cost: report.cost });
+      report.runs.push({
+        attempt,
+        tag,
+        runName,
+        rounds: roles,
+        status: rounds.status,
+        cost: report.cost,
+        mostAlive,
+      });
       const panelShot = path.join(fixture, `settings-after-run-${attempt}.png`);
       await page.screenshot({ path: panelShot, animations: "disabled" });
       report.screenshots.push(panelShot);
@@ -420,10 +580,13 @@ if (isMainModule()) {
   const mode = process.argv[2];
   if (mode === "--help") {
     process.stdout.write(
-      "Usage: node scripts/accept-repro-demo.mjs [--check] [--runs <1-5>]\n" +
+      "Usage: node scripts/accept-repro-demo.mjs [--check] [--runs <1-5>] [--live ...]\n" +
         "  --check      verify the built desktop and core binaries exist, run nothing\n" +
         "  --runs <n>   how many whole demos to run back to back (default 2: the\n" +
-        "               second one proves a run can be repeated)\n",
+        "               second one proves a run can be repeated)\n" +
+        "  --live --main-harness <id> [--main-model <id>] --subagent-harness <id> [--subagent-model <id>]\n" +
+        "               run on the REAL harnesses installed here (real inference and spend):\n" +
+        "               the main agent on one runtime, its subagents on another\n",
     );
   } else if (mode === "--check") {
     const result = await runCheck();
@@ -436,7 +599,27 @@ if (isMainModule()) {
       process.stderr.write("--runs takes 1..5\n");
       process.exitCode = 1;
     }
-    const report = await execute({ runs });
+    const flag = (name) => {
+      const at = process.argv.indexOf(name);
+      return at === -1 ? null : (process.argv[at + 1] ?? null);
+    };
+    let live = null;
+    if (process.argv.includes("--live")) {
+      const mainHarness = flag("--main-harness");
+      const subagentHarness = flag("--subagent-harness") ?? mainHarness;
+      if (!mainHarness || !HARNESS_DISPLAY_NAMES[mainHarness] || !HARNESS_DISPLAY_NAMES[subagentHarness]) {
+        process.stderr.write("--live needs --main-harness (claude|codex|opencode|pi), optionally --subagent-harness\n");
+        process.exit(1);
+      }
+      live = {
+        main: { harness: mainHarness, model: flag("--main-model") ?? "" },
+        subagents: {
+          harness: subagentHarness,
+          model: flag("--subagent-model") ?? (subagentHarness === mainHarness ? flag("--main-model") ?? "" : ""),
+        },
+      };
+    }
+    const report = await execute({ runs, live });
     process.exitCode = report.status === "PASSED" ? 0 : 1;
   }
 }

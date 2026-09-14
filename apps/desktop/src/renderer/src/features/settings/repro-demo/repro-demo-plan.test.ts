@@ -1,12 +1,13 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  DEFAULT_REPRO_RUNTIME,
-  REPRO_RUNTIME_CHOICES,
+  REPRO_SUPPORTED_HARNESSES,
   describeReproCost,
   describeWorkflowStatus,
   formatReproCost,
+  harnessNeedsModel,
   isTerminalWorkflowStatus,
+  pickDemoModel,
   priceReproUsage,
   REPRO_PHASES,
   REPRO_RATES,
@@ -31,21 +32,37 @@ describe("the demo's plan", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  test("ships no model id of its own: the operator names the runtime", () => {
-    // A demo that pinned a model would be choosing someone else's spend. Every
-    // choice is a harness this product can run a node on, with the model left
-    // to whatever that harness is already set up to use, or typed exactly.
-    for (const choice of REPRO_RUNTIME_CHOICES) {
-      expect(choice.model).toBe("");
-      expect(choice.free).toBe(false);
-    }
-    expect(REPRO_RUNTIME_CHOICES.map((choice) => choice.harness)).toEqual([
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-    ]);
-    expect(DEFAULT_REPRO_RUNTIME).toBe(REPRO_RUNTIME_CHOICES[0]);
+  test("ships no model id of its own: the harness's list names the runtime", () => {
+    // A demo that pinned a model would be choosing someone else's spend. The
+    // harnesses are the ones a Work Graph node can run on, and the model is
+    // proposed from what the harness itself lists on this machine.
+    expect([...REPRO_SUPPORTED_HARNESSES]).toEqual(["claude", "codex", "opencode", "pi"]);
+    const option = (id: string, extra: Partial<{ verified: boolean; recommended: boolean }> = {}) => ({
+      id,
+      verified: false,
+      recommended: false,
+      ...extra,
+    });
+    // The host's recommendation wins, else the first id the host verified;
+    // unverified (curated or typed) ids and the "harness default" row (an
+    // empty id) are never proposed.
+    expect(
+      pickDemoModel([
+        option(""),
+        option("a", { verified: true }),
+        option("b", { verified: true }),
+        option("c", { verified: true, recommended: true }),
+      ]),
+    ).toBe("c");
+    expect(pickDemoModel([option(""), option("a"), option("b", { verified: true })])).toBe("b");
+    expect(pickDemoModel([option(""), option("a"), option("b")])).toBeNull();
+    expect(pickDemoModel([option("", { verified: true })])).toBeNull();
+    expect(pickDemoModel([])).toBeNull();
+    // Shell adapters refuse a node without an exact id; native ones run their default.
+    expect(harnessNeedsModel("pi")).toBe(true);
+    expect(harnessNeedsModel("opencode")).toBe(true);
+    expect(harnessNeedsModel("claude")).toBe(false);
+    expect(harnessNeedsModel("codex")).toBe(false);
   });
 });
 

@@ -62,20 +62,36 @@ notarized: on first launch, right-click `Drogon.app` and choose **Open**.
 - Reproduce a whole run: `make repro`. It asks which harnesses to use, then
   runs the chain end to end in a disposable world of its own — a bot with a
   `local_file_digest.v1` monitor over `specs/dog-tinder.md`, the spec change
-  that wakes it, the worktree its released session opens, and the bounded
-  adversarial rounds the daemon drives there. It leaves a receipt in
-  `.preflight/reproduce/<run>/` with the verdict of every round, the evidence
+  that wakes it, the session it releases fanning the build out to parallel
+  workers through Drogon's own orchestration verbs, and the bounded
+  adversarial rounds the daemon drives afterwards. It leaves a receipt in
+  `.preflight/reproduce/<run>/` with the verdict of every round, the telemetry
   and usage ledgers, an independent `node --test` of the work product, and the
   cost of what ran. Every invocation is a NEW run (`make repro-list` shows
   them all), and the default lane runs local fixtures: the product executes
   for real, no model inference happens, and nothing is billed. The same demo
-  runs from the app in **Settings → Demo reproducible**, which walks the
-  viewer through the phases and moves the focus to whatever is changing.
-  Tests: `make repro-test`, `node scripts/probe-repro-demo.mjs`, and
+  runs from the app in **Settings → Reproducible demo**: the main agent and
+  the subagents each take a harness installed here and a model from that
+  harness's own list (the Subagent policy's pickers, with a proposal filled
+  in), every run creates a project `dog-tinder-<tag>` under Projects and a
+  bot `White walker <tag>` under Chats, and the tour leaves Settings on its
+  own — Bots once the watch is armed, the run's sessions while the released
+  session and its workers run side by side, and the Work Graph's **Agent
+  telemetry** and Usage tabs at the end. The telemetry is written by the
+  daemon itself as the orchestrator advances (every attempt, runtime, verdict
+  with the agent's evidence, and the workflow's outcome), so it reads the
+  same whichever harness ran. "Remove demo runs" deletes only what the demo
+  created; a watch whose workspace is gone retires itself instead of failing
+  forever. Tests: `make repro-test`, `node scripts/probe-repro-demo.mjs`, and
   `make repro-ui`, which runs the in-app demo end to end from its own button
   in a background window — the bot, its watch firing on the spec change, the
-  Work Graph opening by itself, the adversarial rounds passing there, and the
-  cost the panel reports afterwards.
+  sessions view opening by itself with at least two sessions alive at once
+  (measured through the daemon), the rounds passing, the telemetry and the
+  cost. `make repro-ui FLAGS="--runs 1 --live --main-harness claude
+  --main-model claude-sonnet-5 --subagent-harness pi --subagent-model <id>"`
+  runs the same demo on the real harnesses installed here — real inference,
+  real spend — with the main agent on one runtime and its subagents on
+  another.
 - Screenshots: [docs/screenshots/](screenshots/) — 23 images of every surface
   (workspace, Orchestrator off and on, Bots, Meetings, Automations, Tasks,
   Settings; light and dark; one at 760px), all captured from the real packaged

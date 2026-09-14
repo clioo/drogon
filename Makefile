@@ -13,9 +13,12 @@
 #   make repro-list              every run this checkout has produced
 #   make repro-test              run the reproducible run's own tests
 #   make repro-ui                run the SAME demo from the app's own button
-#                                (Settings -> Demo reproducible) end to end,
+#                                (Settings -> Reproducible demo) end to end,
 #                                in a background window, and report what a
-#                                viewer would see
+#                                viewer would see. FLAGS="--runs 1 --live
+#                                --main-harness claude --main-model <id>
+#                                --subagent-harness pi --subagent-model <id>"
+#                                runs it on the real harnesses installed here
 #
 # Extra flags reach the installer through FLAGS, e.g.
 #   make install FLAGS=--no-restart

@@ -9,20 +9,33 @@ import { CheckCircle2, CircleDashed, CircleDot, Play, XCircle } from "lucide-rea
 import { Button } from "../../../components/ui/button";
 import { SettingsRow, SettingsSubsectionHeader } from "../SettingsFormControls";
 import { SettingsSection } from "../SettingsSection";
+import { useHarnessCatalog } from "../../mentu/mentu-harness-catalog";
+import { useMentuModelCatalog } from "../../mentu/mentu-model-catalog";
+import { modelOptionsFromCatalog } from "../../mentu/mentu-model-registry";
+import {
+  HarnessSelect,
+  RuntimeModelField,
+} from "../../work-graph-workflows/SubagentPolicyPanel";
 import {
   DEFAULT_REPRO_ITERATIONS,
-  DEFAULT_REPRO_RUNTIME,
   REPRO_ITERATION_CHOICES,
   REPRO_PHASES,
-  REPRO_RUNTIME_CHOICES,
+  REPRO_SUPPORTED_HARNESSES,
   describeReproCost,
   describeWorkflowStatus,
   formatReproCost,
+  harnessNeedsModel,
+  pickDemoModel,
   type ReproPhaseId,
   type ReproPhaseState,
 } from "./repro-demo-plan";
 import { requestReproTour } from "../../../repro-demo-tour";
 import { useReproDemo, type ReproDemoBridge } from "./use-repro-demo";
+import {
+  canRemoveDemoRuns,
+  removeDemoRuns,
+  type ReproCleanupReport,
+} from "./repro-demo-store";
 
 /** The bridges the demo needs, gathered from the frozen `window.drogon`
  *  namespaces. A build whose preload predates any of them reports the demo as
@@ -35,7 +48,7 @@ export function windowReproBridge(): ReproDemoBridge | null {
     const project = drogon.project as Record<string, unknown> | undefined;
     const needed = {
       status: drogon.status,
-      quickSessionCreate: project?.quickSessionCreate,
+      projectCreate: project?.projectCreate,
       fileWrite: drogon.fileWrite,
       botCreate: drogon.botCreate,
       botMonitorCreate: drogon.botMonitorCreate,
@@ -47,10 +60,30 @@ export function windowReproBridge(): ReproDemoBridge | null {
       graphObservabilityStatus: graph?.graphObservabilityStatus,
     };
     if (Object.values(needed).some((value) => typeof value !== "function")) return null;
+    // Housekeeping channels: present in this build or not, the demo runs.
+    const optional = {
+      botSnapshot: drogon.botSnapshot,
+      botDelete: drogon.botDelete,
+      projectList: project?.projectList,
+      projectRemove: project?.projectRemove,
+    };
+    const housekeeping =
+      Object.values(optional).every((value) => typeof value === "function")
+        ? {
+            botSnapshot: (input: unknown) =>
+              (optional.botSnapshot as (value: unknown) => Promise<never>)(input),
+            botDelete: (input: unknown) =>
+              (optional.botDelete as (value: unknown) => Promise<never>)(input),
+            projectList: () => (optional.projectList as () => Promise<never>)(),
+            projectRemove: (input: unknown) =>
+              (optional.projectRemove as (value: unknown) => Promise<never>)(input),
+          }
+        : {};
     return {
+      ...housekeeping,
       status: () => (needed.status as () => Promise<never>)(),
-      quickSessionCreate: (input) =>
-        (needed.quickSessionCreate as (value: unknown) => Promise<never>)(input),
+      projectCreate: (input) =>
+        (needed.projectCreate as (value: unknown) => Promise<never>)(input),
       fileWrite: (input) => (needed.fileWrite as (value: unknown) => Promise<never>)(input),
       botCreate: (input) => (needed.botCreate as (value: unknown) => Promise<never>)(input),
       botMonitorCreate: (input) =>
@@ -126,8 +159,9 @@ function Spotlight({
 }
 
 /** A round's own verdict, in the product's badge grammar plus the semantic
- *  colour the Evidence tab already uses: pass is green, findings amber, and
- *  anything else stays neutral rather than being dressed as either. */
+ *  colour the Agent telemetry tab already uses: pass is green, findings
+ *  amber, and anything else stays neutral rather than being dressed as
+ *  either. */
 function VerdictBadge({
   verdict,
   status,
@@ -150,10 +184,187 @@ function VerdictBadge({
   );
 }
 
+/** One runtime of the run, chosen the way the Subagent policy chooses one:
+ *  the harnesses installed here, and each harness's own model list. The demo
+ *  proposes a model as soon as the list arrives — the host's recommended one
+ *  when it names one — and the viewer's own pick wins over the proposal.
+ *  With `follow`, the runtime mirrors another one until the viewer touches
+ *  it: "the subagents run where the main agent runs" needs no explaining. */
+export function useDemoRuntime(input: {
+  initial: { harness: string; model: string } | null;
+  defaultHarnessId: string | null;
+  follow?: { harness: string; model: string } | null;
+}) {
+  const harnessCatalog = useHarnessCatalog();
+  const installed = useMemo(
+    () =>
+      harnessCatalog.harnesses.filter((harness) =>
+        (REPRO_SUPPORTED_HARNESSES as readonly string[]).includes(harness.harnessId),
+      ),
+    [harnessCatalog.harnesses],
+  );
+  const usable = useMemo(() => {
+    const available = installed.filter((harness) => harness.availability === "available");
+    return available.length > 0 ? available : installed;
+  }, [installed]);
+  const [harness, setHarness] = useState(input.initial?.harness ?? "");
+  const [model, setModel] = useState(input.initial?.model ?? "");
+  const [modelChosen, setModelChosen] = useState(Boolean(input.initial?.model));
+  const [touched, setTouched] = useState(input.initial !== null);
+  const following = Boolean(input.follow) && !touched;
+  const followHarness = input.follow?.harness ?? null;
+  const followModel = input.follow?.model ?? null;
+
+  // Mirroring another runtime, exactly, until the viewer takes this one over.
+  useEffect(() => {
+    if (!following || followHarness === null || followModel === null) return;
+    setHarness(followHarness);
+    setModel(followModel);
+    setModelChosen(true);
+  }, [following, followHarness, followModel]);
+
+  // The harness: the product's default when it is installed here, else the
+  // first installed one — chosen once the catalog answers, never before, so a
+  // harness that is not on this machine is never proposed.
+  const { defaultHarnessId } = input;
+  useEffect(() => {
+    if (following || usable.length === 0) return;
+    if (harness && usable.some((entry) => entry.harnessId === harness)) return;
+    const pick =
+      usable.find((entry) => entry.harnessId === defaultHarnessId) ?? usable[0];
+    setHarness(pick.harnessId);
+    setModel("");
+    setModelChosen(false);
+  }, [following, usable, defaultHarnessId, harness]);
+
+  const modelCatalog = useMentuModelCatalog(harness);
+  const options = useMemo(
+    () =>
+      harness
+        ? modelOptionsFromCatalog({
+            catalog: modelCatalog.catalog,
+            recipe: null,
+            harness,
+            excludeStepLabel: null,
+          })
+        : [],
+    [modelCatalog.catalog, harness],
+  );
+  useEffect(() => {
+    if (following || modelChosen) return;
+    const proposal = pickDemoModel(options);
+    if (proposal && proposal !== model) setModel(proposal);
+  }, [following, options, modelChosen, model]);
+
+  const label = usable.find((entry) => entry.harnessId === harness)?.displayName ?? harness;
+  return {
+    harness,
+    model,
+    label,
+    usable,
+    catalogLoading: harnessCatalog.loading,
+    modelProposed: Boolean(model) && !modelChosen,
+    modelsListed: options.some((option) => option.id.trim().length > 0),
+    following,
+    chooseHarness: (next: string) => {
+      setTouched(true);
+      setHarness(next);
+      // An id from another harness is never carried over silently.
+      setModel("");
+      setModelChosen(false);
+    },
+    chooseModel: (next: string) => {
+      setTouched(true);
+      setModel(next);
+      setModelChosen(true);
+    },
+  };
+}
+
+/** The two rows one runtime takes in the section: its harness, and its model
+ *  through the product's own picker. */
+function RuntimeRows({
+  runtime,
+  who,
+  disabled,
+  testIdPrefix,
+  harnessNote,
+}: {
+  runtime: ReturnType<typeof useDemoRuntime>;
+  who: string;
+  disabled: boolean;
+  testIdPrefix: string;
+  harnessNote: string;
+}): React.JSX.Element {
+  const modelNote = !runtime.harness
+    ? "The list comes from the harness itself."
+    : runtime.following
+      ? `Same as the main agent. Pick a harness or a model here to change where ${who} run.`
+      : runtime.model
+        ? runtime.modelProposed
+          ? `Proposed from what ${runtime.label} lists on this machine. Pick another from Models if you prefer.`
+          : "Your pick."
+        : harnessNeedsModel(runtime.harness)
+          ? runtime.modelsListed
+            ? `${runtime.label} needs an exact model id: pick one from Models.`
+            : `${runtime.label} lists no models on this machine yet: pick one from Models, or type the exact id there.`
+          : `${runtime.label} runs the model it is already set up with.`;
+  return (
+    <>
+      <SettingsRow
+        label="Harness"
+        description={harnessNote}
+        control={
+          <div className="flex w-full max-w-md items-center gap-2">
+            <HarnessSelect
+              value={runtime.harness}
+              harnesses={runtime.usable}
+              disabled={disabled || runtime.usable.length === 0}
+              onChange={runtime.chooseHarness}
+              testId={`${testIdPrefix}-harness`}
+            />
+          </div>
+        }
+      />
+      <SettingsRow
+        label="Model"
+        description={modelNote}
+        control={
+          <div className="flex w-full max-w-md items-center">
+            <RuntimeModelField
+              harness={runtime.harness}
+              model={runtime.model}
+              disabled={disabled || !runtime.harness}
+              onChange={runtime.chooseModel}
+              testIdPrefix={testIdPrefix}
+            />
+          </div>
+        }
+      />
+    </>
+  );
+}
+
+/** Why a runtime cannot run yet, or null when it can. */
+function runtimeBlocker(runtime: ReturnType<typeof useDemoRuntime>, who: string): string | null {
+  if (runtime.usable.length === 0)
+    return runtime.catalogLoading
+      ? "Reading the harnesses installed here…"
+      : "No supported harness is installed here: install Claude Code, Codex, OpenCode or Pi first.";
+  if (!runtime.harness) return `Choose a harness for ${who}.`;
+  if (harnessNeedsModel(runtime.harness) && !runtime.model)
+    return `${runtime.label} needs an exact model id for ${who}: pick one from Models.`;
+  return null;
+}
+
 export function ReproDemoSection({
   bridge,
+  defaultHarnessId = null,
 }: {
   bridge?: ReproDemoBridge | null;
+  /** The harness the product defaults to for new agents; the demo starts
+   *  there when it is installed. */
+  defaultHarnessId?: string | null;
 }): React.JSX.Element {
   const resolved = useMemo(
     () => (bridge === undefined ? windowReproBridge() : bridge),
@@ -162,72 +373,68 @@ export function ReproDemoSection({
   const { state, run, cancel } = useReproDemo(resolved);
   // Reopening the panel after the tour must show what RAN, not the defaults:
   // the store remembers the selection across the unmount the tour causes.
-  const [runtimeId, setRuntimeId] = useState(
-    state.selection?.runtimeId ?? DEFAULT_REPRO_RUNTIME.id,
-  );
-  const [model, setModel] = useState(state.selection?.model ?? DEFAULT_REPRO_RUNTIME.model);
+  const runtime = useDemoRuntime({
+    initial: state.selection
+      ? { harness: state.selection.harness, model: state.selection.model }
+      : null,
+    defaultHarnessId,
+  });
+  const subagents = useDemoRuntime({
+    initial: state.selection?.subagents ?? null,
+    defaultHarnessId,
+    follow: { harness: runtime.harness, model: runtime.model },
+  });
   const [iterations, setIterations] = useState<number>(
     state.selection?.iterations ?? DEFAULT_REPRO_ITERATIONS,
   );
-
-  const choice = REPRO_RUNTIME_CHOICES.find((entry) => entry.id === runtimeId) ?? DEFAULT_REPRO_RUNTIME;
-  const runtime = { ...choice, model: model.trim() };
   const spotlightFor = (id: ReproPhaseId) => state.spotlight === id;
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanup, setCleanup] = useState<ReproCleanupReport | null>(null);
+  const cleanUp = () => {
+    setCleaning(true);
+    setCleanup(null);
+    void removeDemoRuns(resolved)
+      .then(setCleanup)
+      .finally(() => setCleaning(false));
+  };
+
+  const blocked = !resolved
+    ? "This build does not expose every channel the demo needs."
+    : (runtimeBlocker(runtime, "the main agent") ?? runtimeBlocker(subagents, "the subagents"));
 
   return (
     <SettingsSection
       id="demo"
       title="Reproducible demo"
-      description="Run the whole chain with one click: a bot with a watch on the spec, the change that wakes it, the Work Graph's adversarial rounds, and the evidence and cost of what ran. It all happens in a disposable workspace the demo creates for itself, and it takes you along — the Bots page once the bot is configured, then the Work Graph once the rounds start."
+      description="Run the whole chain with one click: a project of its own, a bot with a watch on the spec, the change that wakes it, the session it releases fanning out to parallel workers, the adversarial rounds, and the telemetry and cost of what ran. It takes you along — Bots once the bot is configured, the run's sessions while they work, and the Work Graph's Agent telemetry at the end."
     >
       <div className="space-y-6">
         <SettingsSubsectionHeader
-          title="What runs"
-          description="Pick the harness this run works with, and the exact model id it should use. Leave the model empty to use whatever that harness is already set up with."
+          title="Main agent"
+          description="The bot's harness, and the session it releases when the spec changes. Harnesses installed here and each one's own model list — the same choice the Subagent policy offers. The demo proposes a model; change it if you like."
         />
-
-        <SettingsRow
-          label="Runtime"
-          description={choice.note}
-          control={
-            <select
-              id="repro-demo-runtime"
-              data-testid="repro-demo-runtime"
-              className="h-9 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm"
-              value={runtimeId}
-              disabled={state.running}
-              onChange={(event) => {
-                const next =
-                  REPRO_RUNTIME_CHOICES.find((entry) => entry.id === event.target.value) ??
-                  DEFAULT_REPRO_RUNTIME;
-                setRuntimeId(next.id);
-                setModel(next.model);
-              }}
-            >
-              {REPRO_RUNTIME_CHOICES.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.label}
-                  {entry.free ? " — free" : ""}
-                </option>
-              ))}
-            </select>
+        <RuntimeRows
+          runtime={runtime}
+          who="the main agent"
+          disabled={state.running}
+          testIdPrefix="repro-demo"
+          harnessNote={
+            runtime.usable.length === 0 && !runtime.catalogLoading
+              ? "No supported harness was found on this machine."
+              : "Only harnesses installed on this machine are listed."
           }
         />
 
-        <SettingsRow
-          label="Exact model"
-          description="The exact id the harness receives. Drogon never guesses a model or a provider."
-          control={
-            <input
-              id="repro-demo-model"
-              data-testid="repro-demo-model"
-              className="h-9 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm font-mono"
-              value={model}
-              disabled={state.running}
-              placeholder="harness default"
-              onChange={(event) => setModel(event.target.value)}
-            />
-          }
+        <SettingsSubsectionHeader
+          title="Subagents"
+          description="Where the workers the main agent dispatches, and the daemon's test and review agents, run. Same as the main agent unless you say otherwise — a Claude Code main agent can delegate to Pi workers, for example."
+        />
+        <RuntimeRows
+          runtime={subagents}
+          who="the subagents"
+          disabled={state.running}
+          testIdPrefix="repro-demo-subagents"
+          harnessNote="The Work Graph policy approves this runtime for every subagent."
         />
 
         <SettingsRow
@@ -255,8 +462,14 @@ export function ReproDemoSection({
           <Button
             type="button"
             data-testid="repro-demo-run"
-            disabled={state.running || !resolved}
-            onClick={() => void run({ runtime, iterations })}
+            disabled={state.running || blocked !== null}
+            onClick={() =>
+              void run({
+                runtime: { harness: runtime.harness, model: runtime.model },
+                subagents: { harness: subagents.harness, model: subagents.model },
+                iterations,
+              })
+            }
           >
             <Play className="mr-2 size-4" aria-hidden />
             {state.running ? "Running…" : "Run demo"}
@@ -266,25 +479,39 @@ export function ReproDemoSection({
               Cancel
             </Button>
           ) : null}
-          {!resolved ? (
-            <span className="text-sm text-muted-foreground">
-              This build does not expose every channel the demo needs.
+          {blocked && !state.running ? (
+            <span className="text-sm text-muted-foreground" data-testid="repro-demo-blocked">
+              {blocked}
             </span>
           ) : null}
-          {state.workflowId ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              data-testid="repro-demo-show-orchestration"
-              onClick={() => {
-                if (!state.workspaceId) return;
-                requestReproTour({ kind: "open-work-graph", workspaceId: state.workspaceId });
-                requestReproTour({ kind: "focus-view", view: "graph" });
-              }}
-            >
-              Show the orchestration
-            </Button>
+          {state.workspaceId && state.workflowId ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="repro-demo-show-orchestration"
+                onClick={() => {
+                  if (!state.workspaceId) return;
+                  requestReproTour({ kind: "open-sessions", workspaceId: state.workspaceId });
+                }}
+              >
+                Show the sessions
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="repro-demo-show-telemetry"
+                onClick={() => {
+                  if (!state.workspaceId) return;
+                  requestReproTour({ kind: "open-work-graph", workspaceId: state.workspaceId });
+                  requestReproTour({ kind: "focus-view", view: "evidence" });
+                }}
+              >
+                Show the telemetry
+              </Button>
+            </>
           ) : null}
           {state.projectName ? (
             <span
@@ -299,9 +526,10 @@ export function ReproDemoSection({
 
         <p className="text-xs text-muted-foreground">
           The demo leaves Settings on its own: the Bots page once the bot and its
-          watch are configured, then this run's Work Graph once the rounds start,
-          moving its view — graph, evidence, usage — as they change. Come back to
-          Settings whenever you like: the panel keeps the run.
+          watch are configured, then this run's sessions once the bot releases
+          the work — the main session and the workers it dispatches, side by
+          side — and finally the Work Graph's Agent telemetry and Usage tabs.
+          Come back to Settings whenever you like: the panel keeps the run.
         </p>
 
         <Spotlight active={state.spotlight !== null && state.running} testId="repro-demo-phases">
@@ -349,8 +577,8 @@ export function ReproDemoSection({
                 {state.checks.map((check, index) => (
                   <li key={`${check.outcome}-${check.eventId ?? index}`}>
                     {check.outcome}
-                    {check.eventId ? ` · evento ${check.eventId}` : ""}
-                    {check.firing ? ` · disparo ${check.firing}` : ""}
+                    {check.eventId ? ` · event ${check.eventId}` : ""}
+                    {check.firing ? ` · firing ${check.firing}` : ""}
                     {check.error ? ` · ${check.error}` : ""}
                   </li>
                 ))}
@@ -392,8 +620,8 @@ export function ReproDemoSection({
           <Spotlight active={spotlightFor("evidence")} testId="repro-demo-evidence">
             <div className="space-y-4">
               <SettingsSubsectionHeader
-                title="Evidence and cost"
-                description="The same ledgers that live in .drogon/ and read without Drogon."
+                title="Agent telemetry and cost"
+                description={`${state.evidence.length} entries the daemon and the agents recorded, in the same ledgers that live in .drogon/ and read without Drogon. The full detail is on the Work Graph's Agent telemetry tab.`}
               />
               <ul className="space-y-2">
                 {state.evidence.map((entry) => (
@@ -437,6 +665,37 @@ export function ReproDemoSection({
           <p className="text-sm text-destructive" data-testid="repro-demo-failure">
             {state.failure}
           </p>
+        ) : null}
+
+        {canRemoveDemoRuns(resolved) ? (
+          <div className="space-y-2 border-t border-border pt-4">
+            <SettingsSubsectionHeader
+              title="Tidy up"
+              description="Every run leaves its bot under Chats and its project under Projects, so they can be compared. Remove them all when you are done — only the demo's own bots and projects, nothing else."
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="repro-demo-cleanup"
+                disabled={state.running || cleaning}
+                onClick={cleanUp}
+              >
+                {cleaning ? "Removing…" : "Remove demo runs"}
+              </Button>
+              {cleanup ? (
+                <span
+                  className={`text-xs ${cleanup.errors.length > 0 ? "text-destructive" : "text-muted-foreground"}`}
+                  data-testid="repro-demo-cleanup-result"
+                >
+                  Removed {cleanup.bots} bot{cleanup.bots === 1 ? "" : "s"} and {cleanup.projects}{" "}
+                  project{cleanup.projects === 1 ? "" : "s"}
+                  {cleanup.errors.length > 0 ? ` · ${cleanup.errors.join(" · ")}` : "."}
+                </span>
+              ) : null}
+            </div>
+          </div>
         ) : null}
       </div>
     </SettingsSection>

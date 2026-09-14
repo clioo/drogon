@@ -5,6 +5,7 @@ import {
   FileText,
   Gauge,
 } from "lucide-react";
+import { Fragment } from "react";
 import type { GraphObservabilitySnapshot } from "../../../../shared/graph-contract";
 import { Badge } from "../../components/ui/badge";
 
@@ -28,6 +29,33 @@ function EvidenceIcon({ status }: { status: string }): React.JSX.Element {
   return <CircleDot className="size-4 text-muted-foreground" aria-hidden />;
 }
 
+/** A telemetry entry's own facts, laid out so a curious reader can follow a
+ *  run line by line: who wrote it (the daemon's orchestrator, a worker, the
+ *  releasing session), for which node, and the full detail it carried. */
+function TelemetryFacts({
+  entry,
+}: {
+  entry: GraphObservabilitySnapshot["evidence"][number];
+}): React.JSX.Element {
+  const facts: [string, string][] = [
+    ["Recorded", formatTime(entry.timestamp)],
+    ["Author", entry.role ? entry.role : "—"],
+    ["Node", entry.agentId ? entry.agentId : "—"],
+    ["Workflow run", entry.runId ? entry.runId : "—"],
+    ["Entry", entry.id],
+  ];
+  return (
+    <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+      {facts.map(([label, value]) => (
+        <Fragment key={label}>
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd className="min-w-0 break-all font-mono text-foreground/80">{value}</dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
+}
+
 export function EvidenceView({
   snapshot,
   loading,
@@ -37,7 +65,7 @@ export function EvidenceView({
 }): React.JSX.Element {
   if (loading && snapshot.evidence.length === 0) {
     return (
-      <div className="p-6 text-sm text-muted-foreground">Loading evidence…</div>
+      <div className="p-6 text-sm text-muted-foreground">Loading telemetry…</div>
     );
   }
   if (snapshot.evidence.length === 0) {
@@ -51,26 +79,46 @@ export function EvidenceView({
             className="mx-auto size-8 text-muted-foreground"
             aria-hidden
           />
-          <h2 className="mt-3 text-sm font-medium">No evidence recorded yet</h2>
+          <h2 className="mt-3 text-sm font-medium">No telemetry recorded yet</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Lead-agent checkpoints appear here as work advances. They are stored
-            in <code>.drogon/evidence.json</code> and remain readable without
-            Drogon.
+            Every attempt, verdict and dispatch of a workflow lands here as it
+            happens, along with the checkpoints agents record themselves. It is
+            stored in <code>.drogon/evidence.json</code> and stays readable
+            without Drogon.
           </p>
         </div>
       </div>
     );
   }
+  const byStatus = new Map<string, number>();
+  for (const entry of snapshot.evidence)
+    byStatus.set(entry.status, (byStatus.get(entry.status) ?? 0) + 1);
   return (
     <div
       className="min-h-0 flex-1 overflow-auto p-4"
       data-testid="work-graph-evidence-view"
     >
       <div className="mx-auto max-w-3xl space-y-3">
+        <p
+          className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground"
+          data-testid="work-graph-evidence-summary"
+        >
+          <span>
+            {snapshot.evidence.length} entr{snapshot.evidence.length === 1 ? "y" : "ies"},
+            newest first
+          </span>
+          {[...byStatus.entries()].map(([status, count]) => (
+            <Badge key={status} variant="outline" className="text-[10px] capitalize">
+              {count} {status}
+            </Badge>
+          ))}
+          <span>· updated {formatTime(snapshot.updatedAt)}</span>
+        </p>
         {[...snapshot.evidence].reverse().map((entry) => (
           <article
             key={entry.id}
             className="rounded-lg border border-border bg-card p-4"
+            data-status={entry.status}
           >
             <div className="flex items-start gap-3">
               <EvidenceIcon status={entry.status} />
@@ -81,15 +129,11 @@ export function EvidenceView({
                     {entry.status}
                   </Badge>
                 </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {formatTime(entry.timestamp)}
-                  {entry.role ? ` · ${entry.role}` : ""}
-                  {entry.agentId ? ` · ${entry.agentId}` : ""}
-                </p>
+                <TelemetryFacts entry={entry} />
                 {entry.detail ? (
-                  <p className="mt-3 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                  <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-foreground/90">
                     {entry.detail}
-                  </p>
+                  </pre>
                 ) : null}
                 {entry.artifacts.length > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-1.5">

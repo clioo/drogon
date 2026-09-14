@@ -16,17 +16,35 @@ export type ReproTourRequest =
   /** Show what the demo just configured: the run's workspace selected, and the
    *  Bots page, leaving Settings. */
   | { kind: "open-bots"; workspaceId: string }
-  /** Show the orchestration itself: select the workspace and open its Work
-   *  Graph tab, leaving Settings. */
+  /** Show the orchestration as it happens: select the run's workspace and its
+   *  session area, where the main session and its parallel workers appear. */
+  | { kind: "open-sessions"; workspaceId: string }
+  /** Show the Work Graph tab of the workspace (on demand — its canvas is not
+   *  the orchestration, the sessions are). */
   | { kind: "open-work-graph"; workspaceId: string }
   /** Move the Work Graph's own view to the one that just changed. */
   | { kind: "focus-view"; view: "graph" | "evidence" | "usage" };
 
 export type ReproTourSink = (request: ReproTourRequest) => void;
+export type ReproTourView = Extract<ReproTourRequest, { kind: "focus-view" }>["view"];
+
+// A `focus-view` sent right after `open-work-graph` lands before the pane
+// exists (the tab is still opening), so the view is also kept here for the
+// pane to take when it mounts; a mounted pane takes it through the event.
+let pendingView: ReproTourView | null = null;
 
 export function requestReproTour(request: ReproTourRequest): void {
+  if (request.kind === "focus-view") pendingView = request.view;
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(REPRO_TOUR_EVENT, { detail: request }));
+}
+
+/** The view the tour asked for most recently and no pane has shown yet;
+ *  taking it clears it, so a later pane never opens on a stale request. */
+export function takePendingReproView(): ReproTourView | null {
+  const view = pendingView;
+  pendingView = null;
+  return view;
 }
 
 /** Subscribes to tour requests; returns the unsubscribe. Payloads are shape
@@ -46,7 +64,7 @@ export function onReproTour(handler: ReproTourSink): () => void {
       return;
     }
     if (
-      detail.kind === "open-work-graph" &&
+      (detail.kind === "open-work-graph" || detail.kind === "open-sessions") &&
       typeof (detail as { workspaceId?: unknown }).workspaceId === "string" &&
       (detail as { workspaceId: string }).workspaceId.length > 0
     ) {

@@ -12,6 +12,7 @@ export const project: ProjectBridge = {
   projectUpdate: (value) => ipcRenderer.invoke("drogon:projectUpdate", value),
   quickSessionCreate: (value) =>
     ipcRenderer.invoke("drogon:quickSessionCreate", value),
+  projectCreate: (value) => ipcRenderer.invoke("drogon:projectCreate", value),
   sparsePresets: (value) => ipcRenderer.invoke("drogon:sparsePresets", value),
   saveSparsePreset: (value) =>
     ipcRenderer.invoke("drogon:saveSparsePreset", value),
