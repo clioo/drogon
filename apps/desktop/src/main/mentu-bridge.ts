@@ -109,6 +109,15 @@ export function registerMentuBridge(
     ipcMain.handle(channelFor[method], async (event, input: unknown) => {
       const window = getWindow();
       if (!isTrustedRenderer(window, event)) return { ...invalid };
+      if (
+        method === "mentuRuntime" &&
+        !isMentuRuntimePlatformSupported(process.platform, process.arch)
+      )
+        return installError(
+          "mentu_runtime_unsupported",
+          "The optional Mentu runtime is available only on Apple silicon Macs.",
+          false,
+        );
       return dispatchMentuRequest(method, input);
     });
   }
@@ -139,6 +148,8 @@ export const MENTU_RUNTIME_LOCK_SHA256 =
 export const MENTU_RUNTIME_RELEASE_URL =
   "https://github.com/mentu-ai/mentu-recipes/releases/download/v0.5.0/mentu-recipes-macos-arm64";
 const MAX_MENTU_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+const MENTU_DOWNLOAD_FAILURE_MESSAGE =
+  "Could not download the pinned Mentu runtime. Check your network connection and try again.";
 
 type MentuInstallDeps = {
   call?: NativeCall;
@@ -155,6 +166,13 @@ function installError(
   retryable: boolean,
 ): Result<never> {
   return { ok: false, error: { code, message, retryable } };
+}
+
+export function isMentuRuntimePlatformSupported(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): boolean {
+  return platform === "darwin" && arch === "arm64";
 }
 
 function checkedRuntimeResult(value: unknown): Result<MentuRuntimeResult> {
@@ -179,7 +197,7 @@ export async function installOfficialMentuRuntime(
 ): Promise<Result<MentuRuntimeResult>> {
   const platform = deps.platform ?? process.platform;
   const arch = deps.arch ?? process.arch;
-  if (platform !== "darwin" || arch !== "arm64")
+  if (!isMentuRuntimePlatformSupported(platform, arch))
     return installError(
       "mentu_install_unsupported",
       "Mentu installation is available only on Apple silicon Macs.",
@@ -246,6 +264,10 @@ export async function installOfficialMentuRuntime(
       );
 
     const sourcePath = path.join(temporary, "mentu-recipes");
+    // This is a new app-owned file written from verified HTTPS bytes, not a
+    // Finder/browser download. macOS therefore does not attach a
+    // `com.apple.quarantine` attribute here; do not bypass Gatekeeper with
+    // `xattr -d` or silently retry if the pinned binary still cannot launch.
     await writeFile(sourcePath, bytes, { mode: 0o755 });
     const installed = await call("mentu.runtime_install", { sourcePath });
     if (!installed.ok) return installed as Result<MentuRuntimeResult>;
@@ -259,10 +281,13 @@ export async function installOfficialMentuRuntime(
         false,
       );
     return { ok: true, result: { runtime: checkedInstall.data.runtime } };
-  } catch (error) {
+  } catch {
+    // Do not surface fetch/OS exception text in Settings. It varies by Node,
+    // macOS and network state; the action is retryable and the pinned bytes
+    // were never handed to the daemon unless every verification step passed.
     return installError(
       "mentu_download_failed",
-      error instanceof Error ? error.message : "Mentu download failed.",
+      MENTU_DOWNLOAD_FAILURE_MESSAGE,
       true,
     );
   } finally {

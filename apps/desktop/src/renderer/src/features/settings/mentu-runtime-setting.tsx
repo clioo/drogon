@@ -46,9 +46,22 @@ function windowMentuBridge(): MentuSettingsBridge | null {
 function stateFromResult(result: Result<MentuRuntimeResult>): RuntimeState {
   if (!result.ok)
     return { phase: "error", message: result.error.message, action: "check" };
-  return result.result.runtime.available && result.result.runtime.lockMatches
-    ? { phase: "installed", runtime: result.result.runtime }
-    : { phase: "missing", runtime: result.result.runtime };
+  const runtime = result.result.runtime;
+  if (runtime.available && runtime.lockMatches)
+    return { phase: "installed", runtime };
+  // Matching bytes with a failed executable probe means this host cannot run
+  // the pinned binary (permissions, Gatekeeper or OS compatibility), not that
+  // it is absent. Re-downloading the same bytes would make the Install button
+  // misleading, so surface the daemon's actionable diagnostic and offer only
+  // a status retry.
+  if (runtime.lockMatches)
+    return {
+      phase: "error",
+      message: runtime.message ?? "The installed Mentu runtime cannot run on this host.",
+      action: "check",
+      runtime,
+    };
+  return { phase: "missing", runtime };
 }
 
 function requestFailure(error: unknown): string {

@@ -34,6 +34,15 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+test("does not create a runtime path without an explicit source", () => {
+  const root = fixtureRoot();
+  assert.throws(
+    () => provisionMentuRuntime(join(root, "not-provided"), root),
+    /ENOENT|source/i,
+  );
+  assert.equal(existsSync(bundledRuntimeDestination(root)), false);
+});
+
 test("refuses a source that does not match the approved lock and stages nothing", () => {
   const root = fixtureRoot();
   const source = join(root, "candidate");

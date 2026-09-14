@@ -35,7 +35,6 @@ import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
 import { probeRenderedMentuTab } from "./probe-rendered-mentu-tab.mjs";
 import { probeOrchestrator } from "./probe-orchestrator.mjs";
-import { stageVerifiedRuntime } from "./mentu-runtime-provision.mjs";
 import { probeRenderedDaemonRestart } from "./probe-rendered-daemon-restart.mjs";
 import { probeRenderedChangedDaemonBinary } from "./probe-rendered-changed-daemon-binary.mjs";
 import {
@@ -120,23 +119,9 @@ let fixtureDaemon = packaged
   : null;
 const workspace = path.join(fixture, "folder");
 await mkdir(workspace);
-// The Work Graph journey drives the durable orchestrator, which needs the
-// pinned recipe runtime. Mentu is optional and no longer bundled (#533), so
-// this acceptance provisions it into its OWN data directory exactly as a user
-// would from Settings — a verified copy, checked against the lock, never the
-// caller's installed Drogon. Without one the journey cannot be validated, and
-// the failure says so instead of looking like a product regression.
-// A clean machine carries no pinned recipe runtime and must still validate
-// the rest of the bundle: instead of aborting with zero checks, the
-// runtime-dependent journeys (Work Graph orchestrator, Mentu tab) skip
-// explicitly at their own sites below when this stays null.
-let acceptanceRuntime = null;
-let acceptanceRuntimeError = null;
-try {
-  acceptanceRuntime = await stageVerifiedRuntime(dataDir, root);
-} catch (error) {
-  acceptanceRuntimeError = error.message;
-}
+// This acceptance intentionally does not provision Mentu. A fresh install is
+// Mentu-less; the native Work Graph/orchestrator journey must still run, while
+// recipe execution is reported separately as unavailable/skipped.
 // R16-BB: the sealed journeys run every in-app agent launch against the
 // sealed, loopback, test-owned model fixture (scripts/sealed-model-
 // fixture.mjs) -- never a real network endpoint (Pi resolves its config
@@ -204,6 +189,11 @@ const report = {
   // Environment-gated journeys that did not run. Counted separately from
   // `checks` and never mistaken for passes (see markAcceptancePassed).
   skipped: [],
+  optional: {
+    unavailable: [],
+    skipped: [],
+    available: [],
+  },
   cleanup: [],
   desktopPids: [],
   fixture,
@@ -228,18 +218,6 @@ async function stopOwned(child, label) {
   report.cleanup.push(`${label}: ${result.verdict}`);
   return result;
 }
-// The pinned recipe runtime gates the Work Graph journeys. Returns [] for
-// spreading into `report.checks` while recording a visible skip, so a host
-// without the runtime validates everything else instead of aborting.
-function skipWithoutRuntime(journey) {
-  recordAcceptanceSkip(
-    report,
-    journey,
-    `pinned mentu-recipes runtime unavailable on this host (${acceptanceRuntimeError}); ` +
-      "install it from Settings or point DROGON_MENTU_RUNTIME at a verified copy to run this journey",
-  );
-  return [];
-}
 // The sealed J1/J7/J8 journeys drive the genuine `pi` binary. Returns [] for
 // spreading into `report.checks` while recording a visible skip.
 function skipWithoutPi(journey) {
@@ -259,6 +237,15 @@ function modelJourneysRunnable() {
 function diagnoseBundleLaunchFailure(tail) {
   return diagnosePackagedLaunchFailure({ tail, executable: packaged?.executable });
 }
+
+function isolatedProcessEnv(overrides = {}) {
+  const env = { ...process.env, ...overrides };
+  // Acceptance is the Mentu-less fresh-install lane even when the caller's
+  // shell happens to carry a development override.
+  delete env.DROGON_MENTU_RUNTIME;
+  return env;
+}
+
 async function launchDesktop(overrideDataDir = null) {
   const activeDataDir = overrideDataDir ?? dataDir;
   const child = startAcceptanceProcess(
@@ -266,8 +253,7 @@ async function launchDesktop(overrideDataDir = null) {
     [...(packaged ? [] : [appDir]), "--remote-debugging-port=0"],
     {
       stdio: ["ignore", "ignore", "pipe"],
-      env: {
-        ...process.env,
+      env: isolatedProcessEnv({
         DROGON_DATA_DIR: activeDataDir,
         DROGON_ELECTRON_PROFILE: path.join(fixture, "electron"),
         DROGON_BACKGROUND_WINDOW: "1",
@@ -283,7 +269,7 @@ async function launchDesktop(overrideDataDir = null) {
         ...(withHarness
           ? { PI_CODING_AGENT_DIR: piDir }
           : {}),
-      },
+      }),
     },
   );
   desktop = child;
@@ -411,11 +397,10 @@ try {
       ["--data-dir", dataDir],
       {
         stdio: "ignore",
-        env: {
-          ...process.env,
+        env: isolatedProcessEnv({
           PATH: `${fixtureBin}${path.delimiter}${process.env.PATH ?? ""}`,
           PI_CODING_AGENT_DIR: piDir,
-        },
+        }),
       },
     );
     daemon.on("error", (error) => {
@@ -585,6 +570,34 @@ try {
     return response.result.workspaces[0];
   });
   report.checks.push("isolated-renderer-and-real-folder-registration");
+  const mentuCli = packaged
+    ? packaged.cli
+    : path.join(
+        root,
+        "target",
+        "debug",
+        process.platform === "win32" ? "drogon-cli.exe" : "drogon-cli",
+      );
+  const mentuStatus = JSON.parse(
+    (
+      await runAcceptanceProcess(
+        mentuCli,
+        ["--data-dir", dataDir, "--json", "mentu", "status", "--workspace", registered.id],
+        { timeout: 10000 },
+      )
+    ).stdout,
+  );
+  assert.equal(mentuStatus.ok, true, JSON.stringify(mentuStatus));
+  if (mentuStatus.result.runtime.available) {
+    report.optional.available.push("Mentu runtime reported installed");
+  } else {
+    report.optional.unavailable.push(
+      "Mentu runtime unavailable on the fresh acceptance host",
+    );
+    report.optional.skipped.push(
+      "Mentu recipe execution (no runtime was provisioned)",
+    );
+  }
   if (packaged && process.env.DROGON_MIXED_FROM_BUNDLE) {
     await fixtureDaemon.stop();
     fixtureDaemon = null;
@@ -616,13 +629,9 @@ try {
       "no `claude` binary on this host: install Claude Code to run the real-TUI keyboard journey",
     );
   // The keyboard-isolation probe replaced `bin/claude` with the real,
-  // network-denied binary. Every later Mentu journey (the tab probe and the
-  // sealed J9 journey) hands its prompt to a stub harness that answers by
-  // running `drogon-cli mentu run`, so restore the shared agent-settings
-  // stubs here, after the real Claude session is stopped.
-  // A plain `--files` run also includes the Mentu journey (the tab probe),
-  // which delegates its prompt to a stub harness, so the stubs must come
-  // back here for it too — not only for packaged/agent/session runs.
+  // network-denied binary. Restore the shared agent-settings stubs before
+  // the Work Graph probes; the Mentu-less acceptance never executes a recipe
+  // or downloads a runtime, but it still exercises the native graph surface.
   if (packaged || withAgents || withSessions || withFiles)
     await writeAgentSettingsFixtures(fixtureBin, {
       skip: withAgents || withSessions ? [] : ["pi"],
@@ -1071,39 +1080,30 @@ try {
     report.checks.push(
       ...(await probeRenderedTabs({ page, workspace, output })),
     );
-    if (acceptanceRuntime)
-      report.checks.push(
-        `work-graph-runtime-staged-${acceptanceRuntime.revision.slice(0, 12)}`,
-      );
-    else recordAcceptanceSkip(report, "work-graph-runtime-staged", `pinned mentu-recipes runtime unavailable on this host (${acceptanceRuntimeError})`);
     // The orchestrator probe runs FIRST: it needs a workspace with NO
     // .drogon/graph.json (the honest initial state and the configure-and-run
     // journey). The Mentu tab probe below then writes its own fixture graph.
     report.checks.push(
-      ...(acceptanceRuntime
-        ? await probeOrchestrator({
-            page,
-            workspace,
-            output,
-            cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
-            dataDir,
-            workspaceId: registered.id,
-          })
-        : skipWithoutRuntime("work-graph-orchestrator-configure-and-run")),
+      ...(await probeOrchestrator({
+        page,
+        workspace,
+        output,
+        cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
+        dataDir,
+        workspaceId: registered.id,
+      })),
     );
     // Mentu-as-tab: the reported bug (the "+" menu's Mentu entry used to
     // hide the whole tab strip) plus the Bot-facing `drogon-cli mentu open`
     // and the honest `mentu status` environment check.
     report.checks.push(
-      ...(acceptanceRuntime
-        ? await probeRenderedMentuTab({
-            page,
-            workspace,
-            output,
-            cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
-            dataDir,
-          })
-        : skipWithoutRuntime("mentu-tab-delegation-and-status")),
+      ...(await probeRenderedMentuTab({
+        page,
+        workspace,
+        output,
+        cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
+        dataDir,
+      })),
     );
   }
   if (withAgents) {
@@ -1682,6 +1682,7 @@ try {
       skipped: report.skipped,
       executedChecks: report.checks.length,
       skippedChecks: report.skipped.length,
+      optional: report.optional,
       error: report.error,
       report: path.join(output, "report.json"),
     }),
