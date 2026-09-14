@@ -104,7 +104,11 @@ test("downloadToFile streams the body and refuses HTTP errors", async () => {
   );
 });
 
-test("extraction uses ditto and quarantine matches the Homebrew posture", async () => {
+// ditto extraction only exists on macOS; the quarantine posture is pure
+// (the xattr call is injected) and runs everywhere.
+const darwinOnly = { skip: process.platform !== "darwin" };
+
+test("extraction uses ditto to preserve the bundle shape", darwinOnly, async () => {
   const calls = [];
   const run = async (file, args, options) => {
     calls.push([file, args, options]);
@@ -117,10 +121,18 @@ test("extraction uses ditto and quarantine matches the Homebrew posture", async 
   assert.equal(bundle, path.join(dir, "Drogon.app"));
   assert.deepEqual(calls[0][0], "/usr/bin/ditto");
   assert.deepEqual(calls[0][1].slice(0, 3), ["-x", "-k", path.join(dir, "a.zip")]);
-  const value = await applyQuarantine({ bundle, run });
+});
+
+test("quarantine matches the Homebrew posture", async () => {
+  const calls = [];
+  const run = async (file, args, options) => {
+    calls.push([file, args, options]);
+    return { stdout: "", stderr: "" };
+  };
+  const value = await applyQuarantine({ bundle: path.join(tmpdir(), "Drogon.app"), run });
   assert.match(value, /^0081;00000000;Homebrew;/);
-  assert.equal(calls[1][0], "/usr/bin/xattr");
-  assert.deepEqual(calls[1][1].slice(0, 3), ["-w", "com.apple.quarantine", value]);
+  assert.equal(calls[0][0], "/usr/bin/xattr");
+  assert.deepEqual(calls[0][1].slice(0, 3), ["-w", "com.apple.quarantine", value]);
 });
 
 test("build-info must name the tag under validation", async () => {
