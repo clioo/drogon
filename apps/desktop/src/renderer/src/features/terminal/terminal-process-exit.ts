@@ -18,7 +18,11 @@ export type TerminalProcessExitReason =
   // not dead — it is asleep. The primary action resumes THAT conversation
   // (`claude --resume <id>`) through the harness's own verb instead of
   // relaunching a blank tab; the copy never asserts an exit.
-  | "session-sleeping";
+  | "session-sleeping"
+  // A headless one-shot turn (a Bot's prompt, a Work Graph role) that ended
+  // with exit 0: that IS the turn finishing, not a shell dying. Nothing waits
+  // for input, and relaunching it would run the prompt again.
+  | "turn-completed";
 
 export type TerminalProcessExit = {
   exitCode: number | null;
@@ -33,14 +37,48 @@ export type TerminalProcessExit = {
 export function projectTerminalProcessExit(session: {
   verdict: "live" | "unverifiable" | "exited";
   exitCode: number | null;
+  args?: string[];
+  harnessId?: string | null;
+  causedByEventId?: string | null;
 }): TerminalProcessExit | null {
   // Unlike Orca's PTY lifecycle, Drogon restores durable completed rows.
   // They still need Restart/Close; hiding their overlay strands a dead pane.
   if (session.verdict !== "exited") return null;
+  if (session.exitCode === 0 && isHeadlessTurn(session)) {
+    return { exitCode: 0, reason: "turn-completed" };
+  }
   return {
     exitCode: session.exitCode,
     reason: session.exitCode === 0 ? "process-completed" : "process-failed",
   };
+}
+
+/** A daemon-run headless launch: the prompt rides in argv (`-p`, `run
+ *  --model`, `exec`), so the process ends when the turn does. Mirrors the
+ *  argv shapes `monitorLaunchPrompt` reads; an interactive launch has none. */
+export function isHeadlessTurn(session: {
+  args?: string[];
+  harnessId?: string | null;
+  causedByEventId?: string | null;
+}): boolean {
+  if (session.causedByEventId) return true;
+  const args = session.args ?? [];
+  switch (session.harnessId) {
+    case "pi":
+      return args.includes("-p");
+    case "claude": {
+      const delimiter = args.indexOf("--");
+      return delimiter > 0 && args[delimiter - 1] === "-p";
+    }
+    case "opencode":
+      return args.includes("run") && args.includes("--model");
+    case "codex":
+      return args.includes("exec");
+    case "antigravity":
+      return args.length >= 2 && args.at(-2) === "-p";
+    default:
+      return false;
+  }
 }
 
 /** Pure copy projection for the overlay (title + detail), kept beside the
@@ -68,6 +106,13 @@ export function describeTerminalProcessExit(exit: TerminalProcessExit): {
       title: "This session is sleeping",
       detail:
         "Drogon holds no process for this session, but its conversation is still there. Resume opens the same conversation with the harness's own resume command, or close the tab.",
+    };
+  }
+  if (exit.reason === "turn-completed") {
+    return {
+      title: "Turn finished",
+      detail:
+        "This headless turn ended with exit code 0. Its output stays here and nothing is waiting for input.",
     };
   }
   return {
