@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { markAcceptanceFailed, markAcceptancePassed } from "./acceptance-report-state.mjs";
+import { markAcceptanceFailed, markAcceptancePassed, recordAcceptanceSkip } from "./acceptance-report-state.mjs";
 import { probeWorkspaceProperties } from "./probe-workspace-properties.mjs";
 import { probeChatLifecycle } from "./probe-chat-lifecycle.mjs";
 import { probeMixedVersionRecovery } from "./probe-mixed-version-recovery.mjs";
-import { seedPrivateClaudeKeyboard, probeClaudeTerminalInput } from "./probe-claude-terminal-input.mjs";
+import { findClaudeBinary, seedPrivateClaudeKeyboard, probeClaudeTerminalInput } from "./probe-claude-terminal-input.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
@@ -18,6 +18,7 @@ import {
   stopAcceptanceProcess,
   runAcceptanceProcess,
 } from "./acceptance-process.mjs";
+import { diagnosePackagedLaunchFailure } from "./packaged-launch-diagnosis.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { captureSettingsThemes, verifyThemeCaptures } from "./acceptance-theme.mjs";
 import { verifyRenderedUsageFixture, writeAcceptanceUsageFixture } from "./acceptance-usage-fixture.mjs";
@@ -26,7 +27,7 @@ import {
   verifyForegroundObservation,
 } from "./acceptance-foreground.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
-import { linkHostBinaryIntoFixtureBin, probeAgentSettings, probeAgentSettingsNarrow, writeAgentSettingsFixtures } from "./probe-agent-settings.mjs";
+import { hostBinaryAvailable, linkHostBinaryIntoFixtureBin, probeAgentSettings, probeAgentSettingsNarrow, writeAgentSettingsFixtures } from "./probe-agent-settings.mjs";
 import { probeRenderedSessionRestart } from "./probe-rendered-session-restart.mjs";
 import { probeRenderedExitedStubs } from "./probe-rendered-exited-stubs.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
@@ -125,7 +126,17 @@ await mkdir(workspace);
 // would from Settings — a verified copy, checked against the lock, never the
 // caller's installed Drogon. Without one the journey cannot be validated, and
 // the failure says so instead of looking like a product regression.
-const acceptanceRuntime = await stageVerifiedRuntime(dataDir, root);
+// A clean machine carries no pinned recipe runtime and must still validate
+// the rest of the bundle: instead of aborting with zero checks, the
+// runtime-dependent journeys (Work Graph orchestrator, Mentu tab) skip
+// explicitly at their own sites below when this stays null.
+let acceptanceRuntime = null;
+let acceptanceRuntimeError = null;
+try {
+  acceptanceRuntime = await stageVerifiedRuntime(dataDir, root);
+} catch (error) {
+  acceptanceRuntimeError = error.message;
+}
 // R16-BB: the sealed journeys run every in-app agent launch against the
 // sealed, loopback, test-owned model fixture (scripts/sealed-model-
 // fixture.mjs) -- never a real network endpoint (Pi resolves its config
@@ -148,14 +159,22 @@ await writeFixtureGh(fixtureBin, [
 // working->idle agent-state transitions, which a shell stub can never
 // produce. Link the host's own pi into the fixture PATH so the composer
 // still sees the harness while those journeys drive the genuine binary.
+// The sealed model journeys (J1/J7/J8) drive the genuine `pi` binary, which
+// a shell stub can never stand in for. A host without one skips those
+// journeys explicitly at their sites below instead of failing opaquely.
+let genuinePiAvailable = false;
 if (packaged || withAgents || withSessions) {
   const stubEveryHarness = withAgents || withSessions;
   await writeAgentSettingsFixtures(fixtureBin, {
     skip: stubEveryHarness ? [] : ["pi"],
   });
   if (!stubEveryHarness) {
-    await linkHostBinaryIntoFixtureBin(fixtureBin, "pi", process.env.PATH);
+    genuinePiAvailable = await linkHostBinaryIntoFixtureBin(fixtureBin, "pi", process.env.PATH);
   }
+} else {
+  // A development --files run leaves the daemon on the ambient PATH, so the
+  // same lookup the shell would perform decides whether Pi is genuine.
+  genuinePiAvailable = await hostBinaryAvailable("pi", process.env.PATH);
 }
 const output = path.join(
   root,
@@ -182,6 +201,9 @@ const report = {
   status: "FAILED",
   startedAt: new Date().toISOString(),
   checks: [],
+  // Environment-gated journeys that did not run. Counted separately from
+  // `checks` and never mistaken for passes (see markAcceptancePassed).
+  skipped: [],
   cleanup: [],
   desktopPids: [],
   fixture,
@@ -205,6 +227,37 @@ async function stopOwned(child, label) {
     report.cleanup.push(`${label}: required force after timeout`);
   report.cleanup.push(`${label}: ${result.verdict}`);
   return result;
+}
+// The pinned recipe runtime gates the Work Graph journeys. Returns [] for
+// spreading into `report.checks` while recording a visible skip, so a host
+// without the runtime validates everything else instead of aborting.
+function skipWithoutRuntime(journey) {
+  recordAcceptanceSkip(
+    report,
+    journey,
+    `pinned mentu-recipes runtime unavailable on this host (${acceptanceRuntimeError}); ` +
+      "install it from Settings or point DROGON_MENTU_RUNTIME at a verified copy to run this journey",
+  );
+  return [];
+}
+// The sealed J1/J7/J8 journeys drive the genuine `pi` binary. Returns [] for
+// spreading into `report.checks` while recording a visible skip.
+function skipWithoutPi(journey) {
+  const why =
+    process.env.DROGON_SKIP_MODEL_JOURNEYS === "1"
+      ? "DROGON_SKIP_MODEL_JOURNEYS=1"
+      : "no genuine `pi` binary on this host (the shell stub cannot produce the real TUI)";
+  recordAcceptanceSkip(report, journey, why);
+  return [];
+}
+function modelJourneysRunnable() {
+  return process.env.DROGON_SKIP_MODEL_JOURNEYS !== "1" && genuinePiAvailable;
+}
+// Stillborn packaged launches are diagnosed statically (see
+// packaged-launch-diagnosis.mjs): a null executable is a dev run, which never
+// gets the release diagnosis.
+function diagnoseBundleLaunchFailure(tail) {
+  return diagnosePackagedLaunchFailure({ tail, executable: packaged?.executable });
 }
 async function launchDesktop(overrideDataDir = null) {
   const activeDataDir = overrideDataDir ?? dataDir;
@@ -237,20 +290,26 @@ async function launchDesktop(overrideDataDir = null) {
   if (child.pid) report.desktopPids.push(child.pid);
   const endpoint = await new Promise((resolve, reject) => {
     let tail = "";
-    const timeout = setTimeout(
-      () =>
-        reject(
-          new Error(`Electron did not publish a debugging endpoint: ${tail}`),
+    const timeout = setTimeout(async () => {
+      reject(
+        new Error(
+          `Electron did not publish a debugging endpoint within 20s: ${tail}` +
+            (await diagnoseBundleLaunchFailure(tail)),
         ),
-      20000,
-    );
+      );
+    }, 20000);
     child.once("error", (error) => {
       clearTimeout(timeout);
       reject(error);
     });
-    child.once("exit", () => {
+    child.once("exit", async (code, signal) => {
       clearTimeout(timeout);
-      reject(new Error(`Electron exited before connection: ${tail}`));
+      reject(
+        new Error(
+          `Electron exited before connection (code=${code} signal=${signal}): ${tail}` +
+            (await diagnoseBundleLaunchFailure(tail)),
+        ),
+      );
     });
     child.stderr.on("data", (bytes) => {
       tail = (tail + bytes.toString()).slice(-8192);
@@ -308,9 +367,20 @@ try {
   // Every operation after the server starts is covered by final cleanup.
   privateEnvironment = await installPrivateAcceptanceEnvironment(fixture);
   assert.equal(privateEnvironment.piDir, piDir);
+  // The Claude keyboard journey drives the maintainer's real Claude TUI. A
+  // clean machine has none: skip that journey explicitly instead of
+  // aborting the whole run with zero checks.
+  const claudeBinary = await findClaudeBinary();
+  if (!claudeBinary)
+    recordAcceptanceSkip(
+      report,
+      "claude-keyboard-isolation-seed",
+      "no `claude` binary on this host: install Claude Code to run the real-TUI keyboard journey",
+    );
   modelFixture = await startAndSeedModelFixture(async (baseUrl, instanceId) => {
     await seedLocalPiProvider(piDir, baseUrl, instanceId);
-    report.claudeKeyboardIsolation = await seedPrivateClaudeKeyboard({ home: privateEnvironment.home, fixtureBin, workspace, baseUrl });
+    if (claudeBinary)
+      report.claudeKeyboardIsolation = await seedPrivateClaudeKeyboard({ home: privateEnvironment.home, fixtureBin, workspace, baseUrl });
   });
   if (process.env.DROGON_VERIFY_OS_FOCUS === "1") {
     foregroundObservation = await startForegroundObservation(output);
@@ -539,6 +609,12 @@ try {
     report.checks.push(...await probeChatLifecycle({ page, cli: packaged.cli, dataDir, output }));
   if (report.claudeKeyboardIsolation)
     report.checks.push(...await probeClaudeTerminalInput({ page, workspaceId: registered.id, output }));
+  else
+    recordAcceptanceSkip(
+      report,
+      "claude-real-tui-shift-enter-inserts-editable-newline-without-submission",
+      "no `claude` binary on this host: install Claude Code to run the real-TUI keyboard journey",
+    );
   // The keyboard-isolation probe replaced `bin/claude` with the real,
   // network-denied binary. Every later Mentu journey (the tab probe and the
   // sealed J9 journey) hands its prompt to a stub harness that answers by
@@ -995,33 +1071,39 @@ try {
     report.checks.push(
       ...(await probeRenderedTabs({ page, workspace, output })),
     );
-    report.checks.push(
-      `work-graph-runtime-staged-${acceptanceRuntime.revision.slice(0, 12)}`,
-    );
+    if (acceptanceRuntime)
+      report.checks.push(
+        `work-graph-runtime-staged-${acceptanceRuntime.revision.slice(0, 12)}`,
+      );
+    else recordAcceptanceSkip(report, "work-graph-runtime-staged", `pinned mentu-recipes runtime unavailable on this host (${acceptanceRuntimeError})`);
     // The orchestrator probe runs FIRST: it needs a workspace with NO
     // .drogon/graph.json (the honest initial state and the configure-and-run
     // journey). The Mentu tab probe below then writes its own fixture graph.
     report.checks.push(
-      ...(await probeOrchestrator({
-        page,
-        workspace,
-        output,
-        cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
-        dataDir,
-        workspaceId: registered.id,
-      })),
+      ...(acceptanceRuntime
+        ? await probeOrchestrator({
+            page,
+            workspace,
+            output,
+            cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
+            dataDir,
+            workspaceId: registered.id,
+          })
+        : skipWithoutRuntime("work-graph-orchestrator-configure-and-run")),
     );
     // Mentu-as-tab: the reported bug (the "+" menu's Mentu entry used to
     // hide the whole tab strip) plus the Bot-facing `drogon-cli mentu open`
     // and the honest `mentu status` environment check.
     report.checks.push(
-      ...(await probeRenderedMentuTab({
-        page,
-        workspace,
-        output,
-        cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
-        dataDir,
-      })),
+      ...(acceptanceRuntime
+        ? await probeRenderedMentuTab({
+            page,
+            workspace,
+            output,
+            cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
+            dataDir,
+          })
+        : skipWithoutRuntime("mentu-tab-delegation-and-status")),
     );
   }
   if (withAgents) {
@@ -1090,7 +1172,7 @@ try {
         );
     // Product Pi execution uses the owned deterministic provider, never a
     // real model endpoint. A state transition alone cannot prove that route.
-    if (process.env.DROGON_SKIP_MODEL_JOURNEYS !== "1") {
+    if (modelJourneysRunnable()) {
       const countingBefore = modelFixture.receipt().byKind.counting;
       report.checks.push(
         ...(await probePiAgentStateWorkingIdle({
@@ -1102,11 +1184,13 @@ try {
       );
       assert.ok(modelFixture.receipt().byKind.counting > countingBefore, "interactive Pi must actually call the owned counting fixture");
       report.checks.push("interactive-pi-turn-proven-by-owned-provider-receipt");
+    } else {
+      report.checks.push(...skipWithoutPi("sealed-journey-j1-pi-agent-state-working-idle"));
     }
     report.checks.push(
       ...(await probeJumpPaletteSwitch({ page, root, output })),
     );
-    if (process.env.DROGON_SKIP_MODEL_JOURNEYS !== "1") {
+    if (modelJourneysRunnable()) {
       report.checks.push(
         ...(await probeAutomationRunNowDetail({
           page,
@@ -1125,6 +1209,9 @@ try {
           output,
         })),
       );
+    } else {
+      report.checks.push(...skipWithoutPi("sealed-journey-j7-automation-run-now-detail"));
+      report.checks.push(...skipWithoutPi("sealed-journey-j8-bot-preset-manual-run"));
     }
     report.checks.push(
       ...(await probeTasksStartIssue({ page, cli: journeyCli, dataDir, output })),
@@ -1228,7 +1315,8 @@ try {
         ? "requires --bundle: the upgrade target must be a packaged candidate"
         : null;
   if (upgradeSkipReason) {
-    report.checks.push(`upgrade-from-previous-build: SKIPPED (${upgradeSkipReason})`);
+    // A skip, not a pass: counted in `report.skipped`, never in `checks`.
+    recordAcceptanceSkip(report, "upgrade-from-previous-build", upgradeSkipReason);
   } else {
     const previousPaths = bundlePaths(previousBundlePath);
     const upgradeProjects = [];
@@ -1589,6 +1677,11 @@ try {
     JSON.stringify({
       status: report.status,
       checks: report.checks,
+      // Skipped journeys ride along so callers can distinguish "ran green"
+      // from "nothing ran": PASSED always implies checks.length > 0.
+      skipped: report.skipped,
+      executedChecks: report.checks.length,
+      skippedChecks: report.skipped.length,
       error: report.error,
       report: path.join(output, "report.json"),
     }),
