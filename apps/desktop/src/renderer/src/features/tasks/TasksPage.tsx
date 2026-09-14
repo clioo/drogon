@@ -40,6 +40,10 @@ import {
 } from "./task-source-navigation";
 import { TaskPageSurface } from "./task-page/Surface";
 import { getRepoBackedTaskEmptyState } from "./task-page-empty-state";
+import {
+  toGitHubTaskStartDisplayError,
+  toGitHubTasksDisplayError,
+} from "./task-page-github-error";
 import { toPullWorkItem, toWorkItem } from "./task-page-model";
 import type {
   TaskPageModel,
@@ -866,7 +870,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose, jiraBri
         if (!result.ok) {
           setWorkItems([]);
           setListPhase("error");
-          setTasksError(result.error.message);
+          setTasksError(toGitHubTasksDisplayError(result.error.code, result.error.message));
           setGithubUnavailable(
             result.error.code === "gh_unavailable" ||
               result.error.code === "gh_unauthenticated",
@@ -966,7 +970,7 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose, jiraBri
         .tasksStart({ projectId, number: item.number, mode: githubTaskKind, source: issueSourcePreference })
         .then((result) => {
           if (!result.ok) {
-            setStartError(result.error.message);
+            setStartError(toGitHubTaskStartDisplayError(result.error.code, result.error.message));
             return;
           }
           refreshLinks();

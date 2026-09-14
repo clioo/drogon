@@ -8,6 +8,9 @@
 
 export const NOT_A_GIT_REPOSITORY_COPY = "This workspace is not a git repository.";
 
+export const GIT_NOT_INSTALLED_COPY =
+  "Git developer tools are not installed. Install them with xcode-select --install, then try again.";
+
 export const PR_CREATE_FALLBACK_COPY = "Could not create a pull request.";
 
 /** Matches the daemon's `… exited with exit status: N …` wrapper. */
@@ -33,6 +36,8 @@ const GH_AUTH_MARKERS = [
   "missing token",
   "no oauth",
 ];
+/** git resolves to the macOS CLT stub, which cannot run without the tools. */
+const GIT_MISSING_MARKERS = ["no developer tools were found", "xcode-select"];
 /** gh could not run at all. */
 const GH_MISSING_MARKERS = [
   "could not be spawned",
@@ -64,6 +69,11 @@ export function toGitDisplayError(raw: string, fallback: string): string {
   const text = raw.trim();
   console.error(`[source-control] git failure: ${raw}`);
   if (/not a git repository/i.test(text)) return NOT_A_GIT_REPOSITORY_COPY;
+  // macOS without the command line tools resolves git to the CLT stub,
+  // which asks for an install instead of running. Mirrors the daemon's
+  // `git_unavailable` classifier; also catches the daemon's own typed
+  // message so every surface shows one actionable sentence.
+  if (containsMarker(text, GIT_MISSING_MARKERS)) return GIT_NOT_INSTALLED_COPY;
   if (text === "") return fallback;
   const detail = sanitizeGitDetail(text);
   if (detail === "" || RAW_GIT_INTERNALS.test(detail)) return fallback;

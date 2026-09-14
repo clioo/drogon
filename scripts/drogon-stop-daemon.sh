@@ -13,8 +13,11 @@ process_command() {
 }
 
 is_target() {
+  # A hand-started daemon serves the platform default with no arguments at
+  # all, so the bare executable is a target too. Anything else carrying this
+  # path (transient --help/--version runs) is left alone.
   case "$(process_command "$1")" in
-    "$daemon --data-dir "*) return 0 ;;
+    "$daemon --data-dir "*|"$daemon") return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -29,7 +32,7 @@ pids=$(
         pid = $1;
         $1 = "";
         sub(/^[[:space:]]+/, "", $0);
-        if (index($0, daemon " --data-dir ") == 1) print pid;
+        if (index($0, daemon " --data-dir ") == 1 || $0 == daemon) print pid;
       }'
 )
 

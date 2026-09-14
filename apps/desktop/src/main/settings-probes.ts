@@ -88,6 +88,23 @@ const NOT_INSTALLED_REASON: Record<string, string> = {
   gh: "gh is not installed or not on PATH",
 };
 
+/**
+ * macOS without the command line tools resolves `git` to the CLT stub,
+ * which exits 1 asking for an install — the same exit `git config` uses
+ * for an unset key, so the stub is invisible to `parseGitConfigValue`.
+ * Mirrors the daemon's `git_unavailable` classifier narrowly: only the
+ * stub's own wording matches, never a real repo error.
+ */
+function isCltStubOutput(stderr: string): boolean {
+  const lower = stderr.toLowerCase();
+  return (
+    lower.includes("no developer tools were found") || lower.includes("xcode-select: note")
+  );
+}
+
+const CLT_STUB_REASON =
+  "Git developer tools are not installed on this host: install them with xcode-select --install, then reopen Settings.";
+
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
@@ -116,6 +133,23 @@ export async function probeGitIdentity(
     run("git", ["config", "user.name"], options),
     run("git", ["config", "user.email"], options),
   ]);
+  // A CLT stub reports exit 1 with an install notice — indistinguishable
+  // from "unset" by exit code, so a virgin Mac would otherwise read as a
+  // configured-nothing identity instead of a missing toolchain.
+  if (
+    (nameRun.ok && isCltStubOutput(nameRun.stderr)) ||
+    (emailRun.ok && isCltStubOutput(emailRun.stderr))
+  ) {
+    const checked = gitIdentityResultSchema.safeParse({
+      workspacePath,
+      available: false,
+      name: null,
+      email: null,
+      reason: CLT_STUB_REASON,
+    });
+    if (!checked.success) return internalError();
+    return { ok: true, result: checked.data };
+  }
   // Effective identity for the workspace (repo, then global fallback — the
   // same value git itself would use for a commit there).
   if (!nameRun.ok || !emailRun.ok) {
