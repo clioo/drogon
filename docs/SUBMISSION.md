@@ -13,12 +13,14 @@ and acceptance paths (shell fixtures only).
 
 ## Build and run (macOS)
 
-Requirements: Rust 1.98, Node.js 24, pnpm 11.19.0 (declared in
-`packageManager`), Git, and `gh` for the GitHub features.
+Requirements: Rust 1.98 (`rustup toolchain install 1.98`), Node.js 24
+(supported range `>=24 <27`), pnpm 11.19.0 (`npm install -g pnpm@11.19.0`;
+declared in `packageManager`), Git, and `gh` for the GitHub features.
 
 ```sh
 git clone https://github.com/clioo/drogon.git
 cd drogon
+node scripts/check-toolchains.mjs   # fail fast with "you need X" when a floor is missed
 pnpm install --frozen-lockfile
 cargo build --workspace --locked
 ./target/debug/drogond --data-dir /tmp/drogon-dev
