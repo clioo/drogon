@@ -405,21 +405,21 @@ fn one_event_produces_exactly_one_dispatch() {
     assert!(history[0].responsibility_run.automation_run_id.is_none());
 
     // The delegation prompt carries the deterministic worktree name and the
-    // event id, and instructs the Bot's worktree/session/prompt sequence.
+    // event id, and makes the Bot dispatch a graph rather than become its main.
     let prompts = fixture.seam.prompts();
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].contains(&worktree_name_for_event(&event_id)));
     assert!(prompts[0].contains(&event_id));
     assert!(prompts[0].contains("drogon-cli worktree create"));
-    assert!(prompts[0].contains("drogon-cli harness start"));
-    assert!(prompts[0].contains("--json"));
+    assert!(prompts[0].contains("graph orchestrator-start"));
+    assert!(prompts[0].contains("graph orchestrator-status"));
+    assert!(prompts[0].contains(".result.run.id"));
     assert!(prompts[0].contains(".result.workspaceId"));
-    assert!(prompts[0].contains(".result.id"));
-    assert!(prompts[0].contains(".result.incarnation"));
-    assert!(prompts[0].contains("--permission-mode unattended"));
-    assert!(prompts[0].contains("terminal wait --session <id>"));
-    assert!(prompts[0].contains("--timeout-ms 900000"));
-    assert!(prompts[0].contains("terminal read"));
+    assert!(prompts[0].contains("Bot -> graph main agent -> depth-one workers"));
+    assert!(prompts[0].contains("policy.delegate to true"));
+    assert!(prompts[0].contains("end this Bot turn"));
+    assert!(!prompts[0].contains("drogon-cli harness start"));
+    assert!(!prompts[0].contains("terminal wait"));
     assert!(!prompts[0].contains("terminal send"));
 }
 

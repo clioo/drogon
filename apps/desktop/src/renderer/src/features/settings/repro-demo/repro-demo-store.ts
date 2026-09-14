@@ -293,30 +293,32 @@ export function describeRuntime(runtime: ReproRuntime): string {
   return runtime.model ? `${runtime.harness}/${runtime.model}` : `${runtime.harness} (harness default)`;
 }
 
-/** Standing instructions for the reactive responsibility the watch releases.
- *  The daemon's delegation prompt tells the session to open a worktree; these
- *  say to work right here instead. The released session is the run's main
- *  agent: it fans the build out to parallel workers through Drogon's own
- *  orchestration verbs (the same ones the product's delegation guide names),
- *  waits for their reports, and only then hands the bounded adversarial
- *  workflow to the daemon — with one exact command, so even a small local
- *  model can follow it literally. */
+/** The Bot admits the graph; it does not become its main agent. */
 export function releaseInstructions(workspaceId: string): string {
   return [
-    "The Dog Tinder spec changed in this very workspace, and you are this run's main agent.",
-    "Do not implement the deck yourself: delegate the build to parallel workers, then let the Work Graph test and review it.",
-    "Ignore step 1 of the message (no new worktree is needed): work in this workspace, whose id is " + workspaceId + ".",
+    "You are the Bot dispatcher acting on behalf of the user, not this graph's main agent.",
+    "Use this prepared workspace instead of creating another worktree: " + workspaceId + ". Its graph policy and main-node file are already configured; preserve them.",
+    `Check drogon-cli graph orchestrator-status --workspace ${workspaceId} --json first. Reuse an existing run for this event; do not retry an active or unverifiable admission.`,
+    `Dispatch exactly once: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file .drogon/repro-main-node.json`,
+    "Report the returned graph run id and workspace, then end this Bot turn. Do not implement, start workers, wait for workers, or claim the graph completed.",
+    "The graph's main agent plans and supervises its depth-one workers. The Bot is outside that depth budget.",
+  ].join("\n");
+}
+
+export function mainInstructions(workspaceId: string): string {
+  return [
+    "You are the main agent of the dispatched Dog Tinder graph, not the Bot that released it.",
+    "Do not implement the deck yourself: coordinate parallel workers under the saved Subagent policy.",
     "1. Read the delegation guide: drogon-cli skills get --topic orchestration",
     "2. Create the run: drogon-cli orchestration run-create --objective \"Dog Tinder: deck and page, built in parallel\" --host <the hostId that drogon-cli status prints>. Keep the runId, coordinatorId and consumerGeneration it returns: every orchestration command below takes --run <runId> --coordinator-id <coordinatorId> --consumer-generation <consumerGeneration>.",
     "3. Create two tasks with drogon-cli orchestration task-create ... --spec <text> --task-title <title>: \"[deck] Implement src/deck.js and src/storage.js per specs/dog-tinder.md. You cannot dispatch another worker.\" titled \"Deck and storage\", and \"[page] Implement index.html per specs/dog-tinder.md. You cannot dispatch another worker.\" titled \"Deck page\".",
     "4. Start one worker per task, both at once, in THIS workspace: drogon-cli orchestration worker-start ... --task <taskId> --workspace " + workspaceId + " --timeout-ms 900000. Workers run on the subagent runtime the Work Graph policy approves; do not start them any other way.",
-    "5. Wait for both workers IN THE FOREGROUND, and do not end your turn until step 6 is done: this session ends when your turn ends, and a background wait dies with it. Run drogon-cli orchestration check ... --wait --timeout-ms 600000 (it blocks until a message arrives; the workers take minutes) and repeat it until you have seen a worker_done for both tasks; drogon-cli orchestration worker-show ... --dispatch <dispatchId> confirms each outcome.",
-    `6. Then run exactly this and finish: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file .drogon/repro-main-node.json`,
-    "7. Record one checkpoint with drogon-cli graph evidence-add --workspace " + workspaceId + " --status completed --summary <what the workers built> and exit.",
+    "5. Wait for both workers IN THE FOREGROUND and do not end your turn while children are unfinished. Run drogon-cli orchestration check ... --wait --timeout-ms 600000 and repeat until worker_done arrives for both tasks; drogon-cli orchestration worker-show confirms each outcome. Follow the graph's policy for per-worker testing and corrections.",
+    "6. Record the result with drogon-cli graph evidence-add --workspace " + workspaceId + " --status completed --summary <what the workers built> and exit. This graph is already running: do not start a second workflow. The daemon owns its final whole-workflow adversarial rounds.",
   ].join("\n");
 }
 
-export function mainNodeFor(runtime: ReproRuntime, spec: string) {
+export function mainNodeFor(runtime: ReproRuntime, spec: string, workspaceId: string) {
   return {
     id: "orchestrator-main",
     title: "Dog Tinder with undo of the last swipe",
@@ -324,7 +326,7 @@ export function mainNodeFor(runtime: ReproRuntime, spec: string) {
     model: runtime.model,
     dependsOn: [] as string[],
     enabled: true,
-    prompt: `${spec}\n\n${REPRO_SCENARIO_BRIEF}`,
+    prompt: `${spec}\n\n${REPRO_SCENARIO_BRIEF}\n\n${mainInstructions(workspaceId)}`,
   };
 }
 
@@ -337,9 +339,7 @@ export function policyFor(runtime: ReproRuntime, iterations: number) {
 }
 
 const FIRING_TIMEOUT_MS = 300_000;
-// A real main agent fans the build out to workers that take minutes before
-// it starts the durable workflow; the panel's own fallback waits for that,
-// never races it (the fixture agent starts it within seconds).
+// Admission can be slow. Never race the Bot with a second workflow.
 const WORKFLOW_START_TIMEOUT_MS = 15 * 60_000;
 const ROUNDS_TIMEOUT_MS = 45 * 60_000;
 const POLL_MS = 1500;
@@ -430,7 +430,7 @@ export async function runReproDemo(
         hostId,
         workspaceId,
         path: ".drogon/repro-main-node.json",
-        content: `${JSON.stringify(mainNodeFor(runtime, REPRO_SCENARIO_SPEC), null, 2)}\n`,
+        content: `${JSON.stringify(mainNodeFor(runtime, REPRO_SCENARIO_SPEC, workspaceId), null, 2)}\n`,
         requestId: requestId(),
       }),
       "fileWrite .drogon/repro-main-node.json",
@@ -481,7 +481,7 @@ export async function runReproDemo(
       await bridge.graphWritePolicy({
         workspaceId,
         policy: policyFor(workers, iterations),
-        main: mainNodeFor(runtime, REPRO_SCENARIO_SPEC),
+        main: mainNodeFor(runtime, REPRO_SCENARIO_SPEC, workspaceId),
       }),
       "graphWritePolicy",
     );

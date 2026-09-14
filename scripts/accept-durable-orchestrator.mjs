@@ -1,4 +1,4 @@
-// Real desktop + pinned recipe runtime; every model executable is a local fixture.
+// Real desktop + native Drogon sessions; every model executable is a local fixture.
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile, chmod } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -13,7 +13,6 @@ import { startForegroundObservation, verifyForegroundObservation } from "./accep
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { installPrivateAcceptanceEnvironment } from "./acceptance-private-environment.mjs";
 import { selectSettingsTheme } from "./acceptance-theme.mjs";
-import { bundledRuntimeDestination } from "./mentu-runtime-provision.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const appDir = path.join(root, "apps/desktop");
@@ -139,7 +138,7 @@ console.log(prompt.match(/DROGON_NODE_[A-Z0-9_]+_DONE/g)?.at(-1) ?? 'fixture com
   await writeFile(log, "");
   const env = { ...process.env };
   await installPrivateAcceptanceEnvironment(fixture, env);
-  Object.assign(env, { PATH: `${bin}:${process.env.PATH}`, DROGON_FIXTURE_SCENARIO: scenario, DROGON_FIXTURE_LOG: log, DROGON_MENTU_RUNTIME: process.env.DROGON_MENTU_RUNTIME_SOURCE ?? bundledRuntimeDestination(root) });
+  Object.assign(env, { PATH: `${bin}:${process.env.PATH}`, DROGON_FIXTURE_SCENARIO: scenario, DROGON_FIXTURE_LOG: log });
   if (process.platform === "darwin") observer = await startForegroundObservation(output);
   daemon = start(path.join(root, "target/debug/drogond"), ["--data-dir", dataDir], { env, stdio: "ignore" });
   await until(async () => { try { return await cliJson(["status"]); } catch { return false; } }, "daemon readiness", 30000);
@@ -186,13 +185,18 @@ console.log(prompt.match(/DROGON_NODE_[A-Z0-9_]+_DONE/g)?.at(-1) ?? 'fixture com
   const workflowRow = page.getByRole("button", { name: "Work Graph · Running", exact: true });
   await workflowRow.waitFor();
   await workflowRow.click();
-  await page.getByText("Background workflow · no terminal", { exact: true }).waitFor();
+  await page.getByText("Native workspace sessions", { exact: true }).waitFor();
   await page.getByText("Main agent · running", { exact: true }).waitFor();
-  assert.equal((await cliJson(["terminal", "list", "--workspace", workspaceId])).sessions.length, 0);
-  const sidebarShot = path.join(output, "headless-workflow-sidebar.png");
+  const runningMain = await status();
+  const nativeRunId = runningMain.steps.find((step) => step.phase === "main")?.runId;
+  const nativeIdentity = /^session:([^:]+):(.+)$/.exec(nativeRunId ?? "");
+  assert.ok(nativeIdentity, `main step must carry a native session identity: ${nativeRunId}`);
+  const listedSessions = (await cliJson(["terminal", "list", "--workspace", workspaceId])).sessions;
+  assert.ok(listedSessions.some((session) => session.id === nativeIdentity[1] && session.incarnation === nativeIdentity[2]));
+  const sidebarShot = path.join(output, "native-workflow-sidebar.png");
   await page.screenshot({ path: sidebarShot, animations: "disabled" });
   report.screenshots.push(sidebarShot);
-  report.checks.push("headless-workflow-visible-in-sidebar-without-a-terminal-session");
+  report.checks.push("native-workflow-visible-in-sidebar-with-its-recorded-main-session");
   const baseOnly = await until(async () => { const r = await status(); return r?.status !== "running" && r; }, "base-only run");
   assert.equal(baseOnly.status, "passed", JSON.stringify(baseOnly));
   assert.equal(baseOnly.steps.length, 1);

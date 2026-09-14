@@ -37,10 +37,9 @@ export function WorktreeWorkflow({
     run !== null &&
     ["running", "stopping", "unverifiable"].includes(run.status);
   useEffect(() => {
-    // A headless role has no terminal row of its own. Open each newly
-    // observed active workflow once so its Main agent and chosen harness are
-    // visible immediately beside the real worker sessions. After that, a
-    // user's collapse wins across polling updates.
+    // Open each newly observed active workflow once so its Main agent and
+    // chosen harness are visible immediately beside its native sessions.
+    // After that, a user's collapse wins across polling updates.
     if (!run || !active || autoExpandedRunId.current === run.id) return;
     autoExpandedRunId.current = run.id;
     setExpanded(true);

@@ -103,11 +103,14 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
          repository and use normal tools such as `gh` yourself instead of spawning a worker.\n\n"
     ));
     out.push_str(
-        "- **Who this mode is addressed to: the workspace's MAIN agent.** It controls when the \
-         main agent may proactively delegate; it never forbids direct work the user explicitly \
-         requests. A Work Graph node Drogon dispatches is a depth-one worker; its own task prompt \
-         says so, and that prompt wins over this block. A worker implements its own task and \
-         dispatches nothing.\n",
+        "- **Who this mode is addressed to: the graph's MAIN agent.** The root/main node is \
+         the coordinator, not a depth-one worker. This policy controls when the main agent may \
+         proactively delegate; it never forbids direct work the user explicitly requests. A Bot \
+         that releases this graph only dispatches on the user's behalf and is outside the graph's \
+         depth budget; it must not implement or supervise the graph's work. Only the main agent's \
+         implementation, test, review, and correction children are depth-one workers. Their own \
+         task prompts win over this block; a worker implements its own task and dispatches \
+         nothing.\n",
     );
     if policy.adversarial.enabled {
         out.push_str(&format!(
@@ -374,12 +377,14 @@ mod tests {
         }] {
             let rendered = render_policy_section("ws-1", &policy);
             assert!(
-                rendered.contains("addressed to: the workspace's MAIN agent"),
+                rendered.contains("addressed to: the graph's MAIN agent")
+                    && rendered
+                        .contains("root/main node is the coordinator, not a depth-one worker")
+                    && rendered.contains("outside the graph's depth budget"),
                 "{rendered}"
             );
             assert!(
-                rendered
-                    .contains("its own task prompt says so, and that prompt wins over this block"),
+                rendered.contains("Their own task prompts win over this block"),
                 "{rendered}"
             );
         }

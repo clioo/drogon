@@ -465,12 +465,6 @@ function release() {
   if (direct) {
     const [, workspaceId, file] = direct;
     const scoped = { ...context, workspaceId };
-    // This session IS the main agent: fan out before handing the bounded
-    // whole-workflow pass to the daemon.
-    const fanout = orchestrate(scoped);
-    process.stdout.write(
-      `Main agent: ${fanout.workers.length} workers and ${fanout.testers.length} testers ran as parallel sessions (run ${fanout.runId}).\n`,
-    );
     const started = cliJson(scoped, [
       "graph",
       "orchestrator-start",
@@ -538,13 +532,6 @@ function release() {
   ]);
   if (!wrote) throw new Error("graph write-intent refused the released policy");
 
-  // This session IS the main agent here too: fan out to parallel workers in
-  // the released worktree before handing the bounded pass to the daemon.
-  const fanout = orchestrate(scoped);
-  process.stdout.write(
-    `Main agent: ${fanout.workers.length} workers and ${fanout.testers.length} testers ran as parallel sessions (run ${fanout.runId}).\n`,
-  );
-
   let task = context.mainNode?.prompt ?? "";
   try {
     task = `${readFileSync(path.join(created.path, context.specPath ?? "specs/dog-tinder.md"), "utf8")}\n\n${task}`;
@@ -594,7 +581,12 @@ try {
   }
 
   if (role === "main") {
-    // If the released session's workers already built the deck, this node is
+    if (prompt.includes("main agent of the dispatched Dog Tinder graph")) {
+      const fanout = orchestrate(context);
+      log(context, { at: new Date().toISOString(), event: "graph-main-fanout", role, runId, botDispatcher: false, workers: fanout.workers, testers: fanout.testers });
+      process.stdout.write(`Graph main agent: ${fanout.workers.length} workers and ${fanout.testers.length} testers settled.\n`);
+    }
+    // If the graph main's workers already built the deck, this node is
     // the director's final check, not a second implementation.
     const alreadyBuilt = existsSync(path.join(process.cwd(), "src", "deck.js"));
     if (!alreadyBuilt) applyStage(context, "agent-stage-1");

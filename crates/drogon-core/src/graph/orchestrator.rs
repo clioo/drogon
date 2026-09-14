@@ -993,18 +993,24 @@ fn node_for_step(run: &Run, candidate: &GraphRuntimeRef) -> GraphNodeIntent {
         }
         node.prompt.push_str(&format!(
             "\n\nDrogon run {}: immutable Subagent policy snapshot\n{}\n\
+             You are this graph's main agent, not a Bot dispatcher or a depth-one worker. \
+             A Bot may have dispatched the graph on the user's behalf; that dispatch does not \
+             consume your child-depth budget.\n\
              Before substantial planning or delegation, read `.drogon/graph.json` with \
              `drogon-cli graph read --workspace {} --json` and native evidence/usage with \
              `drogon-cli graph observability --workspace {} --json`. A simple read-only answer \
              or obvious repository command needs no worker: resolve the repository and use normal \
              tools such as `gh` directly. If delegation is useful, use Drogon's native \
-             `orchestration run-create`, `task-create`, and `worker-start` commands with explicit \
-             harness/model pairs from this snapshot. Try approved pairs in order; use fallback \
-             only after every approved runtime fails to execute. Findings are successful \
-             evaluations and do not trigger runtime failover. Maximum subagent depth is one: \
-             children must not delegate further. Workspace policy edits apply to future runs; do \
-             not substitute them for this snapshot. The daemon owns any enabled adversarial loop; \
-             do not launch duplicate whole-workflow test/review workers yourself.",
+             orchestration run-create, task-create and worker-start commands to create and \
+             supervise children (read `drogon-cli skills get --topic orchestration`). Use the \
+             approved runtime policy and explicit harness/model pairs from this snapshot, not \
+             harness-internal subagent tools, bare harness sessions, or native ungoverned spawns. \
+             Try approved pairs in their configured order; use fallback only after every approved \
+             runtime fails to execute. Findings are successful evaluations and do not trigger \
+             runtime failover. Maximum subagent depth is one: children must not delegate further. \
+             Workspace policy edits apply to future runs; do not substitute them for this snapshot. \
+             The daemon owns any enabled adversarial loop; do not launch duplicate whole-workflow \
+             test/review workers yourself.",
             run.id,
             serde_json::to_string(&run.policy).expect("policy serializes"),
             run.workspace_id,
@@ -1372,6 +1378,10 @@ mod tests {
         );
         assert!(node.provider.is_none());
         assert_eq!(node.model, "different-provider/model");
+        assert!(
+            node.prompt
+                .contains("Do not spawn subagents: maximum depth is 1")
+        );
         run.phase = "main".into();
         run.policy.delegate = true;
         let main = node_for_step(
@@ -1390,6 +1400,18 @@ mod tests {
         assert!(main.prompt.contains("`gh` commands"));
         assert!(main.prompt.contains("may make them yourself"));
         assert!(main.prompt.contains("immutable Subagent policy snapshot"));
+        assert!(
+            main.prompt
+                .contains("main agent, not a Bot dispatcher or a depth-one worker")
+        );
+        assert!(
+            main.prompt
+                .contains("does not consume your child-depth budget")
+        );
+        assert!(
+            main.prompt
+                .contains("orchestration run-create, task-create and worker-start")
+        );
         assert!(main.prompt.contains("children must not"));
         assert!(
             main.prompt
