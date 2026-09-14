@@ -59,15 +59,32 @@ impl Drop for PathGuard {
     }
 }
 
-fn wait_for_file(path: &Path) {
+/// Polls until the fixture's capture file holds its completion sentinel, not
+/// merely until the file exists: the stubs stream several lines through one
+/// redirected brace group (`{ ...; } > capture`), so the file is created
+/// before its first line is even written. Reading on existence alone can
+/// observe a strict prefix (CI run 34821790696 read exactly `ARGS`), which
+/// then fails the brief assertions below for no product reason. Writes to the
+/// one redirected fd are ordered, so the trailing sentinel implies every
+/// earlier line is present.
+fn wait_for_capture(path: &Path, sentinel: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        if path.is_file() {
+    loop {
+        if let Ok(text) = std::fs::read_to_string(path)
+            && text.contains(sentinel)
+        {
             return;
+        }
+        if Instant::now() >= deadline {
+            let partial =
+                std::fs::read_to_string(path).unwrap_or_else(|err| format!("<unreadable: {err}>"));
+            panic!(
+                "fixture did not complete {sentinel} in {} (partial: {partial:?})",
+                path.display()
+            );
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    panic!("fixture did not write {}", path.display());
 }
 
 fn shell_quote(path: &Path) -> String {
@@ -86,7 +103,7 @@ fn ordinary_harness_gets_drogon_context_on_its_first_turn_without_policy_files()
     write_executable(
         &bin.join("claude"),
         &format!(
-            "#!/bin/sh\n{{\n  for arg do printf '<%s>\\n' \"$arg\"; done\n}} > {}\nexit 0\n",
+            "#!/bin/sh\n{{\n  for arg do printf '<%s>\\n' \"$arg\"; done\n  echo CAPTURE_COMPLETE\n}} > {}\nexit 0\n",
             shell_quote(&capture)
         ),
     );
@@ -111,7 +128,7 @@ fn ordinary_harness_gets_drogon_context_on_its_first_turn_without_policy_files()
             "prompt": "delega un subagente que te diga hola"
         }),
     );
-    wait_for_file(&capture);
+    wait_for_capture(&capture, "CAPTURE_COMPLETE");
     let fixture = std::fs::read_to_string(&capture).unwrap();
     assert!(
         fixture.contains("=== DROGON RUNTIME CONTEXT ==="),
@@ -151,7 +168,7 @@ fn policy_worker_gets_structured_brief_and_exact_provider_model() {
     write_executable(
         &bin.join("pi"),
         &format!(
-            "#!/bin/sh\n{{\n  echo ARGS\n  for arg do printf '<%s>\\n' \"$arg\"; done\n  echo RUN=$DROGON_RUN_ID\n  echo TASK=$DROGON_TASK_ID\n  echo DISPATCH=$DROGON_DISPATCH_ID\n}} > {capture_literal}\nexit 0\n"
+            "#!/bin/sh\n{{\n  echo ARGS\n  for arg do printf '<%s>\\n' \"$arg\"; done\n  echo RUN=$DROGON_RUN_ID\n  echo TASK=$DROGON_TASK_ID\n  echo DISPATCH=$DROGON_DISPATCH_ID\n  echo CAPTURE_COMPLETE\n}} > {capture_literal}\nexit 0\n"
         ),
     );
     let worker_cli = bin.join("drogon-cli-fixture");
@@ -242,7 +259,7 @@ fn policy_worker_gets_structured_brief_and_exact_provider_model() {
             .unwrap()
             .to_string();
 
-        wait_for_file(&capture);
+        wait_for_capture(&capture, "CAPTURE_COMPLETE");
         let fixture = std::fs::read_to_string(&capture).unwrap();
         assert!(fixture.contains("=== DROGON WORKER BRIEF ==="), "{fixture}");
         assert!(
