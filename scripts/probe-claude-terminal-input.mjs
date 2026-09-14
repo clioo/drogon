@@ -4,10 +4,25 @@ import { mkdir, writeFile, realpath, access } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
 
+// Null on hosts without the maintainer's Claude TUI (a clean Mac): the
+// keyboard probe drives the genuine binary, which a shell stub can never
+// stand in for, so callers must skip that journey explicitly instead.
+// `run` is injectable for tests; the default shells out to /usr/bin/which.
+export async function findClaudeBinary(run = runAcceptanceProcess) {
+  try {
+    const found = (await run("/usr/bin/which", ["claude"], { timeout: 10000 })).stdout.trim();
+    if (!found) return null;
+    return await realpath(found);
+  } catch {
+    return null;
+  }
+}
+
 export async function seedPrivateClaudeKeyboard({ home, fixtureBin, workspace, baseUrl }) {
   assert.equal(process.platform, "darwin", "Claude keyboard probe requires its per-process network sandbox");
   await access("/usr/bin/sandbox-exec");
-  const binary = await realpath((await runAcceptanceProcess("/usr/bin/which", ["claude"], { timeout: 10000 })).stdout.trim());
+  const binary = await findClaudeBinary();
+  assert.ok(binary, "seedPrivateClaudeKeyboard needs the real `claude` binary on PATH");
   const config = path.join(home, ".claude");
   await mkdir(config, { recursive: true });
   await writeFile(path.join(config, "settings.json"), JSON.stringify({
