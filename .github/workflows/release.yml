@@ -114,6 +114,20 @@ jobs:
           set -euo pipefail
           node scripts/verify-release-artifact.mjs --tag "$GITHUB_REF_NAME" --live --skip-tap
 
+      # The published bundle is what a fresh Mac installs: download it back,
+      # verify its checksum, quarantine it like Homebrew delivery, and run the
+      # clean-machine subset of packaged acceptance against it. Nothing beyond
+      # Node and this repo is required (no Claude TUI, no Homebrew packages):
+      # environment-gated journeys skip explicitly, and a skipped-only run
+      # fails instead of passing. A stillborn bundle fails this job visibly
+      # here, before the tap bump below runs for it.
+      - name: Validate the published artifact end to end
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          DROGON_BACKGROUND_WINDOW=1 node scripts/accept-release-artifact.mjs --tag "$GITHUB_REF_NAME"
+
       # The release is not done until the tap serves it: push the cask bump
       # directly to the tap's default branch once the artifact above is
       # verified. A direct push (rather than a bot PR nobody may merge — the
