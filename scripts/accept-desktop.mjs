@@ -34,6 +34,7 @@ import { probeEditorKeyboardInput } from "./probe-editor-keyboard-input.mjs";
 import { probeRenderedTabs } from "./probe-rendered-tabs.mjs";
 import { probeRenderedMentuTab } from "./probe-rendered-mentu-tab.mjs";
 import { probeOrchestrator } from "./probe-orchestrator.mjs";
+import { stageVerifiedRuntime } from "./mentu-runtime-provision.mjs";
 import { probeRenderedDaemonRestart } from "./probe-rendered-daemon-restart.mjs";
 import { probeRenderedChangedDaemonBinary } from "./probe-rendered-changed-daemon-binary.mjs";
 import {
@@ -118,6 +119,13 @@ let fixtureDaemon = packaged
   : null;
 const workspace = path.join(fixture, "folder");
 await mkdir(workspace);
+// The Work Graph journey drives the durable orchestrator, which needs the
+// pinned recipe runtime. Mentu is optional and no longer bundled (#533), so
+// this acceptance provisions it into its OWN data directory exactly as a user
+// would from Settings — a verified copy, checked against the lock, never the
+// caller's installed Drogon. Without one the journey cannot be validated, and
+// the failure says so instead of looking like a product regression.
+const acceptanceRuntime = await stageVerifiedRuntime(dataDir, root);
 // R16-BB: the sealed journeys run every in-app agent launch against the
 // sealed, loopback, test-owned model fixture (scripts/sealed-model-
 // fixture.mjs) -- never a real network endpoint (Pi resolves its config
@@ -986,6 +994,9 @@ try {
     // tabs persist per workspace and come back in order after a reload.
     report.checks.push(
       ...(await probeRenderedTabs({ page, workspace, output })),
+    );
+    report.checks.push(
+      `work-graph-runtime-staged-${acceptanceRuntime.revision.slice(0, 12)}`,
     );
     // The orchestrator probe runs FIRST: it needs a workspace with NO
     // .drogon/graph.json (the honest initial state and the configure-and-run

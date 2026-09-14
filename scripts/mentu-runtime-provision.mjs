@@ -91,6 +91,54 @@ export function provisionMentuRuntime(sourcePath, projectRoot = repoRoot) {
   return { status: "provisioned", path: destination, sha256 };
 }
 
+/**
+ * Stages a VERIFIED pinned runtime into a data directory's own layout
+ * (`<data-dir>/mentu/runtime/bin/mentu-recipes`), which is where the product
+ * looks for it. Mentu is optional and no longer bundled (#533), so anything
+ * that exercises the Work Graph — the packaged acceptance, the reproducible
+ * demo — has to supply it the same way a user would from Settings.
+ *
+ * Sources are tried in order and each is checked against the lock before it is
+ * copied; an unverified or absent copy is never used, and nothing here writes
+ * into the caller's own installed Drogon.
+ */
+export async function stageVerifiedRuntime(dataDir, projectRoot = repoRoot) {
+  const { copyFile, chmod, mkdir, readFile } = await import("node:fs/promises");
+  const candidates = [
+    process.env.DROGON_MENTU_RUNTIME,
+    bundledRuntimeDestination(projectRoot),
+    join(process.env.HOME ?? "", "Library/Application Support/Drogon/mentu/runtime/bin/mentu-recipes"),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    let bytes;
+    try {
+      bytes = await readFile(candidate);
+    } catch {
+      continue;
+    }
+    if (createHash("sha256").update(bytes).digest("hex") !== MENTU_LOCK_SHA256) continue;
+    const destination = join(dataDir, "mentu", "runtime", "bin", "mentu-recipes");
+    await mkdir(dirname(destination), { recursive: true });
+    await copyFile(candidate, destination);
+    await chmod(destination, 0o755);
+    return {
+      path: destination,
+      source: candidate,
+      revision: MENTU_LOCK_REVISION,
+      sha256: MENTU_LOCK_SHA256,
+    };
+  }
+
+  throw new Error(
+    "the pinned mentu-recipes runtime is not on this host, so the Work Graph cannot run. " +
+      "Install it from Drogon → Settings (Apple silicon macOS), run " +
+      `${PINNED_RUNTIME_HINT}, or point DROGON_MENTU_RUNTIME at a verified copy.`,
+  );
+}
+
+const PINNED_RUNTIME_HINT = "node scripts/mentu-runtime-provision.mjs --official";
+
 export const MENTU_RELEASE_URL =
   `https://github.com/mentu-ai/mentu-recipes/releases/download/v${MENTU_LOCK_VERSION}/mentu-recipes-macos-arm64`;
 const LICENSE_URL =

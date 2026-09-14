@@ -31,7 +31,7 @@ import {
 } from "./acceptance-process.mjs";
 import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
 import { HARNESS_CATALOG, harnessById, writeHarnessFixtures } from "./reproduce-harness-fixture.mjs";
-import { MENTU_LOCK_REVISION, MENTU_LOCK_SHA256 } from "./mentu-runtime-provision.mjs";
+import { stageVerifiedRuntime } from "./mentu-runtime-provision.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const scenarioRoot = path.join(root, "scripts/scenarios");
@@ -535,33 +535,7 @@ async function ensureCore() {
  *  writing into the developer's installed Drogon: whatever verified copy the
  *  host already has is copied into this run's own data directory. */
 export async function resolveRuntime(dataDir) {
-  const candidates = [
-    process.env.DROGON_MENTU_RUNTIME,
-    path.join(root, "apps/desktop/resources/mentu-runtime", MENTU_LOCK_REVISION, "bin/mentu-recipes"),
-    path.join(process.env.HOME ?? "", "Library/Application Support/Drogon/mentu/runtime/bin/mentu-recipes"),
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    let bytes;
-    try {
-      bytes = await readFile(candidate);
-    } catch {
-      continue;
-    }
-    const { createHash } = await import("node:crypto");
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
-    if (sha256 !== MENTU_LOCK_SHA256) continue;
-    const destination = path.join(dataDir, "mentu/runtime/bin/mentu-recipes");
-    await mkdir(path.dirname(destination), { recursive: true });
-    await copyFile(candidate, destination);
-    await chmod(destination, 0o755);
-    return { path: destination, source: candidate, revision: MENTU_LOCK_REVISION, sha256 };
-  }
-
-  throw new Error(
-    "the pinned mentu-recipes runtime is not on this host, so the durable orchestrator cannot run. " +
-      "Install it from Drogon → Settings (Apple silicon macOS), or point DROGON_MENTU_RUNTIME at a verified copy.",
-  );
+  return stageVerifiedRuntime(dataDir, root);
 }
 
 async function seedRepository(repo, scenario) {
