@@ -19,7 +19,12 @@ jobs:
       matrix:
         os: [ubuntu-22.04, macos-14]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # macOS now packages a real signed bundle and launches it (the entitlements
+    # regression from #556) plus installs the icon browser, which pushed this job
+    # from ~15 to ~24 minutes: main's run for 9f50ad7d was cancelled at 25:19
+    # while #560's identical job finished in 23:31. The limit is the flake, not
+    # the suite, so give macOS headroom instead of trimming coverage.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
