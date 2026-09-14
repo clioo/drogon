@@ -101,18 +101,36 @@ jobs:
           if [[ "$version" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" "${flags[@]}" "$archive" "$checksum"
 
-      # A fine-grained HOMEBREW_TAP_TOKEN is optional for local/release
-      # bootstrap, but when configured this step opens the cask PR directly.
-      # The tap's updater owns the cask formatting and signing caveat, so no
-      # maintainer needs to hand-edit the version or checksum.
-      - name: Open Homebrew tap bump PR
+      # The published artifact is proven before the tap serves it: this checks
+      # the download URLs only (digest, Developer ID signature, notarization,
+      # build-info, bundled binaries), not the tap. It must stay green or the
+      # tap step below never runs, so the job cannot publish an artifact it
+      # could not verify. A failure here leaves the GitHub release up but the
+      # tap untouched: fix forward, never hand-edit the tap to match.
+      - name: Verify the published release artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-release-artifact.mjs --tag "$GITHUB_REF_NAME" --live --skip-tap
+
+      # The release is not done until the tap serves it: push the cask bump
+      # directly to the tap's default branch once the artifact above is
+      # verified. A direct push (rather than a bot PR nobody may merge — the
+      # rc.3 drift) keeps the whole publish inside this job; the bump content
+      # is fully derived from the verified release, so there is nothing to
+      # review. A fine-grained HOMEBREW_TAP_TOKEN needs only contents:write
+      # on the tap repo, not pull-request permission. A missing token fails
+      # loudly: a green release with a stale tap is the drift this prevents.
+      # The tap stays human-overridable afterwards (a revert is one commit).
+      - name: Publish the cask bump to the Homebrew tap
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "HOMEBREW_TAP_TOKEN is not configured; skipping the optional tap PR."
-            exit 0
+            echo "HOMEBREW_TAP_TOKEN is not configured; cannot land the tap bump for ${GITHUB_REF_NAME}." >&2
+            exit 1
           fi
           version="${GITHUB_REF_NAME#v}"
           archive="$RUNNER_TEMP/drogon-release/Drogon-${version}-darwin-arm64.zip"
@@ -123,27 +141,48 @@ jobs:
           gh auth setup-git
           gh repo clone clioo/homebrew-drogon "$tap"
           cd "$tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           ruby scripts/update-cask.rb "$version" "$digest" "$signed"
           if git diff --quiet -- Casks/drogon.rb; then
             echo "The tap already carries Drogon ${version}."
             exit 0
           fi
-          branch="automation/drogon-${version}"
-          if [[ "$(gh pr list --repo clioo/homebrew-drogon --head "$branch" --state open --json number --jq 'length')" != "0" ]]; then
-            echo "An update PR for ${version} is already open."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$branch"
           git add Casks/drogon.rb
           git commit -m "chore: update Drogon to ${version}"
-          git push --set-upstream origin "$branch"
-          gh pr create --repo clioo/homebrew-drogon \
-            --base main \
-            --head "$branch" \
-            --title "chore: update Drogon to ${version}" \
-            --body "Automated update from the Drogon GitHub pre-release. The version, archive checksum, and signing caveat come from the published release metadata."
+          # No rebase-then-force: if the tap moved under us (a human revert or
+          # another release), the push is rejected and the job fails loudly
+          # instead of clobbering the tap.
+          git push origin HEAD:main
+          # Retire same-version bump PRs left by the old PR flow, if any.
+          for pr in $(gh pr list --repo clioo/homebrew-drogon --head "automation/drogon-${version}" --state open --json number --jq '.[].number'); do
+            gh pr close "$pr" --repo clioo/homebrew-drogon \
+              --comment "Superseded: the verified cask bump for ${version} landed directly on main."
+          done
+          git push origin --delete "automation/drogon-${version}" || true
+
+      # Prove the end state: the tap serves the verified artifact. The CDN
+      # behind the raw cask URL can lag the push, so wait for the version
+      # first and run the full verification (including the tap agreement)
+      # exactly once afterwards.
+      - name: Prove the tap serves the verified artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          cask_url="https://raw.githubusercontent.com/clioo/homebrew-drogon/main/Casks/drogon.rb"
+          for attempt in $(seq 1 12); do
+            if curl -fsSL "$cask_url" | grep -q "version \"${version}\""; then
+              break
+            fi
+            if [[ "$attempt" == "12" ]]; then
+              echo "The tap still does not carry Drogon ${version} after the bump push." >&2
+              exit 1
+            fi
+            sleep 20
+          done
+          node scripts/verify-release-artifact.mjs --tag "$GITHUB_REF_NAME" --live
 
       - name: Remove temporary Apple signing material
         if: ${{ always() }}
