@@ -94,10 +94,22 @@ it("shows a bot-dispatched headless workflow on an unselected card with no termi
     </TooltipProvider>,
   );
   const summary = await screen.findByText("Work Graph · Running");
-  fireEvent.click(summary);
-  expect(screen.getByText("Main agent · running")).toBeTruthy();
+  await waitFor(() =>
+    expect(summary.closest("button")?.getAttribute("aria-expanded")).toBe(
+      "true",
+    ),
+  );
+  const details = screen.getByText("Main agent · running").parentElement
+    ?.parentElement;
+  expect(details?.classList.contains("hidden")).toBe(false);
   expect(screen.getByText("pi · fixture")).toBeTruthy();
   expect(screen.getByText("Background workflow · no terminal")).toBeTruthy();
+  // The automatic reveal happens once. The owner can still collapse it and
+  // polling the same run must not override that choice.
+  fireEvent.click(summary);
+  expect(summary.closest("button")?.getAttribute("aria-expanded")).toBe(
+    "false",
+  );
   expect(
     view.container.querySelectorAll("[data-worktree-agent-row]"),
   ).toHaveLength(0);

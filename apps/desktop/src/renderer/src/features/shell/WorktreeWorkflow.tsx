@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChevronRight, GitFork } from "lucide-react";
 import type {
   GraphBridge,
@@ -32,6 +32,19 @@ export function WorktreeWorkflow({
   const { run, error } = useOrchestratorRun(bridge, workspaceId, 3000, 10_000);
   const labelId = useId();
   const [expanded, setExpanded] = useState(false);
+  const autoExpandedRunId = useRef<string | null>(null);
+  const active =
+    run !== null &&
+    ["running", "stopping", "unverifiable"].includes(run.status);
+  useEffect(() => {
+    // A headless role has no terminal row of its own. Open each newly
+    // observed active workflow once so its Main agent and chosen harness are
+    // visible immediately beside the real worker sessions. After that, a
+    // user's collapse wins across polling updates.
+    if (!run || !active || autoExpandedRunId.current === run.id) return;
+    autoExpandedRunId.current = run.id;
+    setExpanded(true);
+  }, [active, run]);
   if (!run || run.workspaceId !== workspaceId) return null;
   const status = error ? "Unverifiable" : statuses[run.status];
   return (
