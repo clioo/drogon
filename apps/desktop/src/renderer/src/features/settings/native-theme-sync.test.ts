@@ -190,6 +190,77 @@ describe("startNativeThemeSync", () => {
     env.stop();
   });
 
+  // The rc.5 release gate read stored=dark + radio=dark + class=light: the
+  // previous selection's delayed adopt fired past the new report but before
+  // its debounced flush, stamped the stale persisted value over the live
+  // choice, and un-applied the new theme for seconds. A newer live choice
+  // must invalidate older adopt batches.
+  test("a previous choice's delayed adopt cannot stamp over a newer live choice", async () => {
+    vi.useFakeTimers();
+    try {
+      let persisted: "system" | "dark" | "light" = "light";
+      const made = fakeBridge({ shouldUseDarkColors: false, themeSource: "system" });
+      const env = sync({ bridge: made.bridge, getTheme: () => persisted });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(env.classes.has("dark")).toBe(false);
+      reportThemeChoice("dark");
+      expect(env.classes.has("dark")).toBe(true);
+      // The store has not flushed yet (persisted is still "light") while
+      // every pending adopt batch — the boot batch and this report's own —
+      // fires. None may un-apply the live dark choice.
+      await vi.advanceTimersByTimeAsync(5_300);
+      expect(env.classes.has("dark")).toBe(true);
+      persisted = "dark";
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(env.classes.has("dark")).toBe(true);
+      env.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("an adopt inside the flush window defers instead of stamping pre-flush truth", async () => {
+    vi.useFakeTimers();
+    try {
+      let persisted: "system" | "dark" | "light" = "light";
+      const made = fakeBridge({ shouldUseDarkColors: false, themeSource: "system" });
+      const env = sync({ bridge: made.bridge, getTheme: () => persisted });
+      await vi.advanceTimersByTimeAsync(100);
+      reportThemeChoice("dark");
+      // A saturated host delays the store flush past this report's own
+      // 1.3s adopt: the persisted read still says "light" and must wait
+      // for its bounded re-check, not clobber the live choice.
+      await vi.advanceTimersByTimeAsync(1_300);
+      expect(env.classes.has("dark")).toBe(true);
+      persisted = "dark";
+      await vi.advanceTimersByTimeAsync(6_500);
+      expect(env.classes.has("dark")).toBe(true);
+      env.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Behavior preservation: a write that bypassed the section (e.g. the
+  // status-bar theme cycle) never reports, so the delayed adopt past the
+  // flush bound is the only path that converges on it.
+  test("a section-bypassing write older than the flush bound is still adopted", async () => {
+    vi.useFakeTimers();
+    try {
+      let persisted: "system" | "dark" | "light" = "light";
+      const made = fakeBridge({ shouldUseDarkColors: false, themeSource: "system" });
+      const env = sync({ bridge: made.bridge, getTheme: () => persisted });
+      await vi.advanceTimersByTimeAsync(100);
+      reportThemeChoice("light");
+      persisted = "dark";
+      await vi.advanceTimersByTimeAsync(8_000);
+      expect(env.classes.has("dark")).toBe(true);
+      env.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("dispose stops applications from later events", async () => {
     const made = fakeBridge({ shouldUseDarkColors: false, themeSource: "system" });
     const env = sync({ bridge: made.bridge });
