@@ -85,6 +85,40 @@ async function sha256File(file) {
   return hash.digest("hex");
 }
 
+// An AppleDouble sidecar name: any path segment starting with ._
+export function appleDoubleEntries(names) {
+  return names.filter((name) => /(^|\/)\._/.test(name));
+}
+
+export async function archiveEntryNames(archive) {
+  const listing = await runAcceptanceProcess(
+    "/usr/bin/unzip",
+    ["-Z1", archive],
+    { timeout: 60000 },
+  );
+  return listing.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+// Fail closed when the archive cannot survive a plain-unzip extraction:
+// every AppleDouble entry becomes a real file inside the bundle and breaks
+// the code seal ("file added ..."), which is what Homebrew's cask unpacking
+// does. Callers must not publish an archive that fails this gate.
+export async function assertNoAppleDoubleEntries(archive) {
+  const names = await archiveEntryNames(archive);
+  const sidecars = appleDoubleEntries(names);
+  assert.equal(
+    sidecars.length,
+    0,
+    `Release archive carries ${sidecars.length} AppleDouble entries ` +
+      `(e.g. ${sidecars.slice(0, 3).join(", ")}): plain-unzip extraction ` +
+      "would leave them inside the bundle and break the seal",
+  );
+  return names.length;
+}
+
 export async function zipBundle(bundle, archive) {
   assert.equal(
     process.platform,
@@ -94,12 +128,21 @@ export async function zipBundle(bundle, archive) {
   await mkdir(path.dirname(archive), { recursive: true });
   await rm(archive, { force: true });
   // ditto is intentional: unlike a generic zip implementation it preserves
-  // the app bundle's resource forks, symlinks and parent directory shape.
+  // the app bundle's symlinks and parent directory shape. --norsrc drops the
+  // Mac metadata (xattrs, resource forks) ditto would otherwise store as
+  // AppleDouble `._*` sidecars: Homebrew unpacks with plain `unzip`, which
+  // leaves those sidecars inside the bundle as real files and breaks the
+  // seal. The signature lives in the Mach-O load commands and _CodeSignature,
+  // not in xattrs, so nothing sealed is lost — and the bundle itself is never
+  // mutated, which also keeps the stapled ticket and sealed digests intact.
+  // (Stripping the bundle with xattr -cr is not enough: SIP-pinned
+  // com.apple.provenance survives it with a zero exit status.)
   await runAcceptanceProcess(
     "/usr/bin/ditto",
-    ["-c", "-k", "--keepParent", bundle, archive],
+    ["-c", "-k", "--keepParent", "--norsrc", bundle, archive],
     { timeout: 120000 },
   );
+  await assertNoAppleDoubleEntries(archive);
   return archive;
 }
 

@@ -89,6 +89,33 @@ jobs:
           node scripts/release-desktop.mjs --tag "$GITHUB_REF_NAME" --output "$RUNNER_TEMP/drogon-release" --skip-acceptance
           printf 'Release version: %s\n' "$version"
 
+      # Homebrew unpacks cask zips with plain `unzip`, not ditto: prove the
+      # sealed bundle survives exactly that before the archive is published.
+      # zipBundle already fails closed on AppleDouble entries at creation
+      # time; this re-proves the sealed bytes end to end (seal, Gatekeeper,
+      # staple) on a Homebrew-style extraction, so an archive that cannot
+      # survive unzip never reaches the tap.
+      - name: Prove the archive survives Homebrew-style unzip extraction
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          archive="$RUNNER_TEMP/drogon-release/Drogon-${version}-darwin-arm64.zip"
+          if unzip -Z1 "$archive" | grep -E '(^|/)\._'; then
+            echo "Archive carries AppleDouble entries: plain-unzip extraction would break the seal." >&2
+            exit 1
+          fi
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          /usr/bin/unzip -q "$archive" -d "$work"
+          /usr/bin/codesign --verify --deep --strict "$work/Drogon.app"
+          signed="$(unzip -p "$archive" 'Drogon.app/Contents/Resources/build-info.json' | jq -er '.signed // "false"')"
+          if [[ "$signed" == "developer-id-notarized" ]]; then
+            /usr/sbin/spctl -a -t exec -vv "$work/Drogon.app"
+            /usr/bin/xcrun stapler validate "$work/Drogon.app"
+          else
+            echo "Ad-hoc release (${signed}): skipping spctl/stapler acceptance."
+          fi
+
       - name: Publish the GitHub pre-release (stable tags remain stable)
         env:
           GH_TOKEN: ${{ github.token }}
