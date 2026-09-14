@@ -26,6 +26,13 @@ try {
   const demoBox=await page.locator('.hero-video-frame').boundingBox();
   assert.ok(demoBox&&Math.abs(demoBox.width/demoBox.height-16/9)<0.02,'hero video keeps a 16:9 ratio');
   if(process.env.DROGON_WEBSITE_SCREENSHOTS)await page.locator('.hero').screenshot({path:join(process.env.DROGON_WEBSITE_SCREENSHOTS,'drogon-hero-video.png'),animations:'disabled'});
+  await page.locator('#install').scrollIntoViewIfNeeded();
+  assert.match(await page.locator('#release-version').innerText(),/^v\d+\.\d+\.\d+/);
+  assert.match(await page.locator('#install .button').getAttribute('href'),/\/releases\/tag\/v\d+\.\d+\.\d+/);
+  assert.match(await page.locator('#install-command').innerText(),/brew tap clioo\/drogon && brew install --cask clioo\/drogon\/drogon/);
+  await page.click('#copy-command');
+  await page.waitForFunction(()=>document.getElementById('copy-status').textContent.length>0);
+  assert.match(await page.locator('#copy-status').innerText(),/copied|manually/);
   await page.locator('#workspace').scrollIntoViewIfNeeded();
   await page.clock.install();
   assert.equal(await page.locator('[data-node] .harness-badge').count(),5);
