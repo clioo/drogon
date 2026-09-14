@@ -1387,6 +1387,9 @@ fn spawn_git_and_capture(
 fn require_success<'a>(outcome: &'a SpawnOutcome, argv: &[String]) -> Result<&'a str, RpcError> {
     match outcome {
         SpawnOutcome::Exited { status, stdout, .. } if status.success() => Ok(stdout.as_str()),
+        SpawnOutcome::Exited { status, stderr, .. } if is_missing_git_tool(stderr) => {
+            Err(git_unavailable())
+        }
         SpawnOutcome::Exited { status, stderr, .. } => Err(error::io_error(format!(
             "git {} exited with {}: {}",
             argv.join(" "),
@@ -1628,6 +1631,9 @@ fn require_mutation_success(
             stdout: stdout.clone(),
             stderr: stderr.clone(),
         }),
+        SpawnOutcome::Exited {
+            status: _, stderr, ..
+        } if program == "git" && is_missing_git_tool(stderr) => Err(git_unavailable()),
         SpawnOutcome::Exited { status, stderr, .. } => Err(error::io_error(format!(
             "{program} {} exited with {}: {}",
             argv.join(" "),
@@ -2009,6 +2015,28 @@ fn gh_unavailable(message: String) -> RpcError {
     RpcError::new("gh_unavailable", message)
 }
 
+/// Narrow predicate for "git itself cannot run on this host": macOS without
+/// the command line tools resolves `/usr/bin/git` to the CLT stub, which
+/// exits non-zero asking for an install instead of running. Kept narrow so
+/// a real repo error (not a repo, no remotes, network down) stays
+/// `io_error`, never a misleading "install the tools" hint.
+pub(crate) fn is_missing_git_tool(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    ["no developer tools were found", "xcode-select: note"]
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+/// Typed error for `is_missing_git_tool`: names the missing piece and the
+/// fix. Carries no argv or exit-status wrapper so UI sanitizers pass it
+/// through verbatim.
+pub(crate) fn git_unavailable() -> RpcError {
+    RpcError::new(
+        "git_unavailable",
+        "Git developer tools are not installed on this host: install them with `xcode-select --install`, then retry.",
+    )
+}
+
 /// First `https?://` line of `gh pr create` output, if any.
 pub(crate) fn extract_pr_url(stdout: &str) -> Option<String> {
     stdout
@@ -2144,5 +2172,69 @@ mod numstat_tests {
         assert!(parse_numstat_z("x\ty\tfile.txt\0").is_err());
         assert!(parse_numstat_z("3\t1\tfile.txt\textra\0").is_err());
         assert!(parse_numstat_z("3\t1\t\0").is_err());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod missing_git_tool_tests {
+    use super::{GitCommandOutput, SpawnOutcome};
+    use super::{git_unavailable, is_missing_git_tool, require_mutation_success, require_success};
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::ExitStatus;
+
+    const CLT_STUB: &str = "xcode-select: note: No developer tools were found on this system, requesting installation.";
+
+    fn exited(code: u32, stdout: &str, stderr: &str) -> SpawnOutcome {
+        SpawnOutcome::Exited {
+            status: ExitStatus::from_raw((code << 8) as i32),
+            stdout: stdout.to_string(),
+            stderr: stderr.to_string(),
+        }
+    }
+
+    #[test]
+    fn classifier_matches_the_clt_stub_only() {
+        assert!(is_missing_git_tool(CLT_STUB));
+        assert!(is_missing_git_tool(
+            "XCODE-SELECT: NOTE: no developer tools were found"
+        ));
+        assert!(!is_missing_git_tool("fatal: not a git repository"));
+        assert!(!is_missing_git_tool("error: pathspec 'x' did not match"));
+        assert!(!is_missing_git_tool(""));
+    }
+
+    #[test]
+    fn read_path_maps_stub_stderr_to_git_unavailable() {
+        let err = require_success(&exited(1, "", CLT_STUB), &["status".to_string()])
+            .expect_err("CLT stub failure must not be io_error");
+        assert_eq!(err.code, "git_unavailable");
+        assert_eq!(err, git_unavailable());
+    }
+
+    #[test]
+    fn read_path_keeps_real_repo_errors_as_io_error() {
+        let err = require_success(
+            &exited(128, "", "fatal: not a git repository"),
+            &["status".to_string()],
+        )
+        .expect_err("real git failure must fail");
+        assert_eq!(err.code, "io_error");
+    }
+
+    #[test]
+    fn mutation_path_maps_stub_stderr_for_git_only() {
+        let argv = ["worktree".to_string(), "add".to_string()];
+        let err = require_mutation_success(&exited(1, "", CLT_STUB), "git", &argv)
+            .expect_err("CLT stub failure must not be io_error");
+        assert_eq!(err.code, "git_unavailable");
+        let gh_err = require_mutation_success(&exited(1, "", CLT_STUB), "gh", &argv)
+            .expect_err("gh failures keep their own mapping");
+        assert_eq!(gh_err.code, "io_error");
+        let real: Result<GitCommandOutput, _> =
+            require_mutation_success(&exited(1, "", "fatal: no such branch"), "git", &argv);
+        assert_eq!(
+            real.expect_err("real git failure must fail").code,
+            "io_error"
+        );
     }
 }

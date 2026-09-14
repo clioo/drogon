@@ -44,6 +44,9 @@ fn run_git(cwd: &Path, argv: &[String]) -> Result<String, RpcError> {
     let outcome = git_process::spawn_and_capture_bounded(cmd, &budget())?;
     match outcome {
         SpawnOutcome::Exited { status, stdout, .. } if status.success() => Ok(stdout),
+        SpawnOutcome::Exited {
+            status: _, stderr, ..
+        } if git_process::is_missing_git_tool(&stderr) => Err(git_process::git_unavailable()),
         SpawnOutcome::Exited { status, stderr, .. } => Err(error::io_error(format!(
             "git {} exited with {status}: {}",
             argv.join(" "),

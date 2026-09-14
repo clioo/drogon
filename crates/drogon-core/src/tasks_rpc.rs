@@ -82,6 +82,11 @@ fn map_spawn_outcome(
 ) -> Result<String, RpcError> {
     match outcome {
         SpawnOutcome::Exited { status, stdout, .. } if status.success() => Ok(stdout),
+        SpawnOutcome::Exited {
+            status: _, stderr, ..
+        } if program == "git" && git_process::is_missing_git_tool(&stderr) => {
+            Err(git_process::git_unavailable())
+        }
         SpawnOutcome::Exited { status, stderr, .. } => Err(error::io_error(format!(
             "{program} {} exited with {status}: {}",
             argv.join(" "),
@@ -1372,6 +1377,41 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn stub_git_outcome(stderr: &str) -> SpawnOutcome {
+        use std::os::unix::process::ExitStatusExt;
+        SpawnOutcome::Exited {
+            status: std::process::ExitStatus::from_raw(1 << 8),
+            stdout: String::new(),
+            stderr: stderr.to_string(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clt_stub_git_maps_to_git_unavailable_not_io_error() {
+        let argv = vec!["config".to_string(), "--get".to_string()];
+        let err = map_spawn_outcome(
+            "git",
+            &argv,
+            stub_git_outcome("xcode-select: note: No developer tools were found on this system, requesting installation."),
+        )
+        .expect_err("CLT stub failure must not be io_error");
+        assert_eq!(err.code, "git_unavailable");
+        // The shared gh path keeps its own mapping: stub-shaped gh stderr
+        // is a repo/network failure there, never "install the git tools".
+        let gh_err = map_spawn_outcome("gh", &argv, stub_git_outcome("xcode-select: note: nope"))
+            .expect_err("gh failures keep the shared mapping");
+        assert_eq!(gh_err.code, "io_error");
+        let real = map_spawn_outcome(
+            "git",
+            &argv,
+            stub_git_outcome("fatal: not a git repository"),
+        )
+        .expect_err("real git failure must fail");
+        assert_eq!(real.code, "io_error");
+    }
 
     #[test]
     fn parses_https_ssh_and_scp_github_origins() {

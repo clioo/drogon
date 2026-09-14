@@ -320,3 +320,35 @@ fn gh_reports_url_or_typed_unavailable_without_touching_path() {
             .expect_err("non-auth gh failure must fail");
     assert_eq!(err.code, "io_error");
 }
+
+#[test]
+fn clt_stub_git_reports_git_unavailable_through_the_public_read_path() {
+    use drogon_core::git::{CapabilityCache, HostScope};
+    use drogon_core::git_process::{GitProbeBudget, ReadOnlyGitOperation};
+    use std::time::Duration;
+
+    let fx = Fixture::new();
+    let stub = write_executable(
+        fx._root.path(),
+        "git-clt-stub",
+        "#!/bin/sh\necho 'xcode-select: note: No developer tools were found on this system, requesting installation.' >&2\nexit 1\n",
+    );
+    let err = git_process::run_read_only_git_with_bin(
+        ReadOnlyGitOperation::Status,
+        &fx.repo,
+        &HostScope::native(),
+        &CapabilityCache::new(),
+        GitProbeBudget {
+            timeout: Duration::from_secs(10),
+            max_combined_output_bytes: 64 * 1024,
+        },
+        &stub,
+    )
+    .expect_err("CLT stub git must fail typed, never io_error");
+    assert_eq!(err.code, "git_unavailable");
+    assert!(
+        err.message.contains("xcode-select --install"),
+        "unexpected message: {}",
+        err.message
+    );
+}
