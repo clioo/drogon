@@ -338,9 +338,14 @@ The public cask installs the arm64 desktop, its bundled daemon, and `drogon-cli`
 
 ```sh
 brew tap clioo/drogon
+brew trust --tap clioo/drogon
 brew install --cask clioo/drogon/drogon
 DROGON_DATA_DIR=/tmp/drogon-dev drogon-cli --version
 ```
+
+The trust step is required once on a fresh machine: Homebrew refuses
+third-party casks from untrusted taps. It is stored per user in
+`~/.homebrew/trust.json`, so it never repeats.
 
 To move an older cask forward:
 
@@ -350,6 +355,16 @@ brew upgrade --cask clioo/drogon/drogon
 brew info --cask clioo/drogon/drogon   # installed version vs tap version
 drogon-cli --version                   # must match the installed cask
 ```
+
+> **Ad-hoc builds and Gatekeeper.** On ad-hoc-signed casks (versions older
+> than v0.1.0-rc.3), a fresh install stays quarantined until you approve it —
+> open Drogon.app once (right-click → Open) or allow it in System Settings →
+> Privacy & Security, as the cask caveats describe. Until the quarantine is
+> cleared, `drogon-cli` stalls with no output at all and `brew uninstall`
+> stalls instead of finishing: that is Gatekeeper holding the quarantined
+> files, not a broken install. The clean-room audit
+> (`scripts/e2e-brew-install.mjs`) asserts the install-to-launch flow for
+> every cask that does not advertise ad-hoc.
 
 Drogon currently publishes Apple Silicon releases only (Intel is not built). The
 cask declares macOS Sonoma or newer: Electron 44 itself requires macOS Ventura
@@ -362,9 +377,10 @@ a Homebrew-managed data directory after a downgrade refusal, use
 > on first launch, right-click `Drogon.app` and choose **Open** (or allow it in
 > System Settings → Privacy & Security → **Open Anyway**). v0.1.0-rc.3 was
 > Developer ID signed and notarized but aborts on launch (it fails reserving
-> V8 memory), so the tap stays on rc.2 until the signing fix ships in the next
-> release; new casks from that release on are Developer ID signed and notarized
-> and launch without Gatekeeper prompts.
+> V8 memory). v0.1.0-rc.4 is Developer ID signed but its seal currently fails
+> verification (`spctl -a -vv` reports a sealed resource missing or invalid
+> on the tap-pinned bytes), so quarantined files from a fresh install still
+> stall; the signing fix ships in the next release.
 
 > **Gatekeeper:** the preview is ad-hoc signed, not notarized. On first launch,
 > right-click `Drogon.app` and choose **Open** (or allow it in
