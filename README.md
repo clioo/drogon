@@ -337,15 +337,21 @@ daemon. The installed preview uses `~/Library/Application Support/Drogon` for it
 The public cask installs the arm64 desktop, its bundled daemon, and `drogon-cli`:
 
 ```sh
-brew tap clioo/drogon
 brew trust --tap clioo/drogon
+brew tap clioo/drogon
 brew install --cask clioo/drogon/drogon
 DROGON_DATA_DIR=/tmp/drogon-dev drogon-cli --version
 ```
 
-The trust step is required once on a fresh machine: Homebrew refuses
-third-party casks from untrusted taps. It is stored per user in
-`~/.homebrew/trust.json`, so it never repeats.
+Trust first, then tap: Homebrew refuses third-party casks from untrusted taps,
+and it validates every cask *while tapping*, so `brew tap` on an untrusted tap
+fails outright with one `Refusing to load cask ...` line per platform and a final
+`Cannot tap clioo/drogon: invalid syntax in tap!`. That message names a syntax
+error the cask does not have; the tap is simply untrusted. If you already hit it,
+run the trust command and tap again — nothing is broken. Trust is stored per user
+in `~/.homebrew/trust.json` (or `$XDG_CONFIG_HOME/homebrew/trust.json`), so it
+never repeats. Trust the *tap*, not just the cask: a trusted cask inside an
+untrusted tap still fails at tap time.
 
 To move an older cask forward:
 
