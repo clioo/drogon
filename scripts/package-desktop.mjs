@@ -76,6 +76,32 @@ assert.ok(
 const developerSigning =
   process.env.DROGON_RELEASE_SIGNING === "developer-id-notarized";
 const signingIdentity = process.env.DROGON_SIGNING_IDENTITY?.trim() || "-";
+const mainEntitlements = path.join(
+  root,
+  "scripts",
+  "drogon-main.entitlements.plist",
+);
+const helperInheritEntitlements = path.join(
+  root,
+  "scripts",
+  "drogon-helper-inherit.entitlements.plist",
+);
+
+// Keep the local ad-hoc path byte-for-byte equivalent in policy: only release
+// signing enables the hardened runtime and custom entitlement profiles. The
+// Electron helper profiles follow osx-sign's documented split; the ordinary,
+// renderer and GPU helpers use the narrow inherit profile while the plugin
+// helper retains osx-sign's broader built-in profile.
+function optionsForSignedFile(filePath) {
+  const options = { hardenedRuntime: developerSigning };
+  if (!developerSigning) return options;
+  if (path.basename(filePath) === "Drogon.app")
+    return { ...options, entitlements: mainEntitlements };
+  if (/Drogon Helper(?: \(Renderer\)| \(GPU\))?\.app(?:[\\/]|$)/.test(filePath))
+    return { ...options, entitlements: helperInheritEntitlements };
+  return options;
+}
+
 if (developerSigning)
   assert.notEqual(
     signingIdentity,
@@ -208,8 +234,10 @@ const [packagedDirectory] = await packager({
           identity: signingIdentity,
           // Ad-hoc signing has no keychain certificate to discover.
           identityValidation: false,
-          // osx-sign applies runtime policy per file, including helpers.
-          optionsForFile: () => ({ hardenedRuntime: developerSigning }),
+          // osx-sign signs helpers and frameworks before the outer bundle;
+          // choose the matching profile at each boundary without changing
+          // the local ad-hoc development path.
+          optionsForFile: optionsForSignedFile,
         },
       }
     : {}),
@@ -260,7 +288,13 @@ if (process.platform === "darwin") {
   // Refresh the outer seal after stamping final signed-binary fingerprints.
   const finalSigningArgs = ["--force", "--sign", signingIdentity];
   if (developerSigning)
-    finalSigningArgs.push("--options", "runtime", "--timestamp");
+    finalSigningArgs.push(
+      "--options",
+      "runtime",
+      "--timestamp",
+      "--entitlements",
+      mainEntitlements,
+    );
   finalSigningArgs.push(bundle);
   await runAcceptanceProcess("/usr/bin/codesign", finalSigningArgs, {
     timeout: 60000,
