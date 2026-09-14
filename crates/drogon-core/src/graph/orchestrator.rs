@@ -761,11 +761,16 @@ impl Engine {
         let mut launch = json!({
             "workspaceId": run.workspace_id,
             "harnessId": candidate.harness,
-            "model": model,
             "prompt": node.prompt,
             "headless": true,
             "permissionMode": "unattended",
         });
+        // "Harness default" is an absent model, not an empty id: the launcher
+        // refuses an empty string ("must be 1..512 bytes"), which failed every
+        // Claude Code main launched without an explicit model.
+        if !model.trim().is_empty() {
+            launch["model"] = json!(model);
+        }
         if let Some(provider) = provider {
             launch["provider"] = json!(provider);
         }
