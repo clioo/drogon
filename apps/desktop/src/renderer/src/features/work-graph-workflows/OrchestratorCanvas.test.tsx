@@ -839,8 +839,7 @@ describe("OrchestratorCanvas", () => {
     expect(screen.getByTestId("main-agent-delete-refused")).toBeTruthy();
   });
 
-  // F0: before "Run workflow" launches anything, the canvas must disclose
-  // which runtime will run and whether it is paid/external.
+  // Runtime selection belongs to the policy, not an unsolicited cost banner.
   it("shows no runtime disclosure at all when nothing automated is configured", () => {
     render(
       <OrchestratorCanvas
@@ -851,41 +850,35 @@ describe("OrchestratorCanvas", () => {
     expect(screen.queryByTestId("orchestrator-runtime-disclosure")).toBeNull();
   });
 
-  it("discloses the free local default honestly when no runtime is approved", () => {
+  it("does not add a free-model banner when no runtime is approved", () => {
     render(
       <OrchestratorCanvas
         {...baseProps()}
         policy={policyWithAdversarial(true)}
       />,
     );
-    const disclosure = screen.getByTestId("orchestrator-runtime-disclosure");
-    expect(disclosure.getAttribute("data-free-default")).toBe("true");
-    expect(disclosure.textContent).toContain("free local model");
-    expect(disclosure.textContent).not.toContain("paid");
+    expect(screen.queryByTestId("orchestrator-runtime-disclosure")).toBeNull();
+    expect(screen.queryByText(/free local model/)).toBeNull();
   });
 
-  it("discloses the policy runtime for Delegate too, since the leader dispatches children on it", () => {
+  it("does not add a cost banner in Delegate mode", () => {
     const policy: GraphPolicy = {
       ...policyWithAdversarial(false),
       delegate: true,
       approvedRuntimes: [{ harness: "pi", model: "openai-codex/gpt-5.6-luna:low" }],
     };
     render(<OrchestratorCanvas {...baseProps()} policy={policy} />);
-    const disclosure = screen.getByTestId("orchestrator-runtime-disclosure");
-    expect(disclosure.getAttribute("data-free-default")).toBe("false");
-    expect(disclosure.textContent).toContain("pi/openai-codex/gpt-5.6-luna:low");
-    expect(disclosure.textContent).toContain("paid/external");
+    expect(screen.queryByTestId("orchestrator-runtime-disclosure")).toBeNull();
+    expect(screen.queryByText(/paid\/external/)).toBeNull();
   });
 
-  it("discloses a paid/external runtime plainly before Run workflow can launch it", () => {
+  it("does not add a cost banner in adversarial mode", () => {
     const policy: GraphPolicy = {
       ...policyWithAdversarial(true),
       approvedRuntimes: [{ harness: "claude", model: "claude-sonnet-5" }],
     };
     render(<OrchestratorCanvas {...baseProps()} policy={policy} />);
-    const disclosure = screen.getByTestId("orchestrator-runtime-disclosure");
-    expect(disclosure.getAttribute("data-free-default")).toBe("false");
-    expect(disclosure.textContent).toContain("claude/claude-sonnet-5");
-    expect(disclosure.textContent).toContain("paid/external");
+    expect(screen.queryByTestId("orchestrator-runtime-disclosure")).toBeNull();
+    expect(screen.queryByText(/paid\/external/)).toBeNull();
   });
 });

@@ -3,6 +3,7 @@
    R16-AM: dropped the stale "Coming in the migration" note (Mentu and Bots
    both shipped; the fork has no such panel copy). */
 import type { Session } from "../../../../shared/session-contract";
+import { MonitorLaunchPrompt } from "../bots/MonitorLaunchPrompt";
 
 export function SessionDetailsPanel({
   terminal,
@@ -35,6 +36,7 @@ export function SessionDetailsPanel({
       ) : (
         <p>Select a terminal to see its execution details.</p>
       )}
+      {terminal ? <MonitorLaunchPrompt session={terminal} /> : null}
     </aside>
   );
 }

@@ -21,8 +21,6 @@ import type {
 } from "../../../../shared/graph-contract";
 import type { Session } from "../../../../shared/session-contract";
 import {
-  isFreeDefaultRuntime,
-  policyFirstRuntime,
 } from "../../../../shared/work-graph-contract";
 import { isMentuMainSessionLive } from "../mentu/mentu-run-dispatch";
 import { Badge } from "../../components/ui/badge";
@@ -116,34 +114,6 @@ function lastFailedAttemptReason(run: OrchestratorRun): string | null {
     return reason.length > 280 ? `${reason.slice(0, 277)}…` : reason;
   }
   return null;
-}
-
-/** F0: BEFORE "Run workflow" launches anything that is not the free local
- *  default, the canvas must say which runtime will be spawned and that it
- *  is paid/external — never a silent spawn. Shows when the policy's
- *  runtimes will actually be spawned: the adversarial loop's testers and
- *  reviewers, or the depth-one children a Delegate leader dispatches on
- *  the same approved runtimes. Direct mode runs only the main agent, whose
- *  runtime the owner picked by hand right above. */
-function RuntimeDisclosure({
-  policy,
-}: {
-  policy: GraphPolicy;
-}): React.JSX.Element | null {
-  if (!policy.adversarial.enabled && !policy.delegate) return null;
-  const runtime = policyFirstRuntime(policy);
-  const free = isFreeDefaultRuntime(runtime);
-  return (
-    <span
-      className={`text-[11px] ${free ? "text-muted-foreground" : "font-medium text-amber-700 dark:text-amber-400"}`}
-      data-testid="orchestrator-runtime-disclosure"
-      data-free-default={free}
-    >
-      {free
-        ? `Runs on the free local model (${runtime.model}) — never billed.`
-        : `Will run on ${runtime.harness}/${runtime.model} — a paid/external runtime, not the free local default.`}
-    </span>
-  );
 }
 
 /** The Main agent node (Part 4/Scenario 7): a live projection of the real
@@ -632,7 +602,7 @@ export function OrchestratorCanvas({
             evidenceCount={observability.evidence.length}
           />
           <span className="text-xs text-muted-foreground">
-            Native .drogon ledger
+            Local execution data
           </span>
         </div>
         {observabilityError ? (
@@ -734,7 +704,6 @@ export function OrchestratorCanvas({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <RuntimeDisclosure policy={policy} />
           {running ? (
             <Button
               size="sm"

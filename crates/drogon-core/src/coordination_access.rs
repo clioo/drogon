@@ -17,6 +17,7 @@ pub(crate) const SCHEMA_VERSION: i64 = 1;
 
 const ALLOWED_WORKER_METHODS: &[&str] = &[
     "status",
+    "session.hook_event",
     "orchestration.send",
     "orchestration.check",
     "orchestration.ask",
@@ -124,9 +125,14 @@ fn attempt_is_current_and_settled(
 
 /// A settled-report credential may only prove its own identity (status
 /// preflight, `send` replay/duplicate classification, receipt recovery);
-/// no new mail, no check, no ask/reply.
-const REVOKED_REPORT_RECOVERY_METHODS: &[&str] =
-    &["status", "orchestration.requestShow", "orchestration.send"];
+/// no new mail, no check, no ask/reply. Final Pi response counters may still
+/// arrive after the worker's final-report tool call; they remain session-fenced.
+const REVOKED_REPORT_RECOVERY_METHODS: &[&str] = &[
+    "status",
+    "orchestration.requestShow",
+    "orchestration.send",
+    "session.hook_event",
+];
 
 impl std::fmt::Debug for WorkerBinding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -320,6 +326,17 @@ pub(crate) fn authorize_worker(
         return Err(unauthorized());
     }
     if !is_allowed_worker_method(method) {
+        return Err(unauthorized());
+    }
+    // Workers may report counters for exactly their own incarnation, never
+    // modify another session or submit lifecycle/provider-identity hooks.
+    if method == "session.hook_event"
+        && (params.get("sessionId").and_then(Value::as_str) != Some(binding.session_id.as_str())
+            || params.get("incarnation").and_then(Value::as_str)
+                != Some(binding.incarnation.as_str())
+            || params.get("event").and_then(Value::as_str) != Some("PiUsage")
+            || !params.get("piUsage").is_some_and(Value::is_object))
+    {
         return Err(unauthorized());
     }
     if SCOPED_WORKER_METHODS.contains(&method) {

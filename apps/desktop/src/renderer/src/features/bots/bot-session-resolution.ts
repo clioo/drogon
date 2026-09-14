@@ -66,6 +66,23 @@ export function resolveBotSession(input: {
   if (!recorded) return { kind: "open" };
   const observed = input.observed;
 
+  // Viewing an automated run must never resume it or dispatch another turn.
+  if (recorded.source === "monitor") {
+    if (recorded.recordedSessionMissing || recorded.verdict === "unverifiable")
+      return { kind: "unknown" };
+    if (recorded.incarnation && recorded.workspaceId &&
+        (recorded.verdict === "live" || recorded.verdict === "exited")) {
+      return { kind: "focus", session: {
+        sessionId: recorded.sessionId,
+        incarnation: recorded.incarnation,
+        workspaceId: recorded.workspaceId,
+        hostId: input.hostId,
+        harnessId: recordedHarnessId(recorded),
+      } };
+    }
+    return { kind: "unknown" };
+  }
+
   // LIVENESS COMES FIRST. A session this daemon says is RUNNING is focused,
   // never reopened: the reopen path dispatches a NEW Drogon session (a new
   // row, a new tab) that resumes the same provider conversation, which is

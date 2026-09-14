@@ -471,3 +471,65 @@ fn snapshot_projects_home_when_provisioned_and_null_when_not() {
     assert_eq!(home["path"], home_path);
     assert!(home["homeWorkspaceId"].as_str().is_some());
 }
+
+#[test]
+fn monitor_session_projection_uses_the_admission_receipt_not_a_worker_and_preserves_chat() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    fx.seed("watcher", host, fx.workspace["path"].as_str().unwrap());
+    let conn = fx.conn();
+    // Durable observations only: this projection test starts no processes.
+    for id in ["coordinator", "worker"] {
+        conn.execute("INSERT INTO sessions(id,workspace_id,host_id,incarnation,command,args_json,cols,rows,verdict,created_at,harness_id,caused_by_event_id) VALUES(?1,?2,?3,'inc','pi',?4,80,24,'exited','2026-09-14T00:00:00Z','pi','event')",
+            rusqlite::params![id, fx.workspace["id"].as_str().unwrap(), host, r#"["--model","provider/model","-p","Drogon task:\nfixture prompt"]"#]).unwrap();
+    }
+    conn.execute("INSERT INTO requests(request_id,method,fingerprint,status,result_json,created_at) VALUES('run','harness.start','fixture','done',?1,'2026-09-14T00:00:00Z')",
+        [r#"{"id":"coordinator","incarnation":"inc"}"#]).unwrap();
+    conn.execute("INSERT INTO bot_monitor_firings(event_id,monitor_id,bot_id,outcome,run_id,at_ms) VALUES('event','monitor','watcher','dispatched','run',1000)", []).unwrap();
+    let snapshot = || call(&fx.engine, "bot.snapshot", fx.scope()).result.unwrap();
+    let session = snapshot()["bots"][0]["currentSession"].clone();
+    assert_eq!(session["sessionId"], "coordinator");
+    assert_eq!(session["source"], "monitor");
+    assert_eq!(session["model"], "provider/model");
+    assert_eq!(session["verdict"], "exited");
+    assert_eq!(session["workspaceId"], fx.workspace["id"]);
+    assert_eq!(session["incarnation"], "inc");
+    // A snapshot is not a mutation of the interactive conversation link.
+    assert!(
+        bots::storage::get_bot(
+            &conn,
+            host,
+            fx.workspace["path"].as_str().unwrap(),
+            "watcher"
+        )
+        .unwrap()
+        .unwrap()
+        .current_session
+        .is_none()
+    );
+
+    conn.execute(
+        "UPDATE sessions SET host_id='foreign' WHERE id='coordinator'",
+        [],
+    )
+    .unwrap();
+    assert!(snapshot()["bots"][0]["currentSession"].is_null());
+    conn.execute(
+        "UPDATE sessions SET host_id=?1,caused_by_event_id='other-event' WHERE id='coordinator'",
+        [host],
+    )
+    .unwrap();
+    assert!(snapshot()["bots"][0]["currentSession"].is_null());
+    conn.execute(
+        "UPDATE sessions SET caused_by_event_id='event' WHERE id='coordinator'",
+        [],
+    )
+    .unwrap();
+    conn.execute("UPDATE bots SET payload_json=json_set(payload_json,'$.currentSession',json(?1)) WHERE id='watcher'",
+        [r#"{"sessionId":"chat","harness":"pi","model":null,"startedAt":1,"rotatedAt":null}"#]).unwrap();
+    assert_eq!(snapshot()["bots"][0]["currentSession"]["sessionId"], "chat");
+    conn.execute("UPDATE bots SET payload_json=json_set(payload_json,'$.currentSession',null) WHERE id='watcher'", []).unwrap();
+    conn.execute("DELETE FROM sessions WHERE id='coordinator'", [])
+        .unwrap();
+    assert!(snapshot()["bots"][0]["currentSession"].is_null());
+}

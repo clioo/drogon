@@ -527,7 +527,7 @@ try {
     await waitPolicy((p) => p.adversarial.enabled, "failover adversarial on");
     while (Number((await panel().getByTestId("adversarial-max-iterations-value").innerText()).trim()) > 1) await panel().getByTestId("adversarial-max-iterations-decrease").click();
     await waitPolicy((p) => p.adversarial.maxIterations === 1, "one cycle");
-    assert.match((await page.getByTestId("orchestrator-runtime-disclosure").innerText()), new RegExp(`Will run on pi/${BAD_MODEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), "the disclosure names the first approved runtime");
+    assert.equal(await page.getByTestId("orchestrator-runtime-disclosure").count(), 0);
     const before = await status();
     await runButton().click();
     const started = await until(async () => { const r = await status(); return r && r.id !== before?.id && r; }, "failover run started", 30000);

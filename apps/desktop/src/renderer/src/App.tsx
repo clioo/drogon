@@ -2301,6 +2301,8 @@ export function App() {
   // page's Open/New session and the sidebar row): record the REAL session
   // native returned, select its workspace, leave the page and set the
   // pending id the list-delivery effect below activates.
+  // A completed session's list can stay unchanged when the user clicks it.
+  const [botFocusRequest, setBotFocusRequest] = useState(0);
   const recordBotSession = (
     input: Parameters<NonNullable<BotsPanelProps["onOpenSession"]>>[0],
   ) => {
@@ -2319,6 +2321,7 @@ export function App() {
         hostId: input.hostId,
       },
     };
+    setBotFocusRequest((value) => value + 1);
     setSelected(input.workspaceId);
     // The Bot's own home workspace was just registered natively (or
     // already existed): `workspaces` will not know about it yet, and the
@@ -2337,18 +2340,14 @@ export function App() {
   // Activates a Bot-opened session the moment the polled list delivers
   // it (the open call returns before the tab exists). Runs after the
   // refresh's own active-fallback in the same commit cycle, so the pending
-  // id wins. selectSessionTab parity, inline: route reset, tab activate,
-  // other panes cleared — in-app state only.
+  // id wins. Reuse tab selection so Work Graph cannot keep hiding the session.
   useEffect(() => {
     const pending = pendingBotSessionRef.current;
     if (!pending) return;
     if (sessions.some((item) => item.id === pending.sessionId)) {
       pendingBotSessionRef.current = null;
       setSelected(pending.workspaceId);
-      setRoute(null);
-      setActive(pending.sessionId);
-      setActiveBrowserTabId(null);
-      setActiveEditorTabId(null);
+      selectSessionTab(pending.sessionId);
       setBotSessions((current) => {
         const next = new Map(current);
         next.set(pending.sessionId, pending.meta);
@@ -2363,7 +2362,7 @@ export function App() {
         botSessionTitle(pending.meta.displayName, pending.meta.harnessId),
       );
     }
-  }, [sessions]);
+  }, [sessions, botFocusRequest]);
   // The freshest copy wins per session id: `sessions` (the CURRENTLY
   // selected workspace's own push-updated list) overrides the host-wide
   // poll for any id both contain, so the workspace you are actually

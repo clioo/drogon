@@ -1,6 +1,6 @@
 //! Native launch admission commits before the owned PTY effect.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use drogon_harness::{HarnessLaunchPlan, HarnessLaunchRequest};
@@ -24,12 +24,15 @@ struct PreparedWorker {
     attempt: Attempt,
     session: PreparedSession,
     environment: WorkerEnvironment,
+    pi_extension: Option<PathBuf>,
+    cli: String,
 }
 
 struct LaunchPlan {
     harness: HarnessLaunchPlan,
     cli: String,
     preferences: LaunchPreferences,
+    pi_extension: Option<PathBuf>,
 }
 
 /// Converts a policy runtime into the launch vocabulary. New policy files use
@@ -271,10 +274,22 @@ impl Engine {
             &cli,
             &graph.intent.policy,
         ));
+        let mut harness = harness::resolve_launch(&launch_request)?;
+        let pi_extension = (launch.harness_id == "pi").then(|| {
+            let path = harness::harness_hooks::pi::nonce_extension_path(
+                &self.data_dir,
+                &uuid::Uuid::new_v4().to_string(),
+            );
+            harness
+                .args
+                .extend(["--extension".into(), path.to_string_lossy().into_owned()]);
+            path
+        });
         Ok(LaunchPlan {
-            harness: harness::resolve_launch(&launch_request)?,
+            harness,
             cli,
             preferences: launch,
+            pi_extension,
         })
     }
 
@@ -422,6 +437,8 @@ impl Engine {
             attempt,
             session: prepared,
             environment,
+            pi_extension: plan.pi_extension,
+            cli: plan.cli,
         })
     }
 
@@ -430,13 +447,38 @@ impl Engine {
         params: &WorkerStartParams,
         mut prepared: PreparedWorker,
     ) -> Result<Value, RpcError> {
-        match session_admission::launch_reserved(
-            self.db.clone(),
-            &self.data_dir,
-            prepared.session,
-            Some(prepared.environment),
-            &[],
-        ) {
+        let mut cleanup_paths = Vec::new();
+        let launch = (|| {
+            let mut extra_env = Vec::new();
+            if let Some(path) = &prepared.pi_extension {
+                let marker = harness::harness_hooks::pi::marker_path(path);
+                cleanup_paths.extend([path.clone(), marker.clone()]);
+                harness::harness_hooks::pi::write_extension_file(path)?;
+                extra_env = crate::session_env::harness_hook_env(
+                    &prepared.cli,
+                    prepared.session.incarnation(),
+                );
+                extra_env.extend([
+                    (
+                        "DROGON_HOOK_MARKER".into(),
+                        marker.to_string_lossy().into_owned(),
+                    ),
+                    ("DROGON_HOOK_USAGE_ONLY".into(), "1".into()),
+                ]);
+            }
+            session_admission::launch_reserved_with_cleanup(
+                self.db.clone(),
+                &self.data_dir,
+                prepared.session,
+                Some(prepared.environment),
+                &extra_env,
+                session_admission::LaunchOptions {
+                    cleanup_paths: cleanup_paths.clone(),
+                    ..Default::default()
+                },
+            )
+        })();
+        match launch {
             Ok((id, handle, _)) => {
                 self.sessions.lock().unwrap().insert(id, handle.clone());
                 // Spawn is already accepted; preserve recovery identity on a bookkeeping fault.
@@ -458,6 +500,12 @@ impl Engine {
                 }
             }
             Err(_) => {
+                if let Some(identity) = &prepared.attempt.result.session_identity {
+                    session_admission::abandon_pending(&self.db, &identity.session_id);
+                }
+                for path in cleanup_paths {
+                    crate::hooks::remove_settings_file(&path);
+                }
                 prepared.attempt.result.assignment_state = AssignmentState::Failed;
                 prepared.attempt.result.failure = Some(AttemptFailure {
                     code: "launch_failed".into(),

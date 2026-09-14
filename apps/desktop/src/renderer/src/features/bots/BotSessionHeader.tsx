@@ -10,6 +10,7 @@
 // using this repo's existing Tailwind/shadcn tokens for consistency with
 // the rest of the Bots feature.
 import { Square } from "lucide-react";
+import { MonitorLaunchPrompt } from "./MonitorLaunchPrompt";
 import type { Session } from "../../../../shared/session-contract";
 import { Button } from "../../components/ui/button";
 import { agentIconKind, agentStateLabel } from "../shell/agent-state";
@@ -118,6 +119,7 @@ export function BotSessionHeader({
           {stopping ? "Stopping…" : "Stop"}
         </Button>
       </div>
+      <MonitorLaunchPrompt session={session} />
     </div>
   );
 }

@@ -1,0 +1,51 @@
+import type { Session } from "../../../../shared/session-contract";
+
+/** Read the daemon's saved headless argv, never reconstruct from today's Bot settings. */
+export function monitorLaunchPrompt(session: Session): string | null {
+  if (!session.causedByEventId) return null;
+  const args = session.args;
+  const last = args.at(-1);
+  if (!last) return null;
+  switch (session.harnessId) {
+    case "pi":
+      return args.includes("-p") ? args.find((arg) => arg.startsWith("Drogon task:\n")) ?? null : null;
+    case "claude": {
+      const delimiter = args.indexOf("--");
+      return delimiter > 0 && args[delimiter - 1] === "-p" ? args[delimiter + 1] ?? null : null;
+    }
+    case "opencode":
+      return args.includes("run") && args.includes("--model") ? last : null;
+    case "codex":
+      return args.includes("exec") ? last : null;
+    case "antigravity":
+      return args.at(-2) === "-p" ? last : null;
+    default:
+      return null;
+  }
+}
+
+export function MonitorLaunchPrompt({ session }: { session: Session }) {
+  if (!session.causedByEventId) return null;
+  const prompt = monitorLaunchPrompt(session);
+  const systemIndex = session.args.indexOf("--append-system-prompt");
+  const system = systemIndex >= 0 ? session.args[systemIndex + 1] : null;
+  return (
+    <details className="min-w-0 text-xs" data-testid="monitor-launch-prompt">
+      <summary className="cursor-pointer rounded-sm py-1 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        Launch prompt
+      </summary>
+      <p className="my-2 text-muted-foreground">
+        Recorded launch argument for monitor event {session.causedByEventId}. Read-only; opening this does not run it again.
+      </p>
+      {prompt ? (
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/30 p-3 font-mono text-xs" data-testid="monitor-launch-prompt-text">{prompt}</pre>
+      ) : (
+        <p className="text-muted-foreground">The launch prompt is unavailable for this session.</p>
+      )}
+      {prompt && system ? <>
+        <p className="my-2 font-medium">Additional system instructions</p>
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/30 p-3 font-mono text-xs">{system}</pre>
+      </> : null}
+    </details>
+  );
+}

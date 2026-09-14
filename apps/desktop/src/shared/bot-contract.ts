@@ -465,6 +465,8 @@ export type BotsPanelResponsibility = {
 };
 
 export type BotsPanelSession = {
+  /** A monitor execution is inspectable, never automatically resumed. */
+  source?: "monitor";
   sessionId: string;
   harness: string;
   model: string | null;

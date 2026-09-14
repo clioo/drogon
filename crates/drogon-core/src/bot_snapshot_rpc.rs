@@ -45,6 +45,7 @@ impl Engine {
             .map_err(|_| error::internal_error("Bot snapshot serialization failed"))?;
         project_bots_trigger_automation_id(&mut bots_json);
         project_bots_home(&tx, &mut bots_json);
+        self.project_monitor_sessions(&tx, &mut bots_json)?;
         self.project_bots_current_session_facts(&tx, &mut bots_json);
         let result = json!({"hostId":self.host_id,"workspaceId":scope.workspace_id,"bots":bots_json,"history":history});
         if serde_json::to_vec(&result)
@@ -121,6 +122,58 @@ impl Engine {
                 .total_cmp(&a["run"]["startedAt"].as_f64().unwrap_or(0.0))
         });
         Ok((bots_json, history))
+    }
+
+    /// A monitor's headless coordinator is already a real Bot session. Resolve
+    /// its exact admission receipt, not a worker sharing its event or workspace.
+    /// Never replace the Bot's separately opened interactive conversation.
+    fn project_monitor_sessions(
+        &self,
+        tx: &rusqlite::Transaction,
+        bots_json: &mut Value,
+    ) -> Result<(), RpcError> {
+        let Some(bots) = bots_json.as_array_mut() else {
+            return Ok(());
+        };
+        let mut statement = tx.prepare(
+            "SELECT s.id, s.harness_id, s.args_json, f.at_ms FROM bot_monitor_firings f \
+             JOIN requests r ON r.request_id = f.run_id AND r.method = 'harness.start' AND r.status = 'done' \
+             JOIN sessions s ON s.id = json_extract(r.result_json, '$.id') \
+                AND s.caused_by_event_id = f.event_id AND s.host_id = ?1 \
+             WHERE f.bot_id = ?2 AND f.outcome = 'dispatched' ORDER BY f.at_ms DESC, f.event_id DESC LIMIT 1"
+        ).map_err(crate::error::from_sqlite)?;
+        for bot in bots {
+            if !bot["currentSession"].is_null() {
+                continue;
+            }
+            let Some(id) = bot["id"].as_str() else {
+                continue;
+            };
+            let row = statement
+                .query_row(params![self.host_id, id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, f64>(3)?,
+                    ))
+                })
+                .optional()
+                .map_err(crate::error::from_sqlite)?;
+            let Some((session_id, harness, args, started_at)) = row else {
+                continue;
+            };
+            let args: Vec<String> = serde_json::from_str(&args).unwrap_or_default();
+            let model = args
+                .windows(2)
+                .find(|pair| pair[0] == "--model")
+                .map(|pair| pair[1].clone());
+            bot["currentSession"] = json!({
+                "sessionId": session_id, "harness": harness.unwrap_or_default(), "model": model,
+                "startedAt": started_at, "rotatedAt": null, "source": "monitor"
+            });
+        }
+        Ok(())
     }
 
     /// Live-session projection for the Bot snapshot: for each Bot whose

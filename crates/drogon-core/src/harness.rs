@@ -28,7 +28,7 @@ fn explicit_resume_is_usable(request: &HarnessLaunchRequest) -> bool {
 }
 
 #[path = "harness_hooks/mod.rs"]
-mod harness_hooks;
+pub(crate) mod harness_hooks;
 
 #[path = "harness/selection_gate.rs"]
 mod selection_gate;
@@ -313,7 +313,12 @@ impl Engine {
         // managed home in headless mode: config/resources must never be read
         // from or written to the user's real `~/.codex`.
         let pending = match request.harness_id {
-            id if !hooks_enabled && id != HarnessId::Codex => PendingHookInstall::None,
+            id if !hooks_enabled
+                && id != HarnessId::Codex
+                && (id != HarnessId::Pi || !request.headless) =>
+            {
+                PendingHookInstall::None
+            }
             HarnessId::Codex => {
                 let nonce = uuid::Uuid::new_v4().to_string();
                 PendingHookInstall::Codex {
@@ -331,7 +336,6 @@ impl Engine {
             }
             HarnessId::Claude if request.headless => PendingHookInstall::None,
             HarnessId::Opencode if request.headless => PendingHookInstall::None,
-            HarnessId::Pi if request.headless => PendingHookInstall::None,
             HarnessId::Antigravity => PendingHookInstall::None,
             HarnessId::Claude => {
                 let nonce = uuid::Uuid::new_v4().to_string();

@@ -434,6 +434,12 @@ impl Engine {
             Ok(_) if request.method == "status" => {
                 Response::success(request.request_id, self.status())
             }
+            Ok(_) if request.method == "session.hook_event" => {
+                match self.mutating(&request, Self::do_session_hook_event) {
+                    Ok(value) => Response::success(request.request_id, value),
+                    Err(err) => Response::failure(request.request_id, err),
+                }
+            }
             Ok(_) if request.method == "orchestration.requestShow" => {
                 match self.show_coordination_receipt(&request, Some(&binding)) {
                     Ok(value) => Response::success(request.request_id, value),
