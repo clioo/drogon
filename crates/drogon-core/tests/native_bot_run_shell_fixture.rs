@@ -351,3 +351,56 @@ fn bot_run_workspace_owned_by_another_host_is_rejected_through_full_engine_dispa
         .unwrap();
     assert_eq!(harness_start_count, 0);
 }
+
+/// A chat turn is a real Bot session: the snapshot must project it as the
+/// Bot's current session (`source: "chat"`) so the sidebar's Chats and the
+/// Bot's card can show it — a Bot that has only ever been prompted used to
+/// show no session anywhere.
+#[test]
+fn bot_snapshot_projects_the_newest_chat_turn_as_the_bots_current_session() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_pi_fixture_echoing_cwd(bin.path());
+    prepend_fixture_bin(bin.path());
+
+    let before = ok(
+        &fx.engine,
+        "bot.snapshot",
+        "snap-before",
+        json!({"hostId": fx.host, "workspaceId": fx.home_workspace_id, "locale": "en-US"}),
+    );
+    assert!(
+        before["bots"][0]["currentSession"].is_null(),
+        "no turn yet, no session: {before:?}"
+    );
+
+    let receipt = ok(
+        &fx.engine,
+        "bot.run",
+        "req-chat-projection",
+        fx.chat_params(""),
+    );
+    assert_eq!(receipt["outcome"], "dispatched", "{receipt:?}");
+    let session_id = receipt["session"]["sessionId"].as_str().unwrap();
+    let incarnation = receipt["session"]["incarnation"].as_str().unwrap();
+    read_until_exited(&fx.engine, session_id, incarnation, Duration::from_secs(10));
+
+    let after = ok(
+        &fx.engine,
+        "bot.snapshot",
+        "snap-after",
+        json!({"hostId": fx.host, "workspaceId": fx.home_workspace_id, "locale": "en-US"}),
+    );
+    let current = &after["bots"][0]["currentSession"];
+    assert_eq!(current["sessionId"], json!(session_id), "{after:?}");
+    assert_eq!(current["source"], json!("chat"), "{after:?}");
+    assert_eq!(current["harness"], json!("pi"), "{after:?}");
+    assert_eq!(
+        current["verdict"],
+        json!("exited"),
+        "the daemon's own liveness facts ride the projected session: {after:?}"
+    );
+    assert_eq!(current["incarnation"], json!(incarnation), "{after:?}");
+}

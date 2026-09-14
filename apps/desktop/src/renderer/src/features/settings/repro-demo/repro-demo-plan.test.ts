@@ -16,16 +16,15 @@ import {
 } from "./repro-demo-plan";
 
 describe("the demo's plan", () => {
-  test("walks nine phases, each named once", () => {
+  test("walks eight phases, each named once", () => {
     const ids = REPRO_PHASES.map((phase) => phase.id);
     expect(ids).toEqual([
       "workspace",
       "seed",
       "bot",
       "policy",
-      "watch",
-      "spec",
-      "firing",
+      "prompt",
+      "workflow",
       "rounds",
       "evidence",
     ]);

@@ -60,7 +60,7 @@ const bot = z.object({
   currentSession: z
     .object({
       sessionId: z.string(),
-      source: z.literal("monitor").optional(),
+      source: z.enum(["monitor", "chat"]).optional(),
       harness: z.string(),
       model: z.string().nullable(),
       startedAt: timestamp,

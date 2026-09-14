@@ -1083,7 +1083,10 @@ pub fn spawn(engine: Arc<Engine>) -> Scheduler {
         while !flag.load(Ordering::Acquire) && !engine.is_quiescent() {
             crate::automations::scheduler::guarded_tick("graph-orchestrator", || {
                 if let Err(err) = engine.tick_graph_orchestrator() {
-                    eprintln!("Graph orchestrator: {}", err.message);
+                    crate::diagnostics::log_line(format_args!(
+                        "Graph orchestrator: {}",
+                        err.message
+                    ));
                 }
             });
             thread::park_timeout(Duration::from_millis(500));

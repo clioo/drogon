@@ -46,6 +46,7 @@ impl Engine {
         project_bots_trigger_automation_id(&mut bots_json);
         project_bots_home(&tx, &mut bots_json);
         self.project_monitor_sessions(&tx, &mut bots_json)?;
+        self.project_chat_sessions(&tx, &mut bots_json)?;
         self.project_bots_current_session_facts(&tx, &mut bots_json);
         let result = json!({"hostId":self.host_id,"workspaceId":scope.workspace_id,"bots":bots_json,"history":history});
         if serde_json::to_vec(&result)
@@ -171,6 +172,75 @@ impl Engine {
             bot["currentSession"] = json!({
                 "sessionId": session_id, "harness": harness.unwrap_or_default(), "model": model,
                 "startedAt": started_at, "rotatedAt": null, "source": "monitor"
+            });
+        }
+        Ok(())
+    }
+
+    /// A chat turn's headless session is a real Bot session too: `bot.run`
+    /// with a prompt records the turn (`bot_messages`) but never rotates the
+    /// Bot's interactive `currentSession`, so a Bot that has only ever been
+    /// prompted showed no session anywhere — not in the sidebar's Chats, not
+    /// on its card. Project the newest chat turn whose session this host
+    /// still knows, the same way a monitor's coordinator is projected above,
+    /// tagged `source: "chat"` so the renderer views it instead of resuming
+    /// it. A newer chat turn outranks an older monitor firing; a separately
+    /// opened interactive conversation is never replaced.
+    fn project_chat_sessions(
+        &self,
+        tx: &rusqlite::Transaction,
+        bots_json: &mut Value,
+    ) -> Result<(), RpcError> {
+        let Some(bots) = bots_json.as_array_mut() else {
+            return Ok(());
+        };
+        let mut statement = tx
+            .prepare(
+                "SELECT s.id, s.harness_id, s.args_json, m.started_at FROM bot_messages m \
+                 JOIN sessions s ON s.id = json_extract(m.payload_json, '$.sessionId') \
+                    AND s.host_id = ?1 \
+                 WHERE m.bot_id = ?2 ORDER BY m.started_at DESC, m.rowid DESC LIMIT 1",
+            )
+            .map_err(crate::error::from_sqlite)?;
+        for bot in bots {
+            let projected_monitor_at = match bot["currentSession"].as_object() {
+                None => None,
+                Some(current) if current.get("source") == Some(&json!("monitor")) => Some(
+                    current
+                        .get("startedAt")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.0),
+                ),
+                Some(_) => continue,
+            };
+            let Some(id) = bot["id"].as_str() else {
+                continue;
+            };
+            let row = statement
+                .query_row(params![self.host_id, id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, f64>(3)?,
+                    ))
+                })
+                .optional()
+                .map_err(crate::error::from_sqlite)?;
+            let Some((session_id, harness, args, started_at)) = row else {
+                continue;
+            };
+            if projected_monitor_at.is_some_and(|monitor_at| monitor_at >= started_at) {
+                continue;
+            }
+            let args: Vec<String> = serde_json::from_str(&args).unwrap_or_default();
+            let model = args
+                .windows(2)
+                .find(|pair| pair[0] == "--model")
+                .map(|pair| pair[1].clone());
+            bot["currentSession"] = json!({
+                "sessionId": session_id, "harness": harness.unwrap_or_default(), "model": model,
+                "startedAt": started_at, "rotatedAt": null, "source": "chat"
             });
         }
         Ok(())

@@ -130,8 +130,8 @@ test("a reloaded deck keeps its swipes and can still undo the last one", async (
   },
 ];
 
-/** The change the bot's monitor is watching for: the spec lands, and the
- *  watch releases the work. Written AFTER the monitor is armed. */
+/** The spec the work is built against. Seeded with the repository, so the
+ *  bot's session and every worker read the same file the tests contract. */
 export const REPRO_SCENARIO_SPEC_PATH = "specs/dog-tinder.md";
 
 export const REPRO_SCENARIO_SPEC = `# Spec: Dog Tinder

@@ -62,6 +62,7 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
     let engine = open_engine_naming_data_dir(data_dir)?;
     let engine = Arc::new(configure_worker_cli(engine)?);
+    move_diagnostics_to_log(data_dir);
     let mut graph_scheduler = drogon_core::graph::orchestrator::spawn(engine.clone());
     // Daemon-owned automation tick loop (R2-B): a plain OS thread polling
     // every 15 s. It exits on engine quiescence or here on serve exit.
@@ -102,6 +103,7 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     let token = auth::ensure_token(data_dir).map_err(ServeError::Io)?;
     let engine = open_engine_naming_data_dir(data_dir)?;
     let engine = Arc::new(configure_worker_cli(engine)?);
+    move_diagnostics_to_log(data_dir);
     let mut graph_scheduler = drogon_core::graph::orchestrator::spawn(engine.clone());
     // Daemon-owned automation tick loop (R2-B); see the Unix serve above.
     let mut scheduler = drogon_core::automations::scheduler::spawn(
@@ -114,6 +116,34 @@ pub fn serve(data_dir: &Path) -> Result<(), ServeError> {
     graph_scheduler.shutdown();
     result?;
     Ok(())
+}
+
+/// Every startup refusal above went to the stderr the spawner gave us — the
+/// desktop reads that pipe to explain a daemon that died early. From here on
+/// the process is a long-lived service that outlives the desktop which
+/// spawned it, so its diagnostics move to `logs/drogond.log` under the data
+/// directory: a pipe whose reader has gone away turns every `eprintln!` into
+/// a panic, which is how the automation scheduler once died silently after
+/// a desktop relaunch. When the log cannot be opened the pipe stays, and the
+/// loops that matter log through the non-panicking writer anyway.
+fn move_diagnostics_to_log(data_dir: &Path) {
+    let path = drogon_core::diagnostics::log_path(data_dir);
+    drogon_core::diagnostics::log_line(format_args!(
+        "drogond: diagnostics continue in {}",
+        path.display()
+    ));
+    match drogon_core::diagnostics::redirect_stderr_to_log(data_dir) {
+        Ok(path) => drogon_core::diagnostics::log_line(format_args!(
+            "drogond {} (pid {}) serving {} — log opened at {}",
+            env!("CARGO_PKG_VERSION"),
+            std::process::id(),
+            data_dir.display(),
+            path.display()
+        )),
+        Err(error) => drogon_core::diagnostics::log_line(format_args!(
+            "drogond: diagnostics stay on the inherited stderr; the log could not be opened: {error}"
+        )),
+    }
 }
 
 /// Cross-platform: the daemon's installed sibling worker CLI is named
