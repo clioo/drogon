@@ -11,6 +11,7 @@ fn request(id: HarnessId) -> HarnessLaunchRequest {
         append_system_prompt: None,
         permission_mode: PermissionMode::Inherit,
         headless: false,
+        daemon_visible: false,
         resume: false,
         agent_session_id: None,
         agent_session_transcript_path: None,

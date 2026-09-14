@@ -589,6 +589,7 @@ impl LocalModelInference {
             append_system_prompt: None,
             permission_mode: PermissionMode::Unattended,
             headless: true,
+            daemon_visible: false,
             resume: false,
             agent_session_id: None,
             agent_session_transcript_path: None,

@@ -158,11 +158,14 @@ impl Engine {
         let workspace_id = require_str(params, "workspaceId")?;
         let mut request: HarnessLaunchRequest = serde_json::from_value(params.clone())
             .map_err(|_| error::invalid_argument("Invalid harness launch preferences"))?;
-        // Permission escalation is meaningful only for daemon-owned,
-        // headless runs. Normalize here before either settings-backed or
-        // PATH fallback planning so every interactive launch inherits the
-        // user's normal approval behavior.
-        if !request.headless {
+        // Permission escalation is meaningful only for daemon-owned runs.
+        // Normalize here before either settings-backed or PATH fallback
+        // planning so every user-facing interactive launch inherits the
+        // user's normal approval behavior. `daemonVisible` is the one
+        // exception: a daemon-owned session shown as a live tab (a Work
+        // Graph role a human can watch work in its harness's own TUI) —
+        // interactive, but nobody sits at it to answer approvals.
+        if !request.headless && !request.daemon_visible {
             request.permission_mode = drogon_harness::PermissionMode::Inherit;
         }
         // Resume by identity (the owner's contract): `resumeSessionId` names
@@ -265,6 +268,14 @@ impl Engine {
             let conn = self.db.lock().unwrap();
             crate::workspace::get_path(&conn, workspace_id)?
         };
+        // Claude Code's interactive TUI stalls on its "trust this folder?"
+        // dialog in a folder it has never opened. A folder Drogon created
+        // under its own data directory is the user's by construction, so it
+        // is marked trusted in Claude Code's own config first (see
+        // `claude_trust`); anywhere else the dialog stays the user's call.
+        if request.harness_id == HarnessId::Claude && !request.headless {
+            crate::claude_trust::trust_drogon_folder(self.data_dir(), std::path::Path::new(&cwd));
+        }
         // Every harness receives Drogon delegation context on its first turn.
         // Claude and Pi have a portable system-prompt flag; the other
         // adapters receive the same bytes as a prefixed initial prompt. No

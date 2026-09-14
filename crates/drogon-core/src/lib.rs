@@ -13,6 +13,7 @@ pub mod bot_self_mgmt;
 mod bot_snapshot_rpc;
 pub mod bots;
 pub mod claim_identity;
+mod claude_trust;
 mod coordination_access;
 mod coordination_attempts;
 mod coordination_identity;

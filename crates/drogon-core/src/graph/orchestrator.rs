@@ -17,6 +17,20 @@ use drogon_protocol::{Request, RpcError};
 use rusqlite::OptionalExtension as _;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::HashSet;
+use std::sync::Mutex;
+
+/// Role steps whose interactive session has been seen `working` since it
+/// was launched. An interactive Claude Code reads `idle` the moment it opens
+/// (its SessionStart hook concludes a turn), so idle alone proves nothing;
+/// idle AFTER working is the turn ending. In memory on purpose: a daemon
+/// restart loses the session too, which the run reports as unverifiable.
+static SEEN_WORKING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn seen_working<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> R {
+    let mut guard = SEEN_WORKING.lock().unwrap_or_else(|e| e.into_inner());
+    f(guard.get_or_insert_with(HashSet::new))
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -611,10 +625,26 @@ impl Engine {
                     Err(err) => return Err(err),
                 },
             };
+            // A role runs in its harness's own interactive TUI so a human can
+            // watch it work; the TURN ending is the phase ending. The session
+            // stays open and idle afterwards — a record anyone can read or
+            // even talk to — like any other session in the workspace.
+            let mut turn_concluded = false;
             if snapshot["verdict"] == "live" && retained {
-                return Ok(());
+                let state = snapshot["agentState"].as_str().unwrap_or("");
+                let node_id = step.node_id.clone();
+                if state == "working" {
+                    seen_working(|seen| seen.insert(node_id));
+                    return Ok(());
+                }
+                let worked = seen_working(|seen| seen.contains(&node_id));
+                if !(worked && (state == "idle" || state == "needs_input")) {
+                    return Ok(());
+                }
+                seen_working(|seen| seen.remove(&node_id));
+                turn_concluded = true;
             }
-            if snapshot["verdict"] != "exited" {
+            if !turn_concluded && snapshot["verdict"] != "exited" {
                 step.status = "unverifiable".into();
                 run.status = "unverifiable".into();
                 return Ok(());
@@ -624,7 +654,11 @@ impl Engine {
                 step.status = "stopped".into();
                 return Ok(());
             }
-            let exit_code = snapshot["exitCode"].as_i64();
+            let exit_code = if turn_concluded {
+                Some(0)
+            } else {
+                snapshot["exitCode"].as_i64()
+            };
             let evaluation = if exit_code == Some(0) {
                 if run.phase == "main" {
                     Some(("pass".to_string(), None))
@@ -758,11 +792,17 @@ impl Engine {
         // keyboard to approve anything: launched unattended, like a Bot's
         // turn. Left to inherit, a `claude -p`/`codex exec` main agent had
         // every tool call denied and "passed" by exiting without building.
+        // The role's harness in its own interactive TUI, with the task as its
+        // first message: what a viewer sees is Claude Code (or Pi, or Codex)
+        // working, not a blank pane until a headless run prints its answer.
+        // `daemonVisible` keeps it unattended — nobody answers its approvals
+        // — and the phase ends when the turn does (see `advance_orchestrator`).
         let mut launch = json!({
             "workspaceId": run.workspace_id,
             "harnessId": candidate.harness,
             "prompt": node.prompt,
-            "headless": true,
+            "headless": false,
+            "daemonVisible": true,
             "permissionMode": "unattended",
         });
         // "Harness default" is an absent model, not an empty id: the launcher

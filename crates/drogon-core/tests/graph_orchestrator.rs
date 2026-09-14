@@ -22,7 +22,8 @@ prompt=""
 while [ "$#" -gt 0 ]; do
  case "$1" in
   -p|--prompt) prompt="$2"; shift 2;;
-  --provider|--model|--append-system-prompt|--extension) shift 2;;
+  --provider|--model|--append-system-prompt|--extension|--settings) shift 2;;
+  "Drogon task:"*) prompt="$1"; shift;;
   *) shift;;
  esac
 done
