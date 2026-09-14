@@ -151,6 +151,12 @@ export function quarantineAttributePresent(xattrOutput) {
   return /com\.apple\.quarantine/.test(xattrOutput);
 }
 
+// Fresh Homebrew installations refuse third-party casks until the tap is
+// trusted. The failure text names the recovery command.
+export function tapNeedsTrust(output) {
+  return /untrusted tap/i.test(output);
+}
+
 // Every room-owned path must stay under the room root. Anything else is a
 // safety abort, never a best effort.
 export function assertRoomContained(roomDir, candidate) {
@@ -657,13 +663,29 @@ async function main() {
         return version.stdout.trim().split("\n")[0];
       });
 
+      let trustRequired = false;
       const tapDir = await step(steps, `tap ${TAP_NAME}`, async () => {
-        await brew(brewBin, brewEnv, ["tap", TAP_NAME, options.tapUrl]);
+        const first = await runHostCommand(brewBin, ["tap", TAP_NAME, options.tapUrl], {
+          timeoutMs: BREW_TIMEOUT_MS,
+          env: brewEnv,
+        });
+        if (first.code !== 0 && tapNeedsTrust(first.stdout + first.stderr)) {
+          // What a fresh-Mac user hits following the README: trust the tap,
+          // then tap again. Recorded, not hidden: the README must say this.
+          await brew(brewBin, brewEnv, ["trust", "--tap", TAP_NAME]);
+          await brew(brewBin, brewEnv, ["tap", TAP_NAME, options.tapUrl]);
+          trustRequired = true;
+        } else if (first.code !== 0) {
+          throw new Error(
+            `brew tap exited ${first.code}\nstdout: ${first.stdout.slice(-2000)}\nstderr: ${first.stderr.slice(-2000)}`,
+          );
+        }
         const dirResult = await brew(brewBin, brewEnv, ["--repo", TAP_NAME]);
         const dir = dirResult.stdout.trim().split("\n").pop();
         assertRoomContained(room.dir, dir);
         return dir;
       });
+      versions.trustRequiredOnFreshPrefix = trustRequired;
 
       let fromEntry = null;
       let toEntry = null;

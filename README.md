@@ -338,9 +338,14 @@ The public cask installs the arm64 desktop, its bundled daemon, and `drogon-cli`
 
 ```sh
 brew tap clioo/drogon
+brew trust --tap clioo/drogon
 brew install --cask clioo/drogon/drogon
 DROGON_DATA_DIR=/tmp/drogon-dev drogon-cli --version
 ```
+
+The trust step is required once on a fresh machine: Homebrew refuses
+third-party casks from untrusted taps. It is stored per user in
+`~/.homebrew/trust.json`, so it never repeats.
 
 To move an older cask forward:
 
@@ -362,9 +367,10 @@ a Homebrew-managed data directory after a downgrade refusal, use
 > on first launch, right-click `Drogon.app` and choose **Open** (or allow it in
 > System Settings → Privacy & Security → **Open Anyway**). v0.1.0-rc.3 was
 > Developer ID signed and notarized but aborts on launch (it fails reserving
-> V8 memory), so the tap stays on rc.2 until the signing fix ships in the next
-> release; new casks from that release on are Developer ID signed and notarized
-> and launch without Gatekeeper prompts.
+> V8 memory). v0.1.0-rc.4 is Developer ID signed but its seal currently fails
+> verification (`spctl -a -vv` reports a sealed resource missing or invalid
+> on the tap-pinned bytes), so quarantined files from a fresh install still
+> stall; the signing fix ships in the next release.
 
 > **Gatekeeper:** the preview is ad-hoc signed, not notarized. On first launch,
 > right-click `Drogon.app` and choose **Open** (or allow it in

@@ -22,6 +22,7 @@ import {
   spctlAccepted,
   step,
   summarizeRun,
+  tapNeedsTrust,
 } from "./e2e-brew-install.mjs";
 
 const RC2_RUBY = `cask "drogon" do
@@ -156,6 +157,15 @@ test("compareDrogonVersions orders release candidates and finals", () => {
   assert.equal(compareDrogonVersions("0.1.0", "0.1.0-rc.9"), 1);
   assert.equal(compareDrogonVersions("0.2.0-rc.1", "0.1.0"), 1);
   assert.throws(() => compareDrogonVersions("nope", "0.1.0-rc.2"), /not a Drogon version/);
+});
+
+test("tapNeedsTrust spots the fresh-prefix trust refusal", () => {
+  assert.equal(
+    tapNeedsTrust("Error: Invalid cask (macOS 27 on arm): drogon.rb\nRefusing to load cask clioo/drogon/drogon from untrusted tap clioo/drogon."),
+    true,
+  );
+  assert.equal(tapNeedsTrust("Tapped 1 cask (15 files, 21KB)."), false);
+  assert.equal(tapNeedsTrust("Error: No available formula with the name \"nope\"."), false);
 });
 
 test("spctlAccepted and quarantineAttributePresent read command output", () => {
