@@ -318,6 +318,15 @@ brew install --cask clioo/drogon/drogon
 DROGON_DATA_DIR=/tmp/drogon-dev drogon-cli --version
 ```
 
+To move an older cask forward:
+
+```sh
+brew update
+brew upgrade --cask clioo/drogon/drogon
+brew info --cask clioo/drogon/drogon   # installed version vs tap version
+drogon-cli --version                   # must match the installed cask
+```
+
 Drogon currently publishes Apple Silicon releases only (Intel is not built). The
 cask declares macOS Sonoma or newer: Electron 44 itself requires macOS Ventura
 (13) or newer, but Sonoma is the supported release floor for this arm64 cask.
@@ -325,10 +334,13 @@ Homebrew stops the detached Drogon daemon before uninstall and upgrade; to recov
 a Homebrew-managed data directory after a downgrade refusal, use
 `brew reinstall --cask clioo/drogon/drogon` or install the previous cask version.
 
-> **Signing:** release casks are Developer ID signed and notarized, so the
-> installed app launches without Gatekeeper prompts. Cask versions older than
-> v0.1.0-rc.3 were ad-hoc signed and may need **Open Anyway** once in
-> System Settings → Privacy & Security.
+> **Signing:** the current cask (v0.1.0-rc.2) is ad-hoc signed, not notarized:
+> on first launch, right-click `Drogon.app` and choose **Open** (or allow it in
+> System Settings → Privacy & Security → **Open Anyway**). v0.1.0-rc.3 was
+> Developer ID signed and notarized but aborts on launch (it fails reserving
+> V8 memory), so the tap stays on rc.2 until the signing fix ships in the next
+> release; new casks from that release on are Developer ID signed and notarized
+> and launch without Gatekeeper prompts.
 
 > **Gatekeeper:** the preview is ad-hoc signed, not notarized. On first launch,
 > right-click `Drogon.app` and choose **Open** (or allow it in

@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   assertProjectVersions,
+  assertTagMatchesManifests,
   readProjectManifests,
   validateSemanticVersion,
   versionFromCliOutput,
@@ -47,6 +48,22 @@ test("CLI version parsing handles clap output and bare output", () => {
     () => versionFromCliOutput("drogon-cli development"),
     /semantic version/,
   );
+});
+
+test("a tag can only release when both manifests already carry its version", () => {
+  const matching = {
+    workspace: { version: "0.1.0-rc.3" },
+    desktop: { version: "0.1.0-rc.3" },
+  };
+  assert.equal(assertTagMatchesManifests(matching, "v0.1.0-rc.3"), "0.1.0-rc.3");
+  // Today's tree state (manifests 0.1.0-rc.4, newest tag v0.1.0-rc.3) must
+  // fail: the rc.4 tag has to be cut from the bumped manifests first.
+  const drifted = {
+    workspace: { version: "0.1.0-rc.4" },
+    desktop: { version: "0.1.0-rc.4" },
+  };
+  assert.throws(() => assertTagMatchesManifests(drifted, "v0.1.0-rc.3"), /does not match release/);
+  assert.throws(() => assertTagMatchesManifests(matching, "0.1.0-rc.3"), /start with v/);
 });
 
 test("bump-version updates and then verifies both package manifests", async (context) => {
