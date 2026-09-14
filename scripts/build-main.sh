@@ -19,7 +19,7 @@ if [[ -x "$node_bin/node" ]]; then export PATH="$node_bin:$PATH"; fi
 for tool in git node npm cargo; do
   command -v "$tool" >/dev/null || { printf 'Required tool missing: %s\n' "$tool" >&2; exit 1; }
 done
-node -e 'if (Number(process.versions.node.split(".")[0]) !== 24) { console.error("Node 24 is required; put it on PATH."); process.exit(1); }'
+node -e 'const major = Number(process.versions.node.split(".")[0]); if (!(major >= 24 && major < 27)) { console.error("Node >=24 <27 is required (this is " + process.version + "); put it on PATH."); process.exit(1); }'
 
 remote=$(git -C "$root" remote get-url origin)
 mkdir -p "$root/.preflight/build-main"

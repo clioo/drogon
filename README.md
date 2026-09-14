@@ -193,18 +193,25 @@ export DROGON_DATA_DIR=/tmp/drogon-dev
 
 ### Requirements
 
-- Rust **1.98**
-- Node.js **24**
-- pnpm **11.19.0** (declared in `packageManager`)
+- Rust **1.98** — via [rustup](https://rustup.rs): `rustup toolchain install 1.98`
+- Node.js **24** (supported range `>=24 <27`, from `engines`): [nodejs.org](https://nodejs.org) or `brew install node@24`
+- pnpm **11.19.0** (declared in `packageManager`) — not on `PATH` by default: `npm install -g pnpm@11.19.0`
 - Git; GitHub CLI (`gh`) for GitHub features
 - A supported coding harness installed and configured if you want agent sessions
 
 ```sh
 git clone https://github.com/clioo/drogon.git
 cd drogon
+node scripts/check-toolchains.mjs   # fail fast with "you need X" when a floor is missed
 pnpm install --frozen-lockfile
 cargo build --workspace --locked
 ```
+
+On a current Apple Silicon Mac the first build takes well under a minute with
+empty caches (`cargo build` measured 34–53s across runs; `pnpm install` and
+`pnpm typecheck` are seconds each). A clean-room rerun of exactly these commands lives in
+`node scripts/e2e-fresh-clone.mjs --full`; the fast static probes
+(`--check`) run in CI.
 
 Start the daemon with an isolated data directory:
 
@@ -246,6 +253,17 @@ test windows stay inactive and never steal focus. Surfaces are compared against 
 own recorded baselines, pixel- and accessibility-tree-level; every reported difference
 becomes a tracked fix.
 
+A hermetic Linux pass of the portable gates — no Mac state involved — runs from
+a clean `node:24` container with Rust 1.98:
+
+```sh
+./docs/hermetic-linux/run-check.sh
+```
+
+A green container is not a validated desktop: it cannot cover the `.app`,
+Electron rendering, packaging, or Gatekeeper. Those need macOS (the acceptance
+line above, ending in PASSED).
+
 ## Hackathon engineering evidence
 
 The submission separates the product specification from the process used to build it:
@@ -276,11 +294,17 @@ make install BUNDLE=<path>   # install an already-packaged Drogon.app
 make install FLAGS=--no-restart
 ```
 
-It quits the running app, stops its detached daemon through that bundle's own
-scoped `drogon-stop-daemon`, swaps the bundle with two renames (keeping the
-previous build beside it for rollback), relaunches, and then reports whether the
-new service actually came back. Packaging refuses a dirty checkout, so commit
-first. The lower-level flow below stays available and is what a release uses.
+It runs the toolchain preflight (`node scripts/check-toolchains.mjs`) before
+building, then quits the running app, stops its detached daemon through that
+bundle's own scoped `drogon-stop-daemon`, swaps the bundle with two renames
+(keeping the previous build beside it for rollback), relaunches, and then
+reports whether the new service actually came back. Packaging refuses a dirty
+checkout, so commit first. The lower-level flow below stays available and is
+what a release uses.
+
+`make install` always targets `/Applications/Drogon.app` — it quits the
+running app and replaces the bundle, so there is no isolated-prefix mode.
+Hands-off installs go through the preview flow or Homebrew below.
 
 ## Install the macOS preview
 

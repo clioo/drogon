@@ -69,7 +69,11 @@ pnpm-toolchain:
 node_modules: pnpm-toolchain
 	@PATH="$(PATH)"; export PATH; "$(PNPM_BIN)/pnpm" install --frozen-lockfile
 
-install: $(if $(BUNDLE),,pnpm-toolchain | node_modules)
+# Fail fast with "you need X" before a build goes sideways on a new machine.
+preflight:
+	@PATH="$(PATH)"; export PATH; node scripts/check-toolchains.mjs
+
+install: preflight $(if $(BUNDLE),,pnpm-toolchain | node_modules)
 	@PATH="$(PATH)"; export PATH; node $(INSTALLER) $(if $(BUNDLE),--bundle "$(BUNDLE)") $(FLAGS)
 
 install-main:
