@@ -69,7 +69,7 @@ pub(crate) fn compose_harness_context(
         "{HARNESS_CONTEXT_MARKER}\n\
 You are running inside Drogon, workspace {workspace_id}, at {}.\n\
 Drogon is the source of truth for delegation and orchestration. For any subagent or worker, use the `drogon-cli` executable supplied by this session, not an internal Agent tool and not a raw harness session.\n\
-Before delegating, read the version-matched guide with `drogon-cli skills get --topic orchestration`; use its existing `run-create`, `task-create`, `worker-start`, `send`, `ask`, `check`, and `reply` verbs. A child must report through `drogon-cli orchestration send --kind worker_done` (the `final-report` alias), not only in a terminal buffer.\n\
+Before delegating, read the version-matched guide with `drogon-cli skills get --topic orchestration`; use its existing `run-create`, `task-create`, `worker-start`, `send`, `ask`, `check`, and `reply` verbs. A child must report through `drogon-cli orchestration send --kind worker_done` (the `final-report` alias), not only in a terminal buffer. Wait for a child in the foreground — `drogon-cli orchestration check --wait --timeout-ms <ms>`, repeated until its worker_done arrives — never in a background task and never by ending your turn: this session ends when your turn ends, and a backgrounded wait dies with it.\n\
 The Work Graph policy for child runtimes is:\n{}\n\
 Use approved runtimes in order and the configured fallback only after them. Provider and model are an inseparable pair from that policy; never guess a provider for an ambiguous model id. With no configured policy, Drogon uses its free local runtime. Do not create or modify `AGENTS.md` or `CLAUDE.md` merely to deliver this context.\n",
         workspace_path.display(),
