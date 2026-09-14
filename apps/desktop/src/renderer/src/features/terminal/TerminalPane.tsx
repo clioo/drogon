@@ -1153,7 +1153,13 @@ export function TerminalPane({
         const result = await window.drogon.resize({ ...inputIdentity, cols, rows });
         if (!result.ok) throw new Error(result.error.message);
       },
-      onError: (error) => report(error instanceof Error ? error.message : "Terminal resize could not be confirmed."),
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : "Terminal resize could not be confirmed.";
+        // A pane whose process already ended cannot be resized; that is the
+        // session's state, not a fault worth a banner over a finished turn.
+        if (/already exited/i.test(message)) return;
+        report(message);
+      },
     });
     const resize = terminal.onResize((grid) => geometrySync?.request(grid));
     const observer = new ResizeObserver(fitTerminal);
