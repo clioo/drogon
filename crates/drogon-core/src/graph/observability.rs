@@ -354,7 +354,7 @@ impl Engine {
                 if worker {
                     "worker"
                 } else if handle.caused_by_event_id.is_some() {
-                    "coordinator"
+                    "dispatcher"
                 } else {
                     "agent"
                 }
@@ -403,7 +403,7 @@ impl Engine {
             let role = if run_id.is_some() || session["parentSessionId"].as_str().is_some() {
                 "worker"
             } else if session["causedByEventId"].as_str().is_some() {
-                "coordinator"
+                "dispatcher"
             } else {
                 "agent"
             };

@@ -1003,10 +1003,15 @@ fn node_for_step(run: &Run, candidate: &GraphRuntimeRef) -> GraphNodeIntent {
         }
         node.prompt.push_str(&format!(
             "\n\nDrogon run {}: immutable Subagent policy snapshot\n{}\n\
+             You are this graph's main agent, not a Bot dispatcher or a depth-one worker. \
+             A Bot may have dispatched the graph on the user's behalf; that dispatch does not \
+             consume your child-depth budget.\n\
              Before acting, read `.drogon/graph.json` with `drogon-cli graph read --workspace {} \
              --json` and read native evidence/usage with `drogon-cli graph observability \
-             --workspace {} --json`. If this mode delegates, use Drogon graph CLI declared nodes \
-             (see `drogon-cli graph --help`) and explicit harness/model pairs from this snapshot. \
+             --workspace {} --json`. If this mode delegates, use Drogon's native orchestration \
+             run-create, task-create and worker-start commands to create and supervise children \
+             (read `drogon-cli skills get --topic orchestration`). Use the approved runtime \
+             policy, not harness-internal subagent tools or bare harness sessions. \
              Try approved pairs in their configured order; use fallback only after every approved \
              runtime fails to execute. Findings are successful evaluations and do not trigger \
              runtime failover. Do not use native ungoverned subagent spawns. Maximum subagent depth \
@@ -1396,6 +1401,10 @@ mod tests {
         );
         assert!(node.provider.is_none());
         assert_eq!(node.model, "different-provider/model");
+        assert!(
+            node.prompt
+                .contains("Do not spawn subagents: maximum depth is 1")
+        );
         run.phase = "main".into();
         run.policy.delegate = true;
         let main = node_for_step(
@@ -1410,6 +1419,18 @@ mod tests {
         assert!(main.prompt.contains("only as planner and director"));
         assert!(main.prompt.contains("do not add adversarial testers"));
         assert!(main.prompt.contains("immutable Subagent policy snapshot"));
+        assert!(
+            main.prompt
+                .contains("main agent, not a Bot dispatcher or a depth-one worker")
+        );
+        assert!(
+            main.prompt
+                .contains("does not consume your child-depth budget")
+        );
+        assert!(
+            main.prompt
+                .contains("orchestration run-create, task-create and worker-start")
+        );
         assert!(main.prompt.contains("children must not"));
         assert!(
             main.prompt
