@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   dispatchMentuRequest,
   installOfficialMentuRuntime,
+  isMentuRuntimePlatformSupported,
   MENTU_RUNTIME_LOCK_REVISION,
   MENTU_RUNTIME_LOCK_SHA256,
   type MentuMethod,
@@ -160,6 +161,12 @@ describe("mentu bridge admission", () => {
 });
 
 describe("optional Mentu runtime installation", () => {
+  it("only advertises installation on Apple silicon macOS", () => {
+    expect(isMentuRuntimePlatformSupported("darwin", "arm64")).toBe(true);
+    expect(isMentuRuntimePlatformSupported("darwin", "x64")).toBe(false);
+    expect(isMentuRuntimePlatformSupported("linux", "arm64")).toBe(false);
+  });
+
   const missingRuntime = {
     available: false,
     path: null,
@@ -265,5 +272,27 @@ describe("optional Mentu runtime installation", () => {
       error: { code: "mentu_download_invalid", retryable: false },
     });
     expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns network failures into an honest retryable Settings message", async () => {
+    const result = await installOfficialMentuRuntime({
+      platform: "darwin",
+      arch: "arm64",
+      call: async () => ({
+        ok: true as const,
+        result: { runtime: missingRuntime },
+      }),
+      fetchImpl: async () => {
+        throw new TypeError("fetch failed: network is down");
+      },
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "mentu_download_failed",
+        message: "Could not download the pinned Mentu runtime. Check your network connection and try again.",
+        retryable: true,
+      },
+    });
   });
 });

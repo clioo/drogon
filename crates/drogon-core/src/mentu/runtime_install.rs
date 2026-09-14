@@ -12,6 +12,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use drogon_protocol::RpcError;
 use drogon_protocol::mentu::{MentuRuntimeInstallResult, MentuRuntimeInstallStatus};
@@ -23,6 +24,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Verifies `source_path` against the pinned lock sha256 (or the test
 /// seam's override — same one `runtime::runtime_info` honors) and, only if
@@ -37,6 +40,18 @@ pub fn install_runtime(
     data_dir: &Path,
     source_path: &Path,
 ) -> Result<MentuRuntimeInstallResult, RpcError> {
+    let source_metadata = fs::symlink_metadata(source_path).map_err(|e| {
+        RpcError::new(
+            "mentu_runtime_source_unreadable",
+            format!("Cannot read the provided runtime source: {e}"),
+        )
+    })?;
+    if !source_metadata.file_type().is_file() {
+        return Err(RpcError::new(
+            "mentu_runtime_source_unreadable",
+            "The provided runtime source must be a regular file.",
+        ));
+    }
     let source_bytes = fs::read(source_path).map_err(|e| {
         RpcError::new(
             "mentu_runtime_source_unreadable",
@@ -58,9 +73,14 @@ pub fn install_runtime(
             .map_err(|e| RpcError::new("io_error", format!("cannot create runtime dir: {e}")))?;
     }
 
-    let already_installed = fs::read(&destination)
-        .map(|existing| existing == source_bytes)
-        .unwrap_or(false);
+    // Do not follow a destination symlink when deciding that the runtime is
+    // already installed. `activate` must replace it with the verified bytes.
+    let already_installed = fs::symlink_metadata(&destination)
+        .map(|metadata| metadata.file_type().is_file())
+        .unwrap_or(false)
+        && fs::read(&destination)
+            .map(|existing| existing == source_bytes)
+            .unwrap_or(false);
     if !already_installed {
         activate(&destination, &source_bytes)?;
     }
@@ -80,7 +100,9 @@ fn activate(destination: &Path, bytes: &[u8]) -> Result<(), RpcError> {
         .file_name()
         .unwrap_or_default()
         .to_string_lossy();
-    let temp = destination.with_file_name(format!("{file_name}.tmp-{}", std::process::id()));
+    let temp_id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+    let temp =
+        destination.with_file_name(format!("{file_name}.tmp-{}-{temp_id}", std::process::id()));
     let staged = fs::write(&temp, bytes)
         .map_err(|e| RpcError::new("io_error", format!("cannot stage runtime: {e}")))
         .and_then(|()| make_executable(&temp));
@@ -225,5 +247,49 @@ mod tests {
 
         let err = install_runtime(&data_dir, &missing).unwrap_err();
         assert_eq!(err.code, "mentu_runtime_source_unreadable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlink_source_without_following_it() {
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = root.path().join("data");
+        let bytes = b"#!/bin/sh\necho fixture\n";
+        let _override = Override::set(&sha256_hex(bytes));
+        let real = write_source(root.path(), "real-source", bytes);
+        let link = root.path().join("source-link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let err = install_runtime(&data_dir, &link).unwrap_err();
+
+        assert_eq!(err.code, "mentu_runtime_source_unreadable");
+        assert!(!runtime::resolve_runtime_path(&data_dir).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaces_a_destination_symlink_instead_of_trusting_its_target() {
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = root.path().join("data");
+        let bytes = b"#!/bin/sh\necho approved\n";
+        let _override = Override::set(&sha256_hex(bytes));
+        let destination = runtime::resolve_runtime_path(&data_dir);
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        let outside = root.path().join("outside");
+        fs::write(&outside, bytes).unwrap();
+        std::os::unix::fs::symlink(&outside, &destination).unwrap();
+        let source = write_source(root.path(), "source-bin", bytes);
+
+        let result = install_runtime(&data_dir, &source).unwrap();
+
+        assert_eq!(result.status, MentuRuntimeInstallStatus::Installed);
+        assert!(
+            fs::symlink_metadata(&destination)
+                .unwrap()
+                .file_type()
+                .is_file()
+        );
+        assert_eq!(fs::read(&destination).unwrap(), bytes);
+        assert_eq!(fs::read(&outside).unwrap(), bytes);
     }
 }

@@ -32,6 +32,11 @@ const installedRuntime: MentuRuntimeInfo = {
   lockMatches: true,
   message: null,
 };
+const unusableRuntime: MentuRuntimeInfo = {
+  ...installedRuntime,
+  available: false,
+  message: "The installed Mentu runtime could not be started on this host.",
+};
 
 afterEach(cleanup);
 
@@ -46,6 +51,45 @@ describe("Mentu optional runtime setting", () => {
     );
     expect(container.innerHTML).toBe("");
     expect(bridge.mentuRuntime).not.toHaveBeenCalled();
+  });
+
+  test("does not offer installation when the host cannot run the pinned runtime", async () => {
+    const bridge: MentuSettingsBridge = {
+      mentuRuntime: vi.fn(async () => ({
+        ok: false as const,
+        error: {
+          code: "mentu_runtime_unsupported",
+          message: "The optional Mentu runtime is available only on Apple silicon Macs.",
+          retryable: false,
+        },
+      })),
+      mentuInstall: vi.fn(),
+    };
+    render(<MentuRuntimeSetting bridge={bridge} isMac />);
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "The optional Mentu runtime is available only on Apple silicon Macs.",
+    );
+    expect(screen.queryByRole("button", { name: "Install" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(bridge.mentuInstall).not.toHaveBeenCalled();
+  });
+
+  test("does not offer a reinstall when the locked binary cannot start", async () => {
+    const bridge: MentuSettingsBridge = {
+      mentuRuntime: vi.fn(async () => ({
+        ok: true as const,
+        result: { runtime: unusableRuntime },
+      })),
+      mentuInstall: vi.fn(),
+    };
+    render(<MentuRuntimeSetting bridge={bridge} isMac />);
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "The installed Mentu runtime could not be started on this host.",
+    );
+    expect(screen.queryByRole("button", { name: "Install" })).toBeNull();
+    expect(bridge.mentuInstall).not.toHaveBeenCalled();
   });
 
   test("shows installed state without offering another install", async () => {

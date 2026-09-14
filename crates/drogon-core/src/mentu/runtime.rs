@@ -7,7 +7,8 @@
 //! mismatched runtime fails closed: `mentu.run`/`mentu.retry` never fall
 //! back to a workspace binary or a PATH lookup.
 
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -24,6 +25,10 @@ pub const MENTU_LOCK_SHA256: &str =
     "f00528a940185e9433ad65b02e7de251d7d3d856c9d24d38f8b1474a1ca8bc5d";
 
 const RUNTIME_ENV_OVERRIDE: &str = "DROGON_MENTU_RUNTIME";
+const MENTU_RUNTIME_NOT_EXECUTABLE_MESSAGE: &str =
+    "The installed Mentu runtime is not executable on this host.";
+const MENTU_RUNTIME_CANNOT_START_MESSAGE: &str =
+    "The installed Mentu runtime could not be started on this host.";
 
 /// Ported verbatim from the read-only reference's own fallback copy for this
 /// state (`src/renderer/src/components/mentu/recipe-pane-controller.ts`'s
@@ -113,15 +118,60 @@ fn probe_version(path: &Path) -> Option<String> {
     text.lines().next().map(|line| line.trim().to_string())
 }
 
+fn read_runtime_file(path: &Path) -> std::io::Result<(fs::Metadata, Vec<u8>)> {
+    #[cfg(unix)]
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)?
+    };
+    #[cfg(not(unix))]
+    let mut file = OpenOptions::new().read(true).open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.file_type().is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "runtime path is not a regular file",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok((metadata, bytes))
+}
+
+fn metadata_is_executable(metadata: &fs::Metadata) -> bool {
+    if !metadata.file_type().is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows executable identity is supplied by the `.exe` path and the
+        // process launch itself. There is no portable executable permission
+        // bit to inspect here.
+        true
+    }
+}
+
 /// Availability, identity and lock verification for the current process's
 /// resolved runtime. Never panics on a missing file: absence is reported as
 /// `available: false`, the same as a hash mismatch — both are ordinary,
 /// expected states for a data directory that has not been provisioned yet.
+///
+/// The regular-file and lock checks happen before `--version` is spawned.
+/// A mismatched, symlinked, special or non-executable path is data, not a
+/// runtime, and must never receive execution just because it happens to exist.
 pub fn runtime_info(data_dir: &Path) -> MentuRuntimeInfo {
     let path = resolve_runtime_path(data_dir);
     let expected = expected_sha256();
-    let bytes = match fs::read(&path) {
-        Ok(bytes) => bytes,
+    let (metadata, bytes) = match read_runtime_file(&path) {
+        Ok(file) => file,
         Err(e) => {
             // The raw OS error (e.g. "No such file or directory (os error
             // 2)") is a daemon-operator detail, never a renderer string
@@ -142,18 +192,33 @@ pub fn runtime_info(data_dir: &Path) -> MentuRuntimeInfo {
     };
     let actual_sha256 = sha256_hex(&bytes);
     let lock_matches = actual_sha256 == expected;
+    let executable = metadata_is_executable(&metadata);
+    // Never execute a candidate until both the bytes and file mode have
+    // passed the admission checks above. A successful version probe is also
+    // required: an exact-but-quarantined or otherwise unlaunchable binary is
+    // not useful to `mentu.run` and must not be advertised as available.
+    let version = if lock_matches && executable {
+        probe_version(&path)
+    } else {
+        None
+    };
+    let available = lock_matches && executable && version.is_some();
     MentuRuntimeInfo {
-        available: lock_matches,
+        available,
         path: Some(path.to_string_lossy().into_owned()),
-        version: probe_version(&path),
+        version,
         expected_revision: MENTU_LOCK_REVISION.to_string(),
         expected_sha256: expected,
         actual_sha256: Some(actual_sha256),
         lock_matches,
-        message: if lock_matches {
-            None
-        } else {
+        message: if !lock_matches {
             Some(MENTU_RUNTIME_MISMATCH_MESSAGE.to_string())
+        } else if !executable {
+            Some(MENTU_RUNTIME_NOT_EXECUTABLE_MESSAGE.to_string())
+        } else if !available {
+            Some(MENTU_RUNTIME_CANNOT_START_MESSAGE.to_string())
+        } else {
+            None
         },
     }
 }
@@ -233,5 +298,130 @@ mod tests {
         assert_eq!(info.expected_sha256, MENTU_LOCK_SHA256);
         assert_eq!(info.message.unwrap(), MENTU_RUNTIME_MISMATCH_MESSAGE);
         assert!(require_verified_runtime(data_dir.path()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mismatched_runtime_is_not_executed_for_version_probe() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _sha_guard = SHA256_OVERRIDE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let data_dir = tempfile::tempdir().unwrap();
+        let bin_dir = data_dir.path().join("mentu").join("runtime").join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let marker = data_dir.path().join("version-probe-ran");
+        let bin_path = bin_dir.join(executable_name());
+        fs::write(
+            &bin_path,
+            format!("#!/bin/sh\nprintf ran > '{}'\n", marker.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&bin_path, fs::Permissions::from_mode(0o755)).unwrap();
+        unsafe { std::env::remove_var(RUNTIME_ENV_OVERRIDE) };
+
+        let info = runtime_info(data_dir.path());
+
+        assert!(!info.available);
+        assert!(!info.lock_matches);
+        assert!(!marker.exists(), "hash-mismatched runtime was executed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn matching_runtime_that_cannot_start_is_unavailable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _sha_guard = SHA256_OVERRIDE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let bytes = b"#!/bin/sh\nexit 17\n";
+        let _reset_override = ExpectedSha256OverrideReset;
+        set_expected_sha256_override(Some(sha256_hex(bytes)));
+        let data_dir = tempfile::tempdir().unwrap();
+        let bin_dir = data_dir.path().join("mentu").join("runtime").join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let bin_path = bin_dir.join(executable_name());
+        fs::write(&bin_path, bytes).unwrap();
+        fs::set_permissions(&bin_path, fs::Permissions::from_mode(0o755)).unwrap();
+        unsafe { std::env::remove_var(RUNTIME_ENV_OVERRIDE) };
+
+        let info = runtime_info(data_dir.path());
+
+        assert!(!info.available);
+        assert!(info.lock_matches);
+        assert_eq!(
+            info.message.as_deref(),
+            Some(MENTU_RUNTIME_CANNOT_START_MESSAGE)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_runtime_is_unavailable_without_following_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _sha_guard = SHA256_OVERRIDE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let bytes = b"#!/bin/sh\necho fixture\n";
+        let _reset_override = ExpectedSha256OverrideReset;
+        set_expected_sha256_override(Some(sha256_hex(bytes)));
+        let data_dir = tempfile::tempdir().unwrap();
+        let bin_dir = data_dir.path().join("mentu").join("runtime").join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let real = bin_dir.join("real-runtime");
+        fs::write(&real, bytes).unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&real, bin_dir.join(executable_name())).unwrap();
+        unsafe { std::env::remove_var(RUNTIME_ENV_OVERRIDE) };
+
+        let info = runtime_info(data_dir.path());
+
+        assert!(!info.available);
+        assert!(!info.lock_matches);
+        assert!(info.actual_sha256.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn matching_non_executable_runtime_is_unavailable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _sha_guard = SHA256_OVERRIDE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let bytes = b"fixture bytes";
+        let _reset_override = ExpectedSha256OverrideReset;
+        set_expected_sha256_override(Some(sha256_hex(bytes)));
+        let data_dir = tempfile::tempdir().unwrap();
+        let bin_dir = data_dir.path().join("mentu").join("runtime").join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let bin_path = bin_dir.join(executable_name());
+        fs::write(&bin_path, bytes).unwrap();
+        fs::set_permissions(&bin_path, fs::Permissions::from_mode(0o644)).unwrap();
+        unsafe { std::env::remove_var(RUNTIME_ENV_OVERRIDE) };
+
+        let info = runtime_info(data_dir.path());
+
+        assert!(!info.available);
+        assert!(info.lock_matches);
+        assert_eq!(
+            info.message.as_deref(),
+            Some(MENTU_RUNTIME_NOT_EXECUTABLE_MESSAGE)
+        );
+    }
+
+    struct ExpectedSha256OverrideReset;
+
+    impl Drop for ExpectedSha256OverrideReset {
+        fn drop(&mut self) {
+            set_expected_sha256_override(None);
+        }
     }
 }
