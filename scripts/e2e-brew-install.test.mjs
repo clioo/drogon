@@ -12,6 +12,9 @@ import {
   assertRoomContained,
   commandMatchesDaemon,
   compareDrogonVersions,
+  developerAppFingerprint,
+  developerDaemonLive,
+  developerDataDir,
   expandZapPath,
   launchEnv,
   makeCleanRoom,
@@ -308,6 +311,12 @@ test("makeCleanRoom returns a symlink-free room root", async () => {
   } finally {
     await rm(room.dir, { recursive: true, force: true });
   }
+});
+
+test("developer guards are read-only and boolean-stable", async () => {
+  assert.ok(developerDataDir().endsWith(path.join("Application Support", "Drogon")));
+  assert.equal(typeof (await developerDaemonLive()), "boolean");
+  assert.ok((await developerAppFingerprint()).startsWith("/Applications/Drogon.app"));
 });
 
 test("snapshotTree records relative paths of a fresh HOME", async () => {

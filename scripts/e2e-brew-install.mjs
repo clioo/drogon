@@ -25,7 +25,6 @@
 //   node scripts/e2e-brew-install.mjs
 //   node scripts/e2e-brew-install.mjs --keep   # keep the room for inspection
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import {
   lstat,
   mkdir,
@@ -486,6 +485,9 @@ export async function auditInstall(ctx, cask) {
     const result = await brew(brewBin, brewEnv, ["install", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
     const tail = (result.stderr.slice(-1500) || result.stdout.slice(-1500));
     assert.ok(await pathExists(appDir), `app missing after install: ${appDir}\n${tail}`);
+    // The cask's `uninstall quit:` stanza addresses the app by bundle id.
+    const ident = await runHostCommand("/usr/bin/defaults", ["read", path.join(appDir, "Contents", "Info"), "CFBundleIdentifier"], { timeoutMs: 30_000 });
+    assert.equal(ident.stdout.trim(), BUNDLE_ID, `bundle id ${JSON.stringify(ident.stdout.trim())} != ${BUNDLE_ID}; the cask quit stanza would miss`);
     let bin;
     try {
       bin = await resolveCliBin(room);
@@ -634,21 +636,35 @@ export async function auditZap(ctx, cask, homeBefore) {
   });
 }
 
-async function developerFingerprint() {
-  // Prove the developer's own install was never touched: a stable fingerprint
-  // of the real app and data dir, compared again after the run.
-  const probe = async (p) => {
-    try {
-      const s = await lstat(p);
-      return `${p} mtime=${s.mtimeMs} size=${s.size}`;
-    } catch {
-      return `${p} ABSENT`;
-    }
-  };
-  return [
-    await probe("/Applications/Drogon.app"),
-    await probe(path.join(process.env.HOME ?? "~", "Library", "Application Support", "Drogon")),
-  ].join("\n");
+export function developerDataDir() {
+  return path.join(process.env.HOME ?? "~", "Library", "Application Support", "Drogon");
+}
+
+// Prove the developer's own install was never touched. The app bundle must be
+// byte-stable across the run, full stop. The data dir churns under normal use
+// while the developer's own daemon is live, so it is asserted strictly only
+// when no live developer daemon owns it — otherwise the step SKIPs instead of
+// crying wolf over someone else's session writes.
+export async function developerAppFingerprint() {
+  try {
+    const s = await lstat("/Applications/Drogon.app");
+    return `/Applications/Drogon.app mtime=${s.mtimeMs} size=${s.size}`;
+  } catch {
+    return "/Applications/Drogon.app ABSENT";
+  }
+}
+
+export async function developerDaemonLive() {
+  const devDir = developerDataDir();
+  const list = await runHostCommand("/bin/ps", ["-axo", "command="], { timeoutMs: 20_000 });
+  if (list.code !== 0) return true; // fail open into SKIP, never into PASS
+  return list.stdout.split("\n").some((line) => {
+    const command = line.trim();
+    return (
+      command.includes(`--data-dir ${devDir}`) &&
+      command.includes("drogond")
+    );
+  });
 }
 
 async function readTapCask(tapDir) {
@@ -715,7 +731,8 @@ async function main() {
     if (process.platform !== "darwin") {
       skipStep(steps, "clean-room brew audit", `requires macOS, running on ${process.platform}`);
     } else {
-      const fingerprintBefore = await developerFingerprint();
+      const appBefore = await developerAppFingerprint();
+      const dataBefore = await snapshotTree(developerDataDir());
       ({ room, brewEnv } = await makeCleanRoom());
       cleanup.roomPath = room.dir;
       const homeBefore = await snapshotTree(room.home);
@@ -781,11 +798,16 @@ async function main() {
         }
         fromEntry = toEntry;
         if (!options.fromRev) {
+          // Newest version strictly older than TO: history-newest-first can
+          // surface a reverted newer bump (served briefly, then pulled), and
+          // upgrading DOWN to the current tap version is a downgrade, not the
+          // previous -> current path a user walks.
           for (const rev of await tapCaskRevs(tapDir)) {
             const candidate = await readCaskAtRev(tapDir, rev);
-            if (candidate.version !== toEntry.version) {
-              fromEntry = candidate;
-              break;
+            if (compareDrogonVersions(candidate.version, toEntry.version) === -1) {
+              if (!fromEntry || compareDrogonVersions(fromEntry.version, candidate.version) === -1) {
+                fromEntry = candidate;
+              }
             }
           }
         } else {
@@ -795,6 +817,13 @@ async function main() {
         }
         versions.from = fromEntry.version;
         versions.to = toEntry.version;
+        if (fromEntry.version !== toEntry.version) {
+          assert.equal(
+            compareDrogonVersions(fromEntry.version, toEntry.version),
+            -1,
+            `refusing a downgrade pair: from=${fromEntry.version} to=${toEntry.version}`,
+          );
+        }
         return `from=${fromEntry.version}@${fromEntry.rev.slice(0, 12)} to=${toEntry.version}@${toEntry.rev.slice(0, 12)}`;
       });
 
@@ -862,11 +891,18 @@ async function main() {
         await tapCheckout(tapDir, fromEntry.rev);
         const caskFrom = await readTapCask(tapDir);
         const leg = legRunner();
-        const prevInstalled = await leg(`install previous ${caskFrom.version}`, async () => {
-          await brew(brewBin, brewEnv, ["install", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
-          assert.ok(await pathExists(appDir), "previous-version app missing after install");
-          return { cliBin: await resolveCliBin(room) };
-        });
+        const prevInstalled = await leg(`install previous ${caskFrom.version}`, async () =>
+          step(steps, `install previous ${caskFrom.version}`, async () => {
+            const result = await brew(brewBin, brewEnv, ["install", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
+            const tail = result.stderr.slice(-1500) || result.stdout.slice(-1500);
+            assert.ok(await pathExists(appDir), `previous-version app missing after install\n${tail}`);
+            try {
+              return { cliBin: await resolveCliBin(room) };
+            } catch {
+              throw new Error(`binary shim missing after install\n${tail}`);
+            }
+          }),
+        );
         const prevCli = prevInstalled?.cliBin ?? null;
         const seeded = prevCli
           ? await leg(`launch previous ${caskFrom.version}`, () => auditLaunch(ctx, appDir, prevCli, `launch previous ${caskFrom.version}`))
@@ -921,11 +957,28 @@ async function main() {
         }
       }
 
-      const fingerprintAfter = await developerFingerprint();
-      await step(steps, "developer install untouched", async () => {
-        assert.equal(fingerprintAfter, fingerprintBefore, `developer's install changed:\nbefore:\n${fingerprintBefore}\nafter:\n${fingerprintAfter}`);
-        return fingerprintBefore.replaceAll("\n", " | ");
+      const appAfter = await developerAppFingerprint();
+      await step(steps, "developer app bundle untouched", async () => {
+        assert.equal(appAfter, appBefore, `developer's app changed:\nbefore: ${appBefore}\nafter: ${appAfter}`);
+        return appBefore;
       });
+      if (await developerDaemonLive()) {
+        skipStep(
+          steps,
+          "developer data dir unchanged",
+          "developer's own daemon is live, so its session writes are expected; the run's isolation (fresh HOME/DROGON_DATA_DIR on every child) is the guard",
+        );
+      } else {
+        const dataAfter = await snapshotTree(developerDataDir());
+        await step(steps, "developer data dir unchanged", async () => {
+          assert.deepEqual(
+            [...dataAfter].sort(),
+            [...dataBefore].sort(),
+            "developer's data dir changed while no developer daemon was live",
+          );
+          return `${dataAfter.size} entries, identical`;
+        });
+      }
     }
   } catch (error) {
     runError = error;
