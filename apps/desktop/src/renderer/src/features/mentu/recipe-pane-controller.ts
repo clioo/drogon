@@ -34,7 +34,7 @@ import {
 import { buildRecipeGraph, type RecipeGraph } from "./recipe-graph";
 import { subscribeWorkspaceFilesChanged } from "../file-explorer/files-watch";
 import { useMentuState } from "./mentu-store";
-import { useHarnessCatalog } from "./mentu-harness-catalog";
+import { useHarnessCatalog } from "../agent-runtime/harness-catalog";
 import type { MentuRuntimeMessageKind } from "./MentuRuntimeMessage";
 import type {
   MentuRecipeDefinition,

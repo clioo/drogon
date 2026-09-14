@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 // MIT Copyright (c) 2026 Lovecast Inc.
-// The Mentu inspector's Harness / backend select must render the real
-// registered-harness catalog, honestly reflect a failed load, and support
+// Agent-runtime selectors must render the real registered-harness catalog,
+// honestly reflect a failed load, and support
 // an explicit manual refresh — never invent harnesses or silently retry
 // into fiction.
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { Harness } from "../../../../shared/session-contract";
-import { useHarnessCatalog } from "./mentu-harness-catalog";
+import { useHarnessCatalog } from "./harness-catalog";
 
 afterEach(() => {
   cleanup();

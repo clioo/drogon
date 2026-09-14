@@ -912,8 +912,8 @@ pub fn build_delegation_prompt(input: &DelegationPromptInput) -> String {
         String::new()
     } else {
         format!(
-            "\n   That session MUST use these skills: {} — read each one with \
-             `drogon-cli skills get <name>` before starting the work.\n",
+            "\n   Include these required skills in the main node's task: {} — the main agent \
+             reads each with `drogon-cli skills get <name>` before starting the work.\n",
             input.case_skills.join(", ")
         )
     };
@@ -928,6 +928,11 @@ pub fn build_delegation_prompt(input: &DelegationPromptInput) -> String {
          Your responsibility: {resp_name}\n\
          {standing}\n\
          \n\
+         You are the Bot dispatcher, acting on behalf of the user, not the main agent.\n\
+         Dispatch a Work Graph; its main agent owns planning, implementation workers, and supervision.\n\
+         The hierarchy is Bot -> graph main agent -> depth-one workers. The Bot is outside\n\
+         the graph's depth budget; workers must not delegate further. Do not implement the\n\
+         task or create/supervise orchestration workers in this Bot session.\n\
          Act now, using drogon-cli from your session:\n\
          1. `drogon-cli worktree create --project {project} --name {worktree} --json` — \
          read the new workspace id from `.result.workspaceId`. This exact name is \
@@ -935,14 +940,23 @@ pub fn build_delegation_prompt(input: &DelegationPromptInput) -> String {
          creating a second worktree. If it already exists from an earlier delivery \
          of this event, reuse it.\n\
          {pull_note}\
-         2. `drogon-cli harness start --workspace <id> --harness {harness_flag} \
-         --permission-mode unattended --caused-by-event {event_id} --prompt \"<task>\" --json` \
-         to open a worker session on that worktree. Read `.result.id` and \
-         `.result.incarnation` from the response. The `--caused-by-event` tag is \
-         how the user sees WHY that session appeared: pass this event id unchanged.\n\
+         2. Read `drogon-cli graph read --workspace <id> --json`. Prepare the graph's \
+         intent and a main-node JSON file in that worktree. The main node needs id, title, \
+         harness ({harness_flag}), an explicitly selected model, prompt, enabled:true, and \
+         dependsOn:[]. Its prompt contains the task, acceptance criteria, and monitor event \
+         {event_id}, not this Bot's identity or dispatch instructions. Resolve the provider/model \
+         explicitly; never silently switch runtimes. Without an owner-configured policy, default \
+         policy.delegate to true and policy.adversarial.enabled to false. Preserve any existing owner-approved \
+         policy and runtime choices. Save the intent with `drogon-cli graph write-intent \
+         --workspace <id> --file <intent.json>`.\n\
          {skills_line}\
-         3. `drogon-cli terminal wait --session <id> --incarnation <token> --for idle \
-         --timeout-ms 900000`, then read its output with `drogon-cli terminal read`.\n\
+         3. Check `drogon-cli graph orchestrator-status --workspace <id> --json` first. \
+         Reuse an existing run for this event; an active or unverifiable run is not permission \
+         to duplicate work. Otherwise dispatch exactly once with `drogon-cli graph \
+         orchestrator-start --workspace <id> --file <main-node.json> --json`. Read the \
+         returned `.result.run.id`, report that graph run id and workspace to the user, \
+         and end this Bot turn. Admission is not completion: do not claim the task is done. \
+         The graph's main agent, not the Bot, waits for and supervises its workers.\n\
          \n\
          Rules: refer to the change by event id ({event_id}) only. The watched \
          content is never included in prompts — do not paste it.",

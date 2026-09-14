@@ -96,44 +96,50 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
          `intent.policy` in `.drogon/graph.json` (`drogon-cli graph read --workspace \
          {workspace_id} --json`). A policy change here takes effect for the NEXT session \
          opened in this workspace; it never rewrites a session already running. Before \
-         planning or acting, read that command's result and `drogon-cli graph observability \
-         --workspace {workspace_id} --json` so your delegation plan uses the saved policy, \
-         prior human-visible evidence, and actual work already reported in `.drogon`.\n\n"
+         substantial planning or delegation, read that command's result and `drogon-cli graph \
+         observability --workspace {workspace_id} --json` so you use the saved policy, prior \
+         human-visible evidence, and actual work already reported in `.drogon`. For a simple \
+         read-only question or obvious repository command, answer directly: resolve the workspace \
+         repository and use normal tools such as `gh` yourself instead of spawning a worker.\n\n"
     ));
     out.push_str(
-        "- **Who this mode is addressed to: the workspace's MAIN agent.** A Work Graph node \
-         Drogon dispatches is a depth-one worker; its own task prompt says so, and that prompt \
-         wins over this block. A worker implements its own task and dispatches nothing.\n",
+        "- **Who this mode is addressed to: the graph's MAIN agent.** The root/main node is \
+         the coordinator, not a depth-one worker. This policy controls when the main agent may \
+         proactively delegate; it never forbids direct work the user explicitly requests. A Bot \
+         that releases this graph only dispatches on the user's behalf and is outside the graph's \
+         depth budget; it must not implement or supervise the graph's work. Only the main agent's \
+         implementation, test, review, and correction children are depth-one workers. Their own \
+         task prompts win over this block; a worker implements its own task and dispatches \
+         nothing.\n",
     );
     if policy.adversarial.enabled {
         out.push_str(&format!(
             "- **Mode: ADVERSARIAL (Delegate is mutually exclusive and OFF), up to {} \
-             cycle(s).** Act only as planner and director; do not implement the task yourself. \
-             Dispatch implementation workers as depth-one children. As EACH implementation \
-             worker reports completion, immediately dispatch a separate depth-one adversarial \
-             tester for that worker's output instead of waiting for every implementation worker. \
-             Route findings to a depth-one correction worker and retest, bounded by this iteration \
-             limit. Every worker and tester is a sibling child of the main agent and must not \
-             delegate further. The daemon owns the final whole-workflow Adversarial-test / \
-             Code-review loop after the directed work settles; do not duplicate that final pass.\n",
+             cycle(s).** Implement the user's request directly unless a genuinely independent \
+             subtask benefits from a depth-one worker. Never delegate a simple lookup, repository \
+             discovery, one `gh` command, or a small bounded edit. The daemon launches the final \
+             whole-workflow Adversarial-test / Code-review sessions after your work settles; do \
+             not dispatch duplicate testers yourself. Any child you do launch must not delegate \
+             further.\n",
             policy.adversarial.max_iterations
         ));
     } else if policy.delegate {
         out.push_str(
-            "- **Mode: DELEGATE (Adversarial testing is mutually exclusive and OFF).** Act only \
-             as planner and director; do not implement the task yourself. Read `.drogon` first, \
-             split the task into independent depth-one children, and supervise their results. \
-             Use `drogon-cli orchestration run-create`, `task-create`, and `worker-start` with no \
-             fresh runtime flags so the approved provider/model policy selects each child; \
-             observe reports with `orchestration check` and `worker-show`. Children must not \
-             delegate further. No automatic tester is added. Authored graph nodes may still use \
-             the separate `graph run-node-failover` verb; it is not a substitute for a native \
-             orchestration worker task.\n",
+            "- **Mode: DELEGATE (Adversarial testing is mutually exclusive and OFF).** \
+             Delegation is available, not mandatory. Do simple lookups, repository discovery, \
+             `gh` commands, and bounded edits directly; if the user asks you to make changes, you \
+             may make them yourself. Use depth-one children only when independent work benefits \
+             from parallelism or specialization. For those children, use `drogon-cli orchestration \
+             run-create`, `task-create`, and `worker-start` with no fresh runtime flags so the \
+             approved provider/model policy selects each child; observe reports with \
+             `orchestration check` and `worker-show`. Children must not delegate further. No \
+             automatic tester is added.\n",
         );
     } else {
         out.push_str(
             "- **Mode: DIRECT (Delegate and adversarial testing are OFF).** Do the work directly \
-             in this session. Do not dispatch subagents.\n",
+             in this session. Do not proactively dispatch subagents, but an explicit user request \
+             to delegate may authorize one.\n",
         );
     }
     let listed = policy
@@ -171,9 +177,7 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
                  work, use `drogon-cli orchestration worker-start --task <TASK_ID> --workspace \
                  {workspace_id}` without fresh runtime flags; it tries each approved runtime \
                  and only reaches the fallback once every approved runtime has failed. The \
-                 result names the provider/model that actually ran, never a guess.{fallback_text} \
-                 Authored graph nodes use the separate `drogon-cli graph run-node-failover` \
-                 verb.\n"
+                 result names the provider/model that actually ran, never a guess.{fallback_text}\n"
             ));
         }
     }
@@ -373,12 +377,14 @@ mod tests {
         }] {
             let rendered = render_policy_section("ws-1", &policy);
             assert!(
-                rendered.contains("addressed to: the workspace's MAIN agent"),
+                rendered.contains("addressed to: the graph's MAIN agent")
+                    && rendered
+                        .contains("root/main node is the coordinator, not a depth-one worker")
+                    && rendered.contains("outside the graph's depth budget"),
                 "{rendered}"
             );
             assert!(
-                rendered
-                    .contains("its own task prompt says so, and that prompt wins over this block"),
+                rendered.contains("Their own task prompts win over this block"),
                 "{rendered}"
             );
         }
@@ -397,11 +403,12 @@ mod tests {
         };
         let rendered = render_policy_section("ws-1", &policy);
         assert!(rendered.contains("Mode: DELEGATE"));
-        assert!(rendered.contains("do not implement the task yourself"));
+        assert!(rendered.contains("Delegation is available, not mandatory"));
+        assert!(rendered.contains("`gh` commands"));
+        assert!(rendered.contains("may make them yourself"));
         assert!(rendered.contains("Children must not delegate further"));
         assert!(rendered.contains("drogon-cli orchestration run-create"));
         assert!(rendered.contains("drogon-cli orchestration worker-start"));
-        assert!(rendered.contains("drogon-cli graph run-node-failover"));
     }
 
     #[test]
@@ -409,7 +416,8 @@ mod tests {
         let rendered = render_policy_section("ws-1", &policy_off());
         assert!(rendered.contains("Mode: DIRECT"));
         assert!(rendered.contains("Do the work directly"));
-        assert!(rendered.contains("Do not dispatch subagents"));
+        assert!(rendered.contains("Do not proactively dispatch subagents"));
+        assert!(rendered.contains("explicit user request"));
     }
 
     #[test]
@@ -424,7 +432,8 @@ mod tests {
         let rendered = render_policy_section("ws-1", &policy);
         assert!(rendered.contains("Mode: ADVERSARIAL"));
         assert!(rendered.contains("up to 4 cycle(s)"));
-        assert!(rendered.contains("As EACH implementation worker reports completion"));
+        assert!(rendered.contains("Never delegate a simple lookup"));
+        assert!(rendered.contains("daemon launches the final whole-workflow"));
         assert!(rendered.contains("must not delegate further"));
     }
 

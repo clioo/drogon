@@ -22,7 +22,6 @@ import type {
 import type { Session } from "../../../../shared/session-contract";
 import {
 } from "../../../../shared/work-graph-contract";
-import { isMentuMainSessionLive } from "../mentu/mentu-run-dispatch";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
@@ -141,8 +140,7 @@ function MainAgentNode({
   /** What the NEXT run will execute (the configured main task). The
    *  session's own harness is a different fact and lives in the inspector. */
   task?: { harness: string; model: string; prompt: string };
-  /** Delegate/adversarial preview: the main agent directs instead of
-   *  implementing. */
+  /** Delegate/adversarial preview: native depth-one helpers are available. */
   director?: boolean;
   mainSession: Session | null;
   /** True when `mainSession` is the last OBSERVED record, not a fresh
@@ -161,7 +159,7 @@ function MainAgentNode({
       <div className="flex flex-wrap gap-1">
         <Chip>{task.harness}</Chip>
         <Chip>{task.model || "Harness default"}</Chip>
-        {director ? <Chip>Director</Chip> : null}
+        {director ? <Chip>Workers available</Chip> : null}
       </div>
       <p className="line-clamp-3 text-xs text-muted-foreground">
         {task.prompt || "Configure the main task"}
@@ -193,7 +191,10 @@ function MainAgentNode({
       </div>
     );
   }
-  const live = !stale && isMentuMainSessionLive(mainSession);
+  const live =
+    !stale &&
+    mainSession.verdict !== "exited" &&
+    mainSession.agentState !== "exited";
   const exited = mainSession.verdict === "exited";
   const guardActive = !exited;
   const dataState = live ? "live" : exited ? "exited" : "unverifiable";
@@ -813,7 +814,7 @@ export function OrchestratorCanvas({
                       <Chip>Subagent policy</Chip>
                     </div>
                     <p className="text-[11px] text-muted-foreground">
-                      Planned and supervised by the main agent
+                      Available when useful; main may work directly
                     </p>
                   </div>
                 </>
@@ -962,7 +963,7 @@ export function OrchestratorCanvas({
                 data-testid="orchestrator-no-subagents-caption"
               >
                 {previewDelegates
-                  ? "Delegate mode · depth-1 implementation workers"
+                  ? "Depth-1 workers available when useful"
                   : "Direct mode · main agent works without subagents"}
               </p>
             )}

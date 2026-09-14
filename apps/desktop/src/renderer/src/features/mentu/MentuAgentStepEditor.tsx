@@ -14,7 +14,7 @@
 //
 // Live catalog edition: the searchable picker, its status line, the
 // provenance row and the per-model notes are driven by the daemon's real
-// `harness.models` answer (projected by `mentu-model-registry.ts`) —
+// `harness.models` answer (projected by the shared model registry) —
 // host-enumerated entries (the only verified ones), the curated known
 // catalog (marked unverified), then recipe-observed ids ("from this
 // recipe", unverified). The picker is always available for an agent step
@@ -28,8 +28,11 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import type { ApprovedSelectionVerdict } from "./mentu-approved-selection";
-import type { ModelCatalogReadout, ModelOption } from "./mentu-model-registry";
-import { MentuModelPicker } from "./MentuModelPicker";
+import type { ModelCatalogReadout } from "./mentu-model-registry";
+import {
+  ModelPicker,
+  type ModelOption,
+} from "../agent-runtime/ModelPicker";
 
 const VERDICT_TONE: Record<ApprovedSelectionVerdict["kind"], string> = {
   unavailable: "text-destructive",
@@ -92,7 +95,7 @@ export function MentuAgentStepEditor({
             className="h-8 text-xs"
             aria-describedby="recipe-step-selection-verdict"
           />
-          <MentuModelPicker
+          <ModelPicker
             options={modelOptions}
             selected={model}
             disabled={disabled}

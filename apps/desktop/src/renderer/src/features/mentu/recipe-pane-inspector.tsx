@@ -54,7 +54,10 @@ import {
   modelCatalogReadout,
   modelOptionsFromCatalog,
 } from "./mentu-model-registry";
-import { isRegisteredHarness, useMentuModelCatalog } from "./mentu-model-catalog";
+import {
+  isRegisteredHarness,
+  useModelCatalog,
+} from "../agent-runtime/model-catalog";
 import {
   classifySelection,
   conflictMessage,
@@ -345,7 +348,7 @@ export function SelectedNodeInspector({
   // harness the step would run with. An explicit `modelCatalog` prop
   // (tests, preloaded answers) replaces it whole.
   const backendRegistered = isRegisteredHarness(effectiveBackend);
-  const liveModelCatalog = useMentuModelCatalog(backendRegistered ? effectiveBackend : "");
+  const liveModelCatalog = useModelCatalog(backendRegistered ? effectiveBackend : "");
   const catalogOverride = modelCatalog !== undefined;
   const resolvedModelCatalog = catalogOverride
     ? (modelCatalog ?? null)

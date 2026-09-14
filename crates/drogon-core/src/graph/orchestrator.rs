@@ -6,15 +6,13 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::{compiler, failover, observability, store};
-use crate::mentu::{execution, run_record, storage};
-use crate::{Engine, error};
+use super::{failover, observability, store};
+use crate::{Engine, error, session};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use drogon_protocol::graph::{
-    GraphFailoverAttemptRecord, GraphIntent, GraphNodeIntent, GraphOrchestratorRun as Run,
+    GraphFailoverAttemptRecord, GraphNodeIntent, GraphOrchestratorRun as Run,
     GraphOrchestratorStep as Step, GraphPolicy, GraphRuntimeRef,
 };
-use drogon_protocol::mentu::MentuRunStatus;
 use drogon_protocol::{Request, RpcError};
 use rusqlite::OptionalExtension as _;
 use serde::Deserialize;
@@ -108,6 +106,32 @@ fn next_orchestrator_updated_at(previous: &str) -> Result<String, RpcError> {
 
 fn parse<T: serde::de::DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
     serde_json::from_value(value.clone()).map_err(|e| error::invalid_argument(e.to_string()))
+}
+
+const NATIVE_SESSION_RUN_PREFIX: &str = "session:";
+
+fn encode_session_run_id(session_id: &str, incarnation: &str) -> String {
+    format!("{NATIVE_SESSION_RUN_PREFIX}{session_id}:{incarnation}")
+}
+
+fn decode_session_run_id(run_id: &str) -> Option<(&str, &str)> {
+    run_id
+        .strip_prefix(NATIVE_SESSION_RUN_PREFIX)?
+        .split_once(':')
+}
+
+fn runtime_launch_parts(runtime: &GraphRuntimeRef) -> (Option<String>, String) {
+    if let Some(provider) = runtime.provider.as_ref().filter(|value| !value.is_empty()) {
+        return (Some(provider.clone()), runtime.model.clone());
+    }
+    if runtime.harness == "pi"
+        && let Some((provider, model)) = runtime.model.split_once('/')
+        && !provider.is_empty()
+        && !model.is_empty()
+    {
+        return (Some(provider.to_string()), model.to_string());
+    }
+    (None, runtime.model.clone())
 }
 
 /// Refuse only the ambiguous bare Pi ids the host's own model catalog can
@@ -349,50 +373,31 @@ impl Engine {
             let mut run = engine.find_orchestrator(&parsed)?;
             if matches!(run.status.as_str(), "running" | "unverifiable") {
                 if let Some(id) = run.steps.last().and_then(|step| step.run_id.as_ref()) {
-                    if execution::is_tracked(id) {
-                        execution::cancel(id);
-                        run.status = "stopping".into();
-                    } else {
-                        let child = storage::get_run(&engine.db.lock().unwrap(), id)?;
-                        if child
-                            .as_ref()
-                            .is_some_and(|child| child.status == MentuRunStatus::Succeeded)
-                        {
-                            let step = run.steps.last_mut().unwrap();
-                            let verdict = if step.phase == "main" {
-                                Some("pass".into())
-                            } else {
-                                read_verdict(
-                                    &engine.workspace_path(&run.workspace_id)?,
-                                    &step.node_id,
-                                )?
-                            };
-                            if let Some(verdict) = verdict {
-                                step.status = "succeeded".into();
-                                step.verdict = Some(verdict);
-                                if let Some(attempt) = step.attempts.last_mut() {
-                                    attempt.outcome = "succeeded".into();
-                                }
-                                finish_step(&mut run);
-                                if run.status == "running" {
-                                    run.status = "stopped".into();
-                                }
-                            } else {
+                    if let Some((session_id, incarnation)) = decode_session_run_id(id) {
+                        match engine.do_session_stop(&json!({
+                            "sessionId": session_id,
+                            "incarnation": incarnation,
+                        })) {
+                            Ok(stopped) if stopped["verdict"] == "exited" => {
                                 run.status = "stopped".into();
+                                run.steps.last_mut().unwrap().status = "stopped".into();
                             }
-                        } else {
-                            run.status = if child.is_some_and(|child| {
-                                matches!(
-                                    child.status,
-                                    MentuRunStatus::Failed | MentuRunStatus::Cancelled
-                                )
-                            }) {
-                                "stopped"
-                            } else {
-                                "unverifiable"
+                            Ok(_) => run.status = "unverifiable".into(),
+                            Err(err) if err.code == "not_found" => {
+                                run.status = "unverifiable".into();
+                                run.error = Some(
+                                    "The native session record is missing, so Drogon cannot confirm that its process exited."
+                                        .into(),
+                                );
                             }
-                            .into();
+                            Err(err) => return Err(err),
                         }
+                    } else {
+                        run.status = "unverifiable".into();
+                        run.error = Some(
+                            "This workflow predates native session execution; its process cannot be controlled by this build."
+                                .into(),
+                        );
                     }
                 } else if run
                     .steps
@@ -575,118 +580,122 @@ impl Engine {
             run.error = Some("Daemon interrupted during launch; no retry is safe without confirming the worker exited.".into());
             return Ok(());
         }
-        if let Some(id) = &step.run_id {
-            let child = storage::get_run(&self.db.lock().unwrap(), id)?;
-            let Some(child) = child else {
+        if let Some(id) = step.run_id.clone() {
+            let Some((session_id, incarnation)) = decode_session_run_id(&id) else {
                 step.status = "unverifiable".into();
                 run.status = "unverifiable".into();
+                run.error = Some(
+                    "This workflow predates native session execution; its process cannot be observed by this build."
+                        .into(),
+                );
                 return Ok(());
             };
-            if child.status == MentuRunStatus::Unavailable {
+            let handle = self.sessions.lock().unwrap().get(session_id).cloned();
+            let retained = handle.is_some();
+            let snapshot = match handle {
+                Some(handle) => {
+                    session::check_incarnation(&handle, incarnation)?;
+                    session::snapshot(&handle)
+                }
+                None => match self.session_row_as_value(session_id, incarnation) {
+                    Ok(snapshot) => snapshot,
+                    Err(err) if err.code == "not_found" => {
+                        step.status = "unverifiable".into();
+                        run.status = "unverifiable".into();
+                        run.error = Some(
+                            "The native session record is missing, so its process outcome is unverifiable."
+                                .into(),
+                        );
+                        return Ok(());
+                    }
+                    Err(err) => return Err(err),
+                },
+            };
+            if snapshot["verdict"] == "live" && retained {
+                return Ok(());
+            }
+            if snapshot["verdict"] != "exited" {
                 step.status = "unverifiable".into();
                 run.status = "unverifiable".into();
                 return Ok(());
             }
-            if child.status == MentuRunStatus::Running {
-                if !execution::is_tracked(id) {
-                    step.status = "unverifiable".into();
-                    run.status = "unverifiable".into();
-                }
-                return Ok(());
-            }
-            if execution::is_tracked(id) {
-                return Ok(());
-            }
-            if run.status == "stopping" || child.status == MentuRunStatus::Cancelled {
+            if run.status == "stopping" {
                 run.status = "stopped".into();
                 step.status = "stopped".into();
                 return Ok(());
             }
-            if child.status == MentuRunStatus::Succeeded {
-                let evaluation = if run.phase == "main" {
+            let exit_code = snapshot["exitCode"].as_i64();
+            let evaluation = if exit_code == Some(0) {
+                if run.phase == "main" {
                     Some(("pass".to_string(), None))
                 } else {
                     read_evaluation(&root, &step.node_id)?
                         .map(|(verdict, evidence)| (verdict, Some(evidence)))
-                };
-                if let Some((verdict, evidence)) = evaluation {
-                    step.status = "succeeded".into();
-                    step.verdict = Some(verdict.clone());
-                    if let Some(attempt) = step.attempts.last_mut() {
-                        attempt.outcome = "succeeded".into();
-                    }
-                    let (iteration, phase, node_id, runtime) = (
-                        step.iteration,
-                        step.phase.clone(),
-                        step.node_id.clone(),
-                        step.runtime
-                            .as_ref()
-                            .map(describe_runtime)
-                            .unwrap_or_default(),
-                    );
-                    let mentu_run = child.mentu_run_id.clone().unwrap_or_default();
-                    finish_step(run);
-                    if phase == "main" {
-                        self.record_telemetry(
-                            run,
-                            "completed",
-                            format!("Iteration {iteration} · main agent finished its task on {runtime}"),
-                            Some(format!(
-                                "Node {node_id} · Mentu run {mentu_run}\nTask as given to the agent:\n{}\n\n{}",
-                                run.main.prompt,
-                                if run.policy.adversarial.enabled {
-                                    "Adversarial testing is on: a test agent now tries to break this work, and a review agent judges what it found."
-                                } else {
-                                    "Adversarial testing is off: the workflow ends here."
-                                }
-                            )),
-                            vec![],
-                            &node_id,
-                            "main",
-                        );
-                    } else {
-                        let status = if verdict == "pass" {
-                            "completed"
-                        } else {
-                            "finding"
-                        };
-                        self.record_telemetry(
-                            run,
-                            status,
-                            format!(
-                                "Iteration {iteration} · {phase} verdict: {verdict} · {runtime}"
-                            ),
-                            Some(format!(
-                                "Node {node_id} · Mentu run {mentu_run}\nWhat the {phase} agent reported as its evidence:\n{}",
-                                evidence.unwrap_or_default()
-                            )),
-                            vec![result_path(&node_id)],
-                            &node_id,
-                            &phase,
-                        );
-                    }
-                    return Ok(());
                 }
-            }
-            let shell_adapter = step
-                .runtime
-                .as_ref()
-                .is_some_and(|runtime| matches!(runtime.harness.as_str(), "pi" | "opencode"));
-            let stderr_reason = if shell_adapter {
-                child.mentu_run_id.as_deref().and_then(|mentu_run_id| {
-                    run_record::read_run_json(&root, mentu_run_id)
-                        .ok()
-                        .flatten()
-                        .and_then(|run_json| {
-                            run_record::shell_step_stderr_tail(&root, mentu_run_id, &run_json)
-                        })
-                })
             } else {
                 None
             };
-            let reason = stderr_reason
-                .or(child.error)
-                .unwrap_or_else(|| "Worker did not produce a valid evaluation result.".into());
+            if let Some((verdict, evidence)) = evaluation {
+                step.status = "succeeded".into();
+                step.verdict = Some(verdict.clone());
+                if let Some(attempt) = step.attempts.last_mut() {
+                    attempt.outcome = "succeeded".into();
+                }
+                let (iteration, phase, node_id, runtime) = (
+                    step.iteration,
+                    step.phase.clone(),
+                    step.node_id.clone(),
+                    step.runtime
+                        .as_ref()
+                        .map(describe_runtime)
+                        .unwrap_or_default(),
+                );
+                finish_step(run);
+                if phase == "main" {
+                    self.record_telemetry(
+                        run,
+                        "completed",
+                        format!("Iteration {iteration} · main agent finished its task on {runtime}"),
+                        Some(format!(
+                            "Node {node_id} · session {session_id}\nTask as given to the agent:\n{}\n\n{}",
+                            run.main.prompt,
+                            if run.policy.adversarial.enabled {
+                                "Adversarial testing is on: a test agent now tries to break this work, and a review agent judges what it found."
+                            } else {
+                                "Adversarial testing is off: the workflow ends here."
+                            }
+                        )),
+                        vec![],
+                        &node_id,
+                        "main",
+                    );
+                } else {
+                    let status = if verdict == "pass" {
+                        "completed"
+                    } else {
+                        "finding"
+                    };
+                    self.record_telemetry(
+                        run,
+                        status,
+                        format!("Iteration {iteration} · {phase} verdict: {verdict} · {runtime}"),
+                        Some(format!(
+                            "Node {node_id} · session {session_id}\nWhat the {phase} agent reported as its evidence:\n{}",
+                            evidence.unwrap_or_default()
+                        )),
+                        vec![result_path(&node_id)],
+                        &node_id,
+                        &phase,
+                    );
+                }
+                return Ok(());
+            }
+            let reason = match exit_code {
+                Some(code) if code != 0 => {
+                    format!("Native agent session exited with code {code}.")
+                }
+                _ => "Agent session did not produce a valid evaluation result.".into(),
+            };
             if let Some(attempt) = step.attempts.last_mut() {
                 attempt.outcome = "failed".into();
                 attempt.reason = Some(reason.clone());
@@ -700,19 +709,16 @@ impl Engine {
                     .as_ref()
                     .map(describe_runtime)
                     .unwrap_or_default(),
-                child.mentu_run_id.clone().unwrap_or_default(),
             );
             step.run_id = None;
             step.status = "pending".into();
-            let (iteration, phase, node_id, attempt_no, runtime, mentu_run) = failed;
+            let (iteration, phase, node_id, attempt_no, runtime) = failed;
             self.record_telemetry(
                 run,
                 "failed",
-                format!(
-                    "Iteration {iteration} · {phase}: attempt {attempt_no} on {runtime} failed"
-                ),
+                format!("Iteration {iteration} · {phase}: attempt {attempt_no} on {runtime} failed"),
                 Some(format!(
-                    "Node {node_id} · Mentu run {mentu_run}\nReason: {reason}\nThe next approved runtime is tried, then the fallback; the workflow fails only when every configured runtime failed."
+                    "Node {node_id} · session {session_id}\nReason: {reason}\nThe next approved runtime is tried, then the fallback; the workflow fails only when every configured runtime failed."
                 )),
                 vec![],
                 &node_id,
@@ -747,35 +753,21 @@ impl Engine {
         if evaluation_file.exists() {
             std::fs::remove_file(&evaluation_file).map_err(|e| error::io_error(e.to_string()))?;
         }
-        let intent = GraphIntent {
-            nodes: vec![node.clone()],
-            policy: run.policy.clone(),
-        };
+        let (provider, model) = runtime_launch_parts(&candidate);
+        let mut launch = json!({
+            "workspaceId": run.workspace_id,
+            "harnessId": candidate.harness,
+            "model": model,
+            "prompt": node.prompt,
+            "headless": true,
+        });
+        if let Some(provider) = provider {
+            launch["provider"] = json!(provider);
+        }
         let launched = (|| {
-            let mut compiled = compiler::compile_for(
-                &intent,
-                &compiler::Selection::Target(node.id.clone()),
-                &compiler::PiProviderDefaults::from_env(),
-                // The main phase IS this workspace's main agent: its prompt
-                // already carries the mode. The test and review roles are
-                // dispatched workers like any other node.
-                (run.phase == "main").then_some(node.id.as_str()),
-            )?;
-            let runtime = crate::mentu::runtime::require_verified_runtime(self.data_dir())?;
-            // No `expected_changes` on any phase, on purpose. The main and
-            // review agents change the workspace by design and the test
-            // agent writes its evidence file; the daemon reads the runtime's
-            // drift as advisory for graph runs (`WorkspaceAttestation`) and
-            // reads the verdict from `result_path` itself. Declaring paths
-            // here would make the pinned runtime auto-commit every matching
-            // change as `chore: mentu-recipes step …` in the owner's repo.
-            compiler::validate_and_persist(&runtime, &root, &mut compiled)?;
-            if let Some(finding) = compiled.findings.iter().find(|finding| finding.is_error()) {
-                return Err(error::invalid_argument(finding.message.clone()));
-            }
             run.steps.last_mut().unwrap().status = "dispatching".into();
             self.save_orchestrator(run)?;
-            self.launch_compiled(&run.workspace_id, &[node.id], &mut compiled)
+            self.do_harness_start(&launch)
         })();
         let step = run.steps.last_mut().unwrap();
         step.runtime = Some(candidate.clone());
@@ -791,8 +783,13 @@ impl Engine {
         let runtime = describe_runtime(&candidate);
         match launched {
             Ok(child) => {
-                let mentu_run = child.mentu_run_id.clone().unwrap_or_default();
-                step.run_id = Some(child.id);
+                let session_id = child["id"].as_str().ok_or_else(|| {
+                    error::internal_error("Native session launch returned no id.")
+                })?;
+                let incarnation = child["incarnation"].as_str().ok_or_else(|| {
+                    error::internal_error("Native session launch returned no incarnation.")
+                })?;
+                step.run_id = Some(encode_session_run_id(session_id, incarnation));
                 step.status = "running".into();
                 step.attempts.push(GraphFailoverAttemptRecord {
                     harness: candidate.harness,
@@ -820,7 +817,7 @@ impl Engine {
                         "Iteration {iteration} · {phase}: attempt {attempt_no} launched on {runtime}{}",
                         if is_fallback { " (fallback runtime)" } else { "" }
                     ),
-                    Some(format!("Node {node_id} · Mentu run {mentu_run}\n{role_note}")),
+                    Some(format!("Node {node_id} · session {session_id}\n{role_note}")),
                     vec![],
                     &node_id,
                     &phase,
@@ -920,10 +917,6 @@ fn describe_runtime(runtime: &GraphRuntimeRef) -> String {
     }
 }
 
-fn read_verdict(root: &std::path::Path, node_id: &str) -> Result<Option<String>, RpcError> {
-    Ok(read_evaluation(root, node_id)?.map(|(verdict, _)| verdict))
-}
-
 /// The worker's evaluation file: its verdict and the evidence it wrote for
 /// it. Absent, oversized, malformed or evidence-less files are `None` — an
 /// attempt without a readable verdict is a failed attempt.
@@ -978,48 +971,53 @@ fn node_for_step(run: &Run, candidate: &GraphRuntimeRef) -> GraphNodeIntent {
     if run.phase == "main" && node.harness != "shell" {
         if run.policy.adversarial.enabled {
             node.prompt.push_str(
-                "\nAct only as planner and director; do not implement the task yourself. Read \
-                 the workspace's native .drogon state before planning. Dispatch implementation \
-                 workers as depth-one children. As each implementation worker finishes, \
-                 immediately dispatch a separate depth-one adversarial tester for that worker's \
-                 output; route findings to a depth-one correction worker and retest within the \
-                 configured iteration bound. Every worker, tester, and correction worker is a \
-                 sibling child and must not delegate. The daemon owns the final whole-workflow \
-                 test/review pass after your directed work settles; do not duplicate that final \
-                 pass.",
+                "\nImplement the user's request directly unless a genuinely independent subtask \
+                 benefits from a depth-one worker. Never delegate a simple lookup, repository \
+                 discovery, one `gh` command, or a small bounded edit. The daemon launches the \
+                 final whole-workflow test/review sessions after your work settles; do not \
+                 dispatch duplicate testers yourself. Any child you launch must not delegate.",
             );
         } else if run.policy.delegate {
             node.prompt.push_str(
-                "\nAct only as planner and director; do not implement the task yourself. Read \
-                 the workspace's native .drogon state before planning, delegate implementation \
-                 to depth-one Drogon children using the approved policy below, supervise their \
-                 results, and do not add adversarial testers. Children must not delegate further.",
+                "\nDelegation is available, not mandatory. Do simple lookups, repository \
+                 discovery, `gh` commands, and bounded edits directly. If the user asks you to \
+                 make changes, you may make them yourself. Use depth-one Drogon children only \
+                 when independent work benefits from parallelism or specialization, supervise \
+                 their results, and do not add adversarial testers. Children must not delegate.",
             );
         } else {
             node.prompt.push_str(
-                "\nWork directly on the task in this main agent. Delegate and adversarial \
-                 testing are off, so do not dispatch subagents.",
+                "\nWork directly on the task in this main agent. Do not proactively dispatch \
+                 subagents, though an explicit user request to delegate may authorize one.",
             );
         }
         node.prompt.push_str(&format!(
             "\n\nDrogon run {}: immutable Subagent policy snapshot\n{}\n\
-             Before acting, read `.drogon/graph.json` with `drogon-cli graph read --workspace {} \
-             --json` and read native evidence/usage with `drogon-cli graph observability \
-             --workspace {} --json`. If this mode delegates, use Drogon graph CLI declared nodes \
-             (see `drogon-cli graph --help`) and explicit harness/model pairs from this snapshot. \
+             You are this graph's main agent, not a Bot dispatcher or a depth-one worker. \
+             A Bot may have dispatched the graph on the user's behalf; that dispatch does not \
+             consume your child-depth budget.\n\
+             Before substantial planning or delegation, read `.drogon/graph.json` with \
+             `drogon-cli graph read --workspace {} --json` and native evidence/usage with \
+             `drogon-cli graph observability --workspace {} --json`. A simple read-only answer \
+             or obvious repository command needs no worker: resolve the repository and use normal \
+             tools such as `gh` directly. If delegation is useful, use Drogon's native \
+             orchestration run-create, task-create and worker-start commands to create and \
+             supervise children (read `drogon-cli skills get --topic orchestration`). Use the \
+             approved runtime policy and explicit harness/model pairs from this snapshot, not \
+             harness-internal subagent tools, bare harness sessions, or native ungoverned spawns. \
              Try approved pairs in their configured order; use fallback only after every approved \
              runtime fails to execute. Findings are successful evaluations and do not trigger \
-             runtime failover. Do not use native ungoverned subagent spawns. Maximum subagent depth \
-             is one: children must not delegate further. Workspace policy edits apply to future \
-             runs; do not substitute them for this snapshot. The daemon owns any enabled \
-             adversarial loop; do not launch duplicate whole-workflow test/review workers yourself.",
+             runtime failover. Maximum subagent depth is one: children must not delegate further. \
+             Workspace policy edits apply to future runs; do not substitute them for this snapshot. \
+             The daemon owns any enabled adversarial loop; do not launch duplicate whole-workflow \
+             test/review workers yourself.",
             run.id,
             serde_json::to_string(&run.policy).expect("policy serializes"),
             run.workspace_id,
             run.workspace_id
         ));
         node.prompt.push_str(&format!(
-            "\nRecord concise, meaningful progress checkpoints for the human with `drogon-cli graph evidence-add --workspace {} --run {} --agent leader`; use progress, finding, blocked, completed, or failed. Pi terminal sessions with DROGON_HOOK_MARKER report usage automatically; do not duplicate those measurements. For other launches, record exact incremental token usage with `graph usage-add` only when the harness reports it. Omit unknown token fields; never estimate them. These native ledgers live under .drogon and do not depend on Mentu.",
+            "\nRecord concise, meaningful progress checkpoints for the human with `drogon-cli graph evidence-add --workspace {} --run {} --agent leader`; use progress, finding, blocked, completed, or failed. Pi terminal sessions with DROGON_HOOK_MARKER report usage automatically; do not duplicate those measurements. For other launches, record exact incremental token usage with `graph usage-add` only when the harness reports it. Omit unknown token fields; never estimate them. These native ledgers live under .drogon and belong to Drogon.",
             run.workspace_id, run.id
         ));
     }
@@ -1132,27 +1130,13 @@ mod tests {
     }
 
     #[test]
-    fn shell_adapter_stderr_tail_preserves_cause_and_redacts_bearer_value() {
-        let root = tempfile::tempdir().unwrap();
-        let run_dir = root.path().join(".mentu/runs/run_fixture");
-        std::fs::create_dir_all(&run_dir).unwrap();
-        std::fs::write(
-            run_dir.join("step.stderr"),
-            "Model \\\"gpt-5.6-luna\\\" is ambiguous across providers: Bearer secret-value\\n",
-        )
-        .unwrap();
-        let run_json = json!({
-            "steps": [{
-                "backend": "shell",
-                "exit_code": 1,
-                "error_file": "step.stderr"
-            }]
-        });
-        let reason = run_record::shell_step_stderr_tail(root.path(), "run_fixture", &run_json)
-            .expect("stderr tail");
-        assert!(reason.contains("ambiguous across providers"));
-        assert!(!reason.contains("secret-value"));
-        assert!(reason.contains("[redacted]"));
+    fn native_session_run_ids_round_trip_without_mentu_state() {
+        let encoded = encode_session_run_id("session-id", "incarnation-id");
+        assert_eq!(
+            decode_session_run_id(&encoded),
+            Some(("session-id", "incarnation-id"))
+        );
+        assert_eq!(decode_session_run_id("legacy-mentu-run"), None);
     }
 
     #[test]
@@ -1167,7 +1151,7 @@ mod tests {
             json!({"verdict":"pass","evidence":[]}),
         ] {
             std::fs::write(&path, invalid.to_string()).unwrap();
-            assert_eq!(read_verdict(root.path(), "test").unwrap(), None);
+            assert_eq!(read_evaluation(root.path(), "test").unwrap(), None);
         }
         for verdict in ["pass", "findings"] {
             std::fs::write(
@@ -1176,8 +1160,10 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                read_verdict(root.path(), "test").unwrap().as_deref(),
-                Some(verdict)
+                read_evaluation(root.path(), "test")
+                    .unwrap()
+                    .map(|value| value.0),
+                Some(verdict.to_string())
             );
         }
     }
@@ -1226,7 +1212,7 @@ mod tests {
             &run,
             "progress",
             "Iteration 1 · main: attempt 1 launched on pi/dgx-spark/qwen".into(),
-            Some("Node or-1 · Mentu run mr-1".into()),
+            Some("Node or-1 · session session-1".into()),
             vec![],
             "or-1",
             "main",
@@ -1285,10 +1271,6 @@ mod tests {
         let (verdict, evidence) = read_evaluation(root.path(), "node-7").unwrap().unwrap();
         assert_eq!(verdict, "findings");
         assert_eq!(evidence, "Undo after the last swipe restores nothing.");
-        assert_eq!(
-            read_verdict(root.path(), "node-7").unwrap().as_deref(),
-            Some("findings")
-        );
         assert_eq!(read_evaluation(root.path(), "absent").unwrap(), None);
     }
 
@@ -1396,6 +1378,10 @@ mod tests {
         );
         assert!(node.provider.is_none());
         assert_eq!(node.model, "different-provider/model");
+        assert!(
+            node.prompt
+                .contains("Do not spawn subagents: maximum depth is 1")
+        );
         run.phase = "main".into();
         run.policy.delegate = true;
         let main = node_for_step(
@@ -1407,9 +1393,25 @@ mod tests {
             },
         );
         assert!(main.provider.is_some());
-        assert!(main.prompt.contains("only as planner and director"));
-        assert!(main.prompt.contains("do not add adversarial testers"));
+        assert!(
+            main.prompt
+                .contains("Delegation is available, not mandatory")
+        );
+        assert!(main.prompt.contains("`gh` commands"));
+        assert!(main.prompt.contains("may make them yourself"));
         assert!(main.prompt.contains("immutable Subagent policy snapshot"));
+        assert!(
+            main.prompt
+                .contains("main agent, not a Bot dispatcher or a depth-one worker")
+        );
+        assert!(
+            main.prompt
+                .contains("does not consume your child-depth budget")
+        );
+        assert!(
+            main.prompt
+                .contains("orchestration run-create, task-create and worker-start")
+        );
         assert!(main.prompt.contains("children must not"));
         assert!(
             main.prompt
@@ -1433,12 +1435,12 @@ mod tests {
         assert!(
             adversarial
                 .prompt
-                .contains("As each implementation worker finishes")
+                .contains("Never delegate a simple lookup")
         );
         assert!(
             adversarial
                 .prompt
-                .contains("tester, and correction worker is a sibling child")
+                .contains("daemon launches the final whole-workflow")
         );
 
         run.policy.adversarial.enabled = false;
@@ -1450,6 +1452,10 @@ mod tests {
                 provider: None,
             },
         );
-        assert!(direct.prompt.contains("do not dispatch subagents"));
+        assert!(
+            direct
+                .prompt
+                .contains("explicit user request to delegate may authorize one")
+        );
     }
 }

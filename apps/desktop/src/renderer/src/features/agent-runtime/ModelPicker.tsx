@@ -1,19 +1,13 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// Searchable model picker for one Mentu agent step: the `/model` ergonomics
-// the owner asked for. A small trigger opens a popover whose search box
-// filters the harness's models underneath as the user types; arrow keys
-// move the active row, Enter selects, Escape closes. Provenance is rendered
-// per row (host-enumerated = verified, curated known catalog = unverified,
-// recipe-observed = unverified, or the exact id the user typed) so an
-// unverified id is never dressed up as a host-confirmed one.
-//
-// The free-text Model Input in `MentuAgentStepEditor` stays the field's
-// source of truth: the picker only writes the chosen id into it, so typing
-// an id the host did not enumerate is still possible (and stays marked
-// unverified).
+// Searchable model picker shared by every agent-runtime surface. A small
+// trigger opens a popover whose search box filters the harness's models;
+// arrow keys move the active row, Enter selects, and Escape closes. Every
+// option retains its real provenance so an unverified id is never presented
+// as host-confirmed.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Search } from "lucide-react";
+import type { HarnessModelsCatalog } from "../../../../shared/session-contract";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import {
@@ -21,8 +15,45 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "../../components/ui/popover";
-import type { ModelOption } from "./mentu-model-registry";
-import { filterModelOptions } from "./mentu-model-registry";
+export type ModelOption = {
+  id: string;
+  group: "catalog" | "known" | "observed";
+  verified: boolean;
+  recommended: boolean;
+  notes: string[];
+};
+
+export function filterModelOptions(
+  options: ModelOption[],
+  query: string,
+): ModelOption[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return options;
+  return options.filter(
+    (option) =>
+      option.id.toLowerCase().includes(needle) ||
+      option.notes.some((note) => note.toLowerCase().includes(needle)),
+  );
+}
+
+/** Honest picker options from the daemon's host enumeration only. */
+export function catalogModelOptions(
+  catalog: HarnessModelsCatalog | null,
+): ModelOption[] {
+  return (catalog?.entries ?? []).map((entry) => ({
+    id: entry.id,
+    group: "catalog",
+    verified: true,
+    recommended: false,
+    notes: [
+      ...(entry.provider ? [entry.provider] : []),
+      ...(entry.context ? [`ctx ${entry.context}`] : []),
+      ...(entry.maxOutput ? [`max out ${entry.maxOutput}`] : []),
+      ...(entry.thinking ? ["thinking"] : []),
+      ...(entry.images ? ["images"] : []),
+    ],
+  }));
+}
 
 type PickerGroup = ModelOption["group"] | "default" | "typed";
 
@@ -35,8 +66,8 @@ type PickerRow = {
   label: string;
 };
 
-const LIST_ID = "recipe-step-model-listbox";
-const rowDomId = (index: number) => `recipe-step-model-option-${index}`;
+const LIST_ID = "agent-runtime-model-listbox";
+const rowDomId = (index: number) => `agent-runtime-model-option-${index}`;
 
 function groupLabel(row: PickerRow): { text: string; className: string } {
   switch (row.group) {
@@ -64,7 +95,7 @@ function groupLabel(row: PickerRow): { text: string; className: string } {
   }
 }
 
-export function MentuModelPicker({
+export function ModelPicker({
   options,
   selected,
   disabled = false,

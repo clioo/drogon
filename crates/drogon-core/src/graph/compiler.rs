@@ -166,15 +166,10 @@ pub fn completion_sentinel(node_id: &str) -> String {
 
 /// Compiles `selection` against `intent`. Writes nothing here; the caller
 /// persists and validates. `defaults` supplies Pi provider inputs.
-/// The one sentence that keeps a dispatched node from obeying the wrong
-/// instructions. The Subagent Policy block Drogon writes into a workspace's
-/// `AGENTS.md`/`CLAUDE.md` is a repository file every agent in that checkout
-/// reads, and under Delegate or Adversarial it says "act only as planner and
-/// director; do not implement the task yourself". A depth-one worker reads
-/// that too — and obeys it over its own task (observed in a real run: a
-/// delegated child refused to create its file and tried to delegate onward,
-/// then printed the completion line anyway). The node's own prompt is the
-/// stronger channel, so the compiler states the reader's role there.
+/// The sentence that identifies a dispatched node's narrower role. The
+/// Subagent Policy block addresses the main agent, while a depth-one worker
+/// must complete its assigned task without delegating onward. The node's own
+/// prompt is the stronger channel, so the compiler states that distinction.
 pub const WORKER_ROLE_NOTE: &str = "\n\nYou are a depth-one Work Graph worker that Drogon launched for this      node. The Subagent Policy block in this workspace's AGENTS.md/CLAUDE.md is addressed to the main      agent, not to you: do this task yourself and dispatch no subagents.";
 
 pub fn compile(

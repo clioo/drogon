@@ -31,7 +31,7 @@ SHELL := /bin/bash
 NODE_RUNTIME := $(HOME)/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin
 # Keep the package manager project-local as well. Some Node distributions do
 # not ship Corepack, and `packageManager` alone does not put pnpm on PATH.
-PNPM_TOOLCHAIN_DIR ?= $(CURDIR)/.mentu/runtime/toolchain
+PNPM_TOOLCHAIN_DIR ?= $(CURDIR)/.preflight/pnpm-toolchain
 PNPM_BIN := $(PNPM_TOOLCHAIN_DIR)/node_modules/.bin
 # A missing directory in PATH is harmless, and keeping this unconditional
 # also works with the BSD make shipped by macOS (which does not implement

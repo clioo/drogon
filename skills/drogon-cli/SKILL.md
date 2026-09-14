@@ -7,11 +7,9 @@ description: >-
   browser pane (open, navigate, snapshot, click, fill, tabs), launch
   harnesses, create and run cron automations, manage Bots and their
   self-managed automations, monitors and monitor actions, seal and grant
-  integration secrets, list and restore pre-migration backups, and use the
-  optional work-graph recipe environment (the `mentu` verbs: status, open,
-  run, follow, cancel). Use for terminal control, lightweight prompts and
-  shell commands. Use the orchestration guide for supervised multi-agent
-  coordination.
+  integration secrets, and list and restore pre-migration backups. Use for
+  terminal control, lightweight prompts and shell commands. Use the
+  orchestration guide for supervised multi-agent coordination.
 ---
 
 # Drogon CLI
@@ -26,6 +24,14 @@ the Drogon app. Triggers include "$drogon-cli", "Drogon worktree", "child worktr
 "spawn codex/claude in a worktree", "read/wait/send Drogon terminal", "full handoff" /
 "handover" / "give this to another agent", and "control the browser inside Drogon". Use
 plain shell tools when Drogon state does not matter.
+
+For a simple repository question, do not launch a harness, create a worktree, or
+delegate merely to run `git` or `gh`. Resolve the repository from the current checkout
+or, when this is a Bot workspace, from `drogon-cli project list --json`; then run the
+read-only repository command yourself (for example `gh issue list --repo OWNER/REPO`).
+A direct request to edit or fix something also permits this agent to make the change
+itself. Launch another agent only for an explicit handoff or work that genuinely benefits
+from parallelism or specialization.
 
 ## Resolve the CLI for this session
 
