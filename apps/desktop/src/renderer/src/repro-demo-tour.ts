@@ -13,6 +13,7 @@
 export const REPRO_TOUR_EVENT = "drogon:repro-demo-tour";
 
 export type ReproTourRequest =
+  | { kind: "open-demo" }
   /** Show what the demo just configured: the run's workspace selected, and the
    *  Bots page, leaving Settings. */
   | { kind: "open-bots"; workspaceId: string }
@@ -55,6 +56,10 @@ export function onReproTour(handler: ReproTourSink): () => void {
   const listener = (event: Event) => {
     const detail = (event as CustomEvent).detail as Partial<ReproTourRequest> | null;
     if (!detail || typeof detail !== "object") return;
+    if (detail.kind === "open-demo") {
+      handler({ kind: "open-demo" });
+      return;
+    }
     if (
       detail.kind === "open-bots" &&
       typeof (detail as { workspaceId?: unknown }).workspaceId === "string" &&

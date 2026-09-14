@@ -248,6 +248,10 @@ pub struct Engine {
     /// accepted receipt. The server uses its separate post-reply gate to
     /// stop listening; this flag only fences core mutations.
     quiescent: AtomicBool,
+    /// Unix ms of the automation scheduler's last completed tick (0 before
+    /// the first). `status` reports it so a stalled scheduler — every watch
+    /// silently unchecked — is visible instead of inferred.
+    pub(crate) scheduler_last_tick_ms: std::sync::atomic::AtomicU64,
     /// Test-only admission-window seam: when set, `do_runtime_shutdown`
     /// invokes it exactly once between the ledger's durable receipt persist
     /// and the `quiescent` store, passing `self` so the test can observe
@@ -340,6 +344,7 @@ impl Engine {
             meeting_commitments: meetings::CommitmentStore::new(data_dir),
             lifecycle_gate: RwLock::new(()),
             quiescent: AtomicBool::new(false),
+            scheduler_last_tick_ms: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             pre_freeze_hook: Mutex::new(None),
         })
@@ -727,6 +732,10 @@ impl Engine {
             // Kernel-observer correlation only, per
             // `service-quiescence-contract.md`: "not signaling authority."
             "processId": std::process::id(),
+            "schedulerLastTickMs": match self.scheduler_last_tick_ms.load(Ordering::Acquire) {
+                0 => Value::Null,
+                at => json!(at),
+            },
         })
     }
 

@@ -4252,6 +4252,11 @@ export function App() {
   // simply leaves the viewer where they are.
   useEffect(() => {
     return onReproTour((request) => {
+      if (request.kind === "open-demo") {
+        setSettingsInitialSection("demo");
+        setRoute(SETTINGS_ROUTE_ID);
+        return;
+      }
       if (request.kind === "open-bots") {
         // Leave Settings for the page that shows the bot the demo configured,
         // with its responsibilities and its watch. The bot lives in the

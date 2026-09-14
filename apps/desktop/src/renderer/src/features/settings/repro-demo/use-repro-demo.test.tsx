@@ -12,7 +12,7 @@ import {
   type ReproDemoBridge,
 } from "./use-repro-demo";
 import { REPRO_SCENARIO_SPEC_PATH } from "./repro-demo-scenario";
-import { removeDemoRuns } from "./repro-demo-store";
+import { cancelReproDemo, removeDemoRuns } from "./repro-demo-store";
 
 const ok = <T,>(result: T) => ({ ok: true as const, result });
 
@@ -65,7 +65,7 @@ function makeBridge(fakes: Fakes) {
       const view =
         fakes.monitorViews[Math.min(monitorIndex, fakes.monitorViews.length - 1)];
       monitorIndex += 1;
-      return ok({ monitors: [view] });
+      return ok({ monitors: view ? [view] : [] });
     },
     graphWritePolicy: async () => {
       calls.push("graphWritePolicy");
@@ -173,7 +173,7 @@ describe("the in-app demo run", () => {
     expect(calls).not.toContain("graphOrchestratorStart");
   });
 
-  test("a watch that never releases the work is reported, and the panel starts it", async () => {
+  test("a watch that never releases work fails without launching a competing workflow", async () => {
     const clock = fakeClock();
     const { bridge, calls } = makeBridge({
       monitorViews: [
@@ -191,12 +191,12 @@ describe("the in-app demo run", () => {
 
     await waitFor(() => expect(result.current.state.running).toBe(false));
     const state = result.current.state;
-    expect(state.releasedBy).toBe("panel");
+    expect(state.releasedBy).toBeNull();
     expect(state.phases.firing.status).toBe("failed");
     expect(state.phases.firing.note).toMatch(/never fired/);
-    expect(calls).toContain("graphOrchestratorStart");
-    expect(state.workflowStatus).toBe("exhausted");
-    expect(state.failure).toBeNull();
+    expect(calls).not.toContain("graphOrchestratorStart");
+    expect(state.workflowStatus).toBeNull();
+    expect(state.failure).toMatch(/never fired/);
   });
 
   test("a refused dispatch is a failure with the daemon's reason, not a silent retry", async () => {
@@ -225,7 +225,8 @@ describe("the in-app demo run", () => {
     await waitFor(() => expect(result.current.state.running).toBe(false));
     expect(result.current.state.phases.firing.note).toMatch(/dispatch_failed/);
     expect(result.current.state.phases.firing.note).toMatch(/nope/);
-    expect(result.current.state.releasedBy).toBe("panel");
+    expect(result.current.state.releasedBy).toBeNull();
+    expect(result.current.state.failure).toMatch(/dispatch_failed/);
   });
 
   test("a failing bridge stops the run with the reason on the phase that failed", async () => {
@@ -247,6 +248,67 @@ describe("the in-app demo run", () => {
     await waitFor(() => expect(result.current.state.running).toBe(false));
     expect(result.current.state.failure).toMatch(/disk is full/);
     expect(result.current.state.phases.workspace.status).toBe("failed");
+  });
+
+  test("a stalled scheduler reports recovery guidance instead of waiting five minutes", async () => {
+    const clock = fakeClock();
+    const { bridge, writes, calls } = makeBridge({ monitorViews: [], runStates: [] });
+    bridge.status = async () => ok({ hostId: "host-1", schedulerLastTickMs: null });
+    const { result } = renderHook(() => useReproDemo(bridge, clock));
+    await act(async () => { await result.current.run({ runtime, iterations: 2 }); });
+    expect(result.current.state.failure).toMatch(/scheduler.*Restart daemon/);
+    expect(clock.now()).toBeLessThan(70_000);
+    expect(writes).not.toContain(REPRO_SCENARIO_SPEC_PATH);
+    expect(calls).not.toContain("graphOrchestratorStart");
+  });
+
+  test("a slow coordinator has fifteen minutes and is never raced by the panel", async () => {
+    const clock = fakeClock();
+    const { bridge, calls } = makeBridge({
+      monitorViews: [{ monitorId: "mon-1", lastCheckOutcome: "changed",
+        firing: { lastEventId: "event-1", lastOutcome: "dispatched" } }],
+      runStates: [null],
+    });
+    const { result } = renderHook(() => useReproDemo(bridge, clock));
+    await act(async () => { await result.current.run({ runtime, iterations: 2 }); });
+    expect(clock.now()).toBeGreaterThanOrEqual(15 * 60_000);
+    expect(result.current.state.failure).toMatch(/released session never started/);
+    expect(calls).not.toContain("graphOrchestratorStart");
+  });
+
+  test("stopping during the release wait never launches fallback work", async () => {
+    const clock = fakeClock();
+    const { bridge, calls } = makeBridge({
+      monitorViews: [{ monitorId: "mon-1", lastCheckOutcome: "changed",
+        firing: { lastEventId: "event-1", lastOutcome: "dispatched" } }],
+      runStates: [null],
+    });
+    bridge.graphOrchestratorStatus = async () => {
+      cancelReproDemo();
+      return ok({ run: null });
+    };
+    const { result } = renderHook(() => useReproDemo(bridge, clock));
+    await act(async () => { await result.current.run({ runtime, iterations: 2 }); });
+    expect(result.current.state.failure).toMatch(/Tour stopped/);
+    expect(result.current.state.running).toBe(false);
+    expect(calls).not.toContain("graphOrchestratorStart");
+  });
+
+  test("stopping setup holds admission until the pending call settles", async () => {
+    const clock = fakeClock();
+    const { bridge, calls } = makeBridge({ monitorViews: [], runStates: [] });
+    let finish!: () => void;
+    bridge.projectCreate = () => new Promise((resolve) => {
+      finish = () => resolve(ok({ project: { id: "p1", name: "demo" }, workspaceId: "ws-1" }));
+    });
+    const { result } = renderHook(() => useReproDemo(bridge, clock));
+    let running!: Promise<void>;
+    await act(async () => { running = result.current.run({ runtime, iterations: 2 }); });
+    act(() => result.current.cancel());
+    expect(result.current.state.running).toBe(true);
+    await act(async () => { finish(); await running; });
+    expect(result.current.state.running).toBe(false);
+    expect(calls).not.toContain("botCreate");
   });
 
   test("nothing runs without a bridge", async () => {
@@ -349,7 +411,7 @@ describe("the guided tour", () => {
     ]);
   });
 
-  test("a run that fails before the rounds never navigates away", async () => {
+  test("a failed run returns to the demo panel so its reason is visible", async () => {
     const clock = fakeClock();
     const tour: unknown[] = [];
     const { bridge } = makeBridge({ monitorViews: [], runStates: [] });
@@ -367,7 +429,7 @@ describe("the guided tour", () => {
     await act(async () => {
       await result.current.run({ runtime, iterations: 1 });
     });
-    expect(tour).toEqual([]);
+    expect(tour).toEqual([{ kind: "open-demo" }]);
     expect(result.current.state.failure).toMatch(/no bot/);
   });
 });

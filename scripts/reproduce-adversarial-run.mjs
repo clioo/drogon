@@ -382,7 +382,7 @@ async function processRows() {
 
 /** Every descendant of the pids we started, captured BEFORE anything closes:
  *  a closed parent cannot tell us what it had. */
-async function captureDescendants(seeds, owned) {
+export async function captureDescendants(seeds, owned) {
   const rows = await processRows();
   const parents = new Set(seeds.filter(Boolean));
   let added;
@@ -405,7 +405,7 @@ async function captureDescendants(seeds, owned) {
 
 /** Confirms each owned pid is gone; terminates only a survivor whose identity
  *  still matches what we recorded, so a reused pid is never signalled. */
-async function settleOwnedProcesses(owned) {
+export async function settleOwnedProcesses(owned) {
   const verdicts = [];
   for (const [pid, identity] of owned) {
     let rows = await processRows();

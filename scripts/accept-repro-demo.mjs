@@ -11,7 +11,6 @@
 //
 // Modes: --help | --check (read-only) | (default) execute.
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -19,10 +18,11 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { runAcceptanceProcess, startAcceptanceProcess } from "./acceptance-process.mjs";
+import { runAcceptanceProcess, startAcceptanceProcess, stopAcceptanceProcess } from "./acceptance-process.mjs";
+import { startForegroundObservation, verifyForegroundObservation } from "./acceptance-foreground.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
-import { resolveRuntime } from "./reproduce-adversarial-run.mjs";
+import { resolveRuntime, captureDescendants, settleOwnedProcesses } from "./reproduce-adversarial-run.mjs";
 import { writeHarnessFixtures } from "./reproduce-harness-fixture.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -63,19 +63,10 @@ export async function runCheck() {
 }
 
 async function stopOwned(child, label, report) {
-  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) {
-    report.cleanup.push(`${label}: ${child?.pid ? "exited" : "never-started"}`);
-    return;
-  }
-  const exited = once(child, "exit");
-  child.kill("SIGTERM");
-  if (!(await Promise.race([exited.then(() => true), delay(5000).then(() => false)]))) {
-    child.kill("SIGKILL");
-    await Promise.race([exited, delay(2000)]);
-    report.cleanup.push(`${label}: required force after timeout`);
-    return;
-  }
-  report.cleanup.push(`${label}: exited on SIGTERM`);
+  if (!child) return;
+  const result = await stopAcceptanceProcess(child);
+  report.cleanup.push(`${label}: ${result.verdict}${result.forced ? " (forced)" : ""}`);
+  if (result.verdict !== "exited") report.status = "FAILED";
 }
 
 /** The display names the product's harness picker shows, by harness id. */
@@ -125,7 +116,11 @@ export async function execute({ runs = 2, live = null } = {}) {
   let daemon = null;
   let daemonHandle = null;
   let browser = null;
+  let foreground = null;
+  const owned = new Map();
   try {
+    if (process.env.DROGON_VERIFY_OS_FOCUS === "1")
+      foreground = await startForegroundObservation(fixture);
     const cliPath = path.join(root, "target/debug/drogon-cli");
     const daemonPath = path.join(root, "target/debug/drogond");
     const runtime = await resolveRuntime(dataDir);
@@ -174,6 +169,7 @@ export async function execute({ runs = 2, live = null } = {}) {
       stdio: ["ignore", "ignore", "ignore"],
       env,
     });
+    await captureDescendants([daemon.pid], owned);
     const deadline = Date.now() + 30_000;
     for (;;) {
       const answered = await runAcceptanceProcess(
@@ -204,6 +200,7 @@ export async function execute({ runs = 2, live = null } = {}) {
         DROGON_BACKGROUND_WINDOW: "1",
       },
     });
+    await captureDescendants([desktop.pid], owned);
     const endpoint = await new Promise((resolve, reject) => {
       let tail = "";
       const timer = setTimeout(
@@ -483,16 +480,25 @@ export async function execute({ runs = 2, live = null } = {}) {
         );
       }
       report.rounds = roles;
+      const health = await page.evaluate(() => window.drogon.status());
+      assert.ok(health.ok && Number.isFinite(health.result.schedulerLastTickMs), "scheduler heartbeat must survive the real preload");
+      assert.ok(Date.now() - health.result.schedulerLastTickMs < 60_000, "scheduler heartbeat must keep advancing");
       report.checks.push(`the orchestration ran its rounds and ${rounds.status}: ${roles.join(" · ")}`);
 
       // Third stop: the Work Graph's Agent telemetry, where the daemon itself
       // wrote every attempt and verdict of the rounds as they happened.
       await page.getByTestId("work-graph-evidence-view").waitFor({ timeout: 120_000 });
-      const telemetry = await page.getByTestId("work-graph-evidence-view").innerText();
-      for (const expected of live
+      const expectedTelemetry = live
         ? [/Workflow started/, /verdict: /, /Workflow (passed|exhausted)/]
-        : [/Workflow started/, /verdict: findings/, /Workflow passed/]) {
-        assert.match(telemetry, expected, `the daemon's own telemetry must carry ${expected}`);
+        : [/Workflow started/, /verdict: findings/, /Workflow passed/];
+      // The tab can mount with the previous poll's snapshot. Wait for the
+      // final entry of THIS run, not just for the container to exist.
+      const telemetryDeadline = Date.now() + 6_000;
+      for (;;) {
+        const telemetry = await page.getByTestId("work-graph-evidence-view").innerText();
+        if (telemetry.includes(rounds.id) && expectedTelemetry.every((pattern) => pattern.test(telemetry))) break;
+        assert.ok(Date.now() < telemetryDeadline, `Agent telemetry never showed the final outcome of ${rounds.id}`);
+        await delay(100);
       }
       const telemetryShot = path.join(fixture, `telemetry-${attempt}.png`);
       await page.screenshot({ path: telemetryShot, animations: "disabled" });
@@ -504,9 +510,12 @@ export async function execute({ runs = 2, live = null } = {}) {
       await page.getByTestId("work-graph-usage-view").waitFor({ timeout: 60_000 });
       report.checks.push("the tour ended on the Work Graph's Usage tab");
 
-      // Back in Settings: the panel kept the run and shows what it cost.
-      await page.keyboard.press(process.platform === "darwin" ? "Meta+," : "Control+,");
-      await page.getByRole("button", { name: "Reproducible demo", exact: true }).click();
+      // Exercise the same return route used when a run fails off-panel.
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", {
+        detail: { kind: "open-demo" },
+      })));
+      await page.getByTestId("repro-demo-run").waitFor();
+      report.checks.push("the failure-return route opens the retained demo panel");
       // Back in Settings the panel is mounted again, so its own rows are
       // readable: wait for the last phase to settle there.
       await (async () => {
@@ -556,6 +565,15 @@ export async function execute({ runs = 2, live = null } = {}) {
   } catch (error) {
     report.failure = error instanceof Error ? error.message : String(error);
   } finally {
+    try {
+      await captureDescendants(
+        [desktop, daemon].filter((child) => child && child.exitCode === null && child.signalCode === null)
+          .map((child) => child.pid), owned,
+      );
+    } catch (error) {
+      report.status = "FAILED";
+      report.cleanup.push(`process capture unverifiable: ${error.message}`);
+    }
     if (browser) await browser.close().catch(() => {});
     await stopOwned(desktop, "desktop", report);
     if (daemonHandle) {
@@ -567,6 +585,23 @@ export async function execute({ runs = 2, live = null } = {}) {
       if (!stopped.startsWith("exited")) report.status = "FAILED";
     } else {
       await stopOwned(daemon, "daemon", report);
+    }
+    try {
+      report.processes = await settleOwnedProcesses(owned);
+      assert.ok(report.processes.every((entry) => entry.verdict === "exited"), "owned processes remain");
+    } catch (error) {
+      report.status = "FAILED";
+      report.cleanup.push(`process exit unverifiable: ${error.message}`);
+    }
+    if (foreground) {
+      try {
+        report.osForeground = await foreground.stop();
+        verifyForegroundObservation(report.osForeground, [desktop?.pid].filter(Boolean));
+        report.checks.push("OS focus preserved: no desktop activation or visible native window");
+      } catch (error) {
+        report.status = "FAILED";
+        report.cleanup.push(`OS focus verification failed: ${error.message}`);
+      }
     }
     if (report.status === "PASSED") await rm(world, { recursive: true, force: true });
     report.finishedAt = new Date().toISOString();
@@ -597,7 +632,7 @@ if (isMainModule()) {
     const runs = runsFlag === -1 ? 2 : Number(process.argv[runsFlag + 1]);
     if (!Number.isInteger(runs) || runs < 1 || runs > 5) {
       process.stderr.write("--runs takes 1..5\n");
-      process.exitCode = 1;
+      process.exit(1);
     }
     const flag = (name) => {
       const at = process.argv.indexOf(name);

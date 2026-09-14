@@ -307,7 +307,7 @@ fn resolve_pi_model(node_id: &str, raw: &str) -> Result<(String, Option<GraphFin
 /// Context delivered in the recipe prompt because graph nodes run through
 /// the recipe runtime rather than `harness.start`. It is intentionally not a
 /// workspace context file: an unconfigured workspace must remain byte-clean.
-const GRAPH_HARNESS_CONTEXT: &str = "You are running inside Drogon. Drogon is the source of truth for delegation: use the managed `drogon-cli`, never an internal Agent tool or a raw hidden session. Before delegating, read `drogon-cli skills get --topic orchestration`; use the Work Graph policy's provider and model together, and report child completion through `drogon-cli orchestration send --kind worker_done`.";
+const GRAPH_HARNESS_CONTEXT: &str = "You are running inside Drogon. Drogon is the source of truth for delegation: use the managed `drogon-cli`, never an internal Agent tool or a raw hidden session. Before delegating, read `drogon-cli skills get --topic orchestration`; use the Work Graph policy's provider and model together, and report child completion through `drogon-cli orchestration send --kind worker_done`. Wait for a child in the foreground — `drogon-cli orchestration check --wait --timeout-ms <ms>`, repeated until its worker_done arrives — never in a background task and never by ending your turn: this session ends when your turn ends, and a backgrounded wait dies with it.";
 
 /// Emits one recipe step plus, for Pi, the provider-map entry and any
 /// compile-time finding (the provider/model split is surfaced, never
@@ -1044,6 +1044,8 @@ mod tests {
         assert!(step.get("completion_keyword").is_none());
         let prompt = step["prompt"].as_str().unwrap();
         assert!(prompt.starts_with(GRAPH_HARNESS_CONTEXT));
+        assert!(prompt.contains("Wait for a child in the foreground"));
+        assert!(prompt.contains("check --wait --timeout-ms <ms>"));
         assert!(prompt.contains("Task:\ndo n1"));
         assert!(
             prompt.ends_with(WORKER_ROLE_NOTE),

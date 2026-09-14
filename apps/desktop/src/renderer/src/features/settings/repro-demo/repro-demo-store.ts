@@ -85,7 +85,7 @@ export type MonitorCheck = {
  *  driven by fakes in tests, and a build whose preload predates one of these
  *  reports the demo as unavailable instead of throwing at click time. */
 export type ReproDemoBridge = {
-  status: () => Promise<Result<{ hostId: string }>>;
+  status: () => Promise<Result<{ hostId: string; schedulerLastTickMs?: number | null }>>;
   projectCreate: (input: { name: string }) => Promise<
     Result<{ project: { id: string; name: string; path?: string }; workspaceId: string }>
   >;
@@ -216,6 +216,7 @@ function initialState(): ReproDemoState {
 
 let state: ReproDemoState = initialState();
 let cancelled = false;
+let generation = 0;
 const listeners = new Set<() => void>();
 
 export function subscribeReproDemo(listener: () => void): () => void {
@@ -230,6 +231,7 @@ export function getReproDemoState(): ReproDemoState {
 /** Test seam: the store outlives a component on purpose, so a suite must be
  *  able to start each case from nothing. */
 export function resetReproDemo(): void {
+  generation += 1;
   cancelled = true;
   state = initialState();
   for (const listener of listeners) listener();
@@ -259,7 +261,8 @@ function setPhase(
 
 export function cancelReproDemo(): void {
   cancelled = true;
-  update({ running: false });
+  // Keep admission closed until the in-flight operation has settled.
+  update({ failure: "Stopping the tour. Already-started sessions keep running." });
 }
 
 /** A short, readable tag for one run: enough to tell two demos apart at a
@@ -334,7 +337,10 @@ export function policyFor(runtime: ReproRuntime, iterations: number) {
 }
 
 const FIRING_TIMEOUT_MS = 300_000;
-const WORKFLOW_START_TIMEOUT_MS = 180_000;
+// A real main agent fans the build out to workers that take minutes before
+// it starts the durable workflow; the panel's own fallback waits for that,
+// never races it (the fixture agent starts it within seconds).
+const WORKFLOW_START_TIMEOUT_MS = 15 * 60_000;
 const ROUNDS_TIMEOUT_MS = 45 * 60_000;
 const POLL_MS = 1500;
 
@@ -350,6 +356,7 @@ export async function runReproDemo(
   const now = deps.now ?? (() => Date.now());
   const tour = deps.tour ?? requestReproTour;
 
+  const runGeneration = ++generation;
   cancelled = false;
   state = {
     ...initialState(),
@@ -363,6 +370,10 @@ export async function runReproDemo(
   };
   for (const listener of listeners) listener();
 
+  const ensureFollowing = () => {
+    if (cancelled || generation !== runGeneration)
+      throw new Error("Tour stopped. Already-started sessions keep running.");
+  };
   const until = async <T>(
     check: () => Promise<T | null>,
     label: string,
@@ -370,8 +381,9 @@ export async function runReproDemo(
   ): Promise<T> => {
     const deadline = now() + timeoutMs;
     for (;;) {
-      if (cancelled) throw new Error("the demo was cancelled");
+      ensureFollowing();
       const value = await check();
+      ensureFollowing();
       if (value) return value;
       if (now() > deadline)
         throw new Error(`${label} (${Math.round(timeoutMs / 1000)}s)`);
@@ -381,6 +393,7 @@ export async function runReproDemo(
 
   try {
     const { hostId } = unwrap(await bridge.status(), "status");
+    ensureFollowing();
 
     // Phase 1 — a project of the demo's own, listed under Projects like any
     // other (a Quick Session would file it under Chats, next to the bot).
@@ -390,6 +403,7 @@ export async function runReproDemo(
       await bridge.projectCreate({ name: `dog-tinder-${tag}` }),
       "projectCreate",
     );
+    ensureFollowing();
     const workspaceId = created.workspaceId;
     update({ workspaceId, projectName: created.project.name });
     setPhase("workspace", "done", created.project.name);
@@ -398,6 +412,7 @@ export async function runReproDemo(
     // released session will start.
     setPhase("seed", "running");
     for (const file of REPRO_SCENARIO_SEED) {
+      ensureFollowing();
       unwrap(
         await bridge.fileWrite({
           hostId,
@@ -409,6 +424,7 @@ export async function runReproDemo(
         `fileWrite ${file.path}`,
       );
     }
+    ensureFollowing();
     unwrap(
       await bridge.fileWrite({
         hostId,
@@ -423,6 +439,7 @@ export async function runReproDemo(
 
     // Phase 3 — the bot that owns the watch and delegates the work. It lives
     // under Chats, so its name says what it is, not what it builds.
+    ensureFollowing();
     setPhase("bot", "running");
     const botId = `white-walker-${tag}`;
     const bot = unwrap(
@@ -431,7 +448,7 @@ export async function runReproDemo(
         workspaceId,
         requestId: requestId(),
         botId,
-        locale: "es-MX",
+        locale: "en-US",
         body: {
           characterPreset: "arya",
           displayIdentity: {
@@ -453,10 +470,12 @@ export async function runReproDemo(
       }),
       "botCreate",
     );
+    ensureFollowing();
     update({ botId: bot.id ?? botId });
     setPhase("bot", "done", bot.id ?? botId);
 
     // Phase 4 — the Subagent policy, with the adversarial loop on.
+    ensureFollowing();
     setPhase("policy", "running");
     unwrap(
       await bridge.graphWritePolicy({
@@ -474,6 +493,7 @@ export async function runReproDemo(
 
     // Phase 5 — the watch, armed while the spec does not exist yet, so the
     // firing is caused by the change the demo makes next.
+    ensureFollowing();
     setPhase("watch", "running");
     const monitor = unwrap(
       await bridge.botMonitorCreate({
@@ -487,6 +507,7 @@ export async function runReproDemo(
       }),
       "botMonitorCreate",
     );
+    ensureFollowing();
     unwrap(
       await bridge.botMonitorApprove({
         hostId,
@@ -496,6 +517,7 @@ export async function runReproDemo(
       }),
       "botMonitorApprove",
     );
+    ensureFollowing();
     update({ monitorId: monitor.monitorId });
     setPhase("watch", "done", `${monitor.ruleKind} · ${REPRO_SCENARIO_SPEC_PATH}`);
     // The bot and its watch exist now, so show them: Bots is where a human
@@ -503,7 +525,9 @@ export async function runReproDemo(
     // A beat first — the setup rows above are worth reading before the panel
     // gives way (and `sleep` is injected, so tests pay nothing for it).
     await sleep(2500);
+    ensureFollowing();
     tour({ kind: "open-bots", workspaceId });
+    const monitorWaitStarted = now();
 
     const readMonitor = async (): Promise<MonitorView | null> => {
       const listed = await bridge.botMonitorList({
@@ -511,9 +535,17 @@ export async function runReproDemo(
         workspaceId,
         botId: bot.id ?? botId,
       });
-      if (!listed.ok) return null;
+      const monitors = unwrap(listed, "botMonitorList");
+      const health = unwrap(await bridge.status(), "status");
+      if (health.schedulerLastTickMs !== undefined) {
+        const lastTick = health.schedulerLastTickMs;
+        if ((lastTick === null && now() - monitorWaitStarted > 60_000) ||
+            (lastTick !== null && now() - lastTick > 60_000)) {
+          throw new Error("The service scheduler has not completed a tick in over a minute. Check running sessions, then use Settings → Restart daemon and retry the demo.");
+        }
+      }
       return (
-        listed.result.monitors.find((entry) => entry.monitorId === monitor.monitorId) ??
+        monitors.monitors.find((entry) => entry.monitorId === monitor.monitorId) ??
         null
       );
     };
@@ -592,6 +624,11 @@ export async function runReproDemo(
       // is a diagram, not the work.
       tour({ kind: "open-sessions", workspaceId });
 
+      setPhase(
+        "firing",
+        "running",
+        `${fired.lastEventId} · session started; waiting for its workers and workflow`,
+      );
       const started = await until(
         async () => {
           const status = await bridge.graphOrchestratorStatus({ workspaceId });
@@ -605,27 +642,15 @@ export async function runReproDemo(
         releasedBy: "monitor",
         releaseNote: `Firing ${fired.lastEventId}`,
       });
+      setPhase("firing", "done", `Firing ${fired.lastEventId} started workflow ${started.id}`);
     } catch (error) {
-      // The watch is real evidence either way: record why it did not release
-      // the work, then start the workflow from the panel so the rest of the
-      // demo still shows what it is for.
+      if (generation !== runGeneration) return;
+      // A timeout is not proof the coordinator exited. Never race a slow
+      // coordinator (or a stopped tour) by launching a second workflow.
       const message = error instanceof Error ? error.message : String(error);
       setPhase("firing", "failed", message);
-      const started = unwrap(
-        await bridge.graphOrchestratorStart({
-          workspaceId,
-          main: mainNodeFor(runtime, REPRO_SCENARIO_SPEC),
-        }),
-        "graphOrchestratorStart",
-      );
-      update({
-        workflowId: started.run.id,
-        releasedBy: "panel",
-        releaseNote: message,
-      });
-      // Released by the panel instead: the daemon's rounds still run as
-      // sessions in this workspace, so the tour goes there all the same.
-      tour({ kind: "open-sessions", workspaceId });
+      update({ releaseNote: message });
+      throw error;
     }
 
     // Phase 8 — the rounds, followed from the sessions view the tour opened
@@ -673,9 +698,11 @@ export async function runReproDemo(
     );
     // The telemetry is worth reading before the tour's last stop, the usage.
     await sleep(8000);
+    ensureFollowing();
     tour({ kind: "focus-view", view: "usage" });
     update({ running: false, spotlight: "evidence" });
   } catch (error) {
+    if (generation !== runGeneration) return;
     const message = error instanceof Error ? error.message : String(error);
     mutate((previous) => {
       const phases = { ...previous.phases };
@@ -685,6 +712,8 @@ export async function runReproDemo(
       }
       return { ...previous, phases, running: false, failure: message };
     });
+    // The panel may be unmounted by the tour; make failures visible there.
+    if (!cancelled) tour({ kind: "open-demo" });
   }
 }
 

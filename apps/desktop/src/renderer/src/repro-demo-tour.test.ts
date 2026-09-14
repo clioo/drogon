@@ -23,11 +23,13 @@ function collect(): ReproTourRequest[] {
 describe("the demo's guided tour", () => {
   test("carries a request from the panel to whoever can navigate", () => {
     const seen = collect();
+    requestReproTour({ kind: "open-demo" });
     requestReproTour({ kind: "open-bots", workspaceId: "ws-1" });
     requestReproTour({ kind: "open-sessions", workspaceId: "ws-1" });
     requestReproTour({ kind: "open-work-graph", workspaceId: "ws-1" });
     requestReproTour({ kind: "focus-view", view: "usage" });
     expect(seen).toEqual([
+      { kind: "open-demo" },
       { kind: "open-bots", workspaceId: "ws-1" },
       { kind: "open-sessions", workspaceId: "ws-1" },
       { kind: "open-work-graph", workspaceId: "ws-1" },
