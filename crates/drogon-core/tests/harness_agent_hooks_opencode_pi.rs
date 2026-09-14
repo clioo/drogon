@@ -459,6 +459,167 @@ fn pi_harness_start_installs_extension_and_removes_it_on_exit() {
     );
 }
 
+#[test]
+fn pi_headless_usage_is_fenced_deduplicated_and_visible_before_workflow_rounds() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = ok(
+        &engine,
+        "workspace.register",
+        json!({"path": workspace.path()}),
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let bin = tempfile::tempdir().unwrap();
+    write_fixture_script(bin.path(), "pi", "exec /bin/sleep 30");
+    prepend_fixture_bin(bin.path());
+    let launched = ok(
+        &engine,
+        "harness.start",
+        json!({"workspaceId": workspace_id, "harnessId": "pi", "prompt": "fixture", "headless": true}),
+    );
+    let session_id = launched["id"].as_str().unwrap();
+    let incarnation = launched["incarnation"].as_str().unwrap();
+    let snapshot = || {
+        ok(
+            &engine,
+            "graph.observability_status",
+            json!({"workspaceId": workspace_id}),
+        )["observability"]
+            .clone()
+    };
+    let payload = json!({"sessionId": session_id, "incarnation": incarnation, "event": "PiUsage",
+        "piUsage": {"id": "message-1", "model": "fixture/model", "inputTokens": 37, "outputTokens": 11, "cacheReadTokens": 2, "cacheWriteTokens": 1}});
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert!(
+            launched["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|arg| arg == "--extension")
+        );
+        let initial = snapshot();
+        assert!(initial["usage"].as_array().unwrap().is_empty());
+        assert_eq!(initial["evidence"][0]["agentId"], session_id);
+        assert_eq!(initial["evidence"][0]["status"], "progress");
+        assert!(
+            !workspace
+                .path()
+                .join(drogon_protocol::graph::GRAPH_FILE_DIR)
+                .join(drogon_protocol::graph::GRAPH_EVIDENCE_FILE_NAME)
+                .exists()
+        );
+        for invalid in [
+            json!({"id": "missing", "model": "fixture/model"}),
+            json!({"id": "overflow", "model": "fixture/model", "inputTokens": 9_007_199_254_740_992u64}),
+            json!({"id": "negative", "model": "fixture/model", "outputTokens": -1}),
+        ] {
+            let mut bad = payload.clone();
+            bad["piUsage"] = invalid;
+            assert!(
+                !engine
+                    .dispatch(req(
+                        "session.hook_event",
+                        &uuid::Uuid::new_v4().to_string(),
+                        bad
+                    ))
+                    .ok
+            );
+        }
+        let mut stale = payload.clone();
+        stale["incarnation"] = json!("stale");
+        assert!(
+            !engine
+                .dispatch(req("session.hook_event", "stale", stale))
+                .ok
+        );
+        assert!(snapshot()["usage"].as_array().unwrap().is_empty());
+        for _ in 0..2 {
+            ok(&engine, "session.hook_event", payload.clone());
+        }
+        let recorded = snapshot();
+        let rows = recorded["usage"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["agentId"], session_id);
+        assert_eq!(rows[0]["model"], "fixture/model");
+        assert_eq!(rows[0]["inputTokens"], 37);
+        assert_eq!(rows[0]["outputTokens"], 11);
+        assert_eq!(rows[0]["cacheReadTokens"], 2);
+        assert_eq!(rows[0]["cacheWriteTokens"], 1);
+    }));
+    // Always stop the one owned process before unwinding a failed assertion.
+    let stopped = ok(
+        &engine,
+        "session.stop",
+        json!({"sessionId": session_id, "incarnation": incarnation}),
+    );
+    assert_eq!(stopped["verdict"], "exited");
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+    ok(&engine, "session.hook_event", payload);
+    assert_eq!(snapshot()["usage"].as_array().unwrap().len(), 1);
+    assert_ne!(snapshot()["evidence"][0]["status"], "progress");
+}
+
+#[test]
+fn worker_usage_install_failure_retires_the_reservation_without_starting_a_child() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let marker = bin.path().join("spawned");
+    write_fixture_script(bin.path(), "pi", &format!("touch '{}'", marker.display()));
+    prepend_fixture_bin(bin.path());
+    write_fixture_script(bin.path(), "drogon-cli", "exit 0");
+    let engine = Engine::open(dir.path())
+        .unwrap()
+        .with_worker_cli(&bin.path().join("drogon-cli"))
+        .unwrap();
+    let host = ok(&engine, "status", json!({}))["hostId"].clone();
+    let workspace_id = ok(
+        &engine,
+        "workspace.register",
+        json!({"path": workspace.path()}),
+    )["id"]
+        .clone();
+    let run = ok(
+        &engine,
+        "orchestration.runCreate",
+        json!({"contractVersion":1, "hostId":host, "coordinatorId":"owner", "objective":"fixture"}),
+    )["run"]["runId"]
+        .clone();
+    let scope = json!({"contractVersion":1, "hostId":host, "runId":run, "coordinatorId":"owner", "consumerGeneration":1});
+    let mut task_params = scope.clone();
+    task_params["spec"] = json!({"instructions":"fixture"});
+    let task = ok(&engine, "orchestration.taskCreate", task_params)["task"]["taskId"].clone();
+    std::fs::create_dir_all(dir.path().join("harness-hooks")).unwrap();
+    std::fs::write(dir.path().join("harness-hooks/pi"), "not a directory").unwrap();
+    let mut params = scope;
+    params["taskId"] = task;
+    params["workspaceId"] = workspace_id.clone();
+    params["mode"] = json!("fresh");
+    params["launch"] =
+        json!({"harnessId":"pi", "model":"fixture-model", "permissionMode":"inherit"});
+    let result = ok(&engine, "orchestration.workerStart", params);
+    assert_eq!(result["assignmentState"], "failed");
+    assert!(
+        !marker.exists(),
+        "hook setup failed before any process effect"
+    );
+    let sessions = ok(&engine, "session.list", json!({"workspaceId":workspace_id}));
+    assert_eq!(sessions["sessions"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        sessions["sessions"][0]["verdict"], "exited",
+        "never leave pending admission for crash recovery"
+    );
+}
+
 /// The core J1 correctness guard: OpenCode/Pi are full TUIs that can repaint
 /// while genuinely still waiting, so unlike claude they must not clear
 /// `needs_input` on generic PTY output — only their own hook's events may.

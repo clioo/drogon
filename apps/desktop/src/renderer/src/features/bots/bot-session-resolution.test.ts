@@ -50,6 +50,26 @@ function observedSession(overrides: Partial<Session> = {}): Session {
   };
 }
 
+describe("monitor session resolution", () => {
+  test.each(["live", "exited"] as const)("views a %s monitor run without reopening it", (verdict) => {
+    const resolution = resolveBotSession({
+      bot: bot(record({ source: "monitor", verdict, workspaceId: "ws-home", incarnation: "inc-1", agentSessionId: "provider-conversation" })),
+      observed: null, hostId: "host-1",
+    });
+    expect(resolution).toMatchObject({ kind: "focus", session: { sessionId: "sess-1", incarnation: "inc-1" } });
+  });
+  test.each([
+    { verdict: "unverifiable" as const },
+    { recordedSessionMissing: true },
+    {},
+  ])("never restarts an unobservable monitor run: %j", (facts) => {
+    expect(resolveBotSession({
+      bot: bot(record({ source: "monitor", agentSessionId: "provider-conversation", ...facts })),
+      observed: null, hostId: "host-1",
+    })).toEqual({ kind: "unknown" });
+  });
+});
+
 describe("resolveBotSession", () => {
   test("opens fresh only when there is no recorded session", () => {
     expect(

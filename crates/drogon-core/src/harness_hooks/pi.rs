@@ -71,22 +71,25 @@ pub(crate) fn extension_source() -> String {
 // `drogon-cli internal hook-event` instead of the source's HTTP loopback
 // hooks server; see harness_hooks::pi for what else is not ported.
 
-function report(eventName, prompt) {{
+function report(eventName, prompt, usage) {{
   var cli = process.env.DROGON_HOOK_CLI || "drogon-cli"
   var sessionId = process.env.DROGON_SESSION_ID || ""
   var incarnation = process.env.DROGON_HOOK_INCARNATION || ""
   if (!sessionId || !incarnation) return
-  try {{
-    var child = require("node:child_process").execFile(
-      cli,
-      ["internal", "hook-event", "--session", sessionId, "--incarnation", incarnation, "--event", eventName],
-      {{ stdio: "ignore" }},
-      function () {{}}
-    )
-    if (child.stdin) child.stdin.end(JSON.stringify({{ prompt: typeof prompt === "string" ? prompt.slice(0, 512) : undefined }}))
-  }} catch (err) {{
-    // Why: a hook-report failure must never fail the pi run.
-  }}
+  return new Promise(function (resolve) {{
+    try {{
+      var child = require("node:child_process").execFile(
+        cli,
+        ["internal", "hook-event", "--session", sessionId, "--incarnation", incarnation, "--event", eventName],
+        {{ timeout: 5000, maxBuffer: 65536, windowsHide: true }},
+        function () {{ resolve() }}
+      )
+      if (child.stdin) {{
+        child.stdin.on("error", function () {{}})
+        child.stdin.end(JSON.stringify({{ prompt: typeof prompt === "string" ? prompt.slice(0, 512) : undefined, piUsage: usage }}))
+      }}
+    }} catch (err) {{ resolve() }}
+  }})
 }}
 
 // Why: proves the extension module actually executed inside pi even when no
@@ -100,16 +103,36 @@ try {{
 }}
 
 export default function (pi) {{
-  pi.on("before_agent_start", function (event) {{ report("{agent_start}", event && event.prompt) }})
-  pi.on("agent_start", function () {{ report("{agent_start}") }})
-  pi.on("tool_execution_start", function () {{ report("{tool_start}") }})
-  pi.on("tool_call", function () {{ report("{tool_start}") }})
-  pi.on("tool_approval_requested", function () {{ report("{tool_approval_requested}") }})
-  pi.on("tool_approval_resolved", function () {{ report("{tool_approval_resolved}") }})
-  pi.on("agent_settled", function () {{ report("{agent_end}") }})
+  pi.on("message_end", async function (event) {{
+    var message = event && event.message
+    if (!message || message.role !== "assistant" || !message.usage) return
+    if (typeof message.provider !== "string" || typeof message.model !== "string" || !Number.isFinite(message.timestamp)) return
+    var reported = {{}}
+    var keys = {{ input: "inputTokens", output: "outputTokens", cacheRead: "cacheReadTokens", cacheWrite: "cacheWriteTokens" }}
+    for (var key of Object.keys(keys)) {{
+      var value = message.usage[key]
+      if (Number.isSafeInteger(value) && value >= 0) reported[keys[key]] = value
+    }}
+    if (!Object.keys(reported).length) return
+    if ((message.stopReason === "error" || message.stopReason === "aborted") && !Object.values(reported).some(function (value) {{ return value > 0 }})) return
+    // Hash for replay identity only; no message content crosses the hook transport.
+    reported.id = require("node:crypto").createHash("sha256").update(JSON.stringify([
+      message.timestamp, message.provider, message.model, message.usage, message.content
+    ])).digest("hex")
+    reported.model = message.provider + "/" + message.model
+    await report("PiUsage", undefined, reported)
+  }})
+  if (process.env.DROGON_HOOK_USAGE_ONLY === "1") return
+  pi.on("before_agent_start", function (event) {{ return report("{agent_start}", event && event.prompt) }})
+  pi.on("agent_start", function () {{ return report("{agent_start}") }})
+  pi.on("tool_execution_start", function () {{ return report("{tool_start}") }})
+  pi.on("tool_call", function () {{ return report("{tool_start}") }})
+  pi.on("tool_approval_requested", function () {{ return report("{tool_approval_requested}") }})
+  pi.on("tool_approval_resolved", function () {{ return report("{tool_approval_resolved}") }})
+  pi.on("agent_settled", function () {{ return report("{agent_end}") }})
   pi.on("agent_end", function (event) {{
     if (event && event.willContinue === true) return
-    report("{agent_end}")
+    return report("{agent_end}")
   }})
 }}
 "#,

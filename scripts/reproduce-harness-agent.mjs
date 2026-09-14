@@ -18,6 +18,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 
 const FIXTURE_VERSION = "drogon-repro-fixture 1.0";
 
@@ -74,7 +75,8 @@ function log(context, entry) {
 /** The prompt the harness was launched with: the last non-flag argument the
  *  adapters pass, or stdin for an adapter that pipes it. */
 function resolvePrompt(rest) {
-  const candidates = rest.filter((value) => typeof value === "string" && value.length > 40);
+  const candidates = rest.filter((value, index) =>
+    !["--extension", "--settings"].includes(rest[index - 1]) && typeof value === "string" && value.length > 40);
   if (candidates.length > 0) return candidates[candidates.length - 1];
   try {
     return readFileSync(0, "utf8");
@@ -217,6 +219,23 @@ if (rest[0] === "models" || rest.includes("--list-models")) {
   process.exit(0);
 }
 
+// Load the actual managed extension and drive its public event contract.
+// This fixture reports synthetic counters, never contacts a model provider.
+if (harness === "pi" && rest.includes("--extension")) {
+  const extensionPath = rest[rest.indexOf("--extension") + 1];
+  const handlers = new Map();
+  const install = new Function("require", readFileSync(extensionPath, "utf8").replace("export default function", "return function"))(createRequire(import.meta.url));
+  install({ on: (name, handler) => handlers.set(name, handler) });
+  const message = { role: "assistant", provider: "fixture", model: "dog-tinder", timestamp: Date.now(), stopReason: "stop",
+    content: [{ type: "text", text: "Fixture response" }], usage: { input: 37, output: 11, cacheRead: 2, cacheWrite: 1 } };
+  await handlers.get("message_end")?.({ message: { ...message, role: "user" } });
+  await handlers.get("message_end")?.({ message: { ...message, timestamp: message.timestamp + 1, usage: {} } });
+  await handlers.get("message_end")?.({ message: { ...message, timestamp: message.timestamp + 2, stopReason: "error", usage: { input: 0, output: 0 } } });
+  await handlers.get("message_end")?.({ message });
+  // A redelivery must not count that same response twice.
+  await handlers.get("message_end")?.({ message });
+}
+
 const prompt = resolvePrompt(rest);
 const modelIndex = rest.indexOf("--model");
 const model = modelIndex === -1 ? (context?.model ?? "fixture") : (rest[modelIndex + 1] ?? "fixture");
@@ -267,7 +286,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** How long a worker keeps its session alive after doing its slice: long
  *  enough that a viewer (and the acceptance) can see several of them live at
  *  once, short enough not to bore anyone. */
-const WORKER_DWELL_MS = 8000;
+const WORKER_DWELL_MS = context.workerDwellMs ?? 8000;
 
 /** The worker's own turn, inside the session `worker-start` opened for it.
  *  The task spec carries a tag the main agent chose (`[deck]`, `[page]`,

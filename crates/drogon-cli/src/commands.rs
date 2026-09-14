@@ -961,6 +961,9 @@ async fn internal(
                 "incarnation": incarnation,
                 "event": event,
             });
+            if let Some(usage) = payload.pi_usage {
+                params["piUsage"] = usage;
+            }
             if let Some(agent_session_id) = payload.agent_session_id {
                 params["agentSessionId"] = json!(agent_session_id);
             }
@@ -984,6 +987,7 @@ struct HookPayload {
     prompt_preview: Option<String>,
     agent_session_id: Option<String>,
     transcript_path: Option<String>,
+    pi_usage: Option<Value>,
 }
 
 /// Read bounded hook JSON without hanging the agent on an open stdin pipe.
@@ -1032,6 +1036,10 @@ fn hook_payload(bytes: &[u8]) -> HookPayload {
             .map(|prompt| prompt.chars().take(512).collect()),
         agent_session_id: string("session_id").or_else(|| string("conversation_id")),
         transcript_path: string("transcript_path").or_else(|| string("session_file")),
+        pi_usage: value
+            .get("piUsage")
+            .filter(|value| value.is_object())
+            .cloned(),
     }
 }
 
@@ -3379,8 +3387,20 @@ mod tests {
                 prompt_preview: None,
                 agent_session_id: None,
                 transcript_path: None,
+                pi_usage: None,
             }
         );
+    }
+
+    #[test]
+    fn hook_payload_forwards_reported_pi_usage_without_message_content() {
+        let parsed = hook_payload(br#"{"piUsage":{"id":"m1","model":"fixture/model","inputTokens":37},"message":{"content":"not forwarded"}}"#);
+        assert_eq!(
+            parsed.pi_usage,
+            Some(json!({"id":"m1","model":"fixture/model","inputTokens":37}))
+        );
+        assert_eq!(parsed.prompt_preview, None);
+        assert_eq!(hook_payload(br#"{"piUsage":[]}"#).pi_usage, None);
     }
 
     #[test]

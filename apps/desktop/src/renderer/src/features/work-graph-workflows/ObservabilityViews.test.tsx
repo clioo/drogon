@@ -50,6 +50,12 @@ describe("native Work Graph observability views", () => {
     expect(screen.getByText("reports/unit.txt")).toBeTruthy();
   });
 
+  it("identifies native session activity as a session, not a graph node", () => {
+    render(<EvidenceView snapshot={{ ...snapshot, evidence: [{ ...snapshot.evidence[0], id: "session:worker-1", agentId: "worker-1" }] }} loading={false} />);
+    expect(screen.getByText("Session")).toBeTruthy();
+    expect(screen.queryByText("Node")).toBeNull();
+  });
+
   it("sums only reported usage and leaves missing fields unknown", () => {
     render(<UsageView snapshot={snapshot} loading={false} />);
     expect(screen.getByText("120")).toBeTruthy();

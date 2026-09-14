@@ -40,7 +40,7 @@ function TelemetryFacts({
   const facts: [string, string][] = [
     ["Recorded", formatTime(entry.timestamp)],
     ["Author", entry.role ? entry.role : "—"],
-    ["Node", entry.agentId ? entry.agentId : "—"],
+    [entry.id.startsWith("session:") ? "Session" : "Node", entry.agentId ? entry.agentId : "—"],
     ["Workflow run", entry.runId ? entry.runId : "—"],
     ["Entry", entry.id],
   ];

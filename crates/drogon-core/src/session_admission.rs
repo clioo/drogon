@@ -469,7 +469,7 @@ fn verify_committed(conn: &Connection, plan: &PreparedSession) -> Result<(), Rpc
 
 /// A spawn failure must not leave a `pending` row for crash recovery to
 /// misread as a session that ran.
-fn abandon_pending(db: &Mutex<Connection>, session_id: &str) {
+pub(crate) fn abandon_pending(db: &Mutex<Connection>, session_id: &str) {
     let conn = db.lock().unwrap();
     let _ = conn.execute(
         "UPDATE sessions SET verdict = 'exited', exit_code = NULL WHERE id = ?1 AND verdict = 'pending'",

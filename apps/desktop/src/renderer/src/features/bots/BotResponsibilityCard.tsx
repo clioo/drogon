@@ -293,7 +293,7 @@ export function BotResponsibilityCard({
             onClick={onLaunch}
           >
             <Play />
-            Open session
+            {bot.currentSession?.source === "monitor" ? "View session" : "Open session"}
           </Button>
           {bot.currentSession && onLaunchNew ? (
             // Gap 2: a Bot is bound to one session, so the default click

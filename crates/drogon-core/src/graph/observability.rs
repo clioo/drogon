@@ -12,6 +12,7 @@ use drogon_protocol::graph::{
     MAX_GRAPH_EVIDENCE_DETAIL_BYTES, MAX_GRAPH_EVIDENCE_SUMMARY_BYTES,
     MAX_GRAPH_OBSERVABILITY_ENTRIES,
 };
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
@@ -279,12 +280,198 @@ fn snapshot(root: &Path) -> Result<GraphObservabilitySnapshot, RpcError> {
     })
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PiSessionUsage {
+    id: String,
+    model: String,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cache_read_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
+}
+
 impl Engine {
+    fn session_dispatch_run(
+        &self,
+        session_id: &str,
+        incarnation: &str,
+    ) -> Result<Option<String>, RpcError> {
+        self.db.lock().unwrap().query_row(
+            "SELECT run_id FROM orchestration_dispatch_credentials WHERE host_id=?1 AND session_id=?2 AND incarnation=?3",
+            rusqlite::params![self.host_id, session_id, incarnation], |row| row.get(0),
+        ).optional().map_err(error::from_sqlite)
+    }
+
+    pub(crate) fn record_pi_session_usage(
+        &self,
+        handle: &crate::session::SessionHandle,
+        value: &Value,
+    ) -> Result<(), RpcError> {
+        if handle.harness_id.as_deref() != Some("pi") {
+            return Err(error::invalid_argument("Pi usage requires a Pi session."));
+        }
+        let usage: PiSessionUsage = parse(value)?;
+        validate_text(&usage.id, 128, "Usage message id", false)?;
+        validate_text(&usage.model, 512, "Usage model", false)?;
+        let tokens = [
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        ];
+        if tokens.iter().all(Option::is_none)
+            || tokens.into_iter().flatten().any(|v| v > MAX_TOKEN_VALUE)
+        {
+            return Err(error::invalid_argument(
+                "Usage needs reported, exact non-negative token counters.",
+            ));
+        }
+        let root = self.workspace_path(&handle.workspace_id)?;
+        let run_id = self.session_dispatch_run(&handle.session_id, &handle.incarnation)?;
+        let worker = run_id.is_some() || handle.parent_session_id.is_some();
+        let _gate = self.graph_orchestrator_gate.lock().unwrap();
+        let path = ledger_path(&root, GRAPH_USAGE_FILE_NAME);
+        let mut ledger: Ledger<GraphUsageEntry> = read_ledger(&path)?;
+        let id = format!(
+            "pi:{}:{}:{}",
+            handle.session_id, handle.incarnation, usage.id
+        );
+        if ledger.entries.iter().any(|entry| entry.id == id) {
+            return Ok(());
+        }
+        if ledger.entries.len() >= MAX_GRAPH_OBSERVABILITY_ENTRIES {
+            return Err(error::invalid_argument(
+                "The usage ledger reached its entry limit.",
+            ));
+        }
+        ledger.entries.push(GraphUsageEntry {
+            id,
+            timestamp: crate::now_rfc3339(),
+            run_id,
+            agent_id: Some(handle.session_id.clone()),
+            role: Some(
+                if worker {
+                    "worker"
+                } else if handle.caused_by_event_id.is_some() {
+                    "coordinator"
+                } else {
+                    "agent"
+                }
+                .into(),
+            ),
+            harness: Some("pi".into()),
+            model: Some(usage.model),
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_write_tokens: usage.cache_write_tokens,
+        });
+        write_ledger(&path, &ledger)
+    }
+
     pub(crate) fn graph_observability_status(&self, params: &Value) -> Result<Value, RpcError> {
         let parsed: WorkspaceParams = parse(params)?;
         let root = self.workspace_path(&parsed.workspace_id)?;
+        let sessions = self.do_session_list(&json!({"workspaceId": parsed.workspace_id}))?;
+        let dispatches = {
+            let conn = self.db.lock().unwrap();
+            let mut stmt = conn.prepare(
+                "SELECT c.session_id, c.run_id FROM orchestration_dispatch_credentials c
+                 JOIN sessions s ON s.id=c.session_id AND s.incarnation=c.incarnation AND s.host_id=c.host_id
+                 WHERE s.workspace_id=?1 AND s.host_id=?2"
+            ).map_err(error::from_sqlite)?;
+            stmt.query_map(
+                rusqlite::params![parsed.workspace_id, self.host_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .map_err(error::from_sqlite)?
+            .collect::<Result<std::collections::HashMap<_, _>, _>>()
+            .map_err(error::from_sqlite)?
+        };
         let _gate = self.graph_orchestrator_gate.lock().unwrap();
-        Ok(json!({"observability": snapshot(&root)?}))
+        let mut observed = snapshot(&root)?;
+        for session in sessions["sessions"].as_array().into_iter().flatten() {
+            let Some(harness) = session["harnessId"].as_str() else {
+                continue;
+            };
+            let Some(id) = session["id"].as_str() else {
+                continue;
+            };
+            let verdict = session["verdict"].as_str().unwrap_or("unverifiable");
+            let run_id = dispatches.get(id).cloned();
+            let role = if run_id.is_some() || session["parentSessionId"].as_str().is_some() {
+                "worker"
+            } else if session["causedByEventId"].as_str().is_some() {
+                "coordinator"
+            } else {
+                "agent"
+            };
+            let (status, summary) = match verdict {
+                "exited" => (
+                    match session["exitCode"].as_i64() {
+                        Some(0) => "completed",
+                        Some(_) => "failed",
+                        None => "note",
+                    },
+                    format!(
+                        "{harness} {role} session exited · code {}",
+                        session["exitCode"]
+                            .as_i64()
+                            .map(|code| code.to_string())
+                            .unwrap_or_else(|| "unavailable".into())
+                    ),
+                ),
+                "live" => (
+                    "progress",
+                    format!(
+                        "{harness} {role} session · {}",
+                        session["agentState"].as_str().unwrap_or("live")
+                    ),
+                ),
+                _ => (
+                    "blocked",
+                    format!("{harness} {role} session · contact unavailable"),
+                ),
+            };
+            let mut detail = format!("Liveness: {verdict}");
+            if let Some(parent) = session["parentSessionId"].as_str() {
+                detail.push_str(&format!("\nParent session: {parent}"));
+            }
+            if let Some(event) = session["causedByEventId"].as_str() {
+                detail.push_str(&format!("\nMonitor event: {event}"));
+            }
+            let mut entry = daemon_evidence(
+                status,
+                summary,
+                Some(detail),
+                vec![],
+                run_id,
+                Some(id.into()),
+                Some(role.into()),
+            );
+            entry.id = format!("session:{id}");
+            entry.timestamp = session["createdAt"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            observed.evidence.push(entry);
+        }
+        observed
+            .evidence
+            .sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        let excess = observed
+            .evidence
+            .len()
+            .saturating_sub(MAX_GRAPH_OBSERVABILITY_ENTRIES);
+        observed.evidence.drain(..excess);
+        if sessions["sessions"]
+            .as_array()
+            .is_some_and(|rows| !rows.is_empty())
+        {
+            observed.updated_at = crate::now_rfc3339();
+        }
+        Ok(json!({"observability": observed}))
     }
 
     pub(crate) fn graph_evidence_append(&self, request: &Request) -> Result<Value, RpcError> {

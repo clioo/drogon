@@ -111,6 +111,38 @@ fn valid_active_worker_status_is_authorized() {
 }
 
 #[test]
+fn worker_usage_is_limited_to_its_exact_session_and_never_lifecycle_events() {
+    let mut conn = migrated_conn();
+    register(&mut conn, SECRET);
+    let params = json!({"sessionId": SESSION, "incarnation": INCARNATION, "event": "PiUsage", "piUsage": {"id":"m1","model":"fixture/model","inputTokens":37}});
+    authorize_worker(&conn, HOST, SECRET, "session.hook_event", &params).unwrap();
+    for (key, value) in [
+        ("sessionId", json!("other")),
+        ("incarnation", json!("stale")),
+        ("event", json!("AgentStart")),
+        ("piUsage", json!(null)),
+    ] {
+        let mut wrong = params.clone();
+        wrong[key] = value;
+        assert_eq!(
+            authorize_worker(&conn, HOST, SECRET, "session.hook_event", &wrong)
+                .unwrap_err()
+                .code,
+            "unauthorized"
+        );
+    }
+    let tx = conn.transaction().unwrap();
+    revoke_in_tx(&tx, DISPATCH, "stopped").unwrap();
+    tx.commit().unwrap();
+    assert_eq!(
+        authorize_worker(&conn, HOST, SECRET, "session.hook_event", &params)
+            .unwrap_err()
+            .code,
+        "unauthorized"
+    );
+}
+
+#[test]
 fn missing_credential_is_unauthorized() {
     let conn = migrated_conn();
     let err = authorize_worker(&conn, HOST, "", "status", &json!({})).unwrap_err();

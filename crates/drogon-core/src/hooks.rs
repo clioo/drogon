@@ -168,11 +168,25 @@ impl Engine {
     /// `SessionHandle::set_explicit_wait_clear`) — the generic PTY-output
     /// clear would let the composer's keystroke echo spend a real wait and
     /// spin idle rows. Headless runs keep the ordinary completion behavior
-    /// (process exit; no hooks are installed for them). A stale incarnation
+    /// (process exit, even when usage hooks are installed). A stale incarnation
     /// or an exited session never gains a wait signal.
     pub(crate) fn do_session_hook_event(&self, params: &Value) -> Result<Value, RpcError> {
         let event = require_str(params, "event")?;
         let (handle, _) = self.require_session_with_incarnation(params)?;
+        // Usage never changes lifecycle authority or provider conversation identity.
+        // Late delivery is safe: both the incarnation and message id are fenced.
+        if event == "PiUsage" {
+            let usage = params
+                .get("piUsage")
+                .ok_or_else(|| error::invalid_argument("Missing Pi usage counters."))?;
+            self.record_pi_session_usage(&handle, usage)?;
+            return Ok(session::snapshot(&handle));
+        }
+        if params.get("piUsage").is_some() {
+            return Err(error::invalid_argument(
+                "Usage requires the PiUsage hook event.",
+            ));
+        }
         if !crate::agent_state::event_belongs_to_harness(event, handle.harness_id.as_deref()) {
             // The flat classification namespace is safe only because each
             // harness's own plumbing names its own events; a foreign
@@ -250,8 +264,8 @@ impl Engine {
             // A headless daemon run (`pi -p`, `claude -p`, `opencode run`,
             // `codex exec`, `agy -p`) has no approval-answer surface: stamping a wait
             // signal would pin it at `needs_input` forever with nobody able
-            // to answer (issue #186). Headless installs no hooks, so a wait
-            // signal here is unexpected anyway — ignore it, never report it.
+            // to answer (issue #186). Ignore wait signals from headless
+            // usage wiring; they have no answer surface.
             // Its exit is the completion signal, not a hook event.
             HookSignal::Wait if handle.is_headless() => {}
             HookSignal::Wait => handle.note_hook_event(),

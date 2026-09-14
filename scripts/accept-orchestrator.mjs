@@ -744,37 +744,9 @@ async function main() {
   await canvas.waitFor();
   report.checks.push("design-2-screenshots-light-dark-no-overflow");
 
-  // 8. F0: BEFORE clicking "Run workflow", the canvas must disclose which
-  //    runtime would run and whether it is the free local default — never
-  //    a silent paid/external spawn. Computed the same way the app does
-  //    (mirrors `FREE_DEFAULT_RUNTIME` in `shared/work-graph-contract.ts`),
-  //    not assumed, since the approved runtime added in step 5 could be
-  //    the catalog's default free pair or something else.
-  const FREE_DEFAULT = {
-    harness: "pi",
-    model: "qwen3.8-flash-next-nvidia-nvfp4",
-  };
-  const currentPolicy = (await readGraph(workspace)).intent.policy;
-  const firstRuntime =
-    currentPolicy.approvedRuntimes[0] ??
-    currentPolicy.fallbackRuntime ??
-    FREE_DEFAULT;
-  const expectFree =
-    firstRuntime.harness === FREE_DEFAULT.harness &&
-    firstRuntime.model === FREE_DEFAULT.model;
-  const disclosure = panel.locator(
-    '[data-testid="orchestrator-runtime-disclosure"]',
-  );
-  await disclosure.waitFor({ timeout: 10000 });
-  assert.equal(
-    await disclosure.getAttribute("data-free-default"),
-    String(expectFree),
-  );
-  assert.match(
-    (await disclosure.innerText()) ?? "",
-    expectFree ? /free local model/ : /paid\/external/,
-  );
-  report.checks.push("run-workflow-discloses-the-runtime-before-launch");
+  // 8. The selected runtime is already shown in the policy controls.
+  assert.equal(await panel.getByTestId("orchestrator-runtime-disclosure").count(), 0);
+  report.checks.push("runtime-policy-does-not-add-a-cost-banner");
 
   // 9. "Run workflow" (DISHONEST-1): dispatches the base task to the Main
   //    agent's OWN session first — the terminal must show it genuinely

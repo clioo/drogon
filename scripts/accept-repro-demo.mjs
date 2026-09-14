@@ -85,12 +85,13 @@ const HARNESS_DISPLAY_NAMES = {
  * parallel sessions, the daemon's telemetry); what a real agent decides —
  * whether the first round already passes — is reported, not assumed.
  */
-export async function execute({ runs = 2, live = null } = {}) {
+export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_HARNESS } = {}) {
+  assert.ok(["opencode", "pi"].includes(fixtureHarness), "Unsupported fixture harness");
   const report = {
     runner: "scripts/accept-repro-demo.mjs",
     status: "FAILED",
     startedAt: new Date().toISOString(),
-    lane: `${FIXTURE_HARNESS}/${FIXTURE_MODEL} (local fixture, no inference)`,
+    lane: `${fixtureHarness}/${FIXTURE_MODEL} (local fixture, no inference)`,
     checks: [],
     runs: [],
     phases: {},
@@ -127,7 +128,7 @@ export async function execute({ runs = 2, live = null } = {}) {
     if (live) {
       report.lane = `LIVE · main ${live.main.harness}/${live.main.model || "harness default"} · subagents ${live.subagents.harness}/${live.subagents.model || "harness default"} (real inference)`;
     } else {
-      await writeHarnessFixtures(binDir, [FIXTURE_HARNESS]);
+      await writeHarnessFixtures(binDir, [fixtureHarness]);
     }
     // What the fixture agent needs to reach the CLI and its stages. The in-app
     // demo writes no context file of its own, so the daemon carries the path
@@ -143,6 +144,7 @@ export async function execute({ runs = 2, live = null } = {}) {
           model: FIXTURE_MODEL,
           invocationLog: path.join(world, "harness-invocations.jsonl"),
           specPath: "specs/dog-tinder.md",
+          workerDwellMs: 15000,
         },
         null,
         2,
@@ -264,7 +266,7 @@ export async function execute({ runs = 2, live = null } = {}) {
           `the picked ${prefix} model must be the one the run gets`,
         );
       };
-      const main = live ? live.main : { harness: FIXTURE_HARNESS, model: FIXTURE_MODEL };
+      const main = live ? live.main : { harness: fixtureHarness, model: FIXTURE_MODEL };
       const subagents = live ? live.subagents : main;
       await pick("repro-demo", main);
       await pick("repro-demo-subagents", subagents);
@@ -409,11 +411,13 @@ export async function execute({ runs = 2, live = null } = {}) {
       };
       let mostAlive = 0;
       let sessionsShot = null;
+      let monitorSessionId = null;
       const rounds = await (async () => {
         const stop = Date.now() + (live ? LIVE_RUN_BUDGET_MS : RUN_BUDGET_MS);
         for (;;) {
           const alive = await sessionsAlive().catch(() => []);
           if (alive.length > mostAlive) mostAlive = alive.length;
+          if (alive.length) await captureDescendants([daemon.pid], owned);
           if (alive.length >= 2 && !sessionsShot) {
             // The tour leaves Bots for the sessions at the firing, seconds
             // before the workers exist: the viewer sees terminals working —
@@ -435,9 +439,60 @@ export async function execute({ runs = 2, live = null } = {}) {
               (await page.locator(".xterm").filter({ visible: true }).count()) >= 1,
               "the sessions stop must show a terminal on screen",
             );
+            // The monitor's own admission, not a worker or a fresh chat.
+            const host = await cli("status");
+            const snapshot = await cli("rpc", "bot.snapshot", "--params", JSON.stringify({
+              hostId: host.hostId, workspaceId: "", locale: "en-US",
+            }));
+            const linked = snapshot.bots.find((bot) => bot.id === `white-walker-${tag}`)?.currentSession;
+            assert.equal(linked?.source, "monitor");
+            monitorSessionId = linked.sessionId;
+            const launched = alive.find((session) => session.id === monitorSessionId);
+            assert.ok(launched, "the Bot links the live coordinator");
+            await page.locator(`[data-bot-session-row="white-walker-${tag}"]`).click({ timeout: 15_000 });
+            await page.getByTestId("bot-session-header").waitFor();
+            await page.getByTestId("bot-session-header").getByText("Launch prompt", { exact: true }).click();
+            assert.equal(await page.getByTestId("bot-session-header").getByTestId("monitor-launch-prompt-text").textContent(), launched.args.find((arg) => arg.startsWith("Drogon task:\n")) ?? launched.args.at(-1));
+            report.checks.push("Chats opens the monitor coordinator and shows its exact recorded launch prompt");
             sessionsShot = path.join(fixture, `sessions-running-${attempt}.png`);
             await page.screenshot({ path: sessionsShot, animations: "disabled" });
             report.screenshots.push(sessionsShot);
+            if (!live && fixtureHarness === "pi") {
+              const observed = (await cli("rpc", "graph.observability_status", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }))).observability;
+              assert.ok(observed.evidence.some((entry) => entry.id === `session:${monitorSessionId}` && entry.status === "progress"));
+              const reported = observed.usage.filter((entry) => entry.agentId === monitorSessionId && entry.id.startsWith("pi:"));
+              assert.equal(reported.length, 1, "replayed Pi message usage is counted once");
+              assert.equal(reported[0].inputTokens, 37);
+              assert.equal(reported[0].outputTokens, 11);
+              assert.equal(reported[0].cacheReadTokens, 2);
+              assert.equal(reported[0].cacheWriteTokens, 1);
+              assert.equal(reported[0].model, "fixture/dog-tinder");
+              for (const session of alive.filter((session) => session.id !== monitorSessionId)) {
+                const workerUsage = observed.usage.filter((entry) => entry.agentId === session.id && entry.id.startsWith("pi:"));
+                assert.equal(workerUsage.length, 1, "each live Pi worker reports exactly one response through its own dispatch credential");
+                assert.equal(workerUsage[0].role, "worker");
+                assert.equal(typeof workerUsage[0].runId, "string");
+              }
+              assert.equal(await orchestratorStatus(), null, "activity and usage exist before workflow rounds start");
+              await page.evaluate((workspaceId) => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", { detail: { kind: "open-work-graph", workspaceId } })), demoWorkspaceId);
+              await page.getByTestId("orchestrator-canvas").waitFor();
+              assert.equal(await page.getByTestId("orchestrator-runtime-disclosure").count(), 0);
+              await page.evaluate(() => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", { detail: { kind: "focus-view", view: "evidence" } })));
+              await page.getByTestId("work-graph-evidence-view").waitFor();
+              const activityShot = path.join(fixture, `telemetry-running-${attempt}.png`);
+              await page.screenshot({ path: activityShot, animations: "disabled" });
+              report.screenshots.push(activityShot);
+              await page.evaluate(() => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", { detail: { kind: "focus-view", view: "usage" } })));
+              await page.getByTestId("work-graph-usage-view").waitFor();
+              const usageShot = path.join(fixture, `usage-running-${attempt}.png`);
+              await page.screenshot({ path: usageShot, animations: "disabled" });
+              report.screenshots.push(usageShot);
+              const stillRunning = await cli("rpc", "session.list", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }));
+              assert.equal(stillRunning.sessions.find((session) => session.id === monitorSessionId)?.verdict, "live");
+              await page.locator(`[data-bot-session-row="white-walker-${tag}"]`).click();
+              await page.getByTestId("bot-session-header").waitFor();
+              report.checks.push("Before workflow rounds, rendered coordinator/worker activity and Pi-hook counters via their own credentials (synthetic fixture responses), with replay deduplication");
+            }
             report.checks.push(
               `the app left Bots for the run's sessions by itself, with ${alive.length} alive: ${alive
                 .map((session) => session.harnessId ?? session.command ?? session.id)
@@ -559,6 +614,22 @@ export async function execute({ runs = 2, live = null } = {}) {
       const panelShot = path.join(fixture, `settings-after-run-${attempt}.png`);
       await page.screenshot({ path: panelShot, animations: "disabled" });
       report.screenshots.push(panelShot);
+      if (!live) {
+        const beforeView = await cli("rpc", "session.list", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }));
+        assert.equal(beforeView.sessions.find((session) => session.id === monitorSessionId)?.verdict, "exited");
+        await page.evaluate((workspaceId) => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", {
+          detail: { kind: "open-bots", workspaceId },
+        })), demoWorkspaceId);
+        const view = page.getByTestId(`open-session-white-walker-${tag}`);
+        await view.waitFor();
+        assert.equal((await view.innerText()).trim(), "View session");
+        await view.click();
+        await page.getByTestId("bot-session-header").waitFor();
+        await delay(500);
+        const afterView = await cli("rpc", "session.list", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }));
+        assert.deepEqual(afterView.sessions.map((session) => session.id).sort(), beforeView.sessions.map((session) => session.id).sort());
+        report.checks.push("View session inspects the exited monitor run without creating or resuming a session");
+      }
     }
 
     report.status = "PASSED";

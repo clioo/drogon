@@ -1,6 +1,6 @@
 //! Headless daemon runs (issue #186): `harness.start` with `headless: true`
 //! launches each harness's non-interactive entrypoint (`pi -p`,
-//! `claude -p`, `opencode run`, `agy -p`), installs no hook wiring, and a
+//! `claude -p`, `opencode run`, `agy -p`), and a
 //! hook wait signal against the headless session never reports
 //! `needs_input`. Against real `portable-pty` children and a real SQLite
 //! file per test (Unix-only, like `agent_state_hook_events.rs`). No model
@@ -132,7 +132,7 @@ fn read_until_exited(
 }
 
 #[test]
-fn pi_headless_uses_print_mode_installs_no_hooks_and_ignores_wait_signals() {
+fn pi_headless_uses_print_mode_installs_usage_hooks_and_ignores_wait_signals() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _saved_path = SavedEnv::capture("PATH");
 
@@ -157,8 +157,8 @@ fn pi_headless_uses_print_mode_installs_no_hooks_and_ignores_wait_signals() {
         "headless Pi must go through print mode: {args:?}"
     );
     assert!(
-        !args.iter().any(|arg| arg == "--extension"),
-        "headless runs install no hook extension: {args:?}"
+        args.iter().any(|arg| arg == "--extension"),
+        "headless Pi installs the managed usage extension: {args:?}"
     );
     let session_id = launched["id"].as_str().unwrap().to_string();
     let incarnation = launched["incarnation"].as_str().unwrap().to_string();
