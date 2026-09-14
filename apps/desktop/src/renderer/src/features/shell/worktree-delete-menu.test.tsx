@@ -59,16 +59,20 @@ function mount({
   action = null,
   onOpenAction = () => {},
   onSubmitRemove = async () => null,
+  groups: mountGroups = groups,
+  workspaces = [workspace],
 }: {
   action?: ProjectAction | null;
   onOpenAction?: (action: ProjectAction) => void;
   onSubmitRemove?: (worktree: Worktree, force: boolean) => Promise<string | null>;
+  groups?: ProjectGroup[];
+  workspaces?: Workspace[];
 }) {
   return render(
     <Tooltip.Provider>
       <ProjectList
-        groups={groups}
-        workspaces={[workspace]}
+        groups={mountGroups}
+        workspaces={workspaces}
         sessions={[]}
         selectedWorkspaceId="ws1"
         activeSessionId=""
@@ -95,7 +99,7 @@ function mount({
   );
 }
 
-function clickDeleteMenuItem(): void {
+function clickDeleteMenuItem(label = "Delete"): void {
   const scope = document.querySelector(
     '[data-worktree-context-menu-scope="worktree"]',
   ) as HTMLElement;
@@ -105,10 +109,12 @@ function clickDeleteMenuItem(): void {
     document.querySelectorAll<HTMLElement>(
       ".shell-worktree-context-menu-item-destructive",
     ),
-  ).find((el) => el.textContent?.includes("Delete"));
-  expect(item?.textContent).toContain("Delete");
-  // Fork copy: the destructive row shows the workspace.delete chord chip.
-  expect(item?.querySelector(".shell-worktree-context-menu-shortcut")).toBeTruthy();
+  ).find((el) => el.textContent?.includes(label));
+  expect(item?.textContent).toContain(label);
+  // Git deletion shows the workspace.delete chord chip; folder projects
+  // expose the app-level Remove Workspace action instead.
+  if (label === "Delete")
+    expect(item?.querySelector(".shell-worktree-context-menu-shortcut")).toBeTruthy();
   // Radix selects on the full pointer gesture, not a bare click.
   fireEvent.pointerDown(item!, { pointerType: "mouse", button: 0 });
   fireEvent.pointerUp(item!, { pointerType: "mouse", button: 0 });
@@ -176,6 +182,46 @@ describe("worktree card menu: primary checkout pair (fork parity)", () => {
     expect(onOpenAction).toHaveBeenCalledWith({
       kind: "remove-project",
       projectId: "p1",
+    });
+  });
+});
+
+describe("folder project delete routing (#220)", () => {
+  test("routes the daemon's project-id implicit worktree to project removal", () => {
+    const onOpenAction = vi.fn();
+    const folderProject: Project = {
+      ...project,
+      id: "folder-project",
+      path: "/work/folder-project",
+      name: "folder-project",
+      kind: "folder",
+    };
+    const folderWorkspace: Workspace = {
+      ...workspace,
+      id: "folder-workspace",
+      path: folderProject.path,
+      name: folderProject.name,
+      kind: "folder",
+    };
+    // `worktree.list` uses the project id for a folder project's implicit
+    // row; it does not use the renderer fallback's `implicit:` id.
+    const implicitWorktree: Worktree = {
+      ...worktree,
+      id: folderProject.id,
+      projectId: folderProject.id,
+      workspaceId: folderWorkspace.id,
+      path: folderProject.path,
+      branch: "",
+    };
+    mount({
+      groups: [{ project: folderProject, worktrees: [implicitWorktree] }],
+      workspaces: [folderWorkspace],
+      onOpenAction,
+    });
+    clickDeleteMenuItem("Remove Workspace");
+    expect(onOpenAction).toHaveBeenCalledWith({
+      kind: "remove-project",
+      projectId: folderProject.id,
     });
   });
 });
