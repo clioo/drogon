@@ -84,6 +84,7 @@ function bot(overrides: Partial<BotsPanelBot> = {}): BotsPanelBot {
 function fakeBridge(initial: BotsPanelBot[]) {
   const bots = [...initial];
   let snapshots = 0;
+  const deleteCalls: Array<Record<string, unknown>> = [];
   let failNext: string | null = null;
   const bridge = {
     botSnapshot: async () => {
@@ -139,7 +140,8 @@ function fakeBridge(initial: BotsPanelBot[]) {
         automationId: "auto-1",
       },
     }),
-    botDelete: async () => {
+    botDelete: async (input: Record<string, unknown>) => {
+      deleteCalls.push(input);
       const index = bots.findIndex((entry) => entry.id === "bot-1");
       if (index >= 0) bots.splice(index, 1);
       return {
@@ -151,6 +153,7 @@ function fakeBridge(initial: BotsPanelBot[]) {
   return {
     bridge,
     snapshots: () => snapshots,
+    botDeletes: () => [...deleteCalls],
     failNextSnapshotWith: (message: string) => {
       failNext = message;
     },
@@ -547,6 +550,15 @@ describe("use-bots-page-controller", () => {
     const deleteButton = await screen.findByTestId("delete-bot-bot-1");
     fireEvent.click(deleteButton);
     await waitFor(() => expect(screen.getByTestId("bots-empty")).toBeTruthy());
+    // The retrying probe wait must culminate in the real delete dispatch once
+    // the route-reentry snapshot hydrates; an empty pending render must never
+    // be mistaken for a completed deletion.
+    expect(fake.botDeletes()).toHaveLength(1);
+    expect(fake.botDeletes()[0]).toMatchObject({
+      botId: "bot-1",
+      hostId: scope.hostId,
+      workspaceId: scope.workspaceId,
+    });
   });
 });
 
