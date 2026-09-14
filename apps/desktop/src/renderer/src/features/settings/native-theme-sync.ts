@@ -40,6 +40,18 @@ import {
 const PERSISTED_ADOPT_DELAYS_MS = [1_300, 5_300];
 
 /**
+ * Upper bound for a section write to reach the persisted envelope: the
+ * store's 1s save debounce with a 5s maximum pending delay
+ * (renderer/src/settings-store.ts DEBOUNCE_MS/MAX_PENDING_MS), plus margin.
+ * A live choice younger than this may legitimately disagree with a
+ * persisted read (its flush is still pending); anything older has either
+ * flushed or been superseded by a write that bypassed the section.
+ */
+const ADOPT_FLUSH_BOUND_MS = 6_000;
+/** Breathing room past the bound before the single convergence re-check. */
+const ADOPT_RETRY_SLACK_MS = 500;
+
+/**
  * After a themeSource write, shouldUseDarkColors may settle a tick (or
  * more) later — the invoke response can still carry the pre-settle value.
  * Re-pull until it converges; every pull carries the authoritative state.
@@ -193,6 +205,7 @@ export function startNativeThemeSync(
 
   let disposed = false;
   let currentTheme: Theme | null = null;
+  let lastReportAt = 0;
   let adoptTimers: ReturnType<typeof setTimeout>[] = [];
 
   const apply = (): void => {
@@ -221,15 +234,42 @@ export function startNativeThemeSync(
   // A write that bypassed the section (e.g. the status-bar theme cycle)
   // lands in the envelope only after the store's debounce; adopt it past
   // both deadlines so the resolution converges on the persisted truth.
+  // Guarded two ways: a batch scheduled before a newer live choice must
+  // never stamp its older persisted read over that choice (a previous
+  // selection's adopt firing past the new report but before its debounced
+  // flush un-applied the new theme for seconds — the rc.5 gate caught the
+  // check reading mid-flap), and a persisted read that disagrees with a
+  // live choice younger than the flush bound is a not-yet-flushed store,
+  // not truth, so it waits for one bounded re-check instead of clobbering.
   const adoptPersistedSoon = (): void => {
-    for (const delay of PERSISTED_ADOPT_DELAYS_MS) {
+    const known = currentTheme;
+    const knownReportAt = lastReportAt;
+    const check = (isRetry: boolean): void => {
+      if (disposed) return;
+      if (currentTheme !== known || lastReportAt !== knownReportAt) return;
+      const persisted = readPersistedTheme();
+      if (
+        persisted === known ||
+        isRetry ||
+        Date.now() - knownReportAt > ADOPT_FLUSH_BOUND_MS
+      ) {
+        currentTheme = persisted;
+        repull();
+        return;
+      }
       adoptTimers.push(
-        setTimeout(() => {
-          if (disposed) return;
-          currentTheme = readPersistedTheme();
-          repull();
-        }, delay),
+        setTimeout(
+          () => check(true),
+          Math.max(
+            0,
+            ADOPT_FLUSH_BOUND_MS - (Date.now() - knownReportAt) +
+              ADOPT_RETRY_SLACK_MS,
+          ),
+        ),
       );
+    };
+    for (const delay of PERSISTED_ADOPT_DELAYS_MS) {
+      adoptTimers.push(setTimeout(() => check(false), delay));
     }
   };
 
@@ -249,6 +289,7 @@ export function startNativeThemeSync(
   liveThemeReporter = (theme) => {
     if (disposed) return;
     currentTheme = theme;
+    lastReportAt = Date.now();
     void bridge.setThemeSource(theme).catch(() => {});
     apply();
     settleRepull();
