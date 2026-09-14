@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
 import { existsSync, utimesSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
+import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +39,13 @@ import {
   decodePng,
   iconRasterStats,
 } from "./build-app-icon.mjs";
+import {
+  captureDescendants,
+  runAcceptanceProcess,
+  settleOwnedProcesses,
+  startAcceptanceProcess,
+  stopAcceptanceProcess,
+} from "./acceptance-process.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -483,4 +499,386 @@ test("packaging, acceptance and install-preview stay wired to the icon invariant
   );
   assert.match(installer, /lenientPreviousBuildInfo\(/);
   assert.match(installer, /PREVIOUS-BUILD-LENIENT/);
+});
+
+const MAIN_ENTITLEMENTS_FILE = path.join(
+  root,
+  "scripts",
+  "drogon-main.entitlements.plist",
+);
+const HELPER_ENTITLEMENTS_FILE = path.join(
+  root,
+  "scripts",
+  "drogon-helper-inherit.entitlements.plist",
+);
+const MAIN_RUNTIME_ENTITLEMENTS = [
+  "com.apple.security.cs.allow-jit",
+  "com.apple.security.cs.allow-unsigned-executable-memory",
+  "com.apple.security.cs.disable-library-validation",
+];
+
+function entitlementPattern(key) {
+  const escaped = key.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+  return new RegExp(
+    `\\[Key\\] ${escaped}[\\s\\S]*?\\[Value\\]\\s+\\[Bool\\] true`,
+  );
+}
+
+function assertEntitlements(output, keys, target) {
+  for (const key of keys)
+    assert.match(output, entitlementPattern(key), `${target} lacks ${key}`);
+}
+
+async function codesignOutput(args) {
+  const result = await runAcceptanceProcess("/usr/bin/codesign", args, {
+    timeout: 60000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  return `${result.stdout}\n${result.stderr}`;
+}
+
+async function helperCodeTargets(bundle) {
+  const frameworks = path.join(bundle, "Contents", "Frameworks");
+  const entries = await readdir(frameworks, { withFileTypes: true });
+  const targets = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith("Drogon Helper"))
+      continue;
+    const helper = path.join(frameworks, entry.name);
+    const executableDir = path.join(helper, "Contents", "MacOS");
+    const executables = await readdir(executableDir, { withFileTypes: true });
+    const executable = executables.find((candidate) => candidate.isFile());
+    assert.ok(executable, `No executable in ${helper}`);
+    targets.push({
+      bundle: helper,
+      executable: path.join(executableDir, executable.name),
+    });
+  }
+  assert.ok(targets.length > 0, "Electron packaged no Drogon Helper bundles");
+  return targets;
+}
+
+async function inspectHardenedElectronCode(bundle) {
+  const mainExecutable = path.join(bundle, "Contents", "MacOS", "Drogon");
+  const helpers = await helperCodeTargets(bundle);
+  const records = [];
+  const mainTargets = [
+    { bundle, executable: mainExecutable, keys: MAIN_RUNTIME_ENTITLEMENTS },
+    ...helpers.map((target) => ({
+      ...target,
+      keys: [MAIN_RUNTIME_ENTITLEMENTS[0]],
+    })),
+  ];
+  for (const target of mainTargets) {
+    const summary = await codesignOutput([
+      "-dv",
+      "--verbose=4",
+      target.executable === mainExecutable ? target.bundle : target.executable,
+    ]);
+    assert.match(
+      summary,
+      /flags=.*runtime/,
+      `${target.bundle} is not hardened-runtime signed`,
+    );
+    const entitlements = await codesignOutput([
+      "-d",
+      "--entitlements",
+      "-",
+      target.bundle,
+    ]);
+    assertEntitlements(entitlements, target.keys, target.bundle);
+    records.push({
+      bundle: path.relative(root, target.bundle),
+      entitlements: target.keys,
+    });
+  }
+  console.log(`hardened-entitlements ${JSON.stringify(records)}`);
+  return records;
+}
+
+function packagedRecord(output) {
+  const record = output
+    .split("\n")
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    })
+    .find((candidate) => candidate?.status === "PACKAGED");
+  assert.ok(record?.bundle, "package-desktop did not report a bundle");
+  return record;
+}
+
+async function packageSigningFixture() {
+  const result = await runAcceptanceProcess(
+    process.execPath,
+    ["scripts/package-desktop.mjs"],
+    {
+      cwd: root,
+      env: (() => {
+        const env = { ...process.env };
+        delete env.ELECTRON_RUN_AS_NODE;
+        return env;
+      })(),
+      timeout: 1800000,
+      maxBuffer: 32 * 1024 * 1024,
+    },
+  );
+  return path.resolve(packagedRecord(result.stdout).bundle);
+}
+
+async function exactDaemonRows(daemon, dataDir) {
+  const result = await runAcceptanceProcess("/bin/ps", [
+    "-axo",
+    "pid=,ppid=,command=",
+  ]);
+  const prefix = `${daemon} --data-dir ${dataDir}`;
+  return result.stdout.split("\n").filter((line) => line.includes(prefix));
+}
+
+async function runBundleForSigning(bundle, { expectCrash = false } = {}) {
+  const scratch = await mkdtemp(path.join(tmpdir(), "dg-sign-"));
+  const dataDir = path.join(scratch, "d");
+  const profile = path.join(scratch, "p");
+  const home = path.join(scratch, "h");
+  await Promise.all([mkdir(dataDir), mkdir(profile), mkdir(home)]);
+  const daemon = path.join(bundle, "Contents", "Resources", "bin", "drogond");
+  const cli = path.join(bundle, "Contents", "Resources", "bin", "drogon-cli");
+  const stopDaemon = path.join(
+    bundle,
+    "Contents",
+    "Resources",
+    "bin",
+    "drogon-stop-daemon",
+  );
+  const env = {
+    ...process.env,
+    HOME: home,
+    DROGON_BACKGROUND_WINDOW: "1",
+    DROGON_DATA_DIR: dataDir,
+    DROGON_ELECTRON_PROFILE: profile,
+    PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+  };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const child = startAcceptanceProcess(
+    path.join(bundle, "Contents", "MacOS", "Drogon"),
+    [],
+    { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let output = "";
+  child.stdout?.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+  child.stderr?.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+  const owned = new Map();
+  let operationError = null;
+  let cleanupError = null;
+  let result = null;
+  try {
+    const deadline = Date.now() + (expectCrash ? 30000 : 45000);
+    if (expectCrash) {
+      const failure =
+        /CodeRange|Library not loaded|different Team IDs|not valid for use|Fatal process/;
+      while (
+        !failure.test(output) &&
+        !output.includes("[window] Window bounds at startup:") &&
+        child.exitCode === null &&
+        child.signalCode === null &&
+        Date.now() < deadline
+      )
+        await delay(50);
+      assert.doesNotMatch(
+        output,
+        /\[window\] Window bounds at startup:/,
+        `unentitled hardened launch reached the window: ${output}`,
+      );
+      assert.match(
+        output,
+        failure,
+        "the unentitled hardened launch did not expose the runtime failure",
+      );
+      result = { output, dataDir };
+    } else {
+      while (
+        !output.includes("[window] Window bounds at startup:") &&
+        child.exitCode === null &&
+        child.signalCode === null &&
+        Date.now() < deadline
+      )
+        await delay(50);
+      assert.match(output, /\[window\] Window bounds at startup:/, output);
+      assert.equal(child.exitCode, null, output);
+      assert.equal(child.signalCode, null, output);
+      let status = null;
+      let statusError = null;
+      const statusDeadline = Date.now() + 30000;
+      while (!status?.ok && Date.now() < statusDeadline) {
+        try {
+          const result = await runAcceptanceProcess(
+            cli,
+            ["--data-dir", dataDir, "--json", "status"],
+            { cwd: root, timeout: 2000 },
+          );
+          status = JSON.parse(result.stdout);
+        } catch (error) {
+          statusError = error;
+        }
+        if (!status?.ok) await delay(250);
+      }
+      assert.equal(
+        status?.ok,
+        true,
+        `bundled drogond never answered status: ${statusError?.message ?? "no response"}\n${output}`,
+      );
+      assert.equal(child.exitCode, null, output);
+      assert.equal(child.signalCode, null, output);
+      result = { output, dataDir };
+    }
+  } catch (error) {
+    operationError = error;
+  } finally {
+    try {
+      if (child.pid) await captureDescendants([child.pid], owned);
+      const stopped = await stopAcceptanceProcess(child, {
+        graceMs: 5000,
+        forceMs: 2000,
+      });
+      if (stopped.verdict !== "exited")
+        throw new Error(`desktop cleanup was ${stopped.verdict}`);
+      const settled = await settleOwnedProcesses(owned);
+      const unsettled = settled.filter((item) => item.verdict !== "exited");
+      if (unsettled.length > 0)
+        throw new Error(
+          `owned Electron processes survived: ${JSON.stringify(unsettled)}`,
+        );
+      await runAcceptanceProcess(stopDaemon, [], { cwd: root, timeout: 20000 });
+      const remaining = await exactDaemonRows(daemon, dataDir);
+      if (remaining.length > 0)
+        throw new Error(
+          `bundled daemon survived cleanup: ${remaining.join("\n")}`,
+        );
+      await rm(scratch, { recursive: true, force: true });
+    } catch (error) {
+      cleanupError = error;
+    }
+  }
+  if (operationError) {
+    operationError.message += `\nLaunch output:\n${output}`;
+    if (cleanupError)
+      operationError.message += `\nCleanup: ${cleanupError.message}`;
+    throw operationError;
+  }
+  if (cleanupError) throw cleanupError;
+  return result;
+}
+
+test("release signing profiles protect the outer Electron seal and helpers", async () => {
+  const packaged = await readFile(
+    path.join(root, "scripts", "package-desktop.mjs"),
+    "utf8",
+  );
+  const main = await readFile(MAIN_ENTITLEMENTS_FILE, "utf8");
+  const helper = await readFile(HELPER_ENTITLEMENTS_FILE, "utf8");
+  assert.match(packaged, /optionsForSignedFile/);
+  assert.match(packaged, /mainEntitlements/);
+  assert.match(packaged, /helperInheritEntitlements/);
+  assert.match(packaged, /"--entitlements",\s*mainEntitlements/);
+  for (const key of MAIN_RUNTIME_ENTITLEMENTS)
+    assert.match(main, new RegExp(key));
+  assert.match(helper, /com\.apple\.security\.cs\.allow-jit/);
+  assert.doesNotMatch(
+    helper,
+    /com\.apple\.security\.cs\.allow-unsigned-executable-memory/,
+  );
+});
+
+test("packaged hardened runtime carries entitlements and launches with its daemon", async () => {
+  // Electron's signing and launch contract is macOS-only; retain a real
+  // source/profile assertion on Linux rather than marking the regression skipped.
+  if (process.platform !== "darwin") {
+    const packaged = await readFile(
+      path.join(root, "scripts", "package-desktop.mjs"),
+      "utf8",
+    );
+    assert.match(packaged, /DROGON_RELEASE_SIGNING/);
+    return;
+  }
+  const bundle = await packageSigningFixture();
+  // This is the deliberately failing reproduction: runtime signing without
+  // the main entitlements must not be mistaken for a healthy package.
+  await codesignOutput([
+    "-s",
+    "-",
+    "--options",
+    "runtime",
+    "--force",
+    "--deep",
+    bundle,
+  ]);
+  const unentitled = await runBundleForSigning(bundle, { expectCrash: true });
+  // Ad-hoc signatures also need library validation disabled because they have
+  // no team identity. Removing only JIT from the otherwise valid profile
+  // isolates the shipped Developer ID failure: V8 cannot reserve CodeRange.
+  const noJitDir = await mkdtemp(path.join(tmpdir(), "dg-no-jit-"));
+  const noJitEntitlements = path.join(noJitDir, "entitlements.plist");
+  await writeFile(
+    noJitEntitlements,
+    (await readFile(MAIN_ENTITLEMENTS_FILE, "utf8")).replace(
+      /\s*<key>com\.apple\.security\.cs\.allow-jit<\/key>\s*<true\s*\/>/,
+      "",
+    ),
+  );
+  let noJit = null;
+  try {
+    await codesignOutput([
+      "-s",
+      "-",
+      "--options",
+      "runtime",
+      "--entitlements",
+      noJitEntitlements,
+      "--force",
+      "--deep",
+      bundle,
+    ]);
+    noJit = await runBundleForSigning(bundle, { expectCrash: true });
+    assert.match(noJit.output, /CodeRange/);
+  } finally {
+    await rm(noJitDir, { recursive: true, force: true });
+  }
+  assert.match(unentitled.output, /Library not loaded|CodeRange|Fatal process/);
+  const failureEvidence = (output) =>
+    output
+      .split("\n")
+      .find((line) => /Library not loaded|CodeRange|Fatal process/.test(line)) ??
+    "failure marker was observed without a single-line diagnostic";
+  console.log(
+    `hardened-launch-failure ${JSON.stringify({
+      unentitled: failureEvidence(unentitled.output),
+      noJit: failureEvidence(noJit.output),
+    })}`,
+  );
+  // Re-sign the same freshly packaged bundle with the production profile. The
+  // subsequent checks inspect the real Mach-O signatures and launch it headless.
+  await codesignOutput([
+    "-s",
+    "-",
+    "--options",
+    "runtime",
+    "--entitlements",
+    MAIN_ENTITLEMENTS_FILE,
+    "--force",
+    "--deep",
+    bundle,
+  ]);
+  await codesignOutput(["--verify", "--deep", "--strict", bundle]);
+  await inspectHardenedElectronCode(bundle);
+  const launched = await runBundleForSigning(bundle);
+  console.log(
+    `signed-launch ${JSON.stringify({ bundle, dataDir: launched.dataDir })}`,
+  );
 });
