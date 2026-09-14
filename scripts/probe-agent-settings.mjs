@@ -59,6 +59,22 @@ export async function writeAgentSettingsFixtures(bin, { skip = [] } = {}) {
   }
 }
 
+// True when the host carries an executable `name` on `hostPath`. The model
+// journeys drive the genuine `pi` TUI/binary, so a clean machine without
+// one must skip those journeys explicitly instead of failing opaquely.
+export async function hostBinaryAvailable(name, hostPath) {
+  const dirs = (hostPath ?? "").split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    try {
+      await access(path.join(dir, name), fsConstants.X_OK);
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
 /**
  * Links a host binary into the isolated fixture PATH. The packaged Pi
  * journeys assert the real TUI banner and its agent-state transitions, so
