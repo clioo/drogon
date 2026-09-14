@@ -451,6 +451,19 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
             const launched = allSessions.sessions.find((session) => session.id === monitorSessionId);
             assert.ok(launched, "the Bot links its dispatcher, not the graph main or a worker");
             if (!live) assert.equal(launched.verdict, "exited", "the Bot ended after admitting the graph");
+            const workerSessions = alive.filter((session) => session.id !== monitorSessionId);
+            assert.ok(workerSessions.length >= 2, "parallelism counts worker terminals, never the Bot or a fabricated main terminal");
+            const activeGraph = await orchestratorStatus();
+            assert.equal(activeGraph?.status, "running");
+            assert.equal(activeGraph?.phase, "main", "workers execute inside the already-admitted graph main phase");
+            const card = page.locator("[data-worktree-card-id]").filter({ has: page.getByText(`Run ${activeGraph.id}`, { exact: true }) });
+            await card.getByText("Main agent · running", { exact: true }).waitFor();
+            assert.equal(await card.getByRole("button", { name: "Work Graph · Running" }).getAttribute("aria-expanded"), "true");
+            assert.equal(await card.getByText("Background workflow · no terminal", { exact: true }).isVisible(), true);
+            const runtime = activeGraph.steps.find((step) => step.phase === "main" && step.status === "running")?.runtime;
+            assert.ok(runtime, "running main retains its selected runtime");
+            assert.equal(await card.getByText(`${runtime.harness}${runtime.model ? ` · ${runtime.model}` : ""}`, { exact: true }).isVisible(), true);
+            report.checks.push("Sidebar reveals the background graph main and selected runtime beside the actual worker sessions");
             await page.locator(`[data-bot-session-row="white-walker-${tag}"]`).click({ timeout: 15_000 });
             await page.getByTestId("bot-session-header").waitFor();
             await page.getByTestId("bot-session-header").getByText("Launch prompt", { exact: true }).click();
@@ -475,9 +488,6 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
                 assert.equal(workerUsage[0].role, "worker");
                 assert.equal(typeof workerUsage[0].runId, "string");
               }
-              const activeGraph = await orchestratorStatus();
-              assert.equal(activeGraph?.status, "running");
-              assert.equal(activeGraph?.phase, "main", "workers execute inside the already-admitted graph main phase");
               await page.evaluate((workspaceId) => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", { detail: { kind: "open-work-graph", workspaceId } })), demoWorkspaceId);
               await page.getByTestId("orchestrator-canvas").waitFor();
               assert.equal(await page.getByTestId("orchestrator-runtime-disclosure").count(), 0);
