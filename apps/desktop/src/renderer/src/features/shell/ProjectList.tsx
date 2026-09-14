@@ -1247,7 +1247,10 @@ function EntryGroupRow({
       </div>
       <div className="shell-project-cards">
         {group.entries.map(({ worktree, project }, index) => {
-          const implicitFolderWorktree = isImplicitFolderWorktree(worktree);
+          const implicitFolderWorktree = isImplicitFolderWorktree(
+            worktree,
+            project.kind,
+          );
           const primaryCheckout =
             project.kind === "git" && worktree.path === project.path;
           return (
@@ -1499,7 +1502,10 @@ function ProjectRow({
             depth: number,
           ): React.JSX.Element => {
             const currentIndex = cardIndex++;
-            const implicitFolderWorktree = isImplicitFolderWorktree(worktree);
+            const implicitFolderWorktree = isImplicitFolderWorktree(
+              worktree,
+              project.kind,
+            );
             const primaryCheckout =
               project.kind === "git" && worktree.path === project.path;
             return (
@@ -1564,9 +1570,15 @@ function ProjectRow({
   );
 }
 
-/** Folder projects expose one implicit worktree (the folder itself). */
-function isImplicitFolderWorktree(worktree: Worktree): boolean {
+/** Folder projects expose one implicit worktree (the folder itself).
+ * The daemon identifies it with the project id; the workspace fallback uses
+ * the `implicit:`/`folder:` ids. */
+function isImplicitFolderWorktree(
+  worktree: Worktree,
+  projectKind?: Project["kind"],
+): boolean {
   return (
+    projectKind === "folder" ||
     worktree.id.startsWith("implicit:") ||
     worktree.projectId.startsWith("folder:")
   );
