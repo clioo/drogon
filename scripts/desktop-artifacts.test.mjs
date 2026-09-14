@@ -620,6 +620,15 @@ async function packageSigningFixture() {
       env: (() => {
         const env = { ...process.env };
         delete env.ELECTRON_RUN_AS_NODE;
+        // package-desktop invokes the production renderer build internally.
+        // Keep its real macOS CI run on the same heap budget as the dedicated
+        // build step in foundation.yml instead of failing before signing.
+        env.NODE_OPTIONS = [
+          env.NODE_OPTIONS,
+          "--max-old-space-size=6144",
+        ]
+          .filter(Boolean)
+          .join(" ");
         return env;
       })(),
       timeout: 1800000,
