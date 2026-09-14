@@ -42,6 +42,15 @@ export async function readProjectManifests(root) {
   return { files, manifests };
 }
 
+/**
+ * Release-time invariant: the tag being released must name the version both
+ * manifests already carry. Packaging calls this before producing any bytes,
+ * so a tag-vs-manifest mismatch can never ship — the job fails first.
+ */
+export function assertTagMatchesManifests(manifests, tag) {
+  return assertProjectVersions(manifests, versionFromTag(tag));
+}
+
 export function assertProjectVersions(manifests, expected = null) {
   const workspaceVersion = manifests.workspace?.version;
   const desktopVersion = manifests.desktop?.version;

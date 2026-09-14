@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { bundlePaths, verifiedBuildInfo } from "./desktop-artifacts.mjs";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
 import {
-  assertProjectVersions,
+  assertTagMatchesManifests,
   readProjectManifests,
   versionFromCliOutput,
   versionFromTag,
@@ -223,7 +223,7 @@ export async function createReleaseArtifacts({
   );
   output ??= path.join(root, "dist", "releases");
   const { manifests } = await readProjectManifests(root);
-  assert.equal(assertProjectVersions(manifests, version), version);
+  assert.equal(assertTagMatchesManifests(manifests, tag), version);
   const signing = assertReleaseSigningConfiguration(process.env);
   const packageResult = await runPackager(root, version, signing);
   const bundle = path.resolve(packageResult.bundle);
