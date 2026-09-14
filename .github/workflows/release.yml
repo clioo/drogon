@@ -23,6 +23,20 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
+      # Electron's binary comes from GitHub's release CDN, which returned 504s
+      # across three jobs on 2026-09-14 and broke a release and a main run that
+      # had nothing wrong with them. Cache it per runner and lockfile so a CDN
+      # outage costs a slower first run instead of a red pipeline.
+      - name: Cache the Electron binary
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/.cache/electron
+            ~\AppData\Local\electron\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
       - name: Install pinned tools
         run: |
           rustup toolchain install 1.98.0 --profile minimal
