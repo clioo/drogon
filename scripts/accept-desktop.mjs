@@ -71,8 +71,20 @@ import {
   verifyBundleCarriesDrogonIcon,
   verifySealedBundle,
 } from "./desktop-artifacts.mjs";
-import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
+import {
+  cleanAcceptanceEnvironment,
+  packagedFixtureDaemon,
+} from "./packaged-fixture-daemon.mjs";
 import { probeStandaloneSessions } from "./probe-standalone-sessions.mjs";
+
+// This launcher may itself run inside a dispatched Drogon worker. Dispatch
+// credentials are authoritative to every CLI child, and inherited identity
+// hints can accidentally scope otherwise isolated acceptance RPCs. Scrub the
+// whole DROGON_* namespace before any fixture, Electron, or CLI child starts;
+// the launch code below adds back only acceptance-owned values.
+const cleanEnvironment = cleanAcceptanceEnvironment(process.env);
+for (const key of Object.keys(process.env)) delete process.env[key];
+Object.assign(process.env, cleanEnvironment);
 
 const args = process.argv.slice(2);
 const bundle =

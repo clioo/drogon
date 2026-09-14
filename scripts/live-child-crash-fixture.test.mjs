@@ -547,6 +547,26 @@ test("observer startup settles when the observer exits before ready, reaping the
   assert.ok(Date.now() - began < 5000, "startup rejection must be bounded");
 });
 
+test("observer startup surfaces the interpreter stderr for an unreadable script", async () => {
+  const missingScript = path.join(
+    tmpdir(),
+    "drogon-observer-missing-%20-script.py",
+  );
+  await assert.rejects(
+    startExitObserver(process.pid, {
+      scriptPath: missingScript,
+      deadlineMs: 100,
+      readyTimeoutMs: 1000,
+    }),
+    (error) => {
+      assert.match(error.message, /exited before ready/);
+      assert.match(error.message, /can't open file|No such file|No such file or directory/);
+      assert.match(error.message, /%20/);
+      return true;
+    },
+  );
+});
+
 test("observer startup timeout reaps a stalling observer", async () => {
   const began = Date.now();
   await assert.rejects(

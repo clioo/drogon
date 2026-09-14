@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import { readFileSync, appendFileSync } from "node:fs";
 import { chmod, copyFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -26,10 +27,13 @@ import {
 } from "./acceptance-process.mjs";
 import { startExitObserver } from "./live-child-crash-fixture.mjs";
 
-const OBSERVER_SCRIPT = new URL(
-  "./live-child-exit-observer.py",
-  import.meta.url,
-).pathname;
+// `URL.pathname` leaves `%20` escapes in filesystem paths. This worktree's
+// Application Support parent makes that failure observable in packaged
+// acceptance, where Python exits 2 before it can report readiness.
+export const CHANGED_DAEMON_OBSERVER_SCRIPT = fileURLToPath(
+  new URL("./live-child-exit-observer.py", import.meta.url),
+);
+const OBSERVER_SCRIPT = CHANGED_DAEMON_OBSERVER_SCRIPT;
 
 function sha256File(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");

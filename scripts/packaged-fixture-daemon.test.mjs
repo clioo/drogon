@@ -12,10 +12,11 @@
 // against the running contract implementation before fixing it.
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  cleanAcceptanceEnvironment,
   QUIESCENT_SHUTDOWN_CAPABILITY,
   createFixtureDaemonWithSeams,
   packagedFixtureDaemon,
@@ -124,6 +125,39 @@ function liveSession(overrides = {}) {
     ...overrides,
   };
 }
+
+test("acceptance environment removes inherited worker context but preserves acceptance flags", () => {
+  const clean = cleanAcceptanceEnvironment({
+    PATH: "/usr/bin",
+    DROGON_DISPATCH_CAPABILITY: "stale-worker-secret",
+    DROGON_RUN_ID: "run-worker",
+    DROGON_TASK_ID: "task-worker",
+    DROGON_DISPATCH_ID: "dispatch-worker",
+    DROGON_HOST_ID: "host-worker",
+    DROGON_SESSION_ID: "session-worker",
+    DROGON_SESSION_INCARNATION: "inc-worker",
+    DROGON_HOOK_INCARNATION: "hook-worker",
+    DROGON_DATA_DIR: "/worker/data",
+    DROGON_ELECTRON_PROFILE: "/worker/profile",
+    DROGON_VERIFY_OS_FOCUS: "1",
+    DROGON_PROBE_SURFACES: "1",
+    DROGON_UPGRADE_FROM_BUNDLE: "/old/Drogon.app",
+  });
+  assert.deepEqual(clean, {
+    PATH: "/usr/bin",
+    DROGON_VERIFY_OS_FOCUS: "1",
+    DROGON_PROBE_SURFACES: "1",
+    DROGON_UPGRADE_FROM_BUNDLE: "/old/Drogon.app",
+  });
+});
+
+test("changed-daemon probe passes a filesystem path to Python, not a URL pathname", async () => {
+  const { CHANGED_DAEMON_OBSERVER_SCRIPT } = await import(
+    "./probe-rendered-changed-daemon-binary.mjs"
+  );
+  assert.doesNotMatch(CHANGED_DAEMON_OBSERVER_SCRIPT, /%[0-9A-Fa-f]{2}/);
+  await access(CHANGED_DAEMON_OBSERVER_SCRIPT);
+});
 
 test("contract identifiers: public signature preserved plus one narrow seam helper", () => {
   assert.equal(typeof packagedFixtureDaemon, "function");

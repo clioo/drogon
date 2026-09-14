@@ -16,6 +16,38 @@ const OBSERVER_SCRIPT = fileURLToPath(
 const DEFAULT_OBSERVER_DEADLINE_MS = 20_000;
 const DEFAULT_EXIT_WAIT_MS = 15_000;
 const DEFAULT_OBSERVER_STOP_MS = 3000;
+const ACCEPTANCE_POISON_ENV = new Set([
+  "DROGON_CLI_COMMAND",
+  "DROGON_DATA_DIR",
+  "DROGON_DISPATCH_CAPABILITY",
+  "DROGON_DISPATCH_ID",
+  "DROGON_ELECTRON_PROFILE",
+  "DROGON_HOOK_CLI",
+  "DROGON_HOOK_INCARNATION",
+  "DROGON_HOOK_MARKER",
+  "DROGON_HOOK_USAGE_ONLY",
+  "DROGON_HOST_ID",
+  "DROGON_RUN_ID",
+  "DROGON_SESSION_ID",
+  "DROGON_SESSION_INCARNATION",
+  "DROGON_TASK_ID",
+  "DROGON_TERMINAL",
+  "DROGON_WORKSPACE_ID",
+]);
+
+/**
+ * Acceptance is deliberately independent of the Drogon terminal that launched
+ * it. A dispatched worker's DROGON_DISPATCH_CAPABILITY is authoritative to the
+ * CLI (even when stale), while the sibling DROGON_* identity hints can scope
+ * child RPCs to the worker. Remove only that inherited runtime context and the
+ * two paths that must be owned by this run; preserve explicit acceptance flags
+ * such as DROGON_VERIFY_OS_FOCUS and DROGON_UPGRADE_FROM_BUNDLE.
+ */
+export function cleanAcceptanceEnvironment(source = process.env) {
+  const clean = { ...source };
+  for (const key of ACCEPTANCE_POISON_ENV) delete clean[key];
+  return clean;
+}
 
 function nonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
