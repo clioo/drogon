@@ -18,8 +18,15 @@ import {
 const repoRoot = fileURLToPath(new URL("../../../../../../../../", import.meta.url));
 const scenario = path.join(repoRoot, "scripts/scenarios/dog-tinder");
 
+/** Git may check these files out with CRLF (it does on Windows CI), and the
+ *  embedded copies are authored with LF. The contract is the CONTENT, so both
+ *  sides are compared with newlines normalised — a real drift still fails. */
+function normalise(text: string): string {
+  return text.replace(/\r\n/g, "\n");
+}
+
 function onDisk(relative: string): string {
-  return readFileSync(path.join(scenario, relative), "utf8");
+  return normalise(readFileSync(path.join(scenario, relative), "utf8"));
 }
 
 describe("the embedded Dog Tinder scenario", () => {
@@ -30,13 +37,13 @@ describe("the embedded Dog Tinder scenario", () => {
       "tests/deck.test.mjs",
     ]);
     for (const file of REPRO_SCENARIO_SEED) {
-      expect(file.content, file.path).toBe(onDisk(path.join("seed", file.path)));
+      expect(normalise(file.content), file.path).toBe(onDisk(path.join("seed", file.path)));
     }
   });
 
   test("carries the same spec and brief as the CLI demo", () => {
-    expect(REPRO_SCENARIO_SPEC).toBe(onDisk("spec.md"));
-    expect(REPRO_SCENARIO_BRIEF).toBe(onDisk("brief.md"));
+    expect(normalise(REPRO_SCENARIO_SPEC)).toBe(onDisk("spec.md"));
+    expect(normalise(REPRO_SCENARIO_BRIEF)).toBe(onDisk("brief.md"));
   });
 
   test("watches the spec path the scenario's own README names", () => {
