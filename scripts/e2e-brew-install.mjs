@@ -802,7 +802,11 @@ async function main() {
       const dataBefore = await snapshotTree(developerDataDir());
       ({ room, brewEnv } = await makeCleanRoom());
       cleanup.roomPath = room.dir;
-      const homeBefore = await snapshotTree(room.home);
+      // The fresh-HOME baseline is snapshotted AFTER tap+trust: `brew trust`
+      // writes $HOME/.homebrew/trust.json, which is the harness's own
+      // footprint, not the product's — baselining before it false-flags the
+      // zap check.
+      let homeBefore = new Set();
       const brewBin = path.join(room.prefix, "bin", "brew");
       const ctx = { brewBin, brewEnv, room, steps, owned };
 
@@ -846,6 +850,7 @@ async function main() {
         return dir;
       });
       versions.trustRequiredOnFreshPrefix = trustRequired;
+      homeBefore = await snapshotTree(room.home);
 
       let fromEntry = null;
       let toEntry = null;
