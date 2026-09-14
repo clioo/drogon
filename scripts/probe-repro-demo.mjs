@@ -2,11 +2,11 @@
 // an isolated BACKGROUND window (temporary DROGON_DATA_DIR and
 // DROGON_ELECTRON_PROFILE, DROGON_BACKGROUND_WINDOW=1, loopback-only random
 // debugging port), opens the section, and proves the rendered surface against
-// the REAL preload — including that `botMonitorCreate` reached
-// `window.drogon`, which is what lets the demo arm the bot's watch at all.
+// the REAL preload — including that `botRun` reached `window.drogon`, which
+// is what lets the demo send the bot its prompt at all.
 //
-// It deliberately does NOT run the chain: the run itself waits on cron-cadence
-// monitor ticks, and `make repro` already exercises that end to end. This
+// It deliberately does NOT run the chain: the run itself waits on real
+// sessions, and `make repro-ui` already exercises that end to end. This
 // probe covers what only the real app can answer: the wiring and the layout.
 //
 // Modes: --help | --check (read-only) | (default) execute.
@@ -195,11 +195,11 @@ export async function execute() {
     await emulatePageFocus(page);
     await page.getByRole("button", { name: "Reveal active workspace", exact: true }).waitFor();
 
-    // The channel the demo's watch depends on must exist in the REAL preload.
+    // The channels the demo depends on must exist in the REAL preload.
     const wiring = await page.evaluate(() => ({
-      botMonitorCreate: typeof window.drogon.botMonitorCreate,
-      botMonitorApprove: typeof window.drogon.botMonitorApprove,
-      botMonitorList: typeof window.drogon.botMonitorList,
+      botCreate: typeof window.drogon.botCreate,
+      botRun: typeof window.drogon.botRun,
+      sessions: typeof window.drogon.sessions,
       quickSessionCreate: typeof window.drogon.project?.quickSessionCreate,
       graphWritePolicy: typeof window.drogon.graph?.graphWritePolicy,
       graphOrchestratorStart: typeof window.drogon.graph?.graphOrchestratorStart,
@@ -252,8 +252,8 @@ export async function execute() {
     // request names a workspace this window has never listed — exactly what a
     // run does, since the demo creates its own Quick Session — so this also
     // proves App reloads its workspaces before navigating. Driving the request
-    // directly proves the seam in seconds; the run itself waits on
-    // cron-cadence monitor ticks and `make repro` covers it end to end.
+    // directly proves the seam in seconds; the run itself waits on real
+    // sessions and `make repro-ui` covers it end to end.
     const created = await page.evaluate(async () => {
       const result = await window.drogon.project.quickSessionCreate({
         name: "repro-demo-probe",

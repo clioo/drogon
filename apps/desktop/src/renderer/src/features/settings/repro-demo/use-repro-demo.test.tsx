@@ -8,11 +8,15 @@ import {
   policyFor,
   releaseInstructions,
   useReproDemo,
-  type MonitorView,
   type ReproDemoBridge,
 } from "./use-repro-demo";
 import { REPRO_SCENARIO_SPEC_PATH } from "./repro-demo-scenario";
-import { cancelReproDemo, removeDemoRuns } from "./repro-demo-store";
+import {
+  REPRO_MAIN_NODE_PATH,
+  cancelReproDemo,
+  dispatchPrompt,
+  removeDemoRuns,
+} from "./repro-demo-store";
 
 const ok = <T,>(result: T) => ({ ok: true as const, result });
 
@@ -30,15 +34,21 @@ function fakeClock() {
 }
 
 type Fakes = {
-  monitorViews: MonitorView[];
+  /** What `graph.orchestrator_status` answers, poll after poll (the last
+   *  entry repeats). `null` is "no workflow yet". */
   runStates: ({ id: string; status?: string; steps?: unknown[] } | null)[];
+  /** The bot's session as the daemon lists it, poll after poll. */
+  botSession?: { verdict: string; exitCode?: number | null }[];
+  /** What the bot answers the prompt with. Dispatched by default. */
+  receipt?: { outcome: string; session: { sessionId: string; incarnation: string } | null; error?: string };
 };
 
 function makeBridge(fakes: Fakes) {
   const writes: string[] = [];
   const calls: string[] = [];
-  let monitorIndex = 0;
+  const prompts: unknown[] = [];
   let runIndex = 0;
+  let sessionIndex = 0;
   const bridge: ReproDemoBridge = {
     status: async () => ok({ hostId: "host-1" }),
     projectCreate: async () => {
@@ -53,19 +63,16 @@ function makeBridge(fakes: Fakes) {
       calls.push("botCreate");
       return ok({ id: "bot-1" });
     },
-    botMonitorCreate: async (input) => {
-      calls.push(`botMonitorCreate:${input.resource}:${input.cron}`);
-      return ok({ monitorId: "mon-1", ruleKind: "local_file_digest.v1" });
-    },
-    botMonitorApprove: async () => {
-      calls.push("botMonitorApprove");
-      return ok({ approved: true });
-    },
-    botMonitorList: async () => {
-      const view =
-        fakes.monitorViews[Math.min(monitorIndex, fakes.monitorViews.length - 1)];
-      monitorIndex += 1;
-      return ok({ monitors: view ? [view] : [] });
+    botRun: async (input) => {
+      calls.push("botRun");
+      prompts.push(input);
+      return ok(
+        fakes.receipt ?? {
+          outcome: "dispatched",
+          session: { sessionId: "sess-bot", incarnation: "inc-1" },
+          error: null,
+        },
+      );
     },
     graphWritePolicy: async () => {
       calls.push("graphWritePolicy");
@@ -104,7 +111,15 @@ function makeBridge(fakes: Fakes) {
         },
       }),
   };
-  return { bridge, writes, calls };
+  if (fakes.botSession) {
+    const states = fakes.botSession;
+    bridge.sessionList = async () => {
+      const state = states[Math.min(sessionIndex, states.length - 1)];
+      sessionIndex += 1;
+      return ok({ sessions: [{ id: "sess-bot", ...state }] });
+    };
+  }
+  return { bridge, writes, calls, prompts };
 }
 
 const runtime = { harness: "opencode", model: "fixture/dog-tinder" };
@@ -114,19 +129,11 @@ const runtime = { harness: "opencode", model: "fixture/dog-tinder" };
 beforeEach(() => resetReproDemo());
 
 describe("the in-app demo run", () => {
-  test("arms the watch before the spec exists, then lets the firing release the work", async () => {
+  test("sends the bot the prompt, and the bot's session admits the workflow", async () => {
     const clock = fakeClock();
-    const { bridge, writes, calls } = makeBridge({
-      monitorViews: [
-        { monitorId: "mon-1", lastCheckOutcome: "error", lastError: "NotFound" },
-        {
-          monitorId: "mon-1",
-          lastCheckOutcome: "changed",
-          lastEventId: "mev_1",
-          firing: { lastEventId: "mev_1", lastOutcome: "dispatched" },
-        },
-      ],
+    const { bridge, writes, calls, prompts } = makeBridge({
       runStates: [
+        null,
         { id: "run-1", status: "running", steps: [] },
         {
           id: "run-1",
@@ -137,6 +144,7 @@ describe("the in-app demo run", () => {
           ],
         },
       ],
+      botSession: [{ verdict: "live" }],
     });
 
     const { result } = renderHook(() => useReproDemo(bridge, clock));
@@ -147,8 +155,9 @@ describe("the in-app demo run", () => {
     await waitFor(() => expect(result.current.state.running).toBe(false));
     const state = result.current.state;
     expect(state.failure).toBeNull();
-    expect(state.releasedBy).toBe("monitor");
-    expect(state.firingEventId).toBe("mev_1");
+    expect(state.releasedBy).toBe("bot");
+    expect(state.dispatch).toEqual({ sessionId: "sess-bot", incarnation: "inc-1" });
+    expect(state.workflowId).toBe("run-1");
     expect(state.workflowStatus).toBe("passed");
     expect(state.rounds).toHaveLength(2);
     expect(state.cost?.bucket).toBe("exact");
@@ -158,30 +167,45 @@ describe("the in-app demo run", () => {
       expect(phase.status).toBe("done");
     }
 
-    // The seed and the node land first; the spec — the change the watch is
-    // waiting for — is written only after the monitor has checked once.
+    // The whole repository — spec included — is in place before the bot
+    // exists, so its session and every worker read the same files.
     expect(writes).toEqual([
       "package.json",
       "fixtures/dogs.json",
       "tests/deck.test.mjs",
-      ".drogon/repro-main-node.json",
       REPRO_SCENARIO_SPEC_PATH,
+      REPRO_MAIN_NODE_PATH,
     ]);
-    expect(calls).toContain("botMonitorCreate:specs/dog-tinder.md:* * * * *");
-    expect(calls).toContain("botMonitorApprove");
-    // The monitor released it, so the panel never started the workflow itself.
+    expect(calls).toEqual([
+      "projectCreate",
+      "botCreate",
+      "graphWritePolicy",
+      "botRun",
+    ]);
+    // The prompt goes on the runtime the viewer picked, unattended, and
+    // names the exact command; the bot admitted it, so the panel never did.
+    const prompt = prompts[0] as {
+      botId: string;
+      prompt: string;
+      harness: { harnessId: string; model?: string; provider?: string; permissionMode?: string };
+    };
+    expect(prompt.botId).toBe("bot-1");
+    expect(prompt.harness).toEqual({
+      harnessId: "opencode",
+      model: "fixture/dog-tinder",
+      permissionMode: "unattended",
+    });
+    expect(prompt.prompt).toContain(
+      `drogon-cli graph orchestrator-start --workspace ws-1 --file ${REPRO_MAIN_NODE_PATH}`,
+    );
     expect(calls).not.toContain("graphOrchestratorStart");
   });
 
-  test("a watch that never releases work fails without launching a competing workflow", async () => {
+  test("a bot session that exits without admitting the workflow is replaced by the panel, and the panel says so", async () => {
     const clock = fakeClock();
     const { bridge, calls } = makeBridge({
-      monitorViews: [
-        { monitorId: "mon-1", lastCheckOutcome: "no_change" },
-      ],
-      runStates: [
-        { id: "run-panel", status: "exhausted", steps: [{ iteration: 1, phase: "test", verdict: "findings", status: "succeeded" }] },
-      ],
+      runStates: [null, null, { id: "run-panel", status: "passed", steps: [] }],
+      botSession: [{ verdict: "live" }, { verdict: "exited", exitCode: 1 }],
     });
 
     const { result } = renderHook(() => useReproDemo(bridge, clock));
@@ -191,30 +215,50 @@ describe("the in-app demo run", () => {
 
     await waitFor(() => expect(result.current.state.running).toBe(false));
     const state = result.current.state;
-    expect(state.releasedBy).toBeNull();
-    expect(state.phases.firing.status).toBe("failed");
-    expect(state.phases.firing.note).toMatch(/never fired/);
-    expect(calls).not.toContain("graphOrchestratorStart");
-    expect(state.workflowStatus).toBeNull();
-    expect(state.failure).toMatch(/never fired/);
+    expect(state.failure).toBeNull();
+    expect(state.releasedBy).toBe("panel");
+    expect(state.releaseNote).toMatch(/exited \(code 1\) without admitting/);
+    expect(state.workflowId).toBe("run-panel");
+    expect(calls.filter((call) => call === "graphOrchestratorStart")).toHaveLength(1);
+    expect(state.phases.workflow.note).toMatch(/admitted by this panel/);
   });
 
-  test("a refused dispatch is a failure with the daemon's reason, not a silent retry", async () => {
+  test("a bot session still working is never raced: the panel waits the whole budget", async () => {
     const clock = fakeClock();
-    const { bridge } = makeBridge({
-      monitorViews: [
-        {
-          monitorId: "mon-1",
-          lastCheckOutcome: "changed",
-          lastEventId: "mev_2",
-          firing: {
-            lastEventId: "mev_2",
-            lastOutcome: "dispatch_failed",
-            lastDetail: "harness.start refused: invalid_argument: nope",
-          },
-        },
-      ],
-      runStates: [{ id: "run-panel", status: "passed", steps: [] }],
+    const { bridge, calls } = makeBridge({
+      runStates: [null],
+      botSession: [{ verdict: "live" }],
+    });
+    const { result } = renderHook(() => useReproDemo(bridge, clock));
+    await act(async () => {
+      await result.current.run({ runtime, iterations: 2 });
+    });
+    expect(clock.now()).toBeGreaterThanOrEqual(10 * 60_000);
+    expect(result.current.state.failure).toMatch(/never admitted the workflow/);
+    expect(result.current.state.phases.workflow.status).toBe("failed");
+    expect(calls).not.toContain("graphOrchestratorStart");
+  });
+
+  test("without the session list the panel only waits; it never guesses the bot is gone", async () => {
+    const clock = fakeClock();
+    const { bridge, calls } = makeBridge({ runStates: [null] });
+    const { result } = renderHook(() => useReproDemo(bridge, clock));
+    await act(async () => {
+      await result.current.run({ runtime, iterations: 2 });
+    });
+    expect(result.current.state.failure).toMatch(/never admitted the workflow/);
+    expect(calls).not.toContain("graphOrchestratorStart");
+  });
+
+  test("a bot that refuses the prompt is a failure with the daemon's reason, not a silent retry", async () => {
+    const clock = fakeClock();
+    const { bridge, calls } = makeBridge({
+      runStates: [null],
+      receipt: {
+        outcome: "refused",
+        session: null,
+        error: "harness.start refused: invalid_argument: nope",
+      },
     });
 
     const { result } = renderHook(() => useReproDemo(bridge, clock));
@@ -223,15 +267,17 @@ describe("the in-app demo run", () => {
     });
 
     await waitFor(() => expect(result.current.state.running).toBe(false));
-    expect(result.current.state.phases.firing.note).toMatch(/dispatch_failed/);
-    expect(result.current.state.phases.firing.note).toMatch(/nope/);
+    expect(result.current.state.phases.prompt.status).toBe("failed");
+    expect(result.current.state.phases.prompt.note).toMatch(/refused/);
+    expect(result.current.state.phases.prompt.note).toMatch(/nope/);
     expect(result.current.state.releasedBy).toBeNull();
-    expect(result.current.state.failure).toMatch(/dispatch_failed/);
+    expect(result.current.state.failure).toMatch(/refused/);
+    expect(calls).not.toContain("graphOrchestratorStart");
   });
 
   test("a failing bridge stops the run with the reason on the phase that failed", async () => {
     const clock = fakeClock();
-    const { bridge } = makeBridge({ monitorViews: [], runStates: [] });
+    const { bridge } = makeBridge({ runStates: [] });
     const failing: ReproDemoBridge = {
       ...bridge,
       projectCreate: async () => ({
@@ -250,38 +296,11 @@ describe("the in-app demo run", () => {
     expect(result.current.state.phases.workspace.status).toBe("failed");
   });
 
-  test("a stalled scheduler reports recovery guidance instead of waiting five minutes", async () => {
-    const clock = fakeClock();
-    const { bridge, writes, calls } = makeBridge({ monitorViews: [], runStates: [] });
-    bridge.status = async () => ok({ hostId: "host-1", schedulerLastTickMs: null });
-    const { result } = renderHook(() => useReproDemo(bridge, clock));
-    await act(async () => { await result.current.run({ runtime, iterations: 2 }); });
-    expect(result.current.state.failure).toMatch(/scheduler.*Restart daemon/);
-    expect(clock.now()).toBeLessThan(70_000);
-    expect(writes).not.toContain(REPRO_SCENARIO_SPEC_PATH);
-    expect(calls).not.toContain("graphOrchestratorStart");
-  });
-
-  test("a slow coordinator has fifteen minutes and is never raced by the panel", async () => {
+  test("stopping during the admission wait never launches fallback work", async () => {
     const clock = fakeClock();
     const { bridge, calls } = makeBridge({
-      monitorViews: [{ monitorId: "mon-1", lastCheckOutcome: "changed",
-        firing: { lastEventId: "event-1", lastOutcome: "dispatched" } }],
       runStates: [null],
-    });
-    const { result } = renderHook(() => useReproDemo(bridge, clock));
-    await act(async () => { await result.current.run({ runtime, iterations: 2 }); });
-    expect(clock.now()).toBeGreaterThanOrEqual(15 * 60_000);
-    expect(result.current.state.failure).toMatch(/released session never started/);
-    expect(calls).not.toContain("graphOrchestratorStart");
-  });
-
-  test("stopping during the release wait never launches fallback work", async () => {
-    const clock = fakeClock();
-    const { bridge, calls } = makeBridge({
-      monitorViews: [{ monitorId: "mon-1", lastCheckOutcome: "changed",
-        firing: { lastEventId: "event-1", lastOutcome: "dispatched" } }],
-      runStates: [null],
+      botSession: [{ verdict: "exited", exitCode: 0 }],
     });
     bridge.graphOrchestratorStatus = async () => {
       cancelReproDemo();
@@ -296,7 +315,7 @@ describe("the in-app demo run", () => {
 
   test("stopping setup holds admission until the pending call settles", async () => {
     const clock = fakeClock();
-    const { bridge, calls } = makeBridge({ monitorViews: [], runStates: [] });
+    const { bridge, calls } = makeBridge({ runStates: [] });
     let finish!: () => void;
     bridge.projectCreate = () => new Promise((resolve) => {
       finish = () => resolve(ok({ project: { id: "p1", name: "demo" }, workspaceId: "ws-1" }));
@@ -329,14 +348,6 @@ describe("running it again", () => {
     const names: string[] = [];
     const capture = (): ReproDemoBridge => {
       const { bridge } = makeBridge({
-        monitorViews: [
-          {
-            monitorId: "mon-1",
-            lastCheckOutcome: "changed",
-            lastEventId: "mev_1",
-            firing: { lastEventId: "mev_1", lastOutcome: "dispatched" },
-          },
-        ],
         runStates: [{ id: "run-1", status: "passed", steps: [] }],
       });
       return {
@@ -376,32 +387,35 @@ describe("running it again", () => {
 });
 
 describe("the guided tour", () => {
-  test("opens the Work Graph when the rounds start, then follows the views", async () => {
+  test("shows the bot once it has its prompt, the sessions once the workflow exists, then the telemetry", async () => {
     const clock = fakeClock();
     const tour: unknown[] = [];
+    const at: number[] = [];
     const { bridge } = makeBridge({
-      monitorViews: [
-        {
-          monitorId: "mon-1",
-          lastCheckOutcome: "changed",
-          lastEventId: "mev_1",
-          firing: { lastEventId: "mev_1", lastOutcome: "dispatched" },
-        },
-      ],
       runStates: [{ id: "run-1", status: "passed", steps: [] }],
     });
 
     const { result } = renderHook(() =>
-      useReproDemo(bridge, { ...clock, tour: (request) => tour.push(request) }),
+      useReproDemo(bridge, {
+        ...clock,
+        tour: (request) => {
+          tour.push(request);
+          at.push(clock.now());
+        },
+      }),
     );
     await act(async () => {
       await result.current.run({ runtime, iterations: 1 });
     });
+    // A bot that admits the graph at once must not turn the Bots stop into a
+    // flash: the sessions come no sooner than eight seconds after it.
+    expect(at[1] - at[0]).toBeGreaterThanOrEqual(8000);
 
-    // The viewer is shown what was configured (the Bots page) as soon as the
-    // bot and its watch exist, then the run's sessions once the rounds begin
-    // — the orchestration is the sessions working, not a diagram of them —
-    // and the Work Graph's telemetry and usage tabs at the end.
+    // The viewer is shown what was configured (the Bots page, with the bot's
+    // session on it) as soon as the prompt is sent, then the run's sessions
+    // once the workflow exists — the orchestration is the sessions working,
+    // not a diagram of them — and the Work Graph's telemetry and usage tabs
+    // at the end.
     expect(tour).toEqual([
       { kind: "open-bots", workspaceId: "ws-1" },
       { kind: "open-sessions", workspaceId: "ws-1" },
@@ -414,7 +428,7 @@ describe("the guided tour", () => {
   test("a failed run returns to the demo panel so its reason is visible", async () => {
     const clock = fakeClock();
     const tour: unknown[] = [];
-    const { bridge } = makeBridge({ monitorViews: [], runStates: [] });
+    const { bridge } = makeBridge({ runStates: [] });
     const failing: ReproDemoBridge = {
       ...bridge,
       botCreate: async () => ({
@@ -434,8 +448,8 @@ describe("the guided tour", () => {
   });
 });
 
-describe("what the released session is told", () => {
-  test("names the exact command and the workspace it runs in", () => {
+describe("what the bot is told", () => {
+  test("its standing instructions name the exact command and the workspace it runs in", () => {
     const instructions = releaseInstructions("ws-7");
     expect(instructions).toContain(
       "drogon-cli graph orchestrator-start --workspace ws-7 --file .drogon/repro-main-node.json",
@@ -444,6 +458,16 @@ describe("what the released session is told", () => {
     expect(instructions).toContain("end this Bot turn");
     expect(instructions).not.toContain("orchestration worker-start");
     expect(instructions).not.toContain("orchestration check");
+  });
+
+  test("the prompt carries the task and repeats the one command, concretely", () => {
+    const prompt = dispatchPrompt("ws-7");
+    expect(prompt).toContain("Dog Tinder");
+    expect(prompt).toContain(
+      "drogon-cli graph orchestrator-start --workspace ws-7 --file .drogon/repro-main-node.json",
+    );
+    expect(prompt).not.toMatch(/<[a-z-]+>/);
+    expect(prompt).toContain("Do not build the deck yourself");
   });
 
   test("the policy turns the bounded adversarial loop on, and never delegate too", () => {
@@ -470,7 +494,7 @@ describe("what the released session is told", () => {
 
 describe("tidying up after the demo", () => {
   test("removes only the demo's own bots and projects, and keeps going past a failure", async () => {
-    const { bridge } = makeBridge({ monitorViews: [], runStates: [] });
+    const { bridge } = makeBridge({ runStates: [] });
     const deletedBots: string[] = [];
     const removedProjects: { id: string; deleteFiles?: boolean }[] = [];
     const housekeeping: ReproDemoBridge = {
@@ -519,7 +543,7 @@ describe("tidying up after the demo", () => {
   });
 
   test("does nothing without the housekeeping channels", async () => {
-    const { bridge } = makeBridge({ monitorViews: [], runStates: [] });
+    const { bridge } = makeBridge({ runStates: [] });
     expect(await removeDemoRuns(bridge)).toEqual({ bots: 0, projects: 0, errors: [] });
   });
 });

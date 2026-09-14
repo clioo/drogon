@@ -66,8 +66,9 @@ export function resolveBotSession(input: {
   if (!recorded) return { kind: "open" };
   const observed = input.observed;
 
-  // Viewing an automated run must never resume it or dispatch another turn.
-  if (recorded.source === "monitor") {
+  // Viewing a daemon-run session (a monitor's firing, a chat turn) must
+  // never resume it or dispatch another turn.
+  if (recorded.source === "monitor" || recorded.source === "chat") {
     if (recorded.recordedSessionMissing || recorded.verdict === "unverifiable")
       return { kind: "unknown" };
     if (recorded.incarnation && recorded.workspaceId &&

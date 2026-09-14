@@ -28,6 +28,7 @@ mod coordination_worker_control;
 mod coordination_worker_retain;
 mod coordination_workers;
 mod desktop_relay_rpc;
+pub mod diagnostics;
 pub mod graph;
 mod graph_rpc;
 pub mod jira;

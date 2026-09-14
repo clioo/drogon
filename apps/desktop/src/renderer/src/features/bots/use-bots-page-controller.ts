@@ -569,9 +569,10 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       // explicit "start a fresh session" path and skips all of this. The
       // UNKNOWN case is the actual bug this fixes: it must never fall
       // through to a dispatch, or the first click duplicates the session.
-      if (!options?.forceNew && live.currentSession?.source === "monitor" &&
+      if (!options?.forceNew &&
+          (live.currentSession?.source === "monitor" || live.currentSession?.source === "chat") &&
           (!resolveBotSession || !onOpenSession)) {
-        setActionError("This build cannot display the recorded monitor session. No new session was started.");
+        setActionError("This build cannot display the recorded daemon-run session. No new session was started.");
         return;
       }
       let resume = false;

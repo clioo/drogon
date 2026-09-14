@@ -95,22 +95,27 @@ describe the published rc.7 artifact.
   and usage ledgers, an independent `node --test` of the work product, and the
   cost of what ran. Every invocation is a NEW run (`make repro-list` shows
   them all), and the default lane runs local fixtures: the product executes
-  for real, no model inference happens, and nothing is billed. The same demo
-  runs from the app in **Settings → Reproducible demo**: the main agent and
-  the subagents each take a harness installed here and a model from that
-  harness's own list (the Subagent policy's pickers, with a proposal filled
-  in), every run creates a project `dog-tinder-<tag>` under Projects and a
-  bot `White walker <tag>` under Chats, and the tour leaves Settings on its
-  own — Bots once the watch is armed, the run's sessions while the released
-  session and its workers run side by side, and the Work Graph's **Agent
-  telemetry** and Usage tabs at the end. The telemetry is written by the
-  daemon itself as the orchestrator advances (every attempt, runtime, verdict
-  with the agent's evidence, and the workflow's outcome), so it reads the
-  same whichever harness ran. "Remove demo runs" deletes only what the demo
-  created; a watch whose workspace is gone retires itself instead of failing
-  forever. Tests: `make repro-test`, `node scripts/probe-repro-demo.mjs`, and
-  `make repro-ui`, which runs the in-app demo end to end from its own button
-  in a background window — the bot, its watch firing on the spec change, the
+  for real, no model inference happens, and nothing is billed. The in-app
+  demo in **Settings → Reproducible demo** runs the same work with a shorter
+  chain — no watch, no cron: the main agent and the subagents each take a
+  harness installed here and a model from that harness's own list (the
+  Subagent policy's pickers, with a proposal filled in); every run creates a
+  project `dog-tinder-<tag>` under Projects and a bot `White walker <tag>`
+  under Chats; the demo sends the task to that bot's own session (a `bot.run`
+  chat turn on the harness you picked), the bot admits the Work Graph with
+  `drogon-cli graph orchestrator-start`, the graph's main session fans the
+  build out to parallel workers, and the daemon runs the adversarial rounds.
+  The tour leaves Settings on its own — Bots once the bot has its prompt, the
+  run's sessions once the workflow exists (the main session and its workers
+  side by side), and the Work Graph's **Agent telemetry** and Usage tabs at
+  the end. A bot session that exits without admitting the workflow is
+  reported, and the panel admits it and says so. The telemetry is written by
+  the daemon itself as the orchestrator advances (every attempt, runtime,
+  verdict with the agent's evidence, and the workflow's outcome), so it reads
+  the same whichever harness ran. "Remove demo runs" deletes only what the
+  demo created. Tests: `make repro-test`, `node scripts/probe-repro-demo.mjs`,
+  and `make repro-ui`, which runs the in-app demo end to end from its own
+  button in a background window — the bot's session, the admission, the
   sessions view opening by itself with at least two sessions alive at once
   (measured through the daemon), the rounds passing, the telemetry and the
   cost. `make repro-ui FLAGS="--runs 1 --live --main-harness claude
@@ -118,6 +123,11 @@ describe the published rc.7 artifact.
   runs the same demo on the real harnesses installed here — real inference,
   real spend — with the main agent on one runtime and its subagents on
   another.
+- The daemon's own diagnostics live in `logs/drogond.log` under the data
+  directory (`~/Library/Application Support/Drogon` on macOS), rotated once
+  at 8 MiB. `drogond` is spawned detached and outlives the desktop that
+  spawned it; its stderr moves to that file as soon as it is serving, so a
+  desktop relaunch can never leave it writing to a pipe nobody reads.
 - Product screenshots: the [README](../README.md) features three captures supplied
   by the developer on September 14: the Work Graph preview, Agent telemetry from
   work on PR #552, and Usage with 127 measurements across three agents. These are

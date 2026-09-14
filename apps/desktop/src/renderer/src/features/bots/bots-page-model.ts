@@ -129,7 +129,11 @@ export function buildBotRunHarness(
   const overrides: BotRunHarnessOverrides = { harnessId };
   const model = (explicitModel ?? "").trim();
   if (model) {
-    const slash = model.indexOf("/");
+    // Only Pi takes a provider of its own (`--provider x --model y`); the
+    // daemon refuses a provider override on any other harness. OpenCode's
+    // ids carry a slash too (`opencode/gpt-5`, `fixture/dog-tinder`) and ride
+    // whole as the model.
+    const slash = harnessId === "pi" ? model.indexOf("/") : -1;
     if (slash > 0 && slash < model.length - 1) {
       overrides.provider = model.slice(0, slash);
       overrides.model = model.slice(slash + 1);

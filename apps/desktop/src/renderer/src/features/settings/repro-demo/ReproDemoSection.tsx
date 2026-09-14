@@ -2,6 +2,11 @@
 // walks the viewer through it, moving the focus to whatever is changing right
 // now. Built for a screen recording: one control to start, then every step
 // shows what the daemon reported, and nothing on screen is a placeholder.
+//
+// The chain: a project, a bot under Chats on the harness the viewer picked,
+// the task sent to that bot's own session, the Work Graph the bot admits —
+// its main session fanning out to parallel workers — the daemon's adversarial
+// rounds, and the telemetry and cost at the end.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, CircleDashed, CircleDot, Play, XCircle } from "lucide-react";
@@ -51,9 +56,7 @@ export function windowReproBridge(): ReproDemoBridge | null {
       projectCreate: project?.projectCreate,
       fileWrite: drogon.fileWrite,
       botCreate: drogon.botCreate,
-      botMonitorCreate: drogon.botMonitorCreate,
-      botMonitorApprove: drogon.botMonitorApprove,
-      botMonitorList: drogon.botMonitorList,
+      botRun: drogon.botRun,
       graphWritePolicy: graph?.graphWritePolicy,
       graphOrchestratorStart: graph?.graphOrchestratorStart,
       graphOrchestratorStatus: graph?.graphOrchestratorStatus,
@@ -79,19 +82,24 @@ export function windowReproBridge(): ReproDemoBridge | null {
               (optional.projectRemove as (value: unknown) => Promise<never>)(input),
           }
         : {};
+    // The workspace's session list: what lets the demo notice a bot session
+    // that exited without admitting the workflow. Absent, it simply waits.
+    const sessions =
+      typeof drogon.sessions === "function"
+        ? {
+            sessionList: (input: { workspaceId: string }) =>
+              (drogon.sessions as (value: string) => Promise<never>)(input.workspaceId),
+          }
+        : {};
     return {
       ...housekeeping,
+      ...sessions,
       status: () => (needed.status as () => Promise<never>)(),
       projectCreate: (input) =>
         (needed.projectCreate as (value: unknown) => Promise<never>)(input),
       fileWrite: (input) => (needed.fileWrite as (value: unknown) => Promise<never>)(input),
       botCreate: (input) => (needed.botCreate as (value: unknown) => Promise<never>)(input),
-      botMonitorCreate: (input) =>
-        (needed.botMonitorCreate as (value: unknown) => Promise<never>)(input),
-      botMonitorApprove: (input) =>
-        (needed.botMonitorApprove as (value: unknown) => Promise<never>)(input),
-      botMonitorList: (input) =>
-        (needed.botMonitorList as (value: unknown) => Promise<never>)(input),
+      botRun: (input) => (needed.botRun as (value: unknown) => Promise<never>)(input),
       graphWritePolicy: (input) =>
         (needed.graphWritePolicy as (value: unknown) => Promise<never>)(input),
       graphOrchestratorStart: (input) =>
@@ -399,12 +407,12 @@ export function ReproDemoSection({
     <SettingsSection
       id="demo"
       title="Reproducible demo"
-      description="Run the whole chain with one click: a project of its own, a bot with a watch on the spec, the change that wakes it, the session it releases fanning out to parallel workers, the adversarial rounds, and the telemetry and cost of what ran. It takes you along — Bots once the bot is configured, the run's sessions while they work, and the Work Graph's Agent telemetry at the end."
+      description="Run the whole chain with one click: a project of its own, a bot under Chats that gets the task on the harness you picked, the Work Graph it admits — its main session fanning out to parallel workers — the adversarial rounds, and the telemetry and cost of what ran. It takes you along — Bots once the bot is at work, the run's sessions while they work, and the Work Graph's Agent telemetry at the end."
     >
       <div className="space-y-6">
         <SettingsSubsectionHeader
           title="Main agent"
-          description="The bot's harness, and the session it releases when the spec changes. Harnesses installed here and each one's own model list — the same choice the Subagent policy offers. The demo proposes a model; change it if you like."
+          description="The bot's harness — its own session gets the prompt — and the runtime of the Work Graph's main session. Harnesses installed here and each one's own model list — the same choice the Subagent policy offers. The demo proposes a model; change it if you like."
         />
         <RuntimeRows
           runtime={runtime}
@@ -518,9 +526,9 @@ export function ReproDemoSection({
         </div>
 
         <p className="text-xs text-muted-foreground">
-          The demo leaves Settings on its own: the Bots page once the bot and its
-          watch are configured, then this run's sessions once the bot releases
-          the work — the main session and the workers it dispatches, side by
+          The demo leaves Settings on its own: the Bots page once the bot has
+          its prompt, then this run's sessions once the bot admits the Work
+          Graph — the main session and the workers it dispatches, side by
           side — and finally the Work Graph's Agent telemetry and Usage tabs.
           Come back to Settings whenever you like: the panel keeps the run.
         </p>
@@ -559,23 +567,17 @@ export function ReproDemoSection({
           </ol>
         </Spotlight>
 
-        {state.checks.length > 0 ? (
-          <Spotlight active={spotlightFor("firing") || spotlightFor("spec")} testId="repro-demo-checks">
+        {state.dispatch ? (
+          <Spotlight active={spotlightFor("prompt") || spotlightFor("workflow")} testId="repro-demo-dispatch">
             <div className="space-y-2">
               <SettingsSubsectionHeader
-                title="Watch checks"
-                description="Every check is the daemon's, not this screen's."
+                title="The bot's session"
+                description="The prompt went to a session of the bot's own, in this run's project. The daemon's receipt names it; the Bots page and Chats show it."
               />
-              <ul className="space-y-1 font-mono text-xs text-muted-foreground">
-                {state.checks.map((check, index) => (
-                  <li key={`${check.outcome}-${check.eventId ?? index}`}>
-                    {check.outcome}
-                    {check.eventId ? ` · event ${check.eventId}` : ""}
-                    {check.firing ? ` · firing ${check.firing}` : ""}
-                    {check.error ? ` · ${check.error}` : ""}
-                  </li>
-                ))}
-              </ul>
+              <p className="font-mono text-xs text-muted-foreground">
+                session {state.dispatch.sessionId}
+                {state.workflowId ? ` · workflow ${state.workflowId}` : ""}
+              </p>
             </div>
           </Spotlight>
         ) : null}
@@ -646,10 +648,10 @@ export function ReproDemoSection({
 
         {state.releasedBy ? (
           <p className="text-xs text-muted-foreground" data-testid="repro-demo-release">
-            Released by{" "}
-            {state.releasedBy === "monitor"
-              ? "the bot's own watch"
-              : "this panel (the watch did not release the work)"}
+            Workflow admitted by{" "}
+            {state.releasedBy === "bot"
+              ? "the bot's own session"
+              : "this panel (the bot's session exited without admitting it)"}
             {state.releaseNote ? ` · ${state.releaseNote}` : ""}
           </p>
         ) : null}

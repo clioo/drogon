@@ -465,8 +465,9 @@ export type BotsPanelResponsibility = {
 };
 
 export type BotsPanelSession = {
-  /** A monitor execution is inspectable, never automatically resumed. */
-  source?: "monitor";
+  /** A daemon-run session is inspectable, never automatically resumed:
+   *  a monitor's firing (`monitor`) or a `bot.run` chat turn (`chat`). */
+  source?: "monitor" | "chat";
   sessionId: string;
   harness: string;
   model: string | null;

@@ -26,7 +26,18 @@ describe("monitor launch prompt", () => {
   });
   test("does not mistake an interactive launch or an unrecognized argv for a prompt", () => {
     expect(monitorLaunchPrompt(session({ args: ["--model", "provider/model"] }))).toBeNull();
-    expect(monitorLaunchPrompt(session({ causedByEventId: null, args: ["-p", "Drogon task:\nprompt"] }))).toBeNull();
+    expect(monitorLaunchPrompt(session({ causedByEventId: null, args: ["--model", "provider/model"] }))).toBeNull();
+  });
+  test("a chat turn is a headless launch too: its prompt is read without a monitor event", () => {
+    expect(monitorLaunchPrompt(session({ causedByEventId: null, args: ["-p", "Drogon task:\nprompt"] }))).toBe("Drogon task:\nprompt");
+    render(<MonitorLaunchPrompt session={session({ causedByEventId: null, args: ["-p", "Drogon task:\nprompt"] })} />);
+    fireEvent.click(screen.getByText("Launch prompt", { exact: true }));
+    expect(screen.getByTestId("monitor-launch-prompt-text").textContent).toBe("Drogon task:\nprompt");
+    expect(screen.getByText(/of this headless turn/)).toBeTruthy();
+  });
+  test("an interactive session with no prompt in its argv shows no launch prompt at all", () => {
+    render(<MonitorLaunchPrompt session={session({ causedByEventId: null, args: ["--model", "provider/model"] })} />);
+    expect(screen.queryByTestId("monitor-launch-prompt")).toBeNull();
   });
   test("shows the complete recorded prompt as text in a read-only disclosure, including after exit", () => {
     const prompt = `Drogon task:\n<script>not executable</script>\n${"evidence\n".repeat(800)}`;

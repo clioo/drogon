@@ -754,12 +754,17 @@ impl Engine {
             std::fs::remove_file(&evaluation_file).map_err(|e| error::io_error(e.to_string()))?;
         }
         let (provider, model) = runtime_launch_parts(&candidate);
+        // A role session is a daemon-run headless turn with no one at a
+        // keyboard to approve anything: launched unattended, like a Bot's
+        // turn. Left to inherit, a `claude -p`/`codex exec` main agent had
+        // every tool call denied and "passed" by exiting without building.
         let mut launch = json!({
             "workspaceId": run.workspace_id,
             "harnessId": candidate.harness,
             "model": model,
             "prompt": node.prompt,
             "headless": true,
+            "permissionMode": "unattended",
         });
         if let Some(provider) = provider {
             launch["provider"] = json!(provider);
@@ -1083,7 +1088,10 @@ pub fn spawn(engine: Arc<Engine>) -> Scheduler {
         while !flag.load(Ordering::Acquire) && !engine.is_quiescent() {
             crate::automations::scheduler::guarded_tick("graph-orchestrator", || {
                 if let Err(err) = engine.tick_graph_orchestrator() {
-                    eprintln!("Graph orchestrator: {}", err.message);
+                    crate::diagnostics::log_line(format_args!(
+                        "Graph orchestrator: {}",
+                        err.message
+                    ));
                 }
             });
             thread::park_timeout(Duration::from_millis(500));
