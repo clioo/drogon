@@ -32,6 +32,7 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  realpath,
   rm,
   stat,
   writeFile,
@@ -243,7 +244,10 @@ export async function runHostCommand(file, args, { timeoutMs = 60_000, env = pro
 }
 
 export async function makeCleanRoom() {
-  const dir = await mkdtemp(path.join(tmpdir(), "drogon-brew-e2e-"));
+  // Canonicalize the room root: TMPDIR on macOS contains the /var ->
+  // /private/var symlink, and external tools (brew, ps) report resolved
+  // paths. Every containment check below compares against this form.
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "drogon-brew-e2e-")));
   const room = {
     dir,
     home: path.join(dir, "home"),

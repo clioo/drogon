@@ -4,7 +4,7 @@
 // brew/install/launch flow runs on macOS via the script itself, so every
 // test here is fast and platform-independent.
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -14,6 +14,7 @@ import {
   compareDrogonVersions,
   expandZapPath,
   launchEnv,
+  makeCleanRoom,
   parseBrewAuditArgs,
   parseCaskRuby,
   quarantineAttributePresent,
@@ -245,6 +246,16 @@ test("summarizeRun reports PASSED only with zero failures", () => {
   });
   assert.equal(failed.status, "FAILED");
   assert.equal(failed.counts.failed, 1);
+});
+
+test("makeCleanRoom returns a symlink-free room root", async () => {
+  const { room } = await makeCleanRoom();
+  try {
+    assert.equal(room.dir, await realpath(room.dir));
+    assert.doesNotThrow(() => assertRoomContained(room.dir, path.join(room.appdir, "Drogon.app")));
+  } finally {
+    await rm(room.dir, { recursive: true, force: true });
+  }
 });
 
 test("snapshotTree records relative paths of a fresh HOME", async () => {
