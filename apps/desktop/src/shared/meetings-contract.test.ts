@@ -40,9 +40,9 @@ const availability = {
     available: true,
     reason: "ready" as const,
     harness: "pi",
-    provider: "dgx-spark",
-    model: "qwen3.8-flash-next-nvidia-nvfp4",
-    freeLocalModel: true as const,
+    provider: "pi-config",
+    model: "harness-default",
+    freeLocalModel: false as const,
   },
 };
 
@@ -320,9 +320,9 @@ describe("meetings contract", () => {
     ).toBe(false);
   });
 
-  it("pins the extraction to the free local model", () => {
-    expect(MEETINGS_ANALYSIS_MODEL).toBe("qwen3.8-flash-next-nvidia-nvfp4");
-    expect(MEETINGS_ANALYSIS_PROVIDER).toBe("dgx-spark");
+  it("attributes extraction to the user's Pi default without naming a model", () => {
+    expect(MEETINGS_ANALYSIS_MODEL).toBe("harness-default");
+    expect(MEETINGS_ANALYSIS_PROVIDER).toBe("pi-config");
     expect(MEETINGS_ACTIONS_CAPABILITY).toBe("meetings.actions.v1");
     expect(meetingAnalysisSchema.safeParse(analysis).success).toBe(true);
     // Another provider or model is refused on the wire as well as upstream.
@@ -360,12 +360,12 @@ describe("meetings contract", () => {
     ).toBe(false);
   });
 
-  it("keeps an availability answer honest about extraction too", () => {
+  it("keeps availability honest while accepting the legacy cost-attribution flag", () => {
     expect(
       meetingsPageSchema.safeParse({
         availability: {
           ...availability,
-          analysis: { ...availability.analysis, freeLocalModel: false },
+          analysis: { ...availability.analysis, freeLocalModel: true },
         },
         meetings: [],
         total: 0,
@@ -377,7 +377,7 @@ describe("meetings contract", () => {
         scanned: 0,
         searched: false,
       }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       meetingsPageSchema.safeParse({
         availability: { ...availability, analysis: { available: true, reason: "harness-missing" } },

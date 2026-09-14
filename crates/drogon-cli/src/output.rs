@@ -1047,19 +1047,18 @@ pub fn meeting_analysis(analysis: &MeetingAnalysis) -> String {
     let mut lines = vec![
         format!("# {}", analysis.meeting.title),
         format!(
-            "{} · {} ({}, {})",
+            "{} · {} ({} configured default)",
             analysis
                 .meeting
                 .started_at
                 .as_deref()
                 .unwrap_or("unknown time"),
             analysis.meeting.relative_path,
-            analysis.model,
-            analysis.provider
+            analysis.harness
         ),
         format!(
-            "Local model {} via {} answered in {} ms. Nothing was created; accept what you agree with using `meeting actions add`.",
-            analysis.model, analysis.harness, analysis.duration_ms
+            "The configured {} model answered in {} ms. Nothing was created; accept what you agree with using `meeting actions add`.",
+            analysis.harness, analysis.duration_ms
         ),
     ];
     if analysis.transcript_truncated {

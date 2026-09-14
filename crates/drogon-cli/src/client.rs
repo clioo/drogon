@@ -690,15 +690,13 @@ pub struct MeetingAvailability {
     pub transcript_root_source: String,
     pub transcript_root_state: String,
     pub read_only: bool,
-    /// Whether the free local analysis model is available on the host, and
-    /// with what. Reported so a caller never offers an action that cannot
-    /// work.
+    /// Whether Pi is available for explicitly requested meeting analysis.
+    /// Reported so a caller never offers an action that cannot work.
     pub analysis: MeetingAnalysisStatus,
 }
 
-/// The local extraction runner's identity and availability. `model` and
-/// `provider` are the free local ones by construction: there is no field the
-/// daemon accepts to change them.
+/// The extraction runner's identity and availability. Provider/model describe
+/// Pi-owned configuration; the analysis request itself cannot override them.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeetingAnalysisStatus {
@@ -795,7 +793,7 @@ pub struct MeetingDiscardedSuggestion {
     pub reason: String,
 }
 
-/// One analysis run: the local model's answer, after every quote in it was
+/// One analysis run: the configured Pi model's answer, after every quote in it was
 /// checked against the note.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -919,18 +917,14 @@ pub fn check_meeting_list(list: &MeetingList) -> Result<(), String> {
 /// Invariants `meeting.analyze` must satisfy before any of it is printed: a
 /// suggestion always carries the quote and line it came from, an unverified
 /// suggestion is never in the finding lists (only in `discarded`, with its
-/// reason), and the run always names the free local model it used.
+/// reason), and the run always attributes the harness configuration it used.
 pub fn check_meeting_analysis(analysis: &MeetingAnalysis) -> Result<(), String> {
     check_meeting_transcript(&analysis.meeting)?;
-    if analysis.model != "qwen3.8-flash-next-nvidia-nvfp4" || analysis.provider != "dgx-spark" {
-        return Err(format!(
-            "analysis must name the free local model, got {}/{}",
-            analysis.provider, analysis.model
-        ));
-    }
+    require_nonempty("analysis model attribution", &analysis.model)?;
+    require_nonempty("analysis provider attribution", &analysis.provider)?;
     if analysis.harness != "pi" {
         return Err(format!(
-            "analysis must name the local harness, got {}",
+            "analysis must name the Pi harness, got {}",
             analysis.harness
         ));
     }
@@ -1065,21 +1059,11 @@ fn check_meeting_availability(availability: &MeetingAvailability) -> Result<(), 
     if !availability.read_only {
         return Err("the meetings index must report readOnly: true".to_string());
     }
-    // Extraction is only ever the free local model.
-    if !availability.analysis.free_local_model {
-        return Err(format!(
-            "availability.analysis must report the free local model, got {}",
-            availability.analysis.model
-        ));
-    }
-    if availability.analysis.model != "qwen3.8-flash-next-nvidia-nvfp4"
-        || availability.analysis.provider != "dgx-spark"
-    {
-        return Err(format!(
-            "availability.analysis names {}/{}; only the free local model may be used",
-            availability.analysis.provider, availability.analysis.model
-        ));
-    }
+    require_nonempty("analysis model attribution", &availability.analysis.model)?;
+    require_nonempty(
+        "analysis provider attribution",
+        &availability.analysis.provider,
+    )?;
     if availability.analysis.available && availability.analysis.reason != "ready" {
         return Err(format!(
             "analysis.available contradicts reason {}",

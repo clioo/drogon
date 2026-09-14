@@ -10,12 +10,10 @@
 // polled through `graph.read` until the daemon reports a terminal,
 // confirmed status. Nothing here estimates a node's outcome.
 //
-// The node's own stored harness/model (`ADVERSARIAL_HARNESS`/
-// `ADVERSARIAL_MODEL` below) are a SAFE DEFAULT for the payload's shape
-// validation, not what actually runs: `graph.run_node_failover` overrides
-// them per attempt with whichever runtime the workspace's Subagent policy
-// says to try — the free local model when nothing is configured yet, so
-// this loop costs nothing until someone opens the policy panel.
+// The node template uses the first runtime the user configured in the
+// workspace policy. With no configured runtime, the loop refuses before it
+// writes or launches anything; Drogon never substitutes a developer-only
+// model on a user's host.
 //
 // Lives in `WorkGraphPane` (the parent of both the read-only view and the
 // design canvas) specifically so it keeps running across the view↔design
@@ -32,10 +30,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GraphBridge } from "../../../../shared/graph-contract";
-import type { WorkGraphStatus } from "../../../../shared/work-graph-contract";
 import {
-  ADVERSARIAL_HARNESS,
-  ADVERSARIAL_MODEL,
+  resolveGraphPolicy,
+  type GraphRuntimeRef,
+  type WorkGraphStatus,
+} from "../../../../shared/work-graph-contract";
+import {
   advanceLoop,
   dispatchRefusedLedger,
   isTerminalPhase,
@@ -65,12 +65,23 @@ export type StartFailedDispatchInput = {
   message: string;
 };
 
-function reviewNodePayload(nodeId: string, prompt: string, verifyCommand: string): Record<string, unknown> {
+function intentModel(runtime: GraphRuntimeRef): string {
+  return runtime.harness === "pi" && runtime.provider
+    ? `${runtime.provider}/${runtime.model}`
+    : runtime.model;
+}
+
+function reviewNodePayload(
+  nodeId: string,
+  prompt: string,
+  verifyCommand: string,
+  runtime: GraphRuntimeRef,
+): Record<string, unknown> {
   return {
     id: nodeId,
     title: `Adversarial test (${nodeId})`,
-    harness: ADVERSARIAL_HARNESS,
-    model: ADVERSARIAL_MODEL,
+    harness: runtime.harness,
+    model: intentModel(runtime),
     dependsOn: [],
     prompt,
     enabled: true,
@@ -78,12 +89,16 @@ function reviewNodePayload(nodeId: string, prompt: string, verifyCommand: string
   };
 }
 
-function fixNodePayload(nodeId: string, prompt: string): Record<string, unknown> {
+function fixNodePayload(
+  nodeId: string,
+  prompt: string,
+  runtime: GraphRuntimeRef,
+): Record<string, unknown> {
   return {
     id: nodeId,
     title: `Code review (${nodeId})`,
-    harness: ADVERSARIAL_HARNESS,
-    model: ADVERSARIAL_MODEL,
+    harness: runtime.harness,
+    model: intentModel(runtime),
     dependsOn: [],
     prompt,
     enabled: true,
@@ -245,10 +260,24 @@ export function useAdversarialLoop({
         // (never replace) so every other node — the human's own graph, and
         // every earlier cycle's nodes — survives untouched.
         const currentNodes = read.result.graph.intent.nodes as unknown[];
+        const policy = resolveGraphPolicy(read.result.graph.intent);
+        const runtime = policy.approvedRuntimes[0] ?? policy.fallbackRuntime;
+        if (!runtime) {
+          setAndPersist({
+            ...advanced,
+            phase: "launch_refused",
+            activeNodeId: null,
+            updatedAt: now,
+            message:
+              `Cycle ${action.cycle} could not be launched: configure an approved ` +
+              "or fallback runtime in the Subagent policy.",
+          });
+          return;
+        }
         const payload =
           action.kind === "launch_review"
-            ? reviewNodePayload(action.nodeId, action.prompt, action.verifyCommand)
-            : fixNodePayload(action.nodeId, action.prompt);
+            ? reviewNodePayload(action.nodeId, action.prompt, action.verifyCommand, runtime)
+            : fixNodePayload(action.nodeId, action.prompt, runtime);
         const written = await graphBridge.graphWriteIntent({
           workspaceId,
           intent: { nodes: [...currentNodes, payload] },

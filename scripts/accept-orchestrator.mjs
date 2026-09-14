@@ -24,8 +24,8 @@
 //      settles — this dev daemon has no real provider configured, so the
 //      honest, deterministic outcome is a launch refusal (proving the
 //      "designed but never run" -> real-attempt distinction, not a
-//      fabricated success), and the canvas discloses which runtime would
-//      run and whether it is the free local default BEFORE the click.
+//      fabricated success). The canvas never invents a developer-only
+//      runtime when the workspace policy is empty.
 //   6. the top Graph / Evidence / Usage tabs read Drogon's native `.drogon`
 //      ledgers; recorded token totals come from exact CLI measurements and
 //      missing fields stay visibly not reported.

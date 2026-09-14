@@ -18,8 +18,9 @@
 // - codex: the short seed the reference explicitly keeps
 //   (`CODEX_SESSION_OPTION_CATALOG.models`), whose own comment says model
 //   access depends on auth so the list must not claim completeness.
-// - pi / opencode: real host enumeration already exists, so the seed is
-//   only the free local model the owner's constraint names.
+// - pi / opencode: real host enumeration already exists, so there is no
+//   static seed. A developer's private model catalog must not leak into the
+//   choices shown on another host.
 // - antigravity: the CLI exposes no list and the reference publishes no
 //   seed, so it honestly stays empty ("type the id").
 
@@ -75,12 +76,7 @@ const KNOWN_MODELS: Record<string, KnownModelSeed[]> = {
       note: "known catalog · Codex seed · unverified on this host",
     },
   ],
-  pi: [
-    {
-      id: "qwen3.8-flash-next-nvidia-nvfp4",
-      note: "known catalog · free local model · unverified on this host",
-    },
-  ],
+  pi: [],
   opencode: [],
   antigravity: [],
 };

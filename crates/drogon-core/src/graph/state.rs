@@ -92,7 +92,9 @@ fn project_node(
         state.harness = Some(runtime.harness.clone());
         state.model = Some(runtime.model.clone());
         state.provider = runtime.provider.clone();
-        state.is_free_default_runtime = Some(super::failover::is_free_default_runtime(runtime));
+        // Kept absent for wire compatibility: Drogon has no product-wide
+        // "free default" runtime. Cost is a property of the user's provider.
+        state.is_free_default_runtime = None;
     }
     state
 }

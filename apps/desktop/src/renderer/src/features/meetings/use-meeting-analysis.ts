@@ -52,7 +52,7 @@ export function useMeetingAnalysis({
           setError(
             failure instanceof Error
               ? failure.message
-              : "The local model could not be run.",
+              : "The configured Pi model could not be run.",
           );
         })
         .finally(() => {

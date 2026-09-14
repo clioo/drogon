@@ -543,10 +543,9 @@ pub struct GraphNodeState {
     /// explicit catalog identity (notably Pi); absent in older graph state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
-    /// Whether the attributed runtime above is this build's free, local,
-    /// never-billed default (`failover::default_free_runtime()`) — the one
-    /// fact the canvas needs to disclose a paid/external spawn honestly,
-    /// without hardcoding the free pair a second time in the UI layer.
+    /// Legacy cost-attribution field. Current daemons leave it absent because
+    /// Drogon has no product-wide free runtime and cannot infer billing from a
+    /// provider/model id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_free_default_runtime: Option<bool>,
 }

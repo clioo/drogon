@@ -60,9 +60,9 @@ export function availability(
       available: true,
       reason: "ready",
       harness: "pi",
-      provider: "dgx-spark",
-      model: "qwen3.8-flash-next-nvidia-nvfp4",
-      freeLocalModel: true,
+      provider: "pi-config",
+      model: "harness-default",
+      freeLocalModel: false,
     },
     ...overrides,
   };
@@ -106,8 +106,8 @@ export function suggestion(overrides: Partial<MeetingSuggestion> = {}): MeetingS
 export function analysis(overrides: Partial<MeetingAnalysis> = {}): MeetingAnalysis {
   return {
     meeting: transcript(),
-    model: "qwen3.8-flash-next-nvidia-nvfp4",
-    provider: "dgx-spark",
+    model: "harness-default",
+    provider: "pi-config",
     harness: "pi",
     summary: "The team agreed to ship the budget report on Friday.",
     decisions: [

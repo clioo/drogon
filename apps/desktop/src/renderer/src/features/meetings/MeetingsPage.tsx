@@ -10,7 +10,7 @@
 // Adaptations, all data-layer or bounded-read driven:
 //   * the per-row "Ask Drogon" harness input is not ported (the fork's Ask
 //     mounted the notes folder as a writable workspace, which the read-only
-//     boundary forbids); extraction is the local-model panel instead;
+//     boundary forbids); extraction is the explicit Pi-analysis panel instead;
 //   * the list is searched, date/duration filtered and paged through the
 //     daemon, so a 327-transcript folder is never loaded to render one page;
 //   * choosing a row shows the read-only reader in place of the list instead
@@ -109,9 +109,9 @@ const UNAVAILABLE_ANALYSIS: MeetingAnalysisStatus = {
   available: false,
   reason: "harness-missing",
   harness: "pi",
-  provider: "dgx-spark",
-  model: "qwen3.8-flash-next-nvidia-nvfp4",
-  freeLocalModel: true,
+  provider: "pi-config",
+  model: "harness-default",
+  freeLocalModel: false,
 };
 
 export default function MeetingsPage({
@@ -256,13 +256,13 @@ export default function MeetingsPage({
                         disabled={analysis.loading || !analysisStatus.available}
                         title={
                           analysisStatus.available
-                            ? `Run the free local model (${analysisStatus.model}) once over this transcript`
+                            ? "Run your configured Pi default once over this transcript"
                             : meetingsAnalysisUnavailableCopy(analysisStatus).description
                         }
                         onClick={() => analysis.run(controller.transcript!.meeting.id)}
                       >
                         <Sparkles className="size-3.5" />
-                        Suggest actions with the local model
+                        Suggest actions with Pi
                       </Button>
                       <span className="text-xs text-muted-foreground">
                         Read-only: suggests, never creates.

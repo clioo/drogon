@@ -1543,8 +1543,8 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[],
             &["drogon-cli graph run-node-failover --workspace ws-1 --node n2 --follow"],
             &[
-                "Requires graph.v1. Tries each of policy.approvedRuntimes in order, only reaching policy.fallbackRuntime once every approved runtime has failed; an empty policy tries only the free local pi model, so this never costs anything by default.",
-                "The node's own stored harness/model is a shape-validation default only — this verb overrides it per attempt with whichever runtime the policy says to try.",
+                "Requires graph.v1. Tries each of policy.approvedRuntimes in order, only reaching policy.fallbackRuntime once every approved runtime has failed. Drogon never inserts a product-wide model default.",
+                "With a configured policy, the node's stored runtime is a template and this verb overrides it per attempt. With no configured runtime, the authored node runtime is tried once.",
                 "The result names the runtime that actually ran, whether it was the fallback, its position in the attempt sequence, and the full attempt history for this episode.",
             ],
         ),
@@ -1705,7 +1705,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "meeting analyze",
             &["meeting", "analyze"],
-            "Extract suggested actions from one transcript with the free local model",
+            "Extract suggested actions from one transcript with the user's configured Pi model",
             "drogon-cli meeting analyze --id <ID>",
             &["id"],
             &[],
@@ -1713,9 +1713,9 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "drogon-cli meeting analyze --id write-that-down:/Users/me/Transcripts/2026-09-10/08-05_42min.json --json",
             ],
             &[
-                "Requires meetings.actions.v1. The only model used is the free LOCAL one (pi / dgx-spark / qwen3.8-flash-next-nvidia-nvfp4): there is no flag to select a paid provider, so browsing meetings can never be billed.",
+                "Requires meetings.actions.v1. Analysis is an explicit action through the user's configured Pi default; Drogon does not choose or override its provider or model. Listing, searching and reading meetings never launch inference.",
                 "Every decision, action and open question carries the verbatim transcript line it came from and that line's number. A suggestion whose quote is not found in the note is DISCARDED and reported separately, never shown as a finding.",
-                "Nothing is created by this verb: it returns suggestions. Record what you accept with `meeting actions add`; if the local model is unavailable the verb says so instead of substituting another one.",
+                "Nothing is created by this verb: it returns suggestions. Record what you accept with `meeting actions add`; if Pi is unavailable the verb says so instead of substituting another harness.",
             ],
         ),
         entry(

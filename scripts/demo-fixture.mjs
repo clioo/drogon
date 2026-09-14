@@ -42,8 +42,8 @@ export const PINNED_MENTU_RUNTIME_SOURCE =
   "/Users/carlos/Documents/Drogon-mentu-session/.mentu/runtime/" +
     "b72a1203d46c1d930be1aead65388ddfbe9a8fc4/bin/mentu-recipes";
 export const PINNED_MENTU_RUNTIME_PROVISION_COMMAND = `node scripts/mentu-runtime-provision.mjs --source ${PINNED_MENTU_RUNTIME_SOURCE}`;
-export const DEMO_PROVIDER = "dgx-spark";
-export const DEMO_MODEL = "qwen3.8-flash-next-nvidia-nvfp4";
+export const DEMO_PROVIDER = "fixture";
+export const DEMO_MODEL = "dog-tinder";
 export const DEMO_MODEL_SPEC = `${DEMO_PROVIDER}/${DEMO_MODEL}`;
 export const DEMO_RECIPE_ID = "demo-hello";
 

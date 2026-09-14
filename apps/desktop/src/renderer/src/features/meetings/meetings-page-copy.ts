@@ -28,13 +28,13 @@ export function meetingsAnalysisUnavailableCopy(status: MeetingAnalysisStatus): 
 } {
   if (status.reason === "harness-missing") {
     return {
-      title: "Suggesting actions needs the local model",
-      description: `Drogon could not find \`${status.harness}\` on this host's PATH. Extraction runs the free local model (${status.provider}/${status.model}) and nothing else — no paid provider is ever used, so nothing is billed. Browsing, searching and reading the transcripts below are unaffected.`,
+      title: "Suggesting actions needs Pi",
+      description: `Drogon could not find \`${status.harness}\` on this host's PATH. Extraction uses the provider and model configured in Pi only after you request it; Drogon does not choose one for you. Browsing, searching and reading transcripts are unaffected.`,
     };
   }
   return {
     title: "Suggesting actions is unavailable",
-    description: `Drogon could not reach the local model (${status.provider}/${status.model}). The transcripts below are unaffected.`,
+    description: "Drogon could not run the configured Pi model. The transcripts below are unaffected.",
   };
 }
 

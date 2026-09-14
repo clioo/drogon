@@ -25,8 +25,8 @@ const TRANSCRIPT = {
 
 const ANALYSIS = {
   meeting: TRANSCRIPT,
-  model: "qwen3.8-flash-next-nvidia-nvfp4",
-  provider: "dgx-spark",
+  model: "harness-default",
+  provider: "pi-config",
   harness: "pi",
   summary: "The team agreed to ship the budget report.",
   decisions: [],
@@ -93,9 +93,9 @@ const AVAILABILITY = {
     available: true,
     reason: "ready",
     harness: "pi",
-    provider: "dgx-spark",
-    model: "qwen3.8-flash-next-nvidia-nvfp4",
-    freeLocalModel: true,
+    provider: "pi-config",
+    model: "harness-default",
+    freeLocalModel: false,
   },
 };
 

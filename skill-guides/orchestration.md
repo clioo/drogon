@@ -84,11 +84,14 @@ and inspect one task with
 
 Dispatch the task through the Work Graph policy with
 `drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID>`.
-This is the default and records the exact provider+model selected from the
-ordered approved runtimes, then the fallback. A failed attempt may be retried
+This records the exact provider+model selected from the ordered approved
+runtimes, then the fallback. If the workspace has no configured runtime, this
+form refuses instead of inventing a model or copying a developer-only default.
+A failed attempt may be retried
 explicitly with `--retry-of <DISPATCH-ID>`; the next policy runtime is chosen
 without the coordinator hand-picking a provider. A coordinator may override
-that policy only when it deliberately supplies the full fresh launch pair:
+that policy when the user explicitly requests a runtime and it deliberately
+supplies the full fresh launch pair:
 `drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID> --harness <HARNESS> --provider <PROVIDER> --model <MODEL>`.
 To attach an existing session explicitly, use
 `drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID> --reuse-session <SESSION> --reuse-incarnation <TOKEN>`.

@@ -215,12 +215,12 @@ export async function execute() {
     await page.getByTestId("repro-demo-run").waitFor();
     report.checks.push("Settings opens the Demo reproducible section");
 
-    // The section opens on the free local lane, with every phase pending and
+    // The section opens on the deterministic fixture lane, with every phase pending and
     // nothing pretending to have happened yet.
     assert.equal(
       await page.getByTestId("repro-demo-model").inputValue(),
-      "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
-      "the demo must open on the free local model",
+      "fixture/dog-tinder",
+      "the demo must open on the deterministic fixture model",
     );
     const statuses = await page.evaluate(() =>
       // `[data-status]` narrows to the rows themselves: the list container

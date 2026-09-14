@@ -153,12 +153,14 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
         &policy.fallback_runtime,
     ) {
         (true, None) => out.push_str(
-            "- **Approved runtimes:** none configured -- subagent nodes run under the free \
-             local `pi` model by default, so this never costs anything.\n",
+            "- **Approved runtimes:** none configured. Drogon does not choose a model for the \
+             user; policy-based worker dispatch refuses until a runtime is configured. If the \
+             user explicitly requests a child runtime, name its harness and model (and provider \
+             when applicable) in the fresh launch.\n",
         ),
         (true, Some(fallback)) => out.push_str(&format!(
-            "- **Approved runtimes:** none configured, so the free local `pi` model is tried \
-             first. **Fallback runtime:** {} is tried after that attempt fails.\n",
+            "- **Approved runtimes:** none configured. **Fallback runtime:** {} is the only \
+             policy candidate; Drogon does not insert any runtime before it.\n",
             runtime_label(fallback)
         )),
         (false, fallback) => {
@@ -648,7 +650,8 @@ mod tests {
             },
         );
         assert!(rendered.contains("**Fallback runtime:** custom/qwen3-coder"));
-        assert!(!rendered.contains("none configured -- subagent nodes run under"));
+        assert!(rendered.contains("is the only policy candidate"));
+        assert!(!rendered.contains("free local"));
     }
 
     #[test]

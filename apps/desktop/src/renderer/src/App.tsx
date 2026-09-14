@@ -2669,7 +2669,7 @@ export function App() {
   };
   // Starts the composer's picked agent in a workspace (journey J1): the
   // composer chains `worktree.create` + `harness.start` so a worktree can
-  // open straight into a Pi session with the free local provider/model.
+  // open straight into a Pi session with the user's configured provider/model.
   // The Settings → Agents defaults drive the launch (R16-AO #231), like
   // the "+" menu. Resolves a verbatim daemon error, or null when the
   // agent tab is live.

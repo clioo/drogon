@@ -219,9 +219,17 @@ impl Engine {
         parsed.validate()?;
         let workspace_root = self.workspace_path(&parsed.workspace_id)?;
         let graph = store::read_graph(&workspace_root)?;
-        graph.intent.node(&parsed.node_id).ok_or_else(|| {
-            error::not_found(format!("The graph has no node '{}'.", parsed.node_id))
-        })?;
+        let authored_runtime = graph
+            .intent
+            .node(&parsed.node_id)
+            .map(|node| GraphRuntimeRef {
+                harness: node.harness.clone(),
+                model: node.model.clone(),
+                provider: None,
+            })
+            .ok_or_else(|| {
+                error::not_found(format!("The graph has no node '{}'.", parsed.node_id))
+            })?;
         let projected =
             self.refresh_graph_state(&parsed.workspace_id, &workspace_root, &graph.intent)?;
         let node_status = projected
@@ -263,22 +271,32 @@ impl Engine {
         }
 
         let policy = graph.intent.policy.clone();
+        let policy_candidates = failover::attempt_sequence(&policy);
         let mut attempted = self.current_failover_episode(&parsed.workspace_id, &parsed.node_id)?;
         loop {
-            let Some(candidate) = failover::next_runtime(&policy, &attempted) else {
+            // With no Subagent policy, honor the node the user authored once.
+            // A build maintainer's private test runtime must never be injected
+            // into an otherwise unconfigured workspace.
+            let candidate = if policy_candidates.is_empty() {
+                (attempted.is_empty()).then(|| authored_runtime.clone())
+            } else {
+                policy_candidates.get(attempted.len()).cloned()
+            };
+            let Some(candidate) = candidate else {
                 let tried: Vec<String> = attempted
                     .iter()
                     .map(|r| format!("{}/{}", r.harness, r.model))
                     .collect();
+                let candidates = if policy_candidates.is_empty() {
+                    "the authored runtime"
+                } else if policy.fallback_runtime.is_some() {
+                    "every approved runtime plus the fallback"
+                } else {
+                    "every approved runtime"
+                };
                 return Err(error::invalid_argument(format!(
-                    "Node '{}': every approved runtime{} was tried and none succeeded ({}). \
-                     Nothing left to try.",
+                    "Node '{}': {candidates} was tried and none succeeded ({}). Nothing left to try.",
                     parsed.node_id,
-                    if policy.fallback_runtime.is_some() {
-                        " plus the fallback"
-                    } else {
-                        ""
-                    },
                     tried.join(", ")
                 )));
             };

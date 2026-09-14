@@ -43,11 +43,6 @@ const reproduceRoot = path.join(root, ".preflight/reproduce");
 const indexPath = path.join(reproduceRoot, "index.json");
 const defaultRates = path.join(root, "scripts/reproduce-model-rates.v1.json");
 
-/** The only lane that runs a real model by default: the free local Pi model the
- *  product already uses as its zero-cost default. Any other harness needs an
- *  explicit --model in live mode; nothing here guesses a paid runtime. */
-const LIVE_DEFAULT_MODELS = { pi: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4" };
-
 /** The spec the bot's monitor watches, relative to its workspace. */
 const SPEC_PATH = "specs/dog-tinder.md";
 
@@ -66,8 +61,7 @@ const RELEASE_INSTRUCTIONS = [
 
 const RUN_POLL_MS = 1200;
 /** How long the rounds may take. A fixture answers in seconds; a real model
- *  writing this deck takes a lot longer, and the free local lane longest of
- *  all — so the bound follows the lane instead of failing honest work. */
+ *  writing this deck takes longer, so live runs get a larger bound. */
 const FIXTURE_RUN_TIMEOUT_MS = 15 * 60_000;
 const LIVE_RUN_TIMEOUT_MS = 45 * 60_000;
 
@@ -165,10 +159,8 @@ const USAGE = `Drogon reproducible adversarial run
                        the command asks.
   --iterations <1-10>  how many adversarial rounds are allowed (default 2)
   --live               run the REAL harness installed on this host instead of
-                       the local fixture. With --harness pi this is the free
-                       local lane: dgx-spark/qwen3.8-flash-next-nvidia-nvfp4.
-  --model <id>         exact model id (required in live mode for any harness
-                       without a declared free lane)
+                       the local fixture. Drogon never selects a live model.
+  --model <id>         exact model id (required in live mode)
   --release <mode>     'monitor' (default): a bot file-digest monitor over the
                        spec releases the work when this run changes it.
                        'script': skip the watch and start the workflow
@@ -202,7 +194,7 @@ function banner(runId, options) {
   process.stdout.write(
     `${dim(
       options.live
-        ? "live lane: the harness installed on this host (the free local model by default)"
+        ? "live lane: the explicitly selected harness and model on this host"
         : "demonstration: every harness runs as a local fixture — no inference, $0.00 spent",
     )}\n`,
   );
@@ -520,13 +512,9 @@ async function main() {
   const modelFor = (harness) => {
     if (options.model) return options.model;
     if (!options.live) return harness.model;
-    const lane = LIVE_DEFAULT_MODELS[harness.id];
-    if (!lane) {
-      throw new Error(
-        `--live needs --model for '${harness.id}': only pi has a declared free lane (${LIVE_DEFAULT_MODELS.pi}).`,
-      );
-    }
-    return lane;
+    throw new Error(
+      `--live needs --model for '${harness.id}': Drogon does not choose a provider or model.`,
+    );
   };
   const withModel = (harness) => ({ ...harness, model: modelFor(harness) });
   const mainHarness = withModel(harnessById(harnesses[0]));
@@ -538,10 +526,7 @@ async function main() {
   );
   // In live mode a fallback would be a second real runtime to reason about;
   // keep the ladder honest by only declaring one we have a model for.
-  const fallback =
-    fallbackCandidate && (!options.live || LIVE_DEFAULT_MODELS[fallbackCandidate.id])
-      ? withModel(fallbackCandidate)
-      : null;
+  const fallback = fallbackCandidate && !options.live ? withModel(fallbackCandidate) : null;
   process.stdout.write(
     `\n${dim(`main agent: ${mainHarness.id} · adversarial roles: ${roleHarnesses.map((h) => h.id).join(" → ")}${fallback ? ` · unapproved fallback: ${fallback.id}` : ""}`)}\n\n`,
   );

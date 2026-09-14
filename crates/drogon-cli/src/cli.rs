@@ -255,8 +255,8 @@ pub enum MeetingAction {
         max_bytes: Option<u64>,
     },
     /// Extract suggested decisions, commitments and open questions from one
-    /// transcript with the FREE LOCAL model (`pi` / dgx-spark /
-    /// qwen3.8-flash-next-nvidia-nvfp4; no paid provider can be selected).
+    /// transcript through the user's configured Pi provider and model. The
+    /// command does not choose or override that runtime.
     /// Every suggestion carries the transcript line it came from, and a
     /// suggestion whose quote is not found in the note is DISCARDED and
     /// reported separately rather than shown as a finding. Nothing is
@@ -652,9 +652,9 @@ pub enum GraphAction {
         timeout_ms: u64,
     },
     /// Launch a node through the workspace's Subagent policy: the approved
-    /// runtimes in order, then the configured fallback (or the free local
-    /// `pi` model when the policy is empty, so this never costs anything by
-    /// default). Reports which runtime actually ran, whether it was the
+    /// runtimes in order, then the configured fallback. With no configured
+    /// runtime, tries the node's authored runtime once; Drogon never inserts
+    /// a model default. Reports which runtime actually ran, whether it was the
     /// fallback, and the full attempt history for this episode.
     #[command(
         args_override_self = true,

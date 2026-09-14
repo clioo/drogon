@@ -423,12 +423,11 @@ capability `meetings.actions.v1`.
 Three rules make the output safe to act on, and they are enforced by the
 daemon, not by the prompt:
 
-- The only model used is the **free local** one (`pi` / provider `dgx-spark` /
-  model `qwen3.8-flash-next-nvidia-nvfp4`). There is no flag, parameter or
-  field to select anything else, so browsing meetings can never be billed.
-  When the local model is not installed the verb fails with
-  `meeting_analysis_unavailable` and says so — it never substitutes another
-  model.
+- Analysis runs only after this explicit command and inherits the provider
+  and model configured in Pi. Drogon neither selects nor overrides them, so
+  check your Pi configuration before running it. Listing, searching and
+  reading meetings never launch inference. When Pi is not installed the verb
+  fails with `meeting_analysis_unavailable` and says so.
 - A suggestion whose `quote` is not found **verbatim** in the note (or is
   shorter than 12 characters) is **discarded**, not shown. The answer reports
   `discardedCount` and the discarded items with their reason

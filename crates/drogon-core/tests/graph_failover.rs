@@ -505,65 +505,38 @@ fn state_attributes_the_actually_substituted_runtime_not_the_authored_template()
     let settled = fixture.wait_node_status("n1", "succeeded");
     assert_eq!(settled["harness"], "pi");
     assert_eq!(settled["model"], "good-model");
-    assert_eq!(
-        settled["isFreeDefaultRuntime"], false,
-        "good-model is not this build's free local default"
+    assert!(
+        settled["isFreeDefaultRuntime"].is_null(),
+        "Drogon must not classify a user-configured runtime by a product-wide cost assumption"
     );
 }
 
-/// F0, the zero-config half: launched via the same failover seam but with
-/// NO policy configured at all, `state` must attribute the free local
-/// default honestly (harness/model AND the `isFreeDefaultRuntime` flag) —
-/// even though this node settles failed (the free default's model is not
-/// "good-model", so the fixture never marks it a pass). A separate test
-/// (not a second `Fixture` in the test above) because `Fixture::new()`
-/// holds the process-global runtime-override lock for its whole lifetime;
-/// two live in one test body would self-deadlock, not just risk a stale
-/// policy surviving via the store's merge-forward.
+/// With no Subagent policy configured, failover honors the node's authored
+/// runtime once. It must not replace that runtime with a developer machine's
+/// private model or provider.
 #[test]
-fn state_attributes_the_zero_config_free_default_runtime() {
+fn an_empty_policy_runs_the_authored_runtime_without_inventing_a_default() {
     let fixture = Fixture::new();
     fixture.write_intent(json!({"nodes": [Fixture::pi_node("n1")]}));
-    fixture.run_failover("n1");
-    let settled = fixture.wait_node_status("n1", "failed");
-    assert_eq!(settled["harness"], "pi");
-    assert_eq!(settled["model"], "qwen3.8-flash-next-nvidia-nvfp4");
-    assert_eq!(
-        settled["isFreeDefaultRuntime"], true,
-        "the zero-config default runtime must be attributed as free"
-    );
-}
-
-/// An empty policy must still run for real, on the free local default —
-/// zero cost by default, never a hard failure just because nobody has
-/// opened the Subagent policy panel yet.
-#[test]
-fn an_empty_policy_runs_the_free_local_default_and_succeeds() {
-    let fixture = Fixture::new();
-    fixture.write_intent(json!({"nodes": [Fixture::pi_node("n1")]}));
-    // No policy at all in the payload: `resolveGraphPolicy`'s Rust
-    // counterpart, `GraphPolicy::default()`, is what the daemon actually
-    // applies. The default runtime's model does not literally contain
-    // "good-model", so the fixture would normally fail it — proving this
-    // path really did try the DEFAULT id, not silently skip failover.
     let attempt = fixture.run_failover("n1");
     assert_eq!(attempt["runtime"]["harness"], "pi");
-    assert_eq!(
-        attempt["runtime"]["model"],
-        "qwen3.8-flash-next-nvidia-nvfp4"
-    );
+    assert_eq!(attempt["runtime"]["model"], "placeholder");
+    assert!(attempt["runtime"]["provider"].is_null());
     assert_eq!(attempt["isFallback"], false);
     assert_eq!(attempt["attemptNumber"], 1);
 
-    fixture.wait_node_status("n1", "failed");
+    let settled = fixture.wait_node_status("n1", "failed");
+    assert_eq!(settled["model"], "placeholder");
+    assert!(settled["isFreeDefaultRuntime"].is_null());
 
     // No fallback configured either: exhaustion is an honest refusal, not a
     // silent stop.
     let exhausted = fixture.run_failover_err("n1");
     assert!(
-        exhausted.contains("Nothing left to try"),
-        "must name exhaustion, not silently do nothing: {exhausted}"
+        exhausted.contains("the authored runtime"),
+        "must name the only attempted source: {exhausted}"
     );
+    assert!(exhausted.contains("Nothing left to try"), "{exhausted}");
     assert_eq!(fixture.node_status("n1"), "failed");
 }
 

@@ -19,17 +19,9 @@
       "cacheRead": 0.3,
       "cacheWrite": 3.75
     },
-    "qwen3.8-flash-next-nvidia-nvfp4": {
+    "fixture/local-free": {
       "kind": "local_free",
-      "label": "modelo local, sin facturación",
-      "input": 0,
-      "output": 0,
-      "cacheRead": 0,
-      "cacheWrite": 0
-    },
-    "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4": {
-      "kind": "local_free",
-      "label": "modelo local, sin facturación",
+      "label": "modelo de fixture, sin facturación",
       "input": 0,
       "output": 0,
       "cacheRead": 0,

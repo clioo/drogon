@@ -44,6 +44,7 @@ function makeBridge(
      *  discarding it. */
     runtime?: { harness: string; model: string };
     isFallback?: boolean;
+    policyConfigured?: boolean;
   } = {},
 ): {
   bridge: GraphBridge;
@@ -51,6 +52,15 @@ function makeBridge(
   setStatus: (nodeId: string, status: WorkGraphStatus) => void;
 } {
   const recorded: Recorded = { writes: [], failovers: [] };
+  const configuredRuntime = options.runtime ?? { harness: "pi", model: "fixture-model" };
+  const policy = options.policyConfigured === false
+    ? undefined
+    : {
+        approvedRuntimes: [configuredRuntime],
+        fallbackRuntime: null,
+        adversarial: { enabled: true, maxIterations: 3 },
+        delegate: false,
+      };
   let intentNodes: Record<string, unknown>[] = [
     { id: "n1", title: "n1", harness: "shell", model: "", dependsOn: [], prompt: "x", enabled: true },
     { id: "n2", title: "n2", harness: "shell", model: "", dependsOn: [], prompt: "x", enabled: true },
@@ -70,7 +80,7 @@ function makeBridge(
     graphRead: async () => {
       const graph: GraphResult["graph"] = {
         version: 1,
-        intent: { nodes: intentNodes as never },
+        intent: { nodes: intentNodes as never, policy },
         state: {
           updatedAt: "now",
           nodes: [...statuses.entries()].map(([id, status]) => ({ id, status })),
@@ -90,7 +100,7 @@ function makeBridge(
         result: {
           graph: {
             version: 1,
-            intent: { nodes: intentNodes as never },
+            intent: { nodes: intentNodes as never, policy },
             state: { updatedAt: "now", nodes: [] },
           },
         },
@@ -114,7 +124,7 @@ function makeBridge(
         };
       }
       statuses.set(params.nodeId, "running");
-      const runtime = options.runtime ?? { harness: "pi", model: "qwen3.8-flash-next-nvidia-nvfp4" };
+      const runtime = configuredRuntime;
       const isFallback = options.isFallback ?? false;
       return {
         ok: true,
@@ -312,7 +322,7 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
     await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(review1));
     setStatus(review1, "failed");
 
-    // Only ONE approved candidate configured for this node (the default) —
+    // Only ONE approved candidate is configured for this node —
     // the retry the hook fires must come back refused (exhausted), and
     // ONLY THEN does the reducer see the failure and launch a fix cycle.
     const fix1 = fixNodeId(TOKEN, 1);
@@ -347,6 +357,25 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
     expect(view.result.current.ledger?.lastRuntimeIsFallback).toBe(true);
     setStatus(review1, "succeeded");
     await waitFor(() => expect(view.result.current.ledger?.phase).toBe("passed"));
+  });
+
+  it("refuses without writing when the workspace has no configured child runtime", async () => {
+    const { bridge, recorded } = makeBridge({ policyConfigured: false });
+    const view = renderHook(() =>
+      useAdversarialLoop({ graphBridge: bridge, workspaceId: WORKSPACE_ID, pollMs: 15 }),
+    );
+    act(() => {
+      view.result.current.startForRun({
+        workflowId: "wf1",
+        baseRunId: BASE_RUN_ID,
+        baseNodeIds: ["n1", "n2"],
+        maxCycles: 1,
+      });
+    });
+    await waitFor(() => expect(view.result.current.ledger?.phase).toBe("launch_refused"));
+    expect(view.result.current.ledger?.message).toContain("configure an approved or fallback runtime");
+    expect(recorded.writes).toHaveLength(0);
+    expect(recorded.failovers).toHaveLength(0);
   });
 
   it("persists the ledger through setPersist on every transition", async () => {

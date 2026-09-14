@@ -49,29 +49,12 @@
 //     even attempted; a workflow that already failed is reported as such,
 //     never quietly "reviewed" anyway.
 //
-// Model policy: `ADVERSARIAL_HARNESS`/`ADVERSARIAL_MODEL` below are the
-// SAFE DEFAULT stored on each node's intent (satisfies shape validation,
-// and is exactly what runs if the daemon predates failover) — but the I/O
-// hook launches every node through `graph.run_node_failover`
-// (`crates/drogon-core/src/graph_rpc.rs`), which OVERRIDES them per attempt
-// with whichever runtime the workspace's Subagent policy says to try: the
-// free local `pi` model when nothing is configured yet, so this loop costs
-// nothing before anyone opens the policy panel, and a real approved
-// runtime once one is. The max-cycle cap is a TIME safety valve, not a
-// spend one — the free default is what keeps spend at zero by default, not
-// the cap.
-
 import { z } from "zod";
 import {
   graphRuntimeRefSchema,
   type GraphRuntimeRef,
   type WorkGraphStatus,
 } from "../../../../shared/work-graph-contract";
-
-/** The only harness/model the adversarial loop is ever allowed to launch,
- *  per AGENTS.md: free, local, never billed. */
-export const ADVERSARIAL_HARNESS = "pi";
-export const ADVERSARIAL_MODEL = "qwen3.8-flash-next-nvidia-nvfp4";
 
 /** Deterministic, id-safe (`[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}`), short token
  *  for one triggering run — FNV-1a-32 rendered as 8 lowercase hex chars.
