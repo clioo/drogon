@@ -268,6 +268,9 @@ export async function makeCleanRoom() {
     HOMEBREW_NO_ANALYTICS: "1",
     HOMEBREW_NO_ENV_HINTS: "1",
     HOMEBREW_NO_INSTALL_CLEANUP: "1",
+    // --appdir is honored; --binarydir is silently ignored by current
+    // Homebrew (the shim always lands in <prefix>/bin, still room-contained
+    // here) but kept so a future Homebrew that honors it stays isolated.
     HOMEBREW_CASK_OPTS: `--appdir=${room.appdir} --binarydir=${room.bindir}`,
   };
   return { room, brewEnv };
@@ -295,22 +298,31 @@ export async function brew(brewBin, brewEnv, args, { timeoutMs = BREW_TIMEOUT_MS
   return result;
 }
 
-// Distinct cask versions in the throwaway tap's history, oldest first.
-export async function tapCaskVersions(tapDir) {
+// Cask-touching revisions in the throwaway tap's history, newest first.
+export async function tapCaskRevs(tapDir) {
   const log = await runHostCommand("git", ["-C", tapDir, "log", "--format=%H", "--", "Casks/drogon.rb"], {
     timeoutMs: 60_000,
   });
   assert.equal(log.code, 0, `git log on the tap failed: ${log.stderr.slice(-500)}`);
-  const revs = log.stdout.trim().split("\n").filter(Boolean).reverse();
+  return log.stdout.trim().split("\n").filter(Boolean);
+}
+
+export async function readCaskAtRev(tapDir, rev) {
+  const show = await runHostCommand("git", ["-C", tapDir, "show", `${rev}:Casks/drogon.rb`], {
+    timeoutMs: 60_000,
+  });
+  assert.equal(show.code, 0, `cannot read cask at ${rev}: ${show.stderr.slice(-300)}`);
+  return { rev, ...parseCaskRuby(show.stdout) };
+}
+
+// Distinct cask versions in the throwaway tap's history, oldest first.
+export async function tapCaskVersions(tapDir) {
+  const revs = (await tapCaskRevs(tapDir)).reverse();
   const versions = [];
   for (const rev of revs.slice(-10)) {
-    const show = await runHostCommand("git", ["-C", tapDir, "show", `${rev}:Casks/drogon.rb`], {
-      timeoutMs: 60_000,
-    });
-    if (show.code !== 0) continue;
     let parsed;
     try {
-      parsed = parseCaskRuby(show.stdout);
+      parsed = await readCaskAtRev(tapDir, rev);
     } catch {
       continue;
     }
@@ -319,6 +331,25 @@ export async function tapCaskVersions(tapDir) {
     }
   }
   return versions;
+}
+
+// The `binary` stanza shim always lands in <prefix>/bin on current Homebrew:
+// Cask::Config#binarydir is hardcoded to HOMEBREW_PREFIX/"bin" and neither
+// --binarydir on the command line (no such flag exists) nor --binarydir in
+// HOMEBREW_CASK_OPTS changes it (verified against Homebrew 7.0.1 source and a
+// real install). In a throwaway prefix that is still room-contained; resolve
+// whichever location the running brew uses.
+export async function resolveCliBin(room) {
+  const candidates = [
+    path.join(room.bindir, "drogon-cli"),
+    path.join(room.prefix, "bin", "drogon-cli"),
+  ];
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) return candidate;
+  }
+  throw new Error(
+    `drogon-cli shim in neither ${candidates.join(" nor ")}`,
+  );
 }
 
 export async function tapCheckout(tapDir, rev) {
@@ -450,13 +481,18 @@ export function expandZapPath(entry, home) {
 export async function auditFreshInstall(ctx, cask) {
   const { brewBin, brewEnv, room, steps } = ctx;
   const appDir = path.join(room.appdir, APP_NAME);
-  const cliBin = path.join(room.bindir, "drogon-cli");
 
-  await step(steps, `install ${cask.version}`, async () => {
+  const cliBin = await step(steps, `install ${cask.version}`, async () => {
     const result = await brew(brewBin, brewEnv, ["install", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
-    assert.ok(await pathExists(appDir), `app missing after install: ${appDir}\n${result.stderr.slice(-1000)}`);
-    assert.ok(await pathExists(cliBin), `binary shim missing after install: ${cliBin}`);
-    return result.stderr.slice(-1500) || result.stdout.slice(-1500);
+    const tail = (result.stderr.slice(-1500) || result.stdout.slice(-1500));
+    assert.ok(await pathExists(appDir), `app missing after install: ${appDir}\n${tail}`);
+    let bin;
+    try {
+      bin = await resolveCliBin(room);
+    } catch {
+      throw new Error(`binary shim missing after install\n${tail}`);
+    }
+    return bin;
   });
 
   await step(steps, `quarantine+spctl ${cask.version}`, async () => {
@@ -537,7 +573,11 @@ export async function auditUninstallZap(ctx, appDir, cliBin, cask, homeBefore) {
       assert.ok(after === null || after !== commands[pid], `daemon pid ${pid} still runs the same command after uninstall`);
     }
     assert.ok(!(await pathExists(appDir)), "app still present after uninstall");
-    assert.ok(!(await pathExists(cliBin)), "drogon-cli shim still present after uninstall");
+    assert.ok(!(await pathExists(cliBin)), `drogon-cli shim still present after uninstall: ${cliBin}`);
+    const prefixShim = path.join(room.prefix, "bin", "drogon-cli");
+    if (prefixShim !== cliBin) {
+      assert.ok(!(await pathExists(prefixShim)), `drogon-cli shim still present after uninstall: ${prefixShim}`);
+    }
     const survivors = await findDaemonPids(daemonPath, room.dataDir);
     assert.deepEqual(survivors, [], `hook left daemons behind: ${JSON.stringify(survivors)}`);
     return result.stderr.slice(-1500) || result.stdout.slice(-1500);
@@ -694,17 +734,32 @@ async function main() {
       let fromEntry = null;
       let toEntry = null;
       await step(steps, "resolve upgrade pair", async () => {
-        const all = await tapCaskVersions(tapDir);
-        assert.ok(all.length > 0, "tap history serves no drogon cask version");
-        toEntry = all[all.length - 1];
-        fromEntry = all.length > 1 ? all[all.length - 2] : all[0];
+        // TO is what a fresh user gets today: the cask at tap HEAD. FROM is
+        // the newest older version in history, so the default run upgrades
+        // previous -> current; --from-rev/--to-rev override either side.
+        const head = await runHostCommand("git", ["-C", tapDir, "rev-parse", "HEAD"], { timeoutMs: 60_000 });
+        assert.equal(head.code, 0, "cannot resolve tap HEAD");
+        await tapCheckout(tapDir, head.stdout.trim());
+        toEntry = await readTapCask(tapDir);
+        toEntry.rev = head.stdout.trim();
         if (options.toRev) {
           await tapCheckout(tapDir, options.toRev);
-          toEntry = { rev: options.toRev, ...(await readTapCask(tapDir)) };
+          toEntry = await readTapCask(tapDir);
+          toEntry.rev = options.toRev;
         }
-        if (options.fromRev) {
+        fromEntry = toEntry;
+        if (!options.fromRev) {
+          for (const rev of await tapCaskRevs(tapDir)) {
+            const candidate = await readCaskAtRev(tapDir, rev);
+            if (candidate.version !== toEntry.version) {
+              fromEntry = candidate;
+              break;
+            }
+          }
+        } else {
           await tapCheckout(tapDir, options.fromRev);
-          fromEntry = { rev: options.fromRev, ...(await readTapCask(tapDir)) };
+          fromEntry = await readTapCask(tapDir);
+          fromEntry.rev = options.fromRev;
         }
         versions.from = fromEntry.version;
         versions.to = toEntry.version;

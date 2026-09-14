@@ -17,12 +17,16 @@ import {
   makeCleanRoom,
   parseBrewAuditArgs,
   parseCaskRuby,
+  pathExists,
   quarantineAttributePresent,
+  readCaskAtRev,
+  resolveCliBin,
   skipStep,
   snapshotTree,
   spctlAccepted,
   step,
   summarizeRun,
+  tapCaskRevs,
   tapNeedsTrust,
 } from "./e2e-brew-install.mjs";
 
@@ -246,6 +250,54 @@ test("summarizeRun reports PASSED only with zero failures", () => {
   });
   assert.equal(failed.status, "FAILED");
   assert.equal(failed.counts.failed, 1);
+});
+
+test("resolveCliBin prefers the isolated bindir, falls back to prefix/bin", async (t) => {
+  const { room } = await makeCleanRoom();
+  try {
+    const { writeFile: write } = await import("node:fs/promises");
+    await assert.rejects(resolveCliBin(room), /neither/);
+    await mkdir(path.join(room.prefix, "bin"), { recursive: true });
+    await write(path.join(room.prefix, "bin", "drogon-cli"), "shim");
+    assert.equal(await resolveCliBin(room), path.join(room.prefix, "bin", "drogon-cli"));
+    await write(path.join(room.bindir, "drogon-cli"), "shim");
+    assert.equal(await resolveCliBin(room), path.join(room.bindir, "drogon-cli"));
+  } finally {
+    await rm(room.dir, { recursive: true, force: true });
+  }
+  void t;
+});
+
+test("tapCaskRevs lists newest first and readCaskAtRev parses", async (t) => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const run = promisify(execFile);
+  try {
+    await run("git", ["--version"]);
+  } catch {
+    t.skip("git unavailable");
+    return;
+  }
+  const tap = await mkdtemp(path.join(tmpdir(), "fixture-tap-"));
+  try {
+    const git = (args, cwd = tap) => run("git", args, { cwd });
+    await git(["init", "-q"]);
+    await git(["config", "user.email", "test@example.com"]);
+    await git(["config", "user.name", "test"]);
+    await git(["config", "commit.gpgsign", "false"]);
+    await mkdir(path.join(tap, "Casks"), { recursive: true });
+    await writeFile(path.join(tap, "Casks", "drogon.rb"), RC2_RUBY.replace('version "0.1.0-rc.2"', 'version "0.1.0-rc.1"'));
+    await git(["add", "."]);
+    await git(["commit", "-qm", "rc.1"]);
+    await writeFile(path.join(tap, "Casks", "drogon.rb"), RC2_RUBY);
+    await git(["commit", "-qam", "rc.2"]);
+    const revs = await tapCaskRevs(tap);
+    assert.equal(revs.length, 2);
+    assert.equal((await readCaskAtRev(tap, revs[0])).version, "0.1.0-rc.2");
+    assert.equal((await readCaskAtRev(tap, revs[1])).version, "0.1.0-rc.1");
+  } finally {
+    await rm(tap, { recursive: true, force: true });
+  }
 });
 
 test("makeCleanRoom returns a symlink-free room root", async () => {
