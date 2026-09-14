@@ -207,9 +207,9 @@ pnpm install --frozen-lockfile
 cargo build --workspace --locked
 ```
 
-On a current Apple Silicon Mac the first build takes about a minute with empty
-caches (`cargo build` measured ~53s; `pnpm install` and `pnpm typecheck` are
-seconds each). A clean-room rerun of exactly these commands lives in
+On a current Apple Silicon Mac the first build takes well under a minute with
+empty caches (`cargo build` measured 34–53s across runs; `pnpm install` and
+`pnpm typecheck` are seconds each). A clean-room rerun of exactly these commands lives in
 `node scripts/e2e-fresh-clone.mjs --full`; the fast static probes
 (`--check`) run in CI.
 
