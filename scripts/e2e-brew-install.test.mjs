@@ -9,7 +9,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  assertDestructiveScope,
   assertRoomContained,
+  auditInstall,
+  auditUninstall,
+  auditUninstallRemovalOnly,
   auditZap,
   brew,
   commandMatchesDaemon,
@@ -26,6 +30,8 @@ import {
   pathExists,
   quarantineAttributePresent,
   readCaskAtRev,
+  resetInstall,
+  resolveAppDir,
   resolveCliBin,
   skipStep,
   snapshotTree,
@@ -346,6 +352,49 @@ test("brew() refuses --force and appdir-less mutates", async () => {
   assert.equal(out.code, 0);
   const installed = await brew("/bin/echo", safeEnv, ["install", "--cask", "x"], { timeoutMs: 10000 });
   assert.equal(installed.code, 0);
+});
+
+test("resolveAppDir defaults to /Applications without isolated opts", () => {
+  assert.equal(resolveAppDir({}), "/Applications");
+  assert.equal(resolveAppDir({ HOMEBREW_CASK_OPTS: "--appdir=/tmp/room/Applications" }), "/tmp/room/Applications");
+});
+
+test("assertDestructiveScope keeps mutates inside the room", async () => {
+  const { room, brewEnv } = await makeCleanRoom();
+  try {
+    assert.doesNotThrow(() => assertDestructiveScope(room, brewEnv));
+    assert.throws(() => assertDestructiveScope(room, {}), /refusing destructive brew work/);
+    assert.throws(
+      () => assertDestructiveScope(room, { HOMEBREW_CASK_OPTS: "--appdir=/Applications" }),
+      /refusing destructive brew work/,
+    );
+  } finally {
+    await rm(room.dir, { recursive: true, force: true });
+  }
+});
+
+test("destructive paths refuse without an isolated appdir", async () => {
+  const { room } = await makeCleanRoom();
+  try {
+    const steps = [];
+    // /bin/echo would exit 0 if it were ever executed: the refusal must fire
+    // before any brew process starts, so no install can be adopted.
+    const ctx = {
+      brewBin: "/bin/echo",
+      brewEnv: { PATH: "/usr/bin:/bin" },
+      room,
+      steps,
+      owned: new Map(),
+    };
+    const appDir = path.join(room.appdir, "Drogon.app");
+    await assert.rejects(auditUninstallRemovalOnly(ctx, appDir, "/bin/false"), /refusing destructive brew work/);
+    await assert.rejects(auditUninstall(ctx, appDir, "/bin/false"), /refusing destructive brew work/);
+    await assert.rejects(resetInstall(ctx), /refusing destructive brew work/);
+    await assert.rejects(auditInstall(ctx, { version: "0.0.0-test" }), /refusing destructive brew work/);
+    assert.equal(steps.length, 0, "refused phases must not record brew-backed steps");
+  } finally {
+    await rm(room.dir, { recursive: true, force: true });
+  }
 });
 
 test("auditZap verifies trash state without calling brew", async () => {

@@ -315,6 +315,28 @@ export function launchEnv(room) {
 
 const BREW_MUTATING_COMMANDS = new Set(["install", "uninstall", "upgrade", "reinstall", "zap"]);
 
+// Resolve the effective --appdir from the cask options env var.
+export function resolveAppDir(brewEnv, fallback = "/Applications") {
+  const match = (brewEnv.HOMEBREW_CASK_OPTS ?? "").match(/--appdir=([^\s]+)/);
+  return match ? match[1] : fallback;
+}
+
+// Hard guard at the top of every destructive path: the resolved appdir and
+// the shim dir must both sit inside this run's own mkdtemp prefix. Anything
+// else — a missing HOMEBREW_CASK_OPTS, a defaulted /Applications — refuses
+// before any brew process starts.
+export function assertDestructiveScope(room, brewEnv) {
+  const appdir = resolveAppDir(brewEnv);
+  try {
+    assertRoomContained(room.dir, appdir);
+    assertRoomContained(room.dir, path.join(room.prefix, "bin"));
+  } catch {
+    throw new Error(
+      `refusing destructive brew work: appdir ${appdir} is outside the isolated prefix ${room.dir} (no --force, no defaults, ever)`,
+    );
+  }
+}
+
 export async function brew(brewBin, brewEnv, args, { timeoutMs = BREW_MUTATE_TIMEOUT_MS } = {}) {
   // Hard safety rails at the single choke point for every mutating brew call:
   // --force bypasses Homebrew's installed guard (it once let an uninstall
@@ -518,6 +540,7 @@ export function expandZapPath(entry, home) {
 
 export async function auditInstall(ctx, cask) {
   const { brewBin, brewEnv, room, steps } = ctx;
+  assertDestructiveScope(room, brewEnv);
   const appDir = path.join(room.appdir, APP_NAME);
 
   const cliBin = await step(steps, `install ${cask.version}`, async () => {
@@ -616,7 +639,8 @@ export async function assertShimsGone(room, cliBin) {
 // install behind, and `brew install` refuses to run over one. Routed through
 // brew() so the --appdir guard applies here too.
 export async function resetInstall(ctx) {
-  const { brewBin, brewEnv } = ctx;
+  const { brewBin, brewEnv, room } = ctx;
+  assertDestructiveScope(room, brewEnv);
   await brew(brewBin, brewEnv, ["uninstall", "--cask", `${TAP_NAME}/${CASK_TOKEN}`], {
     timeoutMs: BREW_TIMEOUT_MS,
   }).catch(() => null);
@@ -624,6 +648,7 @@ export async function resetInstall(ctx) {
 
 export async function auditUninstall(ctx, appDir, cliBin) {
   const { brewBin, brewEnv, room, steps } = ctx;
+  assertDestructiveScope(room, brewEnv);
   const daemonPath = path.join(appDir, "Contents", "Resources", "bin", "drogond");
 
   await step(steps, "uninstall stops the daemon", async () => {
@@ -649,6 +674,7 @@ export async function auditUninstall(ctx, appDir, cliBin) {
 
 export async function auditUninstallRemovalOnly(ctx, appDir, cliBin) {
   const { brewBin, brewEnv, room, steps } = ctx;
+  assertDestructiveScope(room, brewEnv);
   await step(steps, "uninstall removes app and shim", async () => {
     const result = await brew(brewBin, brewEnv, ["uninstall", "--zap", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
     assert.ok(!(await pathExists(appDir)), "app still present after uninstall");
@@ -924,6 +950,7 @@ async function main() {
         const caskFrom = await readTapCask(tapDir);
         const prevInstalled = await runIf(`install previous ${caskFrom.version}`, true, "", () =>
           step(steps, `install previous ${caskFrom.version}`, async () => {
+            assertDestructiveScope(room, brewEnv);
             const caskRef = `${TAP_NAME}/${CASK_TOKEN}`;
             const result = await brew(brewBin, brewEnv, ["install", "--cask", caskRef], { timeoutMs: BREW_TIMEOUT_MS });
             const tail = result.stderr.slice(-1500) || result.stdout.slice(-1500);
@@ -954,6 +981,7 @@ async function main() {
           "no seeded daemon to upgrade from",
           () =>
             step(steps, `upgrade ${versions.from} -> ${versions.to}`, async () => {
+              assertDestructiveScope(room, brewEnv);
               const caskRef = `${TAP_NAME}/${CASK_TOKEN}`;
               const result = await brew(brewBin, brewEnv, ["upgrade", "--cask", caskRef], { timeoutMs: BREW_TIMEOUT_MS });
               const afterCmd = await processCommandLine(oldDaemonPid);
