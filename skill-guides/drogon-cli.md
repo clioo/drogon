@@ -7,11 +7,9 @@ description: >-
   browser pane (open, navigate, snapshot, click, fill, tabs), launch
   harnesses, create and run cron automations, manage Bots and their
   self-managed automations, monitors and monitor actions, seal and grant
-  integration secrets, list and restore pre-migration backups, and use the
-  optional work-graph recipe environment (the `mentu` verbs: status, open,
-  run, follow, cancel). Use for terminal control, lightweight prompts and
-  shell commands. Use the orchestration guide for supervised multi-agent
-  coordination.
+  integration secrets, and list and restore pre-migration backups. Use for
+  terminal control, lightweight prompts and shell commands. Use the
+  orchestration guide for supervised multi-agent coordination.
 ---
 
 # Drogon CLI
@@ -37,8 +35,14 @@ If the CLI is missing, say so explicitly instead of inspecting source files.
 For the full machine-readable surface, run
 `drogon-cli agent-context --json` (local, no daemon needed).
 
-Recipes are optional work; the recipe section below says how to find out
-whether this host can run one before you say you made one.
+For a simple repository question, do not launch a harness, create a worktree,
+or delegate merely to run `git` or `gh`. Resolve the repository from the
+current checkout or, in a Bot workspace, from `drogon-cli project list --json`;
+then run the read-only command yourself, for example
+`gh issue list --repo OWNER/REPO`. A direct request to edit or fix something
+also permits this agent to make the change itself. Launch another agent only
+for an explicit handoff or work that genuinely benefits from parallelism or
+specialization.
 
 ## Inside A Drogon Terminal
 
@@ -69,16 +73,11 @@ for agent-state fields on sessions, `browser.relay.v1` for the browser
 commands below (which additionally need a connected Drogon desktop),
 `automation.v1` for the cron automation verbs, `bot.self.v1` for the Bot
 self-management verbs, `bot.snapshot.v1` for `bot whoami`,
-`bot.secrets.v1` for the secret verbs, and
-`mentu.v1` for the recipe verbs below, and `graph.v1` for the
+`bot.secrets.v1` for the secret verbs, and `graph.v1` for the native
 work-graph verbs.
 
 Run `drogon-cli status --json` first, then the narrowest command for the
-job. Before promising a recipe, run
-`drogon-cli mentu status --workspace <ID> --json` — the runtime is
-optional, and a recipe can only run once a human has approved its current
-content (`mentu run` refuses otherwise). The full guide for supervised
-coordination is one guide away:
+job. The full guide for supervised coordination is one guide away:
 `drogon-cli skills get --topic orchestration`.
 
 ## Workspaces
@@ -331,13 +330,18 @@ review grants with `drogon-cli bot list-grants --bot <ID> --workspace <ID>
 --json`, and revoke with `drogon-cli bot revoke-secret --bot <ID>
 --workspace <ID> --secret-ref <NAME>`.
 
-### Delegating work
+### Direct project work and delegation
 
-A Bot is the control plane for its monitors, automations and
-responsibilities — it never implements a request itself, in its own home or
-in a project. Whether the request is the owner asking in chat, a monitor
-event, or a scheduled responsibility, the same recipe delegates it to a
-session in the right project location:
+A Bot may answer repository questions and perform project work itself when
+the owner asks directly. For a simple lookup, resolve the project and run
+normal `git` or `gh` commands directly; never launch a harness merely to list
+an issue, inspect a PR, or read a file. For a bounded requested change, work
+in the resolved folder or an isolated Drogon worktree without starting a
+second agent.
+
+Use the following delegation recipe only for an explicit handoff, unattended
+monitor/schedule work, or a task that genuinely benefits from a separate
+specialist or parallel worker:
 
 1. Find the project: `drogon-cli project list --json`, matching the name or
    path the request names and reading its `id`, `kind` and `defaultBaseRef`.
@@ -365,9 +369,9 @@ session in the right project location:
    <ID> --incarnation <TOKEN> --cursor 0 --limit-bytes 4096`. Report the
    session id, the worktree path/branch, and only what that read actually
    shows — never a result you did not observe.
-5. A long-running or repeatable request becomes a responsibility instead of
-   a one-off session — `bot create-automation` or `bot create-monitor`
-   (above) — still delegation, never doing the work yourself.
+5. A long-running or repeatable unattended request can become a responsibility
+   instead of a one-off session — `bot create-automation` or
+   `bot create-monitor` (above).
 
 ## Meetings
 
@@ -496,115 +500,11 @@ sealed (names and kinds, never values) and `secrets delete --kind <KIND>
 `drogon-cli bot grant-secret --bot <ID> --workspace <ID> --secret-ref <NAME>
 --kind <KIND>` (above).
 
-## Recipes
-
-The work graph's runner executes recipes: a recipe is a JSON file under the
-workspace's `.mentu/recipes` directory describing steps in a dependency
-graph. Its runtime is OPTIONAL, so check before you promise anything:
-`drogon-cli mentu status --workspace <ID> --json` reports a `verdict` of
-`installed`, `not_installed` or `partially_available` plus the workspace's
-recipe inventory (total, valid, and each invalid entry's issue). The
-verdict comes from the daemon's own probe of the pinned runtime's bytes and
-lock hash — never from an assumption about the host — and requires the
-service capability `mentu.v1`.
-
-Write a recipe when the work is repeatable, has more than one ordered
-step, and per-step evidence is worth keeping (a build-and-verify chain, a
-release check, a migration you will re-run). Write a plain answer, not a
-recipe, when the request is a question, a single command, or exploratory
-work whose steps you cannot state yet. `drogon-cli mentu status --workspace <ID>`
-afterwards proves the file you wrote is actually discovered and valid — an
-invalid recipe is listed with its issue instead of being hidden.
-
-Hand the human the recipe with
-`drogon-cli mentu open --workspace <ID> --recipe <ID>` (or without
-`--recipe` to reopen the tab on whatever was selected). It enqueues one
-relay request and waits (bounded, `--timeout-ms 5000` overrides the 15000
-default, range 1 to 25000) for the connected Drogon desktop, which opens or
-focuses the workspace's Work Graph tab and answers with its own verdict: a
-refusal is an error (`desktop_unavailable`, `mentu_unavailable`,
-`mentu_workspace_unknown`, `mentu_open_timeout`), never a silent success.
-With no desktop connected the call fails with `desktop_not_connected`
-inside the timeout, like the browser commands above. This verb shows a
-recipe; it never runs one.
-
-### Run A Recipe
-
-Running a recipe is a daemon operation you start and then follow. It needs
-an approval bound to the recipe's EXACT current bytes: `mentu run` never
-approves anything itself, so an edited recipe has to be re-approved by a
-human (the Drogon Work Graph tab's Run Recipe action) before the CLI can run it.
-
-```text
-drogon-cli mentu run --workspace <ID> --recipe <ID> --follow --timeout-ms 900000
-```
-
-- Without `--approval`, the verb resolves the recipe's pending approval
-  (`mentu.pending_approval`: the newest unconsumed approval whose content
-  hash equals the recipe on disk). Pass `--approval <ID>` to consume one
-  specific approval instead — that is what the Work Graph tab's Run Recipe
-  button does when it hands you the id it just approved.
-- With no matching approval the call fails with `mentu_approval_required`
-  (exit 1). Do not look for a way to approve it yourself: report the
-  recipe and ask the human to approve it in the Work Graph tab, then run again.
-- `--follow` polls `mentu.run_status` until the run settles, bounded by
-  `--timeout-ms` (default 900000, range 1 to 3600000). Without `--follow`
-  the verb returns as soon as the daemon has recorded the `running` row.
-- Exit status is the truth, not the prose: `0` only when the run succeeded
-  (or is still running), `1` when it failed, was cancelled, or is
-  `unavailable` (the host never confirmed an outcome), and `1` with code
-  `timeout` when the follow budget ran out. A timeout names the last
-  observed status; it never claims the run died.
-- Inside a Drogon terminal drop `--data-dir`; the shim already binds the
-  running daemon.
-
-Follow or report a run by its daemon run id (the `id` from `mentu run`, not
-the runtime's `run_...` id):
-
-```text
-drogon-cli mentu run-status --run <RUN-ID> --json
-drogon-cli mentu runs --workspace <ID> --limit 10 --json
-```
-
-`mentu run-status` exits 0 while a run is running or succeeded and 1 once
-it settled as failed/cancelled/unavailable, so a shell `if` can branch on
-it. Its `steps[]` fill in as the run progresses — the daemon mirrors the
-runtime's own run record while the process is alive — and each step carries
-`outputPath`/`errorPath` for the captured streams, so report the failing
-step's label, exit code and error instead of paraphrasing the run.
-
-Stop a run with:
-
-```text
-drogon-cli mentu cancel --run <RUN-ID>
-```
-
-Cancellation is asynchronous: the returned row may still read `running`, so
-poll `mentu run-status` until it settles as `cancelled`. It works on any run
-row, including one another agent started, which is why a run started from
-the Work Graph tab stays stoppable by the human (the tab's Cancel) and by you.
-
-When a recipe is worth writing, its steps should be independently
-verifiable: give each step a `shell` command whose exit code means
-something, then run it and read the evidence back rather than asserting
-success.
-
-### Resume And Retry A Recipe Run
-
-An in-flight or failed run can be continued without starting over.
-`drogon-cli mentu resume --run <RUN-ID> --follow` relaunches the run in
-its SAME run directory, rerunning only the steps that did not succeed (a
-still-running prior run is refused until it settles). Retry one step with
-`drogon-cli mentu retry-step --run <RUN-ID> --step <LABEL> --follow` —
-the graph compiler emits each node id as its step label, so a graph node
-retries with its node id, and succeeded steps are never redone. Exit
-status follows the same truth table as `mentu run`.
-
 ## Work Graphs
 
 A workspace can own a work graph: `<workspace>/.drogon/graph.json`
-describes nodes with dependencies, and the daemon compiles it into
-recipes. These verbs need the service capability `graph.v1`.
+describes nodes, dependencies, native orchestration policy, evidence, and
+usage. These verbs need the service capability `graph.v1`.
 
 Read the graph with `drogon-cli graph read --workspace <ID> --json` —
 each node's status is projected from real observation (`running` requires
@@ -615,20 +515,6 @@ graph INTENT with
 `drogon-cli graph write-intent --workspace <ID> --file graph-intent.json`
 (intent only: a payload carrying `state` is refused, and a newer file
 version is refused rather than rewritten).
-
-Compile a node and its dependencies into a validated recipe with
-`drogon-cli graph compile --workspace <ID> --node <ID>` (or
-`--nodes <ID,ID>`; `--output` overrides the emitted path). Compilation
-validates with the runtime's own check and doctor — it runs nothing —
-and findings are attributed to the node that caused them.
-
-Run the compiled node with
-`drogon-cli graph run --workspace <ID> --node <ID> --follow`: the daemon
-mints the approval for the exact compiled bytes and executes through the
-work-graph run path, so there is no second engine. Resume or retry follow the
-same seams as above (`graph resume` reruns every non-succeeded step,
-`graph retry-step` reruns one), and `--follow` polls until the run
-settles with the same exit-status truth table.
 
 ### Subagent Policy And The Adversarial Loop
 
@@ -645,40 +531,31 @@ to confirm before deciding how to act. A configured policy is delivered into the
 next session's managed block; returning to the default removes that block
 without touching owner content:
 
-- `policy.delegate: true` and adversarial OFF means the main agent is only a
-  planner and director. It must not implement the task itself. Write intent nodes
-  for independent depth-one subtasks with
-  `drogon-cli graph write-intent --workspace <ID> --file graph-intent.json`
-  and supervise them through the graph execution path. Every child must be told
-  not to delegate. No automatic tester is added in this mode.
-- `policy.adversarial.enabled: true` is mutually exclusive with Delegate but
-  also makes the main agent a planner/director rather than an implementer.
-  Dispatch depth-one implementation workers. As EACH worker reports completion,
-  immediately dispatch a separate depth-one adversarial tester for that worker's
-  output; do not wait for all implementation workers. Route findings to a
-  depth-one correction worker and retest, up to
-  `policy.adversarial.maxIterations`. Workers, testers, and correction workers
-  are sibling children and none may delegate. Drogon then runs its final bounded
-  whole-workflow Adversarial-test / Code-review pass. Findings are successful
-  evaluations, not failed runtime launches.
-- When both flags are false, the main agent works directly and must not dispatch
-  subagents. A policy with both flags true is invalid and is refused.
+- `policy.delegate: true` and adversarial OFF makes delegation available, not
+  mandatory. The main agent handles simple lookups, repository discovery, `gh`
+  commands, and bounded edits directly, and may always make changes the user
+  explicitly requests. Use native depth-one workers only when independent work
+  benefits from parallelism or specialization. Every child must be told not to
+  delegate. No automatic tester is added in this mode.
+- `policy.adversarial.enabled: true` is mutually exclusive with Delegate. The
+  main agent implements directly unless a genuinely independent subtask benefits
+  from a native depth-one worker. It never delegates a simple lookup, repository
+  discovery, one `gh` command, or a small bounded edit. Drogon runs the final
+  bounded whole-workflow Adversarial-test / Code-review sessions after the main
+  work settles, so the main agent does not dispatch duplicate testers. Findings
+  are successful evaluations, not failed runtime launches.
+- When both flags are false, the main agent works directly and does not
+  proactively dispatch subagents; an explicit user request may authorize
+  delegation. A policy with both flags true is invalid and is refused.
 - `policy.approvedRuntimes` (an ordered list) and `policy.fallbackRuntime`
-  are the runtimes a subagent node may run under, in priority order. Each
-  runtime stores `harness`, `provider`, and `model` together. Provider and
-  model are an inseparable selection; a worker must never guess a provider
-  for an ambiguous model id. Launch a graph node through that exact order with
-  `drogon-cli graph run-node-failover --workspace <ID> --node <ID> --follow`:
-  it tries each approved runtime and only reaches the fallback once every
-  approved runtime has failed; an empty policy tries only the free local
-  `pi` model, so this never costs anything by default. The result names
-  the runtime that actually ran, whether it was the fallback, and the full
-  attempt history — never a guess at what "should" have run.
-- For native orchestration, the same policy-aware choice is the default:
-  `drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID>`.
-  An explicit `--harness --provider --model` is an intentional override;
-  omitting those fresh flags is what makes the daemon select the ordered
-  policy and record the actual pair.
+  are the runtimes a native worker session may run under, in priority order.
+  Each runtime stores `harness`, `provider`, and `model` together. Provider and
+  model are an inseparable selection; a worker must never guess a provider for
+  an ambiguous model id. `drogon-cli orchestration worker-start --run <ID>
+  --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID>`
+  applies that order and records the actual pair. An explicit
+  `--harness --provider --model` is an intentional override; omitting those
+  fresh flags lets the daemon select from policy.
 
 The Orchestrator uses a main-task node (the normal `GraphNodeIntent` JSON
 shape: id, title, harness, model, prompt, enabled, and no dependencies).
@@ -705,7 +582,7 @@ not a sandbox restriction on arbitrary commands an agent can run.
 ### Native Evidence And Usage
 
 The lead agent keeps human-readable progress in Drogon's native workspace
-ledgers, not in Mentu. Record a checkpoint after a meaningful result, finding,
+ledgers. Record a checkpoint after a meaningful result, finding,
 blocker, or completion (not after every tool call):
 
 ```sh
@@ -793,16 +670,6 @@ never established). Only an observed exit is an exit.
 - `terminal wait` exits 1 with code `timeout` when the budget expires.
 - `browser` commands exit 1 with code `desktop_not_connected` when no
   Drogon desktop is connected to execute them.
-- `mentu open` refuses with `method_not_found` when the service does not
-  advertise `mentu.v1` or `browser.relay.v1`, with `desktop_not_connected`
-  when no desktop is connected, and with the desktop's own refusal code
-  when the window would not open the tab.
-- `mentu run` exits 1 with `mentu_approval_required` when the recipe's
-  current bytes have no approval, with `timeout` when `--follow` exhausts
-  its budget, and with the daemon's own code (`not_found`,
-  `invalid_argument`) for an unknown recipe or an approval that does not
-  match it. It exits 1, never 0, for a run that settled as failed,
-  cancelled or unavailable.
 - The diagnostic passthrough `drogon-cli rpc status` sends one raw
   protocol method and prints the validated envelope.
 
@@ -811,10 +678,7 @@ never established). Only an observed exit is an exit.
 Confirm `drogon-cli status --json` unless already checked this turn, then
 choose the narrowest command: `workspace list`, `project list`,
 `worktree list --project <ID>`, `terminal list`, `terminal read`, or
-`terminal wait`. To run a recipe the human approved, use
-`drogon-cli mentu run --workspace <ID> --recipe <ID> --follow`; to report on
-one that is already in flight, `drogon-cli mentu run-status --run <RUN-ID>`.
-To give a Bot a purpose that fires on change, bind a monitor action with
+`terminal wait`. To give a Bot a purpose that fires on change, bind a monitor action with
 `drogon-cli bot bind-monitor --bot <ID> --workspace <ID> --monitor <ID>
 --expected-rev 3 --responsibility-name <NAME>`. When discovering flags
 from scratch, prefer

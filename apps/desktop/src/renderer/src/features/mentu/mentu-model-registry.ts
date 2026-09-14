@@ -1,6 +1,6 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// Real model-catalog projection for the Mentu inspector's Model field.
-// The daemon's `harness.models` RPC (see `mentu-model-catalog.ts`) probes
+// Model-catalog projection for recipe editing. The daemon's
+// `harness.models` RPC (see `model-catalog.ts`) probes
 // the harness's own enumeration command under credential-free isolation;
 // this module turns that answer into what the combobox offers and what
 // the status/provenance rows say — with the C01 honesty contract intact:
@@ -27,6 +27,13 @@ import type {
 } from "../../../../shared/session-contract";
 import type { MentuRecipeDefinition } from "./recipe-validation/mentu-recipe-document";
 import { KNOWN_MODEL_CATALOG_VERSION, knownModelsFor } from "./mentu-known-models";
+import {
+  filterModelOptions,
+  type ModelOption,
+} from "../agent-runtime/ModelPicker";
+
+export { filterModelOptions };
+export type { ModelOption };
 
 /** How long after its probe a catalog is labelled stale in the UI. The
  *  count stays real either way — staleness is rendered, never hidden. */
@@ -41,35 +48,6 @@ const KNOWN_RECOMMENDED: Record<string, string[]> = {
   claude: ["claude-sonnet-5"],
   pi: ["kimi-for-coding"],
 };
-
-export type ModelOption = {
-  id: string;
-  /** Where the option came from: the host catalog, the curated known
-   *  catalog, or the open recipe. */
-  group: "catalog" | "known" | "observed";
-  /** True only when the HOST enumerated this id. */
-  verified: boolean;
-  /** Drogon-recommended AND host-enumerated. */
-  recommended: boolean;
-  /** Real per-model notes (reported capability facts, recipe origin). */
-  notes: string[];
-};
-
-/** Case-insensitive substring filter over a model option: matches the id,
- *  the provider/family (carried in `notes`) and any other reported note.
- *  This is the search behind the picker's small search box. */
-export function filterModelOptions(
-  options: ModelOption[],
-  query: string,
-): ModelOption[] {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return options;
-  return options.filter(
-    (option) =>
-      option.id.toLowerCase().includes(needle) ||
-      option.notes.some((note) => note.toLowerCase().includes(needle)),
-  );
-}
 
 /** Model ids the recipe's OTHER steps already carry for this harness,
  *  first-seen order, excluding the step currently being edited and any

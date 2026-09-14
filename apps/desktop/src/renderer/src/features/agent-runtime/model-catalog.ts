@@ -1,5 +1,5 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// Live per-harness model catalog for the Mentu inspector's Model field.
+// Live per-harness model catalog shared by agent-runtime selectors.
 // `window.drogon.harnessModels({ harnessId })` is the daemon-backed
 // `harness.models` RPC (capability `harness.catalog.v1`): the daemon
 // probes the harness's OWN enumeration command under credential-free
@@ -45,7 +45,7 @@ export type ModelCatalogState = {
   refresh: () => void;
 };
 
-export function useMentuModelCatalog(harness: string): ModelCatalogState {
+export function useModelCatalog(harness: string): ModelCatalogState {
   const registered = isRegisteredHarness(harness);
   const target = (registered ? harness.trim().toLowerCase() : null) as
     | HarnessId

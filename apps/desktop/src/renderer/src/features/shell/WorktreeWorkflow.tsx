@@ -21,7 +21,7 @@ const statuses: Record<OrchestratorRun["status"], string> = {
   unverifiable: "Unverifiable",
 };
 
-/** Headless graph roles are runs, not PTYs. Keep them visible without inventing terminal identities. */
+/** Keep the durable workflow visible beside the native session rows it launches. */
 export function WorktreeWorkflow({
   workspaceId,
   bridge,
@@ -47,6 +47,9 @@ export function WorktreeWorkflow({
   }, [active, run]);
   if (!run || run.workspaceId !== workspaceId) return null;
   const status = error ? "Unverifiable" : statuses[run.status];
+  const usesNativeSessions = run.steps.some((step) =>
+    step.runId?.startsWith("session:"),
+  );
   return (
     <div className="shell-worktree-card-rows min-w-0 text-xs">
       <button
@@ -72,7 +75,9 @@ export function WorktreeWorkflow({
       >
         <p className="break-words text-foreground">{run.main.title}</p>
         <p className="text-muted-foreground">
-          Background workflow · no terminal
+          {usesNativeSessions
+            ? "Native workspace sessions"
+            : "Legacy background workflow · no terminal"}
         </p>
         {run.steps.map((step) => (
           <div key={step.nodeId} className="min-w-0">

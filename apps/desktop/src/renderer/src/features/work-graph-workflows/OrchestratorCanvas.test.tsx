@@ -496,7 +496,7 @@ describe("OrchestratorCanvas", () => {
     );
   });
 
-  it("Delegate mode shows depth-one implementation workers without the adversarial loop", () => {
+  it("Delegate mode makes depth-one workers available without forbidding direct work", () => {
     render(
       <OrchestratorCanvas
         {...baseProps()}
@@ -507,7 +507,7 @@ describe("OrchestratorCanvas", () => {
     expect(screen.queryByTestId("orchestrator-test-node")).toBeNull();
     expect(
       screen.getByTestId("orchestrator-no-subagents-caption").textContent,
-    ).toBe("Delegate mode · depth-1 implementation workers");
+    ).toBe("Depth-1 workers available when useful");
   });
 
   it("a never-run terminal renders dashed, not a fabricated green check", () => {
@@ -816,7 +816,7 @@ describe("OrchestratorCanvas", () => {
   });
 
   it("the inspector still refuses harness/delete while merely unverifiable (loss of contact never proves exit)", () => {
-    // isMentuMainSessionLive => false (agentState "exited"), but
+    // Native liveness => false (agentState "exited"), but
     // verdict !== "exited" => the honest state is "unverifiable", not
     // "exited" — the gate must key off `!exited`, not the coarser `live`.
     const unverifiable: Session = {

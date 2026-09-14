@@ -1,10 +1,9 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-// Real registered-harness catalog for the Mentu inspector's Harness /
-// backend selector. `window.drogon.harnesses()` is the SAME daemon-backed
+// Shared registered-harness catalog for agent-runtime selectors. `window.drogon.harnesses()` is the SAME daemon-backed
 // bridge call (`harness.list`, capability `harness.catalog.v1`) already
 // consumed by Settings -> Agents and the workspace composer's agent
 // picker (`harness-capability.ts`, `NewWorkspaceComposer.tsx`) — never a
-// Mentu-local guess. `Harness.availability` is carried verbatim
+// feature-local guess. `Harness.availability` is carried verbatim
 // (`available` / `missing` / `unsupported_launcher`); this module invents
 // nothing when the call fails or a harness is absent, and never retries
 // silently into a different answer.
