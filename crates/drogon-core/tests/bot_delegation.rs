@@ -1207,8 +1207,12 @@ fn harness_failure_records_honestly_without_retry_storm() {
     fixture.enqueue(1, now);
     let drained = fixture.drain(now);
     // The attempt happened (one seam call) and its outcome was recorded:
-    // the event is gone, the run row exists with no host observation.
-    assert_eq!(drained.dispatched, 1, "{drained:?}");
+    // the event is gone, the run row exists with no host observation. A
+    // refused `harness.start` admitted NO session, so it is counted as
+    // `dispatch_failed` — never as a dispatch that worked — and the firing
+    // carries the daemon's own reason.
+    assert_eq!(drained.dispatched, 0, "{drained:?}");
+    assert_eq!(drained.dispatch_failed, 1, "{drained:?}");
     assert_eq!(fixture.seam.dispatch_count(), 1);
     assert_eq!(fixture.outbox_len(), 0);
     assert_eq!(fixture.run_history_len(), 1);
@@ -1217,6 +1221,18 @@ fn harness_failure_records_honestly_without_retry_storm() {
         bstorage::history_for_bot(&conn, &fixture.host_id, &fixture.folder, &fixture.bot_id)
             .unwrap();
     assert!(history[0].responsibility_run.host_observation.is_none());
+    let firing: (String, String) = conn
+        .query_row(
+            "SELECT outcome, coalesce(detail, '') FROM bot_monitor_firings",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(firing.0, "dispatch_failed");
+    assert!(
+        firing.1.contains("harness_unavailable") && firing.1.contains("no such harness"),
+        "the firing must carry the refusal verbatim: {firing:?}"
+    );
 }
 
 // --- Small pure pins -------------------------------------------------------

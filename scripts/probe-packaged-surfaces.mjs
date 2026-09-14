@@ -541,15 +541,29 @@ async function probeTabStripAndBrowser({ page, cli, dataDir, workspaceId, output
       if (!result.ok) throw new Error(result.error.message);
     }, { tabId, url: readmeUrl });
     await waitForBrowserTab(readmeUrl);
+    // The daemon's tab state settles before the chrome re-renders from it, so
+    // these controls are waited for, not sampled: a disabled-for-one-frame
+    // button is the render catching up, while a button that never enables is
+    // the real failure this still catches (bounded, with the state in the
+    // message).
+    const waitEnabled = async (locator, label) => {
+      const deadline = Date.now() + 10000;
+      for (;;) {
+        if (await locator.isEnabled()) return;
+        if (Date.now() >= deadline)
+          throw new Error(`${label} never became enabled in the browser pane`);
+        await delay(100);
+      }
+    };
     const back = pane.getByRole("button", { name: "Back", exact: true });
     await back.waitFor();
-    assert.equal(await back.isEnabled(), true);
+    await waitEnabled(back, "Back");
     await back.click();
     const afterBack = await waitForBrowserTab(guestUrl);
     assert.equal(afterBack.canGoForward, true);
     const forward = pane.getByRole("button", { name: "Forward", exact: true });
     await forward.waitFor();
-    assert.equal(await forward.isEnabled(), true);
+    await waitEnabled(forward, "Forward");
     await forward.click();
     const afterForward = await waitForBrowserTab(readmeUrl);
     assert.equal(afterForward.canGoBack, true);

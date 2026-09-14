@@ -267,18 +267,18 @@ function unwrap<T>(result: Result<T>, what: string): T {
  *  local model can follow it literally. */
 export function releaseInstructions(workspaceId: string): string {
   return [
-    "El spec de Dog Tinder cambió en este mismo workspace.",
-    "No implementes el deck vos: arrancá el workflow durable y dejá que el Work Graph lo haga.",
-    "Ignorá el paso 1 del mensaje (no hace falta un worktree nuevo): trabajá en este workspace.",
-    `Corré exactamente esto y terminá: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file .drogon/repro-main-node.json`,
-    "Después registrá un checkpoint con `drogon-cli graph evidence-add` y salí.",
+    "The Dog Tinder spec changed in this very workspace.",
+    "Do not implement the deck yourself: start the durable workflow and let the Work Graph do it.",
+    "Ignore step 1 of the message (no new worktree is needed): work in this workspace.",
+    `Run exactly this and finish: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file .drogon/repro-main-node.json`,
+    "Then record a checkpoint with `drogon-cli graph evidence-add` and exit.",
   ].join("\n");
 }
 
 export function mainNodeFor(runtime: ReproRuntimeChoice, spec: string) {
   return {
     id: "orchestrator-main",
-    title: "Dog Tinder con undo del último swipe",
+    title: "Dog Tinder with undo of the last swipe",
     harness: runtime.harness,
     model: runtime.model,
     dependsOn: [] as string[],
@@ -331,7 +331,7 @@ export async function runReproDemo(
   ): Promise<T> => {
     const deadline = now() + timeoutMs;
     for (;;) {
-      if (cancelled) throw new Error("la demo se canceló");
+      if (cancelled) throw new Error("the demo was cancelled");
       const value = await check();
       if (value) return value;
       if (now() > deadline)
@@ -379,7 +379,7 @@ export async function runReproDemo(
       }),
       "fileWrite .drogon/repro-main-node.json",
     );
-    setPhase("seed", "done", `${REPRO_SCENARIO_SEED.length + 1} archivos`);
+    setPhase("seed", "done", `${REPRO_SCENARIO_SEED.length + 1} files`);
 
     // Phase 3 — the bot that owns the watch.
     setPhase("bot", "running");
@@ -394,9 +394,11 @@ export async function runReproDemo(
         body: {
           characterPreset: "arya",
           displayIdentity: {
-            displayName: "Dog Tinder bot",
-            handle: "dog-tinder-demo",
-            title: "Vigila el spec del deck",
+            displayName: `Dog Tinder bot ${tag}`,
+            // The handle is an identity, not a label: a fixed one makes the
+            // SECOND run collide with the first ("handle is already owned").
+            handle: `dog-tinder-${tag}`,
+            title: "Watches the deck's spec",
           },
           harnessPolicy: {
             defaultHarness: runtime.harness,
@@ -404,7 +406,7 @@ export async function runReproDemo(
           },
           instructions: REPRO_SCENARIO_BRIEF,
           memories: [
-            "Esta corrida es una demostración reproducible; nada de esto es producción.",
+            "This run is a reproducible demonstration; none of it is production.",
           ],
         },
       }),
@@ -426,7 +428,7 @@ export async function runReproDemo(
     setPhase(
       "policy",
       "done",
-      `${runtime.harness}${runtime.model ? `/${runtime.model}` : ""} · ${iterations} ronda(s)`,
+      `${runtime.harness}${runtime.model ? `/${runtime.model}` : ""} · ${iterations} round(s)`,
     );
 
     // Phase 5 — the watch, armed while the spec does not exist yet, so the
@@ -439,7 +441,7 @@ export async function runReproDemo(
         botId: bot.id ?? botId,
         resource: REPRO_SCENARIO_SPEC_PATH,
         cron: "* * * * *",
-        responsibilityName: "Rondas adversariales de Dog Tinder",
+        responsibilityName: "Dog Tinder adversarial rounds",
         instructions: releaseInstructions(workspaceId),
       }),
       "botMonitorCreate",
@@ -455,6 +457,12 @@ export async function runReproDemo(
     );
     update({ monitorId: monitor.monitorId });
     setPhase("watch", "done", `${monitor.ruleKind} · ${REPRO_SCENARIO_SPEC_PATH}`);
+    // The bot and its watch exist now, so show them: Bots is where a human
+    // reads what this demo just configured, and the run keeps going behind it.
+    // A beat first — the setup rows above are worth reading before the panel
+    // gives way (and `sleep` is injected, so tests pay nothing for it).
+    await sleep(2500);
+    tour({ kind: "open-bots", workspaceId });
 
     const readMonitor = async (): Promise<MonitorView | null> => {
       const listed = await bridge.botMonitorList({
@@ -494,13 +502,13 @@ export async function runReproDemo(
 
     // Phase 6 — the change. First the watch reports the spec is absent; then
     // the demo writes it.
-    setPhase("spec", "running", "esperando el primer chequeo del monitor");
+    setPhase("spec", "running", "waiting for the watch to check once");
     const first = await until(
       async () => {
         const view = await readMonitor();
         return view?.lastCheckOutcome ? view : null;
       },
-      "el monitor no llegó a hacer su primer chequeo",
+      "the watch never ran its first check",
       FIRING_TIMEOUT_MS,
     );
     recordCheck(first);
@@ -517,7 +525,7 @@ export async function runReproDemo(
     setPhase("spec", "done", REPRO_SCENARIO_SPEC_PATH);
 
     // Phase 7 — the bot wakes itself up.
-    setPhase("firing", "running", "el monitor chequea cada minuto");
+    setPhase("firing", "running", "the watch checks every minute");
     try {
       const fired = await until(
         async () => {
@@ -526,12 +534,12 @@ export async function runReproDemo(
           recordCheck(view);
           return view.firing?.lastEventId ? view.firing : null;
         },
-        "el monitor no disparó sobre el cambio del spec",
+        "the watch never fired on the spec change",
         FIRING_TIMEOUT_MS,
       );
       if (fired.lastOutcome !== "dispatched" && fired.lastOutcome !== "joined") {
         throw new Error(
-          `el disparo no liberó trabajo (${fired.lastOutcome}): ${fired.lastDetail ?? "sin detalle"}`,
+          `the firing released no work (${fired.lastOutcome}): ${fired.lastDetail ?? "no detail"}`,
         );
       }
       update({ firingEventId: fired.lastEventId ?? null });
@@ -542,13 +550,13 @@ export async function runReproDemo(
           const status = await bridge.graphOrchestratorStatus({ workspaceId });
           return status.ok && status.result.run?.id ? status.result.run : null;
         },
-        "la sesión liberada no arrancó el workflow",
+        "the released session never started the workflow",
         WORKFLOW_START_TIMEOUT_MS,
       );
       update({
         workflowId: started.id,
         releasedBy: "monitor",
-        releaseNote: `Disparo ${fired.lastEventId}`,
+        releaseNote: `Firing ${fired.lastEventId}`,
       });
     } catch (error) {
       // The watch is real evidence either way: record why it did not release
@@ -588,7 +596,7 @@ export async function runReproDemo(
         }));
         return isTerminalWorkflowStatus(run.status) ? run : null;
       },
-      "el workflow no terminó",
+      "the workflow never finished",
       ROUNDS_TIMEOUT_MS,
     );
     setPhase(

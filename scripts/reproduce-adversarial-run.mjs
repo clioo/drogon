@@ -31,7 +31,7 @@ import {
 } from "./acceptance-process.mjs";
 import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
 import { HARNESS_CATALOG, harnessById, writeHarnessFixtures } from "./reproduce-harness-fixture.mjs";
-import { MENTU_LOCK_REVISION, MENTU_LOCK_SHA256 } from "./mentu-runtime-provision.mjs";
+import { stageVerifiedRuntime } from "./mentu-runtime-provision.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const scenarioRoot = path.join(root, "scripts/scenarios");
@@ -54,12 +54,12 @@ const SPEC_PATH = "specs/dog-tinder.md";
  *  worktree; these say what to do with it, with the exact commands so a small
  *  local model can follow them literally. */
 const RELEASE_INSTRUCTIONS = [
-  "El spec de Dog Tinder cambió. No implementes el deck vos mismo: armá el workflow durable y dejá que el Work Graph lo haga.",
-  "1. Abrí el worktree exactamente como dice el paso 1 de abajo y quedate con `.result.workspaceId` y `.result.path`.",
-  "2. Copiá `.drogon/repro-context.json` del workspace del bot al worktree nuevo, cambiando `workspaceId` por el del worktree.",
-  "3. Escribí la política: `drogon-cli graph write-intent --workspace <id> --file <path>/.drogon/repro-intent.json` con `{\"nodes\":[],\"policy\":<policy del contexto>}`.",
-  "4. Arrancá las rondas: `drogon-cli graph orchestrator-start --workspace <id> --file <path>/.drogon/repro-main-node.json`, con el nodo main del contexto y el texto de `specs/dog-tinder.md` como prompt.",
-  "5. Registrá un checkpoint con `drogon-cli graph evidence-add` y terminá. El daemon corre las rondas adversariales solo.",
+  "The Dog Tinder spec changed. Do not implement the deck yourself: set up the durable workflow and let the Work Graph do it.",
+  "1. Open the worktree exactly as step 1 below says, and keep `.result.workspaceId` and `.result.path`.",
+  "2. Copy `.drogon/repro-context.json` from the bot's workspace into the new worktree, replacing `workspaceId` with the worktree's own.",
+  "3. Write the policy: `drogon-cli graph write-intent --workspace <id> --file <path>/.drogon/repro-intent.json` with `{\"nodes\":[],\"policy\":<the policy from the context>}`.",
+  "4. Start the rounds: `drogon-cli graph orchestrator-start --workspace <id> --file <path>/.drogon/repro-main-node.json`, with the context's main node and the text of `specs/dog-tinder.md` as its prompt.",
+  "5. Record a checkpoint with `drogon-cli graph evidence-add` and finish. The daemon runs the adversarial rounds on its own.",
 ].join("\n");
 
 const RUN_POLL_MS = 1200;
@@ -193,15 +193,15 @@ const red = (text) => paint("31", text);
 function banner(runId, options) {
   const line = "─".repeat(64);
   process.stdout.write(`\n${teal(line)}\n`);
-  process.stdout.write(`${bold("Drogon · corrida adversarial reproducible")}\n`);
+  process.stdout.write(`${bold("Drogon · reproducible adversarial run")}\n`);
   process.stdout.write(
-    `${dim(`run ${runId} · escenario ${options.scenario} · hasta ${options.iterations} ronda(s)`)}\n`,
+    `${dim(`run ${runId} · scenario ${options.scenario} · up to ${options.iterations} round(s)`)}\n`,
   );
   process.stdout.write(
     `${dim(
       options.live
-        ? "lane real: corre el harness instalado en este host (modelo local gratis por defecto)"
-        : "demostración: cada harness corre como fixture local — sin inferencia, gasto $0.00",
+        ? "live lane: the harness installed on this host (the free local model by default)"
+        : "demonstration: every harness runs as a local fixture — no inference, $0.00 spent",
     )}\n`,
   );
   process.stdout.write(`${teal(line)}\n`);
@@ -228,7 +228,7 @@ function phase(id, title) {
       phases.push({ id, title, status: "failed", ms, detail: message });
       clear();
       process.stdout.write(
-        `${bold(id.padEnd(4))}${title.padEnd(34, " ")} ${red("falló")} ${dim(message)}\n`,
+        `${bold(id.padEnd(4))}${title.padEnd(34, " ")} ${red("failed")} ${dim(message)}\n`,
       );
     },
   };
@@ -239,9 +239,9 @@ function phase(id, title) {
 async function hostStatus(exe) {
   try {
     const { stdout } = await exec("/usr/bin/which", [exe], { timeout: 5000 });
-    return stdout.trim() ? "instalado" : "no instalado";
+    return stdout.trim() ? "installed" : "not installed";
   } catch {
-    return "no instalado";
+    return "not installed";
   }
 }
 
@@ -253,7 +253,7 @@ async function chooseHarnesses(preselected) {
     rows.push({ ...harness, host: harness.exe ? await hostStatus(harness.exe) : "—" });
   }
 
-  process.stdout.write(`\n${bold("¿Con qué harnesses corremos la demostración?")}\n\n`);
+  process.stdout.write(`\n${bold("Which harnesses should the demonstration run with?")}\n\n`);
   rows.forEach((harness, index) => {
     const number = harness.graphCapable ? `${index + 1}` : " ";
     const label = harness.graphCapable ? harness.id : dim(harness.id);
@@ -262,12 +262,12 @@ async function chooseHarnesses(preselected) {
     );
   });
   process.stdout.write(
-    `\n${dim("El primero maneja el main agent; los demás quedan como runtimes aprobados,")}\n${dim("en ese orden, para los nodos adversariales. Ej: 3,4 — o Enter para 3,4.")}\n\n`,
+    `\n${dim("The first runs the main agent; the rest become approved runtimes,")}\n${dim("in that order, for the adversarial roles. e.g. 3,4 — or Enter for 3,4.")}\n\n`,
   );
 
   if (!process.stdin.isTTY) {
     const fallback = ["opencode", "pi"];
-    process.stdout.write(`${dim(`sin TTY: uso ${fallback.join(", ")}`)}\n`);
+    process.stdout.write(`${dim(`no TTY: using ${fallback.join(", ")}`)}\n`);
     return fallback;
   }
 
@@ -290,7 +290,7 @@ async function chooseHarnesses(preselected) {
         if (!picked.includes(harness.id)) picked.push(harness.id);
       }
       if (invalid) {
-        process.stdout.write(`${amber(`'${invalid}' no puede correr un nodo del Work Graph. Probá otra vez.`)}\n`);
+        process.stdout.write(`${amber(`'${invalid}' cannot run a Work Graph node. Try again.`)}\n`);
         continue;
       }
       if (picked.length > 0) return picked;
@@ -469,15 +469,15 @@ async function appendIndex(entry) {
 async function listRuns() {
   const index = await readIndex();
   if (index.runs.length === 0) {
-    process.stdout.write(`${dim("todavía no hay corridas. Probá: make repro")}\n`);
+    process.stdout.write(`${dim("no runs yet. Try: make repro")}\n`);
     return;
   }
-  process.stdout.write(`\n${bold(`${index.runs.length} corrida(s)`)}\n\n`);
+  process.stdout.write(`\n${bold(`${index.runs.length} run(s)`)}\n\n`);
   for (const [position, run] of index.runs.entries()) {
     const status = run.status === "PASSED" ? green(run.status) : run.status === "EXHAUSTED" ? amber(run.status) : red(run.status);
     const cost = run.costUsd === null || run.costUsd === undefined ? "—" : `$${run.costUsd.toFixed(4)}`;
     process.stdout.write(
-      `  ${String(position + 1).padStart(2)}  ${run.runId.padEnd(22)}${status.padEnd(18)}${String(run.harnesses.join("+")).padEnd(20)}${dim(`${run.rounds} ronda(s) · ${cost} · ${run.receipt}`)}\n`,
+      `  ${String(position + 1).padStart(2)}  ${run.runId.padEnd(22)}${status.padEnd(18)}${String(run.harnesses.join("+")).padEnd(20)}${dim(`${run.rounds} round(s) · ${cost} · ${run.receipt}`)}\n`,
     );
   }
   process.stdout.write("\n");
@@ -517,7 +517,7 @@ async function ensureCore() {
     try {
       await readFile(binary);
     } catch {
-      const step = phase("P0", "compilar el core (una vez)");
+      const step = phase("P0", "build the core (once)");
       try {
         await exec("cargo", ["build", "--workspace", "--locked"], { cwd: root, timeout: 20 * 60_000 });
         step.ok();
@@ -535,33 +535,7 @@ async function ensureCore() {
  *  writing into the developer's installed Drogon: whatever verified copy the
  *  host already has is copied into this run's own data directory. */
 export async function resolveRuntime(dataDir) {
-  const candidates = [
-    process.env.DROGON_MENTU_RUNTIME,
-    path.join(root, "apps/desktop/resources/mentu-runtime", MENTU_LOCK_REVISION, "bin/mentu-recipes"),
-    path.join(process.env.HOME ?? "", "Library/Application Support/Drogon/mentu/runtime/bin/mentu-recipes"),
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    let bytes;
-    try {
-      bytes = await readFile(candidate);
-    } catch {
-      continue;
-    }
-    const { createHash } = await import("node:crypto");
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
-    if (sha256 !== MENTU_LOCK_SHA256) continue;
-    const destination = path.join(dataDir, "mentu/runtime/bin/mentu-recipes");
-    await mkdir(path.dirname(destination), { recursive: true });
-    await copyFile(candidate, destination);
-    await chmod(destination, 0o755);
-    return { path: destination, source: candidate, revision: MENTU_LOCK_REVISION, sha256 };
-  }
-
-  throw new Error(
-    "the pinned mentu-recipes runtime is not on this host, so the durable orchestrator cannot run. " +
-      "Install it from Drogon → Settings (Apple silicon macOS), or point DROGON_MENTU_RUNTIME at a verified copy.",
-  );
+  return stageVerifiedRuntime(dataDir, root);
 }
 
 async function seedRepository(repo, scenario) {
@@ -646,7 +620,7 @@ async function main() {
       ? withModel(fallbackCandidate)
       : null;
   process.stdout.write(
-    `\n${dim(`main agent: ${mainHarness.id} · roles adversariales: ${roleHarnesses.map((h) => h.id).join(" → ")}${fallback ? ` · fallback no aprobado: ${fallback.id}` : ""}`)}\n\n`,
+    `\n${dim(`main agent: ${mainHarness.id} · adversarial roles: ${roleHarnesses.map((h) => h.id).join(" → ")}${fallback ? ` · unapproved fallback: ${fallback.id}` : ""}`)}\n\n`,
   );
 
   const receipt = {
@@ -695,14 +669,14 @@ async function main() {
 
   try {
     // P0 — identity. A receipt is only comparable if it says what ran.
-    const step0 = phase("P0", "identidad del build");
+    const step0 = phase("P0", "build identity");
     const gitRev = (await exec("/usr/bin/git", ["rev-parse", "--short", "HEAD"], { cwd: root })).stdout.trim();
     const cliVersion = (await exec(cliPath, ["--version"])).stdout.trim();
     receipt.identity = { gitRev, cliVersion, node: process.version, platform: `${process.platform}-${process.arch}` };
     step0.ok(`rev ${gitRev} · ${cliVersion}`);
 
     // P1 — a disposable world, and the runtime the orchestrator requires.
-    const step1 = phase("P1", "mundo desechable + runtime");
+    const step1 = phase("P1", "disposable world + runtime");
     await mkdir(dataDir, { recursive: true });
     await writeFile(invocationLog, "");
     const runtime = await resolveRuntime(dataDir);
@@ -716,7 +690,7 @@ async function main() {
     step1.ok(world);
 
     // P2 — the daemon this run owns.
-    const step2 = phase("P2", "daemon propio");
+    const step2 = phase("P2", "its own daemon");
     const env = {
       ...process.env,
       PATH: options.live
@@ -762,7 +736,7 @@ async function main() {
     // resolves the Project from its workspace path so it can open a worktree,
     // and a child worktree has no project of its own (the daemon refuses it
     // with exactly that reason).
-    const step3 = phase("P3", "proyecto y workspace");
+    const step3 = phase("P3", "project and workspace");
     const project = await cliJson(dataDir, ["project", "add", repo, "--name", `dog-tinder-${runId}`], { cwd: world });
     const projectId = project.id ?? project.projectId;
     const registered = await cliJson(dataDir, ["workspace", "add", repo, "--name", `dog-tinder-${runId}`], { cwd: world });
@@ -784,7 +758,7 @@ async function main() {
     };
     const mainNode = {
       id: "orchestrator-main",
-      title: "Dog Tinder con undo del último swipe",
+      title: "Dog Tinder with undo of the last swipe",
       harness: mainHarness.id,
       model: mainHarness.model,
       dependsOn: [],
@@ -829,13 +803,15 @@ async function main() {
         body: {
           characterPreset: "arya",
           displayIdentity: {
-            displayName: "Dog Tinder bot",
-            handle: "dog-tinder",
-            title: "Vigila el spec del deck",
+            displayName: `Dog Tinder bot ${runId}`,
+            // The handle is an identity the daemon refuses to reuse: the run's
+            // own random suffix keeps a second run from colliding with the first.
+            handle: `dog-tinder-${runId.slice(-4)}`,
+            title: "Watches the deck's spec",
           },
           harnessPolicy: { defaultHarness: mainHarness.id, explicitModel: mainHarness.model },
           instructions: brief,
-          memories: ["Esta corrida es una demostración reproducible; nada de esto es producción."],
+          memories: ["This run is a reproducible demonstration; none of it is production."],
         },
       }),
     ]);
@@ -844,7 +820,7 @@ async function main() {
 
     // P5 — the Subagent policy on this workspace. The released worktree gets
     // its own copy, written by the session the monitor releases.
-    const step5 = phase("P5", "política del Work Graph");
+    const step5 = phase("P5", "Work Graph policy");
     const intentFile = path.join(world, "intent.json");
     await writeFile(intentFile, `${JSON.stringify({ nodes: [], policy }, null, 2)}\n`);
     await cliJson(dataDir, ["graph", "write-intent", "--workspace", workspaceId, "--file", intentFile]);
@@ -861,7 +837,7 @@ async function main() {
     receipt.selection.approvedRuntimes = policy.approvedRuntimes;
     receipt.selection.fallbackRuntime = policy.fallbackRuntime ?? null;
     step5.ok(
-      `aprobados ${policy.approvedRuntimes.map((r) => r.harness).join(", ")}${fallback ? ` · fallback ${fallback.id}` : ""}`,
+      `approved ${policy.approvedRuntimes.map((r) => r.harness).join(", ")}${fallback ? ` · fallback ${fallback.id}` : ""}`,
     );
 
     let activeWorkspaceId = workspaceId;
@@ -876,7 +852,7 @@ async function main() {
         // P6 — the watch. Armed while the spec does NOT exist yet, so the
         // firing this run waits for is caused by the spec it writes next and
         // not by a file that was already sitting there.
-        const step6 = phase("P6", "monitor sobre el spec");
+        const step6 = phase("P6", "watch on the spec");
         const monitorScope = { hostId: status.hostId, workspaceId, botId: bot.id ?? botId };
         const monitor = await cliJson(dataDir, [
           "rpc",
@@ -904,7 +880,7 @@ async function main() {
           cron: "* * * * *",
           responsibilityId: monitor.responsibilityId ?? null,
         };
-        step6.ok(`${monitor.ruleKind} · ${SPEC_PATH} · cada minuto`);
+        step6.ok(`${monitor.ruleKind} · ${SPEC_PATH} · every minute`);
 
         const readMonitor = async () => {
           const listed = await cliJson(dataDir, [
@@ -918,13 +894,13 @@ async function main() {
 
         // P7 — the monitor's first check, before the spec exists: an honest
         // "not found", no event, nothing dispatched.
-        const step7 = phase("P7", "primer chequeo (spec ausente)");
+        const step7 = phase("P7", "first check (spec absent)");
         const first = await until(
           async () => {
             const view = await readMonitor();
             return view?.lastCheckOutcome ? view : null;
           },
-          "el monitor no llegó a hacer su primer chequeo",
+          "the watch never ran its first check",
           180_000,
         );
         receipt.chain.monitor.firstCheck = {
@@ -934,7 +910,7 @@ async function main() {
         step7.ok(`${first.lastCheckOutcome}${first.lastError ? ` · ${first.lastError}` : ""}`);
 
         // P8 — the change the monitor is watching for.
-        const step8 = phase("P8", "el script escribe el spec");
+        const step8 = phase("P8", "the script writes the spec");
         const specText = await readFile(path.join(scenario, "spec.md"), "utf8");
         const specFile = path.join(workspacePath, SPEC_PATH);
         await mkdir(path.dirname(specFile), { recursive: true });
@@ -949,7 +925,7 @@ async function main() {
         // P9 — the monitor sees it and releases real work. Each check the
         // daemon records is printed as it happens: the demo shows the watch
         // working, not a spinner.
-        const step9 = phase("P9", "el monitor despierta al bot");
+        const step9 = phase("P9", "the watch wakes the bot");
         const checks = [];
         const seenChecks = new Set();
         const fired = await until(
@@ -967,13 +943,13 @@ async function main() {
                 health: view.health ?? null,
               });
               process.stdout.write(
-                `      ${dim(`chequeo ${view.lastCheckOutcome ?? "—"}${view.lastEventId ? ` · evento ${view.lastEventId}` : ""}${view.firing?.outcome ? ` · disparo ${view.firing.outcome}` : ""}${view.lastError ? ` · ${view.lastError}` : ""}`)}\n`,
+                `      ${dim(`check ${view.lastCheckOutcome ?? "—"}${view.lastEventId ? ` · event ${view.lastEventId}` : ""}${view.firing?.lastOutcome ? ` · firing ${view.firing.lastOutcome}` : ""}${view.lastError ? ` · ${view.lastError}` : ""}`)}\n`,
               );
             }
             const firing = view.firing ?? null;
             return firing && firing.lastEventId ? { view, firing } : null;
           },
-          "el monitor nunca disparó sobre el cambio del spec",
+          "the watch never fired on the spec change",
           300_000,
         ).catch((error) => {
           receipt.chain.monitor.checks = checks;
@@ -991,14 +967,14 @@ async function main() {
         if (fired.firing.lastOutcome !== "dispatched" && fired.firing.lastOutcome !== "joined") {
           step9.fail(`evento ${fired.firing.lastEventId} · ${fired.firing.lastOutcome} · ${fired.firing.lastDetail ?? ""}`);
           throw new Error(
-            `el monitor disparó pero el trabajo no se liberó (${fired.firing.lastOutcome}): ${fired.firing.lastDetail ?? "sin detalle"}`,
+            `the watch fired but no work was released (${fired.firing.lastOutcome}): ${fired.firing.lastDetail ?? "no detail"}`,
           );
         }
-        step9.ok(`evento ${fired.firing.lastEventId} · ${fired.firing.lastOutcome}`);
+        step9.ok(`event ${fired.firing.lastEventId} · ${fired.firing.lastOutcome}`);
 
         // P10 — the released session opens its own worktree and starts the
         // workflow there. We observe that, we do not do it.
-        const step10 = phase("P10", "workflow liberado");
+        const step10 = phase("P10", "released workflow");
         try {
           const released = await until(
             async () => {
@@ -1017,7 +993,7 @@ async function main() {
               }
               return null;
             },
-            "la sesión liberada no arrancó ningún workflow",
+            "the released session never started a workflow",
             240_000,
           );
           activeWorkspaceId = released.candidate.workspaceId;
@@ -1031,19 +1007,19 @@ async function main() {
           };
           step10.ok(`${released.candidate.name ?? activeWorkspaceId} · workflow ${orchestratorRun.id}`);
         } catch (error) {
-          step10.fail(`${error.message} — sigo con el workflow desde el script`);
+          step10.fail(`${error.message} — continuing with the workflow from the script`);
           receipt.chain.releaseFallbackReason = error.message;
         }
     } catch (error) {
         receipt.chain.releaseFallbackReason = error.message;
-        process.stdout.write(`      ${amber(`el monitor no liberó el trabajo: ${error.message}`)}\n`);
+        process.stdout.write(`      ${amber(`the watch did not release the work: ${error.message}`)}\n`);
       }
     }
 
     if (!orchestratorRun) {
       // Either --release script, or the monitor chain did not settle in time.
       // Either way the receipt says which of the two started this workflow.
-      const stepStart = phase("PS", "workflow (arranque directo)");
+      const stepStart = phase("PS", "workflow (started directly)");
       const specText = await readFile(path.join(scenario, "spec.md"), "utf8");
       const specFile = path.join(activeWorkspacePath, SPEC_PATH);
       await mkdir(path.dirname(specFile), { recursive: true });
@@ -1069,7 +1045,7 @@ async function main() {
     receipt.chain.activeWorkspaceId = activeWorkspaceId;
 
     // P7 — the rounds, as the daemon observes them.
-    const stepRounds = phase("PR", "rondas adversariales");
+    const stepRounds = phase("PR", "adversarial rounds");
     const seen = new Set();
     const runTimeoutMs = options.live ? LIVE_RUN_TIMEOUT_MS : FIXTURE_RUN_TIMEOUT_MS;
     const runDeadline = Date.now() + runTimeoutMs;
@@ -1082,11 +1058,11 @@ async function main() {
         seen.add(key);
         if (step.status === "running" || step.status === "dispatching") {
           const runtime = step.runtime ? `${step.runtime.harness}/${step.runtime.model}` : "…";
-          process.stdout.write(`      ${dim(`ronda ${step.iteration} · ${step.phase.padEnd(6)} → ${runtime}`)}\n`);
+          process.stdout.write(`      ${dim(`round ${step.iteration} · ${step.phase.padEnd(6)} → ${runtime}`)}\n`);
         }
         if (step.verdict) {
           const mark = step.verdict === "pass" ? green("pass") : amber("findings");
-          process.stdout.write(`      ${dim(`ronda ${step.iteration} · ${step.phase.padEnd(6)} ⇒ `)}${mark}\n`);
+          process.stdout.write(`      ${dim(`round ${step.iteration} · ${step.phase.padEnd(6)} ⇒ `)}${mark}\n`);
         }
       }
       if (["passed", "exhausted", "failed", "stopped", "unverifiable"].includes(orchestratorRun.status)) break;
@@ -1097,12 +1073,12 @@ async function main() {
     receipt.rounds = summarizeSteps(orchestratorRun);
     receipt.workflowStatus = orchestratorRun.status;
     receipt.workflowError = orchestratorRun.error ?? null;
-    if (orchestratorRun.status === "passed") stepRounds.ok(`${orchestratorRun.iteration} ronda(s) · passed`);
-    else if (orchestratorRun.status === "exhausted") stepRounds.ok(`${orchestratorRun.iteration} ronda(s) · tope alcanzado, seguía fallando`);
+    if (orchestratorRun.status === "passed") stepRounds.ok(`${orchestratorRun.iteration} round(s) · passed`);
+    else if (orchestratorRun.status === "exhausted") stepRounds.ok(`${orchestratorRun.iteration} round(s) · cap reached, still failing`);
     else stepRounds.fail(`${orchestratorRun.status}${orchestratorRun.error ? `: ${orchestratorRun.error}` : ""}`);
 
     // P8 — evidence, independent verification, cost.
-    const stepEvidence = phase("PE", "evidencia, verificación y costo");
+    const stepEvidence = phase("PE", "evidence, verification and cost");
     const observability = await cliJson(dataDir, ["graph", "observability", "--workspace", activeWorkspaceId]);
     const snapshot = observability.observability ?? observability;
     receipt.evidence = snapshot.evidence ?? [];
@@ -1130,7 +1106,7 @@ async function main() {
     );
 
     // P9 — the receipt and the work product.
-    const stepReceipt = phase("PC", "recibo");
+    const stepReceipt = phase("PC", "receipt");
     await mkdir(outDir, { recursive: true });
     for (const name of ["graph.json", "evidence.json", "usage.json"]) {
       await copyFile(path.join(activeWorkspacePath, ".drogon", name), path.join(outDir, name)).catch(() => {});
@@ -1173,7 +1149,7 @@ async function main() {
   } catch (error) {
     failure = error;
     receipt.failure = error.message;
-    process.stdout.write(`\n${red("la corrida falló")}: ${error.message}\n`);
+    process.stdout.write(`\n${red("the run failed")}: ${error.message}\n`);
   } finally {
     // Teardown owns every process this run started, on success and failure.
     const stepT = phase("PT", "teardown");
@@ -1192,9 +1168,9 @@ async function main() {
       receipt.teardown = { gracefulShutdown: graceful, owned: owned.size, live: live.length, unverifiable: unverifiable.length };
       if (live.length === 0 && unverifiable.length === 0) {
         if (!options.keep) await rm(world, { recursive: true, force: true });
-        stepT.ok(`${owned.size} proceso(s) salieron${options.keep ? ` · mundo conservado en ${world}` : ""}`);
+        stepT.ok(`${owned.size} process(es) exited${options.keep ? ` · world kept at ${world}` : ""}`);
       } else {
-        stepT.fail(`${live.length} vivo(s), ${unverifiable.length} sin verificar — conservo ${world}`);
+        stepT.fail(`${live.length} live, ${unverifiable.length} unverifiable — keeping ${world}`);
         receipt.status = "FAILED";
       }
     } catch (error) {
@@ -1230,7 +1206,7 @@ async function main() {
 // ---------------------------------------------------------------- reporting
 
 function money(cost) {
-  if (!cost || cost.totalUsd === null) return "no disponible";
+  if (!cost || cost.totalUsd === null) return "unavailable";
   return `$${cost.totalUsd.toFixed(4)} USD`;
 }
 
@@ -1239,15 +1215,15 @@ function costNote(cost) {
   const kinds = cost.rateKinds.join(", ");
   switch (cost.bucket) {
     case "exact":
-      return `${cost.pricedMeasurements} medición(es) tarifadas · ${kinds}`;
+      return `${cost.pricedMeasurements} measurement(s) priced · ${kinds}`;
     case "partial":
-      return `${cost.pricedMeasurements} de ${cost.measurements} medición(es) tarifadas · ${cost.unpriced.length} sin tarifa`;
+      return `${cost.pricedMeasurements} of ${cost.measurements} measurement(s) priced · ${cost.unpriced.length} with no rate`;
     case "local_free":
-      return "modelo local declarado sin facturación";
+      return "declared-free local model";
     case "unpriced":
-      return `${cost.measurements} medición(es) sin tarifa en el rate card`;
+      return `${cost.measurements} measurement(s) with no rate in the card`;
     default:
-      return "ningún agente reportó tokens; ausencia no es cero";
+      return "no agent reported tokens; absence is not zero";
   }
 }
 
@@ -1256,7 +1232,7 @@ function renderReport(receipt, outDir, position) {
   const status =
     receipt.status === "PASSED" ? green("PASSED") : receipt.status === "EXHAUSTED" ? amber("EXHAUSTED") : red("FAILED");
   if (receipt.rounds.length > 0) {
-    lines.push(bold("Rondas"));
+    lines.push(bold("Rounds"));
     for (const round of receipt.rounds) {
       const verdict =
         round.verdict === "pass" ? green("pass") : round.verdict === "findings" ? amber("findings") : dim(round.status);
@@ -1269,7 +1245,7 @@ function renderReport(receipt, outDir, position) {
     lines.push("");
   }
   if (receipt.evidence.length > 0) {
-    lines.push(bold("Evidencia"));
+    lines.push(bold("Evidence"));
     for (const entry of receipt.evidence) {
       lines.push(`  ${dim(`${entry.role ?? "—"}`.padEnd(8))}${entry.summary}`);
     }
@@ -1277,34 +1253,34 @@ function renderReport(receipt, outDir, position) {
   }
   if (receipt.chain?.monitor?.firing) {
     lines.push(
-      `${bold("Disparo")}        ${dim(
-        `monitor ${receipt.chain.monitor.ruleKind} sobre ${receipt.chain.monitor.resource} · evento ${receipt.chain.monitor.firing.eventId} · ${receipt.chain.monitor.firing.outcome}`,
+      `${bold("Firing")}         ${dim(
+        `monitor ${receipt.chain.monitor.ruleKind} on ${receipt.chain.monitor.resource} · event ${receipt.chain.monitor.firing.eventId} · ${receipt.chain.monitor.firing.outcome}`,
       )}`,
     );
   }
   const releaseNote =
     receipt.chain?.releasedBy === "monitor"
-      ? green("el monitor del bot")
+      ? green("the bot's own watch")
       : receipt.chain?.releaseFallbackReason
-        ? amber(`el script (el monitor no llegó a tiempo: ${receipt.chain.releaseFallbackReason})`)
-        : dim("el script (--release script)");
-  lines.push(`${bold("Liberado por")}   ${releaseNote}`);
-  lines.push(`${bold("Veredicto")}      ${status}  ${dim(`workflow ${receipt.workflowStatus ?? "—"}`)}`);
+        ? amber(`the script (the watch did not make it in time: ${receipt.chain.releaseFallbackReason})`)
+        : dim("the script (--release script)");
+  lines.push(`${bold("Released by")}    ${releaseNote}`);
+  lines.push(`${bold("Verdict")}        ${status}  ${dim(`workflow ${receipt.workflowStatus ?? "—"}`)}`);
   if (receipt.verification) {
     lines.push(
-      `${bold("Verificación")}   ${dim("independiente del agente:")} node --test → ${receipt.verification.pass ?? "?"} pasaron, ${receipt.verification.fail ?? "?"} fallaron`,
+      `${bold("Verification")}   ${dim("independent of the agents:")} node --test → ${receipt.verification.pass ?? "?"} passed, ${receipt.verification.fail ?? "?"} failed`,
     );
   }
   lines.push(
     `${bold("Tokens")}         ${receipt.cost?.inputTokens ?? "—"} in · ${receipt.cost?.outputTokens ?? "—"} out ${dim(
       receipt.lane === "live"
-        ? "(reportados por los agentes; lo que no reportan queda ausente)"
-        : "(reportados por el fixture, no por un proveedor)",
+        ? "(reported by the agents; what they do not report stays absent)"
+        : "(reported by the fixture, not by a provider)",
     )}`,
   );
-  lines.push(`${bold("Costo")}          ${money(receipt.cost)}  ${dim(costNote(receipt.cost))}`);
-  lines.push(`${bold("Recibo")}         ${path.relative(root, path.join(outDir, "receipt.md"))}  ${dim(`corrida #${position}`)}`);
-  lines.push(`${bold("Producto")}       ${receipt.artifacts.diffStat ? receipt.artifacts.diffStat.split("\n").pop().trim() : "—"}`);
+  lines.push(`${bold("Cost")}           ${money(receipt.cost)}  ${dim(costNote(receipt.cost))}`);
+  lines.push(`${bold("Receipt")}        ${path.relative(root, path.join(outDir, "receipt.md"))}  ${dim(`run #${position}`)}`);
+  lines.push(`${bold("Product")}        ${receipt.artifacts.diffStat ? receipt.artifacts.diffStat.split("\n").pop().trim() : "—"}`);
   lines.push("");
   return `${lines.join("\n")}\n`;
 }
@@ -1326,66 +1302,66 @@ function renderReceipt(receipt, outDir) {
     )
     .join("\n");
 
-  return `# Drogon — corrida adversarial reproducible ${receipt.runId}
+  return `# Drogon — reproducible adversarial run ${receipt.runId}
 
 **${receipt.status}** · workflow \`${receipt.workflowStatus ?? "—"}\` · ${receipt.startedAt} → ${receipt.finishedAt}
 
-Demostración: los harnesses corrieron como fixtures locales
-(\`${receipt.agentKind}\`). El producto se ejecutó de verdad — daemon, work
-graph, orquestador durable, ledgers — sin inferencia de modelos.
+Demonstration: the harnesses ran as local fixtures
+(\`${receipt.agentKind}\`). The product really executed — daemon, work
+graph, durable orchestrator, ledgers — with no model inference.
 
-## Qué se eligió
+## What was chosen
 
 | | |
 |---|---|
 | main agent | \`${receipt.selection.mainAgent?.harness}/${receipt.selection.mainAgent?.model}\` |
-| runtimes aprobados | ${receipt.selection.approvedRuntimes.map((r) => `\`${r.harness}/${r.model}\``).join(", ") || "—"} |
-| fallback (no aprobado) | ${receipt.selection.fallbackRuntime ? `\`${receipt.selection.fallbackRuntime.harness}/${receipt.selection.fallbackRuntime.model}\`` : "—"} |
-| tope de rondas | ${receipt.selection.iterationsAllowed} |
+| approved runtimes | ${receipt.selection.approvedRuntimes.map((r) => `\`${r.harness}/${r.model}\``).join(", ") || "—"} |
+| fallback (not approved) | ${receipt.selection.fallbackRuntime ? `\`${receipt.selection.fallbackRuntime.harness}/${receipt.selection.fallbackRuntime.model}\`` : "—"} |
+| round cap | ${receipt.selection.iterationsAllowed} |
 | build | \`${receipt.identity.gitRev}\` · ${receipt.identity.cliVersion} · ${receipt.identity.platform} |
-| runtime de recetas | \`${receipt.identity.runtime?.revision}\` sha256 \`${receipt.identity.runtime?.sha256?.slice(0, 12)}…\` |
+| recipe runtime | \`${receipt.identity.runtime?.revision}\` sha256 \`${receipt.identity.runtime?.sha256?.slice(0, 12)}…\` |
 
-## Cadena
+## Chain
 
-bot \`${receipt.chain.botId}\` → responsabilidad \`${receipt.chain.responsibilityId}\` → workflow \`${receipt.chain.orchestratorRunId}\` → workspace \`${receipt.chain.workspaceId}\`
+bot \`${receipt.chain.botId}\` → responsibility \`${receipt.chain.responsibilityId}\` → workflow \`${receipt.chain.orchestratorRunId}\` → workspace \`${receipt.chain.workspaceId}\`
 
-## Rondas
+## Rounds
 
-| ronda | rol | veredicto | runtime |
+| round | role | verdict | runtime |
 |---|---|---|---|
 ${rows || "| — | — | — | — |"}
 
-## Evidencia
+## Evidence
 
-${evidence || "_sin checkpoints_"}
+${evidence || "_no checkpoints_"}
 
-## Verificación independiente
+## Independent verification
 
-\`node --test\` en el workspace, corrido por el script y no por los agentes:
-**${receipt.verification?.pass ?? "?"} pasaron, ${receipt.verification?.fail ?? "?"} fallaron**.
+\`node --test\` in the workspace, run by the script and not by the agents:
+**${receipt.verification?.pass ?? "?"} passed, ${receipt.verification?.fail ?? "?"} failed**.
 
-## Tokens y costo
+## Tokens and cost
 
-| rol | runtime | input | output | cache read |
+| role | runtime | input | output | cache read |
 |---|---|---|---|---|
 ${usage || "| — | — | — | — | — |"}
 
-- **Costo: ${money(receipt.cost)}** (${receipt.cost?.bucket}) — ${costNote(receipt.cost)}
+- **Cost: ${money(receipt.cost)}** (${receipt.cost?.bucket}) — ${costNote(receipt.cost)}
 - Rate card \`${receipt.cost?.rateCard?.path}\` v${receipt.cost?.rateCard?.version}. ${receipt.cost?.rateCard?.note ?? ""}
-- Por rol: ${Object.entries(receipt.cost?.byRole ?? {}).map(([role, value]) => `${role} $${value.toFixed(4)}`).join(" · ") || "—"}
+- By role: ${Object.entries(receipt.cost?.byRole ?? {}).map(([role, value]) => `${role} $${value.toFixed(4)}`).join(" · ") || "—"}
 
-## Procesos
+## Processes
 
-${receipt.processes.map((entry) => `- \`${entry.pid}\` **${entry.verdict}**${entry.note ? ` — ${entry.note}` : ""}`).join("\n") || "_ninguno_"}
+${receipt.processes.map((entry) => `- \`${entry.pid}\` **${entry.verdict}**${entry.note ? ` — ${entry.note}` : ""}`).join("\n") || "_none_"}
 
-## Artefactos
+## Artifacts
 
 ${Object.entries(receipt.artifacts)
   .filter(([, value]) => value)
   .map(([key, value]) => `- ${key}: \`${value}\``)
   .join("\n")}
 
-_Directorio: \`${path.relative(root, outDir)}\`_
+_Directory: \`${path.relative(root, outDir)}\`_
 `;
 }
 
