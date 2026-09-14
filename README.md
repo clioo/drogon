@@ -356,6 +356,16 @@ brew info --cask clioo/drogon/drogon   # installed version vs tap version
 drogon-cli --version                   # must match the installed cask
 ```
 
+> **Ad-hoc builds and Gatekeeper.** On ad-hoc-signed casks (versions older
+> than v0.1.0-rc.3), a fresh install stays quarantined until you approve it —
+> open Drogon.app once (right-click → Open) or allow it in System Settings →
+> Privacy & Security, as the cask caveats describe. Until the quarantine is
+> cleared, `drogon-cli` stalls with no output at all and `brew uninstall`
+> stalls instead of finishing: that is Gatekeeper holding the quarantined
+> files, not a broken install. The clean-room audit
+> (`scripts/e2e-brew-install.mjs`) asserts the install-to-launch flow for
+> every cask that does not advertise ad-hoc.
+
 Drogon currently publishes Apple Silicon releases only (Intel is not built). The
 cask declares macOS Sonoma or newer: Electron 44 itself requires macOS Ventura
 (13) or newer, but Sonoma is the supported release floor for this arm64 cask.

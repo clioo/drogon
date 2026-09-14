@@ -58,6 +58,10 @@ export const APP_NAME = "Drogon.app";
 export const BUNDLE_ID = "ai.clioo.drogon";
 export const SANITIZED_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 export const BREW_TIMEOUT_MS = 10 * 60 * 1000;
+// Uninstall/upgrade/zap never download: if the uninstall hook stalls (seen
+// live on quarantined ad-hoc builds), 4 minutes proves it without burning
+// the whole run budget on every leg.
+export const BREW_MUTATE_TIMEOUT_MS = 4 * 60 * 1000;
 export const LAUNCH_TIMEOUT_MS = 90 * 1000;
 
 export function parseBrewAuditArgs(argv) {
@@ -302,7 +306,7 @@ export function launchEnv(room) {
   };
 }
 
-export async function brew(brewBin, brewEnv, args, { timeoutMs = BREW_TIMEOUT_MS } = {}) {
+export async function brew(brewBin, brewEnv, args, { timeoutMs = BREW_MUTATE_TIMEOUT_MS } = {}) {
   const result = await runHostCommand(brewBin, args, { timeoutMs, env: brewEnv });
   if (result.code !== 0) {
     throw new Error(
@@ -497,7 +501,8 @@ export async function auditInstall(ctx, cask) {
   const appDir = path.join(room.appdir, APP_NAME);
 
   const cliBin = await step(steps, `install ${cask.version}`, async () => {
-    const result = await brew(brewBin, brewEnv, ["install", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
+    const caskRef = `${TAP_NAME}/${CASK_TOKEN}`;
+    const result = await brew(brewBin, brewEnv, ["install", "--cask", caskRef], { timeoutMs: BREW_TIMEOUT_MS });
     const tail = (result.stderr.slice(-1500) || result.stdout.slice(-1500));
     assert.ok(await pathExists(appDir), `app missing after install: ${appDir}\n${tail}`);
     // The cask's `uninstall quit:` stanza addresses the app by bundle id.
@@ -898,7 +903,8 @@ async function main() {
         const caskFrom = await readTapCask(tapDir);
         const prevInstalled = await runIf(`install previous ${caskFrom.version}`, true, "", () =>
           step(steps, `install previous ${caskFrom.version}`, async () => {
-            const result = await brew(brewBin, brewEnv, ["install", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
+            const caskRef = `${TAP_NAME}/${CASK_TOKEN}`;
+            const result = await brew(brewBin, brewEnv, ["install", "--cask", caskRef], { timeoutMs: BREW_TIMEOUT_MS });
             const tail = result.stderr.slice(-1500) || result.stdout.slice(-1500);
             assert.ok(await pathExists(appDir), `previous-version app missing after install\n${tail}`);
             try {
@@ -927,7 +933,8 @@ async function main() {
           "no seeded daemon to upgrade from",
           () =>
             step(steps, `upgrade ${versions.from} -> ${versions.to}`, async () => {
-              const result = await brew(brewBin, brewEnv, ["upgrade", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
+              const caskRef = `${TAP_NAME}/${CASK_TOKEN}`;
+              const result = await brew(brewBin, brewEnv, ["upgrade", "--cask", caskRef], { timeoutMs: BREW_TIMEOUT_MS });
               const afterCmd = await processCommandLine(oldDaemonPid);
               assert.ok(
                 afterCmd === null || afterCmd !== oldDaemonCmd,
