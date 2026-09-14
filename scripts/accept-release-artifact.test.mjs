@@ -18,6 +18,8 @@ import {
   summarizeAcceptanceReport,
   verifyChecksum,
 } from "./accept-release-artifact.mjs";
+import { chatLifecyclePiSkip } from "./probe-chat-lifecycle.mjs";
+import { surfacesPiAutomationSkip } from "./probe-packaged-surfaces.mjs";
 
 test("parseArgs defaults and overrides", () => {
   const defaults = parseArgs([]);
@@ -102,7 +104,11 @@ test("downloadToFile streams the body and refuses HTTP errors", async () => {
   );
 });
 
-test("extraction uses ditto and quarantine matches the Homebrew posture", async () => {
+// ditto extraction only exists on macOS; the quarantine posture is pure
+// (the xattr call is injected) and runs everywhere.
+const darwinOnly = { skip: process.platform !== "darwin" };
+
+test("extraction uses ditto to preserve the bundle shape", darwinOnly, async () => {
   const calls = [];
   const run = async (file, args, options) => {
     calls.push([file, args, options]);
@@ -115,10 +121,18 @@ test("extraction uses ditto and quarantine matches the Homebrew posture", async 
   assert.equal(bundle, path.join(dir, "Drogon.app"));
   assert.deepEqual(calls[0][0], "/usr/bin/ditto");
   assert.deepEqual(calls[0][1].slice(0, 3), ["-x", "-k", path.join(dir, "a.zip")]);
-  const value = await applyQuarantine({ bundle, run });
+});
+
+test("quarantine matches the Homebrew posture", async () => {
+  const calls = [];
+  const run = async (file, args, options) => {
+    calls.push([file, args, options]);
+    return { stdout: "", stderr: "" };
+  };
+  const value = await applyQuarantine({ bundle: path.join(tmpdir(), "Drogon.app"), run });
   assert.match(value, /^0081;00000000;Homebrew;/);
-  assert.equal(calls[1][0], "/usr/bin/xattr");
-  assert.deepEqual(calls[1][1].slice(0, 3), ["-w", "com.apple.quarantine", value]);
+  assert.equal(calls[0][0], "/usr/bin/xattr");
+  assert.deepEqual(calls[0][1].slice(0, 3), ["-w", "com.apple.quarantine", value]);
 });
 
 test("build-info must name the tag under validation", async () => {
@@ -216,4 +230,74 @@ test("clean-machine run reports a timeout instead of hanging CI", async () => {
     onOutput: () => {},
   });
   assert.equal(result.timedOut, true);
+});
+
+// rc.4 clean-runner lane: a host with no harness binaries skips exactly the
+// pi-gated journeys by name (with reasons) while the launch and surface
+// checks still execute — that run must reach PASSED, never a silent pass
+// and never a blanket failure.
+test("a host with no harness binaries reaches PASSED with named skips", () => {
+  const skips = [
+    chatLifecyclePiSkip({ piAvailable: false }),
+    surfacesPiAutomationSkip({ piAvailable: false }),
+  ];
+  assert.ok(skips.every(Boolean), "both pi-gated journeys must report a skip without pi");
+  for (const skip of skips) {
+    assert.ok(skip.name.length > 0, "every skip names its journey");
+    assert.ok(skip.reason.length > 0, "every skip carries a reason");
+  }
+  assert.equal(
+    new Set(skips.map((skip) => skip.name)).size,
+    skips.length,
+    "skipped journeys must be named distinctly",
+  );
+  const report = {
+    status: "PASSED",
+    checks: [
+      "bundle-carries-drogon-icon",
+      "packaged-app-starts-bundled-runtime-with-minimal-path-and-reports-revision",
+      "bots-page-renders-empty-with-create-entry",
+    ],
+    skipped: skips,
+  };
+  const decision = decideArtifactVerdict({
+    receipt: { status: "PASSED", report: "/tmp/r.json" },
+    report,
+  });
+  assert.equal(decision.verdict, "PASSED");
+  assert.equal(decision.executedChecks, 3);
+  assert.equal(decision.skippedChecks, skips.length);
+});
+
+// The honesty guard's other half: named skips can never rescue a bundle
+// that cannot launch. A stillborn candidate stays FAILED with or without
+// skips, and with or without a receipt.
+test("a bundle that cannot launch still fails even with named skips", () => {
+  const skipped = [
+    chatLifecyclePiSkip({ piAvailable: false }),
+    surfacesPiAutomationSkip({ piAvailable: false }),
+  ];
+  const stillborn = {
+    status: "FAILED",
+    checks: ["bundle-carries-drogon-icon"],
+    skipped,
+    error: "Electron exited before connection (code=1 signal=null)",
+  };
+  const failedReceipt = {
+    status: "FAILED",
+    report: "/tmp/r.json",
+    error: "Electron exited before connection (code=1 signal=null)",
+  };
+  assert.equal(
+    decideArtifactVerdict({ receipt: failedReceipt, report: stillborn }).verdict,
+    "FAILED",
+  );
+  assert.equal(
+    decideArtifactVerdict({ receipt: null, report: stillborn }).verdict,
+    "FAILED",
+  );
+  assert.equal(
+    decideArtifactVerdict({ receipt: failedReceipt, report: null }).verdict,
+    "FAILED",
+  );
 });

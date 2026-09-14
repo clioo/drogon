@@ -4,6 +4,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
 import { startExitObserver } from "./live-child-crash-fixture.mjs";
+import { piUnavailableReason } from "./probe-agent-settings.mjs";
+
+// The chat lifecycle creates its quick sessions through the New-session
+// dialog's Pi radio and drives real Pi sessions, so a host without a
+// genuine `pi` binary (rc.4 clean runner) skips this journey by name in
+// report.skipped instead of timing out on the missing radio.
+export const CHAT_LIFECYCLE_PI_SKIP =
+  "chat-lifecycle-pi-new-session-create-and-delete";
+
+/** Named skip for the chat lifecycle when no genuine `pi` is available; null when it can run. */
+export function chatLifecyclePiSkip({ piAvailable }) {
+  if (piAvailable) return null;
+  return { name: CHAT_LIFECYCLE_PI_SKIP, reason: piUnavailableReason() };
+}
 
 export async function probeChatLifecycle({ page, cli, dataDir, output }) {
   const checks = [];

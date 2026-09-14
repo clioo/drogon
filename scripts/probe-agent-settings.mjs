@@ -59,6 +59,17 @@ export async function writeAgentSettingsFixtures(bin, { skip = [] } = {}) {
   }
 }
 
+// The named-skip reason every pi-gated journey records when the host has
+// no genuine `pi` binary (rc.4 clean-runner lane). Centralized so the chat
+// lifecycle, the sealed model journeys and the surfaces automation run all
+// say the same thing in report.skipped; never an empty reason, never a
+// silent pass.
+export function piUnavailableReason() {
+  if (process.env.DROGON_SKIP_MODEL_JOURNEYS === "1")
+    return "DROGON_SKIP_MODEL_JOURNEYS=1";
+  return "no genuine `pi` binary on this host: install Pi to run the real-TUI model journeys";
+}
+
 // True when the host carries an executable `name` on `hostPath`. The model
 // journeys drive the genuine `pi` TUI/binary, so a clean machine without
 // one must skip those journeys explicitly instead of failing opaquely.

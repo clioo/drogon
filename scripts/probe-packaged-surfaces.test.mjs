@@ -14,7 +14,11 @@ import {
   paletteOpenChord,
   registryLiveness,
   summarizeAutomationHistory,
+  SURFACES_PI_AUTOMATION_SKIP,
+  surfacesPiAutomationSkip,
 } from "./probe-packaged-surfaces.mjs";
+import { piUnavailableReason } from "./probe-agent-settings.mjs";
+import { recordAcceptanceSkip } from "./acceptance-report-state.mjs";
 import { extractTerminalText } from "./acceptance-terminal-text.mjs";
 
 describe("responsive parity matrix", () => {
@@ -288,5 +292,51 @@ describe("folderViewSettled", () => {
       folderViewSettled({ headings: [], tabCount: 1, headerNames: [], workspaceName: "folder" }),
       false,
     );
+  });
+});
+
+// rc.4 clean-runner lane: a host without a genuine `pi` binary skips only
+// the automation run that dispatches a real headless Pi session — never a
+// silent pass, never a blanket failure of the other surfaces.
+describe("surfacesPiAutomationSkip", () => {
+  it("runs the journey when pi is available", () => {
+    assert.equal(surfacesPiAutomationSkip({ piAvailable: true }), null);
+  });
+
+  it("names the skipped journey with a reason when pi is missing", () => {
+    const previous = process.env.DROGON_SKIP_MODEL_JOURNEYS;
+    delete process.env.DROGON_SKIP_MODEL_JOURNEYS;
+    let skip;
+    try {
+      skip = surfacesPiAutomationSkip({ piAvailable: false });
+    } finally {
+      if (previous === undefined) delete process.env.DROGON_SKIP_MODEL_JOURNEYS;
+      else process.env.DROGON_SKIP_MODEL_JOURNEYS = previous;
+    }
+    assert.equal(skip.name, SURFACES_PI_AUTOMATION_SKIP);
+    assert.ok(skip.name.length > 0);
+    assert.ok(skip.reason.length > 0);
+    assert.match(skip.reason, /pi/);
+    // The entry satisfies the report contract: recorded as a skip, never
+    // mistaken for an executed check.
+    const report = { status: "FAILED", checks: ["bots-page-renders-empty-with-create-entry"], skipped: [] };
+    recordAcceptanceSkip(report, skip.name, skip.reason);
+    assert.deepEqual(report.skipped, [skip]);
+    assert.deepEqual(report.checks, ["bots-page-renders-empty-with-create-entry"]);
+  });
+
+  it("reports the explicit opt-out when model journeys are disabled", () => {
+    const previous = process.env.DROGON_SKIP_MODEL_JOURNEYS;
+    process.env.DROGON_SKIP_MODEL_JOURNEYS = "1";
+    try {
+      assert.equal(piUnavailableReason(), "DROGON_SKIP_MODEL_JOURNEYS=1");
+      assert.equal(
+        surfacesPiAutomationSkip({ piAvailable: false }).reason,
+        "DROGON_SKIP_MODEL_JOURNEYS=1",
+      );
+    } finally {
+      if (previous === undefined) delete process.env.DROGON_SKIP_MODEL_JOURNEYS;
+      else process.env.DROGON_SKIP_MODEL_JOURNEYS = previous;
+    }
   });
 });
