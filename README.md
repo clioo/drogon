@@ -1,14 +1,18 @@
 # Drogon
 
-### Less meeting. More shipping.
+### Put every subscription to work.
 
-**An open-source desktop workspace for developers who hate meetings and love building.**
+**The open-source agentic development environment for your most ambitious builds.**
 
-Drogon is a **Rust core** with a `drogond` daemon and a `drogon-cli` client, plus an
-**Electron/React desktop** on top. Coding agents, Git worktrees, persistent terminals,
-code review, and repeatable workflows live in one place. Give each task its own
-workspace, keep long-running sessions close to the code, and review what changed
-without piecing together a dozen windows.
+Coordinate coding agents across the vendors you already pay for. Keep your preferred
+harness, delegate work to other configured harnesses, and run independent tasks in
+parallel worktrees. Use the Work Graph to coordinate implementation, adversarial
+testing, and review, with runtime attempts and verdicts you can inspect before shipping.
+Bots watch for work and start sessions in the right project.
+
+Drogon runs locally: a **Rust core**, the `drogond` daemon, and `drogon-cli`, with an
+**Electron/React desktop**. Model access stays with each harness and its configured
+subscription or provider account. You set the goal, execution policy, and final approval.
 
 Drogon is MIT-licensed. Its desktop UI began as a component-by-component port of the
 [Orca](https://github.com/LovecastAI) source (MIT, © Lovecast Inc. — see

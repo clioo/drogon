@@ -123,8 +123,8 @@ minute:
   real tasks, each shown with the transcript line it came from, using only a free local
   model.
 
-Installation is also no longer manual: `brew tap clioo/drogon && brew trust --tap
-clioo/drogon && brew install --cask drogon` installs the app, the daemon and the CLI
+Installation is also no longer manual: `brew trust --tap clioo/drogon && brew tap
+clioo/drogon && brew install --cask clioo/drogon/drogon` installs the app, the daemon and the CLI
 (the one-time trust step is required on a fresh machine because Homebrew refuses
 third-party casks from untrusted taps), and an upgrade restarts a daemon whose
 binary changed instead of silently attaching to the old one.

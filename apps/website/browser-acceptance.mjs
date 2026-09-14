@@ -29,10 +29,13 @@ try {
   await page.locator('#install').scrollIntoViewIfNeeded();
   assert.match(await page.locator('#release-version').innerText(),/^v\d+\.\d+\.\d+/);
   assert.match(await page.locator('#install .button').getAttribute('href'),/\/releases\/tag\/v\d+\.\d+\.\d+/);
-  assert.match(await page.locator('#install-command').innerText(),/brew tap clioo\/drogon && brew install --cask clioo\/drogon\/drogon/);
+  const installCommands = 'brew trust --tap clioo/drogon\nbrew tap clioo/drogon\nbrew install --cask clioo/drogon/drogon';
+  assert.equal(await page.locator('#install-command').innerText(), installCommands);
+  await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.copiedInstallCommands = text; } } }); });
   await page.click('#copy-command');
   await page.waitForFunction(()=>document.getElementById('copy-status').textContent.length>0);
-  assert.match(await page.locator('#copy-status').innerText(),/copied|manually/);
+  assert.match(await page.locator('#copy-status').innerText(),/copied/);
+  assert.equal(await page.evaluate(() => window.copiedInstallCommands), installCommands);
   await page.locator('#workspace').scrollIntoViewIfNeeded();
   await page.clock.install();
   assert.equal(await page.locator('[data-node] .harness-badge').count(),5);
