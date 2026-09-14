@@ -166,7 +166,7 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
 
     const review1 = reviewNodeId(TOKEN, 1);
     await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(review1));
-    expect(view.result.current.ledger?.phase).toBe("reviewing");
+    await waitFor(() => expect(view.result.current.ledger?.phase).toBe("reviewing"));
 
     // The base graph's own nodes must never be rewritten away.
     expect(recorded.writes[0].intent.nodes.map((n) => (n as { id: string }).id)).toEqual([
@@ -179,12 +179,12 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
     setStatus(review1, "failed");
     const fix1 = fixNodeId(TOKEN, 1);
     await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(fix1));
-    expect(view.result.current.ledger?.phase).toBe("fixing");
+    await waitFor(() => expect(view.result.current.ledger?.phase).toBe("fixing"));
 
     setStatus(fix1, "succeeded");
     const review2 = reviewNodeId(TOKEN, 2);
     await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(review2));
-    expect(view.result.current.ledger?.cycle).toBe(2);
+    await waitFor(() => expect(view.result.current.ledger?.cycle).toBe(2));
 
     setStatus(review2, "succeeded");
     await waitFor(() => expect(view.result.current.ledger?.phase).toBe("passed"));
@@ -285,15 +285,17 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
     await waitFor(() =>
       expect(recorded.failovers.filter((r) => r.nodeId === review1)).toHaveLength(2),
     );
-    expect(view.result.current.ledger?.phase).toBe("reviewing");
-    expect(view.result.current.ledger?.cycle).toBe(1);
+    await waitFor(() => {
+      expect(view.result.current.ledger?.phase).toBe("reviewing");
+      expect(view.result.current.ledger?.cycle).toBe(1);
+    });
 
     // Candidate 2 also settles failed — retried again, to candidate 3.
     setStatus(review1, "failed");
     await waitFor(() =>
       expect(recorded.failovers.filter((r) => r.nodeId === review1)).toHaveLength(3),
     );
-    expect(view.result.current.ledger?.phase).toBe("reviewing");
+    await waitFor(() => expect(view.result.current.ledger?.phase).toBe("reviewing"));
 
     // Candidate 3 finally succeeds — cycle 1 passes outright; a fix node
     // for cycle 1 must NEVER have been launched.
@@ -328,7 +330,7 @@ describe("useAdversarialLoop (real wiring over a fake graph bridge)", () => {
     const fix1 = fixNodeId(TOKEN, 1);
     await waitFor(() => expect(recorded.failovers.map((r) => r.nodeId)).toContain(fix1));
     expect(recorded.failovers.filter((r) => r.nodeId === review1)).toHaveLength(2);
-    expect(view.result.current.ledger?.phase).toBe("fixing");
+    await waitFor(() => expect(view.result.current.ledger?.phase).toBe("fixing"));
   });
 
   it("F0: attributes the actual (paid/external) runtime a launch used, instead of discarding it", async () => {
