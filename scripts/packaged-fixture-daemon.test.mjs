@@ -16,6 +16,7 @@ import { access, readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  ACCEPTANCE_ENV_ALLOWLIST,
   cleanAcceptanceEnvironment,
   QUIESCENT_SHUTDOWN_CAPABILITY,
   createFixtureDaemonWithSeams,
@@ -126,29 +127,24 @@ function liveSession(overrides = {}) {
   };
 }
 
-test("acceptance environment removes inherited worker context but preserves acceptance flags", () => {
+test("acceptance environment scrubs the whole namespace and preserves every allowlisted child flag", () => {
+  const allowlisted = Object.fromEntries(
+    [...ACCEPTANCE_ENV_ALLOWLIST].map((key) => [key, `preserved-${key}`]),
+  );
   const clean = cleanAcceptanceEnvironment({
     PATH: "/usr/bin",
+    ...allowlisted,
+    DROGON_NEW_WORKER_CONTEXT: "poison",
     DROGON_DISPATCH_CAPABILITY: "stale-worker-secret",
     DROGON_RUN_ID: "run-worker",
     DROGON_TASK_ID: "task-worker",
-    DROGON_DISPATCH_ID: "dispatch-worker",
-    DROGON_HOST_ID: "host-worker",
-    DROGON_SESSION_ID: "session-worker",
-    DROGON_SESSION_INCARNATION: "inc-worker",
-    DROGON_HOOK_INCARNATION: "hook-worker",
     DROGON_DATA_DIR: "/worker/data",
     DROGON_ELECTRON_PROFILE: "/worker/profile",
-    DROGON_VERIFY_OS_FOCUS: "1",
-    DROGON_PROBE_SURFACES: "1",
-    DROGON_UPGRADE_FROM_BUNDLE: "/old/Drogon.app",
   });
-  assert.deepEqual(clean, {
-    PATH: "/usr/bin",
-    DROGON_VERIFY_OS_FOCUS: "1",
-    DROGON_PROBE_SURFACES: "1",
-    DROGON_UPGRADE_FROM_BUNDLE: "/old/Drogon.app",
-  });
+  assert.deepEqual(clean, { PATH: "/usr/bin", ...allowlisted });
+  for (const key of ACCEPTANCE_ENV_ALLOWLIST)
+    assert.equal(clean[key], `preserved-${key}`, `${key} must reach children`);
+  assert.equal(clean.DROGON_NEW_WORKER_CONTEXT, undefined);
 });
 
 test("changed-daemon probe passes a filesystem path to Python, not a URL pathname", async () => {
