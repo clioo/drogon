@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { markAcceptanceFailed, markAcceptancePassed, recordAcceptanceSkip } from "./acceptance-report-state.mjs";
 import { probeWorkspaceProperties } from "./probe-workspace-properties.mjs";
-import { probeChatLifecycle } from "./probe-chat-lifecycle.mjs";
+import { chatLifecyclePiSkip, probeChatLifecycle } from "./probe-chat-lifecycle.mjs";
 import { probeMixedVersionRecovery } from "./probe-mixed-version-recovery.mjs";
 import { findClaudeBinary, seedPrivateClaudeKeyboard, probeClaudeTerminalInput } from "./probe-claude-terminal-input.mjs";
 import { randomUUID } from "node:crypto";
@@ -27,7 +27,7 @@ import {
   verifyForegroundObservation,
 } from "./acceptance-foreground.mjs";
 import { probeRenderedHarness } from "./probe-rendered-harness.mjs";
-import { hostBinaryAvailable, linkHostBinaryIntoFixtureBin, probeAgentSettings, probeAgentSettingsNarrow, writeAgentSettingsFixtures } from "./probe-agent-settings.mjs";
+import { hostBinaryAvailable, linkHostBinaryIntoFixtureBin, piUnavailableReason, probeAgentSettings, probeAgentSettingsNarrow, writeAgentSettingsFixtures } from "./probe-agent-settings.mjs";
 import { probeRenderedSessionRestart } from "./probe-rendered-session-restart.mjs";
 import { probeRenderedExitedStubs } from "./probe-rendered-exited-stubs.mjs";
 import { probeRenderedFiles } from "./probe-rendered-files.mjs";
@@ -221,11 +221,7 @@ async function stopOwned(child, label) {
 // The sealed J1/J7/J8 journeys drive the genuine `pi` binary. Returns [] for
 // spreading into `report.checks` while recording a visible skip.
 function skipWithoutPi(journey) {
-  const why =
-    process.env.DROGON_SKIP_MODEL_JOURNEYS === "1"
-      ? "DROGON_SKIP_MODEL_JOURNEYS=1"
-      : "no genuine `pi` binary on this host (the shell stub cannot produce the real TUI)";
-  recordAcceptanceSkip(report, journey, why);
+  recordAcceptanceSkip(report, journey, piUnavailableReason());
   return [];
 }
 function modelJourneysRunnable() {
@@ -618,8 +614,17 @@ try {
     await fixtureDaemon.capture();
     await page.getByRole("button", { name: "Sessions", exact: true }).click();
   }
-  if (packaged && modelFixture)
-    report.checks.push(...await probeChatLifecycle({ page, cli: packaged.cli, dataDir, output }));
+  if (packaged && modelFixture) {
+    // The chat lifecycle creates its sessions through the New-session
+    // dialog's Pi radio, which never renders without a genuine `pi` binary
+    // (rc.4 clean runner): skip the journey by name instead of timing out
+    // on the missing radio. A stillborn bundle still fails earlier, at the
+    // packaged-launch checks above.
+    const chatSkip = chatLifecyclePiSkip({ piAvailable: modelJourneysRunnable() });
+    if (chatSkip) recordAcceptanceSkip(report, chatSkip.name, chatSkip.reason);
+    else
+      report.checks.push(...await probeChatLifecycle({ page, cli: packaged.cli, dataDir, output }));
+  }
   if (report.claudeKeyboardIsolation)
     report.checks.push(...await probeClaudeTerminalInput({ page, workspaceId: registered.id, output }));
   else
@@ -1150,6 +1155,12 @@ try {
         root,
         cli: surfacesCli,
         dataDir,
+        // The surfaces automation run dispatches a real headless Pi
+        // session: without a genuine `pi` binary exactly that journey is
+        // skipped by name inside the probe (rc.4), every other surface
+        // still runs.
+        piAvailable: modelJourneysRunnable(),
+        skipped: report.skipped,
       })),
     );
   }

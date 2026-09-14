@@ -11,6 +11,20 @@ import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import { readEditorValue, waitForEditorRegistered } from "./acceptance-editor-text.mjs";
 import { decodePng } from "./build-app-icon.mjs";
 import { captureThemeSurface, readRenderedTheme, restoreThemeAndViewport, selectSettingsTheme, verifyThemeCaptures } from "./acceptance-theme.mjs";
+import { piUnavailableReason } from "./probe-agent-settings.mjs";
+
+// The surfaces Automations journey runs `automation run`, which dispatches
+// a real headless Pi session, so a host without a genuine `pi` binary
+// (rc.4 clean runner) skips exactly this journey by name in
+// report.skipped — every other surface still runs.
+export const SURFACES_PI_AUTOMATION_SKIP =
+  "surfaces-automation-pi-create-run-and-row-render";
+
+/** Named skip for the surfaces automation run when no genuine `pi` is available; null when it can run. */
+export function surfacesPiAutomationSkip({ piAvailable }) {
+  if (piAvailable) return null;
+  return { name: SURFACES_PI_AUTOMATION_SKIP, reason: piUnavailableReason() };
+}
 
 // R16-BB: scheduled fixtures must never fire (and hammer the local model)
 // during the sealed run.
@@ -1032,6 +1046,11 @@ export async function probePackagedSurfaces({
   cli,
   dataDir,
   fs = defaultFs,
+  // Clean-runner lane: false skips only the pi-dispatching automation run
+  // (recorded in `skipped`, never in `checks`); every other surface runs.
+  // Defaults to true so existing callers keep the full journey.
+  piAvailable = true,
+  skipped = null,
 }) {
   const checks = [];
   const screenshot = (name) =>
@@ -1314,15 +1333,26 @@ export async function probePackagedSurfaces({
   checks.push(...(await probeComposerAndAddProject({ page, output })));
 
   // Automations: one created automation, one manual run, UI row render.
-  checks.push(
-    ...(await probeAutomationsCreateAndRun({
-      page,
-      cli,
-      dataDir,
-      workspaceId,
-      output,
-    })),
-  );
+  // The manual run dispatches a real headless Pi session, so without a
+  // genuine `pi` binary this journey alone is skipped by name (rc.4).
+  const automationSkip = surfacesPiAutomationSkip({ piAvailable });
+  if (automationSkip) {
+    assert.ok(
+      Array.isArray(skipped),
+      "probePackagedSurfaces needs a skipped array to record the pi-gated automation run",
+    );
+    skipped.push(automationSkip);
+  } else {
+    checks.push(
+      ...(await probeAutomationsCreateAndRun({
+        page,
+        cli,
+        dataDir,
+        workspaceId,
+        output,
+      })),
+    );
+  }
 
   // Bots: one created bot plus one scheduled responsibility with a run
   // control on its card.
