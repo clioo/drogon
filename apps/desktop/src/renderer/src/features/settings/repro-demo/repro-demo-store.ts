@@ -1,10 +1,11 @@
 // The demo's run state, kept OUTSIDE React on purpose.
 //
-// The tour takes the viewer out of Settings to the run's sessions while the
-// run is still going, which unmounts the panel. A run whose state lived in
-// that component would lose everything at exactly the moment it gets
-// interesting; here the panel is a view over a store that outlives it, so
-// coming back to Settings shows the run as it stands.
+// The demo closes Settings once its Bot session exists, which unmounts the
+// panel. A run whose state lived in that component would lose everything at
+// exactly the moment it gets interesting; here the panel is a view over a
+// store that outlives it, so coming back to Settings shows the run as it
+// stands. After that first handoff the viewer owns navigation: the demo never
+// pulls them away from the Bot, main-agent, or worker session they opened.
 //
 // The chain is short on purpose: a project, a bot under Chats on the harness
 // the viewer picked, the task sent to that bot's own session, the Work Graph
@@ -350,9 +351,6 @@ export function policyFor(runtime: ReproRuntime, iterations: number) {
 const WORKFLOW_START_TIMEOUT_MS = 10 * 60_000;
 const ROUNDS_TIMEOUT_MS = 45 * 60_000;
 const POLL_MS = 1500;
-// The Bots stop is worth a look even when the bot admits the graph in a
-// second: the tour never leaves it for the sessions before this.
-const BOTS_DWELL_MS = 8000;
 
 export async function runReproDemo(
   bridge: ReproDemoBridge | null,
@@ -528,15 +526,12 @@ export async function runReproDemo(
       "done",
       `session ${dispatch.sessionId.slice(0, 8)} · ${describeRuntime(runtime)}`,
     );
-    // The bot exists and is at work: Bots is where a human reads what this
-    // demo just configured and sees the bot's session, while the run keeps
-    // going behind it. A beat first — the setup rows above are worth reading
-    // before the panel gives way (and `sleep` is injected, so tests pay
-    // nothing for it).
+    // The Bot session now exists. Close Settings into the ordinary app shell;
+    // its row appears under Chats and one click opens that exact session. From
+    // here on the demo never changes the viewer's route or selected session.
     await sleep(2500);
     ensureFollowing();
     tour({ kind: "open-bots", workspaceId });
-    const botsShownAt = now();
 
     // Phase 6 — the workflow the bot admits. The daemon's own status is the
     // fact; a bot session that exits without admitting anything is a fact
@@ -577,18 +572,11 @@ export async function runReproDemo(
     );
     update({ workflowId: started.id, releasedBy, releaseNote });
     setPhase("workflow", "done", `workflow ${started.id.slice(0, 8)} · ${releasedBy === "bot" ? "admitted by the bot" : "admitted by this panel"}`);
-    // The main session exists now, and the first thing it does is fan the
-    // build out to parallel workers — so this is the moment to leave Bots
-    // for the run's own sessions: the main session and its workers, side by
-    // side as they run. The Work Graph canvas stays a tab away; it is a
-    // diagram, not the work.
-    const shownFor = now() - botsShownAt;
-    if (shownFor < BOTS_DWELL_MS) await sleep(BOTS_DWELL_MS - shownFor);
-    ensureFollowing();
-    tour({ kind: "open-sessions", workspaceId });
+    // The main session and its workers now appear under the run's project in
+    // the sidebar. Keep the surface the viewer chose instead of replacing the
+    // Bot session they may be reading.
 
-    // Phase 7 — the rounds, followed from the sessions view; the daemon's own
-    // status is what settles them.
+    // Phase 7 — the rounds. The daemon's own status is what settles them.
     setPhase("rounds", "running");
     const finished = await until(
       async () => {
@@ -611,10 +599,10 @@ export async function runReproDemo(
       finished.status ?? null,
     );
 
-    // Phase 8 — the telemetry and the cost, on the Work Graph's own tabs.
+    // Phase 8 — collect telemetry and cost without navigating away from the
+    // session the viewer opened. The explicit "Show the telemetry" control
+    // remains available when they want it.
     setPhase("evidence", "running");
-    tour({ kind: "open-work-graph", workspaceId });
-    tour({ kind: "focus-view", view: "evidence" });
     const snapshot = unwrap(
       await bridge.graphObservabilityStatus({ workspaceId }),
       "graphObservabilityStatus",
@@ -630,10 +618,6 @@ export async function runReproDemo(
       "done",
       `${(snapshot.observability.evidence ?? []).length} telemetry entries`,
     );
-    // The telemetry is worth reading before the tour's last stop, the usage.
-    await sleep(8000);
-    ensureFollowing();
-    tour({ kind: "focus-view", view: "usage" });
     update({ running: false, spotlight: "evidence" });
   } catch (error) {
     if (generation !== runGeneration) return;

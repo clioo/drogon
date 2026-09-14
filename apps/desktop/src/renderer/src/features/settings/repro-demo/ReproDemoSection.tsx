@@ -407,7 +407,7 @@ export function ReproDemoSection({
     <SettingsSection
       id="demo"
       title="Reproducible demo"
-      description="Run the whole chain with one click: a project of its own, a bot under Chats that gets the task on the harness you picked, the Work Graph it admits — its main session fanning out to parallel workers — the adversarial rounds, and the telemetry and cost of what ran. It takes you along — Bots once the bot is at work, the run's sessions while they work, and the Work Graph's Agent telemetry at the end."
+      description="Run the whole chain with one click: a project of its own, a bot under Chats that gets the task on the harness you picked, the Work Graph it admits — its main session fanning out to parallel workers — the adversarial rounds, and the telemetry and cost of what ran. Settings closes when the bot is ready; open the bot, main agent, and workers directly from the sidebar."
     >
       <div className="space-y-6">
         <SettingsSubsectionHeader
@@ -526,11 +526,11 @@ export function ReproDemoSection({
         </div>
 
         <p className="text-xs text-muted-foreground">
-          The demo leaves Settings on its own: the Bots page once the bot has
-          its prompt, then this run's sessions once the bot admits the Work
-          Graph — the main session and the workers it dispatches, side by
-          side — and finally the Work Graph's Agent telemetry and Usage tabs.
-          Come back to Settings whenever you like: the panel keeps the run.
+          Settings closes once the bot appears under Chats. Open that row to
+          watch the bot's own session; the main agent and every worker appear
+          under the demo project as they start. The demo keeps running without
+          changing the session you chose. Return here for progress, telemetry,
+          or cleanup.
         </p>
 
         <Spotlight active={state.spotlight !== null && state.running} testId="repro-demo-phases">

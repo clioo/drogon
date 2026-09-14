@@ -294,28 +294,32 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
           : "the demo starts from its own button on the fixture lane",
       );
 
-      // The panel's own phase rows are NOT a reliable oracle here: the tour
-      // leaves Settings as soon as the bot has its prompt, which is
-      // seconds after the click. Everything below is read from the surfaces
-      // the tour opens and from the daemon itself.
+      // The panel's own phase rows are NOT a reliable oracle here: Settings
+      // closes as soon as the bot has its prompt. The demo must reveal the
+      // ordinary app shell and then preserve whichever session the viewer
+      // chooses — it never routes through the standalone Bots page.
+      await page.getByTestId("repro-demo-run").waitFor({ state: "detached", timeout: 120_000 });
+      assert.equal(
+        await page.getByRole("heading", { name: "Bots", exact: true }).filter({ visible: true }).count(),
+        0,
+        "the demo must close Settings into the app shell, not open the Bots page",
+      );
 
-      // First stop of the tour: the page that shows what was just configured.
-      await page.getByRole("heading", { name: "Bots", exact: true }).waitFor({ timeout: 120_000 });
-      // The page loads its bots asynchronously, and every earlier run's bot is
-      // still listed — which is the point: they coexist. Wait for the one this
-      // run just made, i.e. a name no earlier run in this report claimed.
+      // Every earlier run's Bot is still listed under Chats — which is the
+      // point: they coexist. Wait for the one this run just made, i.e. a name
+      // no earlier run in this report claimed.
       const seenTags = new Set(report.runs.map((entry) => entry.tag));
       const { tag, botName } = await (async () => {
         const stop = Date.now() + 90_000;
         for (;;) {
-          const text = await page.locator("body").innerText();
+          const text = await page.getByTestId("sidebar-chats-section").innerText();
           const found = [...text.matchAll(/White walker ([0-9a-f]{6})/g)]
             .map((match) => ({ botName: match[0], tag: match[1] }))
             .find((entry) => !seenTags.has(entry.tag));
           if (found) return found;
           if (Date.now() > stop)
             throw new Error(
-              `Bots never showed run ${attempt}'s own bot: ${text.slice(0, 220).replace(/\s+/g, " ")}`,
+              `Chats never showed run ${attempt}'s own bot: ${text.slice(0, 220).replace(/\s+/g, " ")}`,
             );
           await delay(1000);
         }
@@ -325,10 +329,18 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
       const runName = `dog-tinder-${tag}`;
       assert.ok(!seenTags.has(tag), `run ${attempt} reused the tag of an earlier run: ${tag}`);
       report.runName = runName;
-      report.checks.push(
-        `run ${attempt} left Settings for Bots, showing '${botName}' — the bot of project '${runName}'`,
+      const botRow = page.locator(`[data-bot-session-row="white-walker-${tag}"]`);
+      await botRow.click();
+      await page.getByTestId("bot-session-header").waitFor({ timeout: 30_000 });
+      assert.equal(
+        await page.getByTestId("repro-demo-run").filter({ visible: true }).count(),
+        0,
+        "one click on the Bot must open its session without returning to Settings",
       );
-      const botsShot = path.join(fixture, `bots-configured-${attempt}.png`);
+      report.checks.push(
+        `run ${attempt} closed Settings, showed '${botName}' under Chats, and opened its session in one click`,
+      );
+      const botsShot = path.join(fixture, `bot-session-open-${attempt}.png`);
       await page.screenshot({ path: botsShot, animations: "disabled" });
       report.screenshots.push(botsShot);
 
@@ -439,25 +451,31 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
             return alive.filter((session) => session.id !== mainSessionId && session.id !== botSessionId).length >= 2;
           })();
           if (fannedOut && !sessionsShot) {
-            // The tour leaves Bots for the sessions at the admission, seconds
-            // before the workers exist: the viewer sees terminals working —
-            // not Bots, not Settings, and not the Work Graph canvas.
-            await page
-              .getByRole("heading", { name: "Bots", exact: true })
-              .waitFor({ state: "detached", timeout: 30_000 });
+            // The demo itself must still be showing the Bot session chosen
+            // above; only this acceptance now asks to inspect the run's
+            // sessions. That explicit request is the same action as the
+            // panel's "Show the sessions" button.
+            await page.getByTestId("bot-session-header").waitFor({ timeout: 30_000 });
+            await page.evaluate(
+              (workspaceId) => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", {
+                detail: { kind: "open-sessions", workspaceId },
+              })),
+              demoWorkspaceId,
+            );
+            await page.getByTestId("bot-session-header").waitFor({ state: "detached", timeout: 30_000 });
             assert.equal(
               await page.getByTestId("orchestrator-canvas").filter({ visible: true }).count(),
               0,
-              "the tour must not show the Work Graph canvas while the sessions work",
+              "showing sessions must not open the Work Graph canvas",
             );
             assert.equal(
               await page.getByTestId("repro-demo-run").filter({ visible: true }).count(),
               0,
-              "the tour must have left Settings for the sessions",
+              "showing sessions must not return to Settings",
             );
             assert.ok(
               (await page.locator(".xterm").filter({ visible: true }).count()) >= 1,
-              "the sessions stop must show a terminal on screen",
+              "the requested sessions view must show a terminal on screen",
             );
             // The Bot's own chat turn is its current session — the one the
             // demo's prompt went to — not a worker and not the graph main.
@@ -540,7 +558,7 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
               report.checks.push("During the graph main phase, workers remain active after the Bot exits; rendered activity and fixture hook counters are attributed separately");
             }
             report.checks.push(
-              `the app left Bots for the run's sessions by itself, with ${alive.length} alive: ${alive
+              `the viewer explicitly opened the run's sessions, with ${alive.length} alive: ${alive
                 .map((session) => session.harnessId ?? session.command ?? session.id)
                 .join(", ")}`,
             );
