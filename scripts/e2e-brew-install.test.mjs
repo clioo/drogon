@@ -16,6 +16,7 @@ import {
   developerDaemonLive,
   developerDataDir,
   expandZapPath,
+  selectUpgradePair,
   launchEnv,
   makeCleanRoom,
   parseBrewAuditArgs,
@@ -165,6 +166,23 @@ test("compareDrogonVersions orders release candidates and finals", () => {
   assert.equal(compareDrogonVersions("0.1.0", "0.1.0-rc.9"), 1);
   assert.equal(compareDrogonVersions("0.2.0-rc.1", "0.1.0"), 1);
   assert.throws(() => compareDrogonVersions("nope", "0.1.0-rc.2"), /not a Drogon version/);
+});
+
+test("selectUpgradePair skips a reverted newer bump", () => {
+  // Newest-first history shaped like the real tap: HEAD serves rc.2, a
+  // reverted rc.3 bump sits in the middle, rc.1 is the true previous.
+  const history = [
+    { rev: "a5bd1a3", version: "0.1.0-rc.2" },
+    { rev: "dbb83f3", version: "0.1.0-rc.2" },
+    { rev: "a40fef8", version: "0.1.0-rc.2" },
+    { rev: "f648fc2", version: "0.1.0-rc.3" },
+    { rev: "0c5d885", version: "0.1.0-rc.2" },
+    { rev: "a0f4eb2", version: "0.1.0-rc.1" },
+  ];
+  assert.deepEqual(selectUpgradePair(history, "0.1.0-rc.2"), { rev: "a0f4eb2", version: "0.1.0-rc.1" });
+  assert.deepEqual(selectUpgradePair(history, "0.1.0-rc.3"), { rev: "a5bd1a3", version: "0.1.0-rc.2" });
+  assert.equal(selectUpgradePair([{ rev: "x", version: "0.1.0-rc.2" }], "0.1.0-rc.2"), null);
+  assert.equal(selectUpgradePair([], "0.1.0-rc.2"), null);
 });
 
 test("tapNeedsTrust spots the fresh-prefix trust refusal", () => {
