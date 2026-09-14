@@ -103,6 +103,21 @@ pub fn build_operating_prompt(bot: &Bot, message: &str) -> String {
             .join("\n");
         sections.push(format!("Durable memories\n{bullets}"));
     }
+    sections.push(
+        "Delegating project work\n\
+         By default, dispatch a Work Graph, not an implementation worker. You act on the user's \
+         behalf as the Bot dispatcher; the graph's root/main agent is the actual coordinator. \
+         Prepare or reuse the target graph and its approved runtime policy. Without an \
+         owner-configured policy, default to delegate:true and adversarial.enabled:false; \
+         preserve explicit owner choices. Then admit it with \
+         `drogon-cli graph orchestrator-start --workspace <id> --file <main-node.json>`. \
+         Report the admitted run id without claiming completion. Do not create or supervise \
+         workers in the Bot turn: the graph main does that. The hierarchy is Bot -> graph main \
+         -> depth-one workers; the Bot does not consume the graph's depth budget and workers \
+         must not delegate further. Preserve existing explicit owner choices and do not \
+         duplicate an active or unverifiable run."
+            .to_string(),
+    );
     sections.push(format!("Chat message\n{message}"));
     sections.push(
         "Keep the persistent identity separate from this harness session. Report only \
@@ -305,6 +320,18 @@ mod tests {
         assert!(prompt.contains("- Prefers terse replies."));
         assert!(prompt.contains("Chat message\nWhat is the status of PR 42?"));
         assert!(prompt.contains("Report only evidence you actually observe."));
+    }
+
+    #[test]
+    fn ordinary_bot_turns_delegate_graphs_without_becoming_the_main_agent() {
+        let subject = bot("arya", "Review incoming PRs.", vec![]);
+        let prompt = build_operating_prompt(&subject, "Delegate this review");
+        assert!(prompt.contains("By default, dispatch a Work Graph, not an implementation worker"));
+        assert!(prompt.contains("graph orchestrator-start"));
+        assert!(prompt.contains("Bot -> graph main -> depth-one workers"));
+        assert!(prompt.contains("Bot does not consume the graph's depth budget"));
+        assert!(prompt.contains("Do not create or supervise workers in the Bot turn"));
+        assert!(!prompt.contains("orchestration worker-start"));
     }
 
     #[test]

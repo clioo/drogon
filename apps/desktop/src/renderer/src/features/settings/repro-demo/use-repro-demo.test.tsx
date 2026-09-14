@@ -440,7 +440,10 @@ describe("what the released session is told", () => {
     expect(instructions).toContain(
       "drogon-cli graph orchestrator-start --workspace ws-7 --file .drogon/repro-main-node.json",
     );
-    expect(instructions).toMatch(/Do not implement the deck yourself/);
+    expect(instructions).toContain("Bot dispatcher");
+    expect(instructions).toContain("end this Bot turn");
+    expect(instructions).not.toContain("orchestration worker-start");
+    expect(instructions).not.toContain("orchestration check");
   });
 
   test("the policy turns the bounded adversarial loop on, and never delegate too", () => {
@@ -453,11 +456,15 @@ describe("what the released session is told", () => {
   });
 
   test("the main node carries the spec as its task", () => {
-    const node = mainNodeFor(runtime, "# Spec\nswipe");
+    const node = mainNodeFor(runtime, "# Spec\nswipe", "ws-7");
     expect(node.id).toBe("orchestrator-main");
     expect(node.dependsOn).toEqual([]);
     expect(node.prompt).toMatch(/# Spec/);
     expect(node.harness).toBe("opencode");
+    expect(node.prompt).toContain("main agent of the dispatched Dog Tinder graph");
+    expect(node.prompt).toContain("orchestration worker-start");
+    expect(node.prompt).toContain("orchestration check");
+    expect(node.prompt).not.toContain("graph orchestrator-start");
   });
 });
 

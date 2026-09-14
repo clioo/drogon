@@ -447,19 +447,34 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
             const linked = snapshot.bots.find((bot) => bot.id === `white-walker-${tag}`)?.currentSession;
             assert.equal(linked?.source, "monitor");
             monitorSessionId = linked.sessionId;
-            const launched = alive.find((session) => session.id === monitorSessionId);
-            assert.ok(launched, "the Bot links the live coordinator");
+            const allSessions = await cli("rpc", "session.list", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }));
+            const launched = allSessions.sessions.find((session) => session.id === monitorSessionId);
+            assert.ok(launched, "the Bot links its dispatcher, not the graph main or a worker");
+            if (!live) assert.equal(launched.verdict, "exited", "the Bot ended after admitting the graph");
+            const workerSessions = alive.filter((session) => session.id !== monitorSessionId);
+            assert.ok(workerSessions.length >= 2, "parallelism counts worker terminals, never the Bot or a fabricated main terminal");
+            const activeGraph = await orchestratorStatus();
+            assert.equal(activeGraph?.status, "running");
+            assert.equal(activeGraph?.phase, "main", "workers execute inside the already-admitted graph main phase");
+            const card = page.locator("[data-worktree-card-id]").filter({ has: page.getByText(`Run ${activeGraph.id}`, { exact: true }) });
+            await card.getByText("Main agent · running", { exact: true }).waitFor();
+            assert.equal(await card.getByRole("button", { name: "Work Graph · Running" }).getAttribute("aria-expanded"), "true");
+            assert.equal(await card.getByText("Background workflow · no terminal", { exact: true }).isVisible(), true);
+            const runtime = activeGraph.steps.find((step) => step.phase === "main" && step.status === "running")?.runtime;
+            assert.ok(runtime, "running main retains its selected runtime");
+            assert.equal(await card.getByText(`${runtime.harness}${runtime.model ? ` · ${runtime.model}` : ""}`, { exact: true }).isVisible(), true);
+            report.checks.push("Sidebar reveals the background graph main and selected runtime beside the actual worker sessions");
             await page.locator(`[data-bot-session-row="white-walker-${tag}"]`).click({ timeout: 15_000 });
             await page.getByTestId("bot-session-header").waitFor();
             await page.getByTestId("bot-session-header").getByText("Launch prompt", { exact: true }).click();
             assert.equal(await page.getByTestId("bot-session-header").getByTestId("monitor-launch-prompt-text").textContent(), launched.args.find((arg) => arg.startsWith("Drogon task:\n")) ?? launched.args.at(-1));
-            report.checks.push("Chats opens the monitor coordinator and shows its exact recorded launch prompt");
+            report.checks.push("Chats shows the Bot dispatcher and its recorded prompt; the graph main owns the workers");
             sessionsShot = path.join(fixture, `sessions-running-${attempt}.png`);
             await page.screenshot({ path: sessionsShot, animations: "disabled" });
             report.screenshots.push(sessionsShot);
             if (!live && fixtureHarness === "pi") {
               const observed = (await cli("rpc", "graph.observability_status", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }))).observability;
-              assert.ok(observed.evidence.some((entry) => entry.id === `session:${monitorSessionId}` && entry.status === "progress"));
+              assert.ok(observed.evidence.some((entry) => entry.id === `session:${monitorSessionId}` && entry.status === "completed"));
               const reported = observed.usage.filter((entry) => entry.agentId === monitorSessionId && entry.id.startsWith("pi:"));
               assert.equal(reported.length, 1, "replayed Pi message usage is counted once");
               assert.equal(reported[0].inputTokens, 37);
@@ -473,7 +488,6 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
                 assert.equal(workerUsage[0].role, "worker");
                 assert.equal(typeof workerUsage[0].runId, "string");
               }
-              assert.equal(await orchestratorStatus(), null, "activity and usage exist before workflow rounds start");
               await page.evaluate((workspaceId) => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", { detail: { kind: "open-work-graph", workspaceId } })), demoWorkspaceId);
               await page.getByTestId("orchestrator-canvas").waitFor();
               assert.equal(await page.getByTestId("orchestrator-runtime-disclosure").count(), 0);
@@ -488,10 +502,11 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
               await page.screenshot({ path: usageShot, animations: "disabled" });
               report.screenshots.push(usageShot);
               const stillRunning = await cli("rpc", "session.list", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }));
-              assert.equal(stillRunning.sessions.find((session) => session.id === monitorSessionId)?.verdict, "live");
+              assert.equal(stillRunning.sessions.find((session) => session.id === monitorSessionId)?.verdict, "exited");
+              assert.ok(stillRunning.sessions.some((session) => session.verdict === "live"), "the graph workers outlive the Bot dispatcher");
               await page.locator(`[data-bot-session-row="white-walker-${tag}"]`).click();
               await page.getByTestId("bot-session-header").waitFor();
-              report.checks.push("Before workflow rounds, rendered coordinator/worker activity and Pi-hook counters via their own credentials (synthetic fixture responses), with replay deduplication");
+              report.checks.push("During the graph main phase, workers remain active after the Bot exits; rendered activity and fixture hook counters are attributed separately");
             }
             report.checks.push(
               `the app left Bots for the run's sessions by itself, with ${alive.length} alive: ${alive
@@ -510,10 +525,10 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
       })();
       assert.ok(
         mostAlive >= 2,
-        `the released session must fan out to parallel workers: most alive at once was ${mostAlive}`,
+        `the dispatched graph main must fan out to parallel workers: most alive at once was ${mostAlive}`,
       );
       report.checks.push(
-        `the released session fanned out: ${mostAlive} sessions alive at once in the run's workspace`,
+        `the dispatched graph main fanned out: ${mostAlive} worker sessions alive at once in the run's workspace`,
       );
       const roles = (rounds.steps ?? []).map((step) => `${step.iteration}:${step.phase}:${step.verdict ?? step.status}`);
       if (live) {

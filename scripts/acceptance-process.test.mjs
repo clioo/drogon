@@ -5,6 +5,8 @@ import {
   startAcceptanceProcess,
   waitAcceptanceExit,
   stopAcceptanceProcess,
+  captureDescendants,
+  settleOwnedProcesses,
 } from "./acceptance-process.mjs";
 
 async function fixture(context, script) {
@@ -19,6 +21,38 @@ async function fixture(context, script) {
   await once(child.stdout, "data");
   return child;
 }
+
+test("process ownership can be captured and settled without workflow runtime helpers", async (context) => {
+  const child = await fixture(context, 'process.stdout.write("ready"); setInterval(() => {}, 1000)');
+  const owned = await captureDescendants([child.pid], new Map());
+  assert.ok(owned.get(child.pid)?.includes(process.execPath));
+  const verdicts = await settleOwnedProcesses(owned);
+  assert.equal(verdicts.find((entry) => entry.pid === child.pid)?.verdict, "exited");
+  assert.equal((await waitAcceptanceExit(child, 2000)).verdict, "exited");
+});
+
+test("captured descendants remain owned after their parent exits", async (context) => {
+  const child = await fixture(context,
+    'require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], { stdio: "ignore" }); process.stdout.write("ready"); setInterval(() => {}, 1000)');
+  const owned = new Map();
+  try {
+    await captureDescendants([child.pid], owned);
+    assert.equal(owned.size, 2);
+    assert.equal((await stopAcceptanceProcess(child)).verdict, "exited");
+    const verdicts = await settleOwnedProcesses(owned);
+    assert.ok(verdicts.every((entry) => entry.verdict === "exited"));
+  } finally {
+    await captureDescendants([child.pid], owned);
+    await stopAcceptanceProcess(child);
+    assert.ok((await settleOwnedProcesses(owned)).every((entry) => entry.verdict === "exited"));
+  }
+});
+
+test("an identity mismatch never signals the process currently using that PID", async () => {
+  const verdicts = await settleOwnedProcesses(new Map([[process.pid, "not this process identity"]]));
+  assert.equal(verdicts[0].verdict, "exited");
+  assert.doesNotThrow(() => process.kill(process.pid, 0));
+});
 
 test("a successful signal without an exit event remains unverifiable", async () => {
   const child = Object.assign(new EventEmitter(), {

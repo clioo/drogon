@@ -13,6 +13,7 @@ import type {
   OrchestratorRun,
 } from "../../../../shared/graph-contract";
 import { DEFAULT_GRAPH_POLICY } from "../../../../shared/graph-contract";
+import type { Session } from "../../../../shared/session-contract";
 import { TooltipProvider } from "../../components/ui/tooltip";
 import { WorktreeCard } from "./WorktreeCard";
 import { WorktreeWorkflow } from "./WorktreeWorkflow";
@@ -120,6 +121,83 @@ it("shows a bot-dispatched headless workflow on an unselected card with no termi
   view.unmount();
   expect(bridge.graphOrchestratorStop).not.toHaveBeenCalled();
   expect(bridge.graphOrchestratorStart).not.toHaveBeenCalled();
+});
+
+it("keeps the headless main separate from an exited Bot and two live worker terminals", async () => {
+  const session = (id: string, workspaceId = "ws"): Session => ({
+    id, workspaceId, hostId: "host", incarnation: `inc-${id}`, command: "pi",
+    harnessId: "pi", args: [], cols: 80, rows: 24, verdict: "live",
+    agentState: "working", exitCode: null, createdAt: run.startedAt,
+  });
+  const bridge = bridgeFor();
+  const onSelectSession = vi.fn();
+  const view = render(
+    <TooltipProvider>
+      <WorktreeCard
+        worktree={{ id: "wt", projectId: "p", workspaceId: "ws", path: "/fixture",
+          branch: "bootstrap", head: "", baseRef: null, createdAt: run.startedAt }}
+        workspaces={[]}
+        sessions={[
+          { ...session("bot-dispatcher", "bot-home"), verdict: "exited", agentState: "exited", exitCode: 0 },
+          session("worker-deck"), session("worker-page"),
+        ]}
+        selected={false} disabled={false} projectKind="folder" implicitFolderWorktree
+        onSelect={vi.fn()} onSelectSession={onSelectSession}
+        onRemove={null} onRename={null} graphBridge={bridge}
+      />
+    </TooltipProvider>,
+  );
+  const summary = await screen.findByRole("button", { name: "Work Graph · Running" });
+  await waitFor(() => expect(summary.getAttribute("aria-expanded")).toBe("true"));
+  expect(screen.getByText("Main agent · running")).toBeTruthy();
+  expect(screen.getByText("Background workflow · no terminal")).toBeTruthy();
+  const rows = [...view.container.querySelectorAll("[data-worktree-agent-row]")];
+  expect(rows.map((row) => row.getAttribute("data-worktree-agent-row")).sort()).toEqual(["worker-deck", "worker-page"]);
+  fireEvent.click(view.container.querySelector('[data-worktree-agent-row="worker-deck"]')!);
+  expect(onSelectSession).toHaveBeenCalledWith("worker-deck");
+  expect(bridge.graphOrchestratorStart).not.toHaveBeenCalled();
+  expect(bridge.graphOrchestratorStop).not.toHaveBeenCalled();
+});
+
+it("respects collapse across polling and loss of contact, then reveals only a new run", async () => {
+  vi.useFakeTimers();
+  const bridge = bridgeFor();
+  const status = vi.mocked(bridge.graphOrchestratorStatus!);
+  render(<WorktreeWorkflow workspaceId="ws" bridge={bridge} />);
+  await act(async () => {});
+  const summary = () => screen.getByRole("button", { name: /Work Graph ·/ });
+  expect(summary().getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(summary());
+  status.mockResolvedValue({ ok: true, result: { run: { ...run, updatedAt: "2026-09-13T03:02:00Z" } } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+  expect(summary().getAttribute("aria-expanded")).toBe("false");
+  status.mockRejectedValue(new Error("Disconnected"));
+  await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+  expect(screen.getByText("Work Graph · Unverifiable")).toBeTruthy();
+  expect(summary().getAttribute("aria-expanded")).toBe("false");
+  status.mockResolvedValue({ ok: true, result: { run: { ...run } } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(screen.getByText("Work Graph · Running")).toBeTruthy();
+  expect(summary().getAttribute("aria-expanded")).toBe("false");
+  status.mockResolvedValue({ ok: true, result: { run: { ...run, id: "stale-workflow" } } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(summary().getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByText("Run stale-workflow")).toBeNull();
+  status.mockResolvedValue({ ok: true, result: { run: { ...run, id: "workflow-2", updatedAt: "2026-09-13T03:03:00Z" } } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(summary().getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByText("Run workflow-2")).toBeTruthy();
+  expect(bridge.graphOrchestratorStart).not.toHaveBeenCalled();
+  expect(bridge.graphOrchestratorStop).not.toHaveBeenCalled();
+});
+
+it.each(["running", "stopping", "unverifiable"] as const)("reveals a newly observed %s workflow without starting or stopping it", async (state) => {
+  const bridge = bridgeFor({ ...run, status: state });
+  render(<WorktreeWorkflow workspaceId="ws" bridge={bridge} />);
+  const summary = await screen.findByRole("button", { name: /Work Graph ·/ });
+  await waitFor(() => expect(summary.getAttribute("aria-expanded")).toBe("true"));
+  expect(bridge.graphOrchestratorStart).not.toHaveBeenCalled();
+  expect(bridge.graphOrchestratorStop).not.toHaveBeenCalled();
 });
 
 it("does not bypass the app capability gate through the raw window bridge", async () => {

@@ -827,6 +827,21 @@ fn an_assigned_pull_request_releases_a_review_session_in_the_project() {
     assert_eq!(home_sessions.len(), 1, "one delegated run, one session");
     let delegated = &home_sessions[0];
     assert_eq!(delegated["harnessId"], "codex");
+    let activity = ok(
+        &fx.engine,
+        "graph.observability_status",
+        json!({"workspaceId": home}),
+    );
+    let dispatcher = activity["observability"]["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["agentId"] == delegated["id"])
+        .unwrap();
+    assert_eq!(
+        dispatcher["role"], "dispatcher",
+        "the Bot is not labeled as the graph coordinator"
+    );
     assert_eq!(
         delegated["causedByEventId"],
         json!(event_id),
@@ -865,7 +880,7 @@ fn an_assigned_pull_request_releases_a_review_session_in_the_project() {
         "{delegated_prompt}"
     );
     assert!(
-        delegated_prompt.contains("--harness codex"),
+        delegated_prompt.contains("harness (codex)"),
         "{delegated_prompt}"
     );
     assert!(
@@ -877,7 +892,7 @@ fn an_assigned_pull_request_releases_a_review_session_in_the_project() {
         "the case's skills travel in the prompt: {delegated_prompt}"
     );
     assert!(
-        delegated_prompt.contains(&format!("--caused-by-event {event_id}")),
+        delegated_prompt.contains(&format!("monitor event {event_id}")),
         "{delegated_prompt}"
     );
     // ...and the stub really was the binary that ran: the session's command
