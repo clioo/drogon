@@ -99,6 +99,12 @@ mod tests {
         let resolved = args
             .data_dir
             .unwrap_or_else(|| default_data_dir(env_of(&[]), Path::new("/Users/tester")));
+        // The leaf differs per platform (Application Support/Drogon on
+        // macOS/Windows, .local/share/drogon elsewhere); the per-platform
+        // tests pin the full path, this one pins the lazy wiring.
+        #[cfg(all(unix, not(target_os = "macos")))]
+        assert!(resolved.ends_with("drogon"));
+        #[cfg(not(all(unix, not(target_os = "macos"))))]
         assert!(resolved.ends_with("Drogon"));
     }
 
