@@ -1635,3 +1635,44 @@ fn stale_event_records_too_old_to_act() {
         view["firing"]["lastDetail"]
     );
 }
+
+#[test]
+fn a_watch_whose_workspace_is_gone_retires_itself_instead_of_failing_forever() {
+    // A demo run's project removed after the fact, a folder deleted from the
+    // registry: the monitor's workspace row disappears while the monitor
+    // stays. Before, every tick failed it with "workspace is gone" for the
+    // rest of time; now one tick disables it, with the reason on the card.
+    let fixture = Fixture::with_monitor(json!({"cron": "* * * * *"}));
+    let now = Fixture::now_ms();
+    {
+        let conn = fixture.conn();
+        conn.execute("DELETE FROM workspaces WHERE id = ?1", [&fixture.workspace_id])
+            .unwrap();
+    }
+    let summary = drogon_core::bot_self_mgmt::tick_bot_monitors(&fixture._engine, now);
+    assert_eq!(summary.retired, 1, "{summary:?}");
+    assert_eq!(summary.evaluated, 0, "{summary:?}");
+    assert_eq!(summary.errors, 0, "{summary:?}");
+
+    let conn = fixture.conn();
+    let payload: String = conn
+        .query_row(
+            "SELECT payload_json FROM bot_monitors WHERE id = ?1",
+            [&fixture.monitor_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let record: Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(record["enabled"], false, "{record}");
+    let notice = record
+        .get("last_notice")
+        .or_else(|| record.get("lastNotice"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    assert!(notice.contains("workspace"), "the reason rides the card: {record}");
+
+    // Retired means retired: the next tick neither checks it nor retires it again.
+    let again = drogon_core::bot_self_mgmt::tick_bot_monitors(&fixture._engine, now + 60_000.0);
+    assert_eq!(again.retired, 0, "{again:?}");
+    assert_eq!(again.evaluated, 0, "{again:?}");
+}
