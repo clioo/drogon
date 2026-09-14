@@ -10,6 +10,8 @@ import path from "node:path";
 import test from "node:test";
 import {
   assertRoomContained,
+  auditZap,
+  brew,
   commandMatchesDaemon,
   compareDrogonVersions,
   developerAppFingerprint,
@@ -322,12 +324,48 @@ test("tapCaskRevs lists newest first and readCaskAtRev parses", async (t) => {
 });
 
 test("makeCleanRoom returns a symlink-free room root", async () => {
-  const { room } = await makeCleanRoom();
+  const { room, brewEnv } = await makeCleanRoom();
   try {
     assert.equal(room.dir, await realpath(room.dir));
     assert.doesNotThrow(() => assertRoomContained(room.dir, path.join(room.appdir, "Drogon.app")));
+    // The isolation contract the brew() choke point enforces: --appdir
+    // present, --binarydir absent (Homebrew rejects it as unknown).
+    assert.ok(brewEnv.HOMEBREW_CASK_OPTS.includes(`--appdir=${room.appdir}`));
+    assert.ok(!brewEnv.HOMEBREW_CASK_OPTS.includes("binarydir"));
   } finally {
     await rm(room.dir, { recursive: true, force: true });
+  }
+});
+
+test("brew() refuses --force and appdir-less mutates", async () => {
+  const safeEnv = { PATH: "/usr/bin:/bin", HOMEBREW_CASK_OPTS: "--appdir=/tmp/room/Applications" };
+  await assert.rejects(brew("/bin/echo", safeEnv, ["uninstall", "--zap", "--force", "--cask", "x"]), /refusing --force/);
+  await assert.rejects(brew("/bin/echo", { PATH: "/usr/bin:/bin" }, ["install", "--cask", "x"]), /isolated --appdir/);
+  // Read-only commands and guarded mutates pass through to the binary.
+  const out = await brew("/bin/echo", { PATH: "/usr/bin:/bin" }, ["--version"], { timeoutMs: 10000 });
+  assert.equal(out.code, 0);
+  const installed = await brew("/bin/echo", safeEnv, ["install", "--cask", "x"], { timeoutMs: 10000 });
+  assert.equal(installed.code, 0);
+});
+
+test("auditZap verifies trash state without calling brew", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "zap-home-"));
+  try {
+    const trash = path.join(home, "Library", "Caches", "Drogon");
+    await mkdir(trash, { recursive: true });
+    await writeFile(path.join(trash, "f"), "x");
+    const steps = [];
+    const ctx = { room: { dir: home, home }, steps };
+    const cask = { zapTrash: ["~/Library/Caches/Drogon"] };
+    await assert.rejects(auditZap(ctx, cask, new Set()), /zap left trash behind/);
+    await rm(trash, { recursive: true, force: true });
+    const before = await snapshotTree(home);
+    await auditZap(ctx, cask, before);
+    assert.equal(steps.at(-1).status, "PASSED");
+    await writeFile(path.join(home, "rogue"), "x");
+    await assert.rejects(auditZap(ctx, cask, before), /zap stanza misses/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
   }
 });
 

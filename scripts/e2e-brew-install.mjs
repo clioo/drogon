@@ -3,14 +3,19 @@
 // Clean-room end-to-end audit of the public Homebrew install flow:
 //
 //   brew tap -> brew install --cask -> quarantine/spctl -> drogon-cli ->
-//   headless first launch -> brew upgrade --cask -> brew uninstall -> brew zap
+//   headless first launch -> brew upgrade --cask -> brew uninstall --zap
+//   (Homebrew 7 has no standalone `zap` command)
 //
 // The clean room is a throwaway Homebrew prefix cloned under a temp dir, an
-// isolated --appdir/--binarydir, a fresh HOME, a fresh DROGON_DATA_DIR and a
-// sanitized PATH. It never touches the developer's /Applications/Drogon.app,
-// ~/Applications, ~/Library/Application Support/Drogon, or the shared
-// /opt/homebrew prefix. Every step asserts with the real command output
-// captured; the run prints a JSON summary and exits non-zero on failure.
+// isolated --appdir (Homebrew ignores --binarydir; shims land in
+// <prefix>/bin, still room-contained), a fresh HOME, a fresh DROGON_DATA_DIR
+// and a sanitized PATH. It never touches the developer's
+// /Applications/Drogon.app, ~/Applications,
+// ~/Library/Application Support/Drogon, or the shared /opt/homebrew prefix:
+// every mutating brew call passes a choke point that refuses --force and
+// refuses to run without an isolated --appdir. Every step asserts with the
+// real command output captured; the run prints a JSON summary and exits
+// non-zero on failure.
 //
 // Fidelity limits (documented, not hidden): a throwaway prefix exercises the
 // same cask stanzas, the same quarantine behaviour and the same bundle bytes
@@ -286,10 +291,12 @@ export async function makeCleanRoom() {
     HOMEBREW_NO_ANALYTICS: "1",
     HOMEBREW_NO_ENV_HINTS: "1",
     HOMEBREW_NO_INSTALL_CLEANUP: "1",
-    // --appdir is honored; --binarydir is silently ignored by current
-    // Homebrew (the shim always lands in <prefix>/bin, still room-contained
-    // here) but kept so a future Homebrew that honors it stays isolated.
-    HOMEBREW_CASK_OPTS: `--appdir=${room.appdir} --binarydir=${room.bindir}`,
+    // --appdir is honored and is what keeps the install inside the room.
+    // --binarydir must NOT be set: current Homebrew has no such key (it
+    // warns "Ignoring unknown cask configuration keys: [:binarydir]") and
+    // the `binary` shim always lands in <prefix>/bin — still room-contained
+    // in a throwaway prefix, resolved by resolveCliBin.
+    HOMEBREW_CASK_OPTS: `--appdir=${room.appdir}`,
   };
   return { room, brewEnv };
 }
@@ -306,7 +313,20 @@ export function launchEnv(room) {
   };
 }
 
+const BREW_MUTATING_COMMANDS = new Set(["install", "uninstall", "upgrade", "reinstall", "zap"]);
+
 export async function brew(brewBin, brewEnv, args, { timeoutMs = BREW_MUTATE_TIMEOUT_MS } = {}) {
+  // Hard safety rails at the single choke point for every mutating brew call:
+  // --force bypasses Homebrew's installed guard (it once let an uninstall
+  // reach past the room), and a mutate without an isolated --appdir lets the
+  // default /Applications into scope. Refuse both, always.
+  assert.ok(!args.includes("--force"), "refusing --force: it bypasses the installed guard");
+  if (args.some((a) => BREW_MUTATING_COMMANDS.has(a))) {
+    assert.ok(
+      (brewEnv.HOMEBREW_CASK_OPTS ?? "").includes("--appdir="),
+      "refusing to mutate without an isolated --appdir in HOMEBREW_CASK_OPTS",
+    );
+  }
   const result = await runHostCommand(brewBin, args, { timeoutMs, env: brewEnv });
   if (result.code !== 0) {
     throw new Error(
@@ -593,13 +613,13 @@ export async function assertShimsGone(room, cliBin) {
 }
 
 // Best-effort reset between legs: an earlier failed leg may have left an
-// install behind, and `brew install` refuses to run over one.
+// install behind, and `brew install` refuses to run over one. Routed through
+// brew() so the --appdir guard applies here too.
 export async function resetInstall(ctx) {
   const { brewBin, brewEnv } = ctx;
-  await runHostCommand(brewBin, ["uninstall", "--cask", `${TAP_NAME}/${CASK_TOKEN}`], {
+  await brew(brewBin, brewEnv, ["uninstall", "--cask", `${TAP_NAME}/${CASK_TOKEN}`], {
     timeoutMs: BREW_TIMEOUT_MS,
-    env: brewEnv,
-  });
+  }).catch(() => null);
 }
 
 export async function auditUninstall(ctx, appDir, cliBin) {
@@ -612,7 +632,9 @@ export async function auditUninstall(ctx, appDir, cliBin) {
     const commands = Object.fromEntries(
       await Promise.all(running.map(async (pid) => [pid, await processCommandLine(pid)])),
     );
-    const result = await brew(brewBin, brewEnv, ["uninstall", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
+    // --zap folds the zap stanza into the same uninstall flow (Homebrew 7 has
+    // no standalone `zap` command); the zap row below verifies its effects.
+    const result = await brew(brewBin, brewEnv, ["uninstall", "--zap", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
     for (const pid of running) {
       const after = await processCommandLine(pid);
       assert.ok(after === null || after !== commands[pid], `daemon pid ${pid} still runs the same command after uninstall`);
@@ -628,7 +650,7 @@ export async function auditUninstall(ctx, appDir, cliBin) {
 export async function auditUninstallRemovalOnly(ctx, appDir, cliBin) {
   const { brewBin, brewEnv, room, steps } = ctx;
   await step(steps, "uninstall removes app and shim", async () => {
-    const result = await brew(brewBin, brewEnv, ["uninstall", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
+    const result = await brew(brewBin, brewEnv, ["uninstall", "--zap", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
     assert.ok(!(await pathExists(appDir)), "app still present after uninstall");
     await assertShimsGone(room, cliBin);
     return `${result.stderr.slice(-1500) || result.stdout.slice(-1500)}`;
@@ -636,14 +658,13 @@ export async function auditUninstallRemovalOnly(ctx, appDir, cliBin) {
 }
 
 export async function auditZap(ctx, cask, homeBefore) {
-  const { brewBin, brewEnv, room, steps } = ctx;
+  // Stateless verification of the `uninstall --zap` the uninstall rows ran:
+  // Homebrew 7 removed the standalone `zap` command, so there is no second
+  // brew call — this row asserts the zap stanza's effects (trash gone, no
+  // untracked leftovers under the fresh HOME).
+  const { room, steps } = ctx;
   await step(steps, "zap removes the real footprint", async () => {
     const trashPaths = cask.zapTrash.map((entry) => expandZapPath(entry, room.home));
-    const missing = [];
-    for (const p of trashPaths) {
-      if (!(await pathExists(p))) missing.push(p);
-    }
-    const result = await brew(brewBin, brewEnv, ["zap", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
     const remaining = [];
     for (const p of trashPaths) {
       if (await pathExists(p)) remaining.push(p);
@@ -652,7 +673,7 @@ export async function auditZap(ctx, cask, homeBefore) {
     const homeAfter = await snapshotTree(room.home);
     const leftovers = [...homeAfter].filter((p) => !homeBefore.has(p));
     assert.deepEqual(leftovers, [], `product wrote paths the zap stanza misses: ${JSON.stringify(leftovers)}`);
-    return `zap cleared ${trashPaths.length} paths (${missing.length} already absent pre-zap); no untracked leftovers under the fresh HOME`;
+    return `zap cleared ${trashPaths.length} paths; no untracked leftovers under the fresh HOME`;
   });
 }
 
