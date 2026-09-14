@@ -4,6 +4,13 @@
 
 **The open-source agentic development environment for your most ambitious builds.**
 
+### [Explore drogon.work](https://drogon.work) · [Download for Mac](https://github.com/clioo/drogon/releases/tag/v0.1.0-rc.7) · [Watch the demo](https://youtu.be/jgnitCkmpKk)
+
+**Available for macOS: Apple Developer ID signed and notarized by Apple.**
+The downloadable [v0.1.0-rc.7 release candidate](https://github.com/clioo/drogon/releases/tag/v0.1.0-rc.7)
+targets Apple Silicon and macOS Sonoma (14) or newer. Install through
+[Homebrew](#install-with-homebrew) or download the app directly; no source build is required.
+
 Coordinate coding agents across the vendors you already pay for. Keep your preferred
 harness, delegate work to other configured harnesses, and run independent tasks in
 parallel worktrees. Use the Work Graph to coordinate implementation, adversarial
@@ -21,19 +28,47 @@ came from the Drogon fork of Orca. It has since grown its own surfaces — the W
 and its Orchestrator, self-waking Bots, Meetings — and depends on no other runtime to
 execute anything.
 
-[Visit drogon.work](https://drogon.work) · [Watch the product demo](https://youtu.be/jgnitCkmpKk) · [Run locally](#run-locally) · [Install with Homebrew](#install-with-homebrew) · [Install the macOS preview](#install-the-macos-preview) · [Feature tour](#feature-tour-the-twelve-mvp-journeys) · [Use it with agents](#using-drogon-with-agents) · [Contribute](#contributing)
+[Install with Homebrew](#install-with-homebrew) · [Build from source](#run-locally) · [Feature tour](#feature-tour) · [Use it with agents](#using-drogon-with-agents) · [Engineering evidence](#hackathon-engineering-evidence) · [Contribute](#contributing)
 
-![Drogon workspace in the light theme: project sidebar with a worktree card, a persistent terminal session, and the file explorer](docs/screenshots/workspace-light.png)
+## See the workflow you are running
 
-_A real Drogon session running a demo project and shell session. No AI inference is running in this capture._
+Give the main agent a task, choose the harnesses its workers can use, and configure
+the verification loop. Keep the graph and the individual agent sessions in one workspace.
 
-![The same workspace in the dark theme](docs/screenshots/workspace-dark.png)
+![Drogon Work Graph: main agent, implementation workers, adversarial test and code review, beside the subagent policy and nine agent sessions](docs/images/work-graph.png)
 
-> **Early preview, under active development.** The current packaging and installation flow targets macOS. Expect rough edges; use a dedicated development data directory, not production data.
+_The workflow preview in the developer's Drogon workspace: depth-1 workers and an
+adversarial loop capped at three iterations. This view shows the configured structure;
+execution outcomes appear in Agent telemetry._
 
-## Built for flow, not status updates
+## Follow how your agents work together
 
-Your next step should be visible in the workspace—not buried in a meeting recap.
+See dispatches, findings, progress, and decisions as agents report back. Open the
+recorded detail to understand what was attempted, what changed, and what still needs attention.
+
+![Agent telemetry in Drogon showing recorded decisions and verification findings for issue 383 and pull request 552](docs/images/agent-telemetry.png)
+
+_An actual development session for [PR #552](https://github.com/clioo/drogon/pull/552).
+The record includes completed work, failures, and blocked attempts, including the
+agent's report of remaining acceptance flakiness._
+
+## See where your tokens go
+
+Track reported input, output, cache-read, and cache-write tokens. Inspect measurements
+by agent and runtime to understand how work is distributed across your configured providers.
+Missing usage stays unavailable rather than being counted as zero; token counts are
+not a claim about subscription savings or a provider's final bill.
+
+![Drogon Usage view showing 344708 input tokens, 49965 output tokens, 12887552 cache-read tokens, and 127 measurements across three agents](docs/images/token-usage.png)
+
+_127 recorded measurements across three agents in this workspace. These are the
+values visible in this capture, not a benchmark. All three images were supplied by
+the developer from Drogon on September 14, 2026; [capture details](docs/screenshots/MANIFEST.md)._
+
+## Coordinate the work from one place
+
+From a monitored pull request to parallel implementation and verification, keep the
+task, its context, and its outcome within reach.
 
 - **Give every task room to build.** Organize repositories and folders into projects. Create Git worktrees for parallel changes without switching branches underneath another session.
 - **Keep agents and terminals together.** Work with Claude Code, Pi, or OpenCode in terminal tabs. Daemon-owned sessions survive renderer restarts, with agent activity and input notifications surfaced in the desktop.
@@ -42,7 +77,7 @@ Your next step should be visible in the workspace—not buried in a meeting reca
 - **Preview without leaving the task.** Open the embedded browser alongside your work. Agents can navigate, inspect, click, and fill through `drogon-cli` while the desktop is connected.
 - **Make recurring work explicit.** Schedule automations, give bots responsibilities and the monitors that wake them, and inspect every run. Design the work itself in the Work Graph: nodes with their own harness and model, an approved-runtime order to fall back through, and an optional bounded adversarial review before anything is called done.
 
-## Feature tour: the twelve MVP journeys
+## Feature tour
 
 Drogon grew as twelve end-to-end journeys. Each one ships with automated acceptance;
 the packaged build is validated as a whole before every release.
@@ -57,10 +92,10 @@ the packaged build is validated as a whole before every release.
 8. **Bots.** Create bots with presets and give them responsibilities (cron-backed), chat over visible `bot.run` execution, and browse per-bot history. A bot owns its own **monitors** — a file digest, an HTTP poll, a script, or a `github_pr.v1` watch on a repository — and a monitor that fires can release real work: a watched pull request opens a worktree and starts a review session, with the firing evidence recorded and deduplicated by case.
 9. **Work Graph.** The Orchestrator launches its **Main agent** and every optional role as a native, visible workspace session. **Delegate** allows depth-1 workers when parallel or specialized work benefits from them without forbidding the main agent from working directly. **Adversarial testing** adds a bounded *Adversarial test* and *Code review* loop after the main work settles. The **Subagent policy** chooses approved runtimes in order and an explicit fallback used only after they fail. `.drogon/graph.json` keeps a strict split: `intent` is yours, `state` is what the daemon observed, and every runtime attempt and verdict appears on the node and in *Evidence*.
 10. **Settings.** Theme (system/light/dark), default harness, rebindable shortcuts, notifications, Git/GitHub auth panes, and an optional Mentu runtime installer on Apple silicon macOS — all persisted and taking effect immediately, including “Restart daemon”.
-11. **Packaging.** An ad-hoc-signed, sealed `Drogon.app` with verified build info, packaged acceptance against a disposable profile, and a per-user installer that preserves previous builds.
+11. **Mac distribution.** A downloadable `Drogon.app`, signed with Apple Developer ID and notarized by Apple, with a Homebrew cask, verified build identity, and published release checks. Local source builds use ad-hoc signing unless a Developer ID is configured.
 12. **Status bar.** The Orca bottom bar: settings and help on the left, per-provider usage meters with refresh, and on the right awake on/off, memory, terminal and port counts, and the daemon connection segment.
 
-## What came after the MVP
+## From a task to a repeatable workflow
 
 The twelve journeys were the scope. Three things grew out of using them.
 
@@ -86,17 +121,9 @@ agent from answering simple questions, running normal repository commands, or ma
 changes the user requests. The configured policy reaches the next session's brief, so a
 toggle in the UI changes how the agent actually behaves.
 
-![The Work Graph with adversarial testing on: Main agent, Implementation workers, the dashed Adversarial loop with per-iteration verdicts, Ready to merge, and the Subagent policy panel](docs/screenshots/orchestrator-adversarial-light.png)
-
-_Adversarial testing on, two iterations allowed, both passed — every node shows its own runtime attempts and verdict. Captured from a disposable fixture workspace; the runtimes are fakes._
-
 ## A brief, not another meeting
 
 Turn a recurring prompt into a scheduled workspace task: a morning summary, a maintenance sweep, or a weekly review. Choose the workspace, harness, and schedule; keep the resulting work traceable through run history.
-
-![Drogon automation editor with a morning-brief prompt, workspace, harness, and schedule controls](docs/images/automations.png)
-
-_An example automation draft in the real preview UI. It was not saved or executed._
 
 ## From task to pull request
 
@@ -140,7 +167,7 @@ Drogon is split so the desktop is a view, not the lifetime of your work.
 - **`crates/drogon-orchestration`** — native multi-agent coordination: runs, tasks, dispatches, blocking ask/reply, worker lifecycle.
 - **`apps/desktop`** — the Electron/React UI. The renderer talks to the daemon through preload bridges; terminals render with xterm.js over WebGL.
 
-Two rules fall out of this shape. First, **liveness is a verdict, not a guess**: sessions report `live`, `unverifiable`, or `exited`, and losing contact never proves exit. Second, **no telemetry and no updater** in the preview: the only network use is yours (git, `gh`, harnesses, and the pages you open).
+Two rules fall out of this shape. First, **liveness is a verdict, not a guess**: sessions report `live`, `unverifiable`, or `exited`, and losing contact never proves exit. Second, **execution evidence stays local**: Agent telemetry and Usage are workspace records, not analytics sent to Drogon. There is no automatic updater in the preview; git, `gh`, harnesses, and pages you open use the network through your configured tools.
 
 **No real model inference runs inside the app's own test and acceptance paths** — they use shell fixtures. Coding harnesses and their provider accounts are configured separately; their network use and data policies still apply. GitHub features require `gh` and appropriate authentication. Mentu is not downloaded during packaging or startup; Mentu execution requires its optional pinned runtime, which Apple silicon macOS users can install explicitly in Settings.
 
@@ -174,14 +201,6 @@ When a workspace has a configured subagent policy, Drogon writes it into a manag
 in that workspace's `AGENTS.md` and `CLAUDE.md` at session start, so the agent knows
 whether it should delegate or do the work itself. A workspace with no policy is left
 untouched — Drogon never creates those files on its own.
-
-![The Bots page with one bot expanded: responsibilities, a Release watch automation and a repository monitor](docs/screenshots/bots-expanded-light.png)
-
-_A bot, its scheduled responsibility, and the monitor that can wake it. Fixture names throughout._
-
-![Meetings: the transcript list with a search and a date filter applied](docs/screenshots/meetings-filtered-light.png)
-
-_Meetings indexed read-only from local Markdown transcripts, searched and filtered. Every image in this README is regenerated by `node scripts/doc-screenshots.mjs` against a fixture world; see [docs/screenshots/MANIFEST.md](docs/screenshots/MANIFEST.md)._
 
 The orchestration verbs (`run`, `task`, `dispatch`, `ask`, `check`, `reply`) mirror
 Orca's, so a worker agent can coordinate with a human supervisor without leaving the
@@ -383,18 +402,16 @@ Homebrew stops the detached Drogon daemon before uninstall and upgrade; to recov
 a Homebrew-managed data directory after a downgrade refusal, use
 `brew reinstall --cask clioo/drogon/drogon` or install the previous cask version.
 
-> **Signing:** the current cask (v0.1.0-rc.2) is ad-hoc signed, not notarized:
-> on first launch, right-click `Drogon.app` and choose **Open** (or allow it in
-> System Settings → Privacy & Security → **Open Anyway**). v0.1.0-rc.3 was
-> Developer ID signed and notarized but aborts on launch (it fails reserving
-> V8 memory). v0.1.0-rc.4 is Developer ID signed but its seal currently fails
-> verification (`spctl -a -vv` reports a sealed resource missing or invalid
-> on the tap-pinned bytes), so quarantined files from a fresh install still
-> stall; the signing fix ships in the next release.
+**Verified Mac distribution.** The published v0.1.0-rc.7 archive is Apple Developer ID
+signed and notarized by Apple. Its [release pipeline](https://github.com/clioo/drogon/actions/runs/34861305249)
+verified the signature, notarization ticket, and Gatekeeper acceptance after ZIP
+extraction, then checked that the Homebrew cask serves the same archive.
+Gatekeeper reported `Notarized Developer ID`. This is a release candidate distributed
+directly and through Homebrew; local source builds have their own signing configuration.
 
-> **Gatekeeper:** the preview is ad-hoc signed, not notarized. On first launch,
-> right-click `Drogon.app` and choose **Open** (or allow it in
-> System Settings → Privacy & Security) to bypass the default quarantine warning.
+The same pipeline executed 107 packaged acceptance checks and reported eight skipped
+checks for unavailable real harnesses or a previous upgrade bundle. Those skips are
+not passing results; the release log records the exact coverage and limitations.
 
 ## Contributing
 
