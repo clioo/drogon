@@ -23,7 +23,7 @@ const ok = <T,>(result: T) => ({ ok: true as const, result });
  *  harnesses are installed here, and what each one lists. */
 function stubCatalogs(input: {
   harnesses: { harnessId: string; displayName: string }[];
-  models: Record<string, string[]>;
+  models: Record<string, (string | { id: string; provider: string })[]>;
 }): void {
   window.drogon = {
     harnesses: async () =>
@@ -49,9 +49,9 @@ function stubCatalogs(input: {
             probedAtEpochMs: Date.now(),
             configScope: "user",
           },
-          entries: (input.models[harness] ?? []).map((id) => ({
-            provider: null,
-            id,
+          entries: (input.models[harness] ?? []).map((model) => ({
+            provider: typeof model === "string" ? null : model.provider,
+            id: typeof model === "string" ? model : model.id,
             context: null,
             maxOutput: null,
             thinking: null,
@@ -309,6 +309,49 @@ describe("Settings → Reproducible demo", () => {
       ),
     );
     expect((screen.getByTestId("repro-demo-run") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("Pi models shared by providers", () => {
+  beforeEach(() => stubCatalogs({
+    harnesses: [{ harnessId: "pi", displayName: "Pi" }],
+    models: { pi: [
+      { id: "gpt-5.6-luna", provider: "openai-codex" },
+      { id: "gpt-5.6-luna", provider: "opencode-go" },
+    ] },
+  }));
+
+  test("proposes a qualified model, preserves separate picks for the bot and its policy", async () => {
+    const seen = { bots: [] as unknown[] };
+    const policies: unknown[] = [];
+    render(<ReproDemoSection defaultHarnessId="pi" bridge={{
+      ...bridgeThatRuns(seen),
+      graphWritePolicy: async (input) => { policies.push(input); return ok({}); },
+    }} />);
+    await waitFor(() => expect(screen.getByTestId("repro-demo-model-value").textContent).toBe("openai-codex/gpt-5.6-luna"));
+    await waitFor(() => expect(screen.getByTestId("repro-demo-subagents-model-value").textContent).toBe("openai-codex/gpt-5.6-luna"));
+    fireEvent.click(screen.getAllByRole("button", { name: "Browse models" })[1]);
+    expect(await screen.findByRole("option", { name: /openai-codex\/gpt-5.6-luna/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("option", { name: /opencode-go\/gpt-5.6-luna/ }));
+    fireEvent.click(screen.getByTestId("repro-demo-run"));
+    await waitFor(() => expect(policies).toHaveLength(1));
+    expect(seen.bots[0]).toMatchObject({ body: { harnessPolicy: { defaultHarness: "pi", explicitModel: "openai-codex/gpt-5.6-luna" } } });
+    expect(policies[0]).toMatchObject({ policy: { approvedRuntimes: [{ harness: "pi", model: "opencode-go/gpt-5.6-luna" }] } });
+  });
+
+  test.each([0, 1])("blocks an ambiguous manually typed model in picker %i before creating a project", async (picker) => {
+    let projects = 0;
+    render(<ReproDemoSection defaultHarnessId="pi" bridge={{
+      ...bridgeThatRuns(),
+      projectCreate: async ({ name }) => { projects++; return ok({ project: { id: "p1", name }, workspaceId: "ws-1" }); },
+    }} />);
+    await waitFor(() => expect((screen.getByTestId("repro-demo-run") as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getAllByRole("button", { name: "Browse models" })[picker]);
+    fireEvent.change(screen.getByRole("combobox", { name: "Search models" }), { target: { value: "gpt-5.6-luna" } });
+    fireEvent.click(screen.getByRole("option", { name: /typed by you/ }));
+    await waitFor(() => expect(screen.getByTestId("repro-demo-blocked").textContent).toContain("multiple providers"));
+    fireEvent.click(screen.getByTestId("repro-demo-run"));
+    expect(projects).toBe(0);
   });
 });
 

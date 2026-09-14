@@ -97,6 +97,39 @@ export function recipeObservedModels(
   return models;
 }
 
+/** Pi's bare model ids can belong to several providers. Keep each route
+ *  selectable instead of deduping distinct providers into one ambiguous id. */
+function catalogModelChoices(catalog: HarnessModelsCatalog, harness: string) {
+  const providers = new Map<string, Set<string>>();
+  if (harness.trim().toLowerCase() === "pi") {
+    for (const entry of catalog.entries) {
+      if (!entry.provider) continue;
+      const routes = providers.get(entry.id) ?? new Set<string>();
+      routes.add(entry.provider);
+      providers.set(entry.id, routes);
+    }
+  }
+  return catalog.entries.map((entry) => ({
+    entry,
+    id: entry.provider && (providers.get(entry.id)?.size ?? 0) > 1
+      ? `${entry.provider}/${entry.id}`
+      : entry.id,
+  }));
+}
+
+/** Alternatives only when the host proves that a bare selection is ambiguous. */
+export function ambiguousModelAlternatives(
+  catalog: HarnessModelsCatalog | null,
+  harness: string,
+  model: string,
+): string[] {
+  if (!catalog || catalog.status !== "enumerated") return [];
+  const selected = model.trim();
+  return [...new Set(catalogModelChoices(catalog, harness)
+    .filter(({ entry, id }) => entry.id === selected && id !== selected)
+    .map(({ id }) => id))];
+}
+
 /** Combobox options: host-enumerated entries first (verified), then the
  *  curated known catalog for ids the host did not enumerate (unverified,
  *  explicitly labelled), then recipe-observed ids (unverified, "from this
@@ -114,8 +147,10 @@ export function modelOptionsFromCatalog(input: {
     const recommended = new Set(
       KNOWN_RECOMMENDED[input.harness.trim().toLowerCase()] ?? [],
     );
-    for (const entry of input.catalog.entries) {
-      if (enumerated.has(entry.id)) continue;
+    for (const { entry, id } of catalogModelChoices(input.catalog, input.harness)) {
+      if (enumerated.has(id)) continue;
+      enumerated.add(id);
+      // Do not reintroduce an ambiguous bare alias from known/recipe models.
       enumerated.add(entry.id);
       const notes: string[] = [];
       if (entry.provider) notes.push(entry.provider);
@@ -126,7 +161,7 @@ export function modelOptionsFromCatalog(input: {
       if (entry.thinking) notes.push("thinking");
       if (entry.images) notes.push("images");
       options.push({
-        id: entry.id,
+        id,
         group: "catalog",
         verified: true,
         recommended: recommended.has(entry.id),
@@ -309,7 +344,9 @@ export function modelCatalogReadout(input: {
       ? `${catalog.note.slice(0, 217)}…`
       : catalog.note
     : null;
-  const enumeratedIds = new Set(catalog.entries.map((entry) => entry.id));
+  const enumeratedIds = new Set(
+    catalogModelChoices(catalog, input.harness).map(({ id }) => id),
+  );
 
   if (catalog.status !== "enumerated") {
     const reason = STATUS_TEXT[catalog.status];

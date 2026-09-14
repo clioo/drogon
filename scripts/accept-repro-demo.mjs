@@ -85,12 +85,14 @@ const HARNESS_DISPLAY_NAMES = {
  * parallel sessions, the daemon's telemetry); what a real agent decides —
  * whether the first round already passes — is reported, not assumed.
  */
-export async function execute({ runs = 2, live = null } = {}) {
+export async function execute({ runs = 2, live = null, piProviderFixture = false } = {}) {
+  assert.ok(!(live && piProviderFixture), "The Pi provider fixture cannot run with --live");
+  const fixtureHarness = piProviderFixture ? "pi" : FIXTURE_HARNESS;
   const report = {
     runner: "scripts/accept-repro-demo.mjs",
     status: "FAILED",
     startedAt: new Date().toISOString(),
-    lane: `${FIXTURE_HARNESS}/${FIXTURE_MODEL} (local fixture, no inference)`,
+    lane: `${fixtureHarness}/${FIXTURE_MODEL} (local fixture, no inference)`,
     checks: [],
     runs: [],
     phases: {},
@@ -127,7 +129,7 @@ export async function execute({ runs = 2, live = null } = {}) {
     if (live) {
       report.lane = `LIVE · main ${live.main.harness}/${live.main.model || "harness default"} · subagents ${live.subagents.harness}/${live.subagents.model || "harness default"} (real inference)`;
     } else {
-      await writeHarnessFixtures(binDir, [FIXTURE_HARNESS]);
+      await writeHarnessFixtures(binDir, [fixtureHarness]);
     }
     // What the fixture agent needs to reach the CLI and its stages. The in-app
     // demo writes no context file of its own, so the daemon carries the path
@@ -253,18 +255,33 @@ export async function execute({ runs = 2, live = null } = {}) {
         if (!wanted.model) return;
         const modelField = page.getByTestId(`${prefix}-model-value`).locator("..");
         await modelField.getByRole("button", { name: "Browse models" }).click();
+        if (piProviderFixture) {
+          await page.getByLabel("Search models").fill("dog-tinder");
+          for (const provider of ["fixture", "alternate"]) {
+            const option = page.getByRole("option", { name: new RegExp(`${provider}/dog-tinder`) });
+            await option.waitFor();
+            assert.doesNotMatch(await option.innerText(), /typed by you|unverified/);
+          }
+          const shot = path.join(fixture, `pi-provider-picker-${prefix}-${attempt}.png`);
+          await page.screenshot({ path: shot, animations: "disabled" });
+          report.screenshots.push(shot);
+          await page.getByRole("option", { name: /typed by you/ }).click();
+          await page.getByTestId("repro-demo-blocked").filter({ hasText: "multiple providers" }).waitFor();
+          assert.equal(await page.getByTestId("repro-demo-run").isEnabled(), false);
+          await modelField.getByRole("button", { name: "Browse models" }).click();
+          report.checks.push(`${prefix}: two host-enumerated Pi routes; bare model blocked before setup`);
+        }
         await page.getByLabel("Search models").fill(wanted.model);
-        await page
-          .getByRole("option", { name: new RegExp(wanted.model.replace(/[/.]/g, "\\$&")) })
-          .first()
-          .click();
+        const selected = page.getByRole("option", { name: new RegExp(wanted.model.replace(/[/.]/g, "\\$&")) }).first();
+        if (piProviderFixture) assert.doesNotMatch(await selected.innerText(), /typed by you|unverified/);
+        await selected.click();
         assert.equal(
           (await page.getByTestId(`${prefix}-model-value`).innerText()).trim(),
           wanted.model,
           `the picked ${prefix} model must be the one the run gets`,
         );
       };
-      const main = live ? live.main : { harness: FIXTURE_HARNESS, model: FIXTURE_MODEL };
+      const main = live ? live.main : { harness: fixtureHarness, model: FIXTURE_MODEL };
       const subagents = live ? live.subagents : main;
       await pick("repro-demo", main);
       await pick("repro-demo-subagents", subagents);
@@ -617,6 +634,7 @@ if (isMainModule()) {
     process.stdout.write(
       "Usage: node scripts/accept-repro-demo.mjs [--check] [--runs <1-5>] [--live ...]\n" +
         "  --check      verify the built desktop and core binaries exist, run nothing\n" +
+        "  --pi-provider-fixture  test duplicate Pi model ids with local shell fixtures\n" +
         "  --runs <n>   how many whole demos to run back to back (default 2: the\n" +
         "               second one proves a run can be repeated)\n" +
         "  --live --main-harness <id> [--main-model <id>] --subagent-harness <id> [--subagent-model <id>]\n" +
@@ -654,7 +672,7 @@ if (isMainModule()) {
         },
       };
     }
-    const report = await execute({ runs, live });
+    const report = await execute({ runs, live, piProviderFixture: process.argv.includes("--pi-provider-fixture") });
     process.exitCode = report.status === "PASSED" ? 0 : 1;
   }
 }

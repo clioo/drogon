@@ -15,6 +15,7 @@ import type { MentuRecipeDefinition } from "./recipe-validation/mentu-recipe-doc
 import { knownModelsFor } from "./mentu-known-models";
 import {
   MODEL_CATALOG_STALE_MS,
+  ambiguousModelAlternatives,
   filterModelOptions,
   isModelCatalogStale,
   modelCatalogAge,
@@ -158,6 +159,52 @@ describe("modelOptionsFromCatalog", () => {
         excludeStepLabel: null,
       }),
     ).toEqual([]);
+  });
+});
+
+describe("Pi provider identity", () => {
+  const shared = catalog({ entries: [
+    entry({ provider: "openai-codex", id: "gpt-5.6-luna" }),
+    entry({ provider: "opencode-go", id: "gpt-5.6-luna" }),
+    entry({ provider: "openai-codex", id: "gpt-5.6-luna" }),
+  ] });
+
+  it("keeps both qualified routes, dedupes identical rows, and suppresses bare recipe aliases", () => {
+    const options = modelOptionsFromCatalog({
+      catalog: shared, harness: "pi", excludeStepLabel: null,
+      recipe: { name: "demo", steps: [{ label: "other", backend: "pi", model: "gpt-5.6-luna" }] },
+    });
+    expect(options.filter((option) => option.group === "catalog").map((option) => option.id)).toEqual([
+      "openai-codex/gpt-5.6-luna", "opencode-go/gpt-5.6-luna",
+    ]);
+    expect(options.some((option) => option.id === "gpt-5.6-luna")).toBe(false);
+    expect(ambiguousModelAlternatives(shared, "pi", "gpt-5.6-luna")).toEqual([
+      "openai-codex/gpt-5.6-luna", "opencode-go/gpt-5.6-luna",
+    ]);
+    expect(ambiguousModelAlternatives(shared, "pi", "openai-codex/gpt-5.6-luna")).toEqual([]);
+    expect(ambiguousModelAlternatives(null, "pi", "gpt-5.6-luna")).toEqual([]);
+    expect(ambiguousModelAlternatives({ ...shared, status: "probe_failed" }, "pi", "gpt-5.6-luna")).toEqual([]);
+  });
+
+  it("verifies qualified choices, not the ambiguous bare alias", () => {
+    const readout = (selectedModel: string) => modelCatalogReadout({
+      catalog: shared, harness: "pi", loading: false, error: null,
+      registered: true, now: NOW, selectedModel,
+    });
+    expect(readout("openai-codex/gpt-5.6-luna").statusLine).not.toContain("carried unverified");
+    expect(readout("gpt-5.6-luna").statusLine).toContain("carried unverified");
+    expect(readout("").enumeratedIds.has("opencode-go/gpt-5.6-luna")).toBe(true);
+  });
+
+  it("preserves unique ids, providerless rows and other harnesses", () => {
+    const options = (harness: HarnessModelsCatalog["harness"], entries = shared.entries) => modelOptionsFromCatalog({
+      catalog: catalog({ harness, entries }), harness, recipe: null, excludeStepLabel: null,
+    }).filter((option) => option.group === "catalog").map((option) => option.id);
+    expect(options("codex")).toEqual(["gpt-5.6-luna"]);
+    expect(options("pi", [entry({ provider: null }), entry({ provider: "p1", id: "org/model" })]))
+      .toEqual(["kimi-for-coding", "org/model"]);
+    expect(options("pi", [entry({ provider: "p1", id: "org/model" }), entry({ provider: "p2", id: "org/model" })]))
+      .toEqual(["p1/org/model", "p2/org/model"]);
   });
 });
 

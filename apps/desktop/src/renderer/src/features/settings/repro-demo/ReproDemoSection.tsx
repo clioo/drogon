@@ -11,7 +11,7 @@ import { SettingsRow, SettingsSubsectionHeader } from "../SettingsFormControls";
 import { SettingsSection } from "../SettingsSection";
 import { useHarnessCatalog } from "../../mentu/mentu-harness-catalog";
 import { useMentuModelCatalog } from "../../mentu/mentu-model-catalog";
-import { modelOptionsFromCatalog } from "../../mentu/mentu-model-registry";
+import { ambiguousModelAlternatives, modelOptionsFromCatalog } from "../../mentu/mentu-model-registry";
 import {
   HarnessSelect,
   RuntimeModelField,
@@ -264,6 +264,7 @@ export function useDemoRuntime(input: {
     usable,
     catalogLoading: harnessCatalog.loading,
     modelProposed: Boolean(model) && !modelChosen,
+    ambiguousModels: ambiguousModelAlternatives(modelCatalog.catalog, harness, model),
     modelsListed: options.some((option) => option.id.trim().length > 0),
     following,
     chooseHarness: (next: string) => {
@@ -352,6 +353,8 @@ function runtimeBlocker(runtime: ReturnType<typeof useDemoRuntime>, who: string)
       ? "Reading the harnesses installed here…"
       : "No supported harness is installed here: install Claude Code, Codex, OpenCode or Pi first.";
   if (!runtime.harness) return `Choose a harness for ${who}.`;
+  if (runtime.ambiguousModels.length > 0)
+    return `${runtime.label} model '${runtime.model}' has multiple providers. Choose a provider-qualified model for ${who} from Models: ${runtime.ambiguousModels.join(", ")}.`;
   if (harnessNeedsModel(runtime.harness) && !runtime.model)
     return `${runtime.label} needs an exact model id for ${who}: pick one from Models.`;
   return null;

@@ -210,10 +210,12 @@ if (rest.includes("--version") || rest.includes("-v") || rest[0] === "--version"
   process.exit(0);
 }
 
-// Enumeration surfaces the harness catalog probes. The fixture model is the
-// only id it will ever claim.
+// Pi reports provider/model columns. Two routes to the same fixture model
+// exercise provider disambiguation without any real provider or inference.
 if (rest[0] === "models" || rest.includes("--list-models")) {
-  process.stdout.write(`${context?.model ?? "fixture/dog-tinder"}\n`);
+  process.stdout.write(harness === "pi"
+    ? "provider   model        context  max-out  thinking  images\nfixture    dog-tinder   1K       1K       no        no\nalternate  dog-tinder   1K       1K       no        no\n"
+    : `${context?.model ?? "fixture/dog-tinder"}\n`);
   process.exit(0);
 }
 
