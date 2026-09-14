@@ -2,6 +2,7 @@
 // exit-status wrappers in the UI; the raw text stays in the console log.
 import { describe, expect, test, vi } from "vitest";
 import {
+  GIT_NOT_INSTALLED_COPY,
   NOT_A_GIT_REPOSITORY_COPY,
   PR_CREATE_FALLBACK_COPY,
   sanitizeGitDetail,
@@ -43,6 +44,24 @@ describe("toGitDisplayError", () => {
         expect(shown).not.toMatch(/git\s+--no-pager/i);
       }
       expect(toGitDisplayError("", "Push failed.")).toBe("Push failed.");
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  test("maps the CLT stub to the install-tools copy", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      for (const raw of [
+        "git worktree add /tmp/x -b probe1 exited with exit status: 1: xcode-select: note: No developer tools were found on this system, requesting installation.",
+        "xcode-select: note: No developer tools were found on this system, requesting installation.",
+        "Git developer tools are not installed on this host: install them with `xcode-select --install`, then retry.",
+      ]) {
+        const shown = toGitDisplayError(raw, "Unable to load source control status.");
+        expect(shown).toBe(GIT_NOT_INSTALLED_COPY);
+        expect(shown).not.toMatch(/exited with exit status/i);
+        expect(shown).not.toMatch(/xcode-select: note/i);
+      }
     } finally {
       vi.restoreAllMocks();
     }

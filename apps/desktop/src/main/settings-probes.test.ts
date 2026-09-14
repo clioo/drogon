@@ -85,6 +85,27 @@ describe("probeGitIdentity", () => {
       },
     });
   });
+  test("a CLT stub is unavailable with the install-tools reason", async () => {
+    const stub = "xcode-select: note: No developer tools were found on this system.";
+    const run: ProbeRunner = async () => okRun("", 1, stub);
+    const result = await probeGitIdentity({ workspacePath: "/repo" }, run);
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        workspacePath: "/repo",
+        available: false,
+        name: null,
+        email: null,
+        reason:
+          "Git developer tools are not installed on this host: install them with xcode-select --install, then reopen Settings.",
+      },
+    });
+  });
+  test("a real repo error without the stub marker stays available", async () => {
+    const run: ProbeRunner = async () => okRun("", 128, "fatal: not a git repository");
+    const result = await probeGitIdentity({ workspacePath: "/repo" }, run);
+    expect(result.ok && result.result.available).toBe(true);
+  });
   test("rejects a NUL byte in the workspace path without spawning", async () => {
     let spawned = false;
     const run: ProbeRunner = async () => {
