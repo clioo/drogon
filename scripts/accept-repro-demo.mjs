@@ -424,7 +424,21 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
           const alive = await sessionsAlive().catch(() => []);
           if (alive.length > mostAlive) mostAlive = alive.length;
           if (alive.length) await captureDescendants([daemon.pid], owned);
-          if (alive.length >= 2 && !sessionsShot) {
+          // The bot's turn and the graph main can both be alive before any
+          // worker exists (a real main agent takes a while to fan out): the
+          // sessions stop is checked once the fan-out has actually happened.
+          const fannedOut = await (async () => {
+            if (alive.length < 2) return false;
+            const graph = await orchestratorStatus().catch(() => null);
+            const mainRunId = graph?.steps?.find((step) => step.phase === "main" && step.status === "running")?.runId ?? "";
+            const mainSessionId = /^session:([^:]+):/.exec(mainRunId)?.[1] ?? null;
+            const bots = await cli("rpc", "bot.snapshot", "--params", JSON.stringify({
+              hostId: (await cli("status")).hostId, workspaceId: "", locale: "en-US",
+            })).catch(() => null);
+            const botSessionId = bots?.bots?.find((bot) => bot.id === `white-walker-${tag}`)?.currentSession?.sessionId ?? null;
+            return alive.filter((session) => session.id !== mainSessionId && session.id !== botSessionId).length >= 2;
+          })();
+          if (fannedOut && !sessionsShot) {
             // The tour leaves Bots for the sessions at the admission, seconds
             // before the workers exist: the viewer sees terminals working —
             // not Bots, not Settings, and not the Work Graph canvas.
@@ -667,6 +681,36 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
     report.status = "PASSED";
   } catch (error) {
     report.failure = error instanceof Error ? error.message : String(error);
+    // What the run's sessions printed, so an early exit of a real harness is
+    // diagnosable from the report alone.
+    try {
+      const tails = [];
+      const listed = await runAcceptanceProcess(
+        cliPath,
+        ["--data-dir", dataDir, "--json", "rpc", "session.list", "--params", "{}"],
+        { timeout: 15_000 },
+      ).then(({ stdout }) => JSON.parse(stdout)).catch(() => null);
+      for (const session of listed?.result?.sessions ?? []) {
+        const read = await runAcceptanceProcess(
+          cliPath,
+          ["--data-dir", dataDir, "--json", "rpc", "session.read", "--params",
+            JSON.stringify({ sessionId: session.id, incarnation: session.incarnation, cursor: 0, limitBytes: 16_384 })],
+          { timeout: 15_000 },
+        ).then(({ stdout }) => JSON.parse(stdout)).catch(() => null);
+        const bytes = read?.result?.dataBase64 ? Buffer.from(read.result.dataBase64, "base64").toString("utf8") : "";
+        tails.push({
+          sessionId: session.id,
+          harnessId: session.harnessId ?? null,
+          verdict: session.verdict,
+          exitCode: session.exitCode ?? null,
+          args: (session.args ?? []).map((arg) => (arg.length > 120 ? `${arg.slice(0, 120)}…(${arg.length})` : arg)),
+          tail: bytes.slice(-6000),
+        });
+      }
+      report.sessionTails = tails;
+    } catch {
+      // Diagnostics only; the failure above is the verdict.
+    }
   } finally {
     try {
       await captureDescendants(
