@@ -8,7 +8,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import { MentuAgentStepEditor } from "./MentuAgentStepEditor";
 import type { ApprovedSelectionVerdict } from "./mentu-approved-selection";
-import type { ModelCatalogReadout, ModelOption } from "./mentu-model-registry";
+import type { ModelCatalogReadout } from "./mentu-model-registry";
+import type { ModelOption } from "../agent-runtime/ModelPicker";
 
 beforeEach(installRadixJsdomStubs);
 afterEach(cleanup);

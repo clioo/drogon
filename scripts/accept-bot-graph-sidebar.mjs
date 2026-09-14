@@ -111,9 +111,9 @@ try {
   assert.equal(await graph().evaluate((button) => getComputedStyle(document.getElementById(button.getAttribute("aria-controls"))).flexDirection), "column", "fixture must load the product's generated utility styles");
   assert.equal(await graph().evaluate((button) => getComputedStyle(button).fontSize), "12px");
   assert.equal(await page.getByText("pi · fixture/model", { exact: true }).isVisible(), true);
-  assert.equal(await page.getByText("Background workflow · no terminal", { exact: true }).isVisible(), true);
-  assert.deepEqual((await page.locator("[data-worktree-agent-row]").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-worktree-agent-row")))).sort(), ["bot-dispatcher", "worker-deck", "worker-page"]);
-  report.checks.push("headless main automatically visible beside an exited Bot and two worker terminal rows; no main terminal invented");
+  assert.equal(await page.getByText("Native workspace sessions", { exact: true }).isVisible(), true);
+  assert.deepEqual((await page.locator("[data-worktree-agent-row]").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-worktree-agent-row")))).sort(), ["bot-dispatcher", "main-session", "worker-deck", "worker-page"]);
+  report.checks.push("native graph main automatically visible beside its workers while the exited Bot remains separate");
   const expanded = path.join(receipt, "main-and-workers.png");
   await page.screenshot({ path: expanded }); report.screenshots.push(expanded);
   await page.locator('[data-worktree-agent-row="worker-deck"]').click();

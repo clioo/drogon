@@ -51,7 +51,7 @@ the packaged build is validated as a whole before every release.
 6. **Tasks.** A page fed by GitHub Issues via `gh`: list, filter, paginate, a pull-request mode with review/checks/merge cells, and “start” creates a worktree and session from an issue or PR.
 7. **Automations.** A cron scheduler runs inside the daemon on top of the automation runner, with an editor, local-time schedules, a Runs dashboard, run detail, and history — including runs by a real coding agent.
 8. **Bots.** Create bots with presets and give them responsibilities (cron-backed), chat over visible `bot.run` execution, and browse per-bot history. A bot owns its own **monitors** — a file digest, an HTTP poll, a script, or a `github_pr.v1` watch on a repository — and a monitor that fires can release real work: a watched pull request opens a worktree and starts a review session, with the firing evidence recorded and deduplicated by case.
-9. **Work Graph.** The Orchestrator is the graph's one interface: a **Main agent** bound to the workspace's live session, the **Implementation workers** it plans and supervises at depth 1, and — when you switch it on — a dashed **adversarial loop** (an *Adversarial test* node that tries to break the result, then a *Code review* node that fixes what is real and verifies each fix), repeating up to the iteration bound and ending at *Ready to merge*. The **Subagent policy** beside it decides what those workers may run on: approved runtimes tried in order, a fallback marked *Not approved* that is used only after every approved one fails, and the two execution modes — **Adversarial testing** and **Delegate** — of which you pick at most one; with both off the main agent works directly. `.drogon/graph.json` keeps a strict split: `intent` is yours, `state` is what the daemon observed, and every runtime attempt and pass/fail verdict shows on the node itself and in the *Evidence* tab.
+9. **Work Graph.** The Orchestrator launches its **Main agent** and every optional role as a native, visible workspace session. **Delegate** allows depth-1 workers when parallel or specialized work benefits from them without forbidding the main agent from working directly. **Adversarial testing** adds a bounded *Adversarial test* and *Code review* loop after the main work settles. The **Subagent policy** chooses approved runtimes in order and an explicit fallback used only after they fail. `.drogon/graph.json` keeps a strict split: `intent` is yours, `state` is what the daemon observed, and every runtime attempt and verdict appears on the node and in *Evidence*.
 10. **Settings.** Theme (system/light/dark), default harness, rebindable shortcuts, notifications, Git/GitHub auth panes, and an optional Mentu runtime installer on Apple silicon macOS — all persisted and taking effect immediately, including “Restart daemon”.
 11. **Packaging.** An ad-hoc-signed, sealed `Drogon.app` with verified build info, packaged acceptance against a disposable profile, and a per-user installer that preserves previous builds.
 12. **Status bar.** The Orca bottom bar: settings and help on the left, per-provider usage meters with refresh, and on the right awake on/off, memory, terminal and port counts, and the daemon connection segment.
@@ -74,13 +74,13 @@ a monitor that fires releases real work rather than just a notification: a watch
 request opens a worktree and starts a review session in it. New watches park until you
 approve them, and every firing records what it saw.
 
-**The Work Graph replaced writing recipes by hand.** The Orchestrator is the plan the
-agent reads instead of being told in prose: which runtimes its workers may use and in
-what order, what to fall back to when they all fail, and one execution mode — either a
-bounded adversarial pass that tries to break the result before it counts as done, or
-Delegate, which makes the main agent a planner and director of depth-1 workers. The
-configured policy reaches the next session's brief, so a toggle in the UI changes how the
-agent actually behaves.
+**The Work Graph replaced writing recipes by hand.** The Orchestrator records which
+runtimes native agent sessions may use, what to fall back to when they fail, and one
+optional execution mode: a bounded adversarial pass after the main work, or permission
+to use depth-1 helpers when delegation is genuinely useful. Neither mode blocks the main
+agent from answering simple questions, running normal repository commands, or making
+changes the user requests. The configured policy reaches the next session's brief, so a
+toggle in the UI changes how the agent actually behaves.
 
 ![The Work Graph with adversarial testing on: Main agent, Implementation workers, the dashed Adversarial loop with per-iteration verdicts, Ready to merge, and the Subagent policy panel](docs/screenshots/orchestrator-adversarial-light.png)
 
@@ -128,7 +128,7 @@ Drogon is split so the desktop is a view, not the lifetime of your work.
 └────────────────────────────┘
 ```
 
-- **`crates/drogon-core`** — domain state: sessions/PTYs, workspaces, worktrees, files, git, bots and their monitors, automations, the work graph and its failover episodes, meetings, orchestration records. The graph is what you design; when installed, the revision-locked Mentu runtime executes a compiled graph.
+- **`crates/drogon-core`** — domain state: sessions/PTYs, workspaces, worktrees, files, git, bots and their monitors, automations, the work graph and its failover episodes, meetings, orchestration records. The native orchestrator launches every graph role through Drogon sessions; the separately installed Mentu runtime is only for optional recipe commands.
 - **`crates/drogon-protocol`** — the versioned wire protocol; daemon and CLI negotiate it on connect.
 - **`crates/drogond`** — the daemon: owns runtime state, listens on a local Unix socket (Windows named pipe in progress), and survives desktop restarts.
 - **`crates/drogon-harness`** — discovery and launch of Claude Code, Pi, OpenCode, and plain shells, with state hooks that report `working` / `needs_input` from each harness.

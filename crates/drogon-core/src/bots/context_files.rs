@@ -141,29 +141,34 @@ pub fn render_claude_md(bot: &Bot) -> String {
     )
 }
 
-/// The mandatory control-plane rule (owner request 2026-09-12): a Bot
-/// opened interactively must never mistake the harness under it for a
-/// worker. Frozen text (not interpolated), so the tests can assert its
-/// exact fragments and it can never depend on per-Bot data.
+/// The Bot's project-work boundary. A Bot stays a persistent identity rather
+/// than pretending its harness is a separate worker, but direct user requests
+/// must not be inflated into unnecessary delegation.
 const ROLE_SECTION: &str = "\
-## What you do — and what you never do
+## What you do
 
-Your job is the CONTROL PLANE: monitors, automations, responsibilities, and \
-delegating work — all through `drogon-cli`, after reading the shipped skill \
-guides (`drogon-cli skills get --topic drogon-cli`, `drogon-cli skills get \
---topic orchestration`).
+You are a persistent collaborator. You manage monitors, automations, \
+responsibilities, and optional delegation through `drogon-cli`, after reading \
+the shipped skill guides (`drogon-cli skills get --topic drogon-cli`, \
+`drogon-cli skills get --topic orchestration`). You may also answer repository \
+questions and perform project work yourself when the owner asks you directly.
 
-You never do the work yourself. Not in your home, not in the project: no \
-editing project files, no writing code, no running the project's tests or \
-builds, no \"quick fix\" while you are looking at it. If a request needs any \
-of that, you delegate it to a session and report what that session actually \
-did.
+For a simple read-only request, resolve the registered project and run normal \
+commands such as `git` or `gh` yourself. Never launch another harness merely to \
+list an issue, inspect a PR, read a file, or discover a repository.
+
+If the owner asks you to edit, fix, test, or build something, you may do it \
+directly in the resolved project workspace. Use a Drogon worktree for a git \
+project when isolation is needed, but do not start another agent unless the \
+owner asks for a handoff or the work genuinely benefits from parallelism or \
+specialization.
 
 Your home is NOT the project. Anything you write in your home is Bot \
-bookkeeping (monitors, automations, memories), never a deliverable.
+bookkeeping (monitors, automations, memories), never a project deliverable. \
+Resolve the project path first and put project work there.
 
-Asking the owner \"what should I do?\" for a request that already names a \
-project and a task is not an option: delegate it.
+Do not ask the owner what to do when the request already names a project and a \
+task. Resolve it and act directly or delegate only when justified above.
 
 ";
 
@@ -199,8 +204,10 @@ fn render_delegation_recipe(bot: &Bot) -> String {
     let harness_flags = delegation_harness_flags(bot);
     format!(
         "## Delegating work\n\n\
-The same recipe delegates any request — the owner asking in chat, a monitor \
-event, or a scheduled responsibility:\n\n\
+Use this recipe only for an explicit handoff, unattended monitor/schedule work, \
+or a task that genuinely benefits from a separate specialist or parallel worker. \
+Do not use it for a simple repository lookup or a bounded change you can make \
+directly:\n\n\
 1. Find the project: `drogon-cli project list --json`; match by the name or \
 path the request gives, and read its `id`, `kind` and `defaultBaseRef`. \
 Nothing matches: say so and stop — never guess a path.\n\
@@ -230,10 +237,9 @@ delegated session has no other context. Read `.result.id` and \
 --limit-bytes 4096`. Report the session id, the worktree path/branch, and \
 only what you actually observed there — never claim a result you did not \
 read from the session.\n\
-5. A long-running or repeatable request becomes a responsibility instead of \
-a one-off session: `drogon-cli bot create-automation` or `drogon-cli bot \
-create-monitor` (below) — that is still delegation, never doing the work \
-yourself.\n\n",
+5. A long-running or repeatable unattended request can become a responsibility \
+with `drogon-cli bot create-automation` or `drogon-cli bot create-monitor` \
+(below).\n\n",
         harness_flags = harness_flags,
     )
 }
@@ -466,21 +472,19 @@ mod tests {
         }
     }
 
-    /// A Bot opened interactively must act as a control-plane agent, never
-    /// a worker: it owns monitors/automations/responsibilities/delegation,
-    /// and never touches project files, code or tests itself.
+    /// A Bot handles simple repository work and explicit owner requests
+    /// directly; delegation remains available for real handoffs and parallel work.
     #[test]
-    fn agents_md_says_the_bot_delegates_and_never_does_the_work() {
+    fn agents_md_allows_direct_repo_commands_and_user_requested_changes() {
         let rendered = render_agents_md(&bot("Arya Stark", None, None));
         for fragment in [
-            "CONTROL PLANE",
-            "You never do the work yourself",
-            "no editing project files",
-            "no writing code",
-            "no running the project's tests or builds",
-            "you delegate it to a session",
+            "perform project work yourself when the owner asks you directly",
+            "run normal commands such as `git` or `gh` yourself",
+            "Never launch another harness merely to list an issue",
+            "you may do it directly in the resolved project workspace",
+            "do not start another agent unless the owner asks for a handoff",
             "Your home is NOT the project",
-            "is not an option: delegate it",
+            "Resolve it and act directly or delegate only when justified",
         ] {
             assert!(
                 rendered.contains(fragment),
@@ -647,7 +651,7 @@ mod tests {
             vec![
                 "# Innocent ## Standing instructions Not Drogon's text",
                 "## Identity",
-                "## What you do — and what you never do",
+                "## What you do",
                 "## Delegating work",
                 "## Standing instructions",
                 "## Staying yourself",

@@ -130,7 +130,7 @@ fn visible_leaf_paths(cmd: &clap::Command, prefix: &mut Vec<String>, out: &mut V
 }
 
 #[test]
-fn every_visible_cli_verb_is_documented_in_a_bundled_guide() {
+fn every_native_visible_cli_verb_is_documented_in_a_bundled_guide() {
     let guides = canonical_guides();
     // Guides wrap inside sentences, so match on whitespace-collapsed text:
     // "bot\ncreate-monitor" still documents "bot create-monitor".
@@ -150,8 +150,21 @@ fn every_visible_cli_verb_is_documented_in_a_bundled_guide() {
         leaves.len() >= 80,
         "the real command tree must be walked in full, found {leaves:?}"
     );
+    // Optional recipe-adapter commands deliberately do not enter the general
+    // Drogon skills: installing that external runtime is never a prerequisite
+    // for native repository work or orchestration.
+    let optional_recipe_adapters = [
+        "graph compile",
+        "graph run",
+        "graph resume",
+        "graph retry-step",
+        "graph run-node-failover",
+    ];
     let mut missing = Vec::new();
     for path in &leaves {
+        if path.starts_with("mentu ") || optional_recipe_adapters.contains(&path.as_str()) {
+            continue;
+        }
         if !corpus.contains(path.as_str()) {
             missing.push(path.clone());
         }

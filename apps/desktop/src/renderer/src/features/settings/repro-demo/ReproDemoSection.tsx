@@ -9,9 +9,9 @@ import { CheckCircle2, CircleDashed, CircleDot, Play, XCircle } from "lucide-rea
 import { Button } from "../../../components/ui/button";
 import { SettingsRow, SettingsSubsectionHeader } from "../SettingsFormControls";
 import { SettingsSection } from "../SettingsSection";
-import { useHarnessCatalog } from "../../mentu/mentu-harness-catalog";
-import { useMentuModelCatalog } from "../../mentu/mentu-model-catalog";
-import { modelOptionsFromCatalog } from "../../mentu/mentu-model-registry";
+import { useHarnessCatalog } from "../../agent-runtime/harness-catalog";
+import { useModelCatalog } from "../../agent-runtime/model-catalog";
+import { catalogModelOptions } from "../../agent-runtime/ModelPicker";
 import {
   HarnessSelect,
   RuntimeModelField,
@@ -237,17 +237,10 @@ export function useDemoRuntime(input: {
     setModelChosen(false);
   }, [following, usable, defaultHarnessId, harness]);
 
-  const modelCatalog = useMentuModelCatalog(harness);
+  const modelCatalog = useModelCatalog(harness);
   const options = useMemo(
     () =>
-      harness
-        ? modelOptionsFromCatalog({
-            catalog: modelCatalog.catalog,
-            recipe: null,
-            harness,
-            excludeStepLabel: null,
-          })
-        : [],
+      harness ? catalogModelOptions(modelCatalog.catalog) : [],
     [modelCatalog.catalog, harness],
   );
   useEffect(() => {

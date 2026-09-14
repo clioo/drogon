@@ -30,10 +30,12 @@ drogon-cli status --json
 `status` must advertise `orchestration.native.v1`. Every verb below is one
 RPC to the running daemon; prefer `--json` for agent-driven calls.
 
-## Read The Workspace Policy First
+## Read The Workspace Policy Before Delegating
 
-Before a main agent creates a run or dispatches any worker, it MUST read the
-workspace's native Drogon state:
+Before a main agent creates a run or dispatches a worker, it MUST read the
+workspace's native Drogon state. Simple read-only questions, repository
+lookups, `gh` commands, and bounded changes should be handled directly without
+creating a run:
 
 ```text
 drogon-cli graph read --workspace <WORKSPACE_ID> --json
@@ -46,18 +48,19 @@ reported by agents. Do not infer policy from the UI or from memory.
 
 The execution modes are mutually exclusive:
 
-- Both Delegate and Adversarial OFF: work directly; do not create workers.
-- Delegate ON: the main agent is only planner/director. Dispatch implementation
-  workers as depth-one children, supervise them, and never implement their work
-  yourself. Do not add testers.
-- Adversarial ON: the main agent is also only planner/director. For every
-  depth-one implementation worker, dispatch a separate depth-one tester as soon
-  as that worker's final report arrives. Findings go to a sibling correction
-  worker and are retested up to the saved iteration bound. Do not wait for all
-  workers before testing the ones already complete.
+- Both Delegate and Adversarial OFF: work directly; do not proactively create
+  workers, though an explicit user request may authorize delegation.
+- Delegate ON: delegation is available, not mandatory. Work directly by default
+  and use depth-one children only when independent work benefits from
+  parallelism or specialization. A user request to make changes always permits
+  the main agent to edit directly. Do not add testers.
+- Adversarial ON: implement directly unless an independent subtask benefits
+  from a depth-one worker. Drogon launches the bounded whole-workflow test and
+  review sessions after the main work settles; do not dispatch duplicate
+  testers yourself.
 
-Every worker/tester brief must say that it cannot dispatch another worker. All
-implementation, testing, and correction workers are siblings at depth one.
+Every worker brief must say that it cannot dispatch another worker. All
+workers remain at depth one.
 
 A Drogon-launched harness receives this context on its first turn, without a
 new `AGENTS.md` or `CLAUDE.md` in an unconfigured workspace: delegation goes

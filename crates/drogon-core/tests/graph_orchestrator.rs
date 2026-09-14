@@ -1,13 +1,8 @@
 //! Real daemon scheduler + pinned shell runtime fixture; no model inference.
 #![cfg(unix)]
-use drogon_core::{
-    Engine,
-    graph::orchestrator,
-    mentu::{execution, runtime},
-};
+use drogon_core::{Engine, graph::orchestrator};
 use drogon_protocol::{PROTOCOL_VERSION, Request};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -18,59 +13,37 @@ use std::{
 static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 const SCRIPT: &str = r#"#!/bin/sh
-set -eu
-case "$1" in
- --version) echo fixture; exit 0;;
- check) echo ok; exit 0;;
- doctor) echo '{"findings":[],"score":100}'; exit 0;;
+set -e
+case "${1:-}" in
+ --version) echo 'pi 0.85.1'; exit 0;;
+ --list-models) printf 'provider model context max-out thinking images\nfixture fixture 1K 1K no no\n'; exit 0;;
 esac
-recipe="$2"
-shift 2
-workspace=""
-while [ $# -gt 0 ]; do
- case "$1" in --workspace) workspace="$2"; shift 2;; *) shift;; esac
+prompt=""
+while [ "$#" -gt 0 ]; do
+ case "$1" in
+  -p|--prompt) prompt="$2"; shift 2;;
+  --provider|--model|--append-system-prompt|--extension) shift 2;;
+  *) shift;;
+ esac
 done
-label=$(sed -n 's/.*"label": *"\([^"]*\)".*/\1/p' "$recipe" | head -1)
-# What a node's runtime (and the agent it launches) can see: the daemon's own
-# CLI shims first on PATH, bound to this data dir and workspace, no session.
-printf '%s\n%s\n%s\n%s\n' "$DROGON_DATA_DIR" "$DROGON_WORKSPACE_ID" "${PATH%%:*}" "${DROGON_SESSION_ID:-unset}" > "$workspace/env-seen"
+workspace="$PWD"
+printf '%s\n%s\n%s\n%s\n' "${DROGON_DATA_DIR:-unset}" "${DROGON_WORKSPACE_ID:-unset}" "${PATH%%:*}" "${DROGON_SESSION_ID:-unset}" > "$workspace/env-seen"
 if [ -f "$workspace/pause-fixture" ]; then
  sleep 60 &
  child=$!
  echo "$child" > "$workspace/fixture-child.pid"
  wait "$child"
 fi
-mkdir -p "$workspace/.drogon/evaluations"
-verdict=pass
-case "$label" in *-1-test) verdict=findings;; esac
-printf '{"verdict":"%s","evidence":"fixture executed"}' "$verdict" > "$workspace/.drogon/evaluations/$label.json"
-run_id="run_fixture_$$"
-run_dir="$workspace/.mentu/runs/$run_id"
-mkdir -p "$run_dir"
-touch "$run_dir/out" "$run_dir/err"
-# Every real step changes the workspace (the main agent does the work, the
-# tester writes its evidence, the reviewer fixes findings) and the pinned
-# runtime reports each created path as drift. The daemon must read that as
-# advisory for orchestrator runs — and must never declare `expected_changes`,
-# which makes the runtime auto-commit the matching changes in the owner's repo.
-bookkeeping=',"drift":{"created_paths":["work.txt",".drogon/evaluations/'"$label"'.json"],"expected_paths":[],"unexpected_paths":["work.txt",".drogon/evaluations/'"$label"'.json"]}'
-if grep -q '"expected_changes"' "$recipe"; then
- bookkeeping=',"warnings":["expected_changes declared: the runtime would auto-commit"]'
-fi
-# A role step proves completion with the evaluation file it was told to write,
-# never with a 60-character keyword the agent has to transcribe by hand.
-case "$label" in
- *-test|*-review)
-  if ! grep -q '"verify"' "$recipe"; then
-   bookkeeping=',"warnings":["role completion was left to a transcribed keyword"]'
-  fi
-  if grep -q '"completion_keyword"' "$recipe"; then
-   bookkeeping=',"warnings":["role step still carries a completion keyword"]'
-  fi
+case "$prompt" in
+ *'.drogon/evaluations/'*)
+  path=$(printf '%s' "$prompt" | grep -o '\.drogon/evaluations/[^ ]*\.json' | head -1)
+  mkdir -p "$workspace/.drogon/evaluations"
+  verdict=pass
+  case "$prompt" in *'Test adversarially'*'Iteration 1 of'*) verdict=findings;; esac
+  printf '{"verdict":"%s","evidence":"native session fixture executed"}' "$verdict" > "$workspace/$path"
   ;;
 esac
-printf '{"run_id":"%s","recipe_name":"fixture","started_at":"2026-01-01T00:00:00Z","ended_at":"2026-01-01T00:00:01Z","outcome":"ok","cloud_mode":"local-only","steps":[{"label":"%s","backend":"shell","outcome":"ok","exit_code":0,"duration_seconds":0,"attempts":1,"output_file":"out","error_file":"err"%s}],"hooks":[]}' "$run_id" "$label" "$bookkeeping" > "$run_dir/run.json"
-echo "Run record: $run_dir/run.json"
+printf 'fixture complete\n'
 "#;
 
 fn call(engine: &Engine, method: &str, params: Value) -> Value {
@@ -94,17 +67,19 @@ impl Fixture {
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
         let data = root.path().join("data");
-        let bin = data.join("mentu/runtime/bin/mentu-recipes");
+        let engine = Arc::new(Engine::open(&data).unwrap());
+        let bin = data.join("bin/pi");
         fs::create_dir_all(bin.parent().unwrap()).unwrap();
         fs::write(&bin, SCRIPT).unwrap();
-        fs::set_permissions(bin, fs::Permissions::from_mode(0o755)).unwrap();
-        runtime::set_expected_sha256_override(Some(
-            Sha256::digest(SCRIPT.as_bytes())
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect(),
-        ));
-        let engine = Arc::new(Engine::open(&data).unwrap());
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        call(
+            &engine,
+            "agent.settings_update",
+            json!({"updates": {
+                "agentCmdOverrides": {"pi": bin},
+                "agentDefaultEnv": {"pi": {"PI_CODING_AGENT_DIR": "/nonexistent/drogon-native-graph-test-pi"}}
+            }}),
+        );
         let dir = root.path().join("workspace");
         fs::create_dir_all(&dir).unwrap();
         let workspace = call(&engine, "workspace.register", json!({"path":dir}))["id"]
@@ -121,11 +96,11 @@ impl Fixture {
         call(
             &self.engine,
             "graph.write_policy",
-            json!({"workspaceId":self.workspace,"policy":{"approvedRuntimes":[{"harness":"antigravity","model":"unavailable"}],"fallbackRuntime":{"harness":"shell","model":""},"adversarial":{"enabled":enabled,"maxIterations":max}}}),
+            json!({"workspaceId":self.workspace,"policy":{"approvedRuntimes":[{"harness":"shell","model":""}],"fallbackRuntime":{"harness":"pi","provider":"fixture","model":"fixture"},"adversarial":{"enabled":enabled,"maxIterations":max}}}),
         );
     }
     fn start(&self) -> Value {
-        call(&self.engine,"graph.orchestrator_start",json!({"workspaceId":self.workspace,"main":{"id":"main","title":"Task","harness":"shell","model":"","prompt":"true","enabled":true}}))["run"].clone()
+        call(&self.engine,"graph.orchestrator_start",json!({"workspaceId":self.workspace,"main":{"id":"main","title":"Task","harness":"pi","model":"fixture/fixture","prompt":"Build the fixture","enabled":true}}))["run"].clone()
     }
     fn snapshot(&self) -> Value {
         call(
@@ -158,20 +133,23 @@ impl Drop for Fixture {
         });
         if let Some(value) = response.result {
             for step in value["run"]["steps"].as_array().into_iter().flatten() {
-                if let Some(id) = step["runId"].as_str() {
-                    execution::cancel(id);
-                    let deadline = Instant::now() + Duration::from_secs(5);
-                    while execution::is_tracked(id) && Instant::now() < deadline {
-                        std::thread::sleep(Duration::from_millis(20));
-                    }
-                    assert!(
-                        !execution::is_tracked(id),
-                        "test-owned runtime {id} remains live"
-                    );
+                if let Some(encoded) = step["runId"].as_str()
+                    && let Some(identity) = encoded.strip_prefix("session:")
+                    && let Some((session_id, incarnation)) = identity.split_once(':')
+                {
+                    let _ = self.engine.dispatch(Request {
+                        protocol: PROTOCOL_VERSION,
+                        request_id: uuid::Uuid::new_v4().to_string(),
+                        auth: None,
+                        method: "session.stop".into(),
+                        params: json!({
+                            "sessionId": session_id,
+                            "incarnation": incarnation,
+                        }),
+                    });
                 }
             }
         }
-        runtime::set_expected_sha256_override(None);
     }
 }
 
@@ -203,7 +181,7 @@ fn daemon_runs_off_mode_and_both_roles_with_snapshot_policy_and_fallback() {
     fixture.engine = Arc::new(Engine::open(&fixture.root.path().join("data")).unwrap());
     let mut scheduler = orchestrator::spawn(fixture.engine.clone());
     let off = fixture.settled();
-    assert_eq!(off["status"], "passed");
+    assert_eq!(off["status"], "passed", "{off}");
     assert_eq!(off["steps"].as_array().unwrap().len(), 1);
     // The daemon binds its canonical data dir (macOS tempdirs live under /private).
     let data_dir = fixture.root.path().join("data").canonicalize().unwrap();
@@ -223,9 +201,9 @@ fn daemon_runs_off_mode_and_both_roles_with_snapshot_policy_and_fallback() {
         data_dir.join("bin").to_str().unwrap(),
         "the daemon's CLI shims lead the node runtime's PATH"
     );
-    assert_eq!(
+    assert_ne!(
         seen[3], "unset",
-        "a node runtime carries no session identity"
+        "every orchestrator role runs as a visible Drogon session"
     );
 
     fixture.policy(true, 2);
@@ -256,8 +234,23 @@ fn daemon_runs_off_mode_and_both_roles_with_snapshot_policy_and_fallback() {
     let deadline = Instant::now() + Duration::from_secs(10);
     let live_id = loop {
         let snapshot = fixture.snapshot();
-        if let Some(id) = snapshot["steps"][0]["runId"].as_str() {
-            assert!(execution::is_tracked(id));
+        if let Some(id) = snapshot["steps"][0]["runId"]
+            .as_str()
+            .and_then(|value| value.strip_prefix("session:"))
+            .and_then(|value| value.split_once(':').map(|pair| pair.0))
+        {
+            let sessions = call(
+                &fixture.engine,
+                "session.list",
+                json!({"workspaceId":fixture.workspace}),
+            );
+            assert!(
+                sessions["sessions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|session| session["id"] == id && session["verdict"] == "live")
+            );
             break id.to_string();
         }
         assert!(Instant::now() < deadline);
@@ -286,7 +279,18 @@ fn daemon_runs_off_mode_and_both_roles_with_snapshot_policy_and_fallback() {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(25));
     }
-    assert!(!execution::is_tracked(&live_id));
+    let sessions = call(
+        &fixture.engine,
+        "session.list",
+        json!({"workspaceId":fixture.workspace}),
+    );
+    assert!(
+        sessions["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| session["id"] == live_id && session["verdict"] == "exited")
+    );
     // Signal zero is a read-only existence check for the exact captured fixture child.
     assert_eq!(
         unsafe { libc::kill(child_pid, 0) },

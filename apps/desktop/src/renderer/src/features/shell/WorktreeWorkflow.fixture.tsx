@@ -10,7 +10,7 @@ const initial: OrchestratorRun = {
   id: "fixture-workflow-1", workspaceId: "project-workspace", policy: DEFAULT_GRAPH_POLICY,
   main: { id: "main", title: "Fixture graph main", prompt: "Fixture task", harness: "pi", model: "fixture/model", dependsOn: [], enabled: true },
   status: "running", phase: "main", iteration: 1,
-  steps: [{ nodeId: "main-1", phase: "main", iteration: 1, status: "running", runId: "fixture-execution", isFallback: false,
+  steps: [{ nodeId: "main-1", phase: "main", iteration: 1, status: "running", runId: "session:main-session:fixture-main-session", isFallback: false,
     runtime: { harness: "pi", model: "fixture/model" }, attempts: [] }],
   startedAt: "2026-09-13T03:00:00Z", updatedAt: "2026-09-13T03:00:00Z",
 };
@@ -34,7 +34,9 @@ function session(id: string, workspaceId = initial.workspaceId): Session {
 }
 const sessions: Session[] = [
   { ...session("bot-dispatcher", "bot-home"), verdict: "exited", agentState: "exited", exitCode: 0 },
-  session("worker-deck"), session("worker-page"),
+  session("main-session"),
+  { ...session("worker-deck"), parentSessionId: "main-session" },
+  { ...session("worker-page"), parentSessionId: "main-session" },
 ];
 function Card({ workspaceId, title }: { workspaceId: string; title: string }) {
   return <WorktreeCard

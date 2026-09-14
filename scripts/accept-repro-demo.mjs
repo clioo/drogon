@@ -376,9 +376,9 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
         )}\n`,
       );
 
-      // Second stop of the tour: the run's own sessions. The released main
-      // session fans out to parallel workers BEFORE it starts the durable
-      // workflow, so from here until the orchestration settles this loop
+      // Second stop of the tour: the run's own sessions. The Bot dispatcher
+      // admits the durable workflow and exits; its native graph main then fans
+      // out to parallel workers. Until orchestration settles, this loop
       // samples the daemon's session list and remembers the most sessions it
       // saw alive at once: the parallelism is measured, never inferred from
       // a screenshot. The daemon's own orchestrator status is the verdict —
@@ -451,19 +451,23 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
             const launched = allSessions.sessions.find((session) => session.id === monitorSessionId);
             assert.ok(launched, "the Bot links its dispatcher, not the graph main or a worker");
             if (!live) assert.equal(launched.verdict, "exited", "the Bot ended after admitting the graph");
-            const workerSessions = alive.filter((session) => session.id !== monitorSessionId);
-            assert.ok(workerSessions.length >= 2, "parallelism counts worker terminals, never the Bot or a fabricated main terminal");
             const activeGraph = await orchestratorStatus();
             assert.equal(activeGraph?.status, "running");
             assert.equal(activeGraph?.phase, "main", "workers execute inside the already-admitted graph main phase");
+            const mainRunId = activeGraph.steps.find((step) => step.phase === "main" && step.status === "running")?.runId;
+            const mainIdentity = /^session:([^:]+):(.+)$/.exec(mainRunId ?? "");
+            assert.ok(mainIdentity, `graph main must expose a native session identity: ${mainRunId}`);
+            assert.ok(alive.some((session) => session.id === mainIdentity[1] && session.incarnation === mainIdentity[2]), "the graph main is a real live workspace session");
+            const workerSessions = alive.filter((session) => session.id !== monitorSessionId && session.id !== mainIdentity[1]);
+            assert.ok(workerSessions.length >= 2, "parallelism counts worker terminals separately from the Bot dispatcher and graph main");
             const card = page.locator("[data-worktree-card-id]").filter({ has: page.getByText(`Run ${activeGraph.id}`, { exact: true }) });
             await card.getByText("Main agent · running", { exact: true }).waitFor();
             assert.equal(await card.getByRole("button", { name: "Work Graph · Running" }).getAttribute("aria-expanded"), "true");
-            assert.equal(await card.getByText("Background workflow · no terminal", { exact: true }).isVisible(), true);
+            assert.equal(await card.getByText("Native workspace sessions", { exact: true }).isVisible(), true);
             const runtime = activeGraph.steps.find((step) => step.phase === "main" && step.status === "running")?.runtime;
             assert.ok(runtime, "running main retains its selected runtime");
             assert.equal(await card.getByText(`${runtime.harness}${runtime.model ? ` · ${runtime.model}` : ""}`, { exact: true }).isVisible(), true);
-            report.checks.push("Sidebar reveals the background graph main and selected runtime beside the actual worker sessions");
+            report.checks.push("Sidebar reveals the native graph main and selected runtime beside its worker sessions");
             await page.locator(`[data-bot-session-row="white-walker-${tag}"]`).click({ timeout: 15_000 });
             await page.getByTestId("bot-session-header").waitFor();
             await page.getByTestId("bot-session-header").getByText("Launch prompt", { exact: true }).click();

@@ -110,9 +110,9 @@ both leave a trace you can inspect.”
 This is the segment worth rehearsing; it is the part nobody else is showing.
 
 1. Open the **Work Graph** tab on the demo workspace. The Orchestrator is the
-   whole interface: the **Main agent** node is bound to this workspace's live
-   session — say the line out loud: “the plan is mine to author; the state is
-   what the daemon observed.”
+   whole interface: it launches the **Main agent** and every optional role as a
+   visible native workspace session — say the line out loud: “the plan is mine
+   to author; the state is what the daemon observed.”
 2. In **Subagent policy**, show the approved runtimes in order and the fallback
    marked **Not approved**: “these are tried in order; the fallback only after
    every approved one fails, and each attempt is recorded.” Point at the pickers:
@@ -124,10 +124,11 @@ This is the segment worth rehearsing; it is the part nobody else is showing.
    ending at **Ready to merge**. Two different briefs: one tries to break the
    result, the other reviews the whole diff and verifies each fix.
 5. Toggle it off and toggle **Delegate** on instead; the **Implementation workers**
-   node is the main agent's depth-1 crew. Say what changes: the next session in
-   this workspace is told to plan and direct instead of doing the work itself.
-   Drogon writes that policy into the workspace's `AGENTS.md` at session start —
-   only when a policy is configured, never into a repo that has none.
+   node is the main agent's optional depth-1 crew. Say what changes: the main
+   agent can use helpers for genuinely parallel or specialized work, but still
+   handles simple commands and user-requested edits directly. Drogon writes that
+   policy into the workspace's `AGENTS.md` at session start — only when a policy
+   is configured, never into a repo that has none.
 6. Click **Run workflow** on the shell-only fixture graph and open the
    **Evidence** tab: per-iteration verdicts and runtime attempts on each node,
    the per-step stdout behind them.
@@ -152,9 +153,8 @@ agent reads, and every attempt it makes is evidence you can open.”
   the real persistence and UI state machine without inference.
 - **`gh` not authenticated or no remote:** keep the Tasks empty state on screen;
   pivot to “add a project from a folder instead of a repo.”
-- **Pinned Mentu runtime unavailable:** run the fixture with the pinned source
-  path available, or show the honest runtime-unavailable status and skip
-  execution. Do not substitute another binary.
+- **Configured agent harness unavailable:** show the recorded launch failure and
+  fallback attempt. Do not substitute an unapproved provider/model pair.
 - **Notification permission missing:** show the in-app state badge instead of
   the native notification; re-enable later in Settings.
 

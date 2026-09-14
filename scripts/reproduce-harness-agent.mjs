@@ -581,7 +581,7 @@ try {
   }
 
   if (role === "main") {
-    if (prompt.includes("Act only as planner and director") || prompt.includes("main agent of the dispatched Dog Tinder graph")) {
+    if (prompt.includes("main agent of the dispatched Dog Tinder graph")) {
       const fanout = orchestrate(context);
       log(context, { at: new Date().toISOString(), event: "graph-main-fanout", role, runId, botDispatcher: false, workers: fanout.workers, testers: fanout.testers });
       process.stdout.write(`Graph main agent: ${fanout.workers.length} workers and ${fanout.testers.length} testers settled.\n`);

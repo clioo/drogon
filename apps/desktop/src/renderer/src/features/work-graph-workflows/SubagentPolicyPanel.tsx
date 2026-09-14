@@ -23,10 +23,12 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { Switch } from "../../components/ui/switch";
-import { useHarnessCatalog } from "../mentu/mentu-harness-catalog";
-import { useMentuModelCatalog } from "../mentu/mentu-model-catalog";
-import { MentuModelPicker } from "../mentu/MentuModelPicker";
-import { modelOptionsFromCatalog } from "../mentu/mentu-model-registry";
+import { useHarnessCatalog } from "../agent-runtime/harness-catalog";
+import { useModelCatalog } from "../agent-runtime/model-catalog";
+import {
+  catalogModelOptions,
+  ModelPicker,
+} from "../agent-runtime/ModelPicker";
 
 function RuntimeProviderField({
   provider,
@@ -70,16 +72,10 @@ export function RuntimeModelField({
   onChange: (model: string) => void;
   testIdPrefix: string;
 }): React.JSX.Element {
-  const modelCatalog = useMentuModelCatalog(harness);
+  const modelCatalog = useModelCatalog(harness);
   const options = useMemo(
-    () =>
-      modelOptionsFromCatalog({
-        catalog: modelCatalog.catalog,
-        recipe: null,
-        harness,
-        excludeStepLabel: null,
-      }),
-    [modelCatalog.catalog, harness],
+    () => catalogModelOptions(modelCatalog.catalog),
+    [modelCatalog.catalog],
   );
   return (
     <div className="order-last col-span-full flex min-w-0 w-full flex-1 items-center gap-1.5">
@@ -89,7 +85,7 @@ export function RuntimeModelField({
       >
         {model || "harness default"}
       </span>
-      <MentuModelPicker
+      <ModelPicker
         options={options}
         selected={model}
         disabled={disabled}
@@ -542,8 +538,8 @@ export function SubagentPolicyPanel({
         ) : null}
         <p className="mt-1.5 text-xs text-muted-foreground">
           {policy.adversarial.enabled
-            ? "The main agent directs depth-1 workers and starts a tester as each worker finishes."
-            : "Adds depth-1 implementation workers, paired testers, and final review."}
+            ? "The main agent can work directly; Drogon runs bounded test and review sessions afterward."
+            : "Adds bounded test and review sessions after the main work settles."}
         </p>
 
         <div className="mt-4 flex items-center justify-between gap-2 border-t border-border pt-4">
@@ -569,8 +565,8 @@ export function SubagentPolicyPanel({
         </div>
         <p className="mt-1.5 text-xs text-muted-foreground">
           {policy.delegate
-            ? "The main agent only plans, directs, and reviews depth-1 workers. It does not implement the task itself."
-            : "Enable to make the main agent a planner and director without adversarial testing."}
+            ? "The main agent may use depth-1 workers when useful and may still work directly."
+            : "Enable depth-1 helpers for work that benefits from delegation."}
         </p>
       </div>
 

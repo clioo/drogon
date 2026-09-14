@@ -31,8 +31,8 @@ const run: OrchestratorRun = {
     id: "bootstrap",
     title: "Bootstrap demo",
     prompt: "Scaffold",
-    harness: "pi",
-    model: "fixture",
+    harness: "claude",
+    model: "opus",
     dependsOn: [],
     enabled: true,
   },
@@ -45,15 +45,49 @@ const run: OrchestratorRun = {
       phase: "main",
       iteration: 1,
       status: "running",
-      runId: "execution-1",
+      runId: "session:session-1:incarnation-1",
       isFallback: false,
-      runtime: { harness: "pi", model: "fixture" },
-      attempts: [{ harness: "pi", model: "fixture", outcome: "launched" }],
+      runtime: { harness: "claude", model: "opus" },
+      attempts: [{ harness: "claude", model: "opus", outcome: "launched" }],
     },
   ],
   startedAt: "2026-09-13T03:00:00Z",
   updatedAt: "2026-09-13T03:01:00Z",
 };
+const nativeSessions: Session[] = [
+  {
+    id: "session-1",
+    workspaceId: "ws",
+    hostId: "local",
+    incarnation: "incarnation-1",
+    command: "/fixture/claude",
+    args: [],
+    cols: 120,
+    rows: 30,
+    verdict: "live",
+    exitCode: null,
+    createdAt: run.startedAt,
+    agentState: "working",
+    harnessId: "claude",
+  },
+  {
+    id: "worker-1",
+    workspaceId: "ws",
+    hostId: "local",
+    incarnation: "incarnation-2",
+    command: "/fixture/pi",
+    args: [],
+    cols: 120,
+    rows: 30,
+    verdict: "live",
+    exitCode: null,
+    createdAt: run.updatedAt,
+    agentState: "working",
+    harnessId: "pi",
+    parentSessionId: "session-1",
+  },
+];
+
 function bridgeFor(observed: OrchestratorRun | null = run) {
   return {
     graphOrchestratorStatus: vi.fn(async () => ({
@@ -65,7 +99,7 @@ function bridgeFor(observed: OrchestratorRun | null = run) {
   } as unknown as GraphBridge;
 }
 
-it("shows a bot-dispatched headless workflow on an unselected card with no terminal sessions", async () => {
+it("shows a native Claude main session and Pi worker beside the active workflow", async () => {
   const bridge = bridgeFor();
   const onSelect = vi.fn();
   const view = render(
@@ -82,7 +116,7 @@ it("shows a bot-dispatched headless workflow on an unselected card with no termi
           createdAt: run.startedAt,
         }}
         workspaces={[]}
-        sessions={[]}
+        sessions={nativeSessions}
         selected={false}
         disabled={false}
         projectKind="folder"
@@ -103,8 +137,8 @@ it("shows a bot-dispatched headless workflow on an unselected card with no termi
   const details = screen.getByText("Main agent · running").parentElement
     ?.parentElement;
   expect(details?.classList.contains("hidden")).toBe(false);
-  expect(screen.getByText("pi · fixture")).toBeTruthy();
-  expect(screen.getByText("Background workflow · no terminal")).toBeTruthy();
+  expect(screen.getByText("claude · opus")).toBeTruthy();
+  expect(screen.getByText("Native workspace sessions")).toBeTruthy();
   // The automatic reveal happens once. The owner can still collapse it and
   // polling the same run must not override that choice.
   fireEvent.click(summary);
@@ -112,8 +146,10 @@ it("shows a bot-dispatched headless workflow on an unselected card with no termi
     "false",
   );
   expect(
-    view.container.querySelectorAll("[data-worktree-agent-row]"),
-  ).toHaveLength(0);
+    [...view.container.querySelectorAll("[data-worktree-agent-row]")].map(
+      (row) => row.getAttribute("data-worktree-agent-row"),
+    ),
+  ).toEqual(["session-1", "worker-1"]);
   expect(bridge.graphOrchestratorStatus).toHaveBeenCalledWith({
     workspaceId: "ws",
   });
@@ -123,37 +159,82 @@ it("shows a bot-dispatched headless workflow on an unselected card with no termi
   expect(bridge.graphOrchestratorStart).not.toHaveBeenCalled();
 });
 
-it("keeps the headless main separate from an exited Bot and two live worker terminals", async () => {
-  const session = (id: string, workspaceId = "ws"): Session => ({
-    id, workspaceId, hostId: "host", incarnation: `inc-${id}`, command: "pi",
-    harnessId: "pi", args: [], cols: 80, rows: 24, verdict: "live",
-    agentState: "working", exitCode: null, createdAt: run.startedAt,
+it("keeps the native graph main separate from an exited Bot and two live workers", async () => {
+  const session = (
+    id: string,
+    workspaceId = "ws",
+    incarnation = `inc-${id}`,
+  ): Session => ({
+    id,
+    workspaceId,
+    hostId: "host",
+    incarnation,
+    command: "pi",
+    harnessId: "pi",
+    args: [],
+    cols: 80,
+    rows: 24,
+    verdict: "live",
+    agentState: "working",
+    exitCode: null,
+    createdAt: run.startedAt,
   });
   const bridge = bridgeFor();
   const onSelectSession = vi.fn();
   const view = render(
     <TooltipProvider>
       <WorktreeCard
-        worktree={{ id: "wt", projectId: "p", workspaceId: "ws", path: "/fixture",
-          branch: "bootstrap", head: "", baseRef: null, createdAt: run.startedAt }}
+        worktree={{
+          id: "wt",
+          projectId: "p",
+          workspaceId: "ws",
+          path: "/fixture",
+          branch: "bootstrap",
+          head: "",
+          baseRef: null,
+          createdAt: run.startedAt,
+        }}
         workspaces={[]}
         sessions={[
-          { ...session("bot-dispatcher", "bot-home"), verdict: "exited", agentState: "exited", exitCode: 0 },
-          session("worker-deck"), session("worker-page"),
+          {
+            ...session("bot-dispatcher", "bot-home"),
+            verdict: "exited",
+            agentState: "exited",
+            exitCode: 0,
+          },
+          session("session-1", "ws", "incarnation-1"),
+          { ...session("worker-deck"), parentSessionId: "session-1" },
+          { ...session("worker-page"), parentSessionId: "session-1" },
         ]}
-        selected={false} disabled={false} projectKind="folder" implicitFolderWorktree
-        onSelect={vi.fn()} onSelectSession={onSelectSession}
-        onRemove={null} onRename={null} graphBridge={bridge}
+        selected={false}
+        disabled={false}
+        projectKind="folder"
+        implicitFolderWorktree
+        onSelect={vi.fn()}
+        onSelectSession={onSelectSession}
+        onRemove={null}
+        onRename={null}
+        graphBridge={bridge}
       />
     </TooltipProvider>,
   );
-  const summary = await screen.findByRole("button", { name: "Work Graph · Running" });
-  await waitFor(() => expect(summary.getAttribute("aria-expanded")).toBe("true"));
+  const summary = await screen.findByRole("button", {
+    name: "Work Graph · Running",
+  });
+  await waitFor(() =>
+    expect(summary.getAttribute("aria-expanded")).toBe("true"),
+  );
   expect(screen.getByText("Main agent · running")).toBeTruthy();
-  expect(screen.getByText("Background workflow · no terminal")).toBeTruthy();
+  expect(screen.getByText("Native workspace sessions")).toBeTruthy();
   const rows = [...view.container.querySelectorAll("[data-worktree-agent-row]")];
-  expect(rows.map((row) => row.getAttribute("data-worktree-agent-row")).sort()).toEqual(["worker-deck", "worker-page"]);
-  fireEvent.click(view.container.querySelector('[data-worktree-agent-row="worker-deck"]')!);
+  expect(
+    rows
+      .map((row) => row.getAttribute("data-worktree-agent-row"))
+      .sort(),
+  ).toEqual(["session-1", "worker-deck", "worker-page"]);
+  fireEvent.click(
+    view.container.querySelector('[data-worktree-agent-row="worker-deck"]')!,
+  );
   expect(onSelectSession).toHaveBeenCalledWith("worker-deck");
   expect(bridge.graphOrchestratorStart).not.toHaveBeenCalled();
   expect(bridge.graphOrchestratorStop).not.toHaveBeenCalled();
@@ -300,6 +381,7 @@ it("shows completed adversarial roles and fallback failure evidence without impl
         nodeId: "test-1",
         phase: "test",
         status: "failed",
+        runtime: { harness: "pi", model: "fixture" },
         isFallback: true,
         attempts: [
           {
