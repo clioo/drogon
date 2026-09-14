@@ -18,7 +18,14 @@ try {
   const page=await browser.newPage({viewport:{width:1440,height:1100},reducedMotion:'reduce'});
   const errors=[]; page.on('pageerror',e=>errors.push(e.message));
   page.on('response',r=>{if(r.status()>=400)errors.push(r.status()+' '+r.url());});
+  await page.route('https://www.youtube.com/**',route=>route.abort());
   await page.goto(process.env.DROGON_WEBSITE_URL || 'http://127.0.0.1:4178/');
+  const demoFrame=page.locator('.hero-video iframe');
+  assert.equal(await demoFrame.getAttribute('src'),'https://www.youtube.com/embed/jgnitCkmpKk');
+  assert.equal(await demoFrame.getAttribute('title'),'Stop Micromanaging AI Agents: Meet Drogon');
+  const demoBox=await page.locator('.hero-video-frame').boundingBox();
+  assert.ok(demoBox&&Math.abs(demoBox.width/demoBox.height-16/9)<0.02,'hero video keeps a 16:9 ratio');
+  if(process.env.DROGON_WEBSITE_SCREENSHOTS)await page.locator('.hero').screenshot({path:join(process.env.DROGON_WEBSITE_SCREENSHOTS,'drogon-hero-video.png'),animations:'disabled'});
   await page.locator('#workspace').scrollIntoViewIfNeeded();
   await page.clock.install();
   assert.equal(await page.locator('[data-node] .harness-badge').count(),5);

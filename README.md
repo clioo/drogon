@@ -17,7 +17,7 @@ came from the Drogon fork of Orca. It has since grown its own surfaces — the W
 and its Orchestrator, self-waking Bots, Meetings — and depends on no other runtime to
 execute anything.
 
-[Run locally](#run-locally) · [Install with Homebrew](#install-with-homebrew) · [Install the macOS preview](#install-the-macos-preview) · [Feature tour](#feature-tour-the-twelve-mvp-journeys) · [Use it with agents](#using-drogon-with-agents) · [Contribute](#contributing)
+[Visit drogon.work](https://drogon.work) · [Watch the product demo](https://youtu.be/jgnitCkmpKk) · [Run locally](#run-locally) · [Install with Homebrew](#install-with-homebrew) · [Install the macOS preview](#install-the-macos-preview) · [Feature tour](#feature-tour-the-twelve-mvp-journeys) · [Use it with agents](#using-drogon-with-agents) · [Contribute](#contributing)
 
 ![Drogon workspace in the light theme: project sidebar with a worktree card, a persistent terminal session, and the file explorer](docs/screenshots/workspace-light.png)
 

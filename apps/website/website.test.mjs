@@ -12,6 +12,12 @@ test('all local assets and navigation targets resolve', async () => {
  }
  assert.doesNotMatch(html,/<img\b/);
 });
+test('the hero embeds the official product demo',()=>{
+ assert.match(html,/<iframe[^>]+src="https:\/\/www\.youtube\.com\/embed\/jgnitCkmpKk"/);
+ assert.match(html,/title="Stop Micromanaging AI Agents: Meet Drogon"/);
+ assert.match(html,/<iframe[^>]+allowfullscreen/);
+ assert.match(html,/href="https:\/\/youtu\.be\/jgnitCkmpKk"/);
+});
 test('three product views replace the invented diagram and rubric narrative',()=>{
  assert.equal((html.match(/role="tab"/g)||[]).length,3);
  for(const name of ['panel-bots','panel-graph','panel-evidence'])assert.ok(html.includes('id="'+name+'"'));
