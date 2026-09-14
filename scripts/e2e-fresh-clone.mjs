@@ -164,9 +164,14 @@ export function checkGate(root) {
   return { schema: "drogon.fresh-clone-check/1", ok: failures.length === 0, failures };
 }
 
+export function makeWorkDir(workRoot) {
+  const safe = assertSafeWorkRoot(workRoot || join(tmpdir(), "drogon-fresh-clone"));
+  mkdirSync(safe, { recursive: true });
+  return mkdtempSync(join(safe, "run-"));
+}
+
 async function runFull(root, workRoot) {
-  const safe = assertSafeWorkRoot(workRoot || join(tmpdir(), "drogon-fresh-clone-"));
-  const base = mkdtempSync(join(safe.replace(/-$/, ""), "run-"));
+  const base = makeWorkDir(workRoot);
   const iso = join(base, "iso");
   for (const dir of ["pnpm-store", "npm-cache", "cargo-home", "tmp", "data"]) mkdirSync(join(iso, dir), { recursive: true });
   const env = {

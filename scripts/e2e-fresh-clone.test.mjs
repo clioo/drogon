@@ -9,6 +9,7 @@ import {
   README_COMMANDS,
   assertSafeWorkRoot,
   checkGate,
+  makeWorkDir,
   probeMachinePaths,
   readmeCoversCommands,
 } from "./e2e-fresh-clone.mjs";
@@ -49,6 +50,16 @@ test("work root guard refuses /Applications, $HOME and relative paths", () => {
   assert.throws(() => assertSafeWorkRoot(process.env.HOME), /work root/);
   assert.throws(() => assertSafeWorkRoot("relative/path"), /absolute/);
   assert.equal(assertSafeWorkRoot(path.join(tmpdir(), "drogon-x")).startsWith(tmpdir()), true);
+});
+
+test("work dir setup creates the default parent before mkdtemp", () => {
+  const base = makeWorkDir(undefined);
+  try {
+    assert.equal(base.startsWith(tmpdir()), true);
+    assert.equal(mkdirSync(base, { recursive: true }), undefined);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test("portable gate list stays the documented Linux-capable subset", () => {
