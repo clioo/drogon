@@ -82,6 +82,64 @@ struct UsageAppendParams {
     cache_write_tokens: Option<u64>,
 }
 
+/// One entry the daemon authored itself — the orchestrator's own transitions
+/// and the workers it dispatches — so the ledger reads as a run's telemetry
+/// even when the agents inside it record nothing. Text is clipped to the
+/// same bounds the RPC enforces; the caller decides which role it speaks for.
+pub(crate) fn daemon_evidence(
+    status: &str,
+    summary: impl Into<String>,
+    detail: Option<String>,
+    artifacts: Vec<String>,
+    run_id: Option<String>,
+    agent_id: Option<String>,
+    role: Option<String>,
+) -> GraphEvidenceEntry {
+    GraphEvidenceEntry {
+        id: uuid::Uuid::new_v4().simple().to_string(),
+        timestamp: crate::now_rfc3339(),
+        status: status.to_string(),
+        summary: clip(summary.into(), MAX_GRAPH_EVIDENCE_SUMMARY_BYTES),
+        detail: detail
+            .map(|text| clip(text, MAX_GRAPH_EVIDENCE_DETAIL_BYTES))
+            .filter(|text| !text.trim().is_empty()),
+        artifacts: artifacts.into_iter().take(MAX_GRAPH_ARTIFACTS).collect(),
+        run_id,
+        agent_id,
+        role,
+    }
+}
+
+fn clip(text: String, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = max_bytes.saturating_sub(1);
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &text[..end])
+}
+
+/// Appends a daemon-authored entry under the caller's own
+/// `graph_orchestrator_gate` hold — this never takes the gate, so the
+/// orchestrator tick can call it from inside its own critical section. A
+/// ledger at its entry limit drops the entry (`Ok(false)`) rather than
+/// failing the run it describes.
+pub(crate) fn append_daemon_evidence(
+    root: &Path,
+    entry: GraphEvidenceEntry,
+) -> Result<bool, RpcError> {
+    let path = ledger_path(root, GRAPH_EVIDENCE_FILE_NAME);
+    let mut ledger: Ledger<GraphEvidenceEntry> = read_ledger(&path)?;
+    if ledger.entries.len() >= MAX_GRAPH_OBSERVABILITY_ENTRIES {
+        return Ok(false);
+    }
+    ledger.entries.push(entry);
+    write_ledger(&path, &ledger)?;
+    Ok(true)
+}
+
 fn parse<T: DeserializeOwned>(value: &Value) -> Result<T, RpcError> {
     serde_json::from_value(value.clone()).map_err(|e| error::invalid_argument(e.to_string()))
 }

@@ -78,7 +78,7 @@ function WorkGraphViewTabs({
           Graph
         </TabsTrigger>
         <TabsTrigger value="evidence" className="h-7 text-xs">
-          Evidence
+          Agent telemetry
           {evidenceCount > 0 ? (
             <span className="ml-1 text-[10px] text-muted-foreground">
               {evidenceCount}

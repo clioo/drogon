@@ -27,7 +27,7 @@ export function useGraphObservability(
   const read = useCallback(async () => {
     if (!bridge?.graphObservabilityStatus) {
       setLoading(false);
-      setError("Native Evidence and Usage are unavailable in this build.");
+      setError("Native Agent telemetry and Usage are unavailable in this build.");
       return;
     }
     try {

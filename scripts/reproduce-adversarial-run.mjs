@@ -803,10 +803,10 @@ async function main() {
         body: {
           characterPreset: "arya",
           displayIdentity: {
-            displayName: `Dog Tinder bot ${runId}`,
+            displayName: `White walker ${runId.slice(-6)}`,
             // The handle is an identity the daemon refuses to reuse: the run's
             // own random suffix keeps a second run from colliding with the first.
-            handle: `dog-tinder-${runId.slice(-4)}`,
+            handle: `white-walker-${runId.slice(-6)}`,
             title: "Watches the deck's spec",
           },
           harnessPolicy: { defaultHarness: mainHarness.id, explicitModel: mainHarness.model },

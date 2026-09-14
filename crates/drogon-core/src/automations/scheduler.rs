@@ -553,9 +553,9 @@ pub fn tick_once(engine: &Engine, now_ms: f64) -> TickSummary {
     // P2: Bot monitors ride this SAME scheduler tick (no second timer).
     // The monitor tick is best-effort and never fails the automation tick.
     let msummary = crate::bot_self_mgmt::tick_bot_monitors(engine, now_ms);
-    if msummary.evaluated > 0 || msummary.refused > 0 {
+    if msummary.evaluated > 0 || msummary.refused > 0 || msummary.retired > 0 {
         eprintln!(
-            "[bot-monitors] tick checked={} evaluated={} changed={} unchanged={} errors={} skipped={} refused={} events={}",
+            "[bot-monitors] tick checked={} evaluated={} changed={} unchanged={} errors={} skipped={} refused={} events={} retired={}",
             msummary.checked,
             msummary.evaluated,
             msummary.changed,
@@ -563,7 +563,8 @@ pub fn tick_once(engine: &Engine, now_ms: f64) -> TickSummary {
             msummary.errors,
             msummary.skipped,
             msummary.refused,
-            msummary.events
+            msummary.events,
+            msummary.retired
         );
     }
     summary.monitor_events += msummary.events;

@@ -70,6 +70,16 @@ pub struct ProjectUpdateParams {
     pub setup_script: Option<Option<String>>,
 }
 
+/// `project.create`: a new, empty folder under the daemon's own projects
+/// home, registered as a folder Project with its implicit Workspace. Unlike a
+/// Quick Session it is a project like any other: it lists under Projects,
+/// nothing marks it as scratch, and removing it is the owner's call.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCreateParams {
+    pub name: String,
+}
+
 /// Quick Session (`project.quickSessionCreate`): an app-owned scratch
 /// folder registered as a folder Project with its implicit Workspace.
 #[derive(Clone, Debug, Deserialize)]

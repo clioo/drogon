@@ -57,7 +57,7 @@ function RuntimeProviderField({
   );
 }
 
-function RuntimeModelField({
+export function RuntimeModelField({
   harness,
   model,
   disabled,
@@ -106,7 +106,7 @@ function RuntimeModelField({
   );
 }
 
-function HarnessSelect({
+export function HarnessSelect({
   value,
   harnesses,
   disabled,

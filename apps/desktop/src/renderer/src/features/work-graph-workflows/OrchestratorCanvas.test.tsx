@@ -67,7 +67,7 @@ function baseProps() {
 }
 
 describe("OrchestratorCanvas", () => {
-  it("uses top-level Graph, Evidence, and Usage tabs", () => {
+  it("uses top-level Graph, Agent telemetry, and Usage tabs", () => {
     render(
       <OrchestratorCanvas
         {...baseProps()}
@@ -92,7 +92,7 @@ describe("OrchestratorCanvas", () => {
     );
     expect(screen.getByRole("tab", { name: "Graph" })).toBeTruthy();
     expect(
-      screen.getByRole("tab", { name: /Evidence/ }).getAttribute("data-state"),
+      screen.getByRole("tab", { name: /Agent telemetry/ }).getAttribute("data-state"),
     ).toBe("active");
     expect(screen.getByRole("tab", { name: "Usage" })).toBeTruthy();
     expect(screen.getByText("Checkpoint visible")).toBeTruthy();

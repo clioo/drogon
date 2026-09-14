@@ -4268,6 +4268,26 @@ export function App() {
         })();
         return;
       }
+      if (request.kind === "open-sessions") {
+        // The orchestration IS the sessions: the released main session and
+        // the workers it dispatches, side by side in this workspace.
+        const workspaceId = request.workspaceId;
+        void (async () => {
+          if (!workspacesRef.current.some((item) => item.id === workspaceId))
+            await reloadWorkspaces();
+          const listed = await window.drogon.workspaces().catch(() => null);
+          const known = listed?.ok
+            ? listed.result.workspaces.some((item) => item.id === workspaceId)
+            : workspacesRef.current.some((item) => item.id === workspaceId);
+          if (!known) return;
+          setRoute(null);
+          setActiveBrowserTabId(null);
+          setActiveEditorTabId(null);
+          setActiveMentuTab(false);
+          if (selectedRef.current !== workspaceId) setSelected(workspaceId);
+        })();
+        return;
+      }
       if (request.kind !== "open-work-graph") return;
       const workspaceId = request.workspaceId;
       void (async () => {
