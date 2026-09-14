@@ -478,7 +478,7 @@ export function expandZapPath(entry, home) {
 
 // ---- audit phases ----
 
-export async function auditFreshInstall(ctx, cask) {
+export async function auditInstall(ctx, cask) {
   const { brewBin, brewEnv, room, steps } = ctx;
   const appDir = path.join(room.appdir, APP_NAME);
 
@@ -494,7 +494,11 @@ export async function auditFreshInstall(ctx, cask) {
     }
     return bin;
   });
+  return { appDir, cliBin };
+}
 
+export async function auditQuarantineSpctl(ctx, appDir, cask) {
+  const { room, steps } = ctx;
   await step(steps, `quarantine+spctl ${cask.version}`, async () => {
     const xattr = await runHostCommand("/usr/bin/xattr", ["-p", "com.apple.quarantine", appDir], { timeoutMs: 30_000 });
     const quarantined = xattr.code === 0 || quarantineAttributePresent(xattr.stdout + xattr.stderr);
@@ -518,7 +522,10 @@ export async function auditFreshInstall(ctx, cask) {
     assert.ok(accepted, `notarized cask rejected by spctl (a real user gets a Gatekeeper prompt): ${spctl.stdout}${spctl.stderr}`);
     return `quarantined; spctl accepted (notarized): ${(spctl.stdout + spctl.stderr).slice(-300)} | quarantine: ${quarantineEvidence.slice(-200)}`;
   });
+}
 
+export async function auditCli(ctx, cliBin, cask) {
+  const { steps } = ctx;
   await step(steps, `drogon-cli ${cask.version}`, async () => {
     const version = await runHostCommand(cliBin, ["--version"], { timeoutMs: 30_000 });
     assert.equal(version.code, 0, `drogon-cli --version failed: ${version.stderr.slice(-500)}`);
@@ -531,8 +538,6 @@ export async function auditFreshInstall(ctx, cask) {
     assert.ok(bare.stdout.includes(cask.version), `bare-PATH version mismatch: ${JSON.stringify(bare.stdout.trim())}`);
     return version.stdout.trim();
   });
-
-  return { appDir, cliBin };
 }
 
 export async function auditLaunch(ctx, appDir, cliBin, label = "first launch headless") {
@@ -549,15 +554,33 @@ export async function auditLaunch(ctx, appDir, cliBin, label = "first launch hea
     });
     return { launched, detail };
   } catch (error) {
-    if (launched) {
-      await stopLaunchedApp(launched).catch(() => {});
-      await stopDaemonViaBundleHook(appDir, room.dataDir).catch(() => {});
-    }
+    // A failed launch can still leave a half-started detached daemon behind;
+    // always sweep it so later legs observe only what they started.
+    if (launched) await stopLaunchedApp(launched).catch(() => {});
+    await stopDaemonViaBundleHook(appDir, room.dataDir).catch(() => {});
     throw error;
   }
 }
 
-export async function auditUninstallZap(ctx, appDir, cliBin, cask, homeBefore) {
+export async function assertShimsGone(room, cliBin) {
+  assert.ok(!(await pathExists(cliBin)), `drogon-cli shim still present after uninstall: ${cliBin}`);
+  const prefixShim = path.join(room.prefix, "bin", "drogon-cli");
+  if (prefixShim !== cliBin) {
+    assert.ok(!(await pathExists(prefixShim)), `drogon-cli shim still present after uninstall: ${prefixShim}`);
+  }
+}
+
+// Best-effort reset between legs: an earlier failed leg may have left an
+// install behind, and `brew install` refuses to run over one.
+export async function resetInstall(ctx) {
+  const { brewBin, brewEnv } = ctx;
+  await runHostCommand(brewBin, ["uninstall", "--cask", `${TAP_NAME}/${CASK_TOKEN}`], {
+    timeoutMs: BREW_TIMEOUT_MS,
+    env: brewEnv,
+  });
+}
+
+export async function auditUninstall(ctx, appDir, cliBin) {
   const { brewBin, brewEnv, room, steps } = ctx;
   const daemonPath = path.join(appDir, "Contents", "Resources", "bin", "drogond");
 
@@ -573,16 +596,25 @@ export async function auditUninstallZap(ctx, appDir, cliBin, cask, homeBefore) {
       assert.ok(after === null || after !== commands[pid], `daemon pid ${pid} still runs the same command after uninstall`);
     }
     assert.ok(!(await pathExists(appDir)), "app still present after uninstall");
-    assert.ok(!(await pathExists(cliBin)), `drogon-cli shim still present after uninstall: ${cliBin}`);
-    const prefixShim = path.join(room.prefix, "bin", "drogon-cli");
-    if (prefixShim !== cliBin) {
-      assert.ok(!(await pathExists(prefixShim)), `drogon-cli shim still present after uninstall: ${prefixShim}`);
-    }
+    await assertShimsGone(room, cliBin);
     const survivors = await findDaemonPids(daemonPath, room.dataDir);
     assert.deepEqual(survivors, [], `hook left daemons behind: ${JSON.stringify(survivors)}`);
     return result.stderr.slice(-1500) || result.stdout.slice(-1500);
   });
+}
 
+export async function auditUninstallRemovalOnly(ctx, appDir, cliBin) {
+  const { brewBin, brewEnv, room, steps } = ctx;
+  await step(steps, "uninstall removes app and shim", async () => {
+    const result = await brew(brewBin, brewEnv, ["uninstall", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
+    assert.ok(!(await pathExists(appDir)), "app still present after uninstall");
+    await assertShimsGone(room, cliBin);
+    return `${result.stderr.slice(-1500) || result.stdout.slice(-1500)}`;
+  });
+}
+
+export async function auditZap(ctx, cask, homeBefore) {
+  const { brewBin, brewEnv, room, steps } = ctx;
   await step(steps, "zap removes the real footprint", async () => {
     const trashPaths = cask.zapTrash.map((entry) => expandZapPath(entry, room.home));
     const missing = [];
@@ -766,52 +798,127 @@ async function main() {
         return `from=${fromEntry.version}@${fromEntry.rev.slice(0, 12)} to=${toEntry.version}@${toEntry.rev.slice(0, 12)}`;
       });
 
-      // Fresh-install leg against the TO version (what a new user gets today):
-      // install -> quarantine/spctl -> cli -> headless launch -> uninstall ->
-      // zap, leaving the room clean for the upgrade leg.
+      // Legs continue past a failed step so one run records the whole flow:
+      // each phase records its own FAILED row, later steps in the same leg
+      // SKIP, and the next leg starts from a reset install.
+      const legRunner = () => {
+        const flag = { failed: false };
+        return async (name, fn) => {
+          if (flag.failed) {
+            skipStep(steps, name, "skipped after an earlier failure in this leg");
+            return null;
+          }
+          try {
+            return await fn();
+          } catch {
+            flag.failed = true;
+            return null;
+          }
+        };
+      };
+
+      // Fresh-install leg against the TO version (what a new user gets today).
+      await resetInstall(ctx);
       await tapCheckout(tapDir, toEntry.rev);
       const caskTo = await readTapCask(tapDir);
-      const fresh = await auditFreshInstall(ctx, caskTo);
-      const firstLaunch = await auditLaunch(ctx, fresh.appDir, fresh.cliBin);
-      await stopLaunchedApp(firstLaunch.launched).catch(() => {});
-      await auditUninstallZap(ctx, fresh.appDir, fresh.cliBin, caskTo, homeBefore);
+      const appDir = path.join(room.appdir, APP_NAME);
+      let freshCli = null;
+      let freshDaemonSeeded = false;
+      {
+        const leg = legRunner();
+        const installed = await leg(`install ${caskTo.version}`, () => auditInstall(ctx, caskTo));
+        if (installed) freshCli = installed.cliBin;
+        await leg(`quarantine+spctl ${caskTo.version}`, () => auditQuarantineSpctl(ctx, appDir, caskTo));
+        if (freshCli) await leg(`drogon-cli ${caskTo.version}`, () => auditCli(ctx, freshCli, caskTo));
+        else skipStep(steps, `drogon-cli ${caskTo.version}`, "no shim to probe: install failed");
+        const launched = freshCli
+          ? await leg("first launch headless", () => auditLaunch(ctx, appDir, freshCli))
+          : (skipStep(steps, "first launch headless", "no install to launch"), null);
+        if (launched) {
+          freshDaemonSeeded = true;
+          await stopLaunchedApp(launched.launched).catch(() => {});
+        }
+        if (freshCli) {
+          if (freshDaemonSeeded) await leg("uninstall stops the daemon", () => auditUninstall(ctx, appDir, freshCli));
+          else {
+            skipStep(steps, "uninstall stops the daemon", "no daemon was seeded; removal-only check follows");
+            await leg("uninstall removes app and shim", () => auditUninstallRemovalOnly(ctx, appDir, freshCli));
+          }
+          await leg("zap removes the real footprint", () => auditZap(ctx, caskTo, homeBefore));
+        } else {
+          for (const name of ["uninstall stops the daemon", "zap removes the real footprint"]) {
+            skipStep(steps, name, "no install to remove");
+          }
+        }
+      }
 
       if (versions.from === versions.to) {
         skipStep(steps, "upgrade previous -> current", `single-version tap history (${versions.to}); nothing to upgrade from`);
       } else {
         // Upgrade leg: install FROM, seed a daemon + data, upgrade to TO,
         // then uninstall + zap the upgraded install.
+        await resetInstall(ctx);
         const homeBeforeUpgrade = await snapshotTree(room.home);
         await tapCheckout(tapDir, fromEntry.rev);
         const caskFrom = await readTapCask(tapDir);
-        await step(steps, `install previous ${caskFrom.version}`, async () => {
+        const leg = legRunner();
+        const prevInstalled = await leg(`install previous ${caskFrom.version}`, async () => {
           await brew(brewBin, brewEnv, ["install", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
-          assert.ok(await pathExists(fresh.appDir), "previous-version app missing after install");
-          return `installed ${caskFrom.version}`;
+          assert.ok(await pathExists(appDir), "previous-version app missing after install");
+          return { cliBin: await resolveCliBin(room) };
         });
-        const seeded = await auditLaunch(ctx, fresh.appDir, fresh.cliBin, `launch previous ${caskFrom.version}`);
-        const oldDaemonPid = seeded.launched.daemonPids[0];
-        const oldDaemonCmd = await processCommandLine(oldDaemonPid);
+        const prevCli = prevInstalled?.cliBin ?? null;
+        const seeded = prevCli
+          ? await leg(`launch previous ${caskFrom.version}`, () => auditLaunch(ctx, appDir, prevCli, `launch previous ${caskFrom.version}`))
+          : (skipStep(steps, `launch previous ${caskFrom.version}`, "previous install failed"), null);
+        const oldDaemonPid = seeded?.launched.daemonPids[0] ?? null;
+        const oldDaemonCmd = oldDaemonPid ? await processCommandLine(oldDaemonPid) : null;
         const dataBefore = await snapshotTree(room.dataDir);
-        await stopLaunchedApp(seeded.launched).catch(() => {});
+        if (seeded) await stopLaunchedApp(seeded.launched).catch(() => {});
         await tapCheckout(tapDir, toEntry.rev);
-        await step(steps, `upgrade ${versions.from} -> ${versions.to}`, async () => {
-          const result = await brew(brewBin, brewEnv, ["upgrade", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
-          const afterCmd = await processCommandLine(oldDaemonPid);
-          assert.ok(afterCmd === null || afterCmd !== oldDaemonCmd, `old daemon pid ${oldDaemonPid} still runs after upgrade: ${(afterCmd ?? "").slice(0, 200)}`);
-          const versionOut = await runHostCommand(fresh.cliBin, ["--version"], { timeoutMs: 30_000 });
-          assert.ok(versionOut.stdout.includes(versions.to), `upgraded cli reports ${JSON.stringify(versionOut.stdout.trim())}, want ${versions.to}`);
-          return `old daemon pid ${oldDaemonPid} gone; cli now ${versionOut.stdout.trim()}; brew: ${(result.stderr.slice(-1000) || result.stdout.slice(-1000))}`;
-        });
-        const upgradedLaunch = await auditLaunch(ctx, fresh.appDir, fresh.cliBin, `launch upgraded ${versions.to}`);
-        await step(steps, "upgraded data opens without loss", async () => {
-          const dataAfter = await snapshotTree(room.dataDir);
-          const lost = [...dataBefore].filter((p) => !p.endsWith(".sock") && !dataAfter.has(p));
-          assert.deepEqual(lost, [], `data files lost across upgrade: ${JSON.stringify(lost.slice(0, 20))}`);
-          return `data dir preserved (${dataAfter.size} entries); status: ${upgradedLaunch.launched.statusStdout.trim().slice(0, 300)}`;
-        });
-        await stopLaunchedApp(upgradedLaunch.launched).catch(() => {});
-        await auditUninstallZap(ctx, fresh.appDir, fresh.cliBin, caskTo, homeBeforeUpgrade);
+        const upgradedCli = prevCli ?? (await resolveCliBin(room).catch(() => null));
+        if (oldDaemonPid && upgradedCli) {
+          await leg(`upgrade ${versions.from} -> ${versions.to}`, async () => {
+            await step(steps, `upgrade ${versions.from} -> ${versions.to}`, async () => {
+              const result = await brew(brewBin, brewEnv, ["upgrade", "--cask", `${TAP_NAME}/${CASK_TOKEN}`]);
+              const afterCmd = await processCommandLine(oldDaemonPid);
+              assert.ok(afterCmd === null || afterCmd !== oldDaemonCmd, `old daemon pid ${oldDaemonPid} still runs after upgrade: ${(afterCmd ?? "").slice(0, 200)}`);
+              const versionOut = await runHostCommand(upgradedCli, ["--version"], { timeoutMs: 30_000 });
+              assert.ok(versionOut.stdout.includes(versions.to), `upgraded cli reports ${JSON.stringify(versionOut.stdout.trim())}, want ${versions.to}`);
+              return `old daemon pid ${oldDaemonPid} gone; cli now ${versionOut.stdout.trim()}; brew: ${(result.stderr.slice(-1000) || result.stdout.slice(-1000))}`;
+            });
+          });
+        } else {
+          skipStep(steps, `upgrade ${versions.from} -> ${versions.to}`, "no seeded daemon to upgrade from");
+        }
+        const upgraded = upgradedCli
+          ? await leg(`launch upgraded ${versions.to}`, () => auditLaunch(ctx, appDir, upgradedCli, `launch upgraded ${versions.to}`))
+          : (skipStep(steps, `launch upgraded ${versions.to}`, "no upgraded install"), null);
+        if (upgraded) {
+          await leg("upgraded data opens without loss", async () => {
+            await step(steps, "upgraded data opens without loss", async () => {
+              const dataAfter = await snapshotTree(room.dataDir);
+              const lost = [...dataBefore].filter((p) => !p.endsWith(".sock") && !dataAfter.has(p));
+              assert.deepEqual(lost, [], `data files lost across upgrade: ${JSON.stringify(lost.slice(0, 20))}`);
+              return `data dir preserved (${dataAfter.size} entries); status: ${upgraded.launched.statusStdout.trim().slice(0, 300)}`;
+            });
+          });
+          await stopLaunchedApp(upgraded.launched).catch(() => {});
+        } else {
+          skipStep(steps, "upgraded data opens without loss", "upgraded app never launched");
+        }
+        if (upgradedCli && (await pathExists(appDir))) {
+          if (upgraded) await leg("uninstall stops the daemon", () => auditUninstall(ctx, appDir, upgradedCli));
+          else {
+            skipStep(steps, "uninstall stops the daemon", "no daemon was seeded; removal-only check follows");
+            await leg("uninstall removes app and shim", () => auditUninstallRemovalOnly(ctx, appDir, upgradedCli));
+          }
+          await leg("zap removes the real footprint", () => auditZap(ctx, caskTo, homeBeforeUpgrade));
+        } else {
+          for (const name of ["uninstall stops the daemon", "zap removes the real footprint"]) {
+            skipStep(steps, name, "no upgraded install to remove");
+          }
+        }
       }
 
       const fingerprintAfter = await developerFingerprint();
