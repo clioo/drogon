@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -20,6 +20,8 @@ import {
 } from "./accept-release-artifact.mjs";
 import { chatLifecyclePiSkip } from "./probe-chat-lifecycle.mjs";
 import { surfacesPiAutomationSkip } from "./probe-packaged-surfaces.mjs";
+import { fixtureOpencodeSource } from "./probe-orchestrator.mjs";
+import { runAcceptanceProcess } from "./acceptance-process.mjs";
 
 test("parseArgs defaults and overrides", () => {
   const defaults = parseArgs([]);
@@ -193,6 +195,33 @@ test("verdict never passes with zero or skipped-only checks", () => {
   assert.equal(passed.verdict, "PASSED");
   assert.equal(passed.executedChecks, 1);
   assert.equal(passed.skippedChecks, 1);
+});
+
+test("offline OpenCode fixture accepts headless and interactive launches", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "ara-opencode-"));
+  const fixture = path.join(dir, "opencode");
+  try {
+    await writeFile(fixture, fixtureOpencodeSource());
+    const headless = await runAcceptanceProcess(process.execPath, [
+      fixture,
+      "run",
+      "--model",
+      "fixture/main",
+      "--auto",
+      "DROGON_NODE_ORCHESTRATOR_MAIN_DONE",
+    ]);
+    assert.equal(headless.stdout.trim(), "DROGON_NODE_ORCHESTRATOR_MAIN_DONE");
+    const interactive = await runAcceptanceProcess(process.execPath, [
+      fixture,
+      "--prompt=Print the acceptance marker and report completion.",
+    ]);
+    assert.equal(interactive.stdout.trim(), "fixture complete");
+    const unsupported = await runAcceptanceProcess(process.execPath, [fixture, "--unknown"])
+      .then(() => null, (error) => error);
+    assert.equal(unsupported?.code, 20);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("clean-machine run fixes the bundle, subset flags and background mode", async () => {
