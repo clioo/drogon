@@ -105,11 +105,13 @@ describe the published rc.7 artifact.
   chat turn on the harness you picked), the bot admits the Work Graph with
   `drogon-cli graph orchestrator-start`, the graph's main session fans the
   build out to parallel workers, and the daemon runs the adversarial rounds.
-  The tour leaves Settings on its own — Bots once the bot has its prompt, the
-  run's sessions once the workflow exists (the main session and its workers
-  side by side), and the Work Graph's **Agent telemetry** and Usage tabs at
-  the end. A bot session that exits without admitting the workflow is
-  reported, and the panel admits it and says so. The telemetry is written by
+  Settings closes into the normal app shell once the bot has its prompt, and
+  that bot appears under Chats. One click opens its exact session. The main
+  session and every worker appear under the run's project as they start; the
+  demo never pulls the viewer away from whichever session they chose.
+  **Show the sessions** and **Show the telemetry** remain explicit controls.
+  A bot session that exits without admitting the workflow is reported, and
+  the panel admits it and says so. The telemetry is written by
   the daemon itself as the orchestrator advances (every attempt, runtime,
   verdict with the agent's evidence, and the workflow's outcome), so it reads
   the same whichever harness ran. "Remove demo runs" deletes only what the

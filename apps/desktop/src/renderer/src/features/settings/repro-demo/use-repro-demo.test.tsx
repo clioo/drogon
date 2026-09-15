@@ -387,10 +387,9 @@ describe("running it again", () => {
 });
 
 describe("the guided tour", () => {
-  test("shows the bot once it has its prompt, the sessions once the workflow exists, then the telemetry", async () => {
+  test("leaves Settings once the bot is ready, then preserves the session the viewer chooses", async () => {
     const clock = fakeClock();
     const tour: unknown[] = [];
-    const at: number[] = [];
     const { bridge } = makeBridge({
       runStates: [{ id: "run-1", status: "passed", steps: [] }],
     });
@@ -398,31 +397,17 @@ describe("the guided tour", () => {
     const { result } = renderHook(() =>
       useReproDemo(bridge, {
         ...clock,
-        tour: (request) => {
-          tour.push(request);
-          at.push(clock.now());
-        },
+        tour: (request) => tour.push(request),
       }),
     );
     await act(async () => {
       await result.current.run({ runtime, iterations: 1 });
     });
-    // A bot that admits the graph at once must not turn the Bots stop into a
-    // flash: the sessions come no sooner than eight seconds after it.
-    expect(at[1] - at[0]).toBeGreaterThanOrEqual(8000);
 
-    // The viewer is shown what was configured (the Bots page, with the bot's
-    // session on it) as soon as the prompt is sent, then the run's sessions
-    // once the workflow exists — the orchestration is the sessions working,
-    // not a diagram of them — and the Work Graph's telemetry and usage tabs
-    // at the end.
-    expect(tour).toEqual([
-      { kind: "open-bots", workspaceId: "ws-1" },
-      { kind: "open-sessions", workspaceId: "ws-1" },
-      { kind: "open-work-graph", workspaceId: "ws-1" },
-      { kind: "focus-view", view: "evidence" },
-      { kind: "focus-view", view: "usage" },
-    ]);
+    // The only automatic handoff reveals the normal shell and its Chats row.
+    // Main-agent, worker, telemetry and usage navigation remains entirely
+    // viewer-controlled, so the demo cannot pull them off a session mid-read.
+    expect(tour).toEqual([{ kind: "open-bots", workspaceId: "ws-1" }]);
   });
 
   test("a failed run returns to the demo panel so its reason is visible", async () => {

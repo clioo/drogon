@@ -14,8 +14,8 @@ export const REPRO_TOUR_EVENT = "drogon:repro-demo-tour";
 
 export type ReproTourRequest =
   | { kind: "open-demo" }
-  /** Show what the demo just configured: the run's workspace selected, and the
-   *  Bots page, leaving Settings. */
+  /** Leave Settings for the normal app shell once the Bot session exists.
+   *  Its app-wide Chats row is then the viewer-controlled entry point. */
   | { kind: "open-bots"; workspaceId: string }
   /** Show the orchestration as it happens: select the run's workspace and its
    *  session area, where the main session and its parallel workers appear. */
