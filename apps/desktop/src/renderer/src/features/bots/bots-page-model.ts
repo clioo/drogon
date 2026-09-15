@@ -119,9 +119,9 @@ export function isBotCreateFormReady(form: BotCreateFormValues): boolean {
 /** Splits the stored `explicitModel` (`provider/model`, the create form's
  *  Model field shape) into `bot.run` harness overrides. No slash (or an
  *  empty side) means a bare model id, which Pi also accepts; null/blank
- *  means no overrides. Every `bot.run` is headless with no approval-answer
- *  affordance, so every harness uses `permissionMode: "unattended"` rather
- *  than inheriting a prompt that would stall at `needs_input` forever. */
+ *  means no overrides. Prompted `bot.run` calls are daemon-dispatched even
+ *  when their TUI is visible, so they use `permissionMode: "unattended"`
+ *  rather than stalling at an approval prompt with no owner in control. */
 export function buildBotRunHarness(
   harnessId: string,
   explicitModel: string | null,

@@ -185,11 +185,15 @@ describe("the in-app demo run", () => {
     // The prompt goes on the runtime the viewer picked, unattended, and
     // names the exact command; the bot admitted it, so the panel never did.
     const prompt = prompts[0] as {
+      workspaceId: string;
       botId: string;
       prompt: string;
+      interactive?: boolean;
       harness: { harnessId: string; model?: string; provider?: string; permissionMode?: string };
     };
+    expect(prompt.workspaceId).toBe("");
     expect(prompt.botId).toBe("bot-1");
+    expect(prompt.interactive).toBe(true);
     expect(prompt.harness).toEqual({
       harnessId: "opencode",
       model: "fixture/dog-tinder",

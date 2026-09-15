@@ -97,8 +97,8 @@ export type ReproDemoBridge = {
     requestId: string;
   }) => Promise<Result<unknown>>;
   botCreate: (input: unknown) => Promise<Result<{ id: string }>>;
-  /** A chat turn: the prompt goes to a headless session of the bot's own,
-   *  on the harness overrides given, and the receipt names that session. */
+  /** A chat turn on the Bot's own harness; this demo requests its visible
+   *  interactive TUI, and the receipt names that session. */
   botRun: (input: unknown) => Promise<Result<BotRunReceiptView>>;
   graphWritePolicy: (input: unknown) => Promise<Result<unknown>>;
   graphOrchestratorStart: (input: unknown) => Promise<Result<{ run: OrchestratorRun }>>;
@@ -286,27 +286,41 @@ export const REPRO_MAIN_NODE_PATH = ".drogon/repro-main-node.json";
 /** What the bot IS, as its standing instructions: a dispatcher. It admits the
  *  graph; it does not become its main agent. Every command is spelled out
  *  with the real workspace id, so even a small model has nothing to infer. */
-export function releaseInstructions(workspaceId: string): string {
+function graphFileArgument(mainNodePath: string): string {
+  return mainNodePath === REPRO_MAIN_NODE_PATH
+    ? mainNodePath
+    : JSON.stringify(mainNodePath);
+}
+
+export function releaseInstructions(
+  workspaceId: string,
+  mainNodePath = REPRO_MAIN_NODE_PATH,
+): string {
+  const file = graphFileArgument(mainNodePath);
   return [
     "You are the Bot dispatcher acting on behalf of the user, not this graph's main agent.",
     "Use this prepared workspace instead of creating another worktree: " + workspaceId + ". Its graph policy and main-node file are already configured; preserve them.",
     `Check drogon-cli graph orchestrator-status --workspace ${workspaceId} --json first. Reuse an existing run for this task; do not retry an active or unverifiable admission.`,
-    `Dispatch exactly once: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file ${REPRO_MAIN_NODE_PATH}`,
+    `Dispatch exactly once: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file ${file}`,
     "Report the returned graph run id and workspace, then end this Bot turn. Do not implement, start workers, wait for workers, or claim the graph completed.",
     "The graph's main agent plans and supervises its depth-one workers. The Bot is outside that depth budget.",
   ].join("\n");
 }
 
 /** The message the demo sends to the bot: the task, and the one action it
- *  takes on it. The concrete command is repeated here on purpose — a
- *  headless turn reads its standing instructions and this message together,
+ *  takes on it. The concrete command is repeated here on purpose — the
+ *  visible turn reads its standing instructions and this message together,
  *  and the command must be unmistakable in either. */
-export function dispatchPrompt(workspaceId: string): string {
+export function dispatchPrompt(
+  workspaceId: string,
+  mainNodePath = REPRO_MAIN_NODE_PATH,
+): string {
+  const file = graphFileArgument(mainNodePath);
   return [
     REPRO_SCENARIO_BRIEF.trim(),
     "",
-    `This task is ready to be admitted as a Work Graph in workspace ${workspaceId}: the spec is at ${REPRO_SCENARIO_SPEC_PATH}, the Subagent policy is saved, and the main node is at ${REPRO_MAIN_NODE_PATH}.`,
-    `Run now, exactly once: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file ${REPRO_MAIN_NODE_PATH}`,
+    `This task is ready to be admitted as a Work Graph in workspace ${workspaceId}: the spec is at ${REPRO_SCENARIO_SPEC_PATH}, the Subagent policy is saved, and the main node is at ${mainNodePath}.`,
+    `Run now, exactly once: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file ${file}`,
     "Then report the run id it returns and end your turn. Do not build the deck yourself.",
   ].join("\n");
 }
@@ -344,9 +358,9 @@ export function policyFor(runtime: ReproRuntime, iterations: number) {
   };
 }
 
-// A headless bot turn has to boot its harness and run one command. Ten
+// The visible Bot turn has to boot its harness and run one command. Ten
 // minutes is generous; the bound exists so a hung harness is reported, not
-// waited on forever. A bot session that EXITS without admitting anything is
+// waited on forever. A Bot session that exits without admitting anything is
 // handled the moment it is observed, not at this deadline.
 const WORKFLOW_START_TIMEOUT_MS = 10 * 60_000;
 const ROUNDS_TIMEOUT_MS = 45 * 60_000;
@@ -413,6 +427,9 @@ export async function runReproDemo(
     );
     ensureFollowing();
     const workspaceId = created.workspaceId;
+    const mainNodePath = created.project.path
+      ? `${created.project.path.replace(/[\\/]+$/, "")}/${REPRO_MAIN_NODE_PATH}`
+      : REPRO_MAIN_NODE_PATH;
     update({ workspaceId, projectName: created.project.name });
     setPhase("workspace", "done", created.project.name);
 
@@ -467,7 +484,7 @@ export async function runReproDemo(
             defaultHarness: runtime.harness,
             explicitModel: runtime.model || null,
           },
-          instructions: releaseInstructions(workspaceId),
+          instructions: releaseInstructions(workspaceId, mainNodePath),
           memories: [
             "This run is a reproducible demonstration; none of it is production.",
           ],
@@ -497,18 +514,24 @@ export async function runReproDemo(
       `main ${describeRuntime(runtime)} · subagents ${describeRuntime(workers)} · ${iterations} round(s)`,
     );
 
-    // Phase 5 — the prompt. One chat turn to the bot, on the runtime the
-    // viewer picked: a headless session of the bot's own, in this workspace.
+    // Phase 5 — the prompt. One visible chat turn to the bot, on the runtime
+    // the viewer picked. It runs in the Bot's isolated home while its prompt
+    // names the demo project where the Work Graph must be admitted.
     ensureFollowing();
     setPhase("prompt", "running");
     const receipt = unwrap(
       await bridge.botRun({
         hostId,
-        workspaceId,
+        // App-global scope lets native truthfully echo the Bot home workspace.
+        workspaceId: "",
         botId: bot.id ?? botId,
         requestId: requestId(),
         locale: "en-US",
-        prompt: dispatchPrompt(workspaceId),
+        prompt: dispatchPrompt(workspaceId, mainNodePath),
+        // This is the first thing the demo asks the viewer to inspect: keep
+        // the turn in the Bot's ordinary interactive TUI instead of a
+        // one-shot headless process that can only show output after exit.
+        interactive: true,
         harness: buildBotRunHarness(runtime.harness, runtime.model || null),
       }),
       "botRun",

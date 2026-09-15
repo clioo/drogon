@@ -232,10 +232,9 @@ pub struct HarnessOverrides {
 }
 
 /// A `bot.run` call is one of a scheduled/reactive/manual responsibility
-/// invocation, a raw chat turn carrying its own `prompt` (headless one-shot
-/// daemon run), or an open-session dispatch (`interactive: true`, no
-/// `prompt`): a live, IDLE session with no model turn behind it. Mutually
-/// exclusive on the wire (see [`parse_bot_run_request`]).
+/// invocation, a chat turn carrying its own `prompt` (headless by default, or
+/// visible in the harness TUI with `interactive: true`), or a promptless
+/// open-session dispatch: a live, IDLE session waiting for the user.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum RunTurn {
     Responsibility {
@@ -245,6 +244,8 @@ pub enum RunTurn {
     },
     Chat {
         prompt: String,
+        /// Show this dispatched turn in the harness's normal interactive TUI.
+        interactive: bool,
     },
     /// Open-session request (bug-bot-a836b4ebf8be65505, refined by the
     /// Carlos directive on task_e7c183ebc637): a live, user-facing tab
@@ -261,9 +262,7 @@ pub enum RunTurn {
     /// conversation in the Bot's home instead of starting a blank one. Set
     /// by the caller only when the Bot's recorded session is known to have
     /// exited; a live session is focused instead, never redispatched.
-    OpenSession {
-        resume: bool,
-    },
+    OpenSession { resume: bool },
 }
 
 /// The strict, normalized request. The envelope `request_id` is deliberately
@@ -298,11 +297,10 @@ pub struct ChatPlan {
     /// dispatch kinds' shared plumbing.
     pub prompt: String,
     pub attempt_at: f64,
-    /// True for an [`RunTurn::OpenSession`] dispatch: the ROOT adapter
-    /// strips `headless` and retargets the Bot's own home workspace, and
-    /// `finalize` rotates `current_session` WITHOUT recording a chat-turn
-    /// message row (no turn was dispatched). `false` for a plain chat
-    /// turn, which keeps the original one-shot headless contract.
+    /// True when the harness must be visible in its ordinary interactive TUI.
+    /// Both a prompted visible turn and a promptless open-session run in the
+    /// Bot's home; only the latter skips the chat-message record.
+    pub visible: bool,
     pub open_session: bool,
     /// True when the open-session dispatch must reopen the harness's own
     /// prior conversation (`--continue`, `codex resume --last`) rather than
@@ -457,13 +455,13 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         Some(Value::Bool(value)) => *value,
         Some(_) => return Err(invalid_argument("field resume must be a boolean")),
     };
-    if resume && interactive != Some(true) {
+    let has_prompt = matches!(object.get("prompt"), Some(value) if !value.is_null());
+    if resume && (interactive != Some(true) || has_prompt) {
         return Err(invalid_argument(
-            "field resume is only valid on an open-session dispatch (interactive: true): a chat \
-             turn or a responsibility invocation has no prior conversation to reopen",
+            "field resume is only valid on a promptless open-session dispatch \
+             (interactive: true)",
         ));
     }
-    let has_prompt = matches!(object.get("prompt"), Some(value) if !value.is_null());
     if interactive.is_some()
         && ["responsibilityId", "reason", "eventIdentity"]
             .iter()
@@ -475,16 +473,6 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         ));
     }
     let turn = if has_prompt {
-        if interactive == Some(true) {
-            // The Carlos directive (task_e7c183ebc637): opening a session
-            // must never dispatch a model turn -- the model is never the
-            // source of truth about the session. Reject the combination so
-            // the wire contract itself enforces it.
-            return Err(invalid_argument(
-                "field prompt must not be set alongside interactive: opening a session never \
-                 dispatches a model turn",
-            ));
-        }
         for key in ["responsibilityId", "reason", "eventIdentity"] {
             if object.contains_key(key) {
                 return Err(invalid_argument(format!(
@@ -497,7 +485,10 @@ pub fn parse_bot_run_request(params: &Value) -> Result<BotRunRequest, RpcError> 
         if prompt.chars().count() > MAX_CHAT_PROMPT_CHARS {
             return Err(invalid_argument("field prompt exceeds the maximum length"));
         }
-        RunTurn::Chat { prompt }
+        RunTurn::Chat {
+            prompt,
+            interactive: interactive == Some(true),
+        }
     } else if interactive == Some(true) {
         RunTurn::OpenSession { resume }
     } else {
@@ -956,7 +947,10 @@ pub fn authorized_prepare(
                 Err(e) => Err(internal_error(format!("failed to load bot run state: {e}"))),
             }
         }
-        RunTurn::Chat { prompt } => {
+        RunTurn::Chat {
+            prompt,
+            interactive,
+        } => {
             let Some(bot) = bots_storage::get_bot(conn, derived_host_id, &folder, &request.bot_id)
                 .map_err(|e| internal_error(format!("failed to load bot run state: {e}")))?
             else {
@@ -982,6 +976,7 @@ pub fn authorized_prepare(
                     params,
                     prompt: prompt.clone(),
                     attempt_at,
+                    visible: *interactive,
                     open_session: false,
                     resume: false,
                     home_notice: None,
@@ -1041,6 +1036,7 @@ pub fn authorized_prepare(
                     params,
                     prompt: String::new(),
                     attempt_at,
+                    visible: true,
                     open_session: true,
                     resume: *resume,
                     home_notice: None,
@@ -1395,28 +1391,23 @@ impl crate::Engine {
                 let attempt_at = crate::now_unix_ms() as f64;
                 let mut prepared =
                     authorized_prepare(tx, &derived_host_id, &request_id, &parsed, attempt_at)?;
-                // Open-session retarget (bug-bot-a836b4ebf8be65505): an
-                // open-session dispatch is a live user-facing tab, not a
-                // headless daemon run, so it must (a) drop `headless` from
-                // the built `harness.start` params -- the interactive TUI
-                // entrypoint stays running instead of exiting on completion
-                // -- and (b) run against the Bot's OWN isolated sandbox
-                // workspace instead of the folder its record happens to be
-                // stored under (which is whatever project workspace was
-                // selected at `bot.create` time, never the caller's to
-                // isolate from). Its params carry NO `prompt` key already
-                // (authorized_prepare built it that way): no model turn is
-                // dispatched. `authorized_prepare` stays unaware of any of
-                // this -- it is applied here, in the ROOT adapter, so the
-                // staged primitive keeps its original one-shot contract
-                // (and every existing direct-call test) untouched.
+                // Visible Bot turns use the same native session surface as a
+                // normal Bot chat: the harness's interactive TUI, in the Bot's
+                // own home. A prompted turn is daemon-owned and therefore
+                // keeps its requested unattended mode; a promptless Open
+                // Session remains user-attended and was normalized to inherit
+                // permissions above.
                 if let BotRunPrepare::ReadyChat { plan, workspace_id } = &mut prepared
-                    && plan.open_session
+                    && plan.visible
                 {
-                    plan.params
+                    let params = plan
+                        .params
                         .as_object_mut()
-                        .expect("chat harness.start params is always a JSON object")
-                        .remove("headless");
+                        .expect("chat harness.start params is always a JSON object");
+                    params.remove("headless");
+                    if !plan.open_session {
+                        params.insert("daemonVisible".to_string(), json!(true));
+                    }
                     let (home_workspace_id, _home_path, home_recreated) =
                         ensure_bot_home_workspace(
                             tx,
