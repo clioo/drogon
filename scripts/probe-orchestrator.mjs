@@ -113,19 +113,37 @@ async function until(check, label, timeout = 20000, every = 200) {
   }
 }
 
-/** A REAL executable standing in for the `opencode` binary. It exposes
- *  `--version` and `models` for discovery, then accepts either OpenCode's
- *  headless `run ... <prompt>` form or the visible role session's interactive
- *  `--prompt=<prompt>` form. No network, credentials, or inference. */
-function fixtureOpencodeSource() {
+/** A REAL executable standing in for the `opencode` binary the compiler's
+ *  "shell" backend invokes (crates/drogon-core/src/graph/compiler.rs: a
+ *  node whose harness is "opencode" compiles to `backend: "shell"`, so
+ *  mentu-recipes runs this file directly — never a bespoke agent-cli
+ *  protocol). Consumes exactly the argv/stdout contract
+ *  accept-durable-orchestrator.mjs already proved against the pinned
+ *  mentu-recipes runtime: `--version`, `models` (for the harness/model
+ *  catalog probes) and `run --model <id> ... <prompt>`, echoing back the
+ *  compiler's own completion keyword. No network, no credentials, no
+ *  inference — fully offline and deterministic. */
+export function fixtureOpencodeSource() {
   return `#!${process.execPath}
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('opencode fixture 1.0'); process.exit(0); }
 if (args[0] === 'models') { console.log('${FIXTURE_MODEL}'); process.exit(0); }
-const interactivePrompt = args.find((arg) => arg.startsWith('--prompt='));
-const prompt = args[0] === 'run' ? args.at(-1) : interactivePrompt?.slice('--prompt='.length);
-if (!prompt) process.exit(20);
-console.log(prompt.match(/DROGON_NODE_[A-Z0-9_]+_DONE/g)?.at(-1) ?? 'fixture complete');
+if (args[0] === 'run') {
+  const prompt = args.at(-1);
+  console.log(prompt.match(/DROGON_NODE_[A-Z0-9_]+_DONE/g)?.at(-1) ?? 'fixture complete');
+  process.exit(0);
+}
+// The durable orchestrator deliberately launches a visible, unattended turn
+// so a developer can watch the selected harness work. OpenCode's interactive
+// adapter receives that turn as --prompt=<text> (rather than the headless
+// run --model ... form above). Keep the offline fixture honest for both
+// launch contracts; rejecting the interactive form made clean packaged
+// acceptance fail with exit code 20 even though the real workflow was valid.
+if (args.some((arg) => arg.startsWith('--prompt='))) {
+  console.log('fixture complete');
+  process.exit(0);
+}
+process.exit(20);
 `;
 }
 
