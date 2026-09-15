@@ -11,9 +11,8 @@ export type ReproPhaseId =
   | "seed"
   | "bot"
   | "policy"
-  | "watch"
-  | "spec"
-  | "firing"
+  | "prompt"
+  | "workflow"
   | "rounds"
   | "evidence";
 
@@ -34,7 +33,7 @@ export const REPRO_PHASES: readonly ReproPhase[] = [
   {
     id: "seed",
     title: "Seed repository",
-    detail: "The dog profiles and the test contract the work has to pass.",
+    detail: "The spec, the dog profiles and the test contract the work has to pass.",
   },
   {
     id: "bot",
@@ -44,27 +43,22 @@ export const REPRO_PHASES: readonly ReproPhase[] = [
   {
     id: "policy",
     title: "Work Graph policy",
-    detail: "Approved runtimes, and the bounded adversarial loop turned on.",
+    detail: "Approved runtimes for the subagents, and the bounded adversarial loop turned on.",
   },
   {
-    id: "watch",
-    title: "Watch on the spec",
-    detail: "A file-digest monitor, approved by its exact rule hash.",
+    id: "prompt",
+    title: "The bot gets the prompt",
+    detail: "The task goes to the bot's own session. Its one job is to admit the Work Graph, not to build anything.",
   },
   {
-    id: "spec",
-    title: "The spec changes",
-    detail: "The demo writes specs/dog-tinder.md — that is what the bot sees.",
-  },
-  {
-    id: "firing",
-    title: "The bot wakes itself",
-    detail: "The watch observes the change and releases real work.",
+    id: "workflow",
+    title: "The main agent takes over",
+    detail: "The workflow the bot admitted starts its main session, which fans the build out to parallel workers.",
   },
   {
     id: "rounds",
     title: "Adversarial rounds",
-    detail: "The released session fans out to parallel workers, then the daemon breaks, fixes and verifies — up to the round cap.",
+    detail: "After the main agent settles, the daemon breaks, fixes and verifies — up to the round cap.",
   },
   {
     id: "evidence",

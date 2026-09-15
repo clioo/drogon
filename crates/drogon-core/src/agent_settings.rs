@@ -370,8 +370,9 @@ pub(crate) fn plan_with_settings(
         .ok_or_else(|| error::not_found("Agent command is not installed on this execution host"))?;
     let mut request = request.clone();
     // Headless runs retain their explicit bot/automation policy; interactive
-    // launches use the source's arguments instead of synthesized permission flags.
-    if !request.headless {
+    // launches use the source's arguments instead of synthesized permission
+    // flags — except a daemon-visible role session, which nobody attends.
+    if !request.headless && !request.daemon_visible {
         request.permission_mode = PermissionMode::Inherit;
     }
     let args = if request.headless {

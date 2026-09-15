@@ -22,7 +22,8 @@ prompt=""
 while [ "$#" -gt 0 ]; do
  case "$1" in
   -p|--prompt) prompt="$2"; shift 2;;
-  --provider|--model|--append-system-prompt|--extension) shift 2;;
+  --provider|--model|--append-system-prompt|--extension|--settings) shift 2;;
+  "Drogon task:"*) prompt="$1"; shift;;
   *) shift;;
  esac
 done
@@ -372,4 +373,40 @@ fn start_rejects_bare_ambiguous_pi_model_but_accepts_qualified_and_unique() {
             );
         }
     }
+}
+
+/// Every role session is a daemon-run headless turn with nobody at a keyboard:
+/// it must launch unattended (Pi's `--approve`; `--dangerously-skip-permissions`
+/// on Claude Code). Left to inherit, a `claude -p` main agent had every tool
+/// call denied and "passed" by exiting without building anything.
+#[test]
+fn role_sessions_launch_unattended() {
+    let fixture = Fixture::new();
+    fixture.policy(false, 1);
+    let run = fixture.start();
+    let mut scheduler = orchestrator::spawn(fixture.engine.clone());
+    let settled = fixture.settled();
+    scheduler.shutdown();
+    assert_eq!(settled["status"], "passed", "{settled}");
+    let listed = call(
+        &fixture.engine,
+        "session.list",
+        json!({"workspaceId": fixture.workspace}),
+    );
+    let sessions = listed["sessions"].as_array().unwrap();
+    let main_run_id = settled["steps"][0]["runId"].as_str().unwrap();
+    let main_session_id = main_run_id
+        .strip_prefix("session:")
+        .and_then(|rest| rest.split_once(':'))
+        .map(|(id, _)| id)
+        .unwrap();
+    let main = sessions
+        .iter()
+        .find(|session| session["id"] == main_session_id)
+        .unwrap_or_else(|| panic!("run {} has no main session row: {listed}", run["id"]));
+    let args: Vec<String> = serde_json::from_value(main["args"].clone()).unwrap();
+    assert!(
+        args.iter().any(|arg| arg == "--approve"),
+        "the main role launched attended: {args:?}"
+    );
 }

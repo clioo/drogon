@@ -60,7 +60,7 @@ const bot = z.object({
   currentSession: z
     .object({
       sessionId: z.string(),
-      source: z.literal("monitor").optional(),
+      source: z.enum(["monitor", "chat"]).optional(),
       harness: z.string(),
       model: z.string().nullable(),
       startedAt: timestamp,
@@ -208,6 +208,8 @@ const chatTurn = globalScope
     requestId: id,
     botId: id,
     prompt: z.string().min(1).max(20_000),
+    // A daemon-dispatched prompt may stay visible in the Bot's normal TUI.
+    interactive: z.literal(true).optional(),
     harness: harnessOverrides.nullable().optional(),
     locale: z.string().nullable().optional(),
   })

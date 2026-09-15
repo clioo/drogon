@@ -17,9 +17,8 @@ import {
 } from "./repro-demo-store";
 
 export type {
+  BotRunReceiptView,
   EvidenceEntry,
-  MonitorCheck,
-  MonitorView,
   ReproDemoBridge,
   ReproDemoDeps,
   ReproDemoOptions,
@@ -27,6 +26,7 @@ export type {
   UsageEntry,
 } from "./repro-demo-store";
 export {
+  dispatchPrompt,
   mainNodeFor,
   policyFor,
   releaseInstructions,

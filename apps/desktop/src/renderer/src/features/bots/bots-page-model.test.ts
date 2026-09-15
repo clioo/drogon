@@ -105,6 +105,13 @@ describe("bots-page-model", () => {
         permissionMode: "unattended",
       });
     }
+    // A slash in an OpenCode id is part of the model, never a provider: the
+    // daemon refuses a provider override on any harness but Pi.
+    expect(buildBotRunHarness("opencode", "fixture/dog-tinder")).toEqual({
+      harnessId: "opencode",
+      model: "fixture/dog-tinder",
+      permissionMode: "unattended",
+    });
     expect(buildBotRunHarness("claude", "sonnet")).toEqual({
       harnessId: "claude",
       model: "sonnet",

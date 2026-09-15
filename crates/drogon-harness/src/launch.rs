@@ -33,6 +33,12 @@ pub struct HarnessLaunchRequest {
     /// a user-facing tab gets. Absent (user tabs) means interactive.
     #[serde(default)]
     pub headless: bool,
+    /// A daemon-owned session shown as a live tab — a Work Graph role a
+    /// human can watch work in its harness's own TUI. Interactive like a
+    /// user tab, but its requested permission mode stands: nobody sits at
+    /// it to answer approvals.
+    #[serde(default)]
+    pub daemon_visible: bool,
     /// Reopen the harness's OWN conversation instead of starting a blank
     /// one. A closed Bot (or sleeping) session must resume the prior
     /// conversation, not merely open an empty tab; the locator is
@@ -617,6 +623,7 @@ mod tests {
             append_system_prompt: None,
             permission_mode: PermissionMode::Inherit,
             headless,
+            daemon_visible: false,
             resume: false,
             agent_session_id: None,
             agent_session_transcript_path: None,
@@ -738,6 +745,7 @@ mod tests {
             append_system_prompt: None,
             permission_mode: PermissionMode::Inherit,
             headless: false,
+            daemon_visible: false,
             resume: false,
             agent_session_id: None,
             agent_session_transcript_path: None,

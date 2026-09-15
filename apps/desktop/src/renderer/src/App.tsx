@@ -4242,13 +4242,12 @@ export function App() {
     });
     return off;
   }, []);
-  // Settings → Demo reproducible asks to SHOW the orchestration once its run
-  // reaches the rounds: the panel cannot select a workspace or open a tab, so
-  // it requests and App answers — the same steps the relayed `mentu.open`
-  // above takes, plus a workspace reload, because the demo created its own
-  // Quick Session workspace behind this window's list. Advisory: a workspace
-  // this window does not know, or a service without the graph capability,
-  // simply leaves the viewer where they are.
+  // Settings → Demo reproducible can reveal the Bot, sessions, or Work Graph
+  // on demand. The panel cannot select a workspace or open a tab, so it asks
+  // App through this seam. The demo only performs the initial Bot reveal
+  // automatically; later requests are explicit viewer actions. Advisory: an
+  // unknown workspace or unavailable graph capability leaves the viewer where
+  // they are.
   useEffect(() => {
     return onReproTour((request) => {
       if (request.kind === "open-demo") {
@@ -4257,19 +4256,14 @@ export function App() {
         return;
       }
       if (request.kind === "open-bots") {
-        // Leave Settings for the page that shows the bot the demo configured,
-        // with its responsibilities and its watch. The bot lives in the
-        // workspace the demo just created, which this window has never listed,
-        // so the list is reloaded and that workspace selected first.
-        const workspaceId = request.workspaceId;
-        void (async () => {
-          await reloadWorkspaces();
-          const listed = await window.drogon.workspaces().catch(() => null);
-          if (listed?.ok && listed.result.workspaces.some((item) => item.id === workspaceId)) {
-            if (selectedRef.current !== workspaceId) setSelected(workspaceId);
-          }
-          setRoute(BOTS_ROUTE_ID);
-        })();
+        // The first demo handoff is intentionally quiet: close Settings and
+        // reveal the normal app shell. The Bot's live row appears under Chats
+        // from the app-wide snapshot, and the viewer chooses when to open it.
+        // Do not route through the Bots page: its Back target is Settings, so a
+        // click on the Chat row used to bounce there before the session opened.
+        setRoute(null);
+        setBotsReload((value) => value + 1);
+        void reloadWorkspaces();
         return;
       }
       if (request.kind === "open-sessions") {

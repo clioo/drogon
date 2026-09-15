@@ -723,6 +723,12 @@ impl SchedulerHandle {
 
 /// Contains an unwinding tick without claiming recovery of poisoned state.
 /// Failed ticks never advance the heartbeat; a blocked tick stays stale too.
+///
+/// The report itself must not be able to unwind: this runs outside the
+/// guard, and `eprintln!` panics when stderr is a pipe nobody reads any more
+/// (the desktop that spawned the daemon has been relaunched). That exact
+/// second panic is what killed the scheduler thread for good before the
+/// daemon logged to a file.
 pub(crate) fn guarded_tick(label: &str, tick: impl FnOnce()) -> bool {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(tick)) {
         Ok(()) => true,
@@ -732,9 +738,9 @@ pub(crate) fn guarded_tick(label: &str, tick: impl FnOnce()) -> bool {
                 .cloned()
                 .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
                 .unwrap_or_else(|| "non-string panic payload".to_string());
-            eprintln!(
+            crate::diagnostics::log_line(format_args!(
                 "[{label}] tick panicked and was contained; the scheduler keeps running: {message}"
-            );
+            ));
             false
         }
     }

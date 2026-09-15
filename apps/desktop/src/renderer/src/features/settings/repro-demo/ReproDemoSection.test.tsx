@@ -66,7 +66,6 @@ function stubCatalogs(input: {
 }
 
 function bridgeThatRuns(seen: { bots: unknown[] } = { bots: [] }): ReproDemoBridge {
-  let monitorChecks = 0;
   return {
     status: async () => ok({ hostId: "host-1" }),
     projectCreate: async (input) =>
@@ -76,23 +75,13 @@ function bridgeThatRuns(seen: { bots: unknown[] } = { bots: [] }): ReproDemoBrid
       seen.bots.push(input);
       return ok({ id: "bot-1" });
     },
-    botMonitorCreate: async () => ok({ monitorId: "mon-1", ruleKind: "local_file_digest.v1" }),
-    botMonitorApprove: async () => ok({ approved: true }),
-    botMonitorList: async () => {
-      monitorChecks += 1;
-      return ok({
-        monitors: [
-          monitorChecks === 1
-            ? { monitorId: "mon-1", lastCheckOutcome: "error", lastError: "NotFound" }
-            : {
-                monitorId: "mon-1",
-                lastCheckOutcome: "changed",
-                lastEventId: "mev_9",
-                firing: { lastEventId: "mev_9", lastOutcome: "dispatched" },
-              },
-        ],
-      });
-    },
+    botRun: async () =>
+      ok({
+        outcome: "dispatched",
+        session: { sessionId: "sess-bot-9", incarnation: "inc-9" },
+        error: null,
+      }),
+    sessionList: async () => ok({ sessions: [{ id: "sess-bot-9", verdict: "live" }] }),
     graphWritePolicy: async () => ok({}),
     graphOrchestratorStart: async () => ok({ run: { id: "run-panel" } }),
     graphOrchestratorStatus: async () =>
@@ -218,7 +207,7 @@ describe("Settings → Reproducible demo", () => {
     ).toBe("codex");
   });
 
-  test("a run walks the phases, shows the firing, the rounds and the cost", async () => {
+  test("a run walks the phases, shows the bot's session, the rounds and the cost", async () => {
     stubCatalogs({
       harnesses: [{ harnessId: "opencode", displayName: "OpenCode" }],
       models: { opencode: ["fixture/dog-tinder"] },
@@ -236,14 +225,14 @@ describe("Settings → Reproducible demo", () => {
         ).toBe("done"),
       { timeout: 15_000 },
     );
-    expect(screen.getByTestId("repro-demo-checks").textContent).toMatch(/mev_9/);
+    expect(screen.getByTestId("repro-demo-dispatch").textContent).toMatch(/sess-bot-9/);
     expect(screen.getByTestId("repro-demo-rounds").textContent).toMatch(/pass/);
     // The free local model is priced as declared-free, not as a bill.
     expect(screen.getByTestId("repro-demo-cost").textContent).toMatch(
       /no rate in the card|measurement/,
     );
     expect(screen.getByTestId("repro-demo-release").textContent).toMatch(
-      /the bot's own watch/,
+      /the bot's own session/,
     );
     expect(screen.getByTestId("repro-demo-evidence").textContent).toMatch(/Agent telemetry/);
     // The last widget that changed is the one holding the focus ring.

@@ -38,10 +38,14 @@ export function TerminalProcessExitOverlay({
             <X />
             Close
           </Button>
-          <Button type="button" size="sm" onClick={onRestart}>
-            <RotateCw />
-            {actionLabel}
-          </Button>
+          {processExit.reason === "turn-completed" ? null : (
+            // A finished headless turn is not offered a Restart: relaunching
+            // it would send the same prompt again.
+            <Button type="button" size="sm" onClick={onRestart}>
+              <RotateCw />
+              {actionLabel}
+            </Button>
+          )}
         </div>
       </div>
     </div>

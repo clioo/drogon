@@ -119,9 +119,9 @@ export function isBotCreateFormReady(form: BotCreateFormValues): boolean {
 /** Splits the stored `explicitModel` (`provider/model`, the create form's
  *  Model field shape) into `bot.run` harness overrides. No slash (or an
  *  empty side) means a bare model id, which Pi also accepts; null/blank
- *  means no overrides. Every `bot.run` is headless with no approval-answer
- *  affordance, so every harness uses `permissionMode: "unattended"` rather
- *  than inheriting a prompt that would stall at `needs_input` forever. */
+ *  means no overrides. Prompted `bot.run` calls are daemon-dispatched even
+ *  when their TUI is visible, so they use `permissionMode: "unattended"`
+ *  rather than stalling at an approval prompt with no owner in control. */
 export function buildBotRunHarness(
   harnessId: string,
   explicitModel: string | null,
@@ -129,7 +129,11 @@ export function buildBotRunHarness(
   const overrides: BotRunHarnessOverrides = { harnessId };
   const model = (explicitModel ?? "").trim();
   if (model) {
-    const slash = model.indexOf("/");
+    // Only Pi takes a provider of its own (`--provider x --model y`); the
+    // daemon refuses a provider override on any other harness. OpenCode's
+    // ids carry a slash too (`opencode/gpt-5`, `fixture/dog-tinder`) and ride
+    // whole as the model.
+    const slash = harnessId === "pi" ? model.indexOf("/") : -1;
     if (slash > 0 && slash < model.length - 1) {
       overrides.provider = model.slice(0, slash);
       overrides.model = model.slice(slash + 1);

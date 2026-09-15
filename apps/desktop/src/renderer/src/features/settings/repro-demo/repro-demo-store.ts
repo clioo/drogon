@@ -1,17 +1,21 @@
 // The demo's run state, kept OUTSIDE React on purpose.
 //
-// The tour takes the viewer out of Settings to the Work Graph while the run is
-// still going, which unmounts the panel. A run whose state lived in that
-// component would lose everything at exactly the moment it gets interesting;
-// here the panel is a view over a store that outlives it, so coming back to
-// Settings shows the run as it stands.
+// The demo closes Settings once its Bot session exists, which unmounts the
+// panel. A run whose state lived in that component would lose everything at
+// exactly the moment it gets interesting; here the panel is a view over a
+// store that outlives it, so coming back to Settings shows the run as it
+// stands. After that first handoff the viewer owns navigation: the demo never
+// pulls them away from the Bot, main-agent, or worker session they opened.
 //
-// Every phase waits for something the DAEMON reports — a firing row, a run
-// row, a terminal status — never for a timer. A phase that cannot be observed
-// inside its bound fails with the reason, and the run continues where it
-// honestly can (the panel says which).
+// The chain is short on purpose: a project, a bot under Chats on the harness
+// the viewer picked, the task sent to that bot's own session, the Work Graph
+// the bot admits (its main session fans out to parallel workers), the
+// daemon's adversarial rounds, and the telemetry. No watch, no cron, no
+// scheduler in between: every wait is for something the DAEMON reports — a
+// dispatch receipt, a workflow row, a terminal status — never for a timer.
 
 import type { Result } from "../../../../../shared/session-contract";
+import { buildBotRunHarness } from "../../bots/bots-page-model";
 import {
   requestReproTour,
   type ReproTourSink,
@@ -62,30 +66,26 @@ export type OrchestratorRun = {
   steps?: OrchestratorStep[];
 };
 
-export type MonitorView = {
-  monitorId: string;
-  lastCheckOutcome?: string | null;
-  lastEventId?: string | null;
-  lastError?: string | null;
-  firing?: {
-    lastEventId?: string | null;
-    lastOutcome?: string | null;
-    lastDetail?: string | null;
-  } | null;
+/** What `bot.run` answers for a chat turn: the session it admitted, or why
+ *  it did not. Narrowed to the fields the demo reads. */
+export type BotRunReceiptView = {
+  outcome: "dispatched" | "refused" | "unsupported" | string;
+  session: { sessionId: string; incarnation: string } | null;
+  error?: string | null;
+  workspaceId?: string;
 };
 
-export type MonitorCheck = {
-  outcome: string;
-  eventId: string | null;
-  error: string | null;
-  firing: string | null;
+export type SessionView = {
+  id: string;
+  verdict: string;
+  exitCode?: number | null;
 };
 
 /** Exactly the calls the demo makes. Narrow on purpose: the panel can be
  *  driven by fakes in tests, and a build whose preload predates one of these
  *  reports the demo as unavailable instead of throwing at click time. */
 export type ReproDemoBridge = {
-  status: () => Promise<Result<{ hostId: string; schedulerLastTickMs?: number | null }>>;
+  status: () => Promise<Result<{ hostId: string }>>;
   projectCreate: (input: { name: string }) => Promise<
     Result<{ project: { id: string; name: string; path?: string }; workspaceId: string }>
   >;
@@ -97,28 +97,9 @@ export type ReproDemoBridge = {
     requestId: string;
   }) => Promise<Result<unknown>>;
   botCreate: (input: unknown) => Promise<Result<{ id: string }>>;
-  botMonitorCreate: (input: {
-    hostId: string;
-    workspaceId: string;
-    botId: string;
-    resource: string;
-    cron?: string;
-    responsibilityName?: string;
-    instructions?: string;
-  }) => Promise<
-    Result<{ monitorId: string; ruleKind: string; responsibilityId?: string | null }>
-  >;
-  botMonitorApprove: (input: {
-    hostId: string;
-    workspaceId: string;
-    botId: string;
-    monitorId: string;
-  }) => Promise<Result<{ approved: boolean }>>;
-  botMonitorList: (input: {
-    hostId: string;
-    workspaceId: string;
-    botId: string;
-  }) => Promise<Result<{ monitors: MonitorView[] }>>;
+  /** A chat turn on the Bot's own harness; this demo requests its visible
+   *  interactive TUI, and the receipt names that session. */
+  botRun: (input: unknown) => Promise<Result<BotRunReceiptView>>;
   graphWritePolicy: (input: unknown) => Promise<Result<unknown>>;
   graphOrchestratorStart: (input: unknown) => Promise<Result<{ run: OrchestratorRun }>>;
   graphOrchestratorStatus: (input: {
@@ -127,6 +108,12 @@ export type ReproDemoBridge = {
   graphObservabilityStatus: (input: { workspaceId: string }) => Promise<
     Result<{ observability: { evidence: EvidenceEntry[]; usage: UsageEntry[] } }>
   >;
+
+  /** The workspace's sessions, as the daemon lists them. Optional: with it
+   *  the demo can tell a bot session that EXITED without admitting the
+   *  workflow from one still working, and admit the workflow itself (saying
+   *  so) instead of waiting out the whole budget. */
+  sessionList?: (input: { workspaceId: string }) => Promise<Result<{ sessions: SessionView[] }>>;
 
   /** Housekeeping for the runs this demo leaves behind. Optional: a build
    *  without them still runs the demo, it just cannot tidy up after it. */
@@ -161,10 +148,11 @@ export type ReproDemoState = {
   workspaceId: string | null;
   projectName: string | null;
   botId: string | null;
-  monitorId: string | null;
-  checks: MonitorCheck[];
-  firingEventId: string | null;
-  releasedBy: "monitor" | "panel" | null;
+  /** The bot's own session, the one the prompt went to. */
+  dispatch: { sessionId: string; incarnation: string } | null;
+  /** Who admitted the workflow: the bot's session, as intended, or this
+   *  panel after that session provably exited without doing it. */
+  releasedBy: "bot" | "panel" | null;
   releaseNote: string | null;
   workflowId: string | null;
   workflowStatus: string | null;
@@ -199,9 +187,7 @@ function initialState(): ReproDemoState {
     workspaceId: null,
     projectName: null,
     botId: null,
-    monitorId: null,
-    checks: [],
-    firingEventId: null,
+    dispatch: null,
     releasedBy: null,
     releaseNote: null,
     workflowId: null,
@@ -293,15 +279,49 @@ export function describeRuntime(runtime: ReproRuntime): string {
   return runtime.model ? `${runtime.harness}/${runtime.model}` : `${runtime.harness} (harness default)`;
 }
 
-/** The Bot admits the graph; it does not become its main agent. */
-export function releaseInstructions(workspaceId: string): string {
+/** The file the bot's dispatch names: the main node, exactly as the policy
+ *  phase wrote it into the graph. */
+export const REPRO_MAIN_NODE_PATH = ".drogon/repro-main-node.json";
+
+/** What the bot IS, as its standing instructions: a dispatcher. It admits the
+ *  graph; it does not become its main agent. Every command is spelled out
+ *  with the real workspace id, so even a small model has nothing to infer. */
+function graphFileArgument(mainNodePath: string): string {
+  return mainNodePath === REPRO_MAIN_NODE_PATH
+    ? mainNodePath
+    : JSON.stringify(mainNodePath);
+}
+
+export function releaseInstructions(
+  workspaceId: string,
+  mainNodePath = REPRO_MAIN_NODE_PATH,
+): string {
+  const file = graphFileArgument(mainNodePath);
   return [
     "You are the Bot dispatcher acting on behalf of the user, not this graph's main agent.",
     "Use this prepared workspace instead of creating another worktree: " + workspaceId + ". Its graph policy and main-node file are already configured; preserve them.",
-    `Check drogon-cli graph orchestrator-status --workspace ${workspaceId} --json first. Reuse an existing run for this event; do not retry an active or unverifiable admission.`,
-    `Dispatch exactly once: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file .drogon/repro-main-node.json`,
+    `Check drogon-cli graph orchestrator-status --workspace ${workspaceId} --json first. Reuse an existing run for this task; do not retry an active or unverifiable admission.`,
+    `Dispatch exactly once: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file ${file}`,
     "Report the returned graph run id and workspace, then end this Bot turn. Do not implement, start workers, wait for workers, or claim the graph completed.",
     "The graph's main agent plans and supervises its depth-one workers. The Bot is outside that depth budget.",
+  ].join("\n");
+}
+
+/** The message the demo sends to the bot: the task, and the one action it
+ *  takes on it. The concrete command is repeated here on purpose — the
+ *  visible turn reads its standing instructions and this message together,
+ *  and the command must be unmistakable in either. */
+export function dispatchPrompt(
+  workspaceId: string,
+  mainNodePath = REPRO_MAIN_NODE_PATH,
+): string {
+  const file = graphFileArgument(mainNodePath);
+  return [
+    REPRO_SCENARIO_BRIEF.trim(),
+    "",
+    `This task is ready to be admitted as a Work Graph in workspace ${workspaceId}: the spec is at ${REPRO_SCENARIO_SPEC_PATH}, the Subagent policy is saved, and the main node is at ${mainNodePath}.`,
+    `Run now, exactly once: drogon-cli graph orchestrator-start --workspace ${workspaceId} --file ${file}`,
+    "Then report the run id it returns and end your turn. Do not build the deck yourself.",
   ].join("\n");
 }
 
@@ -338,9 +358,11 @@ export function policyFor(runtime: ReproRuntime, iterations: number) {
   };
 }
 
-const FIRING_TIMEOUT_MS = 300_000;
-// Admission can be slow. Never race the Bot with a second workflow.
-const WORKFLOW_START_TIMEOUT_MS = 15 * 60_000;
+// The visible Bot turn has to boot its harness and run one command. Ten
+// minutes is generous; the bound exists so a hung harness is reported, not
+// waited on forever. A Bot session that exits without admitting anything is
+// handled the moment it is observed, not at this deadline.
+const WORKFLOW_START_TIMEOUT_MS = 10 * 60_000;
 const ROUNDS_TIMEOUT_MS = 45 * 60_000;
 const POLL_MS = 1500;
 
@@ -405,13 +427,24 @@ export async function runReproDemo(
     );
     ensureFollowing();
     const workspaceId = created.workspaceId;
+    const mainNodePath = created.project.path
+      ? `${created.project.path.replace(/[\\/]+$/, "")}/${REPRO_MAIN_NODE_PATH}`
+      : REPRO_MAIN_NODE_PATH;
     update({ workspaceId, projectName: created.project.name });
     setPhase("workspace", "done", created.project.name);
 
-    // Phase 2 — the seed: profiles, the test contract, and the exact node the
-    // released session will start.
+    // Phase 2 — the seed: the spec, the profiles, the test contract, and the
+    // exact node the bot will admit.
     setPhase("seed", "running");
-    for (const file of REPRO_SCENARIO_SEED) {
+    const seed = [
+      ...REPRO_SCENARIO_SEED,
+      { path: REPRO_SCENARIO_SPEC_PATH, content: REPRO_SCENARIO_SPEC },
+      {
+        path: REPRO_MAIN_NODE_PATH,
+        content: `${JSON.stringify(mainNodeFor(runtime, REPRO_SCENARIO_SPEC, workspaceId), null, 2)}\n`,
+      },
+    ];
+    for (const file of seed) {
       ensureFollowing();
       unwrap(
         await bridge.fileWrite({
@@ -424,21 +457,10 @@ export async function runReproDemo(
         `fileWrite ${file.path}`,
       );
     }
-    ensureFollowing();
-    unwrap(
-      await bridge.fileWrite({
-        hostId,
-        workspaceId,
-        path: ".drogon/repro-main-node.json",
-        content: `${JSON.stringify(mainNodeFor(runtime, REPRO_SCENARIO_SPEC, workspaceId), null, 2)}\n`,
-        requestId: requestId(),
-      }),
-      "fileWrite .drogon/repro-main-node.json",
-    );
-    setPhase("seed", "done", `${REPRO_SCENARIO_SEED.length + 1} files`);
+    setPhase("seed", "done", `${seed.length} files`);
 
-    // Phase 3 — the bot that owns the watch and delegates the work. It lives
-    // under Chats, so its name says what it is, not what it builds.
+    // Phase 3 — the bot that gets the task and delegates it. It lives under
+    // Chats, so its name says what it is, not what it builds.
     ensureFollowing();
     setPhase("bot", "running");
     const botId = `white-walker-${tag}`;
@@ -462,7 +484,7 @@ export async function runReproDemo(
             defaultHarness: runtime.harness,
             explicitModel: runtime.model || null,
           },
-          instructions: REPRO_SCENARIO_BRIEF,
+          instructions: releaseInstructions(workspaceId, mainNodePath),
           memories: [
             "This run is a reproducible demonstration; none of it is production.",
           ],
@@ -474,7 +496,8 @@ export async function runReproDemo(
     update({ botId: bot.id ?? botId });
     setPhase("bot", "done", bot.id ?? botId);
 
-    // Phase 4 — the Subagent policy, with the adversarial loop on.
+    // Phase 4 — the Subagent policy, with the adversarial loop on, and the
+    // main node in the graph.
     ensureFollowing();
     setPhase("policy", "running");
     unwrap(
@@ -491,170 +514,92 @@ export async function runReproDemo(
       `main ${describeRuntime(runtime)} · subagents ${describeRuntime(workers)} · ${iterations} round(s)`,
     );
 
-    // Phase 5 — the watch, armed while the spec does not exist yet, so the
-    // firing is caused by the change the demo makes next.
+    // Phase 5 — the prompt. One visible chat turn to the bot, on the runtime
+    // the viewer picked. It runs in the Bot's isolated home while its prompt
+    // names the demo project where the Work Graph must be admitted.
     ensureFollowing();
-    setPhase("watch", "running");
-    const monitor = unwrap(
-      await bridge.botMonitorCreate({
+    setPhase("prompt", "running");
+    const receipt = unwrap(
+      await bridge.botRun({
         hostId,
-        workspaceId,
+        // App-global scope lets native truthfully echo the Bot home workspace.
+        workspaceId: "",
         botId: bot.id ?? botId,
-        resource: REPRO_SCENARIO_SPEC_PATH,
-        cron: "* * * * *",
-        responsibilityName: "Dog Tinder adversarial rounds",
-        instructions: releaseInstructions(workspaceId),
+        requestId: requestId(),
+        locale: "en-US",
+        prompt: dispatchPrompt(workspaceId, mainNodePath),
+        // This is the first thing the demo asks the viewer to inspect: keep
+        // the turn in the Bot's ordinary interactive TUI instead of a
+        // one-shot headless process that can only show output after exit.
+        interactive: true,
+        harness: buildBotRunHarness(runtime.harness, runtime.model || null),
       }),
-      "botMonitorCreate",
+      "botRun",
     );
     ensureFollowing();
-    unwrap(
-      await bridge.botMonitorApprove({
-        hostId,
-        workspaceId,
-        botId: bot.id ?? botId,
-        monitorId: monitor.monitorId,
-      }),
-      "botMonitorApprove",
+    if (receipt.outcome !== "dispatched" || !receipt.session) {
+      throw new Error(
+        `the bot did not take the prompt (${receipt.outcome}): ${receipt.error ?? "no detail"}`,
+      );
+    }
+    const dispatch = receipt.session;
+    update({ dispatch });
+    setPhase(
+      "prompt",
+      "done",
+      `session ${dispatch.sessionId.slice(0, 8)} · ${describeRuntime(runtime)}`,
     );
-    ensureFollowing();
-    update({ monitorId: monitor.monitorId });
-    setPhase("watch", "done", `${monitor.ruleKind} · ${REPRO_SCENARIO_SPEC_PATH}`);
-    // The bot and its watch exist now, so show them: Bots is where a human
-    // reads what this demo just configured, and the run keeps going behind it.
-    // A beat first — the setup rows above are worth reading before the panel
-    // gives way (and `sleep` is injected, so tests pay nothing for it).
+    // The Bot session now exists. Close Settings into the ordinary app shell;
+    // its row appears under Chats and one click opens that exact session. From
+    // here on the demo never changes the viewer's route or selected session.
     await sleep(2500);
     ensureFollowing();
     tour({ kind: "open-bots", workspaceId });
-    const monitorWaitStarted = now();
 
-    const readMonitor = async (): Promise<MonitorView | null> => {
-      const listed = await bridge.botMonitorList({
-        hostId,
-        workspaceId,
-        botId: bot.id ?? botId,
-      });
-      const monitors = unwrap(listed, "botMonitorList");
-      const health = unwrap(await bridge.status(), "status");
-      if (health.schedulerLastTickMs !== undefined) {
-        const lastTick = health.schedulerLastTickMs;
-        if ((lastTick === null && now() - monitorWaitStarted > 60_000) ||
-            (lastTick !== null && now() - lastTick > 60_000)) {
-          throw new Error("The service scheduler has not completed a tick in over a minute. Check running sessions, then use Settings → Restart daemon and retry the demo.");
-        }
-      }
-      return (
-        monitors.monitors.find((entry) => entry.monitorId === monitor.monitorId) ??
-        null
-      );
-    };
-
-    const recordCheck = (view: MonitorView): void => {
-      mutate((previous) => {
-        const outcome = view.lastCheckOutcome ?? "—";
-        const eventId = view.lastEventId ?? null;
-        const firing = view.firing?.lastOutcome ?? null;
-        const last = previous.checks.at(-1);
-        if (
-          last &&
-          last.outcome === outcome &&
-          last.eventId === eventId &&
-          last.firing === firing
-        )
-          return previous;
-        return {
-          ...previous,
-          checks: [
-            ...previous.checks,
-            { outcome, eventId, error: view.lastError ?? null, firing },
-          ],
-        };
-      });
-    };
-
-    // Phase 6 — the change. First the watch reports the spec is absent; then
-    // the demo writes it.
-    setPhase("spec", "running", "waiting for the watch to check once");
-    const first = await until(
+    // Phase 6 — the workflow the bot admits. The daemon's own status is the
+    // fact; a bot session that exits without admitting anything is a fact
+    // too, and then the panel admits the graph itself and says so.
+    setPhase("workflow", "running", "waiting for the bot's session to admit the Work Graph");
+    let releasedBy: "bot" | "panel" = "bot";
+    let releaseNote = `the bot's session ${dispatch.sessionId.slice(0, 8)} admitted it`;
+    const started = await until(
       async () => {
-        const view = await readMonitor();
-        return view?.lastCheckOutcome ? view : null;
+        const status = await bridge.graphOrchestratorStatus({ workspaceId });
+        if (status.ok && status.result.run?.id) return status.result.run;
+        if (!bridge.sessionList) return null;
+        const listed = await bridge.sessionList({ workspaceId });
+        const session = listed.ok
+          ? listed.result.sessions.find((entry) => entry.id === dispatch.sessionId)
+          : null;
+        if (!session || session.verdict !== "exited") return null;
+        // The dispatcher is gone and admitted nothing: no one is left to race
+        // — unless the viewer stopped following, in which case nothing more
+        // is started on their behalf.
+        ensureFollowing();
+        const admitted = await bridge.graphOrchestratorStart({
+          workspaceId,
+          main: mainNodeFor(runtime, REPRO_SCENARIO_SPEC, workspaceId),
+        });
+        if (!admitted.ok) {
+          // Most likely the bot got there between the two reads; the next
+          // poll reads that run. Anything else is reported by the deadline.
+          setPhase("workflow", "running", `waiting: ${admitted.error.message}`);
+          return null;
+        }
+        releasedBy = "panel";
+        releaseNote = `the bot's session ${dispatch.sessionId.slice(0, 8)} exited (code ${session.exitCode ?? "unknown"}) without admitting the workflow, so this panel admitted it`;
+        return admitted.result.run;
       },
-      "the watch never ran its first check",
-      FIRING_TIMEOUT_MS,
+      "the bot never admitted the workflow",
+      WORKFLOW_START_TIMEOUT_MS,
     );
-    recordCheck(first);
-    unwrap(
-      await bridge.fileWrite({
-        hostId,
-        workspaceId,
-        path: REPRO_SCENARIO_SPEC_PATH,
-        content: REPRO_SCENARIO_SPEC,
-        requestId: requestId(),
-      }),
-      `fileWrite ${REPRO_SCENARIO_SPEC_PATH}`,
-    );
-    setPhase("spec", "done", REPRO_SCENARIO_SPEC_PATH);
+    update({ workflowId: started.id, releasedBy, releaseNote });
+    setPhase("workflow", "done", `workflow ${started.id.slice(0, 8)} · ${releasedBy === "bot" ? "admitted by the bot" : "admitted by this panel"}`);
+    // The main session and its workers now appear under the run's project in
+    // the sidebar. Keep the surface the viewer chose instead of replacing the
+    // Bot session they may be reading.
 
-    // Phase 7 — the bot wakes itself up.
-    setPhase("firing", "running", "the watch checks every minute");
-    try {
-      const fired = await until(
-        async () => {
-          const view = await readMonitor();
-          if (!view) return null;
-          recordCheck(view);
-          return view.firing?.lastEventId ? view.firing : null;
-        },
-        "the watch never fired on the spec change",
-        FIRING_TIMEOUT_MS,
-      );
-      if (fired.lastOutcome !== "dispatched" && fired.lastOutcome !== "joined") {
-        throw new Error(
-          `the firing released no work (${fired.lastOutcome}): ${fired.lastDetail ?? "no detail"}`,
-        );
-      }
-      update({ firingEventId: fired.lastEventId ?? null });
-      setPhase("firing", "done", `${fired.lastEventId} · ${fired.lastOutcome}`);
-      // The released session exists now, and the first thing it does is fan
-      // the build out to parallel workers — so this is the moment to leave
-      // Settings for the run's own sessions: the main session and its workers,
-      // side by side as they run. The Work Graph canvas stays a tab away; it
-      // is a diagram, not the work.
-      tour({ kind: "open-sessions", workspaceId });
-
-      setPhase(
-        "firing",
-        "running",
-        `${fired.lastEventId} · session started; waiting for its workers and workflow`,
-      );
-      const started = await until(
-        async () => {
-          const status = await bridge.graphOrchestratorStatus({ workspaceId });
-          return status.ok && status.result.run?.id ? status.result.run : null;
-        },
-        "the released session never started the workflow",
-        WORKFLOW_START_TIMEOUT_MS,
-      );
-      update({
-        workflowId: started.id,
-        releasedBy: "monitor",
-        releaseNote: `Firing ${fired.lastEventId}`,
-      });
-      setPhase("firing", "done", `Firing ${fired.lastEventId} started workflow ${started.id}`);
-    } catch (error) {
-      if (generation !== runGeneration) return;
-      // A timeout is not proof the coordinator exited. Never race a slow
-      // coordinator (or a stopped tour) by launching a second workflow.
-      const message = error instanceof Error ? error.message : String(error);
-      setPhase("firing", "failed", message);
-      update({ releaseNote: message });
-      throw error;
-    }
-
-    // Phase 8 — the rounds, followed from the sessions view the tour opened
-    // at the firing; the daemon's own status is what settles them.
+    // Phase 7 — the rounds. The daemon's own status is what settles them.
     setPhase("rounds", "running");
     const finished = await until(
       async () => {
@@ -677,10 +622,10 @@ export async function runReproDemo(
       finished.status ?? null,
     );
 
-    // Phase 9 — the telemetry and the cost, on the Work Graph's own tabs.
+    // Phase 8 — collect telemetry and cost without navigating away from the
+    // session the viewer opened. The explicit "Show the telemetry" control
+    // remains available when they want it.
     setPhase("evidence", "running");
-    tour({ kind: "open-work-graph", workspaceId });
-    tour({ kind: "focus-view", view: "evidence" });
     const snapshot = unwrap(
       await bridge.graphObservabilityStatus({ workspaceId }),
       "graphObservabilityStatus",
@@ -696,10 +641,6 @@ export async function runReproDemo(
       "done",
       `${(snapshot.observability.evidence ?? []).length} telemetry entries`,
     );
-    // The telemetry is worth reading before the tour's last stop, the usage.
-    await sleep(8000);
-    ensureFollowing();
-    tour({ kind: "focus-view", view: "usage" });
     update({ running: false, spotlight: "evidence" });
   } catch (error) {
     if (generation !== runGeneration) return;

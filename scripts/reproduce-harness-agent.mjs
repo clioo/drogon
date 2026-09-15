@@ -49,9 +49,14 @@ function parseShimArgs(argv) {
 }
 
 function loadContext() {
+  // A Drogon session's environment is curated: the daemon's own variables do
+  // not reach it, but `DROGON_DATA_DIR` does, so a context dropped next to
+  // the data directory reaches every session of the run — the Bot's chat
+  // turn included, which starts before any file could land in its project.
   const candidates = [
     path.join(process.cwd(), ".drogon", "repro-context.json"),
     process.env.DROGON_REPRO_CONTEXT ?? "",
+    process.env.DROGON_DATA_DIR ? path.join(process.env.DROGON_DATA_DIR, "repro-context.json") : "",
   ].filter(Boolean);
   for (const candidate of candidates) {
     try {
@@ -245,16 +250,26 @@ const runId =
   prompt.match(/Drogon run ([0-9a-f]{8,})/)?.[1] ??
   prompt.match(/for workflow ([0-9a-f]{8,})/)?.[1] ??
   null;
+// The dispatcher's turn: a monitor firing names its delegation event; the
+// in-app demo's Bot gets a chat turn whose prompt spells the exact
+// `orchestrator-start` to run (no placeholders). Either way this session's
+// one job is to admit the graph, not to build anything.
 const releaseEvent = prompt.match(/Monitor delegation (\S+)/)?.[1] ?? null;
+const directDispatch = [
+  ...prompt.matchAll(/drogon-cli graph orchestrator-start --workspace (\S+) --file (?:"([^"]+)"|(\S+))/g),
+]
+  .map((match) => [match[0], match[1], match[2] ?? match[3]])
+  .find(([, workspaceId, file]) => !/[<>]/.test(workspaceId) && !/[<>]/.test(file)) ?? null;
 const dispatchId = process.env.DROGON_DISPATCH_ID ?? null;
-const agentId = evaluation ? path.basename(evaluation, ".json") : releaseEvent ? "monitor-release" : "orchestrator-main";
+const isDispatcher = Boolean(releaseEvent || (directDispatch && !prompt.includes("main agent of the dispatched Dog Tinder graph")));
+const agentId = evaluation ? path.basename(evaluation, ".json") : isDispatcher ? "bot-dispatcher" : "orchestrator-main";
 const role = dispatchId
   ? "worker"
   : evaluation
     ? evaluation.endsWith("-test.json")
       ? "test"
       : "review"
-    : releaseEvent
+    : isDispatcher
       ? "release"
       : "main";
 
@@ -448,20 +463,19 @@ function orchestrate(scoped) {
   return { runId: run.runId, workers, testers, implemented, tested };
 }
 
-/** The monitor-released session: open the worktree the delegation prompt
- *  names, put this run's Subagent policy on it, and start the durable
- *  workflow there. The rounds themselves are the daemon's job. */
+/** The dispatcher's session — the Bot's chat turn in the in-app demo, or the
+ *  monitor-released session of `make repro`: admit the durable workflow the
+ *  prompt names, or open the worktree the delegation prompt names and start
+ *  it there. The rounds themselves are the daemon's job. */
 function release() {
   // Standing instructions win over the delegation template, the same way they
-  // would for a real agent: when the responsibility names the exact command to
-  // run (the in-app demo does, so a small local model can follow it), run THAT
+  // would for a real agent: when the prompt names the exact command to run
+  // (the in-app demo does, so a small local model can follow it), run THAT
   // in this workspace instead of opening a worktree of our own.
   // A CONCRETE command only: instructions that spell the shape with
   // placeholders (`--workspace <id>`) are guidance, not something to run, and
   // running them verbatim is exactly how this fixture used to fail.
-  const direct = [
-    ...prompt.matchAll(/drogon-cli graph orchestrator-start --workspace (\S+) --file (\S+)/g),
-  ].find(([, workspaceId, file]) => !/[<>]/.test(workspaceId) && !/[<>]/.test(file));
+  const direct = directDispatch;
   if (direct) {
     const [, workspaceId, file] = direct;
     const scoped = { ...context, workspaceId };
@@ -478,14 +492,20 @@ function release() {
     }
     recordEvidence(scoped, {
       status: "progress",
-      summary: `Monitor firing ${releaseEvent} released the work: durable workflow started here.`,
-      detail: `Watched ${context.specPath ?? "the spec"} changed. Followed the responsibility's own instructions and started workflow ${started.run.id} in this workspace.`,
+      summary: releaseEvent
+        ? `Monitor firing ${releaseEvent} released the work: durable workflow started here.`
+        : "The Bot admitted the work: durable workflow started here.",
+      detail: releaseEvent
+        ? `Watched ${context.specPath ?? "the spec"} changed. Followed the responsibility's own instructions and started workflow ${started.run.id} in this workspace.`
+        : `Followed the prompt's own instructions and started workflow ${started.run.id} in this workspace; the graph's main agent takes it from here.`,
       role: "release",
       runId: started.run.id,
-      agentId: "monitor-release",
+      agentId,
     });
     process.stdout.write(
-      `Released by ${releaseEvent}: workflow ${started.run.id} in ${workspaceId}\n`,
+      releaseEvent
+        ? `Released by ${releaseEvent}: workflow ${started.run.id} in ${workspaceId}\n`
+        : `Admitted by the Bot: workflow ${started.run.id} in ${workspaceId}\n`,
     );
     return started.run.id;
   }
@@ -577,6 +597,12 @@ try {
   if (role === "release") {
     release();
     if (sentinel) process.stdout.write(`${sentinel}\n`);
+    // The in-app demo deliberately launches this as a visible interactive Bot
+    // turn. Keep the fixture process alive so its Chat row behaves like the
+    // real harness TUI a judge sees; acceptance cleanup owns termination.
+    if (directDispatch && !releaseEvent) {
+      await sleep(context.botDwellMs ?? 180_000);
+    }
     process.exit(0);
   }
 
