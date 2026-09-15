@@ -52,11 +52,10 @@ export type BotRunHarnessSource = {
 };
 
 /** A `bot.run` call is one of a responsibility invocation, a chat turn
- *  carrying its own `prompt` (headless one-shot daemon run), or an
- *  open-session dispatch (`interactive: true`, NO `prompt`) -- mutually
- *  exclusive on the wire (native rejects supplying both). `requestId` is
- *  caller-chosen so a genuine same-params retry after an ambiguous
- *  transport failure reuses the same ledger key, same as `startHarness`. */
+ *  carrying its own `prompt` (headless by default, or visible in the
+ *  harness TUI with `interactive: true`), or a promptless open-session
+ *  dispatch. `requestId` is caller-chosen so a genuine same-params retry
+ *  after an ambiguous transport failure reuses the same ledger key. */
 export type BotRunTurnInput = BotScope & {
   requestId: string;
   botId: string;
@@ -72,10 +71,12 @@ export type BotRunTurnInput = BotScope & {
       }
     | {
         prompt: string;
+        /** Show this daemon-dispatched turn in the Bot's normal TUI. */
+        interactive?: true;
+        resume?: never;
         responsibilityId?: never;
         reason?: never;
         eventIdentity?: never;
-        interactive?: never;
       }
     | {
         /** Open-session request (bug-bot-a836b4ebf8be65505, refined by the
@@ -85,8 +86,8 @@ export type BotRunTurnInput = BotScope & {
          *  IDLE, ready for the user's first real message. The model is never
          *  asked to confirm liveness or narrate the environment: those are
          *  daemon facts surfaced by the status pill and the Bot session
-         *  inspector. A prompt alongside interactive is a native parse
-         *  error.
+         *  inspector. A prompt alongside interactive is a separate visible
+         *  chat-turn shape; this promptless shape never spends a turn.
          *
          *  `resume` (Defect 2): reopen the harness's own most recent
          *  conversation in the Bot's home (`--continue`, `codex resume

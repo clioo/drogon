@@ -819,28 +819,110 @@ fn open_session_delivers_no_prompt_turn_to_the_harness() {
     );
 }
 
-/// The wire contract itself must enforce the directive: `interactive: true`
-/// alongside a `prompt` is a parse error, so no caller -- renderer, CLI,
-/// test -- can ever ask the model to narrate the session's own state
-/// through the open-session seam again.
+/// The demo's dispatched prompt is a normal visible Bot session: it runs in
+/// the Bot home, keeps the harness TUI alive, and remains linked from Chats.
 #[test]
-fn interactive_open_session_rejects_a_prompt_at_the_parse_seam() {
+fn interactive_prompt_runs_in_the_bot_home_and_stays_visible() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_pi_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+
+    let receipt = ok(
+        &fx.engine,
+        "bot.run",
+        "req-visible-turn",
+        json!({
+            "workspaceId": fx.record_workspace_id,
+            "hostId": fx.host,
+            "botId": "bot-1",
+            "prompt": "Delegate this prepared task.",
+            "interactive": true,
+            "harness": { "harnessId": "pi", "permissionMode": "unattended" },
+        }),
+    );
+    assert_eq!(receipt["outcome"], "dispatched", "{receipt:?}");
+    let session_id = receipt["session"]["sessionId"].as_str().unwrap();
+    let incarnation = receipt["session"]["incarnation"].as_str().unwrap();
+    let (output, verdict) = read_until(
+        &fx.engine,
+        session_id,
+        incarnation,
+        |text| text.contains("Delegate this prepared task."),
+        Duration::from_secs(20),
+    );
+    assert_eq!(verdict, "live", "visible turn exited: {output:?}");
+    let canonical_home = fx.home_dir().canonicalize().unwrap();
+    assert!(
+        output.contains(&format!("CWD={}", canonical_home.display())),
+        "visible turn ran outside the Bot home: {output:?}"
+    );
+    assert!(
+        output.contains("Delegate this prepared task."),
+        "{output:?}"
+    );
+
+    let snapshot = ok(
+        &fx.engine,
+        "bot.snapshot",
+        "req-visible-snapshot",
+        json!({"hostId": fx.host, "workspaceId": "", "locale": "en-US"}),
+    );
+    assert_eq!(snapshot["bots"][0]["currentSession"]["source"], "chat");
+    assert_eq!(
+        snapshot["bots"][0]["currentSession"]["sessionId"],
+        session_id
+    );
+    assert_eq!(
+        snapshot["bots"][0]["currentSession"]["workspaceId"],
+        receipt["workspaceId"]
+    );
+
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-visible",
+        json!({"sessionId": session_id, "incarnation": incarnation}),
+    );
+}
+
+/// `interactive: true` has two unambiguous shapes: with a prompt it is a
+/// visible Bot turn; without one it only opens an idle session. Resume stays
+/// exclusive to the promptless shape.
+#[test]
+fn interactive_prompt_is_a_visible_chat_turn_not_an_open_session() {
     use drogon_core::bot_run_rpc::parse_bot_run_request;
 
     let params = json!({
         "workspaceId": "ws-1",
         "hostId": "host-1",
         "botId": "bot-1",
-        "prompt": "Hi! Reply briefly to confirm this session is live.",
+        "prompt": "Delegate this prepared task.",
         "interactive": true,
         "harness": { "harnessId": "pi" },
     });
-    let error = parse_bot_run_request(&params).expect_err("prompt + interactive must be rejected");
-    assert_eq!(error.code, "invalid_argument");
-    assert!(
-        error.message.contains("never dispatches a model turn"),
-        "the refusal must state the design rule, got: {error:?}"
+    let parsed = parse_bot_run_request(&params).expect("visible prompt must be admitted");
+    let value = serde_json::to_value(parsed).unwrap();
+    assert_eq!(
+        value["turn"]["Chat"]["prompt"],
+        "Delegate this prepared task."
     );
+    assert_eq!(value["turn"]["Chat"]["interactive"], true);
+
+    let with_resume = json!({
+        "workspaceId": "ws-1",
+        "hostId": "host-1",
+        "botId": "bot-1",
+        "prompt": "Delegate this prepared task.",
+        "interactive": true,
+        "resume": true,
+        "harness": { "harnessId": "pi" },
+    });
+    let error = parse_bot_run_request(&with_resume)
+        .expect_err("a prompted turn must not claim promptless resume semantics");
+    assert_eq!(error.code, "invalid_argument");
 
     // `interactive: false` without a prompt is meaningless -- the only
     // promptless turn is an open-session dispatch.

@@ -4242,13 +4242,12 @@ export function App() {
     });
     return off;
   }, []);
-  // Settings → Demo reproducible asks to SHOW the orchestration once its run
-  // reaches the rounds: the panel cannot select a workspace or open a tab, so
-  // it requests and App answers — the same steps the relayed `mentu.open`
-  // above takes, plus a workspace reload, because the demo created its own
-  // Quick Session workspace behind this window's list. Advisory: a workspace
-  // this window does not know, or a service without the graph capability,
-  // simply leaves the viewer where they are.
+  // Settings → Demo reproducible can reveal the Bot, sessions, or Work Graph
+  // on demand. The panel cannot select a workspace or open a tab, so it asks
+  // App through this seam. The demo only performs the initial Bot reveal
+  // automatically; later requests are explicit viewer actions. Advisory: an
+  // unknown workspace or unavailable graph capability leaves the viewer where
+  // they are.
   useEffect(() => {
     return onReproTour((request) => {
       if (request.kind === "open-demo") {

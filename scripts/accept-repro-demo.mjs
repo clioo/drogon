@@ -118,6 +118,7 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
   let daemon = null;
   let daemonHandle = null;
   let browser = null;
+  let page = null;
   let foreground = null;
   const owned = new Map();
   try {
@@ -233,7 +234,7 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
       });
     });
     browser = await playwright.chromium.connectOverCDP(endpoint);
-    let page = null;
+    page = null;
     for (let attempt = 0; attempt < 200 && !page; attempt += 1) {
       page = browser.contexts()[0]?.pages()[0] ?? null;
       if (!page) await delay(50);
@@ -462,6 +463,12 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
               })),
               demoWorkspaceId,
             );
+            // Selecting the workspace alone deliberately preserves the active
+            // Bot tab when it belongs to that workspace. Choose one of the
+            // newly-visible graph session tabs exactly as a viewer would.
+            const graphSessionTab = page.locator(`[data-tab-id="${alive[0].id}"]`);
+            await graphSessionTab.waitFor({ timeout: 30_000 });
+            await graphSessionTab.click();
             await page.getByTestId("bot-session-header").waitFor({ state: "detached", timeout: 30_000 });
             assert.equal(
               await page.getByTestId("orchestrator-canvas").filter({ visible: true }).count(),
@@ -492,10 +499,10 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
             assert.ok(turn, "the bot's history records the prompt the demo sent");
             assert.match(turn.prompt, /drogon-cli graph orchestrator-start --workspace /, "the recorded prompt names the exact dispatch");
             dispatcherSessionId = linked.sessionId;
-            const allSessions = await cli("rpc", "session.list", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }));
+            const allSessions = await cli("rpc", "session.list", "--params", "{}");
             const launched = allSessions.sessions.find((session) => session.id === dispatcherSessionId);
-            assert.ok(launched, "the Bot links its dispatcher, not the graph main or a worker");
-            if (!live) assert.equal(launched.verdict, "exited", "the Bot ended after admitting the graph");
+            assert.ok(launched, "the Bot links its home session, not the graph main or a worker");
+            if (!live) assert.equal(launched.verdict, "live", "the visible Bot TUI stays open after admitting the graph");
             const activeGraph = await orchestratorStatus();
             assert.equal(activeGraph?.status, "running");
             assert.equal(activeGraph?.phase, "main", "workers execute inside the already-admitted graph main phase");
@@ -515,9 +522,16 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
             report.checks.push("Sidebar reveals the native graph main and selected runtime beside its worker sessions");
             await page.locator(`[data-bot-session-row="white-walker-${tag}"]`).click({ timeout: 15_000 });
             await page.getByTestId("bot-session-header").waitFor();
-            await page.getByTestId("bot-session-header").getByText("Launch prompt", { exact: true }).click();
-            assert.equal(await page.getByTestId("bot-session-header").getByTestId("monitor-launch-prompt-text").textContent(), launched.args.find((arg) => arg.startsWith("Drogon task:\n")) ?? launched.args.at(-1));
-            report.checks.push("Chats shows the Bot's own session with the prompt it was launched with; the graph main owns the workers");
+            assert.equal(
+              await page.getByTestId("bot-session-header").getByText("Launch prompt", { exact: true }).count(),
+              0,
+              "the visible Bot turn must use the ordinary TUI, not the headless launch-prompt inspector",
+            );
+            assert.ok(
+              (await page.locator(".xterm").filter({ visible: true }).count()) >= 1,
+              "the Bot's ordinary harness terminal must be visible",
+            );
+            report.checks.push("Chats shows the Bot's ordinary live TUI; the graph main owns the workers");
             sessionsShot = path.join(fixture, `sessions-running-${attempt}.png`);
             await page.screenshot({ path: sessionsShot, animations: "disabled" });
             report.screenshots.push(sessionsShot);
@@ -550,12 +564,12 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
               const usageShot = path.join(fixture, `usage-running-${attempt}.png`);
               await page.screenshot({ path: usageShot, animations: "disabled" });
               report.screenshots.push(usageShot);
-              const stillRunning = await cli("rpc", "session.list", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }));
-              assert.equal(stillRunning.sessions.find((session) => session.id === dispatcherSessionId)?.verdict, "exited");
-              assert.ok(stillRunning.sessions.some((session) => session.verdict === "live"), "the graph workers outlive the Bot dispatcher");
+              const stillRunning = await cli("rpc", "session.list", "--params", "{}");
+              assert.equal(stillRunning.sessions.find((session) => session.id === dispatcherSessionId)?.verdict, "live");
+              assert.ok(stillRunning.sessions.some((session) => session.verdict === "live"), "the graph workers and visible Bot TUI remain inspectable together");
               await page.locator(`[data-bot-session-row="white-walker-${tag}"]`).click();
               await page.getByTestId("bot-session-header").waitFor();
-              report.checks.push("During the graph main phase, workers remain active after the Bot exits; rendered activity and fixture hook counters are attributed separately");
+              report.checks.push("During the graph main phase, workers and the Bot TUI remain active; rendered activity and fixture hook counters are attributed separately");
             }
             report.checks.push(
               `the viewer explicitly opened the run's sessions, with ${alive.length} alive: ${alive
@@ -604,9 +618,17 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
       assert.ok(Date.now() - health.result.schedulerLastTickMs < 60_000, "scheduler heartbeat must keep advancing");
       report.checks.push(`the orchestration ran its rounds and ${rounds.status}: ${roles.join(" · ")}`);
 
-      // Third stop: the Work Graph's Agent telemetry, where the daemon itself
-      // wrote every attempt and verdict of the rounds as they happened.
-      await page.getByTestId("work-graph-evidence-view").waitFor({ timeout: 120_000 });
+      // Inspect telemetry explicitly: the demo preserves the viewer's chosen
+      // session, so this is the acceptance exercising "Show the telemetry",
+      // not an automatic route change.
+      await page.evaluate((workspaceId) => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", {
+        detail: { kind: "open-work-graph", workspaceId },
+      })), demoWorkspaceId);
+      await page.getByTestId("orchestrator-canvas").waitFor({ timeout: 120_000 });
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", {
+        detail: { kind: "focus-view", view: "evidence" },
+      })));
+      await page.getByTestId("work-graph-evidence-view").waitFor({ timeout: 60_000 });
       const expectedTelemetry = live
         ? [/Workflow started/, /verdict: /, /Workflow (passed|exhausted)/]
         : [/Workflow started/, /verdict: findings/, /Workflow passed/];
@@ -623,11 +645,13 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
       await page.screenshot({ path: telemetryShot, animations: "disabled" });
       report.screenshots.push(telemetryShot);
       report.checks.push(
-        "the tour showed the Work Graph's Agent telemetry, written by the daemon as the rounds ran",
+        "the viewer explicitly opened Agent telemetry, written by the daemon as the rounds ran",
       );
-      // Last stop: the usage, after a beat on the telemetry.
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", {
+        detail: { kind: "focus-view", view: "usage" },
+      })));
       await page.getByTestId("work-graph-usage-view").waitFor({ timeout: 60_000 });
-      report.checks.push("the tour ended on the Work Graph's Usage tab");
+      report.checks.push("the viewer explicitly opened the Work Graph's Usage tab");
 
       // Exercise the same return route used when a run fails off-panel.
       await page.evaluate(() => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", {
@@ -665,7 +689,7 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
         `the workflow must be admitted by the bot's session, not by the panel: ${release}`,
       );
       report.checks.push("the bot's own session admitted the workflow — not the panel's fallback");
-      report.checks.push(`the panel survived the tour and reports the cost: ${report.cost}`);
+      report.checks.push(`the retained panel reports the cost after the run: ${report.cost}`);
       report.runs.push({
         attempt,
         tag,
@@ -679,26 +703,35 @@ export async function execute({ runs = 2, live = null, fixtureHarness = FIXTURE_
       await page.screenshot({ path: panelShot, animations: "disabled" });
       report.screenshots.push(panelShot);
       if (!live) {
-        const beforeView = await cli("rpc", "session.list", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }));
-        assert.equal(beforeView.sessions.find((session) => session.id === dispatcherSessionId)?.verdict, "exited");
+        const beforeView = await cli("rpc", "session.list", "--params", "{}");
+        assert.equal(beforeView.sessions.find((session) => session.id === dispatcherSessionId)?.verdict, "live");
         await page.evaluate((workspaceId) => window.dispatchEvent(new CustomEvent("drogon:repro-demo-tour", {
           detail: { kind: "open-bots", workspaceId },
         })), demoWorkspaceId);
-        const view = page.getByTestId(`open-session-white-walker-${tag}`);
-        await view.waitFor();
-        assert.equal((await view.innerText()).trim(), "View session");
-        await view.click();
+        const botRow = page.locator(`[data-bot-session-row="white-walker-${tag}"]`);
+        await botRow.waitFor();
+        await botRow.click();
         await page.getByTestId("bot-session-header").waitFor();
         await delay(500);
-        const afterView = await cli("rpc", "session.list", "--params", JSON.stringify({ workspaceId: demoWorkspaceId }));
+        const afterView = await cli("rpc", "session.list", "--params", "{}");
         assert.deepEqual(afterView.sessions.map((session) => session.id).sort(), beforeView.sessions.map((session) => session.id).sort());
-        report.checks.push("View session inspects the exited bot turn without creating or resuming a session");
+        report.checks.push("the live Bot TUI remains a one-click Chat without creating or resuming another session");
       }
     }
 
     report.status = "PASSED";
   } catch (error) {
     report.failure = error instanceof Error ? error.message : String(error);
+    try {
+      report.uiText = (await page?.locator("body").innerText())?.slice(-12_000) ?? null;
+      if (page) {
+        const failureShot = path.join(fixture, "failure.png");
+        await page.screenshot({ path: failureShot, animations: "disabled" });
+        report.screenshots.push(failureShot);
+      }
+    } catch {
+      // Diagnostics only; preserve the original failure.
+    }
     // What the run's sessions printed, so an early exit of a real harness is
     // diagnosable from the report alone.
     try {

@@ -256,8 +256,10 @@ const runId =
 // one job is to admit the graph, not to build anything.
 const releaseEvent = prompt.match(/Monitor delegation (\S+)/)?.[1] ?? null;
 const directDispatch = [
-  ...prompt.matchAll(/drogon-cli graph orchestrator-start --workspace (\S+) --file (\S+)/g),
-].find(([, workspaceId, file]) => !/[<>]/.test(workspaceId) && !/[<>]/.test(file)) ?? null;
+  ...prompt.matchAll(/drogon-cli graph orchestrator-start --workspace (\S+) --file (?:"([^"]+)"|(\S+))/g),
+]
+  .map((match) => [match[0], match[1], match[2] ?? match[3]])
+  .find(([, workspaceId, file]) => !/[<>]/.test(workspaceId) && !/[<>]/.test(file)) ?? null;
 const dispatchId = process.env.DROGON_DISPATCH_ID ?? null;
 const isDispatcher = Boolean(releaseEvent || (directDispatch && !prompt.includes("main agent of the dispatched Dog Tinder graph")));
 const agentId = evaluation ? path.basename(evaluation, ".json") : isDispatcher ? "bot-dispatcher" : "orchestrator-main";
@@ -595,6 +597,12 @@ try {
   if (role === "release") {
     release();
     if (sentinel) process.stdout.write(`${sentinel}\n`);
+    // The in-app demo deliberately launches this as a visible interactive Bot
+    // turn. Keep the fixture process alive so its Chat row behaves like the
+    // real harness TUI a judge sees; acceptance cleanup owns termination.
+    if (directDispatch && !releaseEvent) {
+      await sleep(context.botDwellMs ?? 180_000);
+    }
     process.exit(0);
   }
 
