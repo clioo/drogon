@@ -2,7 +2,7 @@
 // `window.drogon.meetings.*`; the channel is handled by
 // main/meetings-bridge.ts (one channel, one validated request shape, like
 // the Automation bridge). Reading the notes is read-only by construction;
-// `analyze` runs the free local model once and creates nothing, and the two
+// `analyze` runs the user's configured Pi model once and creates nothing, and the two
 // `commitment` ops write only Drogon's own ledger file.
 import { ipcRenderer } from "electron";
 import type { MeetingsBridge } from "../shared/meetings-contract";

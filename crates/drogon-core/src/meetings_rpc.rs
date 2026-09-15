@@ -19,10 +19,9 @@ use crate::meetings::{
 use crate::meetings::{CommitmentError, CommitmentFilter, CommitmentSource, CommitmentStatus};
 use drogon_protocol::RpcError;
 
-// Two rules are enforced here rather than in the UI: the run's model is the
-// free local one (a caller cannot name a provider or a model at all — the
-// parameters below have no such field), and a commitment is only stored when
-// its quote is found in the transcript it names.
+// Two rules are enforced here rather than in the UI: analysis delegates to
+// Pi without a caller-supplied provider/model override, and a commitment is
+// only stored when its quote is found in the transcript it names.
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -196,9 +195,9 @@ impl crate::Engine {
         )
     }
 
-    /// Extraction through the fixed free local model. The parameters carry a
-    /// meeting id and nothing else: there is no provider, model, harness or
-    /// prompt field, so no caller can route this run (or its cost) elsewhere.
+    /// Extraction through the user's configured Pi default. The parameters
+    /// carry a meeting id and nothing else: the caller cannot silently override
+    /// the provider, model, harness or prompt for this one-shot action.
     pub(crate) fn do_meeting_analyze(&self, params: &Value) -> Result<Value, RpcError> {
         let params: MeetingAnalyzeParams = decode(params, "meeting.analyze")?;
         let file_system = RealMeetingFileSystem;

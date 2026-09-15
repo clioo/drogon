@@ -477,8 +477,6 @@ pub enum OrchestrationCommand {
         /// run-home | dispatch:ID | group:NAME
         #[arg(long, value_name = "TARGET")]
         to: Option<String>,
-        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
-        body: Option<String>,
         /// Structured payload as a JSON object
         #[arg(long, value_name = "JSON")]
         payload: Option<String>,
@@ -492,6 +490,15 @@ pub enum OrchestrationCommand {
         result: Option<String>,
         #[command(flatten)]
         host: HostOpt,
+        /// Message text; place this flag last. Remaining shell words are
+        /// joined with spaces, including report bullets and flag-like text.
+        #[arg(
+            long,
+            value_name = "TEXT",
+            allow_hyphen_values = true,
+            num_args = 1..
+        )]
+        body: Option<Vec<String>>,
     },
     /// Consume or inspect the actor's mailbox (whole-FIFO batch, explicit ACK)
     Check {

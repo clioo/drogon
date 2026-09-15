@@ -23,6 +23,7 @@ import { runAcceptanceProcess, startAcceptanceProcess } from "./acceptance-proce
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
 import { resolveRuntime } from "./reproduce-adversarial-run.mjs";
+import { writeHarnessFixtures } from "./reproduce-harness-fixture.mjs";
 
 const STAGE_TIMEOUT_MS = 120_000;
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -106,8 +107,11 @@ export async function execute() {
   const world = await mkdtemp(path.join(tmpdir(), "rpd-"));
   const dataDir = path.join(world, "data");
   const profileDir = path.join(world, "electron");
+  const binDir = path.join(world, "bin");
   await mkdir(dataDir, { recursive: true });
   await mkdir(profileDir, { recursive: true });
+  await writeHarnessFixtures(binDir, ["pi"]);
+  const fixturePath = `${binDir}${path.delimiter}${process.env.PATH ?? ""}`;
   report.world = world;
 
   let desktop = null;
@@ -128,7 +132,11 @@ export async function execute() {
     daemon = startAcceptanceProcess(daemonPath, ["--data-dir", dataDir], {
       cwd: fixture,
       stdio: ["ignore", "ignore", "ignore"],
-      env: { ...process.env, DROGON_MENTU_RUNTIME: runtime.path },
+      env: {
+        ...process.env,
+        PATH: fixturePath,
+        DROGON_MENTU_RUNTIME: runtime.path,
+      },
     });
     const daemonDeadline = Date.now() + 30_000;
     for (;;) {
@@ -151,6 +159,7 @@ export async function execute() {
       stdio: ["ignore", "ignore", "pipe"],
       env: {
         ...process.env,
+        PATH: fixturePath,
         DROGON_DATA_DIR: dataDir,
         DROGON_ELECTRON_PROFILE: profileDir,
         DROGON_BACKGROUND_WINDOW: "1",
@@ -215,12 +224,29 @@ export async function execute() {
     await page.getByTestId("repro-demo-run").waitFor();
     report.checks.push("Settings opens the Demo reproducible section");
 
-    // The section opens on the free local lane, with every phase pending and
-    // nothing pretending to have happened yet.
-    assert.equal(
-      await page.getByTestId("repro-demo-model").inputValue(),
-      "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
-      "the demo must open on the free local model",
+    // PR #574 starts from the user's default installed harness and lets the
+    // subagents follow it. The exact model can therefore be that harness's
+    // own default or a host-enumerated id; it must never be our private QA
+    // model injected by product code.
+    await page.waitForFunction(() => {
+      const button = document.querySelector('[data-testid="repro-demo-run"]');
+      return button instanceof HTMLButtonElement && !button.disabled;
+    });
+    const proposedRuntime = await page.evaluate(() => ({
+      mainHarness: document.querySelector('[data-testid="repro-demo-harness"]')?.textContent ?? "",
+      mainModel: document.querySelector('[data-testid="repro-demo-model-value"]')?.textContent ?? "",
+      subagentHarness:
+        document.querySelector('[data-testid="repro-demo-subagents-harness"]')?.textContent ?? "",
+      subagentModel:
+        document.querySelector('[data-testid="repro-demo-subagents-model-value"]')?.textContent ?? "",
+    }));
+    assert.ok(proposedRuntime.mainHarness, "the demo must choose an installed harness");
+    assert.equal(proposedRuntime.subagentHarness, proposedRuntime.mainHarness);
+    assert.equal(proposedRuntime.subagentModel, proposedRuntime.mainModel);
+    assert.doesNotMatch(
+      `${proposedRuntime.mainHarness}/${proposedRuntime.mainModel}`,
+      /dgx-spark|qwen3\.8-flash-next-nvidia-nvfp4/i,
+      "the product must not propose the private QA runtime",
     );
     const statuses = await page.evaluate(() =>
       // `[data-status]` narrows to the rows themselves: the list container
@@ -229,13 +255,13 @@ export async function execute() {
         (node) => node.getAttribute("data-status"),
       ),
     );
-    assert.equal(statuses.length, 9, "every phase must be listed");
+    assert.equal(statuses.length, 8, "every phase must be listed");
     assert.ok(
       statuses.every((status) => status === "idle"),
       `no phase may claim progress before a run: ${statuses.join(",")}`,
     );
     assert.equal(await page.getByTestId("repro-demo-run").isEnabled(), true);
-    report.checks.push("nine phases render idle and the run control is live");
+    report.checks.push("eight phases render idle and the run control is live");
 
     // Layout: the panel must not push the settings page sideways.
     const overflow = await page.evaluate(
@@ -274,7 +300,7 @@ export async function execute() {
     );
 
     for (const [view, label] of [
-      ["evidence", "Evidence"],
+      ["evidence", "Agent telemetry"],
       ["usage", "Usage"],
       ["graph", "Graph"],
     ]) {

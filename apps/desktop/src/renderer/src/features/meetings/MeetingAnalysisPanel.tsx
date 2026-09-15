@@ -2,7 +2,7 @@
 // The extraction panel. There is no equivalent in the reference fork: the
 // fork's per-row "Ask Drogon" mounted the notes folder as a writable
 // workspace, which this build's read-only boundary forbids, so Meetings grew
-// its own local-model analysis instead.
+// its own explicitly requested Pi analysis instead.
 //
 // What the panel is careful about, because the model's answer is not evidence
 // on its own:
@@ -163,7 +163,7 @@ export function MeetingAnalysisPanel({
     return (
       <div className="flex items-center gap-2 rounded-lg border border-border px-4 py-3 text-sm text-muted-foreground">
         <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
-        Running the local model ({status.model}) once over this transcript…
+        Running your configured Pi model once over this transcript…
       </div>
     );
   }
@@ -195,7 +195,7 @@ export function MeetingAnalysisPanel({
             Suggested from this transcript
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            {analysis.provider}/{analysis.model} · {analysis.durationMs} ms ·{" "}
+            Pi configured model · {analysis.durationMs} ms ·{" "}
             {analysis.transcriptChars} characters read
             {analysis.transcriptTruncated
               ? " (only the first part of the note was analysed)"

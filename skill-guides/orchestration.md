@@ -84,11 +84,14 @@ and inspect one task with
 
 Dispatch the task through the Work Graph policy with
 `drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID>`.
-This is the default and records the exact provider+model selected from the
-ordered approved runtimes, then the fallback. A failed attempt may be retried
+This records the exact provider+model selected from the ordered approved
+runtimes, then the fallback. If the workspace has no configured runtime, this
+form refuses instead of inventing a model or copying a developer-only default.
+A failed attempt may be retried
 explicitly with `--retry-of <DISPATCH-ID>`; the next policy runtime is chosen
 without the coordinator hand-picking a provider. A coordinator may override
-that policy only when it deliberately supplies the full fresh launch pair:
+that policy when the user explicitly requests a runtime and it deliberately
+supplies the full fresh launch pair:
 `drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID> --harness <HARNESS> --provider <PROVIDER> --model <MODEL>`.
 To attach an existing session explicitly, use
 `drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID> --reuse-session <SESSION> --reuse-incarnation <TOKEN>`.
@@ -114,6 +117,8 @@ policy runtime order, and this reporting contract. It reports completion
 through its scoped credential and environment hints, with no explicit
 bindings:
 `drogon-cli orchestration send --kind worker_done --subject <TEXT> --outcome succeeded --body <REPORT>`.
+Keep `--body` last. The CLI joins all remaining shell words, including bullets
+and flag-like text, so a long report needs no Python argv wrapper.
 `worker_done` is the CLI alias for Drogon's `final-report` kind. The outcome
 is `succeeded` or `failed`, and it is required. Send progress with
 `drogon-cli orchestration send --kind status --subject <TEXT> --body <TEXT>`;

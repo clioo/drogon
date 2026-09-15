@@ -47,7 +47,7 @@ const invalid = (): Result<never> => ({
  * resolved at once — so a malformed daemon answer is refused instead of
  * rendered.
  *
- * `meeting.analyze` runs the free local model and can take minutes; that is
+ * `meeting.analyze` runs the user's configured Pi model and can take minutes; that is
  * the daemon's own bounded run (it kills its process group on timeout), so
  * this bridge adds no second timeout of its own.
  */

@@ -770,19 +770,16 @@ fn the_local_model_suggests_only_what_the_note_supports() {
     assert_eq!(list["availability"]["analysis"]["available"], true);
     assert_eq!(list["availability"]["analysis"]["reason"], "ready");
     assert_eq!(list["availability"]["analysis"]["harness"], "pi");
-    assert_eq!(
-        list["availability"]["analysis"]["model"],
-        "qwen3.8-flash-next-nvidia-nvfp4"
-    );
-    assert_eq!(list["availability"]["analysis"]["provider"], "dgx-spark");
-    assert_eq!(list["availability"]["analysis"]["freeLocalModel"], true);
+    assert_eq!(list["availability"]["analysis"]["model"], "harness-default");
+    assert_eq!(list["availability"]["analysis"]["provider"], "pi-config");
+    assert_eq!(list["availability"]["analysis"]["freeLocalModel"], false);
 
     let id = list["meetings"][0]["id"].as_str().unwrap().to_string();
     let analysis = fixture.cli_ok(&["meeting", "analyze", "--id", &id, "--json"]);
 
-    // The run names the free local model and nothing else.
-    assert_eq!(analysis["model"], "qwen3.8-flash-next-nvidia-nvfp4");
-    assert_eq!(analysis["provider"], "dgx-spark");
+    // The run attributes Pi's configured default without claiming a model.
+    assert_eq!(analysis["model"], "harness-default");
+    assert_eq!(analysis["provider"], "pi-config");
     assert_eq!(analysis["harness"], "pi");
     assert_eq!(analysis["meeting"]["id"], id);
 

@@ -273,7 +273,7 @@ fn resolve_pi_model(node_id: &str, raw: &str) -> Result<(String, Option<GraphFin
             format!(
                 "model id '{trimmed}' is not runnable: the {} side of the slash is empty, so \
                  it is neither a bare exact id nor the `provider/model` form the product \
-                 teaches (e.g. dgx-spark/qwen3.8-flash-next-nvidia-nvfp4). Pass the exact id \
+                 teaches (for example provider-name/model-id). Pass the exact id \
                  the per-harness model catalog lists, or `provider/model`.",
                 if provider.is_empty() {
                     "provider"

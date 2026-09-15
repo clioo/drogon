@@ -104,8 +104,8 @@ written by a local note-taking tool — read-only, never edited or moved — and
 corpus of hundreds usable: full-text search, date and duration filters, bounded reads
 instead of loading everything. From a transcript you can pull out commitments and turn
 one into a real Drogon task, with the line it came from shown next to it. Extraction is
-a suggestion until you accept it, and it runs on a free local model, so browsing your
-own meetings never costs anything.
+a suggestion until you accept it and runs only when requested, through the provider and
+model configured in Pi. Browsing, searching and reading meetings never launch inference.
 
 **Bots grew their own triggers.** A bot no longer waits to be asked. It owns monitors —
 a file digest, an HTTP poll, a script, or a watch on a repository's pull requests — and

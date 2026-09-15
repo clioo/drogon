@@ -67,7 +67,7 @@ pub use transcripts::{
 pub const MEETINGS_CAPABILITY: &str = "meetings.v1";
 
 /// Service capability for the working half of Meetings: extraction through
-/// the free local model and the commitment ledger. Separate from
+/// the user's configured Pi model and the commitment ledger. Separate from
 /// [`MEETINGS_CAPABILITY`] so an index-only service is still usable — a
 /// client lists and searches, and simply does not offer the actions.
 pub const MEETINGS_ACTIONS_CAPABILITY: &str = "meetings.actions.v1";
@@ -1152,7 +1152,7 @@ mod tests {
             value["availability"]["analysis"]["reason"],
             "harness-missing"
         );
-        assert_eq!(value["availability"]["analysis"]["freeLocalModel"], true);
+        assert_eq!(value["availability"]["analysis"]["freeLocalModel"], false);
         assert_eq!(value["hasMore"], false);
         assert_eq!(value["scanTruncated"], false);
         assert_eq!(value["total"], 1);

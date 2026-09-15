@@ -162,13 +162,15 @@ describe("modelOptionsFromCatalog", () => {
 });
 
 describe("knownModelsFor", () => {
-  it("has a short, labelled seed for claude/codex and none for antigravity", () => {
+  it("seeds only portable catalogs and leaves host-enumerated harnesses empty", () => {
     expect(knownModelsFor("claude").map((seed) => seed.id)).toEqual(
       expect.arrayContaining(["opus", "sonnet", "haiku"]),
     );
     expect(knownModelsFor("Codex").map((seed) => seed.id)).toEqual(
       expect.arrayContaining(["gpt-5.6-luna"]),
     );
+    expect(knownModelsFor("pi")).toEqual([]);
+    expect(knownModelsFor("opencode")).toEqual([]);
     expect(knownModelsFor("antigravity")).toEqual([]);
   });
 });
@@ -196,7 +198,6 @@ describe("filterModelOptions", () => {
     ]);
     expect(filterModelOptions(options, "nvidia").map((option) => option.id)).toEqual([
       "moonshotai/kimi-k2.6",
-      "qwen3.8-flash-next-nvidia-nvfp4",
     ]);
     expect(filterModelOptions(options, "KIMI")).toHaveLength(2);
   });

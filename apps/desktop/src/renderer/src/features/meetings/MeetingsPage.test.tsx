@@ -411,9 +411,9 @@ describe("Meetings page list and reader", () => {
               available: false,
               reason: "harness-missing",
               harness: "pi",
-              provider: "dgx-spark",
-              model: "qwen3.8-flash-next-nvidia-nvfp4",
-              freeLocalModel: true,
+              provider: "pi-config",
+              model: "harness-default",
+              freeLocalModel: false,
             },
           }),
         }),
@@ -422,13 +422,13 @@ describe("Meetings page list and reader", () => {
     renderPage({ bridge });
     fireEvent.click(await screen.findByRole("button", { name: /Open transcript/ }));
     const button = await screen.findByRole("button", {
-      name: /Suggest actions with the local model/,
+      name: /Suggest actions with Pi/,
     });
     expect(button.hasAttribute("disabled")).toBe(true);
     expect(
       screen.getByText(/Drogon could not find `pi` on this host's PATH/),
     ).toBeTruthy();
-    expect(screen.getByText(/no paid provider is ever used/)).toBeTruthy();
+    expect(screen.getByText(/Drogon does not choose one for you/)).toBeTruthy();
   });
 
   it("shows the verified suggestions, the discarded ones, and accepts explicitly", async () => {
@@ -437,7 +437,7 @@ describe("Meetings page list and reader", () => {
     renderPage({ bridge, renderTranscript: plainRenderer });
     fireEvent.click(await screen.findByRole("button", { name: /Open transcript/ }));
     fireEvent.click(
-      await screen.findByRole("button", { name: /Suggest actions with the local model/ }),
+      await screen.findByRole("button", { name: /Suggest actions with Pi/ }),
     );
 
     expect(await screen.findByText("Suggested from this transcript")).toBeTruthy();
@@ -483,7 +483,7 @@ describe("Meetings page list and reader", () => {
     renderPage({ bridge, renderTranscript: plainRenderer });
     fireEvent.click(await screen.findByRole("button", { name: /Open transcript/ }));
     fireEvent.click(
-      await screen.findByRole("button", { name: /Suggest actions with the local model/ }),
+      await screen.findByRole("button", { name: /Suggest actions with Pi/ }),
     );
     fireEvent.click(await screen.findByRole("button", { name: /Add to my actions/ }));
     expect(await screen.findByText(/NOT recorded/)).toBeTruthy();

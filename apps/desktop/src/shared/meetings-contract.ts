@@ -31,13 +31,9 @@ export const MIN_COMMITMENT_QUOTE_CHARS = 12;
 export const DEFAULT_COMMITMENT_PAGE = 50;
 export const MAX_COMMITMENT_PAGE = 200;
 export const MAX_COMMITMENT_TEXT_CHARS = 500;
-/**
- * The one model extraction may use. Fixed here as well as in the daemon so
- * the renderer physically cannot offer another: the owner must never be
- * billed for browsing his own meetings.
- */
-export const MEETINGS_ANALYSIS_MODEL = "qwen3.8-flash-next-nvidia-nvfp4";
-export const MEETINGS_ANALYSIS_PROVIDER = "dgx-spark";
+/** Stable attribution for extraction through the user's configured Pi default. */
+export const MEETINGS_ANALYSIS_MODEL = "harness-default";
+export const MEETINGS_ANALYSIS_PROVIDER = "pi-config";
 export const MEETINGS_ANALYSIS_HARNESS = "pi";
 
 export type MeetingStatus = "recording" | "saved" | "failed";
@@ -80,7 +76,7 @@ export type MeetingAnalysisStatus = {
   harness: string;
   provider: string;
   model: string;
-  /** Always true: extraction only ever uses the free local model. */
+  /** Legacy cost-attribution flag; current daemons return false for Pi-owned defaults. */
   freeLocalModel: boolean;
 };
 
@@ -270,7 +266,7 @@ export interface MeetingsBridge {
     id: string;
     maxBytes?: number;
   }): Promise<Result<MeetingRead>>;
-  /** Runs the free local model once over one note. Creates nothing. */
+  /** Runs the user's configured Pi default once over one note. Creates nothing. */
   analyze(input: { id: string }): Promise<Result<MeetingAnalysis>>;
   commitments(input?: MeetingCommitmentsQuery): Promise<Result<MeetingCommitmentPage>>;
   /** The explicit acceptance step; the daemon re-verifies the quote. */
@@ -319,7 +315,7 @@ export const meetingAnalysisStatusSchema = z
     harness: z.literal(MEETINGS_ANALYSIS_HARNESS),
     provider: z.literal(MEETINGS_ANALYSIS_PROVIDER),
     model: z.literal(MEETINGS_ANALYSIS_MODEL),
-    freeLocalModel: z.literal(true),
+    freeLocalModel: z.boolean(),
   })
   .strict();
 

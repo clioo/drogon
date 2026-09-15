@@ -30,8 +30,8 @@ cumulative; prepare the disposable fixture before the audience arrives.
   disposable data before the next run.
 - The fixture intentionally starts with **no session**. Set Pi's defaults under
   **Settings → Agents** before the demo if you want the agent segment; choose
-  the local `dgx-spark/qwen3.8-flash-next-nvidia-nvfp4` model and do not use a
-  paid fallback.
+  the exact provider and model you intend to run. The fixture itself never
+  supplies a live model.
 - `gh` authentication and a GitHub remote are optional. This fixture has no
   origin remote, so the Tasks page's honest local empty state is expected.
 

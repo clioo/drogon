@@ -1,16 +1,15 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
-//! Meeting analysis: suggestions extracted from one transcript by the free
-//! local model, and the honesty rules that keep them suggestions.
+//! Meeting analysis: suggestions extracted from one transcript through the
+//! user's configured Pi default, and the honesty rules that keep them suggestions.
 //!
 //! The owner's ask was to turn a transcript into tracked work. The risk is
 //! obvious: a language model that "extracts" a commitment nobody made, or
 //! attributes one to the wrong person, is worse than no extraction at all —
 //! so three rules are enforced in code here rather than promised in a prompt:
 //!
-//! 1. **The only permitted model is the free local one.** The plan is built
-//!    with a fixed provider/model (`dgx-spark` /
-//!    `qwen3.8-flash-next-nvidia-nvfp4`) and a caller cannot name another:
-//!    the owner must never be billed for browsing his own meetings.
+//! 1. **Drogon does not choose a provider or model.** Analysis is an explicit
+//!    user action and the one-shot run inherits the user's Pi configuration;
+//!    browsing and searching transcripts never launch inference.
 //! 2. **A suggestion without a verifiable quote is discarded, not shown.**
 //!    Every decision, action and question must carry a verbatim quote; the
 //!    quote is searched for in the transcript and the line it came from is
@@ -31,10 +30,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{MeetingFileSystem, MeetingTranscript};
 
-/// The free local model. There is deliberately no parameter anywhere in this
-/// module that can replace these three values.
-pub const ANALYSIS_PROVIDER: &str = "dgx-spark";
-pub const ANALYSIS_MODEL: &str = "qwen3.8-flash-next-nvidia-nvfp4";
+/// Stable attribution for a run delegated to Pi without provider/model flags.
+/// The actual provider and model remain Pi-owned user configuration.
+pub const ANALYSIS_PROVIDER: &str = "pi-config";
+pub const ANALYSIS_MODEL: &str = "harness-default";
 pub const ANALYSIS_HARNESS: &str = "pi";
 /// Hard wall-clock ceiling for one analysis. The subprocess is killed and
 /// reaped when it passes.
@@ -62,7 +61,7 @@ pub struct AnalysisStatus {
     pub harness: &'static str,
     pub provider: &'static str,
     pub model: &'static str,
-    /// Always true: the model above is the free local one.
+    /// False: Drogon cannot classify the cost of the user's Pi default.
     pub free_local_model: bool,
 }
 
@@ -74,7 +73,7 @@ impl AnalysisStatus {
             harness: ANALYSIS_HARNESS,
             provider: ANALYSIS_PROVIDER,
             model: ANALYSIS_MODEL,
-            free_local_model: true,
+            free_local_model: false,
         }
     }
 
@@ -181,24 +180,24 @@ impl AnalysisError {
     pub fn message(self) -> String {
         match self {
             AnalysisError::Unavailable => format!(
-                "The local analysis model is unavailable on this host: `{ANALYSIS_HARNESS}` was \
-                 not found on PATH. Transcripts stay fully browsable and searchable; nothing is \
-                 extracted until it is installed."
+                "Meeting analysis is unavailable on this host: `{ANALYSIS_HARNESS}` was not \
+                 found on PATH. Transcripts stay fully browsable and searchable; nothing is \
+                 extracted until it is installed and configured."
             ),
             AnalysisError::Spawn => {
-                "The local analysis model could not be started. Nothing was extracted.".to_string()
+                "The configured Pi model could not be started. Nothing was extracted.".to_string()
             }
             AnalysisError::TimedOut => format!(
-                "The local analysis model did not answer within {} seconds and was stopped. \
+                "The configured Pi model did not answer within {} seconds and was stopped. \
                  Nothing was extracted.",
                 ANALYSIS_TIMEOUT.as_secs()
             ),
             AnalysisError::Empty => {
-                "The local analysis model returned no output, so there is nothing to suggest."
+                "The configured Pi model returned no output, so there is nothing to suggest."
                     .to_string()
             }
             AnalysisError::Unparsable => {
-                "The local analysis model did not answer with the expected JSON, so no suggestion \
+                "The configured Pi model did not answer with the expected JSON, so no suggestion \
                  is shown. Re-running may help."
                     .to_string()
             }
@@ -492,7 +491,7 @@ pub trait MeetingInference: Send + Sync {
     fn analyze(&self, prompt: &str) -> Result<String, AnalysisError>;
 }
 
-/// Runs the local harness once, headless, with the fixed free model.
+/// Runs the user's Pi default once, headless, after an explicit analysis action.
 pub struct LocalModelInference {
     pub executable: PathBuf,
     pub data_dir: PathBuf,
@@ -583,9 +582,9 @@ impl LocalModelInference {
     fn run(&self, prompt: &str, headless: Option<&HeadlessPlan>) -> Result<String, AnalysisError> {
         let request = HarnessLaunchRequest {
             harness_id: HarnessId::Pi,
-            model: Some(ANALYSIS_MODEL.to_string()),
+            model: None,
             effort: None,
-            provider: Some(ANALYSIS_PROVIDER.to_string()),
+            provider: None,
             prompt: Some(prompt.to_string()),
             append_system_prompt: None,
             permission_mode: PermissionMode::Unattended,
@@ -723,7 +722,7 @@ fn read_bounded(mut pipe: impl std::io::Read) -> Vec<u8> {
 }
 
 /// One complete analysis: read the note, build the bounded prompt, run the
-/// local model, verify every quote against the note. `expected_root` is the
+/// configured Pi model, verify every quote against the note. `expected_root` is the
 /// notes directory the caller already resolved, so the analysis and the index
 /// always agree on which folder is being read.
 pub fn analyze(
@@ -896,7 +895,7 @@ mod tests {
         assert!(!environment.status().available);
         assert_eq!(environment.status().provider, ANALYSIS_PROVIDER);
         assert_eq!(environment.status().model, ANALYSIS_MODEL);
-        assert!(environment.status().free_local_model);
+        assert!(!environment.status().free_local_model);
         let failure = analyze(
             &fs,
             &environment,
@@ -996,20 +995,14 @@ mod tests {
             let dir = tempfile::tempdir().expect("temp dir");
             let data_dir = dir.path().join("data");
             std::fs::create_dir_all(&data_dir).expect("data dir");
-            // The fixture refuses to be a model: it asserts the argv it was
-            // handed carries ONLY the free local provider and model, and
-            // echoes the answer otherwise.
+            // The fixture asserts that Drogon did not inject provider/model
+            // flags and echoes the answer otherwise.
             let executable = script(
                 dir.path(),
                 "pi",
                 &format!(
-                    "#!/bin/sh\nargs=\"$*\"\ncase \"$args\" in\n  *\"--provider {ANALYSIS_PROVIDER}\"*) ;;\n  *) echo 'wrong provider' >&2; exit 9 ;;\nesac\ncase \"$args\" in\n  *\"--model {ANALYSIS_MODEL}\"*) ;;\n  *) echo 'wrong model' >&2; exit 9 ;;\nesac\ncase \"$args\" in\n  *'-p'*) ;;\n  *) echo 'not a one-shot run' >&2; exit 9 ;;\nesac\necho '{ANSWER}'\n"
+                    "#!/bin/sh\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --provider|--provider=*|--model|--model=*) echo 'runtime was forced' >&2; exit 9 ;;\n  esac\ndone\nargs=\"$*\"\ncase \"$args\" in\n  *'-p'*) ;;\n  *) echo 'not a one-shot run' >&2; exit 9 ;;\nesac\necho '{ANSWER}'\n"
                 ),
-            );
-            assert!(
-                std::fs::read_to_string(&executable)
-                    .unwrap()
-                    .contains(ANALYSIS_PROVIDER)
             );
             let fs = fixture();
             let environment = env_for(&executable, &data_dir);

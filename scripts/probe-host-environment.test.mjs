@@ -3,7 +3,8 @@
 // helpers decide that, so they are tested against real files and canned
 // process results — never against the ambient host.
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, chmod } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { access, chmod, mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -71,5 +72,7 @@ test("findClaudeBinary resolves a real binary and is null otherwise", async () =
 
 test("findClaudeBinary falls back to the real which by default", async () => {
   const found = await findClaudeBinary();
-  assert.ok(found === null || found.endsWith(`${path.sep}claude`));
+  if (found === null) return;
+  assert.equal((await stat(found)).isFile(), true);
+  await access(found, fsConstants.X_OK);
 });

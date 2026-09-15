@@ -73,13 +73,13 @@ test("a model the rate card does not know is unpriced, and names itself", () => 
   assert.deepEqual(cost.unpriced, [{ harness: "pi", model: "some-unknown-model" }]);
 });
 
-test("a declared-free local model is reported as free, not as a bill", () => {
+test("a declared-zero-cost fixture is reported as free, not as a bill", () => {
   const cost = priceUsage(
     [
       {
         role: "main",
         harness: "pi",
-        model: "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
+        model: "fixture/local-free",
         inputTokens: 2_000_000,
         outputTokens: 500_000,
       },
@@ -90,8 +90,8 @@ test("a declared-free local model is reported as free, not as a bill", () => {
   assert.equal(cost.totalUsd, 0);
 });
 
-test("the rate card prices the free local lane at zero and says why", () => {
-  const lane = card.rates["dgx-spark/qwen3.8-flash-next-nvidia-nvfp4"];
+test("the rate card prices the zero-cost fixture at zero and says why", () => {
+  const lane = card.rates["fixture/local-free"];
   assert.equal(lane.kind, "local_free");
   assert.equal(lane.input, 0);
   assert.equal(lane.output, 0);

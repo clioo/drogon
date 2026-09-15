@@ -65,23 +65,19 @@ await mkdir(output, { recursive: true });
 await mkdir(binDir, { recursive: true });
 
 /**
- * The fixture local model. It is what the daemon resolves as `pi` on PATH, so
- * `meeting investigate` runs for real end to end — argv planning, the spawn,
- * the bounded read — with a deterministic answer instead of a model. It also
- * refuses any argv that names another provider or model, so a regression that
- * tried to bill the owner would fail this script.
+ * The fixture model. It is what the daemon resolves as `pi` on PATH, so
+ * `meeting analyze` runs for real end to end — argv planning, the spawn and
+ * the bounded read — with a deterministic answer instead of a model. It
+ * refuses provider/model flags so a private developer runtime cannot leak in.
  */
 await writeFile(
   path.join(binDir, "pi"),
   `#!/bin/sh
-case "$*" in
-  *"--provider dgx-spark"*) ;;
-  *) echo "wrong provider" >&2; exit 9 ;;
-esac
-case "$*" in
-  *"--model qwen3.8-flash-next-nvidia-nvfp4"*) ;;
-  *) echo "wrong model" >&2; exit 9 ;;
-esac
+for arg in "$@"; do
+  case "$arg" in
+    --provider|--provider=*|--model|--model=*) echo "runtime was forced" >&2; exit 9 ;;
+  esac
+done
 case "$*" in
   *"extract commitments from ONE meeting transcript"*)
     line=$(printf '%s' "$*" | grep -o '\\[0[0-9]:[0-9][0-9]\\].*' | head -1)
@@ -541,7 +537,7 @@ try {
     .getByText(`Showing 1–${firstPageRows} of ${CORPUS + 1}`, { exact: false })
     .waitFor();
 
-  // Extraction, over a real note, with the fixture local model. Nothing is
+  // Extraction, over a real note, with the fixture Pi model. Nothing is
   // created by looking; the suggestion keeps the line it came from and the
   // invention is reported as discarded.
   const tokenRow = page.locator('[role="listitem"]', { hasText: SEARCH_TOKEN });
@@ -549,13 +545,13 @@ try {
   await page.getByText(`${SEARCH_TOKEN_NOTES} of the notes match`, { exact: false }).waitFor();
   await tokenRow.first().getByRole("button", { name: /Open transcript/ }).click();
   await page
-    .getByRole("button", { name: /Suggest actions with the local model/ })
+    .getByRole("button", { name: /Suggest actions with Pi/ })
     .click();
   await page.getByText("Suggested from this transcript").waitFor({ timeout: 60000 });
   const analysisText = await page.locator("main").innerText();
   assert.ok(
-    analysisText.includes("qwen3.8-flash-next-nvidia-nvfp4"),
-    `the run must name the free local model: ${analysisText.slice(0, 500)}`,
+    analysisText.includes("Pi configured model"),
+    `the run must attribute the user's Pi configuration: ${analysisText.slice(0, 500)}`,
   );
   assert.ok(
     analysisText.includes("Fixture action the note states"),

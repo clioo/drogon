@@ -94,9 +94,7 @@ describe("resolvePiModelField", () => {
   });
 
   test("helper copy is the fork's sentence with the documented example", () => {
-    expect(PI_MODEL_EXAMPLE).toBe(
-      "dgx-spark/qwen3.8-flash-next-nvidia-nvfp4",
-    );
+    expect(PI_MODEL_EXAMPLE).toBe("provider/model-id");
     expect(PI_MODEL_HELPER).toContain(
       "Use an exact Pi provider/model ID",
     );

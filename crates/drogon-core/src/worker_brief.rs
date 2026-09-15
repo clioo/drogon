@@ -50,7 +50,7 @@ Reporting contract (mandatory):\n\
 - Use the Drogon CLI on PATH (`DROGON_CLI_COMMAND` when set), never a harness-internal Agent/delegation tool.\n\
 - Send progress with `drogon-cli orchestration send --kind status --subject <TEXT> --body <TEXT>`.\n\
 - If blocked, ask the coordinator with `drogon-cli orchestration ask --question <TEXT>` and resume the same question after a timeout; do not silently poll a PTY.\n\
-- When the task is finished, send exactly one `drogon-cli orchestration send --kind worker_done --outcome succeeded|failed --subject <TEXT> --body <TEXT>`. The `worker_done` alias is Drogon's `final-report`; the dispatch environment supplies run/task/dispatch scope and the private credential.\n\
+- When the task is finished, send exactly one `drogon-cli orchestration send --kind worker_done --outcome succeeded|failed --subject <TEXT> --body <TEXT>`. Keep `--body` last; the CLI joins all remaining shell words, so a long report needs no Python argv wrapper. The `worker_done` alias is Drogon's `final-report`; the dispatch environment supplies run/task/dispatch scope and the private credential.\n\
 - Include the outcome, concise result, modified files, and any artifact path in that final report. Do not send a second final report.\n\
 Work only inside the assigned workspace and end this turn after the final report.\n",
         workspace_path.display()
@@ -71,7 +71,7 @@ You are running inside Drogon, workspace {workspace_id}, at {}.\n\
 Drogon is the source of truth for delegation and orchestration. For any subagent or worker, use the `drogon-cli` executable supplied by this session, not an internal Agent tool and not a raw harness session.\n\
 Before delegating, read the version-matched guide with `drogon-cli skills get --topic orchestration`; use its existing `run-create`, `task-create`, `worker-start`, `send`, `ask`, `check`, and `reply` verbs. A child must report through `drogon-cli orchestration send --kind worker_done` (the `final-report` alias), not only in a terminal buffer. Wait for a child in the foreground — `drogon-cli orchestration check --wait --timeout-ms <ms>`, repeated until its worker_done arrives — never in a background task and never by ending your turn: this session ends when your turn ends, and a backgrounded wait dies with it.\n\
 The Work Graph policy for child runtimes is:\n{}\n\
-Use approved runtimes in order and the configured fallback only after them. Provider and model are an inseparable pair from that policy; never guess a provider for an ambiguous model id. With no configured policy, Drogon uses its free local runtime. Do not create or modify `AGENTS.md` or `CLAUDE.md` merely to deliver this context.\n",
+Use approved runtimes in order and the configured fallback only after them. Provider and model are an inseparable pair from that policy; never guess a provider for an ambiguous model id. With no configured policy, Drogon does not choose a model for the user: an explicitly requested child must name its harness and model (and provider when applicable). Do not create or modify `AGENTS.md` or `CLAUDE.md` merely to deliver this context.\n",
         workspace_path.display(),
         render_policy(policy)
     )
@@ -121,7 +121,7 @@ fn render_policy(policy: &GraphPolicy) -> String {
         .map(|(index, runtime)| format!("- approved {}: {}", index + 1, runtime_label(runtime)))
         .collect::<Vec<_>>();
     let mut lines = if approved.is_empty() {
-        vec!["- approved 1: harness=pi model=qwen3.8-flash-next-nvidia-nvfp4 provider=dgx-spark (free local default)".into()]
+        vec!["- approved: none configured".into()]
     } else {
         approved
     };
@@ -243,6 +243,9 @@ mod tests {
         assert!(prompt.contains("drogon-cli"));
         assert!(prompt.contains("delega un subagente"));
         assert!(prompt.contains("Wait for a child in the foreground"));
+        assert!(prompt.contains("approved: none configured"));
+        assert!(prompt.contains("does not choose a model for the user"));
+        assert!(!prompt.to_lowercase().contains("qwen"));
         assert!(prompt.contains("check --wait --timeout-ms <ms>"));
     }
 }

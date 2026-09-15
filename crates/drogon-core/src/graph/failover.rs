@@ -20,43 +20,13 @@
 
 use drogon_protocol::graph::{GraphPolicy, GraphRuntimeRef};
 
-/// The free, local runtime this build may always run for real without a
-/// human asking per call (AGENTS.md's model policy). Used as the sole
-/// approved runtime whenever the Subagent policy has none configured yet,
-/// so a brand-new workspace's subagents cost nothing by default and the
-/// no-paid-inference rule holds even before anyone opens the policy panel.
-pub fn default_free_runtime() -> GraphRuntimeRef {
-    GraphRuntimeRef {
-        harness: "pi".to_string(),
-        model: "qwen3.8-flash-next-nvidia-nvfp4".to_string(),
-        provider: Some("dgx-spark".to_string()),
-    }
-}
-
-/// The full ordered attempt sequence: every approved runtime in order (or
-/// the zero-cost default when none are configured), then the fallback last
-/// when one is set. `approvedRuntimes` order IS the failover order — this
-/// is the one place that ordering is turned into an actual sequence.
-/// Provider identity was added after the first graph state projection. An
-/// attributed historical attempt may therefore omit it while still being the
-/// free default runtime; compare the stable harness/model pair and treat the
-/// omitted provider as the known local provider.
-pub fn is_free_default_runtime(runtime: &GraphRuntimeRef) -> bool {
-    let default = default_free_runtime();
-    runtime.harness == default.harness
-        && runtime.model == default.model
-        && runtime
-            .provider
-            .as_deref()
-            .is_none_or(|provider| Some(provider) == default.provider.as_deref())
-}
-
+/// The full ordered attempt sequence: every runtime the user approved, then
+/// the fallback last when one is set. An empty policy stays empty; build- or
+/// developer-specific model access must never become a runtime on user hosts.
+/// `approvedRuntimes` order IS the failover order — this is the one place that
+/// ordering is turned into an actual sequence.
 pub fn attempt_sequence(policy: &GraphPolicy) -> Vec<GraphRuntimeRef> {
-    let mut sequence: Vec<GraphRuntimeRef> = if policy.approved_runtimes.is_empty() {
-        vec![default_free_runtime()]
-    } else {
-        policy.approved_runtimes.clone()
-    };
+    let mut sequence = policy.approved_runtimes.clone();
     if let Some(fallback) = &policy.fallback_runtime {
         sequence.push(fallback.clone());
     }
@@ -78,7 +48,7 @@ pub fn next_runtime(
 /// The zero-based attempt position identifies the fallback, even when its
 /// harness/model pair also occurs in the approved list.
 pub fn is_fallback_attempt(policy: &GraphPolicy, attempt_index: usize) -> bool {
-    policy.fallback_runtime.is_some() && attempt_index == policy.approved_runtimes.len().max(1)
+    policy.fallback_runtime.is_some() && attempt_index == policy.approved_runtimes.len()
 }
 
 #[cfg(test)]
@@ -94,28 +64,23 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_policy_tries_only_the_free_default() {
+    fn an_empty_policy_does_not_invent_a_runtime() {
         let policy = GraphPolicy::default();
-        assert_eq!(attempt_sequence(&policy), vec![default_free_runtime()]);
-        assert_eq!(next_runtime(&policy, &[]), Some(default_free_runtime()));
-        assert!(is_free_default_runtime(&GraphRuntimeRef {
-            harness: "pi".into(),
-            model: "qwen3.8-flash-next-nvidia-nvfp4".into(),
-            provider: None,
-        }));
-        assert_eq!(next_runtime(&policy, &[default_free_runtime()]), None);
+        assert!(attempt_sequence(&policy).is_empty());
+        assert_eq!(next_runtime(&policy, &[]), None);
     }
 
     #[test]
-    fn an_empty_policy_with_only_a_fallback_still_tries_the_default_first() {
+    fn a_fallback_without_approved_runtimes_is_the_only_candidate() {
         let policy = GraphPolicy {
-            fallback_runtime: Some(runtime("custom", "qwen3-coder")),
+            fallback_runtime: Some(runtime("custom", "test-model")),
             ..GraphPolicy::default()
         };
         assert_eq!(
             attempt_sequence(&policy),
-            vec![default_free_runtime(), runtime("custom", "qwen3-coder")]
+            vec![runtime("custom", "test-model")]
         );
+        assert!(is_fallback_attempt(&policy, 0));
     }
 
     #[test]
