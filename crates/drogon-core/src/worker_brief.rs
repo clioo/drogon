@@ -50,7 +50,7 @@ Reporting contract (mandatory):\n\
 - Use the Drogon CLI on PATH (`DROGON_CLI_COMMAND` when set), never a harness-internal Agent/delegation tool.\n\
 - Send progress with `drogon-cli orchestration send --kind status --subject <TEXT> --body <TEXT>`.\n\
 - If blocked, ask the coordinator with `drogon-cli orchestration ask --question <TEXT>` and resume the same question after a timeout; do not silently poll a PTY.\n\
-- When the task is finished, send exactly one `drogon-cli orchestration send --kind worker_done --outcome succeeded|failed --subject <TEXT> --body <TEXT>`. The `worker_done` alias is Drogon's `final-report`; the dispatch environment supplies run/task/dispatch scope and the private credential.\n\
+- When the task is finished, send exactly one `drogon-cli orchestration send --kind worker_done --outcome succeeded|failed --subject <TEXT> --body <TEXT>`. Keep `--body` last; the CLI joins all remaining shell words, so a long report needs no Python argv wrapper. The `worker_done` alias is Drogon's `final-report`; the dispatch environment supplies run/task/dispatch scope and the private credential.\n\
 - Include the outcome, concise result, modified files, and any artifact path in that final report. Do not send a second final report.\n\
 Work only inside the assigned workspace and end this turn after the final report.\n",
         workspace_path.display()

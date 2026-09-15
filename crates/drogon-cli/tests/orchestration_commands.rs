@@ -1685,6 +1685,14 @@ async fn source_worker_done_alias_maps_send_and_check_without_changing_authority
             "task-1",
             "--dispatch-id",
             "dispatch-1",
+            "--body",
+            "Report",
+            "outcome",
+            "is",
+            "succeeded",
+            "-",
+            "src/deck.js",
+            "modified",
         ],
         &env,
     );
@@ -1709,6 +1717,10 @@ async fn source_worker_done_alias_maps_send_and_check_without_changing_authority
     assert_eq!(send["params"]["kind"], "finalReport");
     assert_eq!(send["params"]["finalReport"]["outcome"], "succeeded");
     assert_eq!(send["params"]["scope"]["dispatchId"], "dispatch-1");
+    assert_eq!(
+        send["params"]["body"],
+        "Report outcome is succeeded - src/deck.js modified"
+    );
     assert_eq!(send["auth"], SCOPED_CREDENTIAL);
     let check = calls
         .iter()

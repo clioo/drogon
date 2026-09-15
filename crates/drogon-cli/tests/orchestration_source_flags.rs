@@ -40,6 +40,43 @@ fn worker_done_source_spelling_preserves_dispatch_binding() {
 }
 
 #[test]
+fn send_accepts_an_unquoted_multiword_body_as_the_final_flag() {
+    let OrchestrationCommand::Send { body, outcome, .. } = parse(&[
+        "orchestration",
+        "send",
+        "--kind",
+        "worker_done",
+        "--subject",
+        "done",
+        "--outcome",
+        "succeeded",
+        "--body",
+        "Report",
+        "outcome",
+        "is",
+        "succeeded",
+        "-",
+        "files",
+        "modified",
+    ]) else {
+        panic!("expected send")
+    };
+    assert_eq!(
+        body,
+        Some(vec![
+            "Report".to_string(),
+            "outcome".to_string(),
+            "is".to_string(),
+            "succeeded".to_string(),
+            "-".to_string(),
+            "files".to_string(),
+            "modified".to_string(),
+        ])
+    );
+    assert!(outcome.is_some());
+}
+
+#[test]
 fn source_reply_id_is_the_question_not_the_request_envelope() {
     let OrchestrationCommand::Reply { question, .. } = parse(&[
         "orchestration",

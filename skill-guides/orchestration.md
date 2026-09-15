@@ -117,6 +117,8 @@ policy runtime order, and this reporting contract. It reports completion
 through its scoped credential and environment hints, with no explicit
 bindings:
 `drogon-cli orchestration send --kind worker_done --subject <TEXT> --outcome succeeded --body <REPORT>`.
+Keep `--body` last. The CLI joins all remaining shell words, including bullets
+and flag-like text, so a long report needs no Python argv wrapper.
 `worker_done` is the CLI alias for Drogon's `final-report` kind. The outcome
 is `succeeded` or `failed`, and it is required. Send progress with
 `drogon-cli orchestration send --kind status --subject <TEXT> --body <TEXT>`;

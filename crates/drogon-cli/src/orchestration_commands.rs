@@ -1687,7 +1687,7 @@ pub async fn run(
                 kind: kind_value,
                 to: target,
                 subject: subject.clone(),
-                body: body.clone(),
+                body: body.as_ref().map(|words| words.join(" ")),
                 payload: parse_json_object("payload", payload)?,
                 thread_id: thread_id.clone(),
                 final_report,
