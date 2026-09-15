@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -547,6 +547,26 @@ test("observer startup settles when the observer exits before ready, reaping the
   assert.ok(Date.now() - began < 5000, "startup rejection must be bounded");
 });
 
+test("observer startup surfaces the interpreter stderr for an unreadable script", async () => {
+  const missingScript = path.join(
+    tmpdir(),
+    "drogon-observer-missing-%20-script.py",
+  );
+  await assert.rejects(
+    startExitObserver(process.pid, {
+      scriptPath: missingScript,
+      deadlineMs: 100,
+      readyTimeoutMs: 1000,
+    }),
+    (error) => {
+      assert.match(error.message, /exited before ready/);
+      assert.match(error.message, /can't open file|No such file|No such file or directory/);
+      assert.match(error.message, /%20/);
+      return true;
+    },
+  );
+});
+
 test("observer startup timeout reaps a stalling observer", async () => {
   const began = Date.now();
   await assert.rejects(
@@ -561,6 +581,70 @@ test("observer startup timeout reaps a stalling observer", async () => {
   const elapsed = Date.now() - began;
   assert.ok(elapsed >= 400, "startup must wait out its ready timeout");
   assert.ok(elapsed < 8000, "stall rejection plus reap must be bounded");
+});
+
+test("observer startup failure cannot hang its owner when a grandchild holds stdio", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "dg-observer-held-stdio-"));
+  const pidFile = path.join(dir, "grandchild.pid");
+  const moduleUrl = new URL("./live-child-crash-fixture.mjs", import.meta.url).href;
+  const observerProgram = [
+    'const { spawn } = require("node:child_process");',
+    'const { writeFileSync } = require("node:fs");',
+    `const grandchild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "inherit" });`,
+    `writeFileSync(${JSON.stringify(pidFile)}, String(grandchild.pid));`,
+    'process.stderr.write("grandchild-held-stdio\\n");',
+    "process.exit(0);",
+  ].join(" ");
+  const ownerProgram = `
+import { startExitObserver } from ${JSON.stringify(moduleUrl)};
+try {
+  await startExitObserver(process.pid, {
+    scriptPath: "unused-observer-script.py",
+    deadlineMs: 100,
+    executable: process.execPath,
+    args: ["-e", ${JSON.stringify(observerProgram)}],
+    readyTimeoutMs: 300,
+  });
+  throw new Error("observer unexpectedly became ready");
+} catch (error) {
+  console.log(error.message);
+}
+`;
+  try {
+    const { stdout } = await runAcceptanceProcess(
+      process.execPath,
+      ["--input-type=module", "-e", ownerProgram],
+      { timeout: 3000 },
+    );
+    assert.match(stdout, /exited before ready/);
+    assert.match(stdout, /grandchild-held-stdio/);
+  } finally {
+    const rawPid = await readFile(pidFile, "utf8").catch(() => "");
+    const grandchildPid = Number(rawPid.trim());
+    if (Number.isSafeInteger(grandchildPid) && grandchildPid > 0) {
+      try {
+        process.kill(grandchildPid, "SIGTERM");
+      } catch {
+        // The exact test-owned grandchild may already have exited.
+      }
+      await delay(100);
+      try {
+        process.kill(grandchildPid, 0);
+        process.kill(grandchildPid, "SIGKILL");
+      } catch {
+        // No surviving process at the exact recorded pid.
+      }
+      for (let i = 0; i < 20; i += 1) {
+        try {
+          process.kill(grandchildPid, 0);
+        } catch {
+          break;
+        }
+        await delay(25);
+      }
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("unavailable observer executable rejects without a lost handle", async () => {

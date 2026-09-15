@@ -552,6 +552,7 @@ export async function startExitObserver(
   });
   let spawnError = null;
   let settled = false;
+  let observerClosed = false;
   /** @type {any | null} first parsed stdout line (ready/unsupported/...) */
   let firstMessage = null;
   /** @type {{type: string, at: number} | null} terminal observation */
@@ -624,10 +625,40 @@ export async function startExitObserver(
       result = { type: "observer-ended-without-event", at: Date.now() };
     wake();
   });
+  // `exit` may precede delivery of the child's stdout/stderr streams. Wait
+  // for `close` before classifying an early exit so diagnostics include the
+  // interpreter's actual reason (for example, an unreadable percent-encoded
+  // script path).
+  child.on("close", () => {
+    observerClosed = true;
+    wake();
+  });
+
+  // A child-process `close` waits for all stdio pipes to close, including
+  // pipes inherited by a grandchild. Keep the diagnostic wait bounded
+  // independently of the child's exit event so a detached descendant cannot
+  // keep this owner alive forever.
+  const waitForObserverClose = (timeoutMs) =>
+    new Promise((resolve) => {
+      if (observerClosed) return resolve(true);
+      let settledClose = false;
+      const finish = (closed) => {
+        if (settledClose) return;
+        settledClose = true;
+        clearTimeout(timer);
+        child.removeListener("close", onClose);
+        resolve(closed);
+      };
+      const onClose = () => finish(true);
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      child.once("close", onClose);
+    });
 
   // Rejection paths must reap the exact owned observer: kill it if it is
-  // somehow still alive, then bound-wait for its exit event (a failed spawn
-  // has no process and resolves immediately).
+  // somehow still alive, then bound-wait for its exit event. If the observer
+  // inherited stdio into a grandchild, release only the pipe handles owned by
+  // this process and detach the child handle after the independent close
+  // bound. This never claims the grandchild exited.
   const cleanupAndThrow = async (message) => {
     if (child.exitCode === null && child.signalCode === null) {
       try {
@@ -637,6 +668,13 @@ export async function startExitObserver(
       }
     }
     await waitChildExit(child, 2000);
+    if (!observerClosed) {
+      child.stdin?.destroy();
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      await waitForObserverClose(250);
+    }
+    child.unref();
     throw new Error(message);
   };
 
@@ -649,13 +687,26 @@ export async function startExitObserver(
   // the ready timeout — never repolls forever after the observer is gone.
   const startupDeadline = Date.now() + readyTimeoutMs;
   let startupError = null;
+  const diagnostics = () => {
+    const stderr = stderrTail.trim();
+    const stdout = stdoutBuffer.trim();
+    const details = [
+      stderr && `stderr: ${stderr}`,
+      stdout && `stdout: ${stdout}`,
+    ].filter(Boolean);
+    return details.length ? `; ${details.join("; ")}` : "";
+  };
   while (!startupError && !firstMessage) {
     if (spawnError)
-      startupError = `exit observer spawn failed: ${spawnError.message}`;
-    else if (settled)
-      startupError = `exit observer exited before ready (code ${child.exitCode}, signal ${child.signalCode})`;
-    else if (Date.now() >= startupDeadline)
-      startupError = "exit observer did not become ready";
+      startupError = `exit observer spawn failed: ${spawnError.message}${diagnostics()}`;
+    else if (settled) {
+      // Preserve stderr/stdout delivery when it is available, but never let a
+      // grandchild-held pipe turn startup classification into an unbounded
+      // wait. cleanupAndThrow applies the same bound and releases the pipes.
+      await waitForObserverClose(250);
+      startupError = `exit observer exited before ready (code ${child.exitCode}, signal ${child.signalCode})${diagnostics()}`;
+    } else if (Date.now() >= startupDeadline)
+      startupError = `exit observer did not become ready${diagnostics()}`;
     else await waitForWake(Math.min(50, startupDeadline - Date.now()));
   }
   if (startupError) await cleanupAndThrow(startupError);

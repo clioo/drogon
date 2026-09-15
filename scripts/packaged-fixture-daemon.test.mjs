@@ -12,10 +12,12 @@
 // against the running contract implementation before fixing it.
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  ACCEPTANCE_ENV_ALLOWLIST,
+  cleanAcceptanceEnvironment,
   QUIESCENT_SHUTDOWN_CAPABILITY,
   createFixtureDaemonWithSeams,
   packagedFixtureDaemon,
@@ -124,6 +126,34 @@ function liveSession(overrides = {}) {
     ...overrides,
   };
 }
+
+test("acceptance environment scrubs the whole namespace and preserves every allowlisted child flag", () => {
+  const allowlisted = Object.fromEntries(
+    [...ACCEPTANCE_ENV_ALLOWLIST].map((key) => [key, `preserved-${key}`]),
+  );
+  const clean = cleanAcceptanceEnvironment({
+    PATH: "/usr/bin",
+    ...allowlisted,
+    DROGON_NEW_WORKER_CONTEXT: "poison",
+    DROGON_DISPATCH_CAPABILITY: "stale-worker-secret",
+    DROGON_RUN_ID: "run-worker",
+    DROGON_TASK_ID: "task-worker",
+    DROGON_DATA_DIR: "/worker/data",
+    DROGON_ELECTRON_PROFILE: "/worker/profile",
+  });
+  assert.deepEqual(clean, { PATH: "/usr/bin", ...allowlisted });
+  for (const key of ACCEPTANCE_ENV_ALLOWLIST)
+    assert.equal(clean[key], `preserved-${key}`, `${key} must reach children`);
+  assert.equal(clean.DROGON_NEW_WORKER_CONTEXT, undefined);
+});
+
+test("changed-daemon probe passes a filesystem path to Python, not a URL pathname", async () => {
+  const { CHANGED_DAEMON_OBSERVER_SCRIPT } = await import(
+    "./probe-rendered-changed-daemon-binary.mjs"
+  );
+  assert.doesNotMatch(CHANGED_DAEMON_OBSERVER_SCRIPT, /%[0-9A-Fa-f]{2}/);
+  await access(CHANGED_DAEMON_OBSERVER_SCRIPT);
+});
 
 test("contract identifiers: public signature preserved plus one narrow seam helper", () => {
   assert.equal(typeof packagedFixtureDaemon, "function");
