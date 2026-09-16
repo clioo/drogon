@@ -8,8 +8,8 @@
 // git.pull and git.fetch RPCs; PR creation lives in the header toolbar
 // (see create-pr-action.ts), and branch-compare and hosted review have no
 // MVP backend and are not ported. Push stays disabled without an upstream
-// (the daemon runs a plain `git push` with no --set-upstream to back the
-// fork's enabled publish affordance); the title still states the fix.
+// (first publish from the chevron menu's Publish Branch row, #332); the
+// title states that fix.
 // #176: a repo with no remote at all is a third state (not "No upstream")
 // with every remote action disabled and the shared reason title.
 import React from "react";
@@ -108,7 +108,7 @@ export function SyncRow({
   const pushTitle = noRemote
     ? NO_REMOTE_SYNC_TITLE
     : !upstream
-      ? "No upstream branch: push from a terminal once to set one"
+      ? "No upstream branch: publish it from Publish Branch in the commit menu"
       : aheadCount > 0
         ? `Push ${aheadCount} commit${aheadCount === 1 ? "" : "s"} to ${upstream}`
         : `Already up to date with ${upstream}`;

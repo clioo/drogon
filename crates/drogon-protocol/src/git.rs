@@ -150,11 +150,26 @@ impl GitCommitParams {
     }
 }
 
+/// Push mode for `git.push` (#332): omitted keeps the existing plain
+/// `git push`. `ForceWithLease` rewrites the upstream branch but refuses
+/// when the remote moved since the last fetch (safe after an amend);
+/// `Publish` sets the upstream on a branch that has none
+/// (`git push -u origin HEAD`). One optional enum (never two booleans) so
+/// a force+publish combination is unrepresentable.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum GitPushMode {
+    ForceWithLease,
+    Publish,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPushParams {
     #[serde(flatten)]
     pub scope: GitScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<GitPushMode>,
 }
 
 /// Discard working-tree changes for exactly the given paths: tracked paths
@@ -495,6 +510,36 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn push_mode_is_optional_and_kebab_case() {
+        // Omitted keeps the existing plain push (backward compatible).
+        let plain: GitPushParams = serde_json::from_value(json!({
+            "hostId": "host", "workspaceId": "workspace",
+        }))
+        .unwrap();
+        assert_eq!(plain.mode, None);
+        // Both modes round-trip on their kebab-case wire form.
+        for (wire, mode) in [
+            ("force-with-lease", GitPushMode::ForceWithLease),
+            ("publish", GitPushMode::Publish),
+        ] {
+            let params: GitPushParams = serde_json::from_value(json!({
+                "hostId": "host", "workspaceId": "workspace", "mode": wire,
+            }))
+            .unwrap();
+            assert_eq!(params.mode, Some(mode.clone()));
+            let value = serde_json::to_value(&params).unwrap();
+            assert_eq!(value["mode"], wire);
+        }
+        // Unknown modes are rejected, never silently treated as plain.
+        assert!(
+            serde_json::from_value::<GitPushParams>(json!({
+                "hostId": "host", "workspaceId": "workspace", "mode": "force",
+            }))
+            .is_err()
+        );
     }
 
     #[test]
