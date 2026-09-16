@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
-import { createConnection } from "node:net";
+import { createConnection, type Socket } from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -293,6 +293,596 @@ export function identityMismatch(
 }
 
 /**
+ * PERF-02 multiplexed transport, PERF-02b pooled: a small bounded pool of
+ * long-lived connections per main process instead of one `realpath` + token
+ * read + `createConnection` + destroy per request.
+ *
+ * One shared connection proved to serialize the hot path: the daemon's
+ * `connection_loop` serves one frame at a time per connection (read ->
+ * dispatch -> write -> loop) while the accept path spawns a thread per
+ * connection, so one connection is one serialized queue — a slow
+ * `session.list` delayed every fast call behind it, and an oversized
+ * response (over `MAX_FRAME_BYTES`) closed the socket for every flight at
+ * once. The pool keeps the per-request dial/token-read elimination and
+ * demuxes by `requestId`, but concurrent calls land on different
+ * connections (least-busy assignment, lazy growth to the cap), so one slow
+ * call occupies at most its own connection, and one dead connection replays
+ * or settles only its own flights. The push long-poll
+ * (`session.events.poll` in `session-state-bridge.ts`) deliberately stays
+ * off the pool entirely: that RPC holds its dispatch for up to 20 s, which
+ * would head-of-line-block every short call sharing its connection.
+ *
+ * Pool size 4: the daemon pays a thread per connection, and this process's
+ * steady-state concurrency is ~3 (the notifications poll fans out to two
+ * parallel calls; awake-auto and the terminal read poll interleave) — four
+ * absorbs that plus one burst caller while keeping daemon threads and fds
+ * tiny against one-per-request. Bigger bursts share least-busy connections;
+ * only many simultaneous *slow* calls would still queue, and no client-side
+ * cap fixes that without spending daemon threads to match.
+ */
+export const NATIVE_POOL_MAX_CONNECTIONS = 4;
+
+type PooledConnection = {
+  endpoint: string;
+  /** The live socket from dial time (pre-connect it is dialing, not ready). */
+  socket: Socket | null;
+  /** True once the daemon accepted the dial; every flight awaits this. */
+  connected: boolean;
+  ready: Promise<Socket>;
+  rejectReady: (error: Error) => void;
+  receiveBytes: Buffer;
+};
+
+type PendingCall = {
+  method: string;
+  params: object;
+  requestId: string;
+  resolve: (result: Result<unknown>) => void;
+  reject: (error: Error) => void;
+  deadline: ReturnType<typeof setTimeout>;
+  deadlineAt: number;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+  /** Mid-flight socket death replays the frame once, same `requestId`, fresh auth. */
+  replayed: boolean;
+  /** The pool entry carrying this flight; reassigned on replay. */
+  conn: PooledConnection;
+};
+
+type CachedCredentials = {
+  key: string;
+  auth: string;
+  endpoint: string;
+};
+
+let cachedCredentials: CachedCredentials | null = null;
+/**
+ * The key the pool was dialed for. Unlike the secret above this survives a
+ * socket death: a death only forces a credential *reload*, and a reload for
+ * the same directory must never disturb surviving entries — only an actual
+ * endpoint move (tests swapping `DROGON_DATA_DIR`) evicts the pool.
+ */
+let credentialKey: string | null = null;
+let pool: PooledConnection[] = [];
+const pending = new Map<string, PendingCall>();
+let connectionAttempts = 0;
+
+export type NativeTransport = {
+  createConnection: (endpoint: string) => Socket;
+};
+
+let transportOverride: NativeTransport | null = null;
+
+/** Test seam: count of `createConnection` dials from `callNative` (the probe stays separate). */
+export function getNativeConnectionStats(): { connections: number } {
+  return { connections: connectionAttempts };
+}
+
+/** Test seam: reset the dial counter without dropping pooled sockets. */
+export function resetNativeConnectionStatsForTests(): void {
+  connectionAttempts = 0;
+}
+
+/** Test seam: inject a fake socket factory (interleave/replay tests). */
+export function setNativeTransportForTests(
+  transport: NativeTransport | null,
+): void {
+  transportOverride = transport;
+}
+
+/** Every flight assigned to this entry, whatever its state. */
+function flightsOf(conn: PooledConnection): PendingCall[] {
+  const out: PendingCall[] = [];
+  for (const call of pending.values())
+    if (call.conn === conn) out.push(call);
+  return out;
+}
+
+function removeFromPool(conn: PooledConnection): boolean {
+  const index = pool.indexOf(conn);
+  if (index < 0) return false;
+  pool.splice(index, 1);
+  return true;
+}
+
+/** Test seam: drop every pooled socket, fail nothing silently (every flight rejects), clear all module state. */
+export function resetNativeClientForTests(): void {
+  transportOverride = null;
+  connectionAttempts = 0;
+  cachedCredentials = null;
+  credentialKey = null;
+  lastKnownHostId = null;
+  const stale = pool;
+  pool = [];
+  for (const conn of stale) {
+    // Wake any flight still awaiting the dial: it re-checks its mapping and
+    // stands down (the reject loop below owns its outcome), instead of
+    // dangling on a promise that can never settle. Settling an already
+    // settled dial is a no-op.
+    conn.rejectReady(new Error("native client reset for tests"));
+    if (conn.socket) {
+      try {
+        conn.socket.destroy();
+      } catch {
+        // A half-open socket must never break test teardown.
+      }
+    }
+  }
+  const doomed = [...pending.values()];
+  pending.clear();
+  for (const call of doomed) {
+    clearTimeout(call.deadline);
+    if (call.signal && call.onAbort)
+      call.signal.removeEventListener("abort", call.onAbort);
+    call.reject(new Error("native client reset for tests"));
+  }
+}
+
+function detach(call: PendingCall): void {
+  clearTimeout(call.deadline);
+  if (call.signal && call.onAbort)
+    call.signal.removeEventListener("abort", call.onAbort);
+}
+
+/** Settle exactly the mapped flight; a response racing a settle/abort/timeout is dropped, never double-applied. */
+function settle(call: PendingCall, result: Result<unknown>): void {
+  if (pending.get(call.requestId) !== call) {
+    detach(call);
+    return;
+  }
+  pending.delete(call.requestId);
+  detach(call);
+  call.resolve(result);
+}
+
+function cancel(call: PendingCall, error: Error): void {
+  if (pending.get(call.requestId) !== call) return;
+  pending.delete(call.requestId);
+  detach(call);
+  call.reject(error);
+}
+
+async function loadCredentials(
+  signal?: AbortSignal,
+): Promise<CachedCredentials> {
+  // `DROGON_DATA_DIR` never moves under a running app; the key only guards
+  // tests that swap it between isolated cases.
+  const key = `${process.platform}:${process.env.DROGON_DATA_DIR ?? ""}`;
+  if (cachedCredentials && cachedCredentials.key === key)
+    return cachedCredentials;
+  // The endpoint actually moved: sockets bound to the stale one must never
+  // serve new flights. A routine reload after a socket death (same key)
+  // skips this entirely — surviving entries stay up with their flights.
+  // A flight still awaiting an evicted dial settles cannot-reach from its
+  // dial catch (nothing it sent hit the wire — the same verdict as a failed
+  // dial); a flight whose frame already went out on an evicted socket keeps
+  // its absolute deadline, exactly as the single-socket client left it.
+  // Either way this only happens when tests swap directories mid-flight.
+  if (credentialKey !== null && credentialKey !== key && pool.length > 0) {
+    const stale = pool;
+    pool = [];
+    for (const conn of stale) {
+      conn.rejectReady(new Error("stale endpoint"));
+      if (conn.socket) {
+        try {
+          conn.socket.destroy();
+        } catch {
+          // Destroying a half-open socket must never mask the credential load.
+        }
+      }
+    }
+  }
+  // `realpath` itself takes no `signal` (unsupported by the fs API);
+  // the caller re-checks abort immediately after, as before.
+  const directory = await realpath(dataDirectory());
+  if (signal?.aborted) throw new Error("Request aborted");
+  const auth = (
+    await readFile(path.join(directory, "auth.token"), {
+      encoding: "utf8",
+      signal,
+    })
+  ).trim();
+  const endpoint = resolveEndpointPath(directory, process.platform);
+  cachedCredentials = { key, auth, endpoint };
+  credentialKey = key;
+  return cachedCredentials;
+}
+
+/**
+ * Mid-flight socket death, scoped to the entry that died: only its flights
+ * replay exactly once over a surviving or fresh connection (same
+ * `requestId`, re-authed frame, original absolute deadline), so the
+ * daemon's idempotency ledger dedupes a request it had already applied. A
+ * second death is definitive — reported with the same verdict a one-shot
+ * socket would have given, never as an exit proof. Flights on every other
+ * entry are untouched: one call's transport death never punishes unrelated
+ * calls.
+ */
+function onSocketDeath(conn: PooledConnection, reasonMessage: string | null): void {
+  if (!removeFromPool(conn)) return;
+  try {
+    conn.socket?.destroy();
+  } catch {
+    // Already half-closed; the replay below owns the outcome.
+  }
+  conn.receiveBytes = Buffer.alloc(0);
+  // Re-auth on reconnect: the token may have rotated under us.
+  cachedCredentials = null;
+  const flights = flightsOf(conn);
+  if (flights.length === 0) return;
+  for (const flight of flights) pending.delete(flight.requestId);
+  for (const flight of flights) {
+    detach(flight);
+    if (!flight.replayed) {
+      flight.replayed = true;
+      void redeliver(flight);
+    } else {
+      settleReplayExhausted(flight, reasonMessage);
+    }
+  }
+}
+
+function settleReplayExhausted(
+  call: PendingCall,
+  reasonMessage: string | null,
+): void {
+  // The replay budget is spent: report with the verdict the death carries.
+  // An `end` (server half-close) reads as disconnected; anything else —
+  // refused/reset transport — reads as cannot-reach. Both stay
+  // `unverifiable`: loss of contact never proves exit.
+  const result =
+    reasonMessage === null ? unreachable() : unreachable(reasonMessage);
+  // `settle` needs the mapping; re-map briefly for the single settle path.
+  pending.set(call.requestId, call);
+  settle(call, result);
+}
+
+async function redeliver(call: PendingCall): Promise<void> {
+  if (call.signal?.aborted) {
+    cancel(call, new Error("Request aborted"));
+    return;
+  }
+  const remaining = call.deadlineAt - Date.now();
+  if (remaining <= 0) {
+    pending.set(call.requestId, call);
+    settle(call, unreachable("Service request timed out"));
+    return;
+  }
+  pending.set(call.requestId, call);
+  call.deadline = setTimeout(() => {
+    settle(call, unreachable("Service request timed out"));
+  }, remaining);
+  if (call.signal && call.onAbort)
+    call.signal.addEventListener("abort", call.onAbort, { once: true });
+  let creds: CachedCredentials;
+  try {
+    creds = await loadCredentials(call.signal);
+  } catch (error) {
+    if (call.signal?.aborted) {
+      cancel(
+        call,
+        error instanceof Error ? error : new Error("Request aborted"),
+      );
+      return;
+    }
+    // No connection to replay over: cannot reach the service.
+    pending.set(call.requestId, call);
+    settle(call, unreachable());
+    return;
+  }
+  if (call.signal?.aborted) {
+    cancel(call, new Error("Request aborted"));
+    return;
+  }
+  // Reassignment, not affinity: the replay lands on whatever entry is
+  // least busy now (often a survivor), never back on the dead one — the
+  // dead entry left the pool before this ran.
+  const conn = pickConnection(creds.endpoint);
+  call.conn = conn;
+  try {
+    const socket = await conn.ready;
+    if (pending.get(call.requestId) !== call) return;
+    if (!pool.includes(conn) || call.conn !== conn) {
+      // Evicted while dialing (reset or stale endpoint in tests): nothing
+      // hit the wire, so cannot-reach is the honest verdict.
+      pending.delete(call.requestId);
+      detach(call);
+      call.resolve(unreachable());
+      return;
+    }
+    try {
+      socket.write(
+        JSON.stringify({
+          protocol: 1,
+          requestId: call.requestId,
+          auth: creds.auth,
+          method: call.method,
+          params: call.params,
+        }) + "\n",
+      );
+    } catch {
+      // The socket died between dial and write; its death handler already
+      // replayed or settled this flight — never settle twice here.
+    }
+  } catch {
+    // The dial failed; `failDialFlights` already settled every flight that
+    // was still assigned to it. Anything still mapped here was reassigned
+    // away and is owned elsewhere — but a stale-endpoint eviction rejects
+    // the dial without settling, so settle that case here.
+    if (pending.get(call.requestId) !== call) return;
+    if (call.conn !== conn || pool.includes(conn)) return;
+    pending.delete(call.requestId);
+    detach(call);
+    call.resolve(unreachable());
+  }
+}
+
+/**
+ * Total silence on one entry: flights aboard keep the old per-socket idle
+ * verdict; an empty entry simply retires (the pool grows lazily, so idle
+ * entries are dropped rather than held). Either way only this entry's
+ * flights are touched.
+ */
+function onSocketIdle(conn: PooledConnection): void {
+  if (!removeFromPool(conn)) return;
+  const socket = conn.socket;
+  conn.socket = null;
+  try {
+    socket?.destroy();
+  } catch {
+    // Already half-closed; the settle below owns the outcome.
+  }
+  const flights = flightsOf(conn);
+  if (flights.length === 0) return;
+  for (const call of flights) pending.delete(call.requestId);
+  for (const call of flights) {
+    detach(call);
+    call.resolve(unreachable("Service timed out"));
+  }
+}
+
+function routeLine(conn: PooledConnection, line: string): void {
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(line);
+  } catch {
+    // Unattributable bytes: no `requestId` to answer against. The daemon
+    // only emits framed envelopes, so this never fires on a real wire.
+    return;
+  }
+  const requestId = (envelope as { requestId?: unknown }).requestId;
+  if (typeof requestId !== "string") return;
+  const call = pending.get(requestId);
+  // Already settled (including via abort) — a response racing in after that
+  // must never mutate `lastKnownHostId` or resolve/reject again. A frame
+  // arriving on an entry that does not carry the flight is likewise dropped:
+  // the daemon only answers on the connection that received the frame.
+  if (!call || call.conn !== conn) return;
+  let parsed: Result<unknown>;
+  try {
+    const checked = validateEnvelope(envelope, requestId);
+    parsed = checked.ok
+      ? {
+        ok: true,
+        result: resultSchemas[call.method].parse(checked.result),
+      }
+      : checked;
+  } catch {
+    settle(
+      call,
+      malformed(
+        "The service response does not match the expected contract.",
+      ),
+    );
+    return;
+  }
+  if (parsed.ok) {
+    if (call.method === "status")
+      lastKnownHostId = (parsed.result as { hostId: string }).hostId;
+    const mismatch = identityMismatch(
+      call.method,
+      call.params,
+      parsed.result,
+      lastKnownHostId,
+    );
+    if (mismatch) {
+      settle(call, mismatch);
+      return;
+    }
+  }
+  settle(call, parsed);
+}
+
+function onSocketData(conn: PooledConnection, chunk: Buffer): void {
+  if (!pool.includes(conn)) return;
+  if (conn.receiveBytes.length + chunk.length > MAX_FRAME_BYTES) {
+    // An over-limit stream is contained to its entry: only its flights fail
+    // contract validation (never replayed — the bytes cannot be attributed
+    // to one flight, and replaying an oversized answer would fail again),
+    // while every other entry's flights proceed untouched. This is the
+    // oversized-`session.list` case: the daemon closes that connection with
+    // no error frame, and the pool keeps the blast radius to the call that
+    // asked for it.
+    const flights = flightsOf(conn);
+    for (const flight of flights) pending.delete(flight.requestId);
+    removeFromPool(conn);
+    const socket = conn.socket;
+    conn.socket = null;
+    try {
+      socket?.destroy();
+    } catch {
+      // Already half-closed; the settle below owns the outcome.
+    }
+    conn.receiveBytes = Buffer.alloc(0);
+    for (const flight of flights) {
+      detach(flight);
+      flight.resolve(malformed("Service response is too large."));
+    }
+    return;
+  }
+  conn.receiveBytes = Buffer.concat([conn.receiveBytes, chunk]);
+  let newline: number;
+  while ((newline = conn.receiveBytes.indexOf(10)) >= 0) {
+    const line = conn.receiveBytes.subarray(0, newline).toString("utf8");
+    conn.receiveBytes = conn.receiveBytes.subarray(newline + 1);
+    routeLine(conn, line);
+  }
+}
+
+function attachSocket(conn: PooledConnection): void {
+  const socket = conn.socket;
+  if (!socket) return;
+  // An idle persistent connection must never keep the app alive past its windows.
+  try {
+    socket.unref?.();
+  } catch {
+    // A fake transport without `unref` still works; teardown owns lifetime.
+  }
+  try {
+    socket.setTimeout(IDLE_TIMEOUT_MS);
+  } catch {
+    // Same posture: a transport without an idle timer degrades to the
+    // per-call request deadline, which always still applies.
+  }
+  socket.on("data", (chunk: Buffer) => onSocketData(conn, chunk));
+  socket.on("error", () => onSocketDeath(conn, null));
+  socket.on("end", () => onSocketDeath(conn, "Service disconnected"));
+  socket.on("close", () => onSocketDeath(conn, "Service disconnected"));
+  socket.on("timeout", () => onSocketIdle(conn));
+}
+
+/**
+ * A dial that never reached the daemon: nothing hit the wire, so every
+ * flight assigned to it reports cannot-reach with no replay — the same
+ * verdict a one-shot socket's failed dial always gave. Scoped to the dead
+ * entry like every other transport failure.
+ */
+function failDialFlights(conn: PooledConnection): void {
+  const flights = flightsOf(conn);
+  for (const call of flights) pending.delete(call.requestId);
+  for (const call of flights) {
+    detach(call);
+    call.resolve(unreachable());
+  }
+}
+
+/**
+ * Least-busy assignment over the pool. An idle established entry wins;
+ * otherwise the pool grows lazily (one dial per entry, counted while
+ * dialing so a burst shares the new entries instead of stampeding one);
+ * at the cap the least-busy entry shares. Pick-and-register is synchronous
+ * in the caller, so two concurrent `callNative` invocations never pick the
+ * same idle entry.
+ */
+function pickConnection(endpoint: string): PooledConnection {
+  for (const conn of pool) {
+    if (conn.connected && conn.endpoint === endpoint && flightsOf(conn).length === 0)
+      return conn;
+  }
+  if (pool.length < NATIVE_POOL_MAX_CONNECTIONS) return startDial(endpoint);
+  let best = pool[0]!;
+  let bestLoad = flightsOf(best).length;
+  for (const conn of pool.slice(1)) {
+    const load = flightsOf(conn).length;
+    if (load < bestLoad) {
+      best = conn;
+      bestLoad = load;
+    }
+  }
+  return best;
+}
+
+function startDial(endpoint: string): PooledConnection {
+  const conn: PooledConnection = {
+    endpoint,
+    socket: null,
+    connected: false,
+    // Placeholder until the dial promise below is constructed (a pending
+    // promise, never a rejected one, so construction itself is unobservable).
+    ready: new Promise<Socket>(() => {}),
+    rejectReady: () => {},
+    receiveBytes: Buffer.alloc(0),
+  };
+  pool.push(conn);
+  conn.ready = new Promise<Socket>((resolve, reject) => {
+    conn.rejectReady = reject;
+    let socket: Socket;
+    try {
+      connectionAttempts += 1;
+      socket = (transportOverride?.createConnection ?? createConnection)(
+        endpoint,
+      );
+    } catch {
+      // A stillborn dial never lingers: leave the pool before settling, so
+      // the death path cannot see it.
+      removeFromPool(conn);
+      failDialFlights(conn);
+      reject(new Error("connect-failed"));
+      return;
+    }
+    conn.socket = socket;
+    const onConnectError = () => {
+      removeFromPool(conn);
+      conn.socket = null;
+      try {
+        socket.destroy();
+      } catch {
+        // A failed dial has nothing to clean up beyond itself.
+      }
+      failDialFlights(conn);
+      reject(new Error("connect-failed"));
+    };
+    try {
+      socket.once("error", onConnectError);
+      socket.on("connect", () => {
+        if (!pool.includes(conn)) {
+          // Evicted while dialing (reset or stale endpoint): the socket is
+          // torn down, the dial rejects, and awaiting flights stand down via
+          // their dial catch.
+          try {
+            socket.destroy();
+          } catch {
+            // Already half-closed; nothing owns this socket anymore.
+          }
+          reject(new Error("evicted"));
+          return;
+        }
+        socket.removeListener("error", onConnectError);
+        conn.connected = true;
+        attachSocket(conn);
+        resolve(socket);
+      });
+    } catch {
+      onConnectError();
+    }
+  });
+  // A flight can abort or settle between assignment and its first await; a
+  // rejection with no awaiter yet must never surface as unhandled.
+  conn.ready.catch(() => {});
+  return conn;
+}
+
+/**
  * `requestId` defaults to a fresh one per call, matching every existing
  * call site's one-shot behavior. A caller that specifically needs retry
  * safety for an ambiguous outcome (see `startHarness` in `index.ts`) passes
@@ -311,24 +901,21 @@ export async function callNative(
    * request and free its socket instead of it lingering unbounded. Absent,
    * behavior is byte-for-byte identical to before — every existing caller
    * that never passed a fourth argument sees no change.
+   *
+   * Multiplexing note: aborting one call settles only that call now; every
+   * other flight's connection stays up.
    */
   signal?: AbortSignal,
 ): Promise<Result<unknown>> {
   if (signal?.aborted) throw new Error("Request aborted");
-  let directory: string;
-  let auth: string;
+  let creds: CachedCredentials;
   try {
-    directory = await realpath(dataDirectory());
-    // `realpath` itself takes no `signal` (unsupported by the fs API);
-    // re-check immediately after so an abort that landed during it is not
-    // missed just because the resolved directory looks fine.
+    creds = await loadCredentials(signal);
+    // `realpath`/`readFile` are the only gap between the top-of-function
+    // check and socket use, and an abort landing in that gap must never
+    // fall through to registering a listener on a signal whose "abort"
+    // event already fired (which would never replay).
     if (signal?.aborted) throw new Error("Request aborted");
-    auth = (
-      await readFile(path.join(directory, "auth.token"), {
-        encoding: "utf8",
-        signal,
-      })
-    ).trim();
   } catch (error) {
     // An abort during either await must propagate as a cancellation, not
     // read as "couldn't reach the directory/token" — those are different
@@ -337,15 +924,17 @@ export async function callNative(
       throw error instanceof Error ? error : new Error("Request aborted");
     return unreachable();
   }
-  // Re-check once more, right before opening the socket: the two awaits
-  // above are the only gap between the top-of-function check and socket
-  // creation, and an abort landing in that gap must never fall through to
-  // registering a listener on a signal whose "abort" event already fired
-  // (which would never replay, leaving the socket to open regardless).
+  // Re-check once more, right before queueing the flight: an abort landing
+  // after the awaits must never register on an already-fired signal.
   if (signal?.aborted) throw new Error("Request aborted");
-  const endpoint = resolveEndpointPath(directory, process.platform);
   const frame =
-    JSON.stringify({ protocol: 1, requestId, auth, method, params }) + "\n";
+    JSON.stringify({
+      protocol: 1,
+      requestId,
+      auth: creds.auth,
+      method,
+      params,
+    }) + "\n";
   if (Buffer.byteLength(frame) > MAX_FRAME_BYTES)
     return {
       ok: false,
@@ -355,80 +944,66 @@ export async function callNative(
         retryable: false,
       },
     };
-  return await new Promise((resolve, reject) => {
-    const socket = createConnection(endpoint);
-    let bytes = Buffer.alloc(0);
-    let settled = false;
-    const cleanup = () => {
-      clearTimeout(deadline);
-      signal?.removeEventListener("abort", abort);
+  return await new Promise<Result<unknown>>((resolve, reject) => {
+    // Assignment and registration are one synchronous step: a concurrent
+    // `callNative` picking right after this sees this flight's load, so two
+    // concurrent calls never share an idle entry.
+    const conn = pickConnection(creds.endpoint);
+    const call: PendingCall = {
+      method,
+      params,
+      requestId,
+      resolve,
+      reject,
+      deadline: undefined as unknown as ReturnType<typeof setTimeout>,
+      deadlineAt: Date.now() + REQUEST_DEADLINE_MS,
+      signal,
+      replayed: false,
+      conn,
     };
-    const finish = (result: Result<unknown>) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      socket.destroy();
-      resolve(result);
+    const onDeadline = () => {
+      settle(call, unreachable("Service request timed out"));
     };
-    const abort = () => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      socket.destroy();
-      reject(new Error("Request aborted"));
+    call.deadline = setTimeout(onDeadline, REQUEST_DEADLINE_MS);
+    const onAbort = () => {
+      cancel(call, new Error("Request aborted"));
     };
-    signal?.addEventListener("abort", abort, { once: true });
-    const deadline = setTimeout(
-      () => finish(unreachable("Service request timed out")),
-      REQUEST_DEADLINE_MS,
-    );
-    socket.setTimeout(IDLE_TIMEOUT_MS, () =>
-      finish(unreachable("Service timed out")),
-    );
-    socket.on("connect", () => socket.write(frame));
-    socket.on("error", () => finish(unreachable()));
-    socket.on("end", () => finish(unreachable("Service disconnected")));
-    socket.on("data", (chunk) => {
-      // Already settled (including via abort) — a response racing in after
-      // that must never mutate `lastKnownHostId` or resolve/reject again.
-      if (settled) return;
-      if (bytes.length + chunk.length > MAX_FRAME_BYTES)
-        return finish(malformed("Service response is too large."));
-      bytes = Buffer.concat([bytes, chunk]);
-      const newline = bytes.indexOf(10);
-      if (newline < 0) return;
-      let parsed: Result<unknown>;
+    call.onAbort = onAbort;
+    signal?.addEventListener("abort", onAbort, { once: true });
+    // A duplicate `requestId` while its flight is still mapped (practically
+    // impossible outside a concurrent same-id retry) last-wins; the
+    // superseded flight still settles via its own absolute deadline.
+    pending.set(requestId, call);
+    void (async () => {
       try {
-        const envelope = validateEnvelope(
-          JSON.parse(bytes.subarray(0, newline).toString("utf8")),
-          requestId,
-        );
-        parsed = envelope.ok
-          ? { ok: true, result: resultSchemas[method].parse(envelope.result) }
-          : envelope;
-      } catch {
-        finish(
-          malformed(
-            "The service response does not match the expected contract.",
-          ),
-        );
-        return;
-      }
-      if (parsed.ok) {
-        if (method === "status")
-          lastKnownHostId = (parsed.result as { hostId: string }).hostId;
-        const mismatch = identityMismatch(
-          method,
-          params,
-          parsed.result,
-          lastKnownHostId,
-        );
-        if (mismatch) {
-          finish(mismatch);
+        const socket = await conn.ready;
+        if (pending.get(requestId) !== call) return;
+        if (!pool.includes(conn) || call.conn !== conn) {
+          // Evicted while dialing (reset or stale endpoint in tests):
+          // nothing hit the wire, so cannot-reach is the honest verdict.
+          pending.delete(requestId);
+          detach(call);
+          call.resolve(unreachable());
           return;
         }
+        try {
+          socket.write(frame);
+        } catch {
+          // The socket died between dial and write; its death handler owns
+          // this flight's replay-or-settle — never settle twice here.
+        }
+      } catch {
+        // The dial failed; `failDialFlights` already settled every flight
+        // still assigned to it, and an evicted-while-dialing flight is
+        // settled above — unless the eviction rejected the dial without
+        // settling (stale endpoint), which settles here.
+        if (pending.get(requestId) !== call) return;
+        if (call.conn !== conn || pool.includes(conn)) return;
+        pending.delete(requestId);
+        detach(call);
+        // The dial itself failed: cannot reach the service.
+        call.resolve(unreachable());
       }
-      finish(parsed);
-    });
+    })();
   });
 }

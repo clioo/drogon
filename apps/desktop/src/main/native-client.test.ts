@@ -1,10 +1,17 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
+import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
+  MAX_FRAME_BYTES,
+  NATIVE_POOL_MAX_CONNECTIONS,
   callNative,
+  getNativeConnectionStats,
   identityMismatch,
+  resetNativeClientForTests,
+  setNativeTransportForTests,
   validateEnvelope,
 } from "./native-client";
 import { bridgeSchemas } from "../shared/bridge-validation";
@@ -271,5 +278,352 @@ describe("callNative abort handling", () => {
     await expect(
       callNative("status", {}, "req-2", controller.signal),
     ).rejects.toThrow("aborted");
+  });
+});
+
+describe("callNative multiplexed transport (PERF-02)", () => {
+  let scratchDir = "";
+  let originalDataDir: string | undefined;
+
+  // Minimal in-memory daemon wire: one controllable socket per dial, frames
+  // answered only when the test says so (out-of-order, never, or per-dial).
+  class FakeSocket extends EventEmitter {
+    written: string[] = [];
+    destroyed = false;
+    write(chunk: string | Buffer): boolean {
+      this.written.push(chunk.toString());
+      fakeDaemon.onWrite(this);
+      return true;
+    }
+    destroy(): this {
+      if (this.destroyed) return this;
+      this.destroyed = true;
+      this.emit("close");
+      return this;
+    }
+    setTimeout(): this {
+      return this;
+    }
+    unref(): this {
+      return this;
+    }
+  }
+
+  const statusResult = {
+    hostId: "test-host",
+    serviceInstanceId: "svc-1",
+    protocol: 1,
+    capabilities: [],
+    version: "test",
+  };
+
+  const fakeDaemon = {
+    dials: 0,
+    sockets: [] as FakeSocket[],
+    onWrite: (_socket: FakeSocket): void => {},
+  };
+
+  function answer(socket: FakeSocket, requestId: string): void {
+    socket.emit(
+      "data",
+      Buffer.from(
+        `${JSON.stringify({ protocol: 1, requestId, ok: true, result: statusResult })}\n`,
+      ),
+    );
+  }
+
+  function requestIdOf(line: string): string {
+    return (JSON.parse(line) as { requestId: string }).requestId;
+  }
+
+  beforeEach(async () => {
+    resetNativeClientForTests();
+    fakeDaemon.dials = 0;
+    fakeDaemon.sockets = [];
+    fakeDaemon.onWrite = () => {};
+    setNativeTransportForTests({
+      createConnection: (_endpoint: string) => {
+        fakeDaemon.dials += 1;
+        const socket = new FakeSocket();
+        fakeDaemon.sockets.push(socket);
+        queueMicrotask(() => {
+          if (!socket.destroyed) socket.emit("connect");
+        });
+        return socket as unknown as Socket;
+      },
+    });
+    scratchDir = await mkdtemp(
+      path.join(tmpdir(), "drogon-native-client-mux-test-"),
+    );
+    await writeFile(
+      path.join(scratchDir, "auth.token"),
+      "test-token\n",
+      "utf8",
+    );
+    originalDataDir = process.env.DROGON_DATA_DIR;
+    process.env.DROGON_DATA_DIR = scratchDir;
+  });
+
+  afterEach(async () => {
+    resetNativeClientForTests();
+    if (originalDataDir === undefined) delete process.env.DROGON_DATA_DIR;
+    else process.env.DROGON_DATA_DIR = originalDataDir;
+    if (scratchDir) await rm(scratchDir, { recursive: true, force: true });
+  });
+
+  test("concurrent calls land on different entries and demux by requestId", async () => {
+    const received: { socket: FakeSocket; requestId: string }[] = [];
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        received.push({ socket, requestId: requestIdOf(line) });
+      if (received.length === 2) {
+        // Answer in reverse arrival order: routing must follow requestId,
+        // never arrival order.
+        for (const item of [...received].reverse())
+          answer(item.socket, item.requestId);
+      }
+    };
+    const [first, second] = await Promise.all([
+      callNative("status", {}, "req-a"),
+      callNative("status", {}, "req-b"),
+    ]);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    // Least-busy assignment: two concurrent calls never share an idle entry.
+    expect(fakeDaemon.dials).toBe(2);
+    expect(getNativeConnectionStats().connections).toBe(2);
+    expect(received.map((item) => item.requestId).sort()).toEqual([
+      "req-a",
+      "req-b",
+    ]);
+    expect(received[0].socket).not.toBe(received[1].socket);
+  });
+
+  test("sequential calls reuse one pooled entry (the connection-count win)", async () => {
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answer(socket, requestIdOf(line));
+    };
+    for (let i = 0; i < 5; i++)
+      expect((await callNative("status", {}, `req-seq-${i}`)).ok).toBe(true);
+    expect(fakeDaemon.dials).toBe(1);
+    expect(getNativeConnectionStats().connections).toBe(1);
+  });
+
+  test("a burst grows the pool lazily to the cap, never one-per-request", async () => {
+    const arrived: { socket: FakeSocket; requestId: string }[] = [];
+    const total = NATIVE_POOL_MAX_CONNECTIONS + 4;
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        arrived.push({ socket, requestId: requestIdOf(line) });
+      // Withhold every answer until all frames are in flight together: the
+      // burst must overlap for the cap to mean anything.
+      if (arrived.length === total)
+        for (const item of arrived) answer(item.socket, item.requestId);
+    };
+    const burst = await Promise.all(
+      Array.from({ length: total }, (_, i) =>
+        callNative("status", {}, `req-burst-${i}`),
+      ),
+    );
+    expect(burst.every((result) => result.ok)).toBe(true);
+    expect(fakeDaemon.dials).toBe(NATIVE_POOL_MAX_CONNECTIONS);
+    expect(getNativeConnectionStats().connections).toBe(
+      NATIVE_POOL_MAX_CONNECTIONS,
+    );
+  });
+
+  test("a slow call on one entry never delays a fast call on another (PERF-02b)", async () => {
+    const held: { socket: FakeSocket; requestId: string }[] = [];
+    // Warm the credential cache and the first entry first: cold concurrent
+    // calls race through real filesystem reads, so overlap would be a
+    // timing accident rather than a forced fact. Past the warm call every
+    // registration is microtask-ordered and deterministic.
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answer(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0)) {
+        const requestId = requestIdOf(line);
+        // The slow entry's daemon dispatch never finishes until the test
+        // releases it; everything else answers immediately.
+        if (requestId === "req-slow") held.push({ socket, requestId });
+        else answer(socket, requestId);
+      }
+    };
+    const slow = callNative("status", {}, "req-slow");
+    // Causal head-of-line freedom, no timers: the fast call resolves while
+    // the slow frame is still held. On a single shared connection this
+    // `await` would hang until the release below (the test timeout would
+    // fire instead of this passing).
+    const fast = await callNative("status", {}, "req-fast");
+    expect(fast.ok).toBe(true);
+    expect(fakeDaemon.dials).toBe(2);
+    expect(held).toHaveLength(1);
+    for (const item of held) answer(item.socket, item.requestId);
+    expect((await slow).ok).toBe(true);
+  });
+
+  test("one entry's death replays only its own flights (PERF-02b)", async () => {
+    // Warm first (see the slow/fast test): past the warm call every
+    // registration is microtask-ordered, so the doomed and safe flights
+    // deterministically land on separate entries.
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answer(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    const frames: { socket: FakeSocket; requestId: string; auth: unknown }[] =
+      [];
+    const heldSafe: { socket: FakeSocket; requestId: string }[] = [];
+    let killed = false;
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0)) {
+        const body = JSON.parse(line) as {
+          requestId: string;
+          auth: unknown;
+        };
+        frames.push({ socket, requestId: body.requestId, auth: body.auth });
+        // Kill the doomed entry mid-flight exactly once; its replay dial
+        // answers normally. The safe frame stays held until the replay has
+        // landed, so the replay cannot reuse the safe entry and the dial
+        // count below is deterministic.
+        if (body.requestId === "req-doomed-entry" && !killed) {
+          killed = true;
+          socket.destroy();
+          return;
+        }
+        if (body.requestId === "req-safe") {
+          heldSafe.push({ socket, requestId: body.requestId });
+          return;
+        }
+        answer(socket, body.requestId);
+      }
+    };
+    const doomed = callNative("status", {}, "req-doomed-entry");
+    const safe = callNative("status", {}, "req-safe");
+    // The replay answers independently of the held safe flight: no deadlock,
+    // no timers.
+    expect((await doomed).ok).toBe(true);
+    expect(heldSafe).toHaveLength(1);
+    // The survivor entry is untouched by the other entry's death and its
+    // re-auth: still connected, never redialed, still carrying its flight.
+    expect(heldSafe[0].socket.destroyed).toBe(false);
+    for (const item of heldSafe) answer(item.socket, item.requestId);
+    expect((await safe).ok).toBe(true);
+    // Warm dial, the safe flight's own dial (the doomed flight reuses the
+    // warm entry), plus exactly one replay dial for the doomed flight; the
+    // safe flight never replayed.
+    expect(fakeDaemon.dials).toBe(3);
+    expect(
+      frames.filter((item) => item.requestId === "req-safe"),
+    ).toHaveLength(1);
+    const doomedFrames = frames.filter(
+      (item) => item.requestId === "req-doomed-entry",
+    );
+    expect(doomedFrames).toHaveLength(2);
+    // Same identity (the daemon dedupes), re-authed, on a new entry.
+    expect(doomedFrames[0].socket).not.toBe(doomedFrames[1].socket);
+    expect(doomedFrames[0].auth).toBe("test-token");
+    expect(doomedFrames[1].auth).toBe("test-token");
+  });
+
+  test("an over-limit stream fails only its own entry (PERF-02b)", async () => {
+    // Same warm-up as the slow/fast test: cold concurrent calls race
+    // through real filesystem reads, so without it the small call could
+    // legitimately settle before the big call registers and shares nothing.
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answer(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0)) {
+        const requestId = requestIdOf(line);
+        if (requestId === "req-big") {
+          // The daemon's `write_response` fails on the oversized answer and
+          // the connection just closes with no error frame. Feed enough
+          // bytes client-side to trip the same bound, then close like the
+          // daemon does.
+          socket.emit("data", Buffer.alloc(MAX_FRAME_BYTES + 1, 7));
+          socket.destroy();
+        } else answer(socket, requestId);
+      }
+    };
+    const big = callNative("session.list", {}, "req-big");
+    const small = await callNative("status", {}, "req-small");
+    expect(small.ok).toBe(true);
+    const bigResult = await big;
+    expect(bigResult.ok).toBe(false);
+    if (!bigResult.ok) {
+      // Contract failure, never replayed — and never an exit proof.
+      expect(bigResult.error.code).toBe("internal_error");
+      expect(bigResult.error.retryable).toBe(false);
+    }
+    // No replay for the oversized call: exactly the two original dials.
+    expect(fakeDaemon.dials).toBe(2);
+  });
+
+  test("a silent idle entry retires itself; the next call redials (PERF-02b)", async () => {
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answer(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-1")).ok).toBe(true);
+    expect(fakeDaemon.dials).toBe(1);
+    const first = fakeDaemon.sockets[0]!;
+    expect(first.destroyed).toBe(false);
+    first.emit("timeout");
+    expect(first.destroyed).toBe(true);
+    expect((await callNative("status", {}, "req-2")).ok).toBe(true);
+    expect(fakeDaemon.dials).toBe(2);
+  });
+
+  test("a mid-flight socket death replays once with the same requestId", async () => {
+    const framesByDial: string[][] = [];
+    fakeDaemon.onWrite = (socket) => {
+      const dialIndex = fakeDaemon.sockets.indexOf(socket);
+      const lines = socket.written.splice(0);
+      (framesByDial[dialIndex] ??= []).push(...lines);
+      if (dialIndex === 0) {
+        // Die mid-flight: answer nothing, drop the connection.
+        socket.destroy();
+        return;
+      }
+      for (const line of lines) answer(socket, requestIdOf(line));
+    };
+    const result = await callNative("status", {}, "req-replay");
+    expect(result.ok).toBe(true);
+    // Original dial plus exactly one replay dial.
+    expect(fakeDaemon.dials).toBe(2);
+    expect(getNativeConnectionStats().connections).toBe(2);
+    expect(framesByDial).toHaveLength(2);
+    expect(framesByDial[0]).toHaveLength(1);
+    expect(framesByDial[1]).toHaveLength(1);
+    const first = JSON.parse(framesByDial[0]![0]!) as Record<string, unknown>;
+    const second = JSON.parse(framesByDial[1]![0]!) as Record<string, unknown>;
+    // Same identity (the daemon dedupes), re-authed on the new connection.
+    expect(first.requestId).toBe("req-replay");
+    expect(second.requestId).toBe("req-replay");
+    expect(first.auth).toBe("test-token");
+    expect(second.auth).toBe("test-token");
+  });
+
+  test("a second mid-flight death settles unverifiable, never as an exit", async () => {
+    fakeDaemon.onWrite = (socket) => {
+      socket.written.splice(0);
+      socket.destroy();
+    };
+    const result = await callNative("status", {}, "req-doomed");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // Loss of contact never proves exit: the verdict stays unverifiable.
+      expect(result.error.code).toBe("unverifiable");
+      expect(result.error.retryable).toBe(true);
+    }
+    // Replay-once means exactly two dials, never a retry storm.
+    expect(fakeDaemon.dials).toBe(2);
   });
 });
