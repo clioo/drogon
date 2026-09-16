@@ -10,6 +10,7 @@
 use crate::{Engine, PROTOCOL_VERSION};
 use drogon_protocol::Request;
 use serde_json::{Value, json};
+use std::time::{Duration, Instant};
 
 struct Fixture {
     dir: tempfile::TempDir,
@@ -89,6 +90,62 @@ fn identity(session: &Value) -> Value {
     })
 }
 
+fn stored_verdict(fixture: &Fixture, id: &str) -> String {
+    fixture
+        .engine
+        .db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT verdict FROM sessions WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .expect("stub row")
+}
+
+/// Pins the simulated post-restart stub row at `unverifiable` and proves no
+/// late write is still in flight before the caller reads it. The killed
+/// child's detached exit poller performs one final unconditional
+/// `UPDATE sessions SET verdict = 'exited'` after `stop()` returns; under
+/// load that write can land after the stub UPDATE, so a single UPDATE
+/// followed by an immediate `close` races (issue #371: the stored `exited`
+/// was honestly reported, failing the `unverifiable` assertion). The poller
+/// returns right after that single write, so re-applying the UPDATE
+/// converges: at most one overwrite can ever follow, and a continuous
+/// stability window with no flip proves none remains before `close` reads.
+fn pin_stub_row_unverifiable(fixture: &Fixture, id: &str) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        fixture
+            .engine
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET verdict = 'unverifiable', exit_code = NULL WHERE id = ?1",
+                rusqlite::params![id],
+            )
+            .unwrap();
+        let stable_until = Instant::now() + Duration::from_secs(2);
+        let mut overwritten = false;
+        while Instant::now() < stable_until {
+            if stored_verdict(fixture, id) != "unverifiable" {
+                overwritten = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if !overwritten {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "stub row never stabilized at unverifiable for {id}"
+        );
+    }
+}
+
 #[test]
 fn close_stops_live_session_and_forgets_record() {
     let fixture = fixture();
@@ -128,16 +185,7 @@ fn close_of_handleless_stub_forgets_record_with_honest_verdict() {
     let handle = fixture.engine.sessions.lock().unwrap()[&id].clone();
     let _ = crate::session::stop(&handle);
     fixture.engine.sessions.lock().unwrap().remove(&id);
-    fixture
-        .engine
-        .db
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE sessions SET verdict = 'unverifiable', exit_code = NULL WHERE id = ?1",
-            rusqlite::params![id],
-        )
-        .unwrap();
+    pin_stub_row_unverifiable(&fixture, &id);
     let closed = invoke(
         &fixture.engine,
         "close",
