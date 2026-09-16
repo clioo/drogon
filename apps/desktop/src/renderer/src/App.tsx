@@ -489,9 +489,29 @@ export function isPollPageVisible(): boolean {
 }
 
 /**
- * PERF-03: slow fallback between fast ticks while gated (hidden page or no
- * visible consumer). Returns true when a poll is due: always on the first
- * tick after (re)mount, then at most every 30s until the fast gate reopens.
+ * PERF-03b: fast-tick gate for the host-wide session poll. A visible page
+ * polls at the fast cadence unconditionally — the tab strip adopts
+ * out-of-band sessions (CLI-created, Bot-created, another window) from
+ * every host-wide reply, so gating on sidebar/Bots-route visibility cost
+ * up to 30s of tab staleness with the sidebar collapsed. Sidebar and route
+ * are deliberately NOT inputs here, so that regression is structurally
+ * impossible. A hidden page (minimized, occluded) skips fast ticks and
+ * gets the 30s slow fallback instead.
+ */
+export function shouldSessionPollTick(
+  pageVisible: boolean,
+  lastPollMs: number,
+  nowMs: number,
+): boolean {
+  if (pageVisible) return true;
+  return isSlowPollDue(lastPollMs, nowMs);
+}
+
+/**
+ * PERF-03: slow fallback between fast ticks while gated (hidden page or,
+ * for the Bots snapshot, no visible consumer). Returns true when a poll is
+ * due: always on the first tick after (re)mount, then at most every 30s
+ * until the fast gate reopens.
  */
 export function isSlowPollDue(lastPollMs: number, nowMs: number): boolean {
   if (lastPollMs <= 0) return true;
@@ -1396,6 +1416,15 @@ export function App() {
     // the snapshot from going stale. The sequence guard drops a stale
     // overlapping resolution so an older reply can never overwrite a newer
     // snapshot. Cadence and identity only; the snapshot merge is untouched.
+    // PERF-03b review: this gate STAYS, unlike the session poll's. Audited
+    // consumers of the snapshot: the Bots page (route enter forces a fresh
+    // read through the effect above, so a stale snapshot never paints),
+    // the sidebar Chats section (visible only while open), and the
+    // inspector's linkedBotSessionMeta fallback (identity chrome only —
+    // the synchronously-recorded botSessions map is primary and liveness
+    // rides the now-ungated 3s session poll). No off-screen-but-load-bearing
+    // consumer exists here, and unlike the index-backed session.list this
+    // payload (bots + history) is large, so the daemon-load saving is real.
     const scope = {
       hostId: botsScopeHost,
       workspaceId: "",
@@ -2365,15 +2394,12 @@ export function App() {
       );
     };
     const tick = () => {
-      // PERF-03: cadence gate — fast ticks only while the page is visible
-      // and a consumer is showing (open sidebar cards or the Bots page);
-      // otherwise the 30s slow fallback keeps the host-wide view fresh.
-      const consumersVisible =
-        sidebarOpenRef.current || routeRef.current === BOTS_ROUTE_ID;
-      if (
-        (!isPollPageVisible() || !consumersVisible) &&
-        !isSlowPollDue(lastPollMs, Date.now())
-      )
+      // PERF-03b: no consumer gate here — the tab-strip adopt effect below
+      // is an always-visible consumer of every host-wide reply, so a
+      // visible page keeps the 3s cadence regardless of sidebar state.
+      // Unchanged replies still commit nothing (sameSessions), so the fast
+      // cadence costs IPC only while idle.
+      if (!shouldSessionPollTick(isPollPageVisible(), lastPollMs, Date.now()))
         return;
       void poll();
     };

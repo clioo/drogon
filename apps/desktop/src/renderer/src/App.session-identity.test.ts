@@ -10,6 +10,7 @@ import {
   removeSessionExact,
   sameBotsLoadResult,
   sameSessions,
+  shouldSessionPollTick,
 } from "./App";
 import type { BotsLoadResult } from "./bots-loader";
 import type { Session } from "../../shared/session-contract";
@@ -399,5 +400,47 @@ describe("PERF-03 poll cadence gates", () => {
     expect(isPollPageVisible()).toBe(true);
     (globalThis as { document?: unknown }).document = { visibilityState: "hidden" };
     expect(isPollPageVisible()).toBe(false);
+  });
+});
+
+describe("PERF-03b session poll fast tick", () => {
+  // Regression for the sidebar-consumer gate: with the sidebar collapsed
+  // and the route anywhere but Bots, an out-of-band session (CLI-created,
+  // Bot-created, another window) took up to 30s to reach the tab strip.
+  // The gate takes no sidebar/route input, so this shapes the only two
+  // inputs it has: a visible page always fast-ticks.
+  test("a visible page fast-ticks even with a recent poll (sidebar state is not an input)", () => {
+    expect(shouldSessionPollTick(true, 1_000, 1_000 + 3_000)).toBe(true);
+    expect(shouldSessionPollTick(true, 1_000, 1_000 + 29_999)).toBe(true);
+  });
+
+  test("a hidden page skips fast ticks and keeps the 30s slow fallback", () => {
+    expect(shouldSessionPollTick(false, 1_000, 1_000 + 3_000)).toBe(false);
+    expect(shouldSessionPollTick(false, 1_000, 1_000 + 29_999)).toBe(false);
+    expect(shouldSessionPollTick(false, 1_000, 1_000 + 30_000)).toBe(true);
+    expect(shouldSessionPollTick(false, 0, 1_000)).toBe(true);
+  });
+
+  // End-to-end of the regression at unit level: the fast tick fires while
+  // the sidebar is closed, the host-wide reply arrives, and the adopt
+  // effect merges the CLI-created session into the tab strip's list —
+  // all within one fast cadence, never waiting on the slow fallback.
+  test("an out-of-band session reaches the tab strip on a fast tick while the sidebar is closed", () => {
+    // shouldSessionPollTick takes no sidebar/route input by design, so
+    // there is nothing here to set to "closed"/"away" — that absence is
+    // the regression lock.
+    const lastPollMs = 1_000;
+    const fastTickMs = lastPollMs + 3_000;
+    // The tick decision consults only page visibility: closed sidebar and
+    // non-Bots route cannot suppress it.
+    expect(shouldSessionPollTick(true, lastPollMs, fastTickMs)).toBe(true);
+    // The reply it fetches adopts the session the shell did not start.
+    const tabStrip = [session("s1")];
+    const hostWide = [
+      session("s1"),
+      session("cli-created", { createdAt: "2026-01-01T00:01:00Z" }),
+    ];
+    const merged = adoptOutOfBandSessions(tabStrip, hostWide, "w1", () => false);
+    expect(merged.map((item) => item.id)).toEqual(["s1", "cli-created"]);
   });
 });
