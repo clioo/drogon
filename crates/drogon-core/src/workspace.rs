@@ -57,6 +57,40 @@ pub(crate) fn register(
     }
 }
 
+/// Registers an ADDITIONAL Workspace at an already-registered folder path,
+/// always inserting a fresh row instead of reusing the existing one. A
+/// folder Project can own several named Workspaces that share one folder
+/// path (issue #579: each is its own sidebar section with its own sessions),
+/// which the get-or-create [`register`] cannot express because it dedups by
+/// path. Path-keyed readers stay deterministic by preferring the earliest
+/// row, so the folder's original Workspace remains its primary. Requires the
+/// relaxed `workspaces` schema (no `UNIQUE(path)`); see
+/// [`crate::db::migrate_workspaces_drop_path_unique`].
+pub(crate) fn register_additional_at_path(
+    conn: &Connection,
+    host_id: &str,
+    path: &str,
+    name: &str,
+) -> Result<Value, drogon_protocol::RpcError> {
+    let canonical = std::fs::canonicalize(path)
+        .map_err(|_| error::invalid_argument("path does not exist or is not readable"))?;
+    if !canonical.is_dir() {
+        return Err(error::invalid_argument("path is not a directory"));
+    }
+    let canonical_str = utf8_workspace_path(&canonical)?.to_owned();
+    let kind = classify(&canonical);
+    let id = uuid::Uuid::new_v4().to_string();
+    let created_at = crate::now_rfc3339();
+    conn.execute(
+        "INSERT INTO workspaces (id, path, name, kind, host_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![id, canonical_str, name, kind, host_id, created_at],
+    )
+    .map_err(error::from_sqlite)?;
+    Ok(json!({
+        "id": id, "path": canonical_str, "name": name, "kind": kind, "hostId": host_id
+    }))
+}
+
 fn utf8_workspace_path(path: &Path) -> Result<&str, drogon_protocol::RpcError> {
     path.to_str()
         .ok_or_else(|| error::invalid_argument("resolved workspace path is not UTF-8"))
@@ -92,8 +126,11 @@ fn fetch_by_path(
     conn: &Connection,
     canonical_path: &str,
 ) -> Result<Option<Value>, drogon_protocol::RpcError> {
+    // A folder path can back several Workspaces now (issue #579); the
+    // earliest-created one is the folder's primary, so get-or-create and
+    // every other path lookup resolve to it deterministically.
     conn.query_row(
-        "SELECT id, path, name, kind, host_id FROM workspaces WHERE path = ?1",
+        "SELECT id, path, name, kind, host_id FROM workspaces WHERE path = ?1 ORDER BY created_at LIMIT 1",
         [canonical_path],
         |r| {
             Ok(json!({

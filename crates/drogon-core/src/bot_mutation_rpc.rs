@@ -292,9 +292,11 @@ pub(crate) fn resolve_bot_owning_workspace(
     let folder = bots_storage::folder_for_bot_id(conn, derived_host_id, bot_id)
         .map_err(responsibility_storage_error)?
         .ok_or_else(|| not_found(format!("bot {bot_id} not found")))?;
+    // A folder path can back several Workspaces now (issue #579); a Bot
+    // always resolves to the folder's primary (earliest-created) Workspace.
     let resolved_workspace_id: String = conn
         .query_row(
-            "SELECT id FROM workspaces WHERE path = ?1 AND host_id = ?2",
+            "SELECT id FROM workspaces WHERE path = ?1 AND host_id = ?2 ORDER BY created_at LIMIT 1",
             rusqlite::params![folder, derived_host_id],
             |r| r.get(0),
         )

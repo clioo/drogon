@@ -497,9 +497,11 @@ fn folder_implicit_worktree_json(
     conn: &rusqlite::Connection,
     project: &crate::project::ProjectInfo,
 ) -> Result<Value, RpcError> {
+    // A folder can back several Workspaces now (issue #579); the implicit
+    // worktree always renders the folder's primary (earliest-created) row.
     let workspace_id: String = conn
         .query_row(
-            "SELECT id FROM workspaces WHERE path = ?1",
+            "SELECT id FROM workspaces WHERE path = ?1 ORDER BY created_at LIMIT 1",
             [&project.path],
             |r| r.get(0),
         )
@@ -655,9 +657,27 @@ impl Engine {
             crate::project::get(&conn, &project_id)?
         };
         if project.kind != "git" {
-            return Err(error::invalid_argument(
-                "worktree.create requires a git project; a folder project has one implicit worktree",
-            ));
+            // A folder Project owns no git worktrees, but it can own several
+            // named Workspaces that share its one folder path (issue #579):
+            // each is its own sidebar section with its own sessions. None of
+            // the git-only Advanced options apply here, so reject them
+            // honestly rather than silently ignoring them.
+            if base_ref.is_some()
+                || branch_override.is_some()
+                || reuse_branch
+                || parent_worktree_id.is_some()
+                || !sparse.is_empty()
+            {
+                return Err(error::invalid_argument(
+                    "a folder workspace has no branch, base ref, parent or sparse checkout",
+                ));
+            }
+            return self.create_folder_workspace(
+                &project,
+                &name,
+                note.as_deref(),
+                creator.as_deref(),
+            );
         }
         if let Some(parent) = &parent_worktree_id {
             let conn = self.db.lock().unwrap();
@@ -866,6 +886,75 @@ impl Engine {
         }))
     }
 
+    /// Creates an additional Workspace section for a folder Project (issue
+    /// #579). A folder has no git worktrees, so this makes no `git`
+    /// invocation: it registers a second Workspace at the same folder path
+    /// (via [`crate::workspace::register_additional_at_path`]) and inserts a
+    /// real `worktrees` row pointing at it, so the sidebar renders it as its
+    /// own section grouping its own sessions — exactly like a git worktree
+    /// card, minus branch/head. The folder's original implicit worktree
+    /// (`id == project.id`) stays the primary; this row carries a distinct
+    /// uuid, so the renderer treats it as a normal, renamable/removable card.
+    fn create_folder_workspace(
+        &self,
+        project: &crate::project::ProjectInfo,
+        name: &str,
+        note: Option<&str>,
+        creator: Option<&str>,
+    ) -> Result<Value, RpcError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(error::invalid_argument("workspace name must not be empty"));
+        }
+        let conn = self.db.lock().unwrap();
+        let workspace = crate::workspace::register_additional_at_path(
+            &conn,
+            &self.host_id,
+            &project.path,
+            name,
+        )?;
+        let workspace_id = workspace["id"]
+            .as_str()
+            .ok_or_else(|| error::internal_error("workspace registration missing id"))?
+            .to_string();
+        let id = uuid::Uuid::new_v4().to_string();
+        let created_at = now_rfc3339();
+        let sort_order: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM worktrees WHERE project_id = ?1",
+                [&project.id],
+                |r| r.get(0),
+            )
+            .map_err(error::from_sqlite)?;
+        conn.execute(
+            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at, sort_order, last_activity_at, creator) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+            rusqlite::params![id, project.id, workspace_id, project.path, "", "", Option::<String>::None, name, note, Option::<String>::None, created_at, sort_order, created_at, creator],
+        )
+        .map_err(error::from_sqlite)?;
+        Ok(worktree_json(WorktreeMetaRow {
+            id: &id,
+            project_id: &project.id,
+            workspace_id: &workspace_id,
+            path: &project.path,
+            branch: "",
+            head: "",
+            base_ref: None,
+            title: Some(name),
+            note,
+            parent_worktree_id: None,
+            created_at: &created_at,
+            workspace_status: None,
+            is_pinned: false,
+            is_archived: false,
+            sort_order,
+            manual_order: None,
+            last_activity_at: Some(&created_at),
+            linked_pr: None,
+            creator,
+        }))
+    }
+
     /// The fork's smart-name-field branch source (`repo-base-ref-search`):
     /// local heads plus remote refs, most recently committed first, with the
     /// symbolic `<remote>/HEAD` entries dropped. Rows carry the fork's
@@ -943,7 +1032,48 @@ impl Engine {
         let project = crate::project::get(&conn, &project_id)?;
 
         if project.kind == "folder" {
-            return Ok(json!({ "worktrees": [folder_implicit_worktree_json(&conn, &project)?] }));
+            // The synthesized primary (the folder itself) plus any additional
+            // folder Workspaces the user created as their own sections
+            // (issue #579). The additional rows are real `worktrees` rows
+            // with distinct uuids sharing the folder path; they carry no
+            // branch/head, so there is no git checkout to reconcile against.
+            let mut worktrees = vec![folder_implicit_worktree_json(&conn, &project)?];
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, workspace_id, path, title, note, created_at, \
+                     workspace_status, is_pinned, is_archived, sort_order, manual_order, last_activity_at, creator \
+                     FROM worktrees WHERE project_id = ?1 ORDER BY created_at",
+                )
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([&project_id], |r| {
+                    Ok(worktree_json(WorktreeMetaRow {
+                        id: &r.get::<_, String>(0)?,
+                        project_id: &project_id,
+                        workspace_id: &r.get::<_, String>(1)?,
+                        path: &r.get::<_, String>(2)?,
+                        branch: "",
+                        head: "",
+                        base_ref: None,
+                        title: r.get::<_, Option<String>>(3)?.as_deref(),
+                        note: r.get::<_, Option<String>>(4)?.as_deref(),
+                        parent_worktree_id: None,
+                        created_at: &r.get::<_, String>(5)?,
+                        workspace_status: r.get::<_, Option<String>>(6)?.as_deref(),
+                        is_pinned: r.get::<_, bool>(7)?,
+                        is_archived: r.get::<_, bool>(8)?,
+                        sort_order: r.get::<_, i64>(9)?,
+                        manual_order: r.get::<_, Option<i64>>(10)?,
+                        last_activity_at: r.get::<_, Option<String>>(11)?.as_deref(),
+                        linked_pr: None,
+                        creator: r.get::<_, Option<String>>(12)?.as_deref(),
+                    }))
+                })
+                .map_err(error::from_sqlite)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(error::from_sqlite)?;
+            worktrees.extend(rows);
+            return Ok(json!({ "worktrees": worktrees }));
         }
 
         let mut stmt = conn
@@ -1061,26 +1191,32 @@ impl Engine {
         let id = require_str(params, "id")?.to_string();
         let force = optional_bool(params, "force", false)?;
 
-        let (project_path, worktree_path, workspace_id) = {
+        let (project_path, project_kind, worktree_path, workspace_id) = {
             let conn = self.db.lock().unwrap();
             conn.query_row(
-                "SELECT p.path, w.path, w.workspace_id FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE w.id = ?1",
+                "SELECT p.path, p.kind, w.path, w.workspace_id FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE w.id = ?1",
                 [&id],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)),
             )
             .optional()
             .map_err(error::from_sqlite)?
             .ok_or_else(|| error::not_found("worktree not found"))?
         };
 
-        let mut argv = vec!["worktree".to_string(), "remove".to_string()];
-        if force {
-            argv.push("--force".to_string());
+        // A folder Workspace section (issue #579) has no git worktree to
+        // remove — its path is the folder itself, shared with the project.
+        // Removing it only unregisters this Workspace row; the folder and
+        // its files are never touched.
+        if project_kind != "folder" {
+            let mut argv = vec!["worktree".to_string(), "remove".to_string()];
+            if force {
+                argv.push("--force".to_string());
+            }
+            argv.push(worktree_path);
+            // Git itself refuses a dirty worktree without --force; this call
+            // never re-implements that check.
+            run_git(Path::new(&project_path), &argv)?;
         }
-        argv.push(worktree_path);
-        // Git itself refuses a dirty worktree without --force; this call
-        // never re-implements that check.
-        run_git(Path::new(&project_path), &argv)?;
 
         let conn = self.db.lock().unwrap();
         conn.execute("DELETE FROM worktrees WHERE id = ?1", [&id])

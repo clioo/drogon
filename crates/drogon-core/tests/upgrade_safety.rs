@@ -27,7 +27,7 @@ const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("bot_self", 1, &[]),
     ("bot_delegation", 3, &[("bot_delegation-v2", 2)]),
     ("automations", 2, &[("automations-v1", 1)]),
-    ("projects", 5, &[("projects-v1", 1)]),
+    ("projects", 6, &[("projects-v1", 1)]),
     ("mentu", 1, &[]),
     ("graph", 4, &[("graph-v1", 1)]),
     ("coordination_access", 1, &[]),
@@ -660,7 +660,7 @@ fn recovers_pre_projects_orphans_even_when_the_store_is_already_at_v3() {
     assert_eq!(recovered["kind"], "folder");
 
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "projects"), 5);
+    assert_eq!(version_of(&conn, "projects"), 6);
 }
 
 // Coordinator review: a project the user genuinely removed (project.remove

@@ -18,26 +18,25 @@ import type { ProjectGroup } from "../shell/project-adapter";
 import { normalizeBaseRef, validateWorktreeName } from "../shell/project-forms";
 
 /**
- * Pure submit decisions for the new-workspace composer (journey J1): a
- * folder project opens its one implicit workspace, a git project creates
- * a worktree through `worktree.create`. The daemon stays authoritative
- * (it rejects `worktree.create` on folder projects and resolves the base
- * ref), so this module only routes and pre-checks what the form can.
+ * Pure submit decisions for the new-workspace composer (journey J1): both
+ * a git project and a folder project create a new section through
+ * `worktree.create`. A git project gets a real git worktree (with a base
+ * ref); a folder project gets an additional named Workspace sharing its
+ * folder path, its own sidebar section grouping its own sessions (issue
+ * #579). The daemon stays authoritative (it creates the git worktree or
+ * the folder Workspace and resolves the base ref), so this module only
+ * routes and pre-checks what the form can. `folderWorkspace` marks the
+ * folder path so the caller drops the git-only Advanced fields the daemon
+ * would reject.
  */
-export type ComposerSubmitTarget =
-  | {
-      kind: "implicit";
-      project: Project;
-      workspaceId: string;
-      agent: ComposerAgentSelection;
-    }
-  | {
-      kind: "worktree";
-      project: Project;
-      name: string;
-      baseRef?: string;
-      agent: ComposerAgentSelection;
-    };
+export type ComposerSubmitTarget = {
+  kind: "worktree";
+  project: Project;
+  name: string;
+  baseRef?: string;
+  folderWorkspace?: boolean;
+  agent: ComposerAgentSelection;
+};
 
 /**
  * Agent the composer starts in the new workspace (journey J1): the
@@ -147,20 +146,18 @@ export function resolveComposerSubmit(
     null;
   if (!project) return { error: "Choose a project to continue." };
   if (project.kind !== "git") {
-    const group = groups.find((item) => item.project.id === project.id);
-    const workspaceId = group?.worktrees[0]?.workspaceId ?? null;
-    const workspace =
-      workspaces.find((item) => item.id === workspaceId) ?? null;
-    if (!workspace)
-      return {
-        error:
-          "The folder workspace is missing. Refresh the connection and retry.",
-      };
+    // A folder project creates an additional named Workspace sharing its
+    // folder path (issue #579): its own section with its own sessions. The
+    // daemon has no branch/base ref to resolve here, so only the name is
+    // validated; the caller drops the git-only Advanced fields.
+    const nameError = validateWorktreeName(input.name);
+    if (nameError) return { error: nameError };
     return {
       target: {
-        kind: "implicit",
+        kind: "worktree",
         project,
-        workspaceId: workspace.id,
+        name: input.name.trim(),
+        folderWorkspace: true,
         agent: input.agent,
       },
     };

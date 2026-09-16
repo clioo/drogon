@@ -111,7 +111,7 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
         );
         CREATE TABLE IF NOT EXISTS workspaces (
             id TEXT PRIMARY KEY,
-            path TEXT NOT NULL UNIQUE,
+            path TEXT NOT NULL,
             name TEXT NOT NULL,
             kind TEXT NOT NULL,
             host_id TEXT NOT NULL,
@@ -521,6 +521,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     migrate_sessions_turn_fact(&tx)?;
     migrate_sessions_caused_by_event_id(&tx)?;
     migrate_sessions_agent_session(&tx)?;
+    migrate_workspaces_drop_path_unique(&tx)?;
     recover_from_prior_instance(&tx)?;
     mentu_storage::recover_prior_instance_runs(&tx)?;
     recover_prior_instance_headless_runs(&tx)?;
@@ -661,6 +662,48 @@ fn migrate_sessions_agent_session(tx: &Transaction<'_>) -> rusqlite::Result<()> 
             tx.execute_batch(&format!("ALTER TABLE sessions ADD COLUMN {column} TEXT;"))?;
         }
     }
+    Ok(())
+}
+
+/// Structural migration that drops the legacy `UNIQUE(path)` constraint on
+/// `workspaces`. A folder Project used to own exactly one Workspace (its
+/// folder), so path-uniqueness held; now a folder can own several named
+/// Workspaces that share the same folder path (each its own sidebar
+/// section — issue #579), which the old constraint forbade. Fresh databases
+/// already create the table without the constraint in [`create_tables`], so
+/// this only rebuilds the table for data dirs created before the change.
+/// Idempotent: it inspects the stored table DDL and returns early once the
+/// constraint is gone. Every path-keyed reader stays deterministic by
+/// selecting the earliest-created row (`ORDER BY created_at`), so the
+/// folder's original Workspace remains its primary.
+fn migrate_workspaces_drop_path_unique(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    let ddl: Option<String> = tx
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='workspaces'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(ddl) = ddl else { return Ok(()) };
+    // The only UNIQUE this table ever declared was on `path`; a rebuilt
+    // table drops the keyword entirely, so its absence is the done marker.
+    if !ddl.to_ascii_uppercase().contains("UNIQUE") {
+        return Ok(());
+    }
+    tx.execute_batch(
+        "CREATE TABLE workspaces_migrated (
+            id TEXT PRIMARY KEY,
+            path TEXT NOT NULL,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO workspaces_migrated (id, path, name, kind, host_id, created_at)
+            SELECT id, path, name, kind, host_id, created_at FROM workspaces;
+        DROP TABLE workspaces;
+        ALTER TABLE workspaces_migrated RENAME TO workspaces;",
+    )?;
     Ok(())
 }
 
