@@ -15,6 +15,7 @@ import {
   type SessionStateChangedEvent,
 } from "../../shared/notifications-contract";
 import { callNative, dataDirectory } from "../native-client";
+import { subscribeSessionPush } from "../session-state-bridge";
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   NOTIFICATIONS_SETTINGS_FILE,
@@ -114,11 +115,26 @@ async function listSessionsAndPaths(): Promise<{
   };
 }
 
+/** Minimal push shape: the bridge's deduped event without its sequence. */
+export type NeedsInputPushEvent = {
+  sessionId: string;
+  workspaceId: string;
+  agentState: string;
+  agentStateAt: string | null;
+};
+
 /** Polls `session.list`, notifies once per entry into `needs_input`, and
- * forwards every transition to the renderer for the live badge. */
+ * forwards every transition to the renderer for the live badge.
+ *
+ * PERF-05: the session-state push feed is the primary source —
+ * `observePush` consumes each deduped push event with zero daemon I/O and
+ * the 2 s `tick` stays as the reconciliation fallback. Banner ownership is
+ * unchanged: working → needs_input belongs to the push completion
+ * observer, so this watcher never banners that move on either path. */
 export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
   tick: () => Promise<void>;
   stop: () => void;
+  observePush: (event: NeedsInputPushEvent) => void;
 } {
   const log = deps.log ?? ((message: string) => console.log(message));
   let states = new Map<string, string>();
@@ -127,12 +143,77 @@ export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
   let primed = false;
   let inFlight = false;
   let timer: ReturnType<typeof setInterval> | null = null;
+  // Last poll's full rows: the push feed carries state but no
+  // command/harness label, so push banners reuse this cache and unknown
+  // sessions stay silent here for the fallback poll to banner with context.
+  let knownSessions = new Map<string, WatchedSession>();
+  let knownWorkspaceNames = new Map<string, string>();
+
+  function showNeedsInput(
+    session: WatchedSession,
+    workspaceName: string | null,
+  ): void {
+    const { title, body } = formatNeedsInput(session, workspaceName);
+    const focus: FocusSessionEvent = {
+      sessionId: session.id,
+      workspaceId: session.workspaceId,
+    };
+    deps.show(title, body, () => {
+      const target = deps.getWindow();
+      if (!target || target.isDestroyed()) return;
+      if (target.isMinimized()) target.restore();
+      target.show();
+      target.focus();
+      target.webContents.send(
+        notificationsIpcChannels.focusSession,
+        focus,
+      );
+    });
+    log(`[drogon] needs_input notification shown: ${title} — ${body}`);
+  }
+
+  /**
+   * Consumes one deduped push event without any daemon round trip. The
+   * bridge already forwarded the badge to the renderer, so this only moves
+   * the reconciliation baseline (keeping the fallback poll quiet) and
+   * banners exactly the moves the poll path would banner for a known
+   * session. Unknown sessions keep their baseline: the next poll discovers
+   * them with full command/harness context and banners exactly once.
+   */
+  function observePush(event: NeedsInputPushEvent): void {
+    const known = knownSessions.get(event.sessionId);
+    if (!known) return;
+    const previous = states.get(event.sessionId);
+    const next = event.agentState ?? "unknown";
+    if (previous === next) return;
+    states.set(event.sessionId, next);
+    knownSessions.set(event.sessionId, {
+      ...known,
+      agentState: next,
+      agentStateAt: event.agentStateAt,
+    });
+    if (next !== "needs_input" || previous === "needs_input") return;
+    // The push stream owns working → needs_input completion banners. Same
+    // skip as the polling fallback: never double-deliver that move.
+    if (previous === "working") return;
+    if (!deps.isEnabled() || (deps.suppressWhenFocused?.() ?? false)) return;
+    showNeedsInput(
+      {
+        ...known,
+        agentState: next,
+        agentStateAt: event.agentStateAt,
+      },
+      knownWorkspaceNames.get(known.workspaceId) ?? null,
+    );
+  }
 
   async function tick(): Promise<void> {
     if (inFlight) return;
     inFlight = true;
     try {
       const { sessions, workspaceNames } = await deps.listSessions();
+      knownSessions = new Map(sessions.map((session) => [session.id, session]));
+      knownWorkspaceNames = workspaceNames;
       const previousStates = states;
       const { next, transitions } = diffAgentStates(states, sessions, {
         emitFirstSightings: primed,
@@ -167,26 +248,10 @@ export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
           (deps.suppressWhenFocused?.() ?? false)
         )
           continue;
-        const { title, body } = formatNeedsInput(
+        showNeedsInput(
           transition.session,
           workspaceNames.get(transition.session.workspaceId) ?? null,
         );
-        const focus: FocusSessionEvent = {
-          sessionId: transition.session.id,
-          workspaceId: transition.session.workspaceId,
-        };
-        deps.show(title, body, () => {
-          const target = deps.getWindow();
-          if (!target || target.isDestroyed()) return;
-          if (target.isMinimized()) target.restore();
-          target.show();
-          target.focus();
-          target.webContents.send(
-            notificationsIpcChannels.focusSession,
-            focus,
-          );
-        });
-        log(`[drogon] needs_input notification shown: ${title} — ${body}`);
       }
     } catch {
       // A failed poll keeps the previous states: the next tick diffs
@@ -202,9 +267,21 @@ export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
   );
   // An interval alone must never keep the app alive past its windows.
   timer.unref?.();
+  // PERF-05: primary source is the push feed (zero daemon I/O per event);
+  // the interval above stays as the reconciliation fallback.
+  const unsubscribePush = subscribeSessionPush((event) =>
+    observePush({
+      sessionId: event.sessionId,
+      workspaceId: event.workspaceId,
+      agentState: event.agentState,
+      agentStateAt: event.agentStateAt,
+    }),
+  );
   return {
     tick,
+    observePush,
     stop: () => {
+      unsubscribePush();
       if (timer !== null) {
         clearInterval(timer);
         timer = null;

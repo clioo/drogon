@@ -6,6 +6,11 @@ import {
   type AgentTaskCompletionEvent,
   type NeedsInputWatcherDeps,
 } from "./service";
+import {
+  resetSessionPushListenersForTests,
+  resetSessionStatePushForTests,
+  startSessionStatePush,
+} from "../session-state-bridge";
 import type { WatchedSession } from "./watcher";
 
 type FakeWindow = {
@@ -76,7 +81,18 @@ function depsFor(
 const stoppables: { stop: () => void }[] = [];
 afterEach(() => {
   while (stoppables.length) stoppables.pop()?.stop();
+  resetSessionPushListenersForTests();
+  resetSessionStatePushForTests();
 });
+
+async function waitForPushRound(flag: { count: number }): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (flag.count < 1) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for push");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 10));
+}
 
 describe("createTerminalBellNotificationHandler", () => {
   it("gates the bell by master/event settings and focused state", async () => {
@@ -364,5 +380,191 @@ describe("createNeedsInputWatcher", () => {
     expect(deps.shown).toHaveLength(1);
     expect(deps.shown[0].title).toBe("wt-1 - Pi needs input");
     expect(deps.shown[0].body).toBe("Pi needs input.");
+  });
+});
+
+describe("needs_input push feed (PERF-05)", () => {
+  const idleClaude: WatchedSession = { ...waiting("a"), agentState: "idle" };
+  const workingClaude: WatchedSession = {
+    ...waiting("a"),
+    agentState: "working",
+  };
+  const push = (agentState: string) => ({
+    sessionId: "a",
+    workspaceId: "ws-1",
+    agentState,
+    agentStateAt: "2026-09-07T12:00:01Z",
+  });
+
+  it("a push for a known idle session banners at push time; the fallback stays quiet", async () => {
+    const window = fakeWindow();
+    const deps = depsFor(window, [
+      { sessions: [idleClaude] },
+      { sessions: [waiting("a")] },
+    ]);
+    const watcher = createNeedsInputWatcher(deps);
+    stoppables.push(watcher);
+    await watcher.tick();
+    expect(deps.shown).toHaveLength(0);
+    watcher.observePush(push("needs_input"));
+    expect(deps.shown).toHaveLength(1);
+    expect(deps.shown[0].title).toBe("wt-1 - Claude Code needs input");
+    // The bridge already forwarded the badge; the watcher never re-sends.
+    expect(window.sent).toHaveLength(0);
+    await watcher.tick();
+    expect(deps.shown).toHaveLength(1);
+    expect(window.sent).toHaveLength(0);
+  });
+
+  it("a push for a known working session never banners (the completion observer owns it)", async () => {
+    const window = fakeWindow();
+    const deps = depsFor(window, [
+      { sessions: [workingClaude] },
+      { sessions: [waiting("a")] },
+    ]);
+    const watcher = createNeedsInputWatcher(deps);
+    stoppables.push(watcher);
+    await watcher.tick();
+    expect(deps.shown).toHaveLength(0);
+    watcher.observePush(push("needs_input"));
+    expect(deps.shown).toHaveLength(0);
+    // The baseline still moved: the fallback poll finds nothing new, so it
+    // neither banners nor re-forwards.
+    await watcher.tick();
+    expect(deps.shown).toHaveLength(0);
+    expect(window.sent).toHaveLength(0);
+  });
+
+  it("a push for an unknown session stays silent so the fallback poll banners exactly once", async () => {
+    const window = fakeWindow();
+    const shell: WatchedSession = {
+      id: "early",
+      workspaceId: "ws-1",
+      command: "/bin/sleep",
+      harnessId: null,
+      agentState: "unknown",
+      agentStateAt: null,
+    };
+    const late: WatchedSession = { ...waiting("cli-late") };
+    const deps = depsFor(window, [
+      { sessions: [shell] },
+      { sessions: [shell, late] },
+    ]);
+    const watcher = createNeedsInputWatcher(deps);
+    stoppables.push(watcher);
+    await watcher.tick();
+    expect(deps.shown).toHaveLength(0);
+    // No command/harness context yet: silent here, baseline untouched.
+    watcher.observePush({
+      sessionId: "cli-late",
+      workspaceId: "ws-1",
+      agentState: "needs_input",
+      agentStateAt: "2026-09-07T12:00:01Z",
+    });
+    expect(deps.shown).toHaveLength(0);
+    await watcher.tick();
+    expect(deps.shown).toHaveLength(1);
+    expect(deps.shown[0].title).toBe("wt-1 - Claude Code needs input");
+  });
+
+  it("end to end: the push loop drives the watcher with zero polls past seeding", async () => {
+    resetSessionStatePushForTests();
+    const window = fakeWindow();
+    const base = depsFor(window, [{ sessions: [idleClaude] }]);
+    let polls = 0;
+    const deps: NeedsInputWatcherDeps & {
+      shown: { title: string; body: string; onClick: () => void }[];
+      logs: string[];
+    } = {
+      ...base,
+      listSessions: async () => {
+        polls += 1;
+        return base.listSessions();
+      },
+    };
+    const watcher = createNeedsInputWatcher(deps);
+    stoppables.push(watcher);
+    await watcher.tick();
+    expect(polls).toBe(1);
+    expect(deps.shown).toHaveLength(0);
+    const rounds = { count: 0 };
+    const stopLoop = startSessionStatePush({
+      getWindow: () => null,
+      call: async () => {
+        rounds.count += 1;
+        return {
+          ok: true as const,
+          result: {
+            bootId: "boot-1",
+            events: [
+              {
+                seq: rounds.count,
+                sessionId: "a",
+                workspaceId: "ws-1",
+                agentState: "needs_input",
+                agentStateAt: "2026-09-07T12:00:01Z",
+              },
+            ],
+            nextSeq: rounds.count,
+          },
+        };
+      },
+      maxRounds: 1,
+      log: () => {},
+    });
+    try {
+      await waitForPushRound(rounds);
+      expect(deps.shown).toHaveLength(1);
+      expect(deps.shown[0].title).toBe("wt-1 - Claude Code needs input");
+      expect(polls).toBe(1);
+    } finally {
+      stopLoop();
+      resetSessionStatePushForTests();
+    }
+  });
+
+  it("stop unsubscribes the watcher from the push feed", async () => {
+    const window = fakeWindow();
+    const deps = depsFor(window, [{ sessions: [idleClaude] }]);
+    const watcher = createNeedsInputWatcher(deps);
+    await watcher.tick();
+    watcher.stop();
+    watcher.observePush(push("needs_input"));
+    // Direct calls still work (the method is the unit seam); only the live
+    // feed subscription is gone, so a loop round reaches nobody.
+    expect(deps.shown).toHaveLength(1);
+    resetSessionStatePushForTests();
+    const rounds = { count: 0 };
+    const stopLoop = startSessionStatePush({
+      getWindow: () => null,
+      call: async () => {
+        rounds.count += 1;
+        return {
+          ok: true as const,
+          result: {
+            bootId: "boot-1",
+            events: [
+              {
+                seq: rounds.count,
+                sessionId: "a",
+                workspaceId: "ws-1",
+                agentState: "working",
+                agentStateAt: "2026-09-07T12:00:02Z",
+              },
+            ],
+            nextSeq: rounds.count,
+          },
+        };
+      },
+      maxRounds: 1,
+      log: () => {},
+    });
+    try {
+      await waitForPushRound(rounds);
+      expect(deps.shown).toHaveLength(1);
+    } finally {
+      stopLoop();
+      resetSessionStatePushForTests();
+    }
   });
 });

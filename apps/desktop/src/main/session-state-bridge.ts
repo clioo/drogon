@@ -50,6 +50,43 @@ export type SessionDaemonCall = (
   timeoutMs: number,
 ) => Promise<Result<unknown>>;
 
+/**
+ * PERF-05 push fan-out: the loop below already dedupes every pushed event;
+ * these additive subscribers let the notifications and awake-auto watchers
+ * consume the same deduped push as their primary source instead of each
+ * running their own 2 s `session.list` walk (those walks stay as the
+ * reconciliation fallback). A throwing subscriber never breaks the loop or
+ * the renderer forward. `index.ts` needs no change: each watcher subscribes
+ * itself on creation and unsubscribes on stop.
+ */
+export type SessionPushListener = (event: PushedSessionEvent) => void;
+
+const pushListeners = new Set<SessionPushListener>();
+
+export function subscribeSessionPush(
+  listener: SessionPushListener,
+): () => void {
+  pushListeners.add(listener);
+  return () => {
+    pushListeners.delete(listener);
+  };
+}
+
+/** Test seam: drop every push subscriber between isolated tests. */
+export function resetSessionPushListenersForTests(): void {
+  pushListeners.clear();
+}
+
+function fanOutPush(event: PushedSessionEvent): void {
+  for (const listener of [...pushListeners]) {
+    try {
+      listener(event);
+    } catch {
+      // One consumer's bug must never starve the loop or the renderer.
+    }
+  }
+}
+
 function unreachable(message: string): Result<never> {
   return {
     ok: false,
@@ -284,6 +321,7 @@ export function startSessionStatePush(deps: SessionStatePushDeps): () => void {
             cacheIdleAt: event.cacheIdleAt,
           });
           deps.onEvent?.(event);
+          fanOutPush(event);
           const window = deps.getWindow();
           if (window && !window.isDestroyed())
             window.webContents.send(notificationsIpcChannels.stateChanged, {
