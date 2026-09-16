@@ -33,6 +33,7 @@ import type {
   Workspace,
 } from "../../../../shared/session-contract";
 import type { TaskPullRequest } from "../../../../shared/tasks-contract";
+import type { WorkspaceStatusDefinition } from "../../../../shared/persistence-contracts/worktree-types";
 import { Button } from "../../components/ui/button";
 import {
   DropdownMenuCheckboxItem,
@@ -647,6 +648,35 @@ export function ProjectList({
     },
     [worktreesById],
   );
+  // Context-menu Pin/Unpin (issue #331): the daemon stores `isPinned`
+  // (`worktree.update`, SQLite — survives restarts) and the
+  // `project.changes` revision digest covers the flag, so the registry
+  // refresh push re-renders the new order without local overrides.
+  const commitWorktreePin = useCallback((worktree: Worktree) => {
+    const bridge = windowProjectBridge(window.drogon);
+    if (!bridge.worktreeUpdate) return;
+    void bridge
+      .worktreeUpdate({
+        worktreeId: worktree.id,
+        isPinned: !(worktree.isPinned ?? false),
+      })
+      .catch(() => {});
+  }, []);
+  // Context-menu Move to Status (issue #331): same daemon round-trip as
+  // pin; `null` clears the stored override back to the default status.
+  const commitWorktreeStatus = useCallback(
+    (worktree: Worktree, workspaceStatus: string | null) => {
+      const bridge = windowProjectBridge(window.drogon);
+      if (!bridge.worktreeUpdate) return;
+      void bridge
+        .worktreeUpdate({ worktreeId: worktree.id, workspaceStatus })
+        .catch(() => {});
+    },
+    [],
+  );
+  // (No render-time `window` read here: like `onRemove`, the pin/status
+  // rows gate on `worktreesAvailable`, and the commits re-check the
+  // bridge at click time. SSR probes render without a `window`.)
   const visible = filterGroupsBySelectedProjects(
     filterProjectGroups(ordered, workspaces, filter),
     selectedProjectIds,
@@ -1064,6 +1094,13 @@ export function ProjectList({
               onRemoveWorktree={handleRemoveWorktree}
               onRenameWorktree={(worktree, name) => onSubmitRename(worktree, name)}
               onRemoveProject={handleRemoveProject}
+              statuses={sharedPrefs.workspaceStatuses ?? []}
+              onTogglePinWorktree={
+                worktreesAvailable ? commitWorktreePin : null
+              }
+              onMoveWorktreeToStatus={
+                worktreesAvailable ? commitWorktreeStatus : null
+              }
               graphBridge={graphBridge}
             />
           ),
@@ -1101,6 +1138,13 @@ export function ProjectList({
             onRenameWorktree={(worktree, name) => onSubmitRename(worktree, name)}
             onOpenProjectSettings={onOpenProjectSettings}
             onRemoveProject={handleRemoveProject}
+            statuses={sharedPrefs.workspaceStatuses ?? []}
+            onTogglePinWorktree={
+              worktreesAvailable ? commitWorktreePin : null
+            }
+            onMoveWorktreeToStatus={
+              worktreesAvailable ? commitWorktreeStatus : null
+            }
             graphBridge={graphBridge}
           />
         ))
@@ -1204,6 +1248,9 @@ function EntryGroupRow({
   onRemoveWorktree,
   onRenameWorktree,
   onRemoveProject,
+  statuses,
+  onTogglePinWorktree,
+  onMoveWorktreeToStatus,
   portsByWorkspaceId,
   pullsByProjectId,
   cardOptions,
@@ -1229,6 +1276,13 @@ function EntryGroupRow({
     name: string,
   ) => Promise<string | null>;
   onRemoveProject: (project: Project) => void;
+  /** Shared statuses for the card menu's Move to Status submenu. */
+  statuses: readonly WorkspaceStatusDefinition[];
+  /** Null while the project bridge is unavailable (menu rows hide). */
+  onTogglePinWorktree: ((worktree: Worktree) => void) | null;
+  onMoveWorktreeToStatus:
+    | ((worktree: Worktree, statusId: string | null) => void)
+    | null;
   portsByWorkspaceId?: ReadonlyMap<string, readonly number[]>;
   pullsByProjectId?: ReadonlyMap<string, readonly TaskPullRequest[] | null>;
   cardOptions?: Pick<WorkspaceOptionsState, "showProperties" | "agentActivityDisplayMode">;
@@ -1295,6 +1349,17 @@ function EntryGroupRow({
                     ? (name) => onRenameWorktree(worktree, name)
                     : null
                 }
+                onTogglePin={
+                  onTogglePinWorktree
+                    ? () => onTogglePinWorktree(worktree)
+                    : null
+                }
+                statuses={statuses}
+                onMoveToStatus={
+                  onMoveWorktreeToStatus
+                    ? (statusId) => onMoveWorktreeToStatus(worktree, statusId)
+                    : null
+                }
               />
             </div>
           );
@@ -1325,6 +1390,9 @@ function ProjectRow({
   onRenameWorktree,
   onOpenProjectSettings,
   onRemoveProject,
+  statuses,
+  onTogglePinWorktree,
+  onMoveWorktreeToStatus,
   hideHeader = false,
   collapsed = false,
   onToggleCollapsed,
@@ -1367,6 +1435,13 @@ function ProjectRow({
   ) => Promise<string | null>;
   onOpenProjectSettings: (project: Project) => void;
   onRemoveProject: (project: Project) => void;
+  /** Shared statuses for the card menu's Move to Status submenu. */
+  statuses: readonly WorkspaceStatusDefinition[];
+  /** Null while the project bridge is unavailable (menu rows hide). */
+  onTogglePinWorktree: ((worktree: Worktree) => void) | null;
+  onMoveWorktreeToStatus:
+    | ((worktree: Worktree, statusId: string | null) => void)
+    | null;
   /** Workspace options "Group by: None" (workspace-options-state.ts):
    *  renders this project's cards with no header row, so consecutive
    *  projects read as one flat list. Every handler below is still wired
@@ -1554,6 +1629,17 @@ function ProjectRow({
                   onRename={
                     worktreesAvailable && !implicitFolderWorktree
                       ? (name) => onRenameWorktree(worktree, name)
+                      : null
+                  }
+                  onTogglePin={
+                    onTogglePinWorktree
+                      ? () => onTogglePinWorktree(worktree)
+                      : null
+                  }
+                  statuses={statuses}
+                  onMoveToStatus={
+                    onMoveWorktreeToStatus
+                      ? (statusId) => onMoveWorktreeToStatus(worktree, statusId)
                       : null
                   }
                 />
