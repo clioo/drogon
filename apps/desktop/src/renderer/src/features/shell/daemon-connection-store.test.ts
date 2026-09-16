@@ -158,4 +158,48 @@ describe("daemon connection monitor", () => {
     );
     release();
   });
+
+  it("PERF-04: steady-state heartbeats refresh quietly without notifying", async () => {
+    let notifications = 0;
+    const release = ensureDaemonConnectionMonitor({
+      probe: () => Promise.resolve(null),
+      random: () => 0,
+    });
+    const off = subscribeDaemonConnection(() => {
+      notifications += 1;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getDaemonConnectionSnapshot().state).toBe("connected");
+    expect(notifications).toBe(1);
+    // Three heartbeat rounds: probes still run, freshness is observable,
+    // but no subscriber re-renders.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getDaemonConnectionSnapshot().state).toBe("connected");
+    expect(getDaemonConnectionSnapshot().lastConnectedAt).not.toBeNull();
+    expect(notifications).toBe(1);
+    off();
+    release();
+  });
+
+  it("PERF-04: a death after quiet heartbeats still notifies the transition", async () => {
+    let down = false;
+    let notifications = 0;
+    const release = ensureDaemonConnectionMonitor({
+      probe: () => Promise.resolve(down ? "gone" : null),
+      random: () => 0,
+    });
+    const off = subscribeDaemonConnection(() => {
+      notifications += 1;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getDaemonConnectionSnapshot().state).toBe("connected");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(notifications).toBe(1);
+    down = true;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(getDaemonConnectionSnapshot().state).toBe("reconnecting");
+    expect(notifications).toBe(2);
+    off();
+    release();
+  });
 });

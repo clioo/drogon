@@ -416,6 +416,130 @@ export function appendOrReplaceSession(
  * Returns the given array unchanged when there is nothing to adopt, so a
  * poll that brings no news cannot re-render the shell.
  */
+/**
+ * PERF-03: field-level session equality for poll identity stabilization.
+ * Every field of the session contract is compared (including `args`
+ * element-wise), so keeping the previous array can never hide a real
+ * change — it only stops a byte-identical poll reply from minting a new
+ * array identity and re-rendering the whole shell.
+ */
+export function sameSession(left: Session, right: Session): boolean {
+  if (left === right) return true;
+  return (
+    left.id === right.id &&
+    left.workspaceId === right.workspaceId &&
+    left.hostId === right.hostId &&
+    left.incarnation === right.incarnation &&
+    left.command === right.command &&
+    (left.args === right.args ||
+      (left.args.length === right.args.length &&
+        left.args.every((arg, index) => arg === right.args[index]))) &&
+    left.cols === right.cols &&
+    left.rows === right.rows &&
+    left.verdict === right.verdict &&
+    left.exitCode === right.exitCode &&
+    left.createdAt === right.createdAt &&
+    left.agentState === right.agentState &&
+    left.agentStateAt === right.agentStateAt &&
+    left.agentPromptPreview === right.agentPromptPreview &&
+    left.cacheIdleAt === right.cacheIdleAt &&
+    left.harnessId === right.harnessId &&
+    left.parentSessionId === right.parentSessionId &&
+    left.causedByEventId === right.causedByEventId &&
+    left.agentSessionId === right.agentSessionId &&
+    left.agentSessionTranscriptPath === right.agentSessionTranscriptPath &&
+    left.agentResume === right.agentResume
+  );
+}
+
+/**
+ * PERF-03: list-level identity for the 3s host-wide poll. Order matters
+ * (tab/strip order follows list order), so this is positional: same length
+ * and field-equal in every slot keeps the previous array.
+ */
+export function sameSessions(
+  previous: readonly Session[],
+  next: readonly Session[],
+): boolean {
+  if (previous === next) return true;
+  if (previous.length !== next.length) return false;
+  return previous.every((item, index) => sameSession(item, next[index]));
+}
+
+/**
+ * PERF-04: stable primitive for effect keys. `status.capabilities` (and the
+ * status object itself) gets a fresh identity on every `status()` reply, so
+ * effects must key on the capability SET, never the array.
+ */
+export function capabilityDigest(capabilities: readonly string[]): string {
+  return [...capabilities].sort().join("|");
+}
+
+/**
+ * PERF-03: fast poll ticks (3s session list, 4s Bots snapshot) run only
+ * while the page is visible. A hidden page (minimized, occluded) still gets
+ * a slow 30s fallback tick so it can never go stale; mount and
+ * explicitly-triggered polls always run ungated. DOM focus is deliberately
+ * NOT consulted: background validation windows keep DOM focus via focus
+ * emulation, but a harness without emulation must still observe live data.
+ */
+export function isPollPageVisible(): boolean {
+  if (typeof document === "undefined") return true;
+  return document.visibilityState !== "hidden";
+}
+
+/**
+ * PERF-03b: fast-tick gate for the host-wide session poll. A visible page
+ * polls at the fast cadence unconditionally — the tab strip adopts
+ * out-of-band sessions (CLI-created, Bot-created, another window) from
+ * every host-wide reply, so gating on sidebar/Bots-route visibility cost
+ * up to 30s of tab staleness with the sidebar collapsed. Sidebar and route
+ * are deliberately NOT inputs here, so that regression is structurally
+ * impossible. A hidden page (minimized, occluded) skips fast ticks and
+ * gets the 30s slow fallback instead.
+ */
+export function shouldSessionPollTick(
+  pageVisible: boolean,
+  lastPollMs: number,
+  nowMs: number,
+): boolean {
+  if (pageVisible) return true;
+  return isSlowPollDue(lastPollMs, nowMs);
+}
+
+/**
+ * PERF-03: slow fallback between fast ticks while gated (hidden page or,
+ * for the Bots snapshot, no visible consumer). Returns true when a poll is
+ * due: always on the first tick after (re)mount, then at most every 30s
+ * until the fast gate reopens.
+ */
+export function isSlowPollDue(lastPollMs: number, nowMs: number): boolean {
+  if (lastPollMs <= 0) return true;
+  return nowMs - lastPollMs >= 30_000;
+}
+
+/**
+ * PERF-03: identity for the 4s Bots snapshot poll. The snapshot shape is
+ * large and daemon-owned, so equality is by canonical serialization rather
+ * than field enumeration: both sides come from the same producer (the
+ * loader + serde field order), so identical content serializes identically
+ * and any content change replaces the result. A false "different" only
+ * costs one render; a false "same" is impossible for distinct content.
+ */
+export function sameBotsLoadResult(
+  previous: BotsLoadResult | null,
+  next: BotsLoadResult,
+): boolean {
+  if (previous === next) return true;
+  if (previous === null) return false;
+  if (previous.status !== next.status) return false;
+  try {
+    return JSON.stringify(previous) === JSON.stringify(next);
+  } catch {
+    return false;
+  }
+}
+
 export function adoptOutOfBandSessions(
   current: Session[],
   hostWide: readonly Session[],
@@ -565,6 +689,84 @@ export function MountedPanel({
   );
 }
 
+/**
+ * PERF-03: the Bot inspector's live facts own their timers in this subtree.
+ * The daemon pid projection (4s poll) and the Started-row clock (1s tick)
+ * used to live in App state, so every tick re-rendered the whole shell.
+ * Mounted per focused Bot session (`key` on the session id upstream), so a
+ * stale in-flight read can never paint over the currently focused session.
+ */
+export function BotSessionInspectorLive({
+  meta,
+  session,
+  workspacePath,
+  hostId,
+  locale,
+}: {
+  meta: BotSessionMeta;
+  session: Session;
+  /** The Bot's own home workspace path; `null` while `workspaces` lags. */
+  workspacePath: string | null;
+  /** Live connection host; `null` while disconnected (pid reads Unknown). */
+  hostId: string | null;
+  locale: string;
+}) {
+  const [processId, setProcessId] = useState<{
+    sessionId: string;
+    processId: number | null;
+  } | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const sessionId = session.id;
+  const botId = meta.botId;
+  useEffect(() => {
+    // Live-ticking clock for the inspector's Started row — subtree-local.
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [sessionId]);
+  useEffect(() => {
+    if (hostId === null) {
+      setProcessId(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      const result = await window.drogon.botSnapshot({
+        hostId,
+        workspaceId: "",
+        locale,
+      });
+      if (cancelled || !result.ok) return;
+      const bot = result.result.bots.find(
+        (candidate) => candidate.id === botId,
+      );
+      const pid =
+        bot?.currentSession?.sessionId === sessionId
+          ? (bot.currentSession.processId ?? null)
+          : null;
+      // The sessionId guard means a stale in-flight read for a
+      // since-switched-away session can never paint over the focused one.
+      setProcessId({ sessionId, processId: pid });
+    };
+    void poll();
+    const timer = window.setInterval(() => {
+      if (isPollPageVisible()) void poll();
+    }, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [botId, sessionId, hostId, locale]);
+  return (
+    <BotSessionInspector
+      meta={meta}
+      session={session}
+      workspacePath={workspacePath}
+      processId={processId?.sessionId === sessionId ? processId.processId : null}
+      nowMs={nowMs}
+    />
+  );
+}
+
 export function App() {
   const settings = uiSettings();
   const agentPreferences = useAgentSettings();
@@ -605,6 +807,16 @@ export function App() {
   }, [sessions]);
   const [active, setActive] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
+  // PERF-04: explicit reconnect trigger. Effects key on the stable
+  // primitives below plus this epoch — never on the `status` object, whose
+  // identity every successful `status()` reply mints anew. The reconnect
+  // path bumps the epoch explicitly, so re-attach-after-outage (#185,
+  // R16-M) keeps working while spurious identity churn stops cascading
+  // sessions + project-view re-fetches and their loading flash.
+  const [statusEpoch, setStatusEpoch] = useState(0);
+  const statusHostId = status?.hostId ?? null;
+  const statusServiceInstanceId = status?.serviceInstanceId ?? null;
+  const statusCapabilityDigest = capabilityDigest(status?.capabilities ?? []);
   // Read inside in-flight `create`/`launchHarness`/`close` callbacks so a
   // late response is checked against what's current *now*, not a stale
   // value closed over when the call started.
@@ -831,6 +1043,11 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     loadSidebarWidth(window.localStorage),
   );
+  // PERF-03: interval gates read these through refs so opening/closing the
+  // sidebar or navigating never recreates the poll timers (and their
+  // immediate re-polls).
+  const sidebarOpenRef = useRef(sidebarOpen);
+  sidebarOpenRef.current = sidebarOpen;
   // R6-B right sidebar: width, collapsed state and tab persist in the
   // shell's own localStorage keys (source defaults: width 280, Explorer).
   // A saved open choice wins; otherwise the reference's visible default is
@@ -1159,7 +1376,10 @@ export function App() {
       // read is in flight (never a stale error, never an empty flash).
       if (!botsAvailable || !botsScope) return;
       const result = await loadBotSnapshot(botsGatedBridge, botsScope);
-      if (!cancelled) setBotsLoad(result);
+      if (!cancelled)
+        setBotsLoad((previous) =>
+          sameBotsLoadResult(previous, result) ? previous : result,
+        );
     }
     void run();
     return () => {
@@ -1185,13 +1405,56 @@ export function App() {
   // never only while the page that opened it happens to still be open.
   // Runs on the same cadence as the host-wide session-list poll below.
   useEffect(() => {
-    if (!botsAvailable || botsScopeHost === null) return;
-    const timer = window.setInterval(
-      () => setBotsReload((value) => value + 1),
-      4000,
-    );
+    if (!botsAvailable || botsScopeHost === null || botsScopeLocale === null)
+      return;
+    // PERF-03: the 4s poll loads here and publishes ONLY on content change,
+    // so an unchanged snapshot commits nothing while idle — no botsReload
+    // bump. Explicit bumps (route enter, open/stop flows) still force a
+    // refresh through the effect above. Cadence gate: fast ticks only while
+    // the page is visible and a consumer is showing (the Bots page or the
+    // open sidebar's Chats section); otherwise a 30s slow fallback keeps
+    // the snapshot from going stale. The sequence guard drops a stale
+    // overlapping resolution so an older reply can never overwrite a newer
+    // snapshot. Cadence and identity only; the snapshot merge is untouched.
+    // PERF-03b review: this gate STAYS, unlike the session poll's. Audited
+    // consumers of the snapshot: the Bots page (route enter forces a fresh
+    // read through the effect above, so a stale snapshot never paints),
+    // the sidebar Chats section (visible only while open), and the
+    // inspector's linkedBotSessionMeta fallback (identity chrome only —
+    // the synchronously-recorded botSessions map is primary and liveness
+    // rides the now-ungated 3s session poll). No off-screen-but-load-bearing
+    // consumer exists here, and unlike the index-backed session.list this
+    // payload (bots + history) is large, so the daemon-load saving is real.
+    const scope = {
+      hostId: botsScopeHost,
+      workspaceId: "",
+      locale: botsScopeLocale,
+    };
+    let lastPollMs = 0;
+    let sequence = 0;
+    const timer = window.setInterval(() => {
+      const nowMs = Date.now();
+      const consumersVisible =
+        routeRef.current === BOTS_ROUTE_ID || sidebarOpenRef.current;
+      if (
+        (!isPollPageVisible() || !consumersVisible) &&
+        !isSlowPollDue(lastPollMs, nowMs)
+      )
+        return;
+      lastPollMs = nowMs;
+      sequence += 1;
+      const ownSequence = sequence;
+      void loadBotSnapshot(botsGatedBridge, scope)
+        .then((result) => {
+          if (ownSequence !== sequence) return;
+          setBotsLoad((previous) =>
+            sameBotsLoadResult(previous, result) ? previous : result,
+          );
+        })
+        .catch(() => {});
+    }, 4000);
     return () => window.clearInterval(timer);
-  }, [botsAvailable, botsScopeHost, botsScopeWorkspace, botsScopeLocale]);
+  }, [botsAvailable, botsGatedBridge, botsScopeHost, botsScopeLocale]);
   // Stable files base: Bots snapshot refreshes must never reset the Files
   // descriptor identity (mounted editor drafts/attempts). The bots layer
   // rebuilds on snapshot change; the files base below never does.
@@ -1283,18 +1546,9 @@ export function App() {
   // full host-wide session list (`window.drogon.sessions()` with no
   // `workspaceId`) on its own cadence, independent of `selected`.
   const [allBotSessions, setAllBotSessions] = useState<Session[]>([]);
-  // Live pid for the currently-focused Bot session, refreshed by the
-  // polling effect below (bot.snapshot's projected `currentSession.processId`).
-  // Keyed by session id so a stale read for a since-switched-away session
-  // can never paint over the pid of whichever Bot session is active now.
-  const [botSessionPid, setBotSessionPid] = useState<{
-    sessionId: string;
-    processId: number | null;
-  } | null>(null);
-  // Live-ticking clock for the inspector's Started row; ticks only while a
-  // Bot session tab is actually focused (effect below), never in the
-  // background.
-  const [botSessionClockMs, setBotSessionClockMs] = useState(() => Date.now());
+  // PERF-03: the focused Bot session's live pid + Started clock live in
+  // BotSessionInspectorLive's own subtree now (see above), not here — App
+  // keeps only the identity (`botSessions` map) it records synchronously.
   // #270: same pattern for the Tasks page's Close/Esc — the registered
   // descriptor (the workspace-scoped mount) needs a stable onClose that
   // resolves to the view-history handler defined further down.
@@ -1827,7 +2081,15 @@ export function App() {
       .map((group) => group.project.id);
     if (gitIds.length === 0) return;
     void refreshWorktreeIssueLinks(tasksGatedBridge, gitIds);
-  }, [status, projectGroups, tasksGatedBridge]);
+    // PERF-04: same stable-primitive keying as the sessions effect above.
+  }, [
+    statusHostId,
+    statusServiceInstanceId,
+    statusCapabilityDigest,
+    statusEpoch,
+    projectGroups,
+    tasksGatedBridge,
+  ]);
   const refresh = useCallback(
     () =>
       action(async () => {
@@ -1968,9 +2230,9 @@ export function App() {
       void refresh();
       return;
     }
-    // Re-attaches without remounting panes: a fresh status identity
-    // retriggers the sessions effect while the unchanged revision keeps
-    // every same-identity pane — and its scrollback — mounted. A full
+    // Re-attaches without remounting panes: the explicit status-epoch bump
+    // below retriggers the sessions effect while the unchanged revision
+    // keeps every same-identity pane — and its scrollback — mounted. A full
     // refresh() here would remount all panes and clear their buffers just
     // as the service returns. Errors set during the outage belonged to
     // it, so a success clears them. R16-AJ (fixes #218): a silent
@@ -1983,6 +2245,10 @@ export function App() {
         if (!response.ok) return;
         setError("");
         setStatus(response.result);
+        // PERF-04: the sessions + project-view effects key on stable
+        // primitives, so this explicit bump is what re-attaches them after
+        // the outage (same re-fetch as the old fresh-identity trigger).
+        setStatusEpoch((epoch) => epoch + 1);
         void reloadWorkspaces();
       })
       .catch(() => {});
@@ -2006,7 +2272,18 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [status, workspaces, tasksProjectBridge, projectReloadTick]);
+    // PERF-04: keyed on stable primitives + the reconnect epoch, never the
+    // `status` object identity. The epoch bump keeps re-attach-after-outage
+    // reloading exactly as before.
+  }, [
+    statusHostId,
+    statusServiceInstanceId,
+    statusCapabilityDigest,
+    statusEpoch,
+    workspaces,
+    tasksProjectBridge,
+    projectReloadTick,
+  ]);
   useEffect(() => {
     // A session this shell did not start — `drogon-cli terminal create`, a
     // Bot's own session, another window — reaches the selected workspace's
@@ -2032,7 +2309,9 @@ export function App() {
       });
   }, [selected, workspaces]);
   useEffect(() => {
-    if (!selected || !status) {
+    // PERF-04: keyed on stable primitives + the reconnect epoch (see
+    // statusEpoch), never the `status` object identity.
+    if (!selected || statusHostId === null) {
       setLoadingSessions(false);
       setSessions([]);
       setActive("");
@@ -2074,7 +2353,14 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [selected, status, revision]);
+  }, [
+    selected,
+    statusHostId,
+    statusServiceInstanceId,
+    statusCapabilityDigest,
+    statusEpoch,
+    revision,
+  ]);
   // Bot-session persistence (task_926fddc5e769 follow-up): the host-wide
   // counterpart to the `selected`-scoped fetch above. Deliberately its OWN
   // effect (not folded into the one above) so a workspace switch never
@@ -2086,23 +2372,45 @@ export function App() {
   // `sidebarSessions` below. A transient failure keeps the prior list rather
   // than flashing every session away.
   useEffect(() => {
-    if (!status) {
-      setAllBotSessions([]);
+    if (statusHostId === null) {
+      // Identity-stable clear: an already-empty list keeps its array so
+      // disconnected re-runs never re-render the shell.
+      setAllBotSessions((previous) => (previous.length === 0 ? previous : []));
       return;
     }
     let cancelled = false;
+    let lastPollMs = 0;
     const poll = async () => {
+      lastPollMs = Date.now();
       const result = await window.drogon.sessions();
       if (cancelled || !result.ok) return;
-      setAllBotSessions(result.result.sessions);
+      // PERF-03: keep the previous array when the content is unchanged, so
+      // the 3s tick commits nothing while idle. Merge semantics untouched:
+      // any field-level difference still replaces the list.
+      setAllBotSessions((previous) =>
+        sameSessions(previous, result.result.sessions)
+          ? previous
+          : result.result.sessions,
+      );
+    };
+    const tick = () => {
+      // PERF-03b: no consumer gate here — the tab-strip adopt effect below
+      // is an always-visible consumer of every host-wide reply, so a
+      // visible page keeps the 3s cadence regardless of sidebar state.
+      // Unchanged replies still commit nothing (sameSessions), so the fast
+      // cadence costs IPC only while idle.
+      if (!shouldSessionPollTick(isPollPageVisible(), lastPollMs, Date.now()))
+        return;
+      void poll();
     };
     void poll();
-    const timer = window.setInterval(() => void poll(), 3000);
+    const timer = window.setInterval(tick, 3000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [status]);
+    // PERF-04: connectivity primitives + reconnect epoch, never `status`.
+  }, [statusHostId, statusServiceInstanceId, statusEpoch]);
   useEffect(() => {
     // J1 needs_input: main polls session.list for transitions (this repo
     // has no daemon push channel) and forwards them here. Clicking the
@@ -2509,53 +2817,12 @@ export function App() {
     })();
   };
   // Bot session inspector (bug-bot-a836b4ebf8be65505): identity is known
-  // synchronously from `botSessions` (recorded above), but the pid is a
-  // live daemon-side fact that has to be fetched — `bot.snapshot`'s own
-  // projection, polled only while a Bot session tab is actually focused.
-  // The `sessionId` guard on the state write means a stale in-flight read
-  // for a since-switched-away session can never paint over the currently
-  // focused one's pid.
+  // synchronously from `botSessions` (recorded above). PERF-03: the live
+  // pid projection + Started clock live in BotSessionInspectorLive's own
+  // subtree, so they never re-render App.
   const activeBotMeta = terminal
     ? (botSessions.get(terminal.id) ?? linkedBotSessionMeta(loadedBots, terminal))
     : null;
-  useEffect(() => {
-    if (!activeBotMeta || !status?.hostId || !terminal) {
-      setBotSessionPid(null);
-      return;
-    }
-    const sessionId = terminal.id;
-    const hostId = status.hostId;
-    let cancelled = false;
-    const poll = async () => {
-      const result = await window.drogon.botSnapshot({
-        hostId,
-        workspaceId: "",
-        locale: settings.get("locale"),
-      });
-      if (cancelled || !result.ok) return;
-      const bot = result.result.bots.find(
-        (candidate) => candidate.id === activeBotMeta.botId,
-      );
-      const pid =
-        bot?.currentSession?.sessionId === sessionId
-          ? (bot.currentSession.processId ?? null)
-          : null;
-      setBotSessionPid({ sessionId, processId: pid });
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 4000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [activeBotMeta, status?.hostId, terminal?.id]);
-  // Live-ticking clock for the inspector's Started row — only while a Bot
-  // session is actually focused, never a background timer.
-  useEffect(() => {
-    if (!activeBotMeta) return;
-    const timer = window.setInterval(() => setBotSessionClockMs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [activeBotMeta]);
   const [stoppingBotSession, setStoppingBotSession] = useState(false);
   // Bot session Stop (bug-bot-a836b4ebf8be65505's working red Stop
   // button): the SAME generic `session.stop` every other session uses —
@@ -3014,13 +3281,15 @@ export function App() {
   // returns to the terminal pane, selecting a page shows the browser pane
   // for it (the pane reports bounds for the selection, activating it on
   // the host). Closing a page reconciles through the strip subscription.
-  const selectSessionTab = (id: string) => {
+  // PERF-03: stable identity (only stable setters inside) so sidebar rows
+  // and the tab strip never re-render from a fresh callback alone.
+  const selectSessionTab = useCallback((id: string) => {
     setRoute(null);
     setActive(id);
     setActiveBrowserTabId(null);
     setActiveEditorTabId(null);
     setActiveMentuTab(false);
-  };
+  }, []);
   const selectBrowserTab = (tabId: string) => {
     setRoute(null);
     setActiveBrowserTabId(tabId);
@@ -3527,13 +3796,15 @@ export function App() {
     setTabStrip(remapped);
   };
   useEffect(() => {
-    if (!selected || !status) return;
+    // PERF-04: one-shot per workspace keyed on the host primitive, never
+    // the `status` object identity; the ref guard owns re-entry.
+    if (!selected || statusHostId === null) return;
     if (rehydratedTabsRef.current.has(selected)) return;
     rehydratedTabsRef.current.add(selected);
     void rehydrateWorkspaceTabs(selected);
     // One-shot per workspace; the guard above owns re-entry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, status]);
+  }, [selected, statusHostId, statusEpoch]);
   const changeTabOrder = (order: string[]) =>
     updateTabStrip({ ...tabStrip, order });
   const toggleTabPin = (id: string) => {
@@ -5466,7 +5737,8 @@ export function App() {
                     className="right-sidebar-panel"
                   >
                     {activeBotMeta && terminal ? (
-                      <BotSessionInspector
+                      <BotSessionInspectorLive
+                        key={terminal.id}
                         meta={activeBotMeta}
                         session={terminal}
                         workspacePath={
@@ -5474,12 +5746,8 @@ export function App() {
                             (item) => item.id === activeBotMeta.workspaceId,
                           )?.path ?? null
                         }
-                        processId={
-                          botSessionPid?.sessionId === terminal.id
-                            ? botSessionPid.processId
-                            : null
-                        }
-                        nowMs={botSessionClockMs}
+                        hostId={statusHostId}
+                        locale={settings.get("locale")}
                       />
                     ) : (
                       <SessionDetailsPanel terminal={terminal ?? null} />
