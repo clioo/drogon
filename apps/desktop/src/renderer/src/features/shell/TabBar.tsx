@@ -104,6 +104,7 @@ export function TabBar({
   onSelectSession,
   onSelectBrowserTab,
   onSelectEditorTab,
+  onRenameEditorFile,
   mentuOpen,
   mentuActive,
   onSelectMentu,
@@ -158,6 +159,12 @@ export function TabBar({
   onSelectSession: (id: string) => void;
   onSelectBrowserTab: (tabId: string) => void;
   onSelectEditorTab: (tabId: string) => void;
+  /**
+   * Editor file rename (#335): commits an inline rename as (tabId, new base
+   * name); App runs files.rename and retargets the tab. Absent hides every
+   * editor Rename row.
+   */
+  onRenameEditorFile?: (tabId: string, newName: string) => void;
   /** True while this workspace's Mentu tab is open in the strip. It stands
    *  in the strip like any other tab; App owns the membership. */
   mentuOpen: boolean;
@@ -474,6 +481,13 @@ export function TabBar({
                 if (entry.kind === "editor") {
                   const tab = editorById.get(entry.id);
                   if (!tab) return null;
+                  // Rename needs a clean on-disk file: diff tabs read git,
+                  // missing tabs have no path to rename, and dirty tabs
+                  // hold drafts keyed by path that a rename would orphan.
+                  const canRenameFile =
+                    tab.diff === undefined &&
+                    tab.missing === undefined &&
+                    !tab.dirty;
                   return (
                     <SortableEditorTab
                       key={tab.tabId}
@@ -490,6 +504,7 @@ export function TabBar({
                       onCloseToRight={() => onCloseToRight(tab.tabId)}
                       onCloseToLeft={() => onCloseToLeft(tab.tabId)}
                       onTogglePin={() => onTogglePin(tab.tabId)}
+                      onRenameFile={canRenameFile ? (onRenameEditorFile ?? null) : null}
                       onCopyPath={() => onCopyText(tab.path)}
                       onCopyRelativePath={() =>
                         onCopyText(

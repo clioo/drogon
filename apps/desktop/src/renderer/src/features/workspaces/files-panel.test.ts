@@ -11,6 +11,7 @@ import {
   entryToNode,
   isFilesAvailable,
   joinEntryPath,
+  resolveTerminalSpawnCwd,
   openPathSurvivesDeletion,
   shouldApplyOpenRequest,
   truncationNoticeText,
@@ -213,6 +214,17 @@ describe("listing through the factory source (truncation surfaced)", () => {
       "src",
     );
     expect(node.path).toBe("src/lib");
+  });
+
+  test("terminal spawn cwd joins the row directory (#275, kept for #335)", () => {
+    // Open in Terminal spawns below the workspace root for row dirs; the
+    // root resolves to the workspace path itself. The daemon validates
+    // containment — this only pins the join the session bridge receives.
+    expect(resolveTerminalSpawnCwd("/repo", "")).toBe("/repo");
+    expect(resolveTerminalSpawnCwd("/repo", "src")).toBe("/repo/src");
+    expect(resolveTerminalSpawnCwd("/repo", "src/nested")).toBe(
+      "/repo/src/nested",
+    );
   });
 });
 

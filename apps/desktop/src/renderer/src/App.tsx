@@ -86,6 +86,8 @@ import { tabCreateMenuChord } from "./features/shell/TabCreateMenuChords";
 import {
   editorDiffTabId,
   editorTabId,
+  renameTargetPath,
+  retargetEditorTabsAfterRename,
   type EditorTabDiffArea,
   type EditorTabState,
 } from "./features/shell/editor-tab";
@@ -502,6 +504,38 @@ export function applyConfirmedClose(
         )?.id ?? "")
       : active;
   return { sessions, active: nextActive };
+}
+
+export type EditorFileRenamePlan =
+  | { kind: "noop" }
+  | { kind: "rename"; workspaceId: string; from: string; to: string };
+
+/**
+ * Pure plan step for the strip's editor Rename (#335): resolves (tabId, new
+ * base name) to a rename or a no-op. Throws the user-facing message for
+ * input that can never succeed (dirty tabs hold path-keyed drafts a rename
+ * would orphan; separators never pass the daemon). Daemon-side failures
+ * (collisions, missing bridge) still surface from the RPC itself, and a
+ * failed RPC never retargets — the caller applies the plan only after the
+ * rename resolves. Tested in App.editor-file-rename.test.ts.
+ */
+export function planEditorFileRename(
+  tabs: readonly EditorTabState[],
+  tabId: string,
+  newName: string,
+): EditorFileRenamePlan {
+  const tab = tabs.find((candidate) => candidate.tabId === tabId);
+  if (!tab || tab.diff !== undefined || tab.missing !== undefined) {
+    return { kind: "noop" };
+  }
+  if (tab.dirty) throw new Error("Save the file before renaming it.");
+  const name = newName.trim();
+  if (name.includes("/") || name.includes("\\")) {
+    throw new Error("A name cannot contain path separators.");
+  }
+  const to = renameTargetPath(tab.path, name);
+  if (to === tab.path) return { kind: "noop" };
+  return { kind: "rename", workspaceId: tab.workspaceId, from: tab.path, to };
 }
 
 export const IconButton = forwardRef<
@@ -3247,6 +3281,43 @@ export function App() {
     ].find((id) => remainingIds.has(id));
     setActiveEditorTabId(neighbor ?? remaining[remaining.length - 1].tabId);
   };
+  // Editor tab Rename (#335): the strip commits (tabId, new base name) from
+  // its inline input. App runs files.rename with the explorer's own
+  // scope/shape, then retargets the open tab so no stale or tombstoned tab
+  // remains. Separator names and collisions fail through the action error
+  // channel like any other strip operation; a failed RPC never retargets.
+  // Dirty tabs stay out (their drafts are keyed by path, which a rename
+  // would orphan) — the strip hides the row, this is the second gate.
+  const renameEditorFile = (tabId: string, newName: string) =>
+    action(async () => {
+      const hostId = status?.hostId;
+      if (!hostId) throw new Error("No workspace is selected.");
+      const plan = planEditorFileRename(visibleEditorTabs, tabId, newName);
+      if (plan.kind === "noop") return;
+      const rename = filesGatedBridge.fileRename;
+      if (!rename) {
+        throw new Error(
+          "Renaming needs a newer daemon with files.rename support.",
+        );
+      }
+      checked(
+        await rename({
+          hostId,
+          workspaceId: plan.workspaceId,
+          from: plan.from,
+          to: plan.to,
+        }),
+      );
+      const retargeted = retargetEditorTabsAfterRename(
+        editorTabs,
+        tabId,
+        plan.to,
+      );
+      setEditorTabs(retargeted.tabs);
+      if (retargeted.activatedTabId !== null) {
+        setActiveEditorTabId(retargeted.activatedTabId);
+      }
+    });
   const newBrowserTab = () =>
     action(async () => {
       const workspaceId = contextRef.current.workspaceId;
@@ -5061,6 +5132,9 @@ export function App() {
                 onSelectSession={selectSessionTab}
                 onSelectBrowserTab={selectBrowserTab}
                 onSelectEditorTab={selectEditorTab}
+                onRenameEditorFile={(tabId, newName) =>
+                  void renameEditorFile(tabId, newName)
+                }
                 mentuOpen={mentuTabOpen}
                 mentuActive={mentuTabActive}
                 onSelectMentu={openMentuTab}

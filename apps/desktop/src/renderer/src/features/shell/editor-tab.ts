@@ -84,3 +84,55 @@ const DIFF_SOURCE_LABELS: Record<EditorTabDiffArea, string> = {
 export function editorDiffTabLabel(path: string, area: EditorTabDiffArea): string {
   return `${editorTabLabel(path)} (${DIFF_SOURCE_LABELS[area]})`;
 }
+
+/** Workspace-relative path for renaming `path` to `newName` in its own directory. */
+export function renameTargetPath(path: string, newName: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash === -1 ? newName : `${path.slice(0, slash + 1)}${newName}`;
+}
+
+export type EditorTabRenameResult = {
+  tabs: EditorTabState[];
+  /**
+   * Tab to activate after the rename: the retargeted tab, the pre-existing
+   * tab when the target was already open, or null when nothing changed.
+   */
+  activatedTabId: string | null;
+};
+
+/**
+ * Retarget the open tab after a daemon-confirmed file rename (#335): the tab
+ * keeps its slot under the new path/identity instead of tombstoning as
+ * deleted while a second tab opens for the new path. A target that is
+ * already open absorbs the renamed tab (open-file reuse semantics: one tab
+ * per path). Diff tabs never rename (their content comes from git).
+ */
+export function retargetEditorTabsAfterRename(
+  tabs: readonly EditorTabState[],
+  tabId: string,
+  nextPath: string,
+): EditorTabRenameResult {
+  const tab = tabs.find((candidate) => candidate.tabId === tabId);
+  if (!tab || tab.diff !== undefined || tab.path === nextPath) {
+    return { tabs: [...tabs], activatedTabId: null };
+  }
+  const nextTabId = editorTabId(tab.workspaceId, nextPath);
+  const absorbed = tabs.some(
+    (candidate) => candidate.tabId === nextTabId && candidate.tabId !== tabId,
+  );
+  if (absorbed) {
+    return {
+      tabs: tabs.filter((candidate) => candidate.tabId !== tabId),
+      activatedTabId: nextTabId,
+    };
+  }
+  return {
+    tabs: tabs.map((candidate) => {
+      if (candidate.tabId !== tabId) return candidate;
+      const next = { ...candidate, tabId: nextTabId, path: nextPath };
+      delete next.missing;
+      return next;
+    }),
+    activatedTabId: nextTabId,
+  };
+}

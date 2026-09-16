@@ -42,6 +42,7 @@ function renderStrip(overrides: {
   onTogglePin?: (id: string) => void;
   onSelectEditorTab?: (id: string) => void;
   onCloseEditorTab?: (id: string) => void;
+  onRenameEditorFile?: (tabId: string, newName: string) => void;
   onCopyText?: (text: string) => void;
   onRetrySession?: (session: Session) => void;
   mentuOpen?: boolean;
@@ -86,6 +87,7 @@ function renderStrip(overrides: {
       onSelectSession={() => {}}
       onSelectBrowserTab={() => {}}
       onSelectEditorTab={overrides.onSelectEditorTab ?? (() => {})}
+      onRenameEditorFile={overrides.onRenameEditorFile}
       onCloseSession={() => {}}
       onCloseBrowserTab={() => {}}
       onCloseEditorTab={overrides.onCloseEditorTab ?? (() => {})}
@@ -400,6 +402,100 @@ describe("TabBar editor tabs", () => {
     const item = await screen.findByRole("menuitem", { name: "Copy Path" });
     fireEvent.click(item);
     expect(onCopyText).toHaveBeenCalledWith("src/a.ts");
+  });
+});
+
+describe("TabBar editor rename (#335)", () => {
+  const editorTabs: EditorTabState[] = [
+    { tabId: "ws::src/a.ts", workspaceId: "ws", path: "src/a.ts", dirty: false },
+  ];
+
+  it("shows Rename ahead of Copy Path in the editor menu", async () => {
+    renderStrip({ editorTabs, onRenameEditorFile: () => {} });
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a.ts" }));
+    await screen.findByRole("menuitem", { name: "Copy Path" });
+    const names = screen
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent);
+    expect(names).toContain("Rename");
+    expect(names.indexOf("Rename")).toBeLessThan(names.indexOf("Copy Path"));
+  });
+
+  it("commits the inline rename on Enter", async () => {
+    const onRenameEditorFile = vi.fn();
+    renderStrip({ editorTabs, onRenameEditorFile });
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a.ts" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const input = (await screen.findByDisplayValue("a.ts")) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "c.ts" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRenameEditorFile).toHaveBeenCalledWith("ws::src/a.ts", "c.ts");
+  });
+
+  it("cancels the inline rename on Escape", async () => {
+    const onRenameEditorFile = vi.fn();
+    renderStrip({ editorTabs, onRenameEditorFile });
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a.ts" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const input = await screen.findByDisplayValue("a.ts");
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onRenameEditorFile).not.toHaveBeenCalled();
+    expect(screen.queryByDisplayValue("a.ts")).toBeNull();
+  });
+
+  it("hides Rename for a dirty tab (drafts are keyed by path)", async () => {
+    renderStrip({
+      editorTabs: [
+        { tabId: "ws::src/a.ts", workspaceId: "ws", path: "src/a.ts", dirty: true },
+      ],
+      onRenameEditorFile: () => {},
+    });
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a.ts" }));
+    await screen.findByRole("menuitem", { name: "Copy Path" });
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+  });
+
+  it("hides Rename for diff tabs (their content comes from git)", async () => {
+    renderStrip({
+      editorTabs: [
+        {
+          tabId: "ws::diff::unstaged::src/a.ts",
+          workspaceId: "ws",
+          path: "src/a.ts",
+          dirty: false,
+          diff: "unstaged",
+        },
+      ],
+      onRenameEditorFile: () => {},
+    });
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a.ts (diff)" }));
+    await screen.findByRole("menuitem", { name: "Copy Path" });
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+  });
+
+  it("hides Rename for missing tabs (no path to rename)", async () => {
+    renderStrip({
+      editorTabs: [
+        {
+          tabId: "ws::src/gone.ts",
+          workspaceId: "ws",
+          path: "src/gone.ts",
+          dirty: false,
+          missing: "deleted",
+        },
+      ],
+      onRenameEditorFile: () => {},
+    });
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "gone.ts" }));
+    await screen.findByRole("menuitem", { name: "Copy Path" });
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+  });
+
+  it("hides every Rename row without the App wiring", async () => {
+    renderStrip({ editorTabs });
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a.ts" }));
+    await screen.findByRole("menuitem", { name: "Copy Path" });
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
   });
 });
 
