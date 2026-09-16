@@ -1124,3 +1124,168 @@ fn delete_paths_refuses_traversal_missing_and_bad_batches() {
     );
     assert!(root.path().join("a.txt").exists());
 }
+
+// --- files.duplicate (issue #334) -------------------------------------------
+
+#[test]
+fn duplicate_path_copies_file_bytes_verbatim_without_size_or_text_limits() {
+    use workspace_files::duplicate_path;
+
+    let root = make_root();
+    // 200 KiB of non-UTF-8 bytes: past files.read's 64 KiB text cap and
+    // undecodable, so a read/write round trip could never reproduce it.
+    let bytes: Vec<u8> = (0..204_800u32).map(|i| (i % 251) as u8).collect();
+    fs::write(root.path().join("blob.bin"), &bytes).unwrap();
+    duplicate_path(root.path(), "blob.bin", "blob copy.bin").unwrap();
+    assert_eq!(fs::read(root.path().join("blob copy.bin")).unwrap(), bytes);
+    // The source is untouched.
+    assert_eq!(fs::read(root.path().join("blob.bin")).unwrap(), bytes);
+}
+
+#[test]
+fn duplicate_path_copies_directories_recursively() {
+    use workspace_files::duplicate_path;
+
+    let root = make_root();
+    fs::create_dir_all(root.path().join("tree/nested")).unwrap();
+    fs::write(root.path().join("tree/a.txt"), b"a").unwrap();
+    fs::write(root.path().join("tree/nested/b.bin"), [0u8, 255, 1]).unwrap();
+    duplicate_path(root.path(), "tree", "tree copy").unwrap();
+    assert_eq!(fs::read(root.path().join("tree copy/a.txt")).unwrap(), b"a");
+    assert_eq!(
+        fs::read(root.path().join("tree copy/nested/b.bin")).unwrap(),
+        [0u8, 255, 1]
+    );
+    assert!(root.path().join("tree/a.txt").exists());
+}
+
+#[test]
+fn duplicate_path_never_overwrites_and_reports_collisions() {
+    use workspace_files::duplicate_path;
+
+    let root = make_root();
+    fs::write(root.path().join("a.txt"), b"a").unwrap();
+    fs::write(root.path().join("b.txt"), b"original").unwrap();
+    let err = duplicate_path(root.path(), "a.txt", "b.txt").unwrap_err();
+    assert_eq!(err.code, "invalid_argument");
+    assert_eq!(fs::read(root.path().join("b.txt")).unwrap(), b"original");
+    // Identical paths and destinations inside the source subtree refuse.
+    assert_eq!(
+        duplicate_path(root.path(), "a.txt", "a.txt")
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+    fs::create_dir(root.path().join("dir")).unwrap();
+    assert_eq!(
+        duplicate_path(root.path(), "dir", "dir/inner")
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+    assert!(!root.path().join("dir/inner").exists());
+}
+
+#[test]
+fn duplicate_path_refuses_traversal_missing_and_empty_paths() {
+    use workspace_files::duplicate_path;
+
+    let root = make_root();
+    let outside = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), b"a").unwrap();
+    fs::write(outside.path().join("secret.txt"), b"s").unwrap();
+
+    assert_eq!(
+        duplicate_path(root.path(), "../secret.txt", "stolen.txt")
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+    assert!(!root.path().join("stolen.txt").exists());
+    assert_eq!(
+        duplicate_path(root.path(), "a.txt", "../leak.txt")
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+    assert!(!outside.path().join("leak.txt").exists());
+    assert_eq!(
+        duplicate_path(root.path(), "missing.txt", "copy.txt")
+            .unwrap_err()
+            .code,
+        "not_found"
+    );
+    assert!(!root.path().join("copy.txt").exists());
+    assert_eq!(
+        duplicate_path(root.path(), "", "copy.txt")
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn duplicate_path_refuses_symlinks_and_leaves_no_partial_tree() {
+    use std::os::unix::fs::symlink;
+    use workspace_files::duplicate_path;
+
+    let root = make_root();
+    let outside = tempdir().unwrap();
+    fs::write(outside.path().join("target.txt"), b"t").unwrap();
+    // A symlink source is refused, never resolved through.
+    symlink(
+        outside.path().join("target.txt"),
+        root.path().join("link.txt"),
+    )
+    .unwrap();
+    assert_eq!(
+        duplicate_path(root.path(), "link.txt", "link copy.txt")
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+    assert!(!root.path().join("link copy.txt").exists());
+
+    // A symlink nested in a copied tree fails the whole duplicate and the
+    // partial destination is removed, so a retry never collides with it.
+    fs::create_dir_all(root.path().join("tree/real")).unwrap();
+    fs::write(root.path().join("tree/real/a.txt"), b"a").unwrap();
+    symlink(
+        outside.path().join("target.txt"),
+        root.path().join("tree/sneaky.txt"),
+    )
+    .unwrap();
+    assert_eq!(
+        duplicate_path(root.path(), "tree", "tree copy")
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+    assert!(!root.path().join("tree copy").exists());
+    assert_eq!(fs::read(outside.path().join("target.txt")).unwrap(), b"t");
+}
+
+#[test]
+#[cfg(unix)]
+fn duplicate_path_carries_unix_mode_bits_to_the_copy() {
+    use std::os::unix::fs::PermissionsExt;
+    use workspace_files::duplicate_path;
+
+    let root = make_root();
+    fs::write(root.path().join("run.sh"), b"#!/bin/sh\n").unwrap();
+    fs::set_permissions(
+        root.path().join("run.sh"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    duplicate_path(root.path(), "run.sh", "run copy.sh").unwrap();
+    assert_eq!(
+        fs::metadata(root.path().join("run copy.sh"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755
+    );
+}

@@ -256,3 +256,71 @@ fn listing_limit_is_explicit_and_traversal_is_refused() {
     );
     assert_eq!(response.error.unwrap().code, "invalid_argument");
 }
+
+fn duplicate_params(fx: &Fixture, from: &str, to: &str) -> Value {
+    json!({"workspaceId":fx.workspace["id"], "hostId":fx.workspace["hostId"], "from":from, "to":to})
+}
+
+// files.duplicate (issue #334): dispatched through the real Engine like
+// every other files mutation, so the dispatch arm, host correlation and
+// the byte-copy op are covered together.
+#[test]
+fn duplicate_dispatch_copies_arbitrary_bytes_and_echoes_identity() {
+    let fx = Fixture::new();
+    // 100 KiB of non-UTF-8 bytes: files.read could never return this
+    // content (64 KiB text cap), proving the copy runs daemon-side.
+    let bytes: Vec<u8> = (0..102_400u32).map(|i| (i % 251) as u8).collect();
+    fs::write(fx.file("blob.bin"), &bytes).unwrap();
+    let response = call(
+        &fx.engine,
+        "dup",
+        "files.duplicate",
+        duplicate_params(&fx, "blob.bin", "blob copy.bin"),
+    );
+    assert!(response.ok, "{response:?}");
+    let result = response.result.unwrap();
+    assert_eq!(result["workspaceId"], fx.workspace["id"]);
+    assert_eq!(result["hostId"], fx.workspace["hostId"]);
+    assert_eq!(result["from"], "blob.bin");
+    assert_eq!(result["to"], "blob copy.bin");
+    assert_eq!(fs::read(fx.file("blob copy.bin")).unwrap(), bytes);
+    assert_eq!(fs::read(fx.file("blob.bin")).unwrap(), bytes);
+}
+
+#[test]
+fn duplicate_dispatch_refuses_collisions_hosts_and_traversal() {
+    let fx = Fixture::new();
+    fs::write(fx.file("a.txt"), b"a").unwrap();
+    fs::write(fx.file("taken.txt"), b"original").unwrap();
+    let collision = call(
+        &fx.engine,
+        "collision",
+        "files.duplicate",
+        duplicate_params(&fx, "a.txt", "taken.txt"),
+    );
+    assert_eq!(collision.error.unwrap().code, "invalid_argument");
+    assert_eq!(fs::read(fx.file("taken.txt")).unwrap(), b"original");
+
+    let mut foreign = duplicate_params(&fx, "a.txt", "copy.txt");
+    foreign["hostId"] = json!("another-host");
+    let result = call(&fx.engine, "foreign", "files.duplicate", foreign);
+    assert_eq!(result.error.unwrap().code, "unsupported_host");
+    assert!(!fx.file("copy.txt").exists());
+
+    let escape = call(
+        &fx.engine,
+        "escape",
+        "files.duplicate",
+        duplicate_params(&fx, "a.txt", "../outside.txt"),
+    );
+    assert_eq!(escape.error.unwrap().code, "invalid_argument");
+
+    let missing = call(
+        &fx.engine,
+        "missing",
+        "files.duplicate",
+        duplicate_params(&fx, "gone.txt", "copy.txt"),
+    );
+    assert_eq!(missing.error.unwrap().code, "not_found");
+    assert!(!fx.file("copy.txt").exists());
+}

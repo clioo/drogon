@@ -242,6 +242,67 @@ describe("file bridge admission", () => {
     });
   });
 
+  it("maps fileDuplicate onto files.duplicate with from/to echo checks", async () => {
+    const calls: unknown[] = [];
+    const duplicate = {
+      hostId: "host",
+      workspaceId: "workspace",
+      from: "a.txt",
+      to: "a copy.txt",
+    };
+    const result = await dispatchFileRequest(
+      "fileDuplicate",
+      duplicate,
+      async (...args) => {
+        calls.push(args);
+        return { ok: true, result: duplicate };
+      },
+    );
+    expect(result).toEqual({ ok: true, result: duplicate });
+    expect(calls).toEqual([["files.duplicate", duplicate]]);
+    const swapped = await dispatchFileRequest(
+      "fileDuplicate",
+      duplicate,
+      async () => ({
+        ok: true,
+        result: { ...duplicate, to: "other.txt" },
+      }),
+    );
+    expect(swapped).toMatchObject({
+      ok: false,
+      error: { code: "internal_error" },
+    });
+    // A NUL in either path is rejected before the service is called.
+    let called = false;
+    const nulled = await dispatchFileRequest(
+      "fileDuplicate",
+      { ...duplicate, to: "bad\0name" },
+      async () => {
+        called = true;
+        return { ok: true, result: duplicate };
+      },
+    );
+    expect(nulled.ok).toBe(false);
+    expect(called).toBe(false);
+  });
+
+  it("exposes fileDuplicate through the generic IPC gate with strict shape checks", async () => {
+    // main/index.ts registers one `drogon:<method>` handler per
+    // bridgeSchemas entry, so this entry IS the channel registration; the
+    // gate only admits an object here and main/file-bridge.ts re-validates
+    // the shape strictly before the native call (the switch case itself
+    // needs electron's ipcMain and is not unit-runnable).
+    expect(
+      bridgeSchemas.fileDuplicate.safeParse({
+        hostId: "host",
+        workspaceId: "workspace",
+        from: "a.txt",
+        to: "a copy.txt",
+      }).success,
+    ).toBe(true);
+    expect(bridgeSchemas.fileDuplicate.safeParse("nope").success).toBe(false);
+  });
+
   it("maps fileDelete onto files.delete and requires the full batch echo", async () => {
     const calls: unknown[] = [];
     const input = {

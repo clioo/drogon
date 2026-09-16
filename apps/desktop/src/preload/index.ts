@@ -51,6 +51,7 @@ const bridge: DesktopBridge = {
   fileWrite: (value) => ipcRenderer.invoke("drogon:fileWrite", value),
   fileCreate: (value) => ipcRenderer.invoke("drogon:fileCreate", value),
   fileRename: (value) => ipcRenderer.invoke("drogon:fileRename", value),
+  fileDuplicate: (value) => ipcRenderer.invoke("drogon:fileDuplicate", value),
   fileDelete: (value) => ipcRenderer.invoke("drogon:fileDelete", value),
   fileSearch: (value) => ipcRenderer.invoke("drogon:fileSearch", value),
   // R16-AM (coordinator-owned one-liner): git-ignored visible rows.

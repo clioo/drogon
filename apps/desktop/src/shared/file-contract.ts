@@ -34,6 +34,13 @@ export type FileRenameResult = {
   from: string;
   to: string;
 };
+/** Byte-preserving server-side copy for `files.duplicate` (issue #334). */
+export type FileDuplicateResult = {
+  hostId: string;
+  workspaceId: string;
+  from: string;
+  to: string;
+};
 export type FileDeleteResult = {
   hostId: string;
   workspaceId: string;
@@ -106,6 +113,14 @@ export interface FileBridge {
   fileRename?(
     input: { hostId: string; workspaceId: string; from: string; to: string },
   ): Promise<Result<FileRenameResult>>;
+  /**
+   * Server-side duplicate for the explorer's Duplicate row (additive,
+   * issue #334). OPTIONAL like the other explorer mutations: an absent
+   * method disables the row with an explanatory title, never a crash.
+   */
+  fileDuplicate?(
+    input: { hostId: string; workspaceId: string; from: string; to: string },
+  ): Promise<Result<FileDuplicateResult>>;
   fileDelete?(
     input: { hostId: string; workspaceId: string; paths: string[] },
   ): Promise<Result<FileDeleteResult>>;

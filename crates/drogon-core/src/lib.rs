@@ -535,6 +535,7 @@ impl Engine {
             "files.write" => self.mutating(request, Self::do_files_write),
             "files.create" => self.mutating(request, Self::do_files_create),
             "files.rename" => self.mutating(request, Self::do_files_rename),
+            "files.duplicate" => self.mutating(request, Self::do_files_duplicate),
             "files.delete" => self.mutating(request, Self::do_files_delete),
             "desktop.commands.poll" => self.desktop_commands_poll(&request.params),
             "desktop.commands.complete" => self.desktop_commands_complete(&request.params),
