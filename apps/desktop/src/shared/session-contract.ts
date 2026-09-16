@@ -141,6 +141,12 @@ export type Session = {
    * launch) — and `fresh` must never be presented as a restore.
    */
   agentResume?: "resumed" | "continued" | "fresh" | "resume-unverified";
+  /**
+   * Additive (issue #333): true while the session leader has a live child
+   * process (a running foreground job). Reported on live rows only; absent
+   * on older daemon payloads reads as idle.
+   */
+  hasForegroundChild?: boolean;
 };
 /**
  * Install-resilience P4/P5 (additive, both optional so an older daemon's
