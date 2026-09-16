@@ -317,6 +317,7 @@ function registerBridge() {
         case "fileWrite":
         case "fileCreate":
         case "fileRename":
+        case "fileDuplicate":
         case "fileDelete":
         case "fileSearch":
         // R16-AM (coordinator-owned one-liner): git-ignored visible rows.

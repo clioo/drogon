@@ -4,8 +4,10 @@
    (background New File / New Folder). Adapted: this repo has no Radix
    context-menu primitive, so both menus render as lightweight fixed
    layers (role="menu") owned by the tree pane; remote-only actions
-   (download, Copy, duplicate, browser/markdown previews, collapse-folder,
-   find-in-folder, add-as-project) are out of MVP scope and never appear.
+   (download, Copy, browser/markdown previews, find-in-folder,
+   add-as-project) are out of MVP scope and never appear. Duplicate
+   landed on the `files.duplicate` RPC (issue #334); Collapse Folder is
+   implemented for expanded directories.
    Reveal in Finder and Open in Terminal are present per the task contract:
    reveal calls the shell bridge (showItemInFolder, like the source's
    shell.openPath handler), while Open in Terminal is hosted by the Files
@@ -14,6 +16,7 @@
 import { useEffect, useRef } from "react";
 import {
   Copy,
+  CopyPlus,
   ExternalLink,
   FilePlus,
   FolderPlus,
@@ -37,6 +40,7 @@ const ITEM_ICONS: Record<RowMenuItemId, React.ReactNode> = {
   "new-folder": <FolderPlus className="size-3.5 shrink-0" aria-hidden />,
   "copy-path": <Copy className="size-3.5 shrink-0" aria-hidden />,
   "copy-relative-path": <Copy className="size-3.5 shrink-0" aria-hidden />,
+  duplicate: <CopyPlus className="size-3.5 shrink-0" aria-hidden />,
   "open-in-terminal": <SquareTerminal className="size-3.5 shrink-0" aria-hidden />,
   "collapse-folder": <ListCollapse className="size-3.5 shrink-0" aria-hidden />,
   "reveal-in-finder": <ExternalLink className="size-3.5 shrink-0" aria-hidden />,

@@ -105,6 +105,16 @@ export function createGatedFileBridge(
             isAllowed() ? source.fileRename!(input) : refused(),
         }
       : {}),
+    // Server-side duplicate (issue #334): same optional forwarding — absent
+    // on older hosts, in which case the explorer disables the Duplicate row
+    // instead of crashing.
+    ...(source.fileDuplicate
+      ? {
+          fileDuplicate: (
+            input: Parameters<NonNullable<FileBridge["fileDuplicate"]>>[0],
+          ) => (isAllowed() ? source.fileDuplicate!(input) : refused()),
+        }
+      : {}),
     ...(source.fileDelete
       ? {
           fileDelete: (input: Parameters<NonNullable<FileBridge["fileDelete"]>>[0]) =>

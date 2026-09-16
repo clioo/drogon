@@ -275,6 +275,14 @@ export function createExplorerSource(
             .fileRename({ ...scope, from, to })
             .then((result): Result<null> => (result.ok ? { ok: true, result: null } : result))
         : unsupported("files.rename"),
+    // Server-side duplicate (issue #334): an absent bridge method (older
+    // daemon) fails closed with an explicit error, never a crash.
+    duplicate: (from, to) =>
+      bridge.fileDuplicate
+        ? bridge
+            .fileDuplicate({ ...scope, from, to })
+            .then((result): Result<null> => (result.ok ? { ok: true, result: null } : result))
+        : unsupported("files.duplicate"),
     remove: (paths) =>
       bridge.fileDelete
         ? bridge

@@ -4,10 +4,33 @@
    shared/keybindings/definitions-core-3.ts (delete chord defaults).
    Adapted: the daemon deletes permanently on local workspaces too, so the
    local delete uses the source's REMOTE (permanent) copy rather than the
-   Trash copy; download/browser/duplicate/find-in-folder actions are out of
-   MVP scope and never appear. */
+   Trash copy; download/browser/find-in-folder actions are out of MVP
+   scope and never appear. Duplicate landed on `files.duplicate`
+   (issue #334). */
 
 import type { ExplorerNode } from "./tree-model";
+
+/**
+/**
+ * Duplicate destination name: `<stem> copy<ext>`, then `<stem> copy
+ * 2<ext>` and up while a sibling collides. Extension-aware (`a.txt` →
+ * `a copy.txt`); a leading dot is not an extension (`.gitignore` →
+ * `.gitignore copy`). The daemon still refuses overwrites, so this is a
+ * best-effort label over the known siblings, never a guarantee.
+ */
+export function duplicateNameFor(
+  name: string,
+  siblings: ReadonlySet<string>,
+): string {
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  let candidate = `${stem} copy${ext}`;
+  for (let n = 2; siblings.has(candidate); n += 1) {
+    candidate = `${stem} copy ${n}${ext}`;
+  }
+  return candidate;
+}
 
 /**
  * Rename shortcut label: ↩ on macOS, Enter elsewhere (source
@@ -44,6 +67,7 @@ export type RowMenuItemId =
   | "new-folder"
   | "copy-path"
   | "copy-relative-path"
+  | "duplicate"
   | "open-in-terminal"
   | "collapse-folder"
   | "reveal-in-finder"
@@ -72,14 +96,15 @@ export function revealLabel(platform?: string): string {
 
 /**
  * Row context-menu model in source order (MVP subset): New File, New
- * Folder, Copy Path, Copy Relative Path, Open in Terminal (directories
- * only), Collapse Folder (expanded directories only, like the source's
- * shouldShowCollapseFolderAction), Reveal in Finder, Rename, Delete.
- * Mutation items disable (never hide) when the bridge lacks the methods,
- * so the menu shape stays stable. The source's Copy (OS file clipboard),
- * Duplicate, View File, Open in Orca Browser, Open Markdown Preview,
+ * Folder, Copy Path, Copy Relative Path, Duplicate, Open in Terminal
+ * (directories only), Collapse Folder (expanded directories only, like the
+ * source's shouldShowCollapseFolderAction), Reveal in Finder, Rename,
+ * Delete. Mutation items disable (never hide) when the bridge lacks the
+ * methods, so the menu shape stays stable. The source's Copy (OS file
+ * clipboard), View File, Open in Orca Browser, Open Markdown Preview,
  * Download, Find in Folder and Add as Project rows have no backend or
- * surface in this repo and are not ported (listed in the PR).
+ * surface in this repo and are not ported (listed in the PR); Duplicate
+ * landed on the `files.duplicate` RPC (issue #334).
  */
 export function buildRowMenuItems(
   node: ExplorerNode,
@@ -108,6 +133,14 @@ export function buildRowMenuItems(
       id: "copy-relative-path",
       label:
         selectionSize > 1 ? "Copy Relative Paths" : "Copy Relative Path",
+    },
+    // Duplicate sits with the copy group: it copies bytes, not paths. A
+    // multi-selection duplicates only the row the menu opened on (the
+    // daemon copies one entry per call; batching stays out).
+    {
+      id: "duplicate",
+      label: "Duplicate",
+      ...mutateDisabled,
     },
     ...(node.isDirectory && caps.canOpenTerminal
       ? [{ id: "open-in-terminal", label: "Open in Terminal" } as RowMenuItem]

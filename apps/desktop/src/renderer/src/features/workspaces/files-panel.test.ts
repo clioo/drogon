@@ -366,13 +366,19 @@ describe("createExplorerSource", () => {
           calls.push(["delete", input]);
           return Promise.resolve({ ok: true, result: { ...input, deleted: input.paths } });
         },
+        fileDuplicate: (input) => {
+          calls.push(["duplicate", input]);
+          return Promise.resolve({ ok: true, result: input });
+        },
       }),
       scope,
     );
     expect(await source.create?.("docs", "n.txt", "file")).toEqual({ ok: true, result: null });
     expect(await source.rename?.("a.txt", "b.txt")).toEqual({ ok: true, result: null });
     expect(await source.remove?.(["a.txt"])).toEqual({ ok: true, result: null });
-    expect(calls.map(([method]) => method)).toEqual(["create", "rename", "delete"]);
+    expect(await source.duplicate?.("a.txt", "a copy.txt")).toEqual({ ok: true, result: null });
+    expect(calls.map(([method]) => method)).toEqual(["create", "rename", "delete", "duplicate"]);
+    expect(calls[3][1]).toEqual({ ...scope, from: "a.txt", to: "a copy.txt" });
   });
 
   test("mutations fail closed without bridge support — never a local fallback", async () => {
@@ -383,6 +389,7 @@ describe("createExplorerSource", () => {
       () => source.create?.("docs", "n.txt", "file"),
       () => source.rename?.("a.txt", "b.txt"),
       () => source.remove?.(["a.txt"]),
+      () => source.duplicate?.("a.txt", "a copy.txt"),
     ]) {
       const result = await call();
       expect(result?.ok).toBe(false);
