@@ -138,6 +138,7 @@ fn create_tables(tx: &Connection) -> rusqlite::Result<()> {
             agent_session_id TEXT,
             agent_session_transcript_path TEXT
         );
+        CREATE INDEX IF NOT EXISTS sessions_workspace ON sessions(workspace_id);
         CREATE TABLE IF NOT EXISTS requests (
             request_id TEXT PRIMARY KEY,
             method TEXT NOT NULL,
@@ -326,6 +327,25 @@ fn pending_forward_migrations(conn: &Connection) -> rusqlite::Result<Vec<Pending
         {
             pending.push(PendingMigration {
                 component: "sessions (main schema columns)".to_string(),
+                recorded: 1,
+                target: 1,
+            });
+        }
+        // Main-schema additive index: an older data dir's `sessions` table
+        // has no `sessions_workspace` index yet. Guarded on the table
+        // existing so a fresh install (no `sessions` table at all) is never
+        // reported as pending — fresh databases create the index directly.
+        let has_workspace_index: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)
+            .unwrap_or(false);
+        if !has_workspace_index {
+            pending.push(PendingMigration {
+                component: "sessions (workspace index)".to_string(),
                 recorded: 1,
                 target: 1,
             });
@@ -521,6 +541,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     migrate_sessions_turn_fact(&tx)?;
     migrate_sessions_caused_by_event_id(&tx)?;
     migrate_sessions_agent_session(&tx)?;
+    migrate_sessions_workspace_index(&tx)?;
     recover_from_prior_instance(&tx)?;
     mentu_storage::recover_prior_instance_runs(&tx)?;
     recover_prior_instance_headless_runs(&tx)?;
@@ -662,6 +683,17 @@ fn migrate_sessions_agent_session(tx: &Transaction<'_>) -> rusqlite::Result<()> 
         }
     }
     Ok(())
+}
+
+/// Additive migration for the `session.list` hot path: the
+/// `sessions_workspace` index lets a workspace-scoped list read only its
+/// own rows instead of scanning and sorting the whole table (the renderer
+/// polls this every few seconds, so the scan cost grew with full history).
+/// Idempotent: `IF NOT EXISTS` covers reopening an already-migrated data
+/// dir, and fresh databases already created the index in [`create_tables`].
+/// Purely additive — no column, row, or isolation semantic changes.
+fn migrate_sessions_workspace_index(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS sessions_workspace ON sessions(workspace_id);")
 }
 
 /// Runs once per `Engine::open`, inside [`migrate_and_recover`]'s
