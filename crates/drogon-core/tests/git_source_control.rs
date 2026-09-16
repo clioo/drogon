@@ -1,8 +1,10 @@
 //! R10-B Source Control RPCs through the public `Engine` API: discard
 //! (tracked restore via `git checkout --`, untracked removal via scoped
-//! `git clean -fd`), per-file line counts, and fast-forward-only pull plus
-//! default-remote fetch against a temp bare remote. Fixtures are owned temp
-//! dirs; real `git` is spawned by binary name for setup only.
+//! `git clean -fd`), per-file line counts, fast-forward-only pull plus
+//! default-remote fetch against a temp bare remote, and the #332 push
+//! modes (plain, `publish` upstream-setting, lease-checked force) through
+//! the same `git.push` method. Fixtures are owned temp dirs; real `git`
+//! is spawned by binary name for setup only.
 
 use drogon_core::Engine;
 use drogon_protocol::{PROTOCOL_VERSION, Request, Response};
@@ -262,6 +264,181 @@ fn commit_amend_folds_into_the_previous_commit() {
         fs::read_to_string(fx.repo.join("tracked.txt")).unwrap(),
         "amended\n"
     );
+}
+
+/// Temp bare `origin` for the push-mode tests. Mirrors the pull/fetch
+/// tests' inline setup so those stay untouched.
+fn add_bare_origin(fx: &Fixture) -> PathBuf {
+    let remote = fx._root.path().join("remote.git");
+    git(
+        fx._root.path(),
+        &["init", "-q", "--bare", "-b", "main", "remote.git"],
+    );
+    git(
+        &fx.repo,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    remote
+}
+
+#[test]
+fn push_plain_pushes_new_commits_to_the_bare_remote() {
+    let fx = Fixture::new();
+    add_bare_origin(&fx);
+    git(&fx.repo, &["push", "-q", "-u", "origin", "main"]);
+    fs::write(fx.repo.join("tracked.txt"), "two\n").unwrap();
+    git(&fx.repo, &["commit", "-q", "-am", "second"]);
+
+    // Omitted mode is the historical plain push.
+    let push = call(&fx.engine, "git.push", fx.params(json!({})));
+    assert!(push.ok, "{push:?}");
+    assert!(!push.result.unwrap()["detail"].as_str().unwrap().is_empty());
+    assert_eq!(
+        git(&fx.repo, &["rev-parse", "HEAD"]).trim(),
+        git(&fx.repo, &["rev-parse", "origin/main"]).trim()
+    );
+}
+
+#[test]
+fn push_publish_sets_upstream_on_a_branch_without_one() {
+    let fx = Fixture::new();
+    add_bare_origin(&fx);
+    git(&fx.repo, &["checkout", "-q", "-b", "feature/publish-me"]);
+    fs::write(fx.repo.join("tracked.txt"), "feature\n").unwrap();
+    git(&fx.repo, &["commit", "-q", "-am", "feature"]);
+    // Pin repo-local push behavior: the daemon honors the user's global
+    // config by design, and an ambient `push.autoSetupRemote=true` lets a
+    // plain push auto-create the upstream (verified live on this host's
+    // Apple Git, which even ignores a repo-local `autoSetupRemote=false`),
+    // hiding the no-upstream case. `push.default=nothing` refuses any
+    // refspec-less push deterministically on every toolchain, while the
+    // explicit-refspec publish below is unaffected by it.
+    git(&fx.repo, &["config", "push.default", "nothing"]);
+
+    // Plain push has no upstream to push to.
+    let plain = call(&fx.engine, "git.push", fx.params(json!({})));
+    assert!(
+        !plain.ok,
+        "plain push without upstream must fail, got {plain:?}"
+    );
+
+    let publish = call(
+        &fx.engine,
+        "git.push",
+        fx.params(json!({"mode": "publish"})),
+    );
+    assert!(publish.ok, "{publish:?}");
+    assert_eq!(
+        git(
+            &fx.repo,
+            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+        )
+        .trim(),
+        "origin/feature/publish-me"
+    );
+    assert_eq!(
+        git(&fx.repo, &["rev-parse", "HEAD"]).trim(),
+        git(&fx.repo, &["rev-parse", "origin/feature/publish-me"]).trim()
+    );
+}
+
+#[test]
+fn push_force_with_lease_succeeds_after_an_amend() {
+    let fx = Fixture::new();
+    add_bare_origin(&fx);
+    git(&fx.repo, &["push", "-q", "-u", "origin", "main"]);
+    // Drogon's own amend backend creates the divergence a plain push
+    // can no longer move.
+    fs::write(fx.repo.join("tracked.txt"), "amended\n").unwrap();
+    call(
+        &fx.engine,
+        "git.stage",
+        fx.params(json!({"paths": ["tracked.txt"]})),
+    );
+    let amend = call(
+        &fx.engine,
+        "git.commit",
+        fx.params(json!({"message": "amended init", "amend": true})),
+    );
+    assert!(amend.ok, "{amend:?}");
+
+    let plain = call(&fx.engine, "git.push", fx.params(json!({})));
+    assert!(
+        !plain.ok,
+        "plain push after amend must be rejected, got {plain:?}"
+    );
+
+    let forced = call(
+        &fx.engine,
+        "git.push",
+        fx.params(json!({"mode": "force-with-lease"})),
+    );
+    assert!(forced.ok, "{forced:?}");
+    assert_eq!(
+        git(&fx.repo, &["rev-parse", "HEAD"]).trim(),
+        git(&fx.repo, &["rev-parse", "origin/main"]).trim()
+    );
+}
+
+#[test]
+fn push_force_with_lease_refuses_a_stale_lease_without_touching_the_remote() {
+    let fx = Fixture::new();
+    let remote = add_bare_origin(&fx);
+    git(&fx.repo, &["push", "-q", "-u", "origin", "main"]);
+
+    // Someone else advances the remote from a second clone.
+    let other = fx._root.path().join("other");
+    git(
+        fx._root.path(),
+        &["clone", "-q", remote.to_str().unwrap(), "other"],
+    );
+    git(&other, &["config", "user.email", "fixture@example.com"]);
+    git(&other, &["config", "user.name", "fixture"]);
+    fs::write(other.join("tracked.txt"), "remote-side\n").unwrap();
+    git(&other, &["commit", "-q", "-am", "remote side"]);
+    git(&other, &["push", "-q", "origin", "main"]);
+    let remote_tip = git(&other, &["rev-parse", "HEAD"]);
+
+    // Meanwhile we amend locally on a stale tracking ref: the lease must
+    // not match, so the push is refused instead of clobbering the remote.
+    fs::write(fx.repo.join("tracked.txt"), "local-amend\n").unwrap();
+    call(
+        &fx.engine,
+        "git.stage",
+        fx.params(json!({"paths": ["tracked.txt"]})),
+    );
+    let amend = call(
+        &fx.engine,
+        "git.commit",
+        fx.params(json!({"message": "local amend", "amend": true})),
+    );
+    assert!(amend.ok, "{amend:?}");
+
+    let forced = call(
+        &fx.engine,
+        "git.push",
+        fx.params(json!({"mode": "force-with-lease"})),
+    );
+    assert!(!forced.ok, "stale lease must be refused, got {forced:?}");
+    // The bare remote still holds the other clone's tip (`ls-remote`
+    // reads the remote directly; no fetch or network involved).
+    let advertised = git(
+        fx._root.path(),
+        &["ls-remote", remote.to_str().unwrap(), "refs/heads/main"],
+    );
+    assert!(
+        advertised.starts_with(remote_tip.trim()),
+        "remote tip moved to {advertised:?}, expected {remote_tip:?}"
+    );
+}
+
+#[test]
+fn push_rejects_an_unknown_mode_instead_of_pushing_plain() {
+    let fx = Fixture::new();
+    add_bare_origin(&fx);
+    git(&fx.repo, &["push", "-q", "-u", "origin", "main"]);
+    let bad = call(&fx.engine, "git.push", fx.params(json!({"mode": "force"})));
+    assert!(!bad.ok, "unknown mode must be rejected, got {bad:?}");
 }
 
 #[test]

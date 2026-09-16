@@ -1442,6 +1442,18 @@ pub const GIT_MUTATION_MAX_OUTPUT: usize = 1024 * 1024;
 /// wire budget with `truncated: true` instead of failing.
 pub const GIT_DIFF_MAX_CAPTURE: usize = 256 * 1024;
 
+/// Push mode for `GitMutation::Push` (#332): `None` keeps the existing
+/// plain `git push`. `ForceWithLease` rewrites the upstream branch but
+/// refuses when the remote moved first (the safe recovery after an amend);
+/// `Publish` sets the upstream on a branch that has none
+/// (`git push -u origin HEAD`). Fixed argv per variant — no caller-supplied
+/// remote, ref, or flag ever reaches the command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushMode {
+    ForceWithLease,
+    Publish,
+}
+
 /// Which review mutation to run. One variant per fixed argv shape, so adding
 /// an operation requires a reviewed code change, never a caller string.
 #[derive(Debug, Clone)]
@@ -1456,7 +1468,9 @@ pub enum GitMutation {
         message: String,
         amend: bool,
     },
-    Push,
+    Push {
+        mode: Option<PushMode>,
+    },
     /// Restore tracked paths from the index: `git checkout -- <paths>`.
     /// Only ever the caller-selected paths, after `--`.
     DiscardTracked {
@@ -1546,9 +1560,22 @@ pub(crate) fn commit_argv(message: &str, amend: bool) -> Vec<String> {
     argv
 }
 
-pub(crate) fn push_argv() -> Vec<String> {
+pub(crate) fn push_argv(mode: Option<PushMode>) -> Vec<String> {
     let mut argv: Vec<String> = GLOBAL_ARGS.iter().map(|s| s.to_string()).collect();
     argv.push("push".to_string());
+    match mode {
+        // Plain push: unchanged historical behavior.
+        None => {}
+        // Lease-checked rewrite: refuses when the remote moved first,
+        // never a blind `--force`.
+        Some(PushMode::ForceWithLease) => argv.push("--force-with-lease".to_string()),
+        // First push for a branch with no upstream: fixed `origin`/`HEAD`
+        // (never a caller-supplied remote or ref); fails honestly when
+        // the repo has no `origin`.
+        Some(PushMode::Publish) => {
+            argv.extend(["-u", "origin", "HEAD"].iter().map(|s| s.to_string()))
+        }
+    }
     argv
 }
 
@@ -1686,7 +1713,7 @@ pub fn run_git_mutation(
         GitMutation::Stage { paths } => stage_argv(paths),
         GitMutation::Unstage { paths } => unstage_argv(paths),
         GitMutation::Commit { message, amend } => commit_argv(message, *amend),
-        GitMutation::Push => push_argv(),
+        GitMutation::Push { mode } => push_argv(*mode),
         GitMutation::DiscardTracked { paths } => discard_tracked_argv(paths),
         GitMutation::DiscardUntracked { paths } => discard_untracked_argv(paths),
         GitMutation::Pull => pull_argv(),
@@ -2109,7 +2136,7 @@ pub fn run_gh_pr_create_with_bin(
 /// (`git remote`, never `-v`), and `gh pr create` always carries `--body`.
 #[cfg(test)]
 mod scoped_argv_tests {
-    use super::{gh_pr_create_argv, remote_argv, stage_argv};
+    use super::{PushMode, gh_pr_create_argv, push_argv, remote_argv, stage_argv};
 
     #[test]
     fn stage_argv_is_an_explicit_scoped_add() {
@@ -2124,6 +2151,33 @@ mod scoped_argv_tests {
         assert_eq!(
             &argv[dashdash + 1..],
             &["a.txt".to_string(), "<!-- odd -->.html".to_string()]
+        );
+    }
+
+    /// #332 argv-shape pins: plain push is bare, force is always the
+    /// lease-checked form (never `--force`), and publish is a fixed
+    /// `-u origin HEAD` (never a caller-supplied remote or ref).
+    #[test]
+    fn push_argv_pins_plain_lease_and_publish_shapes() {
+        let plain = push_argv(None);
+        assert!(plain.contains(&"push".to_string()));
+        assert!(
+            !plain
+                .iter()
+                .any(|arg| arg == "--force-with-lease" || arg == "--force" || arg == "-u")
+        );
+        let lease = push_argv(Some(PushMode::ForceWithLease));
+        assert!(lease.contains(&"--force-with-lease".to_string()));
+        assert!(
+            !lease
+                .iter()
+                .any(|arg| arg == "--force" || arg == "-u" || arg == "HEAD")
+        );
+        let publish = push_argv(Some(PushMode::Publish));
+        let push_at = publish.iter().position(|arg| arg == "push").unwrap();
+        assert_eq!(
+            &publish[push_at + 1..],
+            &["-u".to_string(), "origin".to_string(), "HEAD".to_string()]
         );
     }
 

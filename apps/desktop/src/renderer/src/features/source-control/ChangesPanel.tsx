@@ -35,6 +35,7 @@ import {
   SourceControlDiscardDialog,
   type PendingDiscardConfirmation,
 } from "./discard-dialog";
+import { ForcePushDialog } from "./force-push-dialog";
 import { EmptyState } from "./empty-state";
 import { TooManyChangesBanner } from "./too-many-changes-banner";
 import { SyncRow, type SyncBusyKind } from "./sync-row";
@@ -168,6 +169,7 @@ export function ChangesPanel({
   );
   const [revision, setRevision] = useState(0);
   const [pendingDiscard, setPendingDiscard] = useState<PendingDiscardConfirmation | null>(null);
+  const [pendingForcePush, setPendingForcePush] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
   const [filterExpanded, setFilterExpanded] = useState(false);
   const [viewMode, setViewMode] = useState<SourceControlViewMode>(() =>
@@ -561,6 +563,43 @@ export function ChangesPanel({
     }
   }, [bridge, scope]);
 
+  // #332 "Publish Branch": first push for a branch with no upstream
+  // (`push -u origin HEAD`). The row is disabled without a remote; this
+  // guard keeps any other caller from publishing anyway.
+  const doPublish = useCallback(async () => {
+    if (hasRemote === false || busy !== null || syncBusy !== null) return;
+    setSyncBusy("push");
+    setRemoteError(null);
+    try {
+      const result = await bridge.gitPush({ ...scope, mode: "publish" });
+      if (!result.ok) setRemoteError(errorMessage(result, "Publish failed."));
+    } finally {
+      setSyncBusy(null);
+      setRevision((value) => value + 1);
+    }
+  }, [bridge, busy, hasRemote, scope, syncBusy]);
+
+  // #332 "Force Push": lease-checked rewrite, always behind the confirm
+  // dialog — the row only arms the pending state, never pushes directly.
+  const requestForcePush = useCallback(() => {
+    if (busy !== null || syncBusy !== null) return;
+    setPendingForcePush(true);
+  }, [busy, syncBusy]);
+
+  const confirmForcePush = useCallback(async () => {
+    setPendingForcePush(false);
+    if (busy !== null || syncBusy !== null) return;
+    setSyncBusy("push");
+    setRemoteError(null);
+    try {
+      const result = await bridge.gitPush({ ...scope, mode: "force-with-lease" });
+      if (!result.ok) setRemoteError(errorMessage(result, "Force push failed."));
+    } finally {
+      setSyncBusy(null);
+      setRevision((value) => value + 1);
+    }
+  }, [bridge, busy, scope, syncBusy]);
+
   const doPull = useCallback(async () => {
     if (!bridge.gitPull) return;
     setSyncBusy("pull");
@@ -853,6 +892,7 @@ export function ChangesPanel({
             hasPartiallyStagedChanges={grouped.unstaged.length > 0 && stagedCount > 0}
             isBusy={isBusy}
             upstream={branch.upstream}
+            hasRemotes={hasRemote}
             ahead={branch.ahead}
             behind={branch.behind}
             createPrDisabled={createPrAction.disabled}
@@ -862,6 +902,8 @@ export function ChangesPanel({
             onCommitAndPush={() => void doCommitAndPush()}
             onCommitAndSync={() => void doCommitAndSync()}
             onPush={() => void doPush()}
+            onPublish={() => void doPublish()}
+            onForcePush={() => requestForcePush()}
             onPushBeforePr={() => void doPushBeforePr()}
             onFastForward={() => void doPull()}
             onSync={() => void doSync()}
@@ -918,6 +960,12 @@ export function ChangesPanel({
         pendingDiscard={pendingDiscard}
         onCancel={() => setPendingDiscard(null)}
         onConfirm={confirmPendingDiscard}
+      />
+      <ForcePushDialog
+        open={pendingForcePush}
+        upstream={branch.upstream}
+        onCancel={() => setPendingForcePush(false)}
+        onConfirm={() => void confirmForcePush()}
       />
     </div>
   );
