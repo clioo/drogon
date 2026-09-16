@@ -246,20 +246,22 @@ describe("project header create affordance conditions", () => {
 
   test("the control's project id drives the composer for fallback and folder projects", async () => {
     // The header hands the composer the row's own project id; for a folder
-    // project (the fallback projection included) that resolves to its one
-    // implicit workspace, so the restored control is functional, not decorative.
+    // project (the fallback projection included) that creates a new named
+    // folder Workspace section (issue #579), so the restored control is
+    // functional, not decorative.
     const works = [workspace("ws-9", "zillow", "git")];
     const fallbackView = await loadProjectView({}, [], works);
     expect(resolveComposerSubmit(fallbackView.groups, works, {
       projectId: "folder:ws-9",
-      name: "ignored-for-folders",
+      name: "analysis",
       baseRef: "",
       agent: { harnessId: null, model: "", provider: "" },
     })).toEqual({
       target: {
-        kind: "implicit",
+        kind: "worktree",
         project: fallbackView.groups[0].project,
-        workspaceId: "ws-9",
+        name: "analysis",
+        folderWorkspace: true,
         agent: { harnessId: null, model: "", provider: "" },
       },
     });

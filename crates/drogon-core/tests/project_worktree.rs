@@ -196,13 +196,36 @@ fn folder_project_exposes_one_implicit_worktree_and_starts_a_session_in_it() {
     );
     assert_eq!(session["verdict"], "live");
 
-    // worktree.create is refused on a folder project.
+    // worktree.create on a folder project now creates an additional named
+    // Workspace section sharing the folder path (issue #579), with its own
+    // distinct workspaceId so its sessions group separately.
+    let extra = ok(
+        &engine,
+        "worktree.create",
+        "w2",
+        json!({"projectId": project_id, "name": "extra"}),
+    );
+    assert_eq!(extra["path"], project["path"]);
+    assert_ne!(extra["workspaceId"].as_str().unwrap(), workspace_id);
+    let listed = ok(
+        &engine,
+        "worktree.list",
+        "w3",
+        json!({"projectId": project_id}),
+    );
+    assert_eq!(
+        listed["worktrees"].as_array().unwrap().len(),
+        2,
+        "the implicit primary plus the created section"
+    );
+
+    // Git-only options remain refused on a folder Workspace.
     assert_eq!(
         err_code(
             &engine,
             "worktree.create",
-            "w2",
-            json!({"projectId": project_id, "name": "extra"})
+            "w4",
+            json!({"projectId": project_id, "name": "nope", "baseRef": "main"})
         ),
         "invalid_argument"
     );

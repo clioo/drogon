@@ -1039,9 +1039,11 @@ fn workspace_id_for_folder(
     host_id: &str,
     folder: &str,
 ) -> Result<Option<String>> {
+    // A folder path can back several Workspaces now (issue #579); a Bot
+    // always resolves to the folder's primary (earliest-created) Workspace.
     Ok(conn
         .query_row(
-            "SELECT id FROM workspaces WHERE path = ?1 AND host_id = ?2",
+            "SELECT id FROM workspaces WHERE path = ?1 AND host_id = ?2 ORDER BY created_at LIMIT 1",
             params![folder, host_id],
             |r| r.get::<_, String>(0),
         )

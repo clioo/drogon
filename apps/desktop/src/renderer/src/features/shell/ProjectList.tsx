@@ -1110,7 +1110,7 @@ export function ProjectList({
           worktree={removeTarget}
           workspaces={workspaces}
           disabled={disabled}
-          isFolderWorkspaceDelete={isImplicitFolderWorktree(removeTarget)}
+          isFolderWorkspaceDelete={isFolderProjectWorktree(groups, removeTarget)}
           onSubmit={(force) => onSubmitRemove(removeTarget, force)}
           onClose={onCloseAction}
         />
@@ -1247,10 +1247,7 @@ function EntryGroupRow({
       </div>
       <div className="shell-project-cards">
         {group.entries.map(({ worktree, project }, index) => {
-          const implicitFolderWorktree = isImplicitFolderWorktree(
-            worktree,
-            project.kind,
-          );
+          const implicitFolderWorktree = isImplicitFolderWorktree(worktree);
           const primaryCheckout =
             project.kind === "git" && worktree.path === project.path;
           return (
@@ -1502,10 +1499,7 @@ function ProjectRow({
             depth: number,
           ): React.JSX.Element => {
             const currentIndex = cardIndex++;
-            const implicitFolderWorktree = isImplicitFolderWorktree(
-              worktree,
-              project.kind,
-            );
+            const implicitFolderWorktree = isImplicitFolderWorktree(worktree);
             const primaryCheckout =
               project.kind === "git" && worktree.path === project.path;
             return (
@@ -1573,12 +1567,30 @@ function ProjectRow({
 /** Folder projects expose one implicit worktree (the folder itself).
  * The daemon identifies it with the project id; the workspace fallback uses
  * the `implicit:`/`folder:` ids. */
-function isImplicitFolderWorktree(
+/** Whether a worktree belongs to a folder Project (its implicit primary or
+ *  an additional folder Workspace — issue #579). A folder Workspace has no
+ *  git worktree, branch or dirty changes, so the delete dialog skips every
+ *  git-specific hint for it. */
+function isFolderProjectWorktree(
+  groups: ProjectGroup[],
   worktree: Worktree,
-  projectKind?: Project["kind"],
 ): boolean {
+  const project = groups.find((group) =>
+    group.worktrees.some((item) => item.id === worktree.id),
+  )?.project;
+  return project?.kind === "folder";
+}
+
+function isImplicitFolderWorktree(worktree: Worktree): boolean {
+  // A folder project's synthesized implicit worktree has id == projectId
+  // (the daemon's `folder_implicit_worktree_json`), so it — and it alone —
+  // is the folder's primary card whose remove means "remove project" and
+  // whose title is the folder itself. Additional folder Workspaces (issue
+  // #579) carry distinct uuids, so they are normal renamable/removable
+  // section cards, exactly like git worktrees. Legacy test/data id shapes
+  // (`implicit:`/`folder:` prefixes) stay recognized for safety.
   return (
-    projectKind === "folder" ||
+    worktree.id === worktree.projectId ||
     worktree.id.startsWith("implicit:") ||
     worktree.projectId.startsWith("folder:")
   );

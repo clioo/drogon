@@ -20,7 +20,7 @@ pub(crate) const QUICK_SESSION_MARKER_OWNER: &str = "drogon";
 pub(crate) const QUICK_SESSION_DEFAULT_NAME: &str = "Quick Session";
 
 pub(crate) const PROJECTS_SCHEMA_COMPONENT: &str = "projects";
-pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 5;
+pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 6;
 
 fn create_v1_tables(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
@@ -130,6 +130,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_relax_worktree_path_unique(tx)?;
             tx.execute(
                 "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -152,6 +153,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_relax_worktree_path_unique(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -161,6 +163,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_relax_worktree_path_unique(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -182,6 +185,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         Some(3) => {
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_relax_worktree_path_unique(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -195,6 +199,19 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         // this fix landed still picks it up on its next open.
         Some(4) => {
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_relax_worktree_path_unique(tx)?;
+            tx.execute(
+                "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
+                params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
+            )?;
+        }
+        // v6: drop the legacy `UNIQUE(path)` on `worktrees`. A folder
+        // Project can now own several named Workspaces sharing its folder
+        // path (issue #579), each a distinct `worktrees` row with its own
+        // `workspace_id` (still UNIQUE). Same "run on the way to current"
+        // shape as the arms above; idempotent via the DDL check inside.
+        Some(5) => {
+            apply_v6_relax_worktree_path_unique(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -202,6 +219,63 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         }
         _ => {}
     }
+    Ok(())
+}
+
+/// v6: rebuilds `worktrees` without the legacy `UNIQUE(path)` constraint,
+/// so a folder Project can own several Workspaces that share its folder
+/// path (issue #579) — each its own sidebar section. `workspace_id` stays
+/// UNIQUE (every worktree still registers exactly one Workspace). SQLite
+/// cannot drop a column constraint in place, so the table is rebuilt with
+/// every current column preserved. Idempotent: it inspects the stored DDL
+/// and returns early once the `path` column is no longer declared UNIQUE.
+fn apply_v6_relax_worktree_path_unique(tx: &Transaction) -> rusqlite::Result<()> {
+    let ddl: Option<String> = tx
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='worktrees'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(ddl) = ddl else { return Ok(()) };
+    // The v1 DDL declared `path TEXT NOT NULL UNIQUE`; the rebuilt table
+    // drops the keyword from that column, so its absence is the done marker
+    // (the `workspace_id` UNIQUE the same table also carries is unaffected).
+    if !ddl.contains("path TEXT NOT NULL UNIQUE") {
+        return Ok(());
+    }
+    tx.execute_batch(
+        "CREATE TABLE worktrees_migrated (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL UNIQUE,
+            path TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            head TEXT NOT NULL,
+            base_ref TEXT,
+            created_at TEXT NOT NULL,
+            title TEXT,
+            note TEXT,
+            parent_worktree_id TEXT,
+            workspace_status TEXT,
+            is_pinned INTEGER NOT NULL DEFAULT 0,
+            is_archived INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            manual_order INTEGER,
+            last_activity_at TEXT,
+            linked_pr INTEGER,
+            creator TEXT
+        );
+        INSERT INTO worktrees_migrated (id, project_id, workspace_id, path, branch, head, base_ref, created_at, \
+            title, note, parent_worktree_id, workspace_status, is_pinned, is_archived, sort_order, manual_order, \
+            last_activity_at, linked_pr, creator)
+            SELECT id, project_id, workspace_id, path, branch, head, base_ref, created_at, \
+            title, note, parent_worktree_id, workspace_status, is_pinned, is_archived, sort_order, manual_order, \
+            last_activity_at, linked_pr, creator FROM worktrees;
+        DROP TABLE worktrees;
+        ALTER TABLE worktrees_migrated RENAME TO worktrees;
+        CREATE INDEX IF NOT EXISTS worktrees_project ON worktrees(project_id);",
+    )?;
     Ok(())
 }
 
