@@ -963,10 +963,10 @@ impl Engine {
     fn do_session_list(&self, params: &Value) -> Result<Value, RpcError> {
         let workspace_filter = optional_str(params, "workspaceId")?.map(str::to_owned);
         // The workspace filter and the `created_at` ordering live in SQL so
-        // a workspace-scoped poll reads only its own rows through the
-        // `sessions_workspace` index instead of materializing the whole
-        // table and filtering in Rust. Output shape and ordering match the
-        // unfiltered path exactly.
+        // a workspace-scoped poll reads only its own rows in index order
+        // through the `sessions_workspace_created_at` composite index
+        // instead of materializing the whole table and filtering in Rust.
+        // Output shape and ordering match the unfiltered path exactly.
         let rows: Vec<(String, Value)> = {
             let conn = self.db.lock().unwrap();
             if let Some(workspace) = workspace_filter.as_deref() {
@@ -1300,11 +1300,13 @@ fn require_dimension(params: &Value, field: &str, default: u16) -> Result<u16, R
     Ok(n as u16)
 }
 
-/// PERF-06: `session.list` pushes the workspace filter and the
+/// PERF-06/06b: `session.list` pushes the workspace filter and the
 /// `created_at` ordering into SQL and reads through the
-/// `sessions_workspace` index. PTY-free: rows are seeded with plain SQL
-/// (there is no `workspace_id` foreign key, so arbitrary workspace ids are
-/// fine) and read back through the public `dispatch` surface.
+/// `sessions_workspace_created_at` composite index (which serves the ORDER
+/// BY from the index — no temp B-tree). PTY-free: rows are seeded with
+/// plain SQL (there is no `workspace_id` foreign key, so arbitrary
+/// workspace ids are fine) and read back through the public `dispatch`
+/// surface.
 #[cfg(test)]
 mod session_list_workspace_index_tests {
     use super::*;
@@ -1445,20 +1447,20 @@ mod session_list_workspace_index_tests {
     }
 
     #[test]
-    fn filtered_list_seeks_the_workspace_index() {
+    fn filtered_list_seeks_the_composite_index_without_sorting() {
         let dir = tempfile::tempdir().unwrap();
         let _engine = Engine::open(dir.path()).unwrap();
         let db = Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
         let index: i64 = db
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace'",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace_created_at'",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(
             index, 1,
-            "fresh Engine::open must create sessions_workspace"
+            "fresh Engine::open must create sessions_workspace_created_at"
         );
         let mut stmt = db
             .prepare(&format!(
@@ -1472,8 +1474,12 @@ mod session_list_workspace_index_tests {
             .unwrap();
         let plan = plan.join(" | ");
         assert!(
-            plan.contains("USING INDEX sessions_workspace"),
-            "filtered list must seek the workspace index, got: {plan}",
+            plan.contains("USING INDEX sessions_workspace_created_at"),
+            "filtered list must seek the composite index, got: {plan}",
+        );
+        assert!(
+            !plan.contains("TEMP B-TREE"),
+            "composite index must serve the ORDER BY from the index, got: {plan}",
         );
     }
 
@@ -1513,14 +1519,14 @@ mod session_list_workspace_index_tests {
         let db = Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
         let index: i64 = db
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace'",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace_created_at'",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(
             index, 1,
-            "migration must add sessions_workspace to old data dirs"
+            "migration must add sessions_workspace_created_at to old data dirs"
         );
         drop(db);
         drop(engine);
@@ -1530,5 +1536,106 @@ mod session_list_workspace_index_tests {
             list_ids(&again, "list-again", json!({ "workspaceId": "ws-legacy" })),
             vec!["sess-legacy"],
         );
+    }
+
+    #[test]
+    fn perf06_single_column_index_migrates_to_the_composite() {
+        // A data dir migrated by PERF-06 carries the single-column
+        // `sessions_workspace` predecessor. Opening it with this build must
+        // swap in the composite (which serves the ORDER BY from the index)
+        // and drop the redundant predecessor, without losing rows.
+        let dir = tempfile::tempdir().unwrap();
+        Connection::open(dir.path().join(DB_FILE_NAME))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    host_id TEXT NOT NULL,
+                    incarnation TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    args_json TEXT NOT NULL,
+                    cols INTEGER NOT NULL,
+                    rows INTEGER NOT NULL,
+                    verdict TEXT NOT NULL,
+                    exit_code INTEGER,
+                    created_at TEXT NOT NULL,
+                    harness_id TEXT,
+                    needs_input_at TEXT,
+                    parent_session_id TEXT,
+                    turn_fact TEXT,
+                    turn_fact_at TEXT,
+                    caused_by_event_id TEXT,
+                    agent_session_id TEXT,
+                    agent_session_transcript_path TEXT
+                );
+                CREATE INDEX sessions_workspace ON sessions(workspace_id);
+                INSERT INTO sessions (id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at)
+                VALUES ('sess-b', 'ws-era', 'host-seed', 'inc-1', '/bin/sh', '[\"-l\"]', 80, 24, 'exited', 0, '2026-09-08T00:00:02Z'),
+                       ('sess-a', 'ws-era', 'host-seed', 'inc-1', '/bin/sh', '[\"-l\"]', 80, 24, 'exited', 0, '2026-09-08T00:00:01Z');",
+            )
+            .unwrap();
+        let engine = Engine::open(dir.path()).unwrap();
+        assert_eq!(
+            list_ids(&engine, "list-era", json!({ "workspaceId": "ws-era" })),
+            vec!["sess-a", "sess-b"],
+            "pre-composite rows stay listable in created_at order",
+        );
+        let db = Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
+        let composite: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace_created_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let predecessor: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            composite, 1,
+            "migration must add the composite index to PERF-06-era data dirs"
+        );
+        assert_eq!(
+            predecessor, 0,
+            "the redundant single-column predecessor must go, not linger beside the composite"
+        );
+        let plan = {
+            let mut stmt = db
+                .prepare(&format!(
+                    "EXPLAIN QUERY PLAN {SESSION_LIST_SELECT} WHERE workspace_id = ?1 ORDER BY created_at"
+                ))
+                .unwrap();
+            stmt.query_map(["ws-era"], |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .join(" | ")
+        };
+        assert!(
+            !plan.contains("TEMP B-TREE"),
+            "migrated data dir must serve ORDER BY from the index, got: {plan}",
+        );
+        drop(db);
+        drop(engine);
+        // Reopening an already-migrated data dir is a no-op.
+        let again = Engine::open(dir.path()).unwrap();
+        assert_eq!(
+            list_ids(&again, "list-again", json!({ "workspaceId": "ws-era" })),
+            vec!["sess-a", "sess-b"],
+        );
+        let db = Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
+        let composite: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace_created_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(composite, 1, "reopen must keep the composite index");
     }
 }
