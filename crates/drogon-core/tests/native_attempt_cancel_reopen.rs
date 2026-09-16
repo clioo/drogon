@@ -26,9 +26,10 @@ use drogon_protocol::Response;
 use serde_json::json;
 
 use harness::{
-    Fixture, Liveness, ProbeEnv, Started, StopMarkerGuard, capability_file, capability_value,
-    classify_kill_output, err_code, fresh_worker, liveness_probe, observe_liveness, ok, pid_dir,
-    recorded_pids, request, started, wait_for_pid_count,
+    Fixture, Liveness, ProbeEnv, Started, StopMarkerGuard, assert_pid_count_stable,
+    capability_file, capability_value, classify_kill_output, err_code, fresh_worker,
+    liveness_probe, observe_liveness, ok, pid_dir, recorded_pids, request, started,
+    wait_for_pid_count,
 };
 
 /// Admits the first worker, stops it (settled stop: attempt `stopped`, task
@@ -463,12 +464,7 @@ fn concurrent_cancel_single_winner(env: &ProbeEnv) {
     let conn = db(env);
     assert_eq!(count(&conn, "orchestration_attempts"), 1);
     drop(conn);
-    std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(
-        recorded_pids(&pid_dir(env)).len(),
-        1,
-        "no cancel may launch or respawn a process"
-    );
+    assert_pid_count_stable(env, 1, "no cancel may launch or respawn a process");
 }
 
 /// A replacement admission that rolls back restores the failed attempt's
@@ -534,12 +530,7 @@ fn failed_retry_rollback_restores_state(env: &ProbeEnv) {
         "blocked",
         "the task keeps its pre-retry status"
     );
-    std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(
-        recorded_pids(&pid_dir(env)).len(),
-        1,
-        "a rolled-back admission must never spawn"
-    );
+    assert_pid_count_stable(env, 1, "a rolled-back admission must never spawn");
     let _ = ok(&engine, "show-rb-old", "orchestration.workerShow", {
         let mut scope = env.scope(&engine, &run_id, 1);
         scope["dispatchId"] = json!(first.dispatch_id);
