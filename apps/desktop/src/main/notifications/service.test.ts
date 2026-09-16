@@ -85,13 +85,30 @@ afterEach(() => {
   resetSessionStatePushForTests();
 });
 
-async function waitForPushRound(flag: { count: number }): Promise<void> {
-  const deadline = Date.now() + 5000;
-  while (flag.count < 1) {
-    if (Date.now() > deadline) throw new Error("timed out waiting for push");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  await new Promise((resolve) => setTimeout(resolve, 10));
+/**
+ * Causal rendezvous for one push-loop round, replacing wall-clock polling.
+ * The loop's mocked `call` resolves `arrived` synchronously while the loop
+ * itself is suspended on it, so by the time the test wakes, the only
+ * remaining work is the loop's own post-call microtask chain (parse, fan
+ * out, forward — no real I/O anywhere on this path). One `setImmediate`
+ * macrotask provably runs after every one of those microtasks, so awaiting
+ * it settles the round deterministically with no timeout at all: under
+ * parallel-suite load a worker stall only delays the rendezvous, never fails
+ * it (the harness `testTimeout` stays the backstop). A 5 s wall-clock
+ * deadline here was the flake: it mistook a loaded event loop for a dead
+ * push feed.
+ */
+function pushRound(): { arrived: Promise<void>; release: () => void } {
+  let release!: () => void;
+  const arrived = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { arrived, release };
+}
+
+async function settlePushRound(arrived: Promise<void>): Promise<void> {
+  await arrived;
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 describe("createTerminalBellNotificationHandler", () => {
@@ -488,10 +505,12 @@ describe("needs_input push feed (PERF-05)", () => {
     expect(polls).toBe(1);
     expect(deps.shown).toHaveLength(0);
     const rounds = { count: 0 };
+    const round = pushRound();
     const stopLoop = startSessionStatePush({
       getWindow: () => null,
       call: async () => {
         rounds.count += 1;
+        round.release();
         return {
           ok: true as const,
           result: {
@@ -513,7 +532,7 @@ describe("needs_input push feed (PERF-05)", () => {
       log: () => {},
     });
     try {
-      await waitForPushRound(rounds);
+      await settlePushRound(round.arrived);
       expect(deps.shown).toHaveLength(1);
       expect(deps.shown[0].title).toBe("wt-1 - Claude Code needs input");
       expect(polls).toBe(1);
@@ -535,10 +554,12 @@ describe("needs_input push feed (PERF-05)", () => {
     expect(deps.shown).toHaveLength(1);
     resetSessionStatePushForTests();
     const rounds = { count: 0 };
+    const round = pushRound();
     const stopLoop = startSessionStatePush({
       getWindow: () => null,
       call: async () => {
         rounds.count += 1;
+        round.release();
         return {
           ok: true as const,
           result: {
@@ -560,7 +581,7 @@ describe("needs_input push feed (PERF-05)", () => {
       log: () => {},
     });
     try {
-      await waitForPushRound(rounds);
+      await settlePushRound(round.arrived);
       expect(deps.shown).toHaveLength(1);
     } finally {
       stopLoop();
