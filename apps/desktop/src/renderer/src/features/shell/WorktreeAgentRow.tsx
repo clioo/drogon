@@ -43,16 +43,7 @@ function stopActivationKeyPropagation(event: React.KeyboardEvent): void {
   if (event.key === "Enter" || event.key === " ") event.stopPropagation();
 }
 
-export const WorktreeAgentRow = memo(function WorktreeAgentRow({
-  row,
-  disabled,
-  onSelect,
-  childCount,
-  childrenExpanded = false,
-  onToggleChildren,
-  reserveDisclosureGutter = false,
-  isChildRow = false,
-}: {
+export type WorktreeAgentRowProps = {
   row: WorktreeAgentRowData;
   disabled: boolean;
   /** Selects the row's session tab (workspace first, then the tab). */
@@ -63,7 +54,52 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
   onToggleChildren?: () => void;
   reserveDisclosureGutter?: boolean;
   isChildRow?: boolean;
-}) {
+};
+
+/**
+ * PERF-03: the card rebuilds every row object on each App render (and the
+ * card's own select handler is re-created with it), so the default shallow
+ * memo never hits. Compare by rendered content instead: the row's display
+ * fields plus the session facts the row actually reads (dot/harness/timer).
+ * Callback identity is deliberately ignored — both callbacks are behaviorally
+ * stable per session (workspace-first activation; lineage toggle), so a fresh
+ * closure with the same target must not re-render the row.
+ */
+export function areWorktreeAgentRowPropsEqual(
+  previous: WorktreeAgentRowProps,
+  next: WorktreeAgentRowProps,
+): boolean {
+  if (previous === next) return true;
+  return (
+    previous.disabled === next.disabled &&
+    previous.childCount === next.childCount &&
+    previous.childrenExpanded === next.childrenExpanded &&
+    previous.reserveDisclosureGutter === next.reserveDisclosureGutter &&
+    previous.isChildRow === next.isChildRow &&
+    previous.row.state === next.row.state &&
+    previous.row.title === next.row.title &&
+    previous.row.secondary === next.row.secondary &&
+    previous.row.relativeTime === next.row.relativeTime &&
+    previous.row.focused === next.row.focused &&
+    previous.row.session.id === next.row.session.id &&
+    previous.row.session.harnessId === next.row.session.harnessId &&
+    previous.row.session.verdict === next.row.session.verdict &&
+    previous.row.session.agentState === next.row.session.agentState &&
+    previous.row.session.agentStateAt === next.row.session.agentStateAt &&
+    previous.row.session.cacheIdleAt === next.row.session.cacheIdleAt
+  );
+}
+
+export const WorktreeAgentRow = memo(function WorktreeAgentRow({
+  row,
+  disabled,
+  onSelect,
+  childCount,
+  childrenExpanded = false,
+  onToggleChildren,
+  reserveDisclosureGutter = false,
+  isChildRow = false,
+}: WorktreeAgentRowProps) {
   const handleActivate = useCallback(
     (event: React.MouseEvent) => {
       event.stopPropagation();
@@ -236,4 +272,4 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
       {tail}
     </button>
   );
-});
+}, areWorktreeAgentRowPropsEqual);
