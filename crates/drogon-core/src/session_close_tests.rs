@@ -46,7 +46,7 @@ fn invoke_err(engine: &Engine, id: &str, method: &str, params: Value) -> String 
     response.error.unwrap().code
 }
 
-fn start_sleep_session(fixture: &Fixture) -> Value {
+fn start_shell_session(fixture: &Fixture, args: &[&str]) -> Value {
     let workspace = invoke(
         &fixture.engine,
         "workspace",
@@ -67,9 +67,24 @@ fn start_sleep_session(fixture: &Fixture) -> Value {
         json!({
             "workspaceId": workspace["id"],
             "command": "/bin/sh",
-            "args": ["-c", "exec sleep 30"],
+            "args": args,
         }),
     )
+}
+
+fn start_sleep_session(fixture: &Fixture) -> Value {
+    start_shell_session(fixture, &["-c", "exec sleep 30"])
+}
+
+fn list_row(fixture: &Fixture, session_id: &str) -> Value {
+    let listed = invoke(&fixture.engine, "list", "session.list", json!({}));
+    listed["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == session_id)
+        .unwrap_or_else(|| panic!("session {session_id} missing from session.list"))
+        .clone()
 }
 
 fn list_ids(fixture: &Fixture) -> Vec<String> {
@@ -232,6 +247,73 @@ fn forget_refuses_a_live_session_but_removes_exited_and_stub_records() {
     );
     assert_eq!(forgotten["verdict"], "exited");
     assert!(!list_ids(&fixture).contains(&stub_id));
+}
+
+/// Issue #333: a shell with a live foreground job must report
+/// `hasForegroundChild`, so the desktop can confirm before closing the tab.
+/// Two commands defeat the shell's single-command exec optimization, so the
+/// leader stays a waiting shell with a live `sleep` child until the job ends.
+#[test]
+fn list_reports_foreground_child_while_shell_runs_job() {
+    let fixture = fixture();
+    let session = start_shell_session(&fixture, &["-c", "echo spawned; sleep 30"]);
+    let id = session["id"].as_str().unwrap().to_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let row = list_row(&fixture, &id);
+        assert_eq!(row["verdict"], "live");
+        if row["hasForegroundChild"] == true {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "foreground job never reported as a live child",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    invoke(&fixture.engine, "stop", "session.stop", identity(&session));
+}
+
+/// Issue #333: an idle shell at its prompt is its own foreground group, so
+/// closing its tab must not prompt.
+#[test]
+fn list_reports_no_foreground_child_for_idle_shell() {
+    let fixture = fixture();
+    let session = start_shell_session(&fixture, &[]);
+    let id = session["id"].as_str().unwrap().to_string();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let row = list_row(&fixture, &id);
+    assert_eq!(row["verdict"], "live");
+    assert_eq!(
+        row["hasForegroundChild"], false,
+        "an idle prompt has no foreground child",
+    );
+    invoke(&fixture.engine, "stop", "session.stop", identity(&session));
+}
+
+/// Issue #333: the busy flag is a live-session fact only — a stopped session
+/// reports `exited` with no foreground child, so a confirmed close never
+/// re-prompts on an already-dead tab.
+#[test]
+fn exited_session_reports_no_foreground_child() {
+    let fixture = fixture();
+    let session = start_shell_session(&fixture, &["-c", "echo spawned; sleep 30"]);
+    let id = session["id"].as_str().unwrap().to_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if list_row(&fixture, &id)["hasForegroundChild"] == true {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "foreground job never reported as a live child",
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    invoke(&fixture.engine, "stop", "session.stop", identity(&session));
+    let row = list_row(&fixture, &id);
+    assert_eq!(row["verdict"], "exited");
+    assert_eq!(row["hasForegroundChild"], false);
 }
 
 #[test]

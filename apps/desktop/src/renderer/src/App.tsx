@@ -75,6 +75,13 @@ import {
 // of hardcoding one.
 import { resolveHarnessPermissionMode } from "../../shared/agent-defaults";
 import { TabBar } from "./features/shell/TabBar";
+import { CloseBusyTerminalDialog } from "./features/shell/CloseBusyTerminalDialog";
+import {
+  isAgentTerminalSession,
+  isBusyTerminalSession,
+  readSkipCloseBusyTerminalConfirm,
+  writeSkipCloseBusyTerminalConfirm,
+} from "./features/shell/close-busy-terminal";
 import { tabCreateMenuChord } from "./features/shell/TabCreateMenuChords";
 import {
   editorDiffTabId,
@@ -3729,13 +3736,94 @@ export function App() {
     changeTheme(
       theme === "system" ? "dark" : theme === "dark" ? "light" : "system",
     );
+  // Issue #333: busy-tab close confirmations. Every close entry point
+  // (strip X, bulk close, pane X, keyboard) funnels through the `close*`
+  // wrappers below, which queue a request here instead of stopping a
+  // session with work in flight. One dialog shows the head; confirming
+  // runs it, cancelling drops it, and Don't-ask-again persists the skip
+  // and flushes the rest without re-prompting.
+  type PendingBusyClose = {
+    kind: "tab" | "split" | "single";
+    sessionId: string;
+    agent: boolean;
+  };
+  const [busyCloseQueue, setBusyCloseQueue] = useState<PendingBusyClose[]>(
+    [],
+  );
+  const busyCloseQueueRef = useRef<PendingBusyClose[]>([]);
+  const enqueueBusyClose = (request: PendingBusyClose) => {
+    busyCloseQueueRef.current = [...busyCloseQueueRef.current, request];
+    setBusyCloseQueue(busyCloseQueueRef.current);
+  };
+  const dequeueBusyClose = (): PendingBusyClose | null => {
+    const [head, ...rest] = busyCloseQueueRef.current;
+    if (!head) return null;
+    busyCloseQueueRef.current = rest;
+    setBusyCloseQueue(rest);
+    return head;
+  };
+  // Returns true when the close was queued behind the confirm dialog. Only
+  // the queued sessions are confirmed; a stale prompt for a tab that is
+  // already gone resolves to a no-op, never a blind stop.
+  const queueBusyClose = (
+    targets: Session[],
+    request: { kind: PendingBusyClose["kind"]; sessionId: string },
+  ): boolean => {
+    if (readSkipCloseBusyTerminalConfirm()) return false;
+    const busy = targets.filter((item) => isBusyTerminalSession(item));
+    if (busy.length === 0) return false;
+    enqueueBusyClose({
+      ...request,
+      agent: busy.some((item) => isAgentTerminalSession(item)),
+    });
+    return true;
+  };
+  const runBusyCloseRequest = (request: PendingBusyClose) => {
+    const session = sessionsRef.current.find(
+      (item) => item.id === request.sessionId,
+    );
+    if (!session) return;
+    if (request.kind === "tab") void closeTabSessionNow(session);
+    else if (request.kind === "split") void closeSplitPaneNow(session);
+    else void closeNow(session);
+  };
+  const confirmBusyClose = (dontAskAgain: boolean) => {
+    if (dontAskAgain) {
+      writeSkipCloseBusyTerminalConfirm(true);
+      // The skip is a standing answer for every queued close, so the whole
+      // queue flushes without re-prompting.
+      const queued = busyCloseQueueRef.current;
+      busyCloseQueueRef.current = [];
+      setBusyCloseQueue([]);
+      for (const request of queued) runBusyCloseRequest(request);
+      return;
+    }
+    const head = dequeueBusyClose();
+    if (head) runBusyCloseRequest(head);
+  };
+  const cancelBusyClose = () => {
+    dequeueBusyClose();
+  };
+  // Read-only twin of the splits lookup inside closeTabSessionNow: same
+  // inputs, so the gate sees the same second pane the close would stop.
+  const splitSecondSession = (sessionId: string): Session | null => {
+    const splits = pruneTerminalSplits(
+      hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
+      new Set(sessionsRef.current.map((item) => item.id)),
+    );
+    const split = splitForTab(splits, sessionId);
+    if (!split) return null;
+    return (
+      sessionsRef.current.find((item) => item.id === split.panes[1]) ?? null
+    );
+  };
   // The tab close is an explicit, confirmed dismissal (R16-AL2, issue
   // #228): `session.close` stops a live PTY and forgets the durable
   // record, so `exited` rows AND post-restart `unverifiable` stubs alike
   // release their tab. The reply verdict is never gated on: a stub keeps
   // its honest `unverifiable` (loss of contact is not exit) and is
   // removed anyway — the user, not the liveness oracle, decided to close.
-  const close = (session: Session) =>
+  const closeNow = (session: Session) =>
     action(async () => {
       confirmCloseOrAlreadyAbsent(
         await window.drogon.close({
@@ -3771,6 +3859,13 @@ export function App() {
       setSessions(applied.sessions);
       setActive(applied.active);
     });
+  // Issue #333: the single-session close (pane X on an unsplit tab, tab
+  // menu) confirms a busy session before stopping it.
+  const close = (session: Session) => {
+    if (queueBusyClose([session], { kind: "single", sessionId: session.id }))
+      return;
+    void closeNow(session);
+  };
   // R16-N Split Terminal Right actions. Each pane is a daemon session of
   // the same workspace created through window.drogon.start (the existing
   // session bridge); the tab keeps its root identity while split.
@@ -3825,7 +3920,14 @@ export function App() {
   // Closing one split pane (header X, context menu, exit overlay): only
   // that daemon session stops; the survivor keeps the tab as a single.
   // Closing the root promotes the survivor with its strip identity.
-  const closeSplitPane = (session: Session) =>
+  // Issue #333: a split pane stops only its own session, so the gate
+  // checks exactly the pane being closed.
+  const closeSplitPane = (session: Session) => {
+    if (queueBusyClose([session], { kind: "split", sessionId: session.id }))
+      return;
+    void closeSplitPaneNow(session);
+  };
+  const closeSplitPaneNow = (session: Session) =>
     action(async () => {
       const splits = pruneTerminalSplits(
         hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
@@ -3833,7 +3935,7 @@ export function App() {
       );
       const outcome = closeTerminalSplitPane(splits, session.id);
       if (!outcome.survivorId || !outcome.dissolvedRoot) {
-        void close(session);
+        void closeNow(session);
         return;
       }
       await stopOneSession(session);
@@ -3870,7 +3972,16 @@ export function App() {
     });
   // Closing a whole tab (strip X, bulk close): a split tab stops both
   // panes first so no orphan session survives as a surprise new tab.
-  const closeTabSession = (session: Session) =>
+  // Issue #333: the gate checks both panes — either one busy confirms.
+  const closeTabSession = (session: Session) => {
+    const targets = [session];
+    const second = splitSecondSession(session.id);
+    if (second) targets.push(second);
+    if (queueBusyClose(targets, { kind: "tab", sessionId: session.id }))
+      return;
+    void closeTabSessionNow(session);
+  };
+  const closeTabSessionNow = (session: Session) =>
     action(async () => {
       const splits = pruneTerminalSplits(
         hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
@@ -5544,6 +5655,13 @@ export function App() {
           agent: { harnessId, model: "", provider: "" },
         })}
       />}
+      {busyCloseQueue[0] && (
+        <CloseBusyTerminalDialog
+          agent={busyCloseQueue[0].agent}
+          onConfirm={(dontAskAgain) => confirmBusyClose(dontAskAgain)}
+          onClose={() => cancelBusyClose()}
+        />
+      )}
       {composer && (
         <NewWorkspaceComposerModal
           groups={projectGroups.filter((group) => !group.project.quickSession)}

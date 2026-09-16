@@ -1424,6 +1424,83 @@ fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, O
     (state.as_wire(), at)
 }
 
+/// Whether the session leader currently has a live child process of its own
+/// (issue #333): an idle shell at its prompt is childless, while a shell
+/// with a running job waits on a forked child. Any uncertainty (non-live
+/// verdict, no pid, failed census) reads as not busy: the renderer treats
+/// the flag as a positive busy signal only, never as proof of idleness.
+pub(crate) fn has_foreground_child(handle: &SessionHandle, verdict: &str) -> bool {
+    if verdict != "live" {
+        return false;
+    }
+    match handle.child_process_id() {
+        Some(pid) => has_live_child_process(pid),
+        None => false,
+    }
+}
+
+/// Process census for [`has_foreground_child`]: one live (non-zombie) direct
+/// child is enough — the renderer only needs a boolean, never the list.
+#[cfg(target_os = "macos")]
+fn has_live_child_process(pid: u32) -> bool {
+    // `proc_listchildpids` lives in libSystem, so no explicit link attribute
+    // is needed; a full buffer still reports a positive count, which is all
+    // this census consumes.
+    unsafe extern "C" {
+        fn proc_listchildpids(ppid: i32, buffer: *mut u32, buffersize: i32) -> i32;
+    }
+    let mut buffer = [0u32; 16];
+    // SAFETY: read-only census; `buffer` is a live 16-element array and the
+    // length passed is its exact byte size.
+    let count = unsafe {
+        proc_listchildpids(
+            pid as i32,
+            buffer.as_mut_ptr(),
+            (buffer.len() * size_of::<u32>()) as i32,
+        )
+    };
+    count > 0
+}
+
+/// Process census for [`has_foreground_child`] on Linux: a `/proc` scan for
+/// a non-zombie task whose parent is the session leader.
+#[cfg(target_os = "linux")]
+fn has_live_child_process(pid: u32) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(task) = name.to_str() else { continue };
+        if task.as_bytes().first().is_none_or(|b| !b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{task}/stat")) else {
+            continue;
+        };
+        // `comm` may itself contain spaces or parens, so split after its
+        // closing paren: `pid (comm) state ppid ...`.
+        let Some(rest) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let mut fields = rest.1.split_whitespace();
+        let (Some(state), Some(ppid)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        if state != "Z" && ppid.parse::<u32>().is_ok_and(|p| p == pid) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Process census for [`has_foreground_child`] where no census exists yet:
+/// honestly idle rather than guessed busy.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn has_live_child_process(_pid: u32) -> bool {
+    false
+}
+
 pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i64>) -> Value {
     let (cols, rows) = *handle.size.lock().unwrap();
     let (agent_state, agent_state_at) = agent_state_fields(handle, verdict);
@@ -1444,6 +1521,9 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         "createdAt": handle.created_at,
         "agentState": agent_state,
         "agentStateAt": agent_state_at,
+        // Additive (issue #333): true while a live foreground child runs
+        // beyond the session leader; absent on older payloads reads as idle.
+        "hasForegroundChild": has_foreground_child(handle, verdict),
         "agentPromptPreview": handle.agent_prompt_preview.lock().unwrap().clone(),
         "cacheIdleAt": handle.cache_idle_at.lock().unwrap().clone(),
         // Additive (`session-contract.ts`): the provider-native conversation
