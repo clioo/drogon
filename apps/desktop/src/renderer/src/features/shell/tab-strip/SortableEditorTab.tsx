@@ -4,13 +4,16 @@
    Path / Copy Relative Path, Reveal in Finder) and SortableTab.tsx (menu
    open/close discipline). Adapter: the row chrome stays in EditorStripTab
    (this wrapper only owns useSortable and the shared TabContextMenu); no
-   workspace-layout section (no pane splits), no Rename row (no tab-driven
-   file rename wiring) and no Open Markdown Preview row (no markdown
-   preview surface) — listed as not-ported. */
+   workspace-layout section (no pane splits) and no Open Markdown Preview
+   row (no markdown preview surface) — listed as not-ported. The Rename
+   row (#335) opens the label's inline input and commits the base name to
+   App through onRenameFile; null hides the row (diff, missing and dirty
+   tabs never offer it). */
 
 import { useEffect, useRef, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import type { EditorTabState } from "../editor-tab";
+import { editorTabLabel } from "../editor-tab";
 import { EditorStripTab } from "./EditorStripTab";
 import type { DropIndicator } from "../tab-chrome";
 import {
@@ -43,6 +46,7 @@ export function SortableEditorTab({
   onCopyPath,
   onCopyRelativePath,
   onCloseAllEditorTabs,
+  onRenameFile,
   onStripKeyDown,
 }: {
   tab: EditorTabState;
@@ -63,13 +67,45 @@ export function SortableEditorTab({
   onCopyRelativePath: () => void;
   /** Closes every editor tab of the workspace (Close All Editor Tabs). */
   onCloseAllEditorTabs: () => void;
+  /**
+   * Commits an inline file rename as (tabId, new base name); App runs
+   * files.rename and retargets the tab. Null hides the menu's Rename row.
+   */
+  onRenameFile: ((tabId: string, newName: string) => void) | null;
   /** Strip-level arrows/Home/End plus reorder, owned by the tab strip. */
   onStripKeyDown: (event: React.KeyboardEvent) => void;
 }): React.JSX.Element {
   const { setNodeRef, listeners } = useSortable({ id: tab.tabId });
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState({ x: 0, y: 0 });
+  const [isEditing, setIsEditing] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
   const pressPoint = useRef<{ x: number; y: number } | null>(null);
+  const committedRef = useRef(false);
+
+  const openRename = () => {
+    committedRef.current = false;
+    // Why: snapshot the base name once; a tab-label update mid-edit must
+    // not overwrite what the user is typing.
+    setRenameValue(editorTabLabel(tab.path));
+    setIsEditing(true);
+  };
+  const commitRename = () => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    setIsEditing(false);
+    const trimmed = renameValue.trim();
+    // Empty and unchanged names cancel like the explorer's inline input;
+    // App validates separators and collisions against the daemon result.
+    if (trimmed.length === 0 || trimmed === editorTabLabel(tab.path)) return;
+    onRenameFile?.(tab.tabId, trimmed);
+  };
+  const cancelRename = () => {
+    committedRef.current = true;
+    setIsEditing(false);
+  };
+  // While editing, drop drag listeners so typing can't start a drag.
+  const dragListeners = isEditing ? undefined : listeners;
 
   useEffect(() => {
     const closeMenu = (): void => setMenuOpen(false);
@@ -88,6 +124,7 @@ export function SortableEditorTab({
   return (
     <div
       onContextMenuCapture={(event) => {
+        if (isEditing) return;
         event.preventDefault();
         window.dispatchEvent(new Event(TAB_STRIP_CLOSE_MENUS_EVENT));
         setMenuPoint({ x: event.clientX, y: event.clientY });
@@ -117,9 +154,19 @@ export function SortableEditorTab({
         isPinned={isPinned}
         hasTabsToRight={hasTabsToRight}
         dropIndicator={dropIndicator}
-        hideTooltip={menuOpen}
+        hideTooltip={menuOpen || isEditing}
         sortableRef={setNodeRef}
-        dragListeners={listeners}
+        dragListeners={dragListeners}
+        renameEditing={
+          isEditing
+            ? {
+                value: renameValue,
+                onChange: setRenameValue,
+                onCommit: commitRename,
+                onCancel: cancelRename,
+              }
+            : null
+        }
         onActivate={onActivate}
         onClose={onClose}
         onStripKeyDown={onStripKeyDown}
@@ -141,6 +188,7 @@ export function SortableEditorTab({
         onCloseToRight={onCloseToRight}
         onCloseToLeft={onCloseToLeft}
         onCloseAllEditorTabs={onCloseAllEditorTabs}
+        onRenameFile={onRenameFile ? openRename : undefined}
         onCopyPath={onCopyPath}
         onCopyRelativePath={onCopyRelativePath}
         onRevealInFinder={() => {

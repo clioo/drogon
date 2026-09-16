@@ -8,9 +8,11 @@
    (session tabs: the Split terminal submenu with its Split terminal right
    entry). Adapter: no Move Tab to Split row and no workspace-layout section
    (no split view), no split-down entry (#129 subset), no switch-view row
-   (no native chat view), no Tab Color section (no tab-color store), no
-   editor Rename row (no tab-driven file rename wiring) and no Open Markdown
-   Preview row (no markdown preview surface) — all listed as not-ported.
+   (no native chat view), no Tab Color section (no tab-color store) and no
+   Open Markdown Preview row (no markdown preview surface) — all listed as
+   not-ported. The editor Rename row opens the strip's inline rename input
+   (#335); it stays hidden while the file cannot be renamed in place (diff,
+   missing or dirty tabs).
    Shortcut hints resolve through the shared keybinding table with
    persisted overrides (./tab-menu-shortcuts.ts), like the source's
    useOptionalShortcutLabel. */
@@ -108,6 +110,7 @@ export function TabContextMenu({
   onDuplicate,
   openInBrowser,
   onCloseAllEditorTabs,
+  onRenameFile,
   onCopyPath,
   onCopyRelativePath,
   onRevealInFinder,
@@ -136,6 +139,8 @@ export function TabContextMenu({
   openInBrowser?: { disabled: boolean; onSelect: () => void };
   /** Editor tabs: closes every editor tab of the workspace. */
   onCloseAllEditorTabs?: () => void;
+  /** Editor tabs: opens the inline rename input for the tab's file. */
+  onRenameFile?: () => void;
   /** Editor tabs: copies the absolute file path. */
   onCopyPath?: () => void;
   /** Editor tabs: copies the workspace-relative file path. */
@@ -274,6 +279,12 @@ export function TabContextMenu({
         {policy.kind === "editor" ? (
           <>
             <DropdownMenuSeparator />
+            {onRenameFile ? (
+              <DropdownMenuItem onSelect={onRenameFile}>
+                <Pencil className="size-3.5 shrink-0" />
+                Rename
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem onSelect={onCopyPath}>
               <Copy className="size-3.5 shrink-0" />
               Copy Path

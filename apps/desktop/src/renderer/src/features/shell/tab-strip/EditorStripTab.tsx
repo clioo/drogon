@@ -10,9 +10,11 @@
    source's per-language file icon (no file-type icon pipeline wired to
    the tab strip in this build); the tooltip shows the full
    workspace-relative path, matching the source's title attribute. The
-   source's close-button tooltip/shortcut label and its rename, preview
-   and git-status tab adornments have no counterpart in this build, so
-   the label row stays a plain base-name span. R16-BJ (#294/#302) ports
+   source's close-button tooltip/shortcut label and its preview and
+   git-status tab adornments have no counterpart in this build, so
+   the label row stays a plain base-name span outside a rename (#335 adds
+   the menu-driven inline input, committing through the strip wrapper).
+   R16-BJ (#294/#302) ports
    the source's diff-tab icon (GitCompareArrows) and its missing-file
    tab state (line-through label plus the mutation badge, verbatim
    classes and copy from EditorFileTab.tsx's isMissingFileMutation). */
@@ -49,6 +51,7 @@ export function EditorStripTab({
   hideTooltip,
   sortableRef,
   dragListeners,
+  renameEditing,
 }: {
   tab: EditorTabState;
   isActive: boolean;
@@ -65,6 +68,17 @@ export function EditorStripTab({
   /** dnd-kit node ref and pointer listeners, owned by the strip wrapper. */
   sortableRef?: (node: HTMLElement | null) => void;
   dragListeners?: DraggableSyntheticListeners;
+  /**
+   * Inline file rename (#335): the menu's Rename row opens it with the base
+   * name snapshotted; Enter commits, Escape cancels. Null renders the plain
+   * label. Owned by the strip wrapper so the menu and the label share it.
+   */
+  renameEditing?: {
+    value: string;
+    onChange: (value: string) => void;
+    onCommit: () => void;
+    onCancel: () => void;
+  } | null;
 }): React.JSX.Element {
   const isDiff = tab.diff !== undefined;
   const tabLabel = isDiff
@@ -127,11 +141,54 @@ export function EditorStripTab({
           aria-hidden
         />
       )}
-      <span
-        className={`${TAB_LABEL_WIDTH_CLASSES} mr-1${isMissingFileMutation ? " line-through" : ""}`}
-      >
-        {tabLabel}
-      </span>
+      {renameEditing ? (
+        <input
+          // Why: autofocus via callback so the input exists past Radix menu
+          // teardown; select-all so typing replaces the old base name.
+          ref={(input) => {
+            if (input) {
+              input.focus();
+              input.select();
+            }
+          }}
+          data-tab-rename-input="true"
+          value={renameEditing.value}
+          aria-label={`Rename ${tabLabel}`}
+          onChange={(event) => renameEditing.onChange(event.target.value)}
+          onBlur={renameEditing.onCommit}
+          onKeyDown={(event) => {
+            // Why: an Enter confirming a CJK IME candidate must not commit
+            // the rename; wait for a non-composition Enter.
+            if (event.keyCode === 229 || event.nativeEvent?.isComposing === true)
+              return;
+            if (event.key === "Enter") {
+              event.preventDefault();
+              renameEditing.onCommit();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              renameEditing.onCancel();
+            }
+          }}
+          // Why: stop bubbling so clicking inside the input doesn't
+          // activate the tab or start a dnd-kit drag.
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => {
+            event.stopPropagation();
+            if (event.button === 1) event.preventDefault();
+          }}
+          onClick={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          onAuxClick={(event) => event.stopPropagation()}
+          className="mr-1 h-5 min-w-[72px] flex-1 px-1 py-0 text-xs"
+          spellCheck={false}
+        />
+      ) : (
+        <span
+          className={`${TAB_LABEL_WIDTH_CLASSES} mr-1${isMissingFileMutation ? " line-through" : ""}`}
+        >
+          {tabLabel}
+        </span>
+      )}
       {isMissingFileMutation && (
         <span className="shrink-0 text-[10px] leading-none font-semibold tracking-wide text-muted-foreground">
           {tab.missing}
