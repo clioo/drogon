@@ -1,11 +1,18 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   adoptOutOfBandSessions,
   appendOrReplaceSession,
   applyConfirmedClose,
+  capabilityDigest,
   contextMatches,
+  isPollPageVisible,
+  isSlowPollDue,
   removeSessionExact,
+  sameBotsLoadResult,
+  sameSessions,
+  shouldSessionPollTick,
 } from "./App";
+import type { BotsLoadResult } from "./bots-loader";
 import type { Session } from "../../shared/session-contract";
 
 const session = (id: string, overrides: Partial<Session> = {}): Session => ({
@@ -248,5 +255,192 @@ describe("applyConfirmedClose", () => {
     const items = [session("s2")];
     const result = applyConfirmedClose(items, target, "s2");
     expect(result).toBeNull();
+  });
+});
+
+describe("PERF-03 poll identity (sameSessions)", () => {
+  const clone = (items: Session[]): Session[] =>
+    items.map((item) => ({ ...item, args: [...item.args] }));
+
+  test("a byte-identical poll reply (fresh objects) keeps the previous array", () => {
+    const previous = [session("s1"), session("s2", { verdict: "exited" })];
+    expect(sameSessions(previous, clone(previous))).toBe(true);
+  });
+
+  test("any field-level change replaces the list", () => {
+    const previous = [session("s1")];
+    for (const overrides of [
+      { verdict: "exited" },
+      { agentState: "idle" },
+      { agentStateAt: "2026-01-01T00:01:00Z" },
+      { incarnation: "inc-2" },
+      { exitCode: 1 },
+      { harnessId: "claude" },
+      { cacheIdleAt: "2026-01-01T00:01:00Z" },
+      { agentPromptPreview: "hello" },
+      { parentSessionId: "p1" },
+      { causedByEventId: "mev_1" },
+      { agentSessionId: "native-1" },
+      { agentSessionTranscriptPath: "/tmp/rollout.jsonl" },
+      { agentResume: "resumed" },
+      { command: "/bin/zsh" },
+      { cols: 100 },
+      { createdAt: "2026-01-02T00:00:00Z" },
+    ] as Partial<Session>[]) {
+      expect(
+        sameSessions(previous, [session("s1", overrides)]),
+        JSON.stringify(overrides),
+      ).toBe(false);
+    }
+    expect(
+      sameSessions(previous, [
+        session("s1", { args: ["/bin/sh", "-l"] }),
+      ]),
+    ).toBe(false);
+  });
+
+  test("length changes and reorder replace the list (order is tab order)", () => {
+    const previous = [session("s1"), session("s2")];
+    expect(sameSessions(previous, [session("s1")])).toBe(false);
+    expect(sameSessions(previous, [session("s1"), session("s2"), session("s3")])).toBe(
+      false,
+    );
+    expect(sameSessions(previous, [session("s2"), session("s1")])).toBe(false);
+  });
+
+  test("same reference is trivially same", () => {
+    const previous = [session("s1")];
+    expect(sameSessions(previous, previous)).toBe(true);
+  });
+});
+
+describe("PERF-04 stable effect keys (capabilityDigest)", () => {
+  test("order-insensitive and stable for the same set", () => {
+    expect(capabilityDigest(["b.v1", "a.v1"])).toBe(capabilityDigest(["a.v1", "b.v1"]));
+    expect(capabilityDigest([])).toBe("");
+  });
+
+  test("a withheld/granted capability changes the digest", () => {
+    expect(capabilityDigest(["a.v1"])).not.toBe(capabilityDigest(["a.v1", "b.v1"]));
+  });
+});
+
+describe("PERF-03 Bots snapshot identity (sameBotsLoadResult)", () => {
+  const loaded = (): BotsLoadResult => ({
+    scope: { hostId: "h1", workspaceId: "", locale: "en" },
+    status: "loaded",
+    snapshot: { bots: [], history: [] },
+    observedLiveness: {},
+  });
+
+  test("an identical reload (fresh objects) keeps the previous snapshot", () => {
+    expect(sameBotsLoadResult(loaded(), loaded())).toBe(true);
+  });
+
+  test("null previous, status change, or content change replaces it", () => {
+    const previous: Extract<BotsLoadResult, { status: "loaded" }> = loaded() as Extract<
+      BotsLoadResult,
+      { status: "loaded" }
+    >;
+    expect(sameBotsLoadResult(null, previous)).toBe(false);
+    expect(
+      sameBotsLoadResult(previous, {
+        scope: previous.scope,
+        status: "error",
+        code: "boom",
+        message: "boom",
+        retryable: true,
+      }),
+    ).toBe(false);
+    expect(
+      sameBotsLoadResult(previous, {
+        ...previous,
+        snapshot: {
+          bots: [],
+          history: [
+            {
+              run: {
+                id: "run-1",
+                botId: "b1",
+                responsibilityId: "r1",
+                automationId: null,
+                automationRunId: null,
+                startedAt: 1,
+                endedAt: 2,
+                recipe: null,
+                hostObservation: null,
+                invocation: "manual",
+              },
+              responsibilityName: null,
+              automationName: null,
+              automationRunNumber: null,
+              automationRunStatus: "completed",
+            },
+          ],
+        },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("PERF-03 poll cadence gates", () => {
+  afterEach(() => {
+    delete (globalThis as { document?: unknown }).document;
+  });
+
+  test("isSlowPollDue fires on the first tick, then at most every 30s", () => {
+    expect(isSlowPollDue(0, 1_000)).toBe(true);
+    expect(isSlowPollDue(1_000, 1_000 + 29_999)).toBe(false);
+    expect(isSlowPollDue(1_000, 1_000 + 30_000)).toBe(true);
+  });
+
+  test("isPollPageVisible is true without a document, else follows visibility", () => {
+    expect(isPollPageVisible()).toBe(true);
+    (globalThis as { document?: unknown }).document = { visibilityState: "visible" };
+    expect(isPollPageVisible()).toBe(true);
+    (globalThis as { document?: unknown }).document = { visibilityState: "hidden" };
+    expect(isPollPageVisible()).toBe(false);
+  });
+});
+
+describe("PERF-03b session poll fast tick", () => {
+  // Regression for the sidebar-consumer gate: with the sidebar collapsed
+  // and the route anywhere but Bots, an out-of-band session (CLI-created,
+  // Bot-created, another window) took up to 30s to reach the tab strip.
+  // The gate takes no sidebar/route input, so this shapes the only two
+  // inputs it has: a visible page always fast-ticks.
+  test("a visible page fast-ticks even with a recent poll (sidebar state is not an input)", () => {
+    expect(shouldSessionPollTick(true, 1_000, 1_000 + 3_000)).toBe(true);
+    expect(shouldSessionPollTick(true, 1_000, 1_000 + 29_999)).toBe(true);
+  });
+
+  test("a hidden page skips fast ticks and keeps the 30s slow fallback", () => {
+    expect(shouldSessionPollTick(false, 1_000, 1_000 + 3_000)).toBe(false);
+    expect(shouldSessionPollTick(false, 1_000, 1_000 + 29_999)).toBe(false);
+    expect(shouldSessionPollTick(false, 1_000, 1_000 + 30_000)).toBe(true);
+    expect(shouldSessionPollTick(false, 0, 1_000)).toBe(true);
+  });
+
+  // End-to-end of the regression at unit level: the fast tick fires while
+  // the sidebar is closed, the host-wide reply arrives, and the adopt
+  // effect merges the CLI-created session into the tab strip's list —
+  // all within one fast cadence, never waiting on the slow fallback.
+  test("an out-of-band session reaches the tab strip on a fast tick while the sidebar is closed", () => {
+    // shouldSessionPollTick takes no sidebar/route input by design, so
+    // there is nothing here to set to "closed"/"away" — that absence is
+    // the regression lock.
+    const lastPollMs = 1_000;
+    const fastTickMs = lastPollMs + 3_000;
+    // The tick decision consults only page visibility: closed sidebar and
+    // non-Bots route cannot suppress it.
+    expect(shouldSessionPollTick(true, lastPollMs, fastTickMs)).toBe(true);
+    // The reply it fetches adopts the session the shell did not start.
+    const tabStrip = [session("s1")];
+    const hostWide = [
+      session("s1"),
+      session("cli-created", { createdAt: "2026-01-01T00:01:00Z" }),
+    ];
+    const merged = adoptOutOfBandSessions(tabStrip, hostWide, "w1", () => false);
+    expect(merged.map((item) => item.id)).toEqual(["s1", "cli-created"]);
   });
 });

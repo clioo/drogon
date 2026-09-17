@@ -2,7 +2,201 @@ import assert from "node:assert/strict";
 import { rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { waitForSessionStripTab } from "./probe-rendered-harness.mjs";
+import { waitForBridgeObservation } from "./acceptance-bridge-observation.mjs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+
+// PERF-01d: each echo wait bounds itself instead of inheriting the page's
+// 15 s default. Hot p95 measured ~36 ms, so 3 s is ~80x headroom; cold
+// allows a quiet-cadence wake; burst covers ~100 KiB end to end. Polling
+// is a 10 ms timer, never rAF: the acceptance window runs hidden, where
+// frames stall under load and a frame-gated wait times out on a landed
+// echo — while a 100 ms tick would quantize every sample near 100 ms and
+// hide the signal this probe exists to record.
+const HOT_SAMPLE_TIMEOUT_MS = 3_000;
+const COLD_SAMPLE_TIMEOUT_MS = 5_000;
+const BURST_TIMEOUT_MS = 30_000;
+const ECHO_POLL_MS = 10;
+
+function percentile(sorted, p) {
+  if (sorted.length === 0) return null;
+  const rank = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
+  return sorted[Math.max(0, rank)];
+}
+
+function summarizeLatency(samples) {
+  const sorted = [...samples].sort((a, b) => a - b);
+  return {
+    n: sorted.length,
+    min: sorted[0] ?? null,
+    p50: percentile(sorted, 50),
+    p95: percentile(sorted, 95),
+    max: sorted[sorted.length - 1] ?? null,
+  };
+}
+
+/**
+ * PERF-01 acceptance: keystroke -> echo latency through real Electron +
+ * CDP. Types single characters into the live shell (PTY line-discipline
+ * echo, no Enter) and polls the xterm buffer for each echo, reporting
+ * p50/p95 in ms. `hot` types continuously (the active window); `cold`
+ * waits out the active window first so the pane falls back to its quiet
+ * cadence; `burst` measures a large idle-pane output burst end to end.
+ * Leaves the line cleared with Ctrl+C and the shell on a fresh prompt.
+ *
+ * PERF-01d: a missed sample is diagnostic, never fatal. Every wait carries
+ * its own short timeout on interval polling — never the inherited 15 s
+ * rAF wait, which stalls in the backgrounded acceptance window under
+ * load — and misses land in terminal-echo-latency.json with phase and
+ * buffer tail. One lost keystroke cannot poison later samples: the line
+ * is cleared and the cumulative expectation resyncs. Percentiles cover
+ * the samples that landed; `dropped` counts the ones that did not. Only
+ * a total blackout — no echo in any phase — still fails, naming the
+ * phase and the observed buffer tail.
+ */
+export async function probeTerminalEchoLatency({ page, session, output, hotSamples = 30 }) {
+  const evidence = { hot: [], coldMs: null, burstMs: null, samples: hotSamples };
+  const misses = [];
+  const focusTerminal = () => page.locator(".xterm-helper-textarea").focus();
+  await focusTerminal();
+  // The shell must be sitting on an empty prompt: anything the journey
+  // typed before would prefix every echo match below.
+  await page.keyboard.press("Control+C");
+  await delay(300);
+  const alphabet = "abcdefghjkmnpqrstuvwxyz";
+  let typed = "";
+  // Hot input: type continuously so the pane stays in its active window,
+  // and time every single keystroke -> echo through the xterm buffer. The
+  // whole buffer joins (a fresh pane's prompt sits at the top rows, not
+  // the bottom); the match stays exact because `expected` grows every
+  // sample, so only the newest echo can complete it.
+  const tailMatches = ({ id, want }) => {
+    const terminal = window.__drogonTerminals?.get(id);
+    if (!terminal) return false;
+    const buffer = terminal.buffer.active;
+    let tail = "";
+    for (let i = 0; i < buffer.length; i++)
+      tail += buffer.getLine(i)?.translateToString(true).replace(/\s+$/, "") ?? "";
+    return tail.endsWith(want);
+  };
+  // Last rows of one pane's buffer for miss diagnostics: enough to tell a
+  // lost keystroke (the echo is absent) from fragile waiting (it landed).
+  const readBufferTail = ({ id, rows = 8, maxChars = 500 }) => {
+    const terminal = window.__drogonTerminals?.get(id);
+    if (!terminal) return "<no terminal>";
+    const buffer = terminal.buffer.active;
+    const lines = [];
+    for (let i = Math.max(0, buffer.length - rows); i < buffer.length; i++)
+      lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
+    return lines.join("\n").slice(-maxChars);
+  };
+  const waitForEcho = async ({ want, timeoutMs, phase, sample }) => {
+    try {
+      await page.waitForFunction(tailMatches, { id: session.id, want }, { timeout: timeoutMs, polling: ECHO_POLL_MS });
+      return true;
+    } catch (error) {
+      const bufferTail = await page.evaluate(readBufferTail, { id: session.id }).catch(() => "<unreadable>");
+      misses.push({
+        phase, sample, expected: want, timeoutMs,
+        error: String(error?.message ?? error).split("\n")[0],
+        bufferTail,
+      });
+      return false;
+    }
+  };
+  for (let s = 0; s < hotSamples; s++) {
+    // Re-focus per sample: the layout probe's cleanup tolerates focus
+    // loss, and a keystroke to the wrong target echoes nowhere.
+    await focusTerminal();
+    const ch = alphabet[s % alphabet.length];
+    const expected = `${typed}${ch}`;
+    const t0 = await page.evaluate(() => performance.now());
+    await page.keyboard.press(ch);
+    const landed = await waitForEcho({ want: expected, timeoutMs: HOT_SAMPLE_TIMEOUT_MS, phase: "hot", sample: s });
+    const t1 = await page.evaluate(() => performance.now());
+    if (landed) {
+      evidence.hot.push(t1 - t0);
+      typed = expected;
+    } else {
+      // Resync: a lost char stays a prefix of `expected` forever and would
+      // fail every later sample, so clear the line and start fresh.
+      await page.keyboard.press("Control+C");
+      await delay(300);
+      typed = "";
+    }
+  }
+  const hot = summarizeLatency(evidence.hot);
+  // Cold echo: wait out the active window (1.5 s) so the pane falls back
+  // to its quiet cadence, then time one keystroke.
+  await page.keyboard.press("Control+C");
+  await delay(300);
+  typed = "";
+  await delay(2200);
+  {
+    await focusTerminal();
+    const t0 = await page.evaluate(() => performance.now());
+    await page.keyboard.press("z");
+    if (await waitForEcho({ want: "z", timeoutMs: COLD_SAMPLE_TIMEOUT_MS, phase: "cold", sample: 0 }))
+      evidence.coldMs = (await page.evaluate(() => performance.now())) - t0;
+  }
+  // Idle-pane burst: after the pane goes quiet, dump ~100 KiB and time
+  // Enter -> last line visible end to end.
+  await page.keyboard.press("Control+C");
+  await delay(2500);
+  {
+    const burstMarker = `BURST_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const command = `i=0; while [ "$i" -lt 1200 ]; do printf '%080d ${burstMarker} %04d\\n' 0 "$i"; i=$((i+1)); done`;
+    await focusTerminal();
+    await page.keyboard.type(command);
+    // Timed from Enter: typing time is input, not output delivery.
+    const t0 = await page.evaluate(() => performance.now());
+    await page.keyboard.press("Enter");
+    // Rows join before matching: an 80-column viewport wraps the ~104-char
+    // burst line, so the marker's tail may start on the next row.
+    const burstMatches = ({ marker }) => {
+      const terminals = window.__drogonTerminals;
+      if (!terminals) return false;
+      for (const terminal of terminals.values()) {
+        const buffer = terminal.buffer.active;
+        let tail = "";
+        for (let i = Math.max(0, buffer.length - 150); i < buffer.length; i++)
+          tail += buffer.getLine(i)?.translateToString(true) ?? "";
+        if (tail.includes(`${marker} 1199`)) return true;
+      }
+      return false;
+    };
+    try {
+      await page.waitForFunction(burstMatches, { marker: burstMarker }, { timeout: BURST_TIMEOUT_MS, polling: ECHO_POLL_MS });
+      evidence.burstMs = (await page.evaluate(() => performance.now())) - t0;
+    } catch (error) {
+      const bufferTail = await page.evaluate(() => {
+        const lines = [];
+        for (const terminal of (window.__drogonTerminals ?? new Map()).values()) {
+          const buffer = terminal.buffer.active;
+          for (let i = Math.max(0, buffer.length - 8); i < buffer.length; i++)
+            lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
+        }
+        return lines.join("\n").slice(-500);
+      }).catch(() => "<unreadable>");
+      misses.push({
+        phase: "burst", sample: 0, expected: `${burstMarker} 1199`, timeoutMs: BURST_TIMEOUT_MS,
+        error: String(error?.message ?? error).split("\n")[0],
+        bufferTail,
+      });
+    }
+  }
+  await page.keyboard.press("Control+C");
+  // The surviving product claim: an echo must eventually land, not hang
+  // forever. Partial misses degrade; a total blackout still fails, naming
+  // the phase and the observed buffer tail.
+  if (evidence.hot.length === 0 && evidence.coldMs == null) {
+    const first = misses[0];
+    assert.fail(`terminal echo never landed (missed=${misses.length}, firstMiss=${first?.phase ?? "hot"}#${first?.sample ?? 0}, bufferTail=${JSON.stringify(first?.bufferTail ?? "<unreadable>")}): an echo must eventually land, not hang forever`);
+  }
+  const summary = { hot, coldMs: evidence.coldMs, burstMs: evidence.burstMs, samples: evidence.hot, dropped: misses.length, missed: misses };
+  if (output) await writeFile(path.join(output, "terminal-echo-latency.json"), JSON.stringify(summary, null, 2));
+  return summary;
+}
 
 /** Actual Electron keyboard, xterm grid and kernel PTY size; no model requests. */
 export async function probeTerminalInputLayout({ page, session, output, expectedHome, dataDir }) {
@@ -65,7 +259,15 @@ export async function probeTerminalInputLayout({ page, session, output, expected
         await page.waitForFunction(({ id, before }) => window.__drogonTerminals.get(id).options.fontSize > before, { id: session.id, before });
       }
       if (index === 3) await page.keyboard.press(`${modifier}+0`);
-      await page.waitForFunction(async ({ id, workspaceId }) => {
+      // Node-side polling, not waitForFunction: this wait must observe a
+      // convergence that lands silently (a daemon-side resize applies with
+      // no visual damage), and the predicate never re-evaluated inside a
+      // damage-quiet background window — one stale evaluation, then the
+      // full 15 s stall, even though every sessions() call answered in
+      // milliseconds and the daemon converged ~3 s after the live flip
+      // (PERF-02c). The house bridge observer drives each iteration as one
+      // CDP round trip from Node; predicate and assertions are unchanged.
+      await waitForBridgeObservation(page, async ({ id, workspaceId }) => {
         const terminal = window.__drogonTerminals?.get(id);
         const reply = await window.drogon.sessions(workspaceId);
         const current = reply.ok && reply.result.sessions.find((item) => item.id === id);
@@ -74,7 +276,7 @@ export async function probeTerminalInputLayout({ page, session, output, expected
         const surface = terminal.element.parentElement.getBoundingClientRect();
         return terminal.cols === current.cols && terminal.rows === current.rows
           && screen.right <= surface.right + 1 && screen.bottom <= surface.bottom + 1;
-      }, session);
+      }, session, { timeoutMs: 15000, intervalMs: 250 });
       const marker = `S${index}`;
       await page.locator(".xterm-helper-textarea").focus();
       await page.keyboard.type(`printf '${marker} '; stty size`);

@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { notificationsIpcChannels } from "../shared/notifications-contract";
 import {
   baseBackoffMs,
   nextBackoff,
+  resetSessionPushListenersForTests,
   resetSessionStatePushForTests,
   shouldForwardSessionEvent,
   startSessionStatePush,
+  subscribeSessionPush,
   type SessionDaemonCall,
 } from "./session-state-bridge";
 
@@ -196,5 +198,78 @@ describe("backoff", () => {
   it("doubles to the cap", () => {
     expect(nextBackoff(baseBackoffMs())).toBe(baseBackoffMs() * 2);
     expect(nextBackoff(1_000_000)).toBe(15_000);
+  });
+});
+
+describe("subscribeSessionPush (PERF-05 fan-out)", () => {
+  afterEach(() => {
+    resetSessionPushListenersForTests();
+  });
+
+  it("delivers each deduped push event to every subscriber", async () => {
+    resetSessionStatePushForTests();
+    const { window } = fakeWindow();
+    const calls = { count: 0 };
+    const first: unknown[] = [];
+    const second: unknown[] = [];
+    const stopFirst = subscribeSessionPush((event) =>
+      first.push(event.sessionId),
+    );
+    const stopSecond = subscribeSessionPush((event) =>
+      second.push(event.agentState),
+    );
+    const stop = startSessionStatePush({
+      getWindow: () => window as never,
+      call: async () => {
+        calls.count += 1;
+        return pollOk("boot-1", [working(1)], 1);
+      },
+      maxRounds: 2,
+      log: () => {},
+    });
+    try {
+      await waitFor(calls, 2);
+      // The second round repeats the same state and dedupes: one delivery.
+      expect(first).toEqual(["s-1"]);
+      expect(second).toEqual(["working"]);
+    } finally {
+      stop();
+      stopFirst();
+      stopSecond();
+    }
+  });
+
+  it("an unsubscribed listener hears nothing and a throwing one never breaks the loop", async () => {
+    resetSessionStatePushForTests();
+    const { sent, window } = fakeWindow();
+    const calls = { count: 0 };
+    const heard: unknown[] = [];
+    const stopGone = subscribeSessionPush((event) =>
+      heard.push(event.sessionId),
+    );
+    stopGone();
+    subscribeSessionPush(() => {
+      throw new Error("consumer bug");
+    });
+    const observed: unknown[] = [];
+    const stop = startSessionStatePush({
+      getWindow: () => window as never,
+      onEvent: (event) => observed.push(event),
+      call: async () => {
+        calls.count += 1;
+        return pollOk("boot-1", [working(1)], 1);
+      },
+      maxRounds: 1,
+      log: () => {},
+    });
+    try {
+      await waitFor(calls, 1);
+      expect(heard).toEqual([]);
+      // The loop, the onEvent consumer, and the renderer forward all ran.
+      expect(observed).toHaveLength(1);
+      expect(sent).toHaveLength(1);
+    } finally {
+      stop();
+    }
   });
 });
