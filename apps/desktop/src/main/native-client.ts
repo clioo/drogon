@@ -382,6 +382,20 @@ let pool: PooledConnection[] = [];
 const pending = new Map<string, PendingCall>();
 let connectionAttempts = 0;
 /**
+ * PERF-02c endpoint health: an established unix-domain connection survives
+ * the socket path going away (rename/unlink) — the daemon keeps answering
+ * it — so a warm pool can mask a transport loss no entry ever dies from.
+ * Every renderer call keeps succeeding on pre-loss entries, the strip tab
+ * never flips to `unverifiable`, and recovery waits hang. A dial failure
+ * and this watchdog are the only signals that test the path itself.
+ */
+const POOL_WATCHDOG_MS = 2_000;
+const POOL_WATCHDOG_PROBE_MS = 1_500;
+/** The endpoint may be undialable: prefer a fresh dial over idle reuse. */
+let endpointSuspect = false;
+let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+let healthCheckInFlight = false;
+/**
  * Outstanding dedicated `session.output` holds. The singleton
  * `session.events.poll` loop bypasses the cap (grandfathered at exactly
  * one); every per-pane output hold counts. Socket budget against the
@@ -432,11 +446,101 @@ function removeFromPool(conn: PooledConnection): boolean {
   return true;
 }
 
+/**
+ * Drop every connected entry carrying no flight. Entries with genuine
+ * in-flight answers are left alone — their answers are real daemon answers,
+ * never a mask — but once they drain, the next pick revalidates rather
+ * than coasting on a pre-loss entry. Never dials, so it cannot fail.
+ */
+function evictIdleEntries(): void {
+  for (const conn of [...pool]) {
+    if (conn.connected && flightsOf(conn).length === 0) {
+      removeFromPool(conn);
+      try {
+        conn.socket?.destroy();
+      } catch {
+        // Already half-closed; the eviction itself is the outcome.
+      }
+      conn.receiveBytes = Buffer.alloc(0);
+    }
+  }
+}
+
+/**
+ * The endpoint may have gone away (failed dial or failed watchdog probe):
+ * stop coasting on pre-loss entries so the next call tests the path and
+ * surfaces `unverifiable` within one round instead of hanging a recovery
+ * wait. In-flight entries keep serving their genuine answers.
+ */
+function markEndpointSuspect(): void {
+  endpointSuspect = true;
+  evictIdleEntries();
+}
+
+async function checkEndpointHealth(): Promise<boolean> {
+  if (healthCheckInFlight) return !endpointSuspect;
+  if (transportOverride) return !endpointSuspect;
+  // An empty unsuspected pool needs no probe: the next call dials fresh
+  // anyway. A suspect flag with an empty pool still probes, so a restored
+  // path clears before the next call instead of crying wolf.
+  if (pool.length === 0 && !endpointSuspect) return true;
+  healthCheckInFlight = true;
+  try {
+    // The spawn gate's own classifier, reused as the watchdog probe:
+    // connect-only, no token read, no pool entry. `absent` (nothing
+    // listening) marks the endpoint; `present` clears; `ambiguous`
+    // (unsupported platform, timeout, odd errno) changes nothing — a
+    // verdict the probe cannot prove must not throttle healthy reuse.
+    const observation = await observeLocalEndpoint(
+      dataDirectory(),
+      process.platform,
+      POOL_WATCHDOG_PROBE_MS,
+    );
+    if (observation.kind === "present") endpointSuspect = false;
+    else if (observation.kind === "absent") markEndpointSuspect();
+    return !endpointSuspect;
+  } finally {
+    healthCheckInFlight = false;
+  }
+}
+
+function ensurePoolWatchdog(): void {
+  if (watchdogTimer || transportOverride) return;
+  watchdogTimer = setInterval(() => {
+    void checkEndpointHealth();
+  }, POOL_WATCHDOG_MS);
+  // A liveness signal must never keep the app alive past its windows.
+  try {
+    watchdogTimer.unref?.();
+  } catch {
+    // A host without `unref` still gets the checks; exit owns lifetime.
+  }
+}
+
+function stopPoolWatchdog(): void {
+  if (watchdogTimer) {
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
+  healthCheckInFlight = false;
+  endpointSuspect = false;
+}
+
+/**
+ * Test seam: run one endpoint-health check on demand and report the
+ * verdict. The background interval stays production-only; deterministic
+ * tests poke instead of waiting out the wall clock.
+ */
+export function runNativePoolHealthCheckForTests(): Promise<boolean> {
+  return checkEndpointHealth();
+}
+
 /** Test seam: drop every pooled socket, fail nothing silently (every flight rejects), clear all module state. */
 export function resetNativeClientForTests(): void {
   transportOverride = null;
   connectionAttempts = 0;
   cachedCredentials = null;
+  stopPoolWatchdog();
   credentialKey = null;
   lastKnownHostId = null;
   activeSessionOutputHolds = 0;
@@ -517,6 +621,9 @@ async function loadCredentials(
   // its absolute deadline, exactly as the single-socket client left it.
   // Either way this only happens when tests swap directories mid-flight.
   if (credentialKey !== null && credentialKey !== key && pool.length > 0) {
+    // A new endpoint gets a fresh health verdict: suspicion attached to
+    // the old path must never throttle dials to the new one.
+    endpointSuspect = false;
     const stale = pool;
     pool = [];
     for (const conn of stale) {
@@ -914,6 +1021,10 @@ function failDialFlights(conn: PooledConnection): void {
  * same idle entry.
  */
 function pickConnection(endpoint: string): PooledConnection {
+  // A suspect endpoint revalidates instead of coasting: evict the idle
+  // pre-loss entries so this call tests the path (fail-fast surfacing) —
+  // a restored path dials cleanly and clears the suspicion on connect.
+  if (endpointSuspect) evictIdleEntries();
   for (const conn of pool) {
     if (conn.connected && conn.endpoint === endpoint && flightsOf(conn).length === 0)
       return conn;
@@ -943,6 +1054,7 @@ function startDial(endpoint: string): PooledConnection {
     receiveBytes: Buffer.alloc(0),
   };
   pool.push(conn);
+  ensurePoolWatchdog();
   conn.ready = new Promise<Socket>((resolve, reject) => {
     conn.rejectReady = reject;
     let socket: Socket;
@@ -956,6 +1068,8 @@ function startDial(endpoint: string): PooledConnection {
       // the death path cannot see it.
       removeFromPool(conn);
       failDialFlights(conn);
+      // Nothing is listening: pre-loss idle entries must not mask this.
+      markEndpointSuspect();
       reject(new Error("connect-failed"));
       return;
     }
@@ -969,6 +1083,8 @@ function startDial(endpoint: string): PooledConnection {
         // A failed dial has nothing to clean up beyond itself.
       }
       failDialFlights(conn);
+      // Nothing answered the dial: pre-loss idle entries must not mask this.
+      markEndpointSuspect();
       reject(new Error("connect-failed"));
     };
     try {
@@ -988,6 +1104,9 @@ function startDial(endpoint: string): PooledConnection {
         }
         socket.removeListener("error", onConnectError);
         conn.connected = true;
+        // A completed dial proves the path: lift any earlier suspicion so
+        // later calls reuse entries again instead of redialing forever.
+        endpointSuspect = false;
         attachSocket(conn);
         resolve(socket);
       });

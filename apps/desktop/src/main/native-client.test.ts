@@ -1,8 +1,11 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtemp, readFile, realpath as realpathDir, rename, rm, writeFile } from "node:fs/promises";
 import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
+import { createServer, type Server as NetServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   MAX_FRAME_BYTES,
@@ -13,6 +16,8 @@ import {
   getNativeConnectionStats,
   identityMismatch,
   resetNativeClientForTests,
+  resetNativeConnectionStatsForTests,
+  runNativePoolHealthCheckForTests,
   setNativeTransportForTests,
   validateEnvelope,
 } from "./native-client";
@@ -1093,3 +1098,146 @@ describe("callNativeHold dedicated long-holds (PERF-01)", () => {
     if (!result.ok) expect(result.error.code).toBe("method_not_found");
   });
 });
+
+describe("pooled transport surfaces endpoint loss (PERF-02c)", () => {
+  // Real unix sockets end to end, no injected transport: the fake
+  // transports above answer whole frames synchronously and never model
+  // path loss, so they cannot see a warm pool masking a renamed-away
+  // socket file while the daemon keeps answering established connections.
+  const statusResult = {
+    hostId: "test-host",
+    serviceInstanceId: "svc-1",
+    protocol: 1,
+    capabilities: [],
+    version: "test",
+  };
+
+  let scratchDir = "";
+  let sockPath = "";
+  let server: NetServer | null = null;
+  let serverSockets: Socket[] = [];
+  let originalDataDir: string | undefined;
+  // Frames the stub holds instead of answering (slow-call test).
+  let heldRequests = new Set<string>();
+
+  function answer(socket: Socket, requestId: string): void {
+    socket.write(
+      `${JSON.stringify({ protocol: 1, requestId, ok: true, result: statusResult })}\n`,
+    );
+  }
+
+  async function startStubDaemon(): Promise<void> {
+    server = createServer((socket) => {
+      serverSockets.push(socket);
+      let bytes = Buffer.alloc(0);
+      socket.on("data", (chunk: Buffer) => {
+        bytes = Buffer.concat([bytes, chunk]);
+        let newline: number;
+        while ((newline = bytes.indexOf(10)) >= 0) {
+          const line = bytes.subarray(0, newline).toString("utf8");
+          bytes = bytes.subarray(newline + 1);
+          const frame = JSON.parse(line) as { requestId: string };
+          if (!heldRequests.has(frame.requestId)) answer(socket, frame.requestId);
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server!.listen(sockPath, resolve));
+  }
+
+  beforeEach(async () => {
+    resetNativeClientForTests();
+    heldRequests = new Set();
+    serverSockets = [];
+    // Canonicalize: the client resolves the data dir, so the stub must
+    // listen (and the test must rename) under the same spelling.
+    scratchDir = await realpathDir(await mkdtemp(path.join(tmpdir(), "drogon-native-pool-loss-")));
+    sockPath = path.join(scratchDir, "runtime-v1.sock");
+    await writeFile(path.join(scratchDir, "auth.token"), "test-token\n", "utf8");
+    originalDataDir = process.env.DROGON_DATA_DIR;
+    process.env.DROGON_DATA_DIR = scratchDir;
+    await startStubDaemon();
+  });
+
+  afterEach(async () => {
+    resetNativeClientForTests();
+    for (const socket of serverSockets) {
+      try {
+        socket.destroy();
+      } catch {
+        // Teardown best-effort; the client reset already closed its ends.
+      }
+    }
+    serverSockets = [];
+    if (server) {
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+      server = null;
+    }
+    if (originalDataDir === undefined) delete process.env.DROGON_DATA_DIR;
+    else process.env.DROGON_DATA_DIR = originalDataDir;
+    if (scratchDir) await rm(scratchDir, { recursive: true, force: true });
+  });
+
+  // Renaming a live socket file is a unix-namespace scenario (Windows
+  // named pipes have no path to move); same gate as the restart suite.
+  const describeUnix = process.platform === "win32" ? describe.skip : describe;
+
+  describeUnix("socket-namespace loss", () => {
+  test("a renamed-away socket surfaces instead of coasting on warm entries", async () => {
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    expect(getNativeConnectionStats().connections).toBe(1);
+    // Transport loss with the daemon still alive: established connections
+    // stay open, so without revalidation every later call would keep
+    // succeeding on the pre-loss entry and no liveness surface would move.
+    await rename(sockPath, path.join(scratchDir, "outage.sock"));
+    expect(await runNativePoolHealthCheckForTests()).toBe(false);
+    const during = await callNative("status", {}, "req-outage");
+    expect(during.ok).toBe(false);
+    if (!during.ok) {
+      expect(during.error.code).toBe("unverifiable");
+      expect(during.error.retryable).toBe(true);
+    }
+    await rename(path.join(scratchDir, "outage.sock"), sockPath);
+    expect(await runNativePoolHealthCheckForTests()).toBe(true);
+    expect((await callNative("status", {}, "req-restored")).ok).toBe(true);
+    // The pool win is intact: the next sequential call reuses the entry
+    // instead of dialing again (warm + outage dial + restore dial only).
+    expect((await callNative("status", {}, "req-reuse")).ok).toBe(true);
+    expect(getNativeConnectionStats().connections).toBe(3);
+  });
+
+  test("the background watchdog revalidates without a poke", async () => {
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    await rename(sockPath, path.join(scratchDir, "outage.sock"));
+    // The 2 s interval (not the poke above) marks the endpoint: poll the
+    // outcome with a deadline instead of sleeping a fixed wall clock.
+    let surfaced = false;
+    for (let i = 0; i < 100 && !surfaced; i++) {
+      const probe = await callNative("status", {}, `req-watch-${i}`);
+      surfaced = !probe.ok;
+      if (!surfaced) await delay(100);
+    }
+    expect(surfaced).toBe(true);
+    await rename(path.join(scratchDir, "outage.sock"), sockPath);
+    expect((await callNative("status", {}, "req-recovered")).ok).toBe(true);
+  }, 20_000);
+  }); // socket-namespace loss
+
+  test("a slow call on one real connection never delays a fast call", async () => {
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    heldRequests.add("req-slow");
+    const slow = callNative("status", {}, "req-slow");
+    // Causal, no timers: the fast call resolves while the slow frame is
+    // still held by the stub, so it never shared the slow connection.
+    const fast = await callNative("status", {}, "req-fast");
+    expect(fast.ok).toBe(true);
+    expect(serverSockets.length).toBeGreaterThanOrEqual(2);
+    heldRequests.delete("req-slow");
+    for (const socket of serverSockets) {
+      // Release the held frame on whichever connection received it.
+      socket.write(
+        `${JSON.stringify({ protocol: 1, requestId: "req-slow", ok: true, result: statusResult })}\n`,
+      );
+    }
+    expect((await slow).ok).toBe(true);
+  });});
+
