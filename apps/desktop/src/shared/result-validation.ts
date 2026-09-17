@@ -58,6 +58,10 @@ const session = z.object({
   agentSessionTranscriptPath: z.string().max(4096).nullable().optional(),
   // `harness.start` replies only: how a resume request actually landed.
   agentResume: z.enum(["resumed", "continued", "fresh"]).optional(),
+  // Issue #333: the daemon reports a live foreground child on live session
+  // rows; optional so a response from an older service without it still
+  // validates, and absent reads as idle at the call sites.
+  hasForegroundChild: z.boolean().optional(),
 });
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 // PERF-01 push channel: `session.output` answers the exact `session.read`

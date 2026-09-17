@@ -256,4 +256,39 @@ describe("gated bridge (explicit withhold fails closed, drafts stay mounted)", (
     expect(refused.ok).toBe(false);
     expect(createGatedFileBridge(source, () => true).fileSearch).toBeUndefined();
   });
+  it("forwards fileDuplicate when the source exposes it, absent otherwise", async () => {
+    const duplicating = {
+      ...source,
+      fileDuplicate: async (input: { from: string; to: string }) => {
+        calls.push(`duplicate:${input.from}->${input.to}`);
+        return {
+          ok: true as const,
+          result: {
+            hostId: "local",
+            workspaceId: "w1",
+            from: input.from,
+            to: input.to,
+          },
+        };
+      },
+    };
+    const gated = createGatedFileBridge(duplicating, () => true);
+    const done = await gated.fileDuplicate!({
+      hostId: "local",
+      workspaceId: "w1",
+      from: "a.txt",
+      to: "a copy.txt",
+    });
+    expect(done.ok).toBe(true);
+    expect(calls).toContain("duplicate:a.txt->a copy.txt");
+    const withheld = createGatedFileBridge(duplicating, () => false);
+    const refused = await withheld.fileDuplicate!({
+      hostId: "local",
+      workspaceId: "w1",
+      from: "a.txt",
+      to: "a copy.txt",
+    });
+    expect(refused.ok).toBe(false);
+    expect(createGatedFileBridge(source, () => true).fileDuplicate).toBeUndefined();
+  });
 });

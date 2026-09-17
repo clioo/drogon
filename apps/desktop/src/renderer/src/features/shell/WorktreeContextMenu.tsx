@@ -2,29 +2,39 @@
    src/renderer/src/components/sidebar/WorktreeContextMenu.tsx,
    WorktreeContextMenuView.tsx (item order, the "Workspace" label, the
    destructive delete row with its shortcut chip) and WorktreeOpenInMenu.tsx
-   (the "Open in" submenu). Adapter: MVP subset — the reference menu routes
-   pins, read state, statuses, groups, lineage, sleep and developer items
-   through zustand stores this repo does not have, so the menu holds Update
-   (inline rename), the Open in submenu, Copy Path and the delete row over
-   props; the submenu lists only the file-manager entry because this repo's
+   (the "Open in" submenu). Adapter: MVP subset — read state, groups,
+   lineage, sleep and developer items route through zustand stores this
+   repo does not have, so those rows stay omitted (issue #331). Pin and
+   workspace status are daemon-stored (`worktree.update`), so the menu
+   holds Update (inline rename), Pin/Unpin, the Move to Status submenu,
+   the Open in submenu, Copy Path and the delete row over props; the
+   Open in submenu lists only the file-manager entry because this repo's
    shell bridge has no open-in-external-editor IPC and no open-in-apps
    settings section (both listed as not-ported). The Radix DropdownMenu
    primitive, the hidden click-point trigger and the ARIA names are the
    source's. Plain fallback copy replaces the clipboard IPC. */
 import { useRef, useState } from "react";
 import {
+  Check,
   ChevronRight,
   Copy,
   FolderOpen,
   Pencil,
+  Pin,
+  PinOff,
+  Tag,
   Trash2,
+  X,
 } from "lucide-react";
 import { DropdownMenu, Tooltip } from "radix-ui";
 import type { Worktree } from "../../../../shared/session-contract";
+import type { WorkspaceStatusDefinition } from "../../../../shared/persistence-contracts/worktree-types";
+import { getWorkspaceStatus } from "../../../../shared/workspace-statuses";
 import {
   getFileManagerLabel,
   getWorktreeDeleteLabel,
   getWorktreeDeleteShortcutLabel,
+  getWorktreePinLabel,
   isWorktreeRenamable,
   PRIMARY_CHECKOUT_DELETE_DISABLED_HINT,
   worktreeDeleteRowKind,
@@ -61,6 +71,9 @@ export function WorktreeContextMenu({
   disabled,
   onRename,
   onDelete,
+  onTogglePin,
+  statuses,
+  onMoveToStatus,
   children,
 }: {
   worktree: Worktree;
@@ -83,6 +96,21 @@ export function WorktreeContextMenu({
    * folder on disk).
    */
   onDelete: (() => void) | null;
+  /**
+   * Toggles the daemon-stored `isPinned` flag (`worktree.update`). Null
+   * while the project bridge is unavailable; the row is omitted then.
+   */
+  onTogglePin: (() => void) | null;
+  /**
+   * The shared workspace statuses backing the "Move to Status" submenu
+   * (Group by/Sort by read the same list). Empty hides the submenu.
+   */
+  statuses: readonly WorkspaceStatusDefinition[];
+  /**
+   * Moves the worktree to a status (`null` clears the stored override).
+   * Null while the project bridge is unavailable; the submenu is omitted.
+   */
+  onMoveToStatus: ((statusId: string | null) => void) | null;
   children: React.ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -102,6 +130,11 @@ export function WorktreeContextMenu({
   );
   const userAgent =
     typeof navigator === "undefined" ? "" : navigator.userAgent;
+  const isPinned = worktree.isPinned ?? false;
+  const showStatusMenu = onMoveToStatus !== null && statuses.length > 0;
+  const effectiveStatusId = showStatusMenu
+    ? getWorkspaceStatus(worktree, statuses)
+    : null;
 
   const openAt = (x: number, y: number) => {
     const bounds = scopeRef.current?.getBoundingClientRect();
@@ -210,6 +243,68 @@ export function WorktreeContextMenu({
               <Copy className="size-3.5" />
               Copy Path
             </DropdownMenu.Item>
+            {onTogglePin !== null && (
+              <DropdownMenu.Item
+                className="shell-worktree-context-menu-item"
+                disabled={disabled}
+                onSelect={() => onTogglePin?.()}
+              >
+                {isPinned ? (
+                  <PinOff className="size-3.5" />
+                ) : (
+                  <Pin className="size-3.5" />
+                )}
+                {getWorktreePinLabel(isPinned)}
+              </DropdownMenu.Item>
+            )}
+            {showStatusMenu && (
+              <DropdownMenu.Sub>
+                <DropdownMenu.SubTrigger
+                  className="shell-worktree-context-menu-item"
+                  disabled={disabled}
+                >
+                  <Tag className="size-3.5" />
+                  Move to Status
+                  <ChevronRight className="shell-worktree-context-menu-subtrigger-chevron" />
+                </DropdownMenu.SubTrigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.SubContent
+                    className="shell-worktree-context-menu"
+                    sideOffset={2}
+                    alignOffset={-5}
+                  >
+                    {statuses.map((status) => (
+                      <DropdownMenu.Item
+                        key={status.id}
+                        className="shell-worktree-context-menu-item"
+                        disabled={disabled}
+                        onSelect={() => onMoveToStatus?.(status.id)}
+                      >
+                        {effectiveStatusId === status.id ? (
+                          <Check className="size-3.5" />
+                        ) : (
+                          <span className="size-3.5" aria-hidden />
+                        )}
+                        {status.label}
+                      </DropdownMenu.Item>
+                    ))}
+                    {worktree.workspaceStatus != null && (
+                      <>
+                        <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
+                        <DropdownMenu.Item
+                          className="shell-worktree-context-menu-item"
+                          disabled={disabled}
+                          onSelect={() => onMoveToStatus?.(null)}
+                        >
+                          <X className="size-3.5" />
+                          Clear status
+                        </DropdownMenu.Item>
+                      </>
+                    )}
+                  </DropdownMenu.SubContent>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Sub>
+            )}
             {onDelete !== null && (
               <>
                 <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />

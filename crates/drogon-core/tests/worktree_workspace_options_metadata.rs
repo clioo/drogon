@@ -242,6 +242,44 @@ fn worktree_create_accepts_and_persists_the_automation_creator_across_reopen() {
     assert_eq!(automation_created_ids, vec![automation_wt_id.as_str()]);
 }
 
+/// Issue #331: the menu's Pin/Unpin and Move to Status rows round-trip
+/// through `worktree.update`, so a pin + status set must survive a daemon
+/// restart (fresh `Engine` over the same data dir), not just echo back
+/// from the update call.
+#[test]
+fn worktree_update_pin_and_status_survive_a_daemon_restart() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let (project_id, wt_id) = {
+        let engine = Engine::open(data_dir.path()).unwrap();
+        let project_id = add_git_project(&engine, repo.path());
+        let wt = ok(
+            &engine,
+            "worktree.create",
+            json!({"projectId": project_id, "name": "feature"}),
+        );
+        let wt_id = wt["id"].as_str().unwrap().to_string();
+        let updated = ok(
+            &engine,
+            "worktree.update",
+            json!({"worktreeId": wt_id, "workspaceStatus": "in-review", "isPinned": true}),
+        );
+        assert_eq!(updated["workspaceStatus"], "in-review");
+        assert_eq!(updated["isPinned"], json!(true));
+        (project_id, wt_id)
+    };
+
+    // Reopen: a fresh Engine over the same data dir.
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let listed = ok(&engine, "worktree.list", json!({"projectId": project_id}));
+    let worktrees = listed["worktrees"].as_array().unwrap();
+    let row = worktrees.iter().find(|w| w["id"] == wt_id).unwrap();
+    assert_eq!(row["workspaceStatus"], "in-review");
+    assert_eq!(row["isPinned"], json!(true));
+}
+
 /// `worktree.update` sets and clears every Workspace Options field, and
 /// bumps `last_activity_at` on any real mutation -- absent-vs-null on the
 /// nullable fields distinguishes "leave untouched" from "clear", exactly

@@ -36,7 +36,6 @@ import {
   type ProjectGroup,
 } from "../shell/project-adapter";
 import {
-  composerAgentLaunchInput,
   composerPrimaryActionLabel,
   resolveComposerSubmit,
   type ComposerAgentSelection,
@@ -446,14 +445,12 @@ export function NewWorkspaceComposer({
     };
     // The fork's blank-name fallback (getWorkspaceSeedName →
     // getSuggestedCreatureName): an [Optional] name never blocks creation —
-    // a globally-unique creature name seeds the worktree instead.
+    // a globally-unique creature name seeds the section instead. Both git
+    // worktrees and folder Workspaces (issue #579) create a real, named
+    // section now, so both use the fallback.
     const submitName =
       name.trim() ||
-      (project?.kind === "git"
-        ? getSuggestedCreatureName(
-            groups.flatMap((group) => group.worktrees),
-          )
-        : "");
+      getSuggestedCreatureName(groups.flatMap((group) => group.worktrees));
     const resolved = resolveComposerSubmit(groups, workspaces, {
       projectId,
       name: submitName,
@@ -467,25 +464,33 @@ export function NewWorkspaceComposer({
     setSending(true);
     setError(null);
     try {
-      if (resolved.target.kind === "implicit") {
-        onSelectWorkspace(resolved.target.workspaceId);
-        if (!agent.harnessId) {
-          onClose();
-          return;
-        }
-        const launch = composerAgentLaunchInput(
-          resolved.target.workspaceId,
+      if (resolved.target.folderWorkspace) {
+        // A folder Workspace shares its project's folder path and has no
+        // branch/base ref/parent/sparse checkout — pass only the name, an
+        // optional note, and the picked agent so the daemon does not reject
+        // a git-only field (issue #579).
+        const failure = await onSubmitWorktree({
+          projectId: resolved.target.project.id,
+          name: resolved.target.name,
+          ...(note.trim() ? { note: note.trim() } : {}),
+          ...(runSetup && project?.setupScript?.trim()
+            ? {
+                setupScript: project.setupScript,
+                ...(waitForSetup ? { waitForSetup: true } : {}),
+              }
+            : {}),
           agent,
-          crypto.randomUUID(),
-          harnessDefaults,
-        );
-        if (!launch) {
-          onClose();
+        });
+        if (failure) {
+          setError(failure);
           return;
         }
-        const failure = await onLaunchAgent(launch);
-        if (failure) setError(failure);
-        else onClose();
+        if (createMultiple) {
+          setName("");
+          setNote("");
+          return;
+        }
+        onClose();
         return;
       }
       const failure = await onSubmitWorktree({

@@ -4,6 +4,7 @@ import {
   buildRowMenuItems,
   deleteConfirmationFor,
   deleteShortcutLabel,
+  duplicateNameFor,
   renameShortcutLabel,
   revealLabel,
   validateInlineName,
@@ -83,6 +84,7 @@ describe("buildRowMenuItems", () => {
       "new-folder",
       "copy-path",
       "copy-relative-path",
+      "duplicate",
       "reveal-in-finder",
       "rename",
       "delete",
@@ -113,13 +115,19 @@ describe("buildRowMenuItems", () => {
     });
     expect(items.map((item) => item.id)).toContain("rename");
     for (const item of items) {
-      if (["new-file", "new-folder", "rename", "delete"].includes(item.id)) {
+      if (["new-file", "new-folder", "duplicate", "rename", "delete"].includes(item.id)) {
         expect(item.disabled).toBe(true);
         expect(item.disabledReason).toMatch(/daemon/);
       } else {
         expect(item.disabled).toBeUndefined();
       }
     }
+  });
+
+  test("duplicate sits with the copy group on directory rows too", () => {
+    const ids = buildRowMenuItems(dirNode, 1, mutable).map((item) => item.id);
+    expect(ids.indexOf("duplicate")).toBeGreaterThan(ids.indexOf("copy-relative-path"));
+    expect(ids.indexOf("duplicate")).toBeLessThan(ids.indexOf("reveal-in-finder"));
   });
 
   test("delete stays destructive with the platform shortcut", () => {
@@ -155,6 +163,23 @@ describe("deleteConfirmationFor", () => {
     expect(deleteConfirmationFor([fileNode, dirNode]).title).toBe(
       "Permanently delete 2 items?",
     );
+  });
+});
+
+describe("duplicateNameFor", () => {
+  test("appends copy before the extension", () => {
+    expect(duplicateNameFor("a.txt", new Set())).toBe("a copy.txt");
+    expect(duplicateNameFor("archive.tar.gz", new Set())).toBe("archive.tar copy.gz");
+  });
+
+  test("extensionless names and dotfiles gain a bare copy suffix", () => {
+    expect(duplicateNameFor("Makefile", new Set())).toBe("Makefile copy");
+    expect(duplicateNameFor(".gitignore", new Set())).toBe(".gitignore copy");
+  });
+
+  test("colliding siblings increment the copy counter", () => {
+    const siblings = new Set(["a.txt", "a copy.txt", "a copy 2.txt"]);
+    expect(duplicateNameFor("a.txt", siblings)).toBe("a copy 3.txt");
   });
 });
 

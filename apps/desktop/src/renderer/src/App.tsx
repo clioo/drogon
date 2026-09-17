@@ -75,10 +75,19 @@ import {
 // of hardcoding one.
 import { resolveHarnessPermissionMode } from "../../shared/agent-defaults";
 import { TabBar } from "./features/shell/TabBar";
+import { CloseBusyTerminalDialog } from "./features/shell/CloseBusyTerminalDialog";
+import {
+  isAgentTerminalSession,
+  isBusyTerminalSession,
+  readSkipCloseBusyTerminalConfirm,
+  writeSkipCloseBusyTerminalConfirm,
+} from "./features/shell/close-busy-terminal";
 import { tabCreateMenuChord } from "./features/shell/TabCreateMenuChords";
 import {
   editorDiffTabId,
   editorTabId,
+  renameTargetPath,
+  retargetEditorTabsAfterRename,
   type EditorTabDiffArea,
   type EditorTabState,
 } from "./features/shell/editor-tab";
@@ -619,6 +628,38 @@ export function applyConfirmedClose(
         )?.id ?? "")
       : active;
   return { sessions, active: nextActive };
+}
+
+export type EditorFileRenamePlan =
+  | { kind: "noop" }
+  | { kind: "rename"; workspaceId: string; from: string; to: string };
+
+/**
+ * Pure plan step for the strip's editor Rename (#335): resolves (tabId, new
+ * base name) to a rename or a no-op. Throws the user-facing message for
+ * input that can never succeed (dirty tabs hold path-keyed drafts a rename
+ * would orphan; separators never pass the daemon). Daemon-side failures
+ * (collisions, missing bridge) still surface from the RPC itself, and a
+ * failed RPC never retargets — the caller applies the plan only after the
+ * rename resolves. Tested in App.editor-file-rename.test.ts.
+ */
+export function planEditorFileRename(
+  tabs: readonly EditorTabState[],
+  tabId: string,
+  newName: string,
+): EditorFileRenamePlan {
+  const tab = tabs.find((candidate) => candidate.tabId === tabId);
+  if (!tab || tab.diff !== undefined || tab.missing !== undefined) {
+    return { kind: "noop" };
+  }
+  if (tab.dirty) throw new Error("Save the file before renaming it.");
+  const name = newName.trim();
+  if (name.includes("/") || name.includes("\\")) {
+    throw new Error("A name cannot contain path separators.");
+  }
+  const to = renameTargetPath(tab.path, name);
+  if (to === tab.path) return { kind: "noop" };
+  return { kind: "rename", workspaceId: tab.workspaceId, from: tab.path, to };
 }
 
 export const IconButton = forwardRef<
@@ -3509,6 +3550,43 @@ export function App() {
     ].find((id) => remainingIds.has(id));
     setActiveEditorTabId(neighbor ?? remaining[remaining.length - 1].tabId);
   };
+  // Editor tab Rename (#335): the strip commits (tabId, new base name) from
+  // its inline input. App runs files.rename with the explorer's own
+  // scope/shape, then retargets the open tab so no stale or tombstoned tab
+  // remains. Separator names and collisions fail through the action error
+  // channel like any other strip operation; a failed RPC never retargets.
+  // Dirty tabs stay out (their drafts are keyed by path, which a rename
+  // would orphan) — the strip hides the row, this is the second gate.
+  const renameEditorFile = (tabId: string, newName: string) =>
+    action(async () => {
+      const hostId = status?.hostId;
+      if (!hostId) throw new Error("No workspace is selected.");
+      const plan = planEditorFileRename(visibleEditorTabs, tabId, newName);
+      if (plan.kind === "noop") return;
+      const rename = filesGatedBridge.fileRename;
+      if (!rename) {
+        throw new Error(
+          "Renaming needs a newer daemon with files.rename support.",
+        );
+      }
+      checked(
+        await rename({
+          hostId,
+          workspaceId: plan.workspaceId,
+          from: plan.from,
+          to: plan.to,
+        }),
+      );
+      const retargeted = retargetEditorTabsAfterRename(
+        editorTabs,
+        tabId,
+        plan.to,
+      );
+      setEditorTabs(retargeted.tabs);
+      if (retargeted.activatedTabId !== null) {
+        setActiveEditorTabId(retargeted.activatedTabId);
+      }
+    });
   const newBrowserTab = () =>
     action(async () => {
       const workspaceId = contextRef.current.workspaceId;
@@ -4000,13 +4078,94 @@ export function App() {
     changeTheme(
       theme === "system" ? "dark" : theme === "dark" ? "light" : "system",
     );
+  // Issue #333: busy-tab close confirmations. Every close entry point
+  // (strip X, bulk close, pane X, keyboard) funnels through the `close*`
+  // wrappers below, which queue a request here instead of stopping a
+  // session with work in flight. One dialog shows the head; confirming
+  // runs it, cancelling drops it, and Don't-ask-again persists the skip
+  // and flushes the rest without re-prompting.
+  type PendingBusyClose = {
+    kind: "tab" | "split" | "single";
+    sessionId: string;
+    agent: boolean;
+  };
+  const [busyCloseQueue, setBusyCloseQueue] = useState<PendingBusyClose[]>(
+    [],
+  );
+  const busyCloseQueueRef = useRef<PendingBusyClose[]>([]);
+  const enqueueBusyClose = (request: PendingBusyClose) => {
+    busyCloseQueueRef.current = [...busyCloseQueueRef.current, request];
+    setBusyCloseQueue(busyCloseQueueRef.current);
+  };
+  const dequeueBusyClose = (): PendingBusyClose | null => {
+    const [head, ...rest] = busyCloseQueueRef.current;
+    if (!head) return null;
+    busyCloseQueueRef.current = rest;
+    setBusyCloseQueue(rest);
+    return head;
+  };
+  // Returns true when the close was queued behind the confirm dialog. Only
+  // the queued sessions are confirmed; a stale prompt for a tab that is
+  // already gone resolves to a no-op, never a blind stop.
+  const queueBusyClose = (
+    targets: Session[],
+    request: { kind: PendingBusyClose["kind"]; sessionId: string },
+  ): boolean => {
+    if (readSkipCloseBusyTerminalConfirm()) return false;
+    const busy = targets.filter((item) => isBusyTerminalSession(item));
+    if (busy.length === 0) return false;
+    enqueueBusyClose({
+      ...request,
+      agent: busy.some((item) => isAgentTerminalSession(item)),
+    });
+    return true;
+  };
+  const runBusyCloseRequest = (request: PendingBusyClose) => {
+    const session = sessionsRef.current.find(
+      (item) => item.id === request.sessionId,
+    );
+    if (!session) return;
+    if (request.kind === "tab") void closeTabSessionNow(session);
+    else if (request.kind === "split") void closeSplitPaneNow(session);
+    else void closeNow(session);
+  };
+  const confirmBusyClose = (dontAskAgain: boolean) => {
+    if (dontAskAgain) {
+      writeSkipCloseBusyTerminalConfirm(true);
+      // The skip is a standing answer for every queued close, so the whole
+      // queue flushes without re-prompting.
+      const queued = busyCloseQueueRef.current;
+      busyCloseQueueRef.current = [];
+      setBusyCloseQueue([]);
+      for (const request of queued) runBusyCloseRequest(request);
+      return;
+    }
+    const head = dequeueBusyClose();
+    if (head) runBusyCloseRequest(head);
+  };
+  const cancelBusyClose = () => {
+    dequeueBusyClose();
+  };
+  // Read-only twin of the splits lookup inside closeTabSessionNow: same
+  // inputs, so the gate sees the same second pane the close would stop.
+  const splitSecondSession = (sessionId: string): Session | null => {
+    const splits = pruneTerminalSplits(
+      hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
+      new Set(sessionsRef.current.map((item) => item.id)),
+    );
+    const split = splitForTab(splits, sessionId);
+    if (!split) return null;
+    return (
+      sessionsRef.current.find((item) => item.id === split.panes[1]) ?? null
+    );
+  };
   // The tab close is an explicit, confirmed dismissal (R16-AL2, issue
   // #228): `session.close` stops a live PTY and forgets the durable
   // record, so `exited` rows AND post-restart `unverifiable` stubs alike
   // release their tab. The reply verdict is never gated on: a stub keeps
   // its honest `unverifiable` (loss of contact is not exit) and is
   // removed anyway — the user, not the liveness oracle, decided to close.
-  const close = (session: Session) =>
+  const closeNow = (session: Session) =>
     action(async () => {
       confirmCloseOrAlreadyAbsent(
         await window.drogon.close({
@@ -4042,6 +4201,13 @@ export function App() {
       setSessions(applied.sessions);
       setActive(applied.active);
     });
+  // Issue #333: the single-session close (pane X on an unsplit tab, tab
+  // menu) confirms a busy session before stopping it.
+  const close = (session: Session) => {
+    if (queueBusyClose([session], { kind: "single", sessionId: session.id }))
+      return;
+    void closeNow(session);
+  };
   // R16-N Split Terminal Right actions. Each pane is a daemon session of
   // the same workspace created through window.drogon.start (the existing
   // session bridge); the tab keeps its root identity while split.
@@ -4096,7 +4262,14 @@ export function App() {
   // Closing one split pane (header X, context menu, exit overlay): only
   // that daemon session stops; the survivor keeps the tab as a single.
   // Closing the root promotes the survivor with its strip identity.
-  const closeSplitPane = (session: Session) =>
+  // Issue #333: a split pane stops only its own session, so the gate
+  // checks exactly the pane being closed.
+  const closeSplitPane = (session: Session) => {
+    if (queueBusyClose([session], { kind: "split", sessionId: session.id }))
+      return;
+    void closeSplitPaneNow(session);
+  };
+  const closeSplitPaneNow = (session: Session) =>
     action(async () => {
       const splits = pruneTerminalSplits(
         hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
@@ -4104,7 +4277,7 @@ export function App() {
       );
       const outcome = closeTerminalSplitPane(splits, session.id);
       if (!outcome.survivorId || !outcome.dissolvedRoot) {
-        void close(session);
+        void closeNow(session);
         return;
       }
       await stopOneSession(session);
@@ -4141,7 +4314,16 @@ export function App() {
     });
   // Closing a whole tab (strip X, bulk close): a split tab stops both
   // panes first so no orphan session survives as a surprise new tab.
-  const closeTabSession = (session: Session) =>
+  // Issue #333: the gate checks both panes — either one busy confirms.
+  const closeTabSession = (session: Session) => {
+    const targets = [session];
+    const second = splitSecondSession(session.id);
+    if (second) targets.push(second);
+    if (queueBusyClose(targets, { kind: "tab", sessionId: session.id }))
+      return;
+    void closeTabSessionNow(session);
+  };
+  const closeTabSessionNow = (session: Session) =>
     action(async () => {
       const splits = pruneTerminalSplits(
         hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
@@ -5221,6 +5403,9 @@ export function App() {
                 onSelectSession={selectSessionTab}
                 onSelectBrowserTab={selectBrowserTab}
                 onSelectEditorTab={selectEditorTab}
+                onRenameEditorFile={(tabId, newName) =>
+                  void renameEditorFile(tabId, newName)
+                }
                 mentuOpen={mentuTabOpen}
                 mentuActive={mentuTabActive}
                 onSelectMentu={openMentuTab}
@@ -5812,6 +5997,13 @@ export function App() {
           agent: { harnessId, model: "", provider: "" },
         })}
       />}
+      {busyCloseQueue[0] && (
+        <CloseBusyTerminalDialog
+          agent={busyCloseQueue[0].agent}
+          onConfirm={(dontAskAgain) => confirmBusyClose(dontAskAgain)}
+          onClose={() => cancelBusyClose()}
+        />
+      )}
       {composer && (
         <NewWorkspaceComposerModal
           groups={projectGroups.filter((group) => !group.project.quickSession)}

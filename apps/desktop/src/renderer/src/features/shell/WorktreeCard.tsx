@@ -56,6 +56,7 @@ import { buildWorktreeAgentRowTree } from "./worktree-agent-lineage";
 import type { TabStripState } from "./tab-order";
 import type { CardProperty } from "./workspace-options-state";
 import type { WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
+import type { WorkspaceStatusDefinition } from "../../../../shared/persistence-contracts/worktree-types";
 
 type AgentBranchContext = {
   row: WorktreeAgentRowData;
@@ -133,8 +134,8 @@ function renderAgentBranch(
  * PR chip when known, agent summary) and relative activity time. The
  * main surface selects the workspace the worktree attaches to; the
  * context menu (right-click, Menu key, Shift+F10, or the kebab button)
- * holds Open in editor / Reveal in Finder / Copy path, Rename, Create
- * worktree from here and Delete worktree.
+ * holds Open in editor / Reveal in Finder / Copy path, Rename, Pin/Unpin,
+ * Move to Status, Create worktree from here and Delete worktree.
  */
 export function WorktreeCard({
   worktree,
@@ -152,6 +153,9 @@ export function WorktreeCard({
   onCardClickCapture,
   onRemove,
   onRename,
+  onTogglePin = null,
+  statuses = [],
+  onMoveToStatus = null,
   onSelectSession = null,
   activeSessionId = "",
   tabStrip,
@@ -197,6 +201,18 @@ export function WorktreeCard({
    * Null for implicit folder worktrees, whose title is the folder.
    */
   onRename: ((name: string) => Promise<string | null>) | null;
+  /**
+   * Toggles the daemon-stored pin flag for the context menu row.
+   * Absent/null hides the row (direct test/fixture renders omit it).
+   */
+  onTogglePin?: (() => void) | null;
+  /** Shared workspace statuses for the menu's Move to Status submenu. */
+  statuses?: readonly WorkspaceStatusDefinition[];
+  /**
+   * Moves the worktree to a status (`null` clears the stored override).
+   * Absent/null hides the submenu.
+   */
+  onMoveToStatus?: ((statusId: string | null) => void) | null;
   /** Workspace options "Show properties" (workspace-options-state.ts):
    *  suppresses the branch name + ahead/behind badges, or the PR chip.
    *  Defaults preserve the card exactly as before this option existed. */
@@ -302,6 +318,9 @@ export function WorktreeCard({
       disabled={disabled}
       onRename={onRename ? () => setBeginEditing(true) : null}
       onDelete={onRemove}
+      onTogglePin={onTogglePin}
+      statuses={statuses}
+      onMoveToStatus={onMoveToStatus}
     >
       <div
         className="shell-worktree-card"

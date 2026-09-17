@@ -2,15 +2,18 @@
 // src/renderer/src/components/right-sidebar/source-control-dropdown-items.ts,
 // source-control-dropdown-remote-items.ts and
 // source-control-dropdown-labels.ts (labels, titles, disabled ladders and
-// row order). Adapter: this repo's git surface is commit / push (plain) /
-// pull --ff-only / fetch / gh pr create, so the reference rows with no
-// matching backend are omitted and listed as not-ported: Force Push, the
-// merge-mode Pull row, Rebase from Base, Publish Branch, and the Abort
-// merge / rebase pair (no in-progress detection). The fork's Fast-forward
-// row maps to this repo's ff-only pull; Sync maps to pull-then-push. The
-// reference menu's amend entry does not exist upstream at all — the
-// previous Drogon port invented it and it has been removed. Pure
-// functions, unit-tested.
+// row order). Adapter: this repo's git surface is commit / push (plain,
+// force-with-lease, publish) / pull --ff-only / fetch / gh pr create. The
+// fork's Fast-forward row maps to this repo's ff-only pull; Sync maps to
+// pull-then-push. The reference menu's amend entry does not exist upstream
+// at all — the previous Drogon port invented it and it has been removed.
+// Intentionally not ported (#332): the merge-mode Pull row (pull stays
+// ff-only on purpose — a panel click must never invent a merge commit),
+// Rebase from Base (rewrites history with no conflict-resolution UX in the
+// panel), and the Abort merge / rebase pair with in-progress detection (no
+// in-app producer for those states while pull stays ff-only and no rebase
+// backend exists; terminal users have the CLI). Pure functions,
+// unit-tested.
 import type { CommitDropdownEntry } from "./commit-action-menu";
 
 /** Source copy (source-control-dropdown-remote-items.ts). */
@@ -18,6 +21,8 @@ const NO_UPSTREAM_PUSH_REASON = "Upstream required. Publish your branch first.";
 const NO_UPSTREAM_PULL_REASON = "Pulling requires an upstream. Publish your branch first.";
 const NO_UPSTREAM_SYNC_REASON = "Sync requires an upstream. Publish your branch first.";
 const REMOTE_BUSY_REASON = "Finish the current remote action first.";
+const NO_REMOTE_PUBLISH_REASON = "No remote configured. Add one with git remote add first.";
+const HAS_UPSTREAM_PUBLISH_REASON = "This branch already tracks an upstream.";
 
 /** Ported from source-control-dropdown-labels.ts. */
 export function formatCountLabel(base: string, count: number): string {
@@ -47,6 +52,8 @@ export type CommitDropdownState = {
   /** A remote operation is in flight (syncBusy !== null). */
   syncBusy: boolean;
   hasUpstream: boolean;
+  /** Any remote configured (false disables Publish; unknown treated as true by callers). */
+  hasRemotes: boolean;
   /** Resolved compare counts (null treated as 0, like the source). */
   ahead: number;
   behind: number;
@@ -69,6 +76,7 @@ export function buildCommitDropdownItems(
     commitBusy,
     syncBusy,
     hasUpstream,
+    hasRemotes,
     ahead,
     behind,
     createPrDisabled,
@@ -100,6 +108,20 @@ export function buildCommitDropdownItems(
     ? NO_UPSTREAM_PUSH_REASON
     : `${describePushCount(ahead)} upstream`;
 
+  const publishTitle = syncBusy
+    ? REMOTE_BUSY_REASON
+    : hasUpstream
+      ? HAS_UPSTREAM_PUBLISH_REASON
+      : !hasRemotes
+        ? NO_REMOTE_PUBLISH_REASON
+        : "Publish this branch to origin and track it as upstream";
+
+  const forcePushTitle = syncBusy
+    ? REMOTE_BUSY_REASON
+    : !hasUpstream
+      ? NO_UPSTREAM_PUSH_REASON
+      : "Rewrite the upstream branch with your local history, refusing when the remote moved first";
+
   const items: CommitDropdownEntry[] = [
     {
       kind: "commit",
@@ -129,6 +151,20 @@ export function buildCommitDropdownItems(
       id: "push",
       label: formatCountLabel("Push", ahead),
       title: pushTitle,
+      disabled: remoteBusy || !hasUpstream,
+    },
+    {
+      kind: "publish",
+      id: "publish",
+      label: "Publish Branch",
+      title: publishTitle,
+      disabled: remoteBusy || hasUpstream || !hasRemotes,
+    },
+    {
+      kind: "force-push",
+      id: "force-push",
+      label: "Force Push",
+      title: forcePushTitle,
       disabled: remoteBusy || !hasUpstream,
     },
     { kind: "separator", id: "sep-review" },

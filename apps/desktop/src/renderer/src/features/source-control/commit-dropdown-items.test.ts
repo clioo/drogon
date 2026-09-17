@@ -14,6 +14,7 @@ const ready: CommitDropdownState = {
   commitBusy: false,
   syncBusy: false,
   hasUpstream: true,
+  hasRemotes: true,
   ahead: 2,
   behind: 1,
   createPrDisabled: false,
@@ -33,6 +34,8 @@ describe("commit dropdown items (fork row set)", () => {
       "Commit & Push",
       "Commit & Sync",
       "Push (2)",
+      "Publish Branch",
+      "Force Push",
       "Create PR",
       "Push before PR",
       "Fast-forward (1)",
@@ -80,7 +83,7 @@ describe("commit dropdown items (fork row set)", () => {
 
   test("a running remote action disables the remote rows", () => {
     const busy = buildCommitDropdownItems({ ...ready, syncBusy: true });
-    for (const id of ["push", "fast-forward", "sync", "fetch"]) {
+    for (const id of ["push", "publish", "force-push", "fast-forward", "sync", "fetch"]) {
       const row = busy.find((entry) => entry.id === id);
       expect(row && "disabled" in row && row.disabled).toBe(true);
     }
@@ -90,6 +93,59 @@ describe("commit dropdown items (fork row set)", () => {
     expect(buildCommitDropdownItems(ready).some((entry) => entry.id === "amend")).toBe(
       false,
     );
+  });
+
+  test("publish is enabled only without an upstream on an existing remote", () => {
+    const fresh = buildCommitDropdownItems({
+      ...ready,
+      hasUpstream: false,
+      hasRemotes: true,
+    });
+    const publish = fresh.find((entry) => entry.id === "publish");
+    expect(publish && "disabled" in publish && publish.disabled).toBe(false);
+    expect(publish && "title" in publish && publish.title).toBe(
+      "Publish this branch to origin and track it as upstream",
+    );
+    const tracked = buildCommitDropdownItems(ready);
+    const alreadyUpstream = tracked.find((entry) => entry.id === "publish");
+    expect(alreadyUpstream && "disabled" in alreadyUpstream && alreadyUpstream.disabled).toBe(
+      true,
+    );
+    expect(alreadyUpstream && "title" in alreadyUpstream && alreadyUpstream.title).toBe(
+      "This branch already tracks an upstream.",
+    );
+    const noRemote = buildCommitDropdownItems({
+      ...ready,
+      hasUpstream: false,
+      hasRemotes: false,
+    });
+    const blocked = noRemote.find((entry) => entry.id === "publish");
+    expect(blocked && "disabled" in blocked && blocked.disabled).toBe(true);
+    expect(blocked && "title" in blocked && blocked.title).toBe(
+      "No remote configured. Add one with git remote add first.",
+    );
+  });
+
+  test("force push needs an upstream and names the lease refusal", () => {
+    const force = buildCommitDropdownItems(ready).find((entry) => entry.id === "force-push");
+    expect(force && "disabled" in force && force.disabled).toBe(false);
+    expect(force && "title" in force && force.title).toBe(
+      "Rewrite the upstream branch with your local history, refusing when the remote moved first",
+    );
+    const noUpstream = buildCommitDropdownItems({ ...ready, hasUpstream: false });
+    const blocked = noUpstream.find((entry) => entry.id === "force-push");
+    expect(blocked && "disabled" in blocked && blocked.disabled).toBe(true);
+    expect(blocked && "title" in blocked && blocked.title).toBe(
+      "Upstream required. Publish your branch first.",
+    );
+  });
+
+  test("merge pull, rebase and abort rows stay omitted by design (#332)", () => {
+    // No row kind may introduce the declined operations; the full
+    // actionable row set is pinned by the order test above.
+    for (const entry of buildCommitDropdownItems(ready)) {
+      expect(entry.kind).not.toMatch(/merge|rebase|abort/i);
+    }
   });
 
   test("label helpers match the source formats", () => {

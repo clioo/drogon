@@ -8,10 +8,18 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-pub const WAIT_BUDGET: Duration = Duration::from_secs(10);
+/// Generous-but-bounded budget for every probe condition wait (issue #371):
+/// each wait returns as soon as its condition holds, so raising the bound
+/// costs a slow run nothing and only stops load from turning a healthy
+/// but slow fixture into a timeout panic.
+pub const WAIT_BUDGET: Duration = Duration::from_secs(30);
 /// Bounded self-expiry for any leftover fixture child (seconds), so cleanup
-/// never needs to signal a discovered PID.
-pub const FIXTURE_LIFETIME_SECS: u64 = 20;
+/// never needs to signal a discovered PID. Must comfortably exceed a
+/// healthy probe's worst case (stacked [`WAIT_BUDGET`] waits): a fixture
+/// that self-expires mid-probe would hand the probe a real exit it never
+/// caused, flipping liveness and single-winner assertions under load
+/// (issue #371).
+pub const FIXTURE_LIFETIME_SECS: u64 = 120;
 
 pub struct Fixture {
     pub dir: PathBuf,
@@ -177,7 +185,10 @@ impl Fixture {
             let _ = stderr_pipe.read_to_end(&mut bytes);
             String::from_utf8_lossy(&bytes).into_owned()
         });
-        let deadline = Instant::now() + Duration::from_secs(120);
+        // Generous-but-bounded (issue #371): stacked WAIT_BUDGET waits in
+        // a healthy-but-slow probe can approach two minutes, so the hang
+        // bound sits well above that while still catching a wedged child.
+        let deadline = Instant::now() + Duration::from_secs(300);
         let invocation = loop {
             match child.try_wait().expect("poll probe subprocess") {
                 Some(status) => {
@@ -215,7 +226,7 @@ impl Fixture {
                     let _ = stdout_reader.join();
                     let _ = stderr_reader.join();
                     self.cleanup();
-                    panic!("probe {probe} exceeded its 120s bound");
+                    panic!("probe {probe} exceeded its 300s bound");
                 }
                 None => std::thread::sleep(Duration::from_millis(20)),
             }
@@ -563,6 +574,44 @@ pub fn wait_for_pid_count(env: &ProbeEnv, expected: usize) {
         assert!(
             Instant::now() < deadline,
             "child count never reached {expected}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Asserts the recorded fixture-child count HOLDS at `expected` instead of
+/// reading it once after a fixed sleep (issue #371): a single point read
+/// proves nothing about the absence of a late spawn, and a fixed sleep is
+/// pure wall-clock either way. Fails fast on any deviation; correct code
+/// never spawns here, so the count holds forever and this passes
+/// deterministically, costing only the stability window.
+#[allow(dead_code)] // Only the cancel/reopen binary uses this entry; cf. `run`.
+pub fn assert_pid_count_stable(env: &ProbeEnv, expected: usize, context: &str) {
+    const STABLE_WINDOW: Duration = Duration::from_secs(2);
+    const BOUND: Duration = Duration::from_secs(60);
+    let stable_since = Instant::now();
+    let bound = stable_since + BOUND;
+    loop {
+        match recorded_pids_result(&pid_dir(env)) {
+            PidLog::Recorded(pids) if pids.len() == expected => {
+                if stable_since.elapsed() >= STABLE_WINDOW {
+                    return;
+                }
+            }
+            PidLog::Recorded(pids) => panic!(
+                "{context}: fixture child count moved to {} (expected {expected})",
+                pids.len()
+            ),
+            PidLog::Unreadable(reason) => {
+                panic!("fixture pid log unreadable (fixture bug): {reason}")
+            }
+            PidLog::NeverStarted => {
+                panic!("no fixture child ever recorded (expected {expected}): {context}")
+            }
+        }
+        assert!(
+            Instant::now() < bound,
+            "{context}: pid-count stability window never completed"
         );
         std::thread::sleep(Duration::from_millis(20));
     }

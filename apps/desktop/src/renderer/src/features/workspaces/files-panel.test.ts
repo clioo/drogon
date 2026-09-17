@@ -11,6 +11,7 @@ import {
   entryToNode,
   isFilesAvailable,
   joinEntryPath,
+  resolveTerminalSpawnCwd,
   openPathSurvivesDeletion,
   shouldApplyOpenRequest,
   truncationNoticeText,
@@ -214,6 +215,17 @@ describe("listing through the factory source (truncation surfaced)", () => {
     );
     expect(node.path).toBe("src/lib");
   });
+
+  test("terminal spawn cwd joins the row directory (#275, kept for #335)", () => {
+    // Open in Terminal spawns below the workspace root for row dirs; the
+    // root resolves to the workspace path itself. The daemon validates
+    // containment — this only pins the join the session bridge receives.
+    expect(resolveTerminalSpawnCwd("/repo", "")).toBe("/repo");
+    expect(resolveTerminalSpawnCwd("/repo", "src")).toBe("/repo/src");
+    expect(resolveTerminalSpawnCwd("/repo", "src/nested")).toBe(
+      "/repo/src/nested",
+    );
+  });
 });
 
 describe("scope-gated selection and open path (frame safety)", () => {
@@ -366,13 +378,19 @@ describe("createExplorerSource", () => {
           calls.push(["delete", input]);
           return Promise.resolve({ ok: true, result: { ...input, deleted: input.paths } });
         },
+        fileDuplicate: (input) => {
+          calls.push(["duplicate", input]);
+          return Promise.resolve({ ok: true, result: input });
+        },
       }),
       scope,
     );
     expect(await source.create?.("docs", "n.txt", "file")).toEqual({ ok: true, result: null });
     expect(await source.rename?.("a.txt", "b.txt")).toEqual({ ok: true, result: null });
     expect(await source.remove?.(["a.txt"])).toEqual({ ok: true, result: null });
-    expect(calls.map(([method]) => method)).toEqual(["create", "rename", "delete"]);
+    expect(await source.duplicate?.("a.txt", "a copy.txt")).toEqual({ ok: true, result: null });
+    expect(calls.map(([method]) => method)).toEqual(["create", "rename", "delete", "duplicate"]);
+    expect(calls[3][1]).toEqual({ ...scope, from: "a.txt", to: "a copy.txt" });
   });
 
   test("mutations fail closed without bridge support — never a local fallback", async () => {
@@ -383,6 +401,7 @@ describe("createExplorerSource", () => {
       () => source.create?.("docs", "n.txt", "file"),
       () => source.rename?.("a.txt", "b.txt"),
       () => source.remove?.(["a.txt"]),
+      () => source.duplicate?.("a.txt", "a copy.txt"),
     ]) {
       const result = await call();
       expect(result?.ok).toBe(false);

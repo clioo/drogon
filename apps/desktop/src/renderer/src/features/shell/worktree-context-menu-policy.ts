@@ -5,10 +5,11 @@
    worktrees and "Remove Workspace" for folder workspaces; the primary
    checkout never appears as a card in this repo, so its disabled
    "Delete Worktree" + "Remove Project from Orca" pair has no case to
-   render). Adapter: MVP subset — pins, read state, statuses, groups,
-   lineage, sleep and developer items route through zustand stores this
-   repo does not have and are not ported (listed in the PR). Pure
-   functions, unit-tested. */
+   render). Adapter: MVP subset — read state, groups, lineage, sleep
+   and developer items route through zustand stores this repo does not
+   have and are not ported (listed in the PR). Pin and workspace status
+   are daemon-stored (`worktree.update`) and have menu rows; the rest
+   stay omitted (issue #331). Pure functions, unit-tested. */
 
 /** Milliseconds after a right-click during which a follow-up click is swallowed. */
 export const CONTEXT_MENU_CLICK_SUPPRESSION_MS = 500;
@@ -89,6 +90,16 @@ export function isWorktreeRenamable(args: {
  */
 export function getWorktreeDeleteShortcutLabel(platform: string): string {
   return /mac/i.test(platform) ? "⌘⇧⌫" : "Ctrl+Shift+Backspace";
+}
+
+/**
+/**
+ * Pin row label for the worktree context menu: the daemon stores
+ * `isPinned` per worktree (`worktree.update`), and Sort by "Recent" already
+ * floats pinned worktrees first — the menu row is the only UI writer.
+ */
+export function getWorktreePinLabel(isPinned: boolean): "Pin" | "Unpin" {
+  return isPinned ? "Unpin" : "Pin";
 }
 
 /**

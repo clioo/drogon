@@ -7,6 +7,7 @@ import { SectionHeader } from "./section-header";
 import { CommitMessageComposer } from "./commit-message-composer";
 import { CommitArea } from "./commit-area";
 import { SourceControlDiscardDialog } from "./discard-dialog";
+import { ForcePushDialog } from "./force-push-dialog";
 import { SourceControlBranchLineTotalChip } from "./branch-line-total-chip";
 import { SourceControlBranchContextRow } from "./branch-context-row";
 import { SourceControlHeaderToolbar } from "./header-toolbar";
@@ -131,6 +132,7 @@ describe("source control render", () => {
       hasPartiallyStagedChanges: false,
       isBusy: false,
       upstream: "origin/main",
+      hasRemotes: true,
       ahead: 1,
       behind: 0,
       createPrDisabled: false,
@@ -140,6 +142,8 @@ describe("source control render", () => {
       onCommitAndPush: () => {},
       onCommitAndSync: () => {},
       onPush: () => {},
+      onPublish: () => {},
+      onForcePush: () => {},
       onPushBeforePr: () => {},
       onFastForward: () => {},
       onSync: () => {},
@@ -158,6 +162,20 @@ describe("source control render", () => {
     // commit-and-remote dropdown (Commit & Push / Sync / Fetch / PR rows)
     // is wired.
     expect(ready).toContain('aria-label="More commit and remote actions"');
+  });
+
+  test("force push dialog stays unmounted until the row arms it", () => {
+    // Radix portals do not SSR; the closed dialog must render nothing.
+    expect(
+      html(
+        createElement(ForcePushDialog, {
+          open: false,
+          upstream: "origin/main",
+          onCancel: () => {},
+          onConfirm: () => {},
+        }),
+      ),
+    ).toBe("");
   });
 
   test("discard dialog stays unmounted without a pending confirmation", () => {

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use drogon_protocol::workspace_files::{
-    FileCreateKind, FileCreateParams, FileDeleteParams, FileListParams, FileReadParams,
-    FileRenameParams, FileScope, FileSearchParams, FileWriteParams, MAX_FILE_BYTES,
+    FileCreateKind, FileCreateParams, FileDeleteParams, FileDuplicateParams, FileListParams,
+    FileReadParams, FileRenameParams, FileScope, FileSearchParams, FileWriteParams, MAX_FILE_BYTES,
 };
 use drogon_protocol::{MAX_FRAME_BYTES, RpcError};
 use serde::de::DeserializeOwned;
@@ -196,6 +196,25 @@ impl Engine {
         }
         Ok(
             json!({"hostId":params.host_id, "workspaceId":params.workspace_id, "ignored":Value::Array(echoed)}),
+        )
+    }
+
+    // Dispatched from `lib.rs`; see `do_files_create`. Covered by the
+    // standalone `tests/native_files_rpc.rs` suite through the real Engine
+    // dispatch.
+    #[allow(dead_code)]
+    pub(super) fn do_files_duplicate(&self, value: &Value) -> Result<Value, RpcError> {
+        let params: FileDuplicateParams = decode(value)?;
+        params.validate_target(&self.host_id)?;
+        let scope = FileScope {
+            host_id: params.host_id.clone(),
+            workspace_id: params.workspace_id.clone(),
+            path: params.from.clone(),
+        };
+        let root = self.file_workspace_root(&scope)?;
+        workspace_files::duplicate_path(&root, &params.from, &params.to)?;
+        Ok(
+            json!({"hostId":params.host_id, "workspaceId":params.workspace_id, "from":params.from, "to":params.to}),
         )
     }
 
