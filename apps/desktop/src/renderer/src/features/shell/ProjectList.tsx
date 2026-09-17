@@ -50,10 +50,15 @@ import {
   windowProjectBridge,
   windowTasksBridge,
   windowUiBridge,
+  worktreeDisplayName,
 } from "./project-adapter";
 import { isWideSidebarHeader } from "./app-chrome-layout";
 import { AddProjectDialog } from "./AddProjectDialog";
+import { BulkDeleteWorktreesDialog } from "./BulkDeleteWorktreesDialog";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
+import { useWorktreeMultiSelect } from "./use-worktree-multi-select";
+import type { WorktreeMultiSelectBinding } from "./use-worktree-multi-select";
+import { formatWorktreeSelectionSummary } from "./worktree-multi-select";
 import { readSkipDeleteWorktreeConfirm } from "./DeleteWorktreeSkipConfirmOption";
 import {
   PROJECT_HEADER_ACTIONS_CLASS_NAME,
@@ -751,6 +756,20 @@ export function ProjectList({
     onCommitWorktreeOrder: commitWorktreeOrder,
     getScrollContainer,
   });
+  // A modified pointer-down is a selection gesture, never the start of a
+  // reorder drag: promoting one would swallow the click that edits the
+  // selection (the drag session's own click guard).
+  const onCardPointerDownForSelection = useCallback(
+    (
+      event: React.PointerEvent<HTMLElement>,
+      projectId: string,
+      worktreeId: string,
+    ) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+      cardDrag.onCardPointerDown(event, projectId, worktreeId);
+    },
+    [cardDrag],
+  );
   // Workspace options' Hide filters apply to what's *rendered*, never to
   // the drag geometry above (allProjectIds/visibleProjectIds/
   // visibleCardIdsByProject stay driven by `active`): a card hidden by a
@@ -880,6 +899,59 @@ export function ProjectList({
         ),
       })),
     [hideFiltered, pullsByProjectId, workspaceOptions.sortBy, sessions],
+  );
+  // --- Multi-selection (Cmd/Ctrl+click, Shift+click) and bulk actions ---
+  // Every known worktree with its REAL owning project, so a bulk action
+  // resolves the same target the single-card menu would, whichever
+  // grouping mode drew the card.
+  const entryByWorktreeId = useMemo(() => {
+    const map = new Map<string, { worktree: Worktree; project: Project }>();
+    for (const group of groups)
+      for (const worktree of group.worktrees)
+        map.set(worktree.id, { worktree, project: group.project });
+    return map;
+  }, [groups]);
+  // Shift ranges are measured in what the sidebar actually draws, in the
+  // order it draws it -- including the cross-project regroupings, where a
+  // range can legitimately span buckets.
+  const selectionOrder = useMemo(() => {
+    if (workspaceOptions.groupBy === "workspace-status")
+      return statusGroups.flatMap((group) =>
+        group.entries.map((entry) => entry.worktree.id),
+      );
+    if (workspaceOptions.groupBy === "pr-status")
+      return prGroups.flatMap((group) =>
+        group.entries.map((entry) => entry.worktree.id),
+      );
+    return displayed.flatMap((group) =>
+      nestProjectWorktrees(group.worktrees).map((item) => item.worktree.id),
+    );
+  }, [workspaceOptions.groupBy, statusGroups, prGroups, displayed]);
+  const commitWorktreeUpdate = useCallback(
+    (
+      input: { worktreeId: string } & Partial<
+        Pick<Worktree, "isPinned" | "workspaceStatus">
+      >,
+    ) => {
+      const bridge = windowProjectBridge(window.drogon);
+      if (!bridge.worktreeUpdate) return;
+      void bridge.worktreeUpdate(input).catch(() => {});
+    },
+    [],
+  );
+  const cardDisplayName = useCallback(
+    (worktree: Worktree) => worktreeDisplayName(worktree, workspaces),
+    [workspaces],
+  );
+  const multiSelect = useWorktreeMultiSelect({
+    entries: entryByWorktreeId,
+    order: selectionOrder,
+    displayName: cardDisplayName,
+    enabled: worktreesAvailable && !disabled,
+    updateWorktree: commitWorktreeUpdate,
+  });
+  const selectionSummary = formatWorktreeSelectionSummary(
+    multiSelect.selectedIds.length,
   );
   // Shared by both render paths (repo/none's ProjectRow and the two
   // cross-project regroupings' EntryGroupRow) so remove/rename always
@@ -1101,6 +1173,7 @@ export function ProjectList({
               onMoveWorktreeToStatus={
                 worktreesAvailable ? commitWorktreeStatus : null
               }
+              multiSelect={multiSelect.binding}
               graphBridge={graphBridge}
             />
           ),
@@ -1127,7 +1200,7 @@ export function ProjectList({
             disabled={disabled}
             worktreesAvailable={worktreesAvailable}
             onProjectHandlePointerDown={projectDrag.onHandlePointerDown}
-            onCardPointerDown={cardDrag.onCardPointerDown}
+            onCardPointerDown={onCardPointerDownForSelection}
             onCardClickCapture={cardDrag.onCardClickCapture}
             onSelectWorkspace={onSelectWorkspace}
             activeSessionId={activeSessionId}
@@ -1145,9 +1218,24 @@ export function ProjectList({
             onMoveWorktreeToStatus={
               worktreesAvailable ? commitWorktreeStatus : null
             }
+            multiSelect={multiSelect.binding}
             graphBridge={graphBridge}
           />
         ))
+      )}
+      {/* The selection is a transient mode with no chrome of its own, so
+          its size is announced politely instead of drawn as a banner. */}
+      <span className="sr-only" role="status" data-worktree-selection-summary="">
+        {selectionSummary}
+      </span>
+      {multiSelect.bulkDeleteTargets && (
+        <BulkDeleteWorktreesDialog
+          targets={multiSelect.bulkDeleteTargets}
+          disabled={disabled}
+          onSubmit={onSubmitRemove}
+          onDeleted={multiSelect.onBulkDeleted}
+          onClose={multiSelect.closeBulkDelete}
+        />
       )}
       {removeTarget && (
         <DeleteWorktreeDialog
@@ -1251,6 +1339,7 @@ function EntryGroupRow({
   statuses,
   onTogglePinWorktree,
   onMoveWorktreeToStatus,
+  multiSelect,
   portsByWorkspaceId,
   pullsByProjectId,
   cardOptions,
@@ -1283,6 +1372,8 @@ function EntryGroupRow({
   onMoveWorktreeToStatus:
     | ((worktree: Worktree, statusId: string | null) => void)
     | null;
+  /** Sidebar multi-selection: selected state and the bulk card menu. */
+  multiSelect: WorktreeMultiSelectBinding;
   portsByWorkspaceId?: ReadonlyMap<string, readonly number[]>;
   pullsByProjectId?: ReadonlyMap<string, readonly TaskPullRequest[] | null>;
   cardOptions?: Pick<WorkspaceOptionsState, "showProperties" | "agentActivityDisplayMode">;
@@ -1325,6 +1416,15 @@ function EntryGroupRow({
                 onCardClickCapture={() => {}}
                 onSelect={onSelectWorkspace}
                 onSelectSession={onSelectSession}
+                multiSelected={multiSelect.selectedIds.has(worktree.id)}
+                selectionActive={multiSelect.active}
+                onSelectionClick={(event) =>
+                  multiSelect.onCardClick(worktree.id, event)
+                }
+                onContextMenuOpen={() =>
+                  multiSelect.onCardContextMenu(worktree.id)
+                }
+                bulk={multiSelect.bulkFor(worktree.id)}
                 activeSessionId={activeSessionId}
                 tabStrip={tabStrip}
                 showBranch={showBranch}
@@ -1390,6 +1490,7 @@ function ProjectRow({
   statuses,
   onTogglePinWorktree,
   onMoveWorktreeToStatus,
+  multiSelect,
   hideHeader = false,
   collapsed = false,
   onToggleCollapsed,
@@ -1439,6 +1540,8 @@ function ProjectRow({
   onMoveWorktreeToStatus:
     | ((worktree: Worktree, statusId: string | null) => void)
     | null;
+  /** Sidebar multi-selection: selected state and the bulk card menu. */
+  multiSelect: WorktreeMultiSelectBinding;
   /** Workspace options "Group by: None" (workspace-options-state.ts):
    *  renders this project's cards with no header row, so consecutive
    *  projects read as one flat list. Every handler below is still wired
@@ -1604,6 +1707,15 @@ function ProjectRow({
                   onCardClickCapture={onCardClickCapture}
                   onSelect={onSelectWorkspace}
                   onSelectSession={onSelectSession}
+                  multiSelected={multiSelect.selectedIds.has(worktree.id)}
+                  selectionActive={multiSelect.active}
+                  onSelectionClick={(event) =>
+                    multiSelect.onCardClick(worktree.id, event)
+                  }
+                  onContextMenuOpen={() =>
+                    multiSelect.onCardContextMenu(worktree.id)
+                  }
+                  bulk={multiSelect.bulkFor(worktree.id)}
                   activeSessionId={activeSessionId}
                   tabStrip={tabStrip}
                   showBranch={showBranch}

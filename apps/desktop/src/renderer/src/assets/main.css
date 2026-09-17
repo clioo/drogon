@@ -1574,8 +1574,52 @@ footer[data-testid="status-bar"] {
   box-shadow: 0 1px 2px
     color-mix(in srgb, var(--worktree-sidebar-foreground) 3%, transparent);
 }
+/* Multi-selection (Cmd/Ctrl+click, Shift+click): the selected cards carry
+   the sidebar ring on the same card outline the active card uses, so a
+   selection reads as one block without competing with the "this is the
+   open workspace" treatment above (a card can be both). Unselected cards
+   dim slightly while a selection is live, the way the sidebar already
+   dims filtered-out chrome. */
+.shell-worktree-card[data-multi-selected="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 45%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 12%,
+    transparent
+  );
+  /* The inner hairline is what a selected card has and the open-workspace
+     card does not, so a card that is both still reads as selected. */
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--worktree-sidebar-foreground) 20%, transparent);
+}
+.shell-worktree-card[data-multi-selected="false"] {
+  opacity: 0.72;
+}
 .shell-worktree-card:disabled {
   cursor: default;
+}
+/* Bulk delete confirm: the target list scrolls instead of growing the
+   modal past the viewport when a large selection is being removed. */
+.shell-bulk-delete-target-list {
+  max-height: 168px;
+  overflow-y: auto;
+}
+.shell-bulk-delete-target-list ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* The per-workspace failure list in the same confirm: one readable line
+   per workspace that refused, under the shared error style. */
+.shell-bulk-delete-failures ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
 }
 /* Status lane (the fork's WorktreeCardStatusSlot column, items-start
    pt-[2px] centered): the activity glyph and the working agent's avatar

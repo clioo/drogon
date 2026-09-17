@@ -29,6 +29,7 @@ import {
 } from "./project-adapter";
 import type { Workspace } from "../../../../shared/session-contract";
 import { WorktreeContextMenu } from "./WorktreeContextMenu";
+import type { WorktreeBulkMenuTarget } from "./worktree-bulk-actions";
 import { WorktreeTitleInlineRename } from "./WorktreeTitleInlineRename";
 import { WorktreeCardMetaBadges } from "./WorktreeCardMetaBadges";
 import { WorktreeCardLinkedMetadata } from "./WorktreeCardLinkedMetadata";
@@ -157,6 +158,11 @@ export function WorktreeCard({
   statuses = [],
   onMoveToStatus = null,
   onSelectSession = null,
+  multiSelected = false,
+  selectionActive = false,
+  onSelectionClick = null,
+  onContextMenuOpen = null,
+  bulk = null,
   activeSessionId = "",
   tabStrip,
   showBranch = true,
@@ -213,6 +219,22 @@ export function WorktreeCard({
    * Absent/null hides the submenu.
    */
   onMoveToStatus?: ((statusId: string | null) => void) | null;
+  /** This card is part of the sidebar's current multi-selection. */
+  multiSelected?: boolean;
+  /** Any card is selected, so unselected cards read as "not chosen". */
+  selectionActive?: boolean;
+  /**
+   * Offers a primary click to the selection model first. Returning true
+   * means the click was a Cmd/Ctrl or Shift selection gesture and the card
+   * must not switch workspace; false falls through to the normal select.
+   */
+  onSelectionClick?:
+    | ((event: React.MouseEvent | React.KeyboardEvent) => boolean)
+    | null;
+  /** Lets the sidebar settle the selection before the menu opens. */
+  onContextMenuOpen?: (() => void) | null;
+  /** Non-null renders the multi-selection menu instead of the card's own. */
+  bulk?: WorktreeBulkMenuTarget | null;
   /** Workspace options "Show properties" (workspace-options-state.ts):
    *  suppresses the branch name + ahead/behind badges, or the PR chip.
    *  Defaults preserve the card exactly as before this option existed. */
@@ -321,10 +343,13 @@ export function WorktreeCard({
       onTogglePin={onTogglePin}
       statuses={statuses}
       onMoveToStatus={onMoveToStatus}
+      bulk={bulk}
+      onContextMenuOpen={onContextMenuOpen}
     >
       <div
         className="shell-worktree-card"
         data-active={selected}
+        data-multi-selected={selectionActive ? multiSelected : undefined}
         data-worktree-card-id={worktree.id}
         data-worktree-card-project={worktree.projectId}
         data-worktree-card-index={cardIndex}
@@ -370,9 +395,28 @@ export function WorktreeCard({
             type="button"
             className="shell-worktree-card-select"
             aria-current={selected ? "page" : undefined}
+            // Why: while a multi-selection is live the card's primary
+            // control really is a toggle, so screen readers get the
+            // pressed state; with no selection it stays plain navigation.
+            aria-pressed={selectionActive ? multiSelected : undefined}
             aria-label={`Select ${name}`}
             disabled={disabled}
-            onClick={() => onSelect(worktree.workspaceId)}
+            onClick={(event) => {
+              // A Cmd/Ctrl or Shift click edits the selection instead of
+              // switching workspace; a plain click clears it and navigates.
+              if (onSelectionClick?.(event)) return;
+              onSelect(worktree.workspaceId);
+            }}
+            onKeyDown={(event) => {
+              // Keyboard parity for the same gestures: Chromium does not
+              // turn a modified Enter/Space into a click, so the selection
+              // would otherwise be mouse-only.
+              if (event.key !== "Enter" && event.key !== " ") return;
+              if (!event.metaKey && !event.ctrlKey && !event.shiftKey) return;
+              if (!onSelectionClick) return;
+              event.preventDefault();
+              onSelectionClick(event);
+            }}
           >
             <span className="shell-worktree-card-top">
               <WorktreeTitleInlineRename

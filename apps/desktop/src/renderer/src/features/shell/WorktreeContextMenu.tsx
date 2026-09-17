@@ -12,7 +12,12 @@
    shell bridge has no open-in-external-editor IPC and no open-in-apps
    settings section (both listed as not-ported). The Radix DropdownMenu
    primitive, the hidden click-point trigger and the ARIA names are the
-   source's. Plain fallback copy replaces the clipboard IPC. */
+   source's. Plain fallback copy replaces the clipboard IPC.
+
+   Drogon's own addition: when the card belongs to a sidebar
+   multi-selection, the same trigger opens the bulk row set
+   (WorktreeBulkContextMenuItems) instead, so one menu implementation
+   serves pointer, touch and keyboard for one card and for many. */
 import { useRef, useState } from "react";
 import {
   Check,
@@ -39,7 +44,15 @@ import {
   PRIMARY_CHECKOUT_DELETE_DISABLED_HINT,
   worktreeDeleteRowKind,
 } from "./worktree-context-menu-policy";
+import {
+  bulkPinIntent,
+  formatWorkspaceCount,
+  type WorktreeBulkMenuTarget,
+} from "./worktree-bulk-actions";
+import { WorktreeBulkContextMenuItems } from "./WorktreeBulkContextMenuItems";
 import { windowShellBridge } from "./worktree-bridges";
+
+export type { WorktreeBulkMenuTarget };
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -74,6 +87,8 @@ export function WorktreeContextMenu({
   onTogglePin,
   statuses,
   onMoveToStatus,
+  bulk = null,
+  onContextMenuOpen,
   children,
 }: {
   worktree: Worktree;
@@ -111,6 +126,14 @@ export function WorktreeContextMenu({
    * Null while the project bridge is unavailable; the submenu is omitted.
    */
   onMoveToStatus: ((statusId: string | null) => void) | null;
+  /** Non-null turns this into the multi-selection menu (see the type). */
+  bulk?: WorktreeBulkMenuTarget | null;
+  /**
+   * Fires before the menu opens, so the sidebar can settle the selection
+   * first: a secondary click outside the current selection collapses it,
+   * and the menu that opens is then the single-card one.
+   */
+  onContextMenuOpen?: (() => void) | null;
   children: React.ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -153,6 +176,14 @@ export function WorktreeContextMenu({
   const handleCopyPath = () => {
     void copyText(worktree.path);
   };
+  const bulkWorktrees = bulk?.worktrees ?? [];
+  const bulkPin = bulkPinIntent(bulkWorktrees);
+  const handleCopyBulkPaths = () => {
+    void copyText(bulkWorktrees.map((item) => item.path).join("\n"));
+  };
+  const menuLabel = bulk
+    ? `Actions for ${formatWorkspaceCount(bulkWorktrees.length)}`
+    : `Worktree actions for ${displayName}`;
 
   return (
     <div
@@ -162,6 +193,7 @@ export function WorktreeContextMenu({
       onContextMenu={(event) => {
         if (disabled) return;
         event.preventDefault();
+        onContextMenuOpen?.();
         openAt(event.clientX, event.clientY);
       }}
       onKeyDown={(event) => {
@@ -173,6 +205,7 @@ export function WorktreeContextMenu({
           if (disabled) return;
           event.preventDefault();
           event.stopPropagation();
+          onContextMenuOpen?.();
           const bounds = scopeRef.current?.getBoundingClientRect();
           openAt(bounds ? bounds.left + 24 : 0, bounds ? bounds.top + 24 : 0);
         }
@@ -193,78 +226,45 @@ export function WorktreeContextMenu({
             className="shell-worktree-context-menu"
             sideOffset={0}
             align="start"
-            aria-label={`Worktree actions for ${displayName}`}
+            aria-label={menuLabel}
           >
-            <DropdownMenu.Label className="shell-worktree-context-menu-label">
-              Workspace
-            </DropdownMenu.Label>
-            {renamable && (
-              <DropdownMenu.Item
-                className="shell-worktree-context-menu-item"
+            {bulk ? (
+              <WorktreeBulkContextMenuItems
+                worktrees={bulk.worktrees}
+                statuses={statuses}
                 disabled={disabled}
-                onSelect={() => onRename?.()}
-              >
-                <Pencil className="size-3.5" />
-                Update
-              </DropdownMenu.Item>
-            )}
-            <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
-            <DropdownMenu.Sub>
-              <DropdownMenu.SubTrigger
-                className="shell-worktree-context-menu-item"
-                disabled={disabled}
-              >
-                <FolderOpen className="size-3.5" />
-                Open in
-                <ChevronRight className="shell-worktree-context-menu-subtrigger-chevron" />
-              </DropdownMenu.SubTrigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.SubContent
-                  className="shell-worktree-context-menu"
-                  sideOffset={2}
-                  alignOffset={-5}
+                pinLabel={bulkPin.label}
+                pinIntent={bulkPin.pin}
+                onTogglePin={bulk.onTogglePin}
+                onMoveToStatus={bulk.onMoveToStatus}
+                onCopyPaths={handleCopyBulkPaths}
+                onClearSelection={bulk.onClearSelection}
+                onDelete={bulk.onDelete}
+                deletableCount={bulk.deletableCount}
+              />
+            ) : (
+              <>
+              <DropdownMenu.Label className="shell-worktree-context-menu-label">
+                Workspace
+              </DropdownMenu.Label>
+              {renamable && (
+                <DropdownMenu.Item
+                  className="shell-worktree-context-menu-item"
+                  disabled={disabled}
+                  onSelect={() => onRename?.()}
                 >
-                  <DropdownMenu.Item
-                    className="shell-worktree-context-menu-item"
-                    disabled={disabled}
-                    onSelect={handleRevealInFileManager}
-                  >
-                    <FolderOpen className="size-3.5" />
-                    {getFileManagerLabel(userAgent)}
-                  </DropdownMenu.Item>
-                </DropdownMenu.SubContent>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Sub>
-            <DropdownMenu.Item
-              className="shell-worktree-context-menu-item"
-              disabled={disabled}
-              onSelect={handleCopyPath}
-            >
-              <Copy className="size-3.5" />
-              Copy Path
-            </DropdownMenu.Item>
-            {onTogglePin !== null && (
-              <DropdownMenu.Item
-                className="shell-worktree-context-menu-item"
-                disabled={disabled}
-                onSelect={() => onTogglePin?.()}
-              >
-                {isPinned ? (
-                  <PinOff className="size-3.5" />
-                ) : (
-                  <Pin className="size-3.5" />
-                )}
-                {getWorktreePinLabel(isPinned)}
-              </DropdownMenu.Item>
-            )}
-            {showStatusMenu && (
+                  <Pencil className="size-3.5" />
+                  Update
+                </DropdownMenu.Item>
+              )}
+              <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
               <DropdownMenu.Sub>
                 <DropdownMenu.SubTrigger
                   className="shell-worktree-context-menu-item"
                   disabled={disabled}
                 >
-                  <Tag className="size-3.5" />
-                  Move to Status
+                  <FolderOpen className="size-3.5" />
+                  Open in
                   <ChevronRight className="shell-worktree-context-menu-subtrigger-chevron" />
                 </DropdownMenu.SubTrigger>
                 <DropdownMenu.Portal>
@@ -273,78 +273,129 @@ export function WorktreeContextMenu({
                     sideOffset={2}
                     alignOffset={-5}
                   >
-                    {statuses.map((status) => (
-                      <DropdownMenu.Item
-                        key={status.id}
-                        className="shell-worktree-context-menu-item"
-                        disabled={disabled}
-                        onSelect={() => onMoveToStatus?.(status.id)}
-                      >
-                        {effectiveStatusId === status.id ? (
-                          <Check className="size-3.5" />
-                        ) : (
-                          <span className="size-3.5" aria-hidden />
-                        )}
-                        {status.label}
-                      </DropdownMenu.Item>
-                    ))}
-                    {worktree.workspaceStatus != null && (
-                      <>
-                        <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
-                        <DropdownMenu.Item
-                          className="shell-worktree-context-menu-item"
-                          disabled={disabled}
-                          onSelect={() => onMoveToStatus?.(null)}
-                        >
-                          <X className="size-3.5" />
-                          Clear status
-                        </DropdownMenu.Item>
-                      </>
-                    )}
+                    <DropdownMenu.Item
+                      className="shell-worktree-context-menu-item"
+                      disabled={disabled}
+                      onSelect={handleRevealInFileManager}
+                    >
+                      <FolderOpen className="size-3.5" />
+                      {getFileManagerLabel(userAgent)}
+                    </DropdownMenu.Item>
                   </DropdownMenu.SubContent>
                 </DropdownMenu.Portal>
               </DropdownMenu.Sub>
-            )}
-            {onDelete !== null && (
-              <>
-                <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
-                {deleteKind === "primary-checkout" ? (
-                  <Tooltip.Root>
-                    <Tooltip.Trigger asChild>
-                      <div>
-                        <DropdownMenu.Item
-                          className="shell-worktree-context-menu-item shell-worktree-context-menu-item-destructive"
-                          disabled
-                        >
-                          <Trash2 className="size-3.5" />
-                          Delete Worktree
-                        </DropdownMenu.Item>
-                      </div>
-                    </Tooltip.Trigger>
-                    <Tooltip.Portal>
-                      <Tooltip.Content
-                        side="right"
-                        sideOffset={8}
-                        className="tooltip max-w-[200px] text-pretty"
-                      >
-                        {PRIMARY_CHECKOUT_DELETE_DISABLED_HINT}
-                      </Tooltip.Content>
-                    </Tooltip.Portal>
-                  </Tooltip.Root>
-                ) : null}
+              <DropdownMenu.Item
+                className="shell-worktree-context-menu-item"
+                disabled={disabled}
+                onSelect={handleCopyPath}
+              >
+                <Copy className="size-3.5" />
+                Copy Path
+              </DropdownMenu.Item>
+              {onTogglePin !== null && (
                 <DropdownMenu.Item
-                  className="shell-worktree-context-menu-item shell-worktree-context-menu-item-destructive"
+                  className="shell-worktree-context-menu-item"
                   disabled={disabled}
-                  onSelect={() => onDelete?.()}
+                  onSelect={() => onTogglePin?.()}
                 >
-                  <Trash2 className="size-3.5" />
-                  {getWorktreeDeleteLabel(deleteKind)}
-                  {deleteKind === "delete" ? (
-                    <span className="shell-worktree-context-menu-shortcut">
-                      {deleteShortcut}
-                    </span>
-                  ) : null}
+                  {isPinned ? (
+                    <PinOff className="size-3.5" />
+                  ) : (
+                    <Pin className="size-3.5" />
+                  )}
+                  {getWorktreePinLabel(isPinned)}
                 </DropdownMenu.Item>
+              )}
+              {showStatusMenu && (
+                <DropdownMenu.Sub>
+                  <DropdownMenu.SubTrigger
+                    className="shell-worktree-context-menu-item"
+                    disabled={disabled}
+                  >
+                    <Tag className="size-3.5" />
+                    Move to Status
+                    <ChevronRight className="shell-worktree-context-menu-subtrigger-chevron" />
+                  </DropdownMenu.SubTrigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.SubContent
+                      className="shell-worktree-context-menu"
+                      sideOffset={2}
+                      alignOffset={-5}
+                    >
+                      {statuses.map((status) => (
+                        <DropdownMenu.Item
+                          key={status.id}
+                          className="shell-worktree-context-menu-item"
+                          disabled={disabled}
+                          onSelect={() => onMoveToStatus?.(status.id)}
+                        >
+                          {effectiveStatusId === status.id ? (
+                            <Check className="size-3.5" />
+                          ) : (
+                            <span className="size-3.5" aria-hidden />
+                          )}
+                          {status.label}
+                        </DropdownMenu.Item>
+                      ))}
+                      {worktree.workspaceStatus != null && (
+                        <>
+                          <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
+                          <DropdownMenu.Item
+                            className="shell-worktree-context-menu-item"
+                            disabled={disabled}
+                            onSelect={() => onMoveToStatus?.(null)}
+                          >
+                            <X className="size-3.5" />
+                            Clear status
+                          </DropdownMenu.Item>
+                        </>
+                      )}
+                    </DropdownMenu.SubContent>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Sub>
+              )}
+              {onDelete !== null && (
+                <>
+                  <DropdownMenu.Separator className="shell-worktree-context-menu-separator" />
+                  {deleteKind === "primary-checkout" ? (
+                    <Tooltip.Root>
+                      <Tooltip.Trigger asChild>
+                        <div>
+                          <DropdownMenu.Item
+                            className="shell-worktree-context-menu-item shell-worktree-context-menu-item-destructive"
+                            disabled
+                          >
+                            <Trash2 className="size-3.5" />
+                            Delete Worktree
+                          </DropdownMenu.Item>
+                        </div>
+                      </Tooltip.Trigger>
+                      <Tooltip.Portal>
+                        <Tooltip.Content
+                          side="right"
+                          sideOffset={8}
+                          className="tooltip max-w-[200px] text-pretty"
+                        >
+                          {PRIMARY_CHECKOUT_DELETE_DISABLED_HINT}
+                        </Tooltip.Content>
+                      </Tooltip.Portal>
+                    </Tooltip.Root>
+                  ) : null}
+                  <DropdownMenu.Item
+                    className="shell-worktree-context-menu-item shell-worktree-context-menu-item-destructive"
+                    disabled={disabled}
+                    onSelect={() => onDelete?.()}
+                  >
+                    <Trash2 className="size-3.5" />
+                    {getWorktreeDeleteLabel(deleteKind)}
+                    {deleteKind === "delete" ? (
+                      <span className="shell-worktree-context-menu-shortcut">
+                        {deleteShortcut}
+                      </span>
+                    ) : null}
+                  </DropdownMenu.Item>
+                </>
+              )}
               </>
             )}
           </DropdownMenu.Content>
