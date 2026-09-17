@@ -60,6 +60,22 @@ const session = z.object({
   agentResume: z.enum(["resumed", "continued", "fresh"]).optional(),
 });
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+// PERF-01 push channel: `session.output` answers the exact `session.read`
+// shape (same cursor/page protocol), so one schema validates both methods.
+const sessionOutputPage = z
+  .object({
+    session,
+    dataBase64: z
+      .string()
+      .max(87384)
+      .regex(
+        /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
+      ),
+    startCursor: cursor,
+    nextCursor: cursor,
+    truncated: z.boolean(),
+  })
+  .refine((value) => value.nextCursor >= value.startCursor);
 const harness = z
   .object({
     harnessId: id,
@@ -109,20 +125,12 @@ export const resultSchemas: Record<string, z.ZodType> = {
   "ports.kill": workspacePortKillResultSchema,
   "session.start": session,
   "session.list": z.object({ sessions: z.array(session) }),
-  "session.read": z
-    .object({
-      session,
-      dataBase64: z
-        .string()
-        .max(87384)
-        .regex(
-          /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
-        ),
-      startCursor: cursor,
-      nextCursor: cursor,
-      truncated: z.boolean(),
-    })
-    .refine((value) => value.nextCursor >= value.startCursor),
+  "session.read": sessionOutputPage,
+  // PERF-01: the long-poll twin of `session.read` — same wire shape, so an
+  // old reader that only knows `session.read` still validates (main's
+  // `callNative` looks this method up by name; without this entry the push
+  // answer would fail the contract at the socket).
+  "session.output": sessionOutputPage,
   "session.write": z.object({ acceptedBytes: z.number().int().nonnegative() }),
   "session.resize": session,
   "session.stop": session,

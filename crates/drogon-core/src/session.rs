@@ -1145,14 +1145,60 @@ pub(crate) fn read(
         .unwrap()
         .read(cursor, limit_bytes)
         .ok_or_else(|| error::invalid_argument("cursor is ahead of all data written so far"))?;
+    Ok(read_response(handle, &outcome))
+}
+
+fn read_response(handle: &SessionHandle, outcome: &crate::ring::ReadOutcome) -> Value {
     let current_verdict_exit = current_verdict(handle);
-    Ok(json!({
+    json!({
         "session": to_json(handle, &current_verdict_exit.0, current_verdict_exit.1),
         "dataBase64": base64_encode(&outcome.bytes),
         "startCursor": outcome.start_cursor,
         "nextCursor": outcome.next_cursor,
         "truncated": outcome.truncated,
-    }))
+    })
+}
+
+/// PERF-01 push channel: the long-poll twin of [`read`]. Blocks (bounded by
+/// `wait_ms`, clamped to `SESSION_OUTPUT_WAIT_MAX_MS`) until the ring holds
+/// bytes at/after `cursor` or the child's exit has been observed, then
+/// answers the exact `session.read` shape so the cursor/page protocol
+/// (replay, truncation, verdict truth) is unchanged. A zero wait degrades
+/// to one immediate [`read`]. Precedent for blocking inside an RPC handler:
+/// `session_events::poll` — and the server is one thread per client, so a
+/// held poll never starves other calls.
+pub(crate) const SESSION_OUTPUT_WAIT_MAX_MS: u64 = 30_000;
+const SESSION_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+pub(crate) fn read_long_poll(
+    handle: &SessionHandle,
+    cursor: u64,
+    limit_bytes: usize,
+    wait_ms: u64,
+) -> Result<Value, RpcError> {
+    let deadline = Instant::now() + Duration::from_millis(wait_ms.min(SESSION_OUTPUT_WAIT_MAX_MS));
+    loop {
+        // A future cursor is a client bug, not a wait condition: `read`
+        // rejects it, so the held variant must too instead of hanging until
+        // the ring catches up to a cursor it may never reach.
+        let outcome = handle
+            .ring
+            .lock()
+            .unwrap()
+            .read(cursor, limit_bytes)
+            .ok_or_else(|| error::invalid_argument("cursor is ahead of all data written so far"))?;
+        // Wake on new bytes OR on a positively observed exit: the pane must
+        // learn `exited` within a frame of the reap, not at the next wait
+        // deadline. An empty live page only answers once the wait expires,
+        // which doubles as the reconciliation tick (it carries the session).
+        if !outcome.bytes.is_empty()
+            || current_verdict(handle).0 == "exited"
+            || Instant::now() >= deadline
+        {
+            return Ok(read_response(handle, &outcome));
+        }
+        std::thread::sleep(SESSION_OUTPUT_POLL_INTERVAL);
+    }
 }
 
 pub(crate) fn write(handle: &SessionHandle, data: &[u8]) -> Result<usize, RpcError> {

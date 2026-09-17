@@ -298,6 +298,17 @@ export interface DesktopBridge extends FileBridge, BotBridge {
   }): Promise<Result<{ hostId: string; catalog: HarnessModelsCatalog }>>;
   startHarness(input: HarnessLaunchInput): Promise<Result<Session>>;
   read(input: Identity & { cursor: number }): Promise<Result<ReadResult>>;
+  /**
+   * PERF-01 push channel (`session.output` long-poll, additive): same
+   * identity/cursor in, same `ReadResult` shape out — the call holds until
+   * bytes exist, the child exits, or `waitMs` expires. Optional (like every
+   * additive bridge member) so a test double or older preload that only
+   * implements `read` still satisfies the type; the pane treats a missing
+   * implementation as capability-absent and keeps the `read` poll.
+   */
+  readOutput?(input: Identity & { cursor: number; waitMs?: number }): Promise<
+    Result<ReadResult>
+  >;
   write(
     input: Identity & { text: string },
   ): Promise<Result<{ acceptedBytes: number }>>;
