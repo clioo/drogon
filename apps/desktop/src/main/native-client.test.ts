@@ -17,6 +17,7 @@ import {
   identityMismatch,
   resetNativeClientForTests,
   resetNativeConnectionStatsForTests,
+  resolveEndpointPath,
   runNativePoolHealthCheckForTests,
   setNativeTransportForTests,
   validateEnvelope,
@@ -1100,10 +1101,11 @@ describe("callNativeHold dedicated long-holds (PERF-01)", () => {
 });
 
 describe("pooled transport surfaces endpoint loss (PERF-02c)", () => {
-  // Real unix sockets end to end, no injected transport: the fake
-  // transports above answer whole frames synchronously and never model
-  // path loss, so they cannot see a warm pool masking a renamed-away
-  // socket file while the daemon keeps answering established connections.
+  // Real endpoints end to end (unix socket, or named pipe on win32),
+  // no injected transport: the fake transports above answer whole frames
+  // synchronously and never model path loss, so they cannot see a warm
+  // pool masking a renamed-away socket file while the daemon keeps
+  // answering established connections.
   const statusResult = {
     hostId: "test-host",
     serviceInstanceId: "svc-1",
@@ -1114,6 +1116,9 @@ describe("pooled transport surfaces endpoint loss (PERF-02c)", () => {
 
   let scratchDir = "";
   let sockPath = "";
+  // The rendezvous the client actually dials: a socket file on unix, a
+  // named pipe on Windows. The stub must listen here, not on sockPath.
+  let endpoint = "";
   let server: NetServer | null = null;
   let serverSockets: Socket[] = [];
   let originalDataDir: string | undefined;
@@ -1141,7 +1146,13 @@ describe("pooled transport surfaces endpoint loss (PERF-02c)", () => {
         }
       });
     });
-    await new Promise<void>((resolve) => server!.listen(sockPath, resolve));
+    await new Promise<void>((resolve, reject) => {
+      server!.once("error", reject);
+      server!.listen(endpoint, () => {
+        server!.removeListener("error", reject);
+        resolve();
+      });
+    });
   }
 
   beforeEach(async () => {
@@ -1152,6 +1163,10 @@ describe("pooled transport surfaces endpoint loss (PERF-02c)", () => {
     // listen (and the test must rename) under the same spelling.
     scratchDir = await realpathDir(await mkdtemp(path.join(tmpdir(), "drogon-native-pool-loss-")));
     sockPath = path.join(scratchDir, "runtime-v1.sock");
+    // Same construction the client dials: on win32 this is a named pipe,
+    // where binding sockPath fails with EACCES and the client would never
+    // reach the stub. sockPath stays for the unix-only rename tests below.
+    endpoint = resolveEndpointPath(scratchDir, process.platform);
     await writeFile(path.join(scratchDir, "auth.token"), "test-token\n", "utf8");
     originalDataDir = process.env.DROGON_DATA_DIR;
     process.env.DROGON_DATA_DIR = scratchDir;
