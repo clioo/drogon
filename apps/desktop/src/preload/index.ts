@@ -76,6 +76,12 @@ const bridge: DesktopBridge = {
         : value,
     ),
   read: (value) => ipcRenderer.invoke("drogon:read", value),
+  // PERF-01 push channel (additive): the held `session.output` long-poll.
+  // Main validates the input through `bridgeSchemas.readOutput` and the
+  // daemon answer through `resultSchemas["session.output"]`; an older
+  // daemon answers `method_not_found`, which the pane reads as
+  // capability-absent and falls back to `read`.
+  readOutput: (value) => ipcRenderer.invoke("drogon:readOutput", value),
   write: (value) => ipcRenderer.invoke("drogon:write", value),
   resize: (value) => ipcRenderer.invoke("drogon:resize", value),
   stop: (value) => ipcRenderer.invoke("drogon:stop", value),

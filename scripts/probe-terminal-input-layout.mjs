@@ -3,6 +3,113 @@ import { rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { waitForSessionStripTab } from "./probe-rendered-harness.mjs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+
+function percentile(sorted, p) {
+  if (sorted.length === 0) return null;
+  const rank = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
+  return sorted[Math.max(0, rank)];
+}
+
+function summarizeLatency(samples) {
+  const sorted = [...samples].sort((a, b) => a - b);
+  return {
+    n: sorted.length,
+    min: sorted[0] ?? null,
+    p50: percentile(sorted, 50),
+    p95: percentile(sorted, 95),
+    max: sorted[sorted.length - 1] ?? null,
+  };
+}
+
+/**
+ * PERF-01 acceptance: keystroke -> echo latency through real Electron +
+ * CDP. Types single characters into the live shell (PTY line-discipline
+ * echo, no Enter) and polls the xterm buffer for each echo, reporting
+ * p50/p95 in ms. `hot` types continuously (the active window); `cold`
+ * waits out the active window first so the pane falls back to its quiet
+ * cadence; `burst` measures a large idle-pane output burst end to end.
+ * Leaves the line cleared with Ctrl+C and the shell on a fresh prompt.
+ */
+export async function probeTerminalEchoLatency({ page, session, output, hotSamples = 30 }) {
+  const evidence = { hot: [], coldMs: null, burstMs: null, samples: hotSamples };
+  await page.locator(".xterm-helper-textarea").focus();
+  // The shell must be sitting on an empty prompt: anything the journey
+  // typed before would prefix every echo match below.
+  await page.keyboard.press("Control+C");
+  await delay(300);
+  const alphabet = "abcdefghjkmnpqrstuvwxyz";
+  let typed = "";
+  // Hot input: type continuously so the pane stays in its active window,
+  // and time every single keystroke -> echo through the xterm buffer. The
+  // whole buffer joins (a fresh pane's prompt sits at the top rows, not
+  // the bottom); the match stays exact because `expected` grows every
+  // sample, so only the newest echo can complete it.
+  const tailMatches = ({ id, want }) => {
+    const terminal = window.__drogonTerminals?.get(id);
+    if (!terminal) return false;
+    const buffer = terminal.buffer.active;
+    let tail = "";
+    for (let i = 0; i < buffer.length; i++)
+      tail += buffer.getLine(i)?.translateToString(true).replace(/\s+$/, "") ?? "";
+    return tail.endsWith(want);
+  };
+  for (let s = 0; s < hotSamples; s++) {
+    const ch = alphabet[s % alphabet.length];
+    const expected = `${typed}${ch}`;
+    const t0 = await page.evaluate(() => performance.now());
+    await page.keyboard.press(ch);
+    await page.waitForFunction(tailMatches, { id: session.id, want: expected });
+    const t1 = await page.evaluate(() => performance.now());
+    evidence.hot.push(t1 - t0);
+    typed = expected;
+    assert.ok(evidence.hot[evidence.hot.length - 1] < 10_000, "echo must land, not hang");
+  }
+  const hot = summarizeLatency(evidence.hot);
+  // Cold echo: wait out the active window (1.5 s) so the pane falls back
+  // to its quiet cadence, then time one keystroke.
+  await page.keyboard.press("Control+C");
+  await delay(300);
+  typed = "";
+  await delay(2200);
+  {
+    const t0 = await page.evaluate(() => performance.now());
+    await page.keyboard.press("z");
+    await page.waitForFunction(tailMatches, { id: session.id, want: "z" });
+    evidence.coldMs = (await page.evaluate(() => performance.now())) - t0;
+  }
+  // Idle-pane burst: after the pane goes quiet, dump ~100 KiB and time
+  // Enter -> last line visible end to end.
+  await page.keyboard.press("Control+C");
+  await delay(2500);
+  {
+    const burstMarker = `BURST_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const command = `i=0; while [ "$i" -lt 1200 ]; do printf '%080d ${burstMarker} %04d\\n' 0 "$i"; i=$((i+1)); done`;
+    await page.keyboard.type(command);
+    // Timed from Enter: typing time is input, not output delivery.
+    const t0 = await page.evaluate(() => performance.now());
+    await page.keyboard.press("Enter");
+    // Rows join before matching: an 80-column viewport wraps the ~104-char
+    // burst line, so the marker's tail may start on the next row.
+    await page.waitForFunction(({ marker }) => {
+      const terminals = window.__drogonTerminals;
+      if (!terminals) return false;
+      for (const terminal of terminals.values()) {
+        const buffer = terminal.buffer.active;
+        let tail = "";
+        for (let i = Math.max(0, buffer.length - 150); i < buffer.length; i++)
+          tail += buffer.getLine(i)?.translateToString(true) ?? "";
+        if (tail.includes(`${marker} 1199`)) return true;
+      }
+      return false;
+    }, { marker: burstMarker });
+    evidence.burstMs = (await page.evaluate(() => performance.now())) - t0;
+  }
+  await page.keyboard.press("Control+C");
+  const summary = { hot, coldMs: evidence.coldMs, burstMs: evidence.burstMs, samples: evidence.hot };
+  if (output) await writeFile(path.join(output, "terminal-echo-latency.json"), JSON.stringify(summary, null, 2));
+  return summary;
+}
 
 /** Actual Electron keyboard, xterm grid and kernel PTY size; no model requests. */
 export async function probeTerminalInputLayout({ page, session, output, expectedHome, dataDir }) {

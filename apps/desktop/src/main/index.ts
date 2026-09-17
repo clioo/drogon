@@ -413,6 +413,35 @@ function registerBridge() {
           }
           return result;
         }
+        // PERF-01 push channel (additive): the held `session.output`
+        // long-poll. Same 64 KiB page and cursor-mismatch guard as `read`;
+        // the renderer's 8 s hold sits under `callNative`'s 10 s idle
+        // socket timeout, and an older daemon answers `method_not_found`,
+        // which the pane reads as capability-absent (no new error shape).
+        case "readOutput": {
+          const result = await callNative("session.output", {
+            ...(value as object),
+            limitBytes: 65536,
+          });
+          if (result.ok) {
+            const read = result.result as {
+              dataBase64: string;
+              startCursor: number;
+              nextCursor: number;
+            };
+            if (
+              readCursorMismatches(
+                read.dataBase64,
+                read.startCursor,
+                read.nextCursor,
+              )
+            )
+              return contractViolation(
+                "The service's cursor advance does not match the decoded byte count.",
+              );
+          }
+          return result;
+        }
         case "write": {
           const data = bridgeSchemas.write.parse(value);
           const result = await callNative("session.write", {

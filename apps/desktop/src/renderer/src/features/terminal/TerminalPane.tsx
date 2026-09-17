@@ -138,6 +138,14 @@ import {
   type SessionSignal,
 } from "./terminal-read-pacing";
 import {
+  OUTPUT_PUSH_WAIT_MS,
+  createOrderedTerminalWriter,
+  decodeBase64ToBytes,
+  isOutputPushAvailable,
+  resolveOutputChannel,
+  type OutputChannelKind,
+} from "./terminal-output-push";
+import {
   createTerminalPanePaste,
   registerTerminalPanePasteListeners,
 } from "./terminal-pane-paste";
@@ -1055,6 +1063,60 @@ export function TerminalPane({
     let seeking = true;
     let seekPages = 0;
     let readInFlight = false;
+    // PERF-01 push negotiation: the daemon's status capabilities decide
+    // whether this pane holds one `session.output` long-poll per visible
+    // mount or keeps the 24/120 ms `session.read` poll. Unknown until the
+    // probe below answers — first paint never waits for it — and latched
+    // off permanently on a `method_not_found` (an older daemon keeps
+    // working unchanged on the old cadence).
+    let daemonCapabilities: readonly string[] | null = null;
+    let pushLatchedOff = false;
+    void window.drogon
+      .status()
+      .then((result) => {
+        if (disposed || !result.ok) return;
+        daemonCapabilities = result.result.capabilities;
+        // The probe may have resolved mid-poll: pull the next read forward
+        // so echo takes the push path at once instead of at the next tick.
+        if (
+          !seeking &&
+          !readInFlight &&
+          canWrite &&
+          paneVisible.current &&
+          !pushLatchedOff &&
+          typeof window.drogon.readOutput === "function" &&
+          isOutputPushAvailable(result.result.capabilities)
+        ) {
+          clearTimeout(timeout);
+          timeout = setTimeout(read, 0);
+        }
+      })
+      .catch(() => {});
+    // PERF-01b: xterm writes serialize through one chain per pane, so the
+    // read loop can schedule its next request before the previous write
+    // settles without ever reordering bytes on screen.
+    const orderedWrite = createOrderedTerminalWriter(
+      (chunk) =>
+        new Promise<void>((resolve) => terminal.write(chunk, resolve)),
+    );
+    // Arms the next read after an answered page. A push answer re-arms the
+    // hold at once (the daemon held the last one, so no cadence applies);
+    // a poll answer keeps the existing cadence — hot while input/output is
+    // fresh, quiet otherwise, hidden when the pane has no viewport — as
+    // the reconciliation fallback.
+    const scheduleNextRead = (channel: OutputChannelKind, fullPage: boolean) => {
+      if (disposed) return;
+      if (channel === "push" || fullPage) timeout = setTimeout(read, 0);
+      else timeout = setTimeout(read, livePollDelay());
+    };
+    const channelFor = (seekingNow: boolean): OutputChannelKind =>
+      resolveOutputChannel({
+        capabilities: daemonCapabilities ?? undefined,
+        pushLatchedOff,
+        readOutputAvailable: typeof window.drogon.readOutput === "function",
+        visible: paneVisible.current,
+        seeking: seekingNow,
+      });
     // Hot-window state for the echo path (TERMINAL_ACTIVE_* in
     // terminal-read-pacing): user input and fresh output arm a short
     // ~1-frame poll cadence so typing echo lands like the fork's push
@@ -1262,20 +1324,41 @@ export function TerminalPane({
     async function read() {
       if (disposed || readInFlight) return;
       readInFlight = true;
+      // PERF-01: one held `session.output` long-poll per visible pane when
+      // the daemon advertises push; the 24/120 ms `session.read` poll stays
+      // the path everywhere else (old daemon, hidden pane, seek phase).
+      const channel = channelFor(seeking);
+      const readOutput = window.drogon.readOutput;
       try {
-        const response = await window.drogon.read({
-          ...inputIdentity,
-          cursor,
-        });
+        const response =
+          channel === "push" && typeof readOutput === "function"
+            ? await readOutput({
+                ...inputIdentity,
+                cursor,
+                waitMs: OUTPUT_PUSH_WAIT_MS,
+              })
+            : await window.drogon.read({
+                ...inputIdentity,
+                cursor,
+              });
         if (disposed) return;
         if (!response.ok) {
+          // An older daemon has no such method: latch the old poll and
+          // re-read at once instead of retry-looping the failure. Any
+          // other error keeps the existing retry (unverifiable + 2 s).
+          if (channel === "push" && response.error.code === "method_not_found") {
+            pushLatchedOff = true;
+            readInFlight = false;
+            if (!disposed) timeout = setTimeout(read, 0);
+            return;
+          }
           scheduleReadRetry();
           return;
         }
         const value = response.result;
-        const bytes = Uint8Array.from(atob(value.dataBase64), (char) =>
-          char.charCodeAt(0),
-        );
+        // PERF-01b: single-pass base64 straight into the final buffer — no
+        // intermediate string, no per-character callback.
+        const bytes = decodeBase64ToBytes(value.dataBase64);
         if (seeking) {
           // Seek phase: retain the newest tail of the ring without writing
           // anything, until a short page says the live edge is reached (or
@@ -1311,7 +1394,9 @@ export function TerminalPane({
           if (bytes.length > 0) lastActivityAt = Date.now();
           emitSessionUpdate(value.session);
           observeProcessExit(value.session);
-          timeout = setTimeout(read, livePollDelay());
+          // The seek just ended: recompute the channel without the seeking
+          // pin so a capable daemon takes the push path from here on.
+          scheduleNextRead(channelFor(false), false);
           return;
         }
         if (value.truncated)
@@ -1323,8 +1408,13 @@ export function TerminalPane({
         if (caughtUp.current && !value.truncated) kittyModes.scan(decodedOutput);
         else kittyModes.scanReplay(decodedOutput);
         observeTerminalBracketedPasteModeOutput(terminal, decodedOutput);
-        await new Promise<void>((resolve) => terminal.write(bytes, resolve));
-        if (disposed) return;
+        // PERF-01b: the cursor advances and the next read arms BEFORE the
+        // xterm write settles, so the next page's network wait overlaps
+        // xterm parsing instead of serializing behind it. Order stays
+        // exact: the cursor only moves forward from an answered page, the
+        // next request carries the advanced cursor (no overlap, no
+        // duplicate), and overlapping writes serialize through the
+        // pane's ordered chain.
         cursor = value.nextCursor;
         canWrite = value.session.verdict === "live";
         if (canWrite) geometrySync?.flush();
@@ -1334,10 +1424,12 @@ export function TerminalPane({
         if (bytes.length < TERMINAL_READ_PAGE_BYTES) caughtUp.current = true;
         observeProcessExit(value.session);
         if (value.session.verdict === "exited" && bytes.length === 0) return;
-        timeout = setTimeout(
-          read,
-          bytes.length === TERMINAL_READ_PAGE_BYTES ? 0 : livePollDelay(),
-        );
+        readInFlight = false;
+        // Recomputed — not the request's channel: a tab switch mid-hold
+        // must not re-arm a push hold for a now-hidden pane.
+        scheduleNextRead(channelFor(false), bytes.length === TERMINAL_READ_PAGE_BYTES);
+        await orderedWrite(bytes);
+        if (disposed) return;
       } catch {
         scheduleReadRetry();
       } finally {

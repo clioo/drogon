@@ -90,6 +90,9 @@ mod dispatch_authenticated_tests;
 #[cfg(test)]
 mod session_stop_tests;
 
+#[cfg(test)]
+mod session_output_tests;
+
 /// The on-disk SQLite filename under a data directory, exposed so
 /// integration tests (a separate crate that only sees `pub` items) can open
 /// their own connection to the same file for fault injection.
@@ -134,6 +137,11 @@ const CAPABILITIES: &[&str] = &[
     drogon_protocol::worktree_issues::CAPABILITY,
     drogon_protocol::tasks::TASKS_CAPABILITY,
     "session.agent-state.v1",
+    // PERF-01 push channel: `session.output` (held long-poll for PTY bytes).
+    // A daemon predating this string has no such method; the renderer gates
+    // on exactly this capability and keeps the 24/120 ms `session.read`
+    // poll as its reconciliation fallback there.
+    "session.output-push.v1",
     // R2-S: the Bots page (list/create/chat/history) is real end-to-end as
     // of this capability landing; desktop's `isBotsAvailable` gate
     // (apps/desktop/src/renderer/src/bots-mount.ts) has referenced this
@@ -568,6 +576,10 @@ impl Engine {
             "session.start" => self.mutating(request, Self::do_session_start),
             "session.list" => self.do_session_list(&request.params),
             "session.read" => self.do_session_read(&request.params),
+            // PERF-01 push channel: long-poll twin of `session.read` (see
+            // `session::read_long_poll`). Read-only like `session.read`, so
+            // it bypasses the ledger and the quiescence gate the same way.
+            "session.output" => self.do_session_output(&request.params),
             "session.write" => self.mutating(request, Self::do_session_write),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
@@ -1033,6 +1045,27 @@ impl Engine {
             return Err(error::invalid_argument("limitBytes must be 1..=65536"));
         }
         session::read(&handle, cursor, limit as usize)
+    }
+
+    /// PERF-01 push channel: `{"sessionId", "incarnation", "cursor",
+    /// "waitMs?", "limitBytes?"}` → the exact `session.read` shape, held
+    /// until bytes exist, the child exits, or the wait expires. `waitMs`
+    /// clamps to 30 s like `session.events.poll`; zero degrades to one
+    /// immediate read. Identity and cursor errors answer at once, never
+    /// held: an unknown id is `not_found`, a wrong incarnation is
+    /// `stale_incarnation`, a future cursor is `invalid_argument` — the
+    /// same codes `session.read` reports, so old clients keep their
+    /// meaning and new ones can gate on the `session.output-push.v1`
+    /// capability instead of probing.
+    fn do_session_output(&self, params: &Value) -> Result<Value, RpcError> {
+        let (handle, _) = self.require_session_with_incarnation(params)?;
+        let cursor = optional_u64(params, "cursor", 0)?;
+        let limit = optional_u64(params, "limitBytes", 65_536)?;
+        if !(1..=65_536).contains(&limit) {
+            return Err(error::invalid_argument("limitBytes must be 1..=65536"));
+        }
+        let wait_ms = optional_u64(params, "waitMs", 20_000)?;
+        session::read_long_poll(&handle, cursor, limit as usize, wait_ms)
     }
 
     fn do_session_write(&self, params: &Value) -> Result<Value, RpcError> {
