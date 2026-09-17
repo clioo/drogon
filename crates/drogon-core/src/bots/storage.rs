@@ -149,7 +149,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 
 use super::records::{Bot, BotMessage, HistoryEntry, ResponsibilityRun, ResponsibilityTrigger};
-use crate::automations::records::Automation;
+use crate::automations::records::{Automation, AutomationRun};
 use crate::automations::storage::{self as automations_storage, AutomationOwnerPrecondition};
 use crate::locale_ordering::{self, LocaleOrderingError};
 
@@ -1492,6 +1492,15 @@ fn upsert_run_row_with_stamp(
 /// is included under any bot_id match, exactly like the pre-fence
 /// behavior. Orphaned responsibility/automation/automation-run links
 /// resolve to `None`, never synthesized.
+///
+/// A Responsibility, an Automation or an AutomationRun can each be linked
+/// from many history rows (a recurring automation's every run shares the
+/// same `automationId`, for instance), so lookups are memoized by id in
+/// this call: `get_automation`/`get_automation_run` run once per *distinct*
+/// linked id, not once per referencing row, matching the cost the
+/// `bot.snapshot` preflight budgets against (see `preflight_snapshot_budget`
+/// in `bot_snapshot_rpc.rs`). The Bot's own record is already fetched once,
+/// above, and its Responsibilities are matched from that in-memory list.
 pub fn history_for_bot(
     conn: &Connection,
     host_id: &str,
@@ -1505,6 +1514,10 @@ pub fn history_for_bot(
     let rows: Vec<String> = stmt
         .query_map(params![bot_id], |r| r.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut automation_cache: std::collections::HashMap<String, Option<Automation>> =
+        std::collections::HashMap::new();
+    let mut automation_run_cache: std::collections::HashMap<String, Option<AutomationRun>> =
+        std::collections::HashMap::new();
     rows.into_iter()
         .map(|json| -> Result<Option<HistoryEntry>> {
             let stored: StoredRun = serde_json::from_str(&json)?;
@@ -1525,11 +1538,25 @@ pub fn history_for_bot(
                     .cloned()
             });
             let automation = match &run.automation_id {
-                Some(id) => automations_storage::get_automation(conn, id)?,
+                Some(id) => match automation_cache.get(id) {
+                    Some(cached) => cached.clone(),
+                    None => {
+                        let fetched = automations_storage::get_automation(conn, id)?;
+                        automation_cache.insert(id.clone(), fetched.clone());
+                        fetched
+                    }
+                },
                 None => None,
             };
             let automation_run = match &run.automation_run_id {
-                Some(id) => automations_storage::get_automation_run(conn, id)?,
+                Some(id) => match automation_run_cache.get(id) {
+                    Some(cached) => cached.clone(),
+                    None => {
+                        let fetched = automations_storage::get_automation_run(conn, id)?;
+                        automation_run_cache.insert(id.clone(), fetched.clone());
+                        fetched
+                    }
+                },
                 None => None,
             };
             Ok(Some(HistoryEntry {

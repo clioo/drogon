@@ -95,8 +95,16 @@ fn scheduled_trigger_preserves_existing_snake_case_storage_reads() {
     );
 }
 
+/// Regression for the estimator bug a real host tripped: a recurring automation's
+/// history rows all link the SAME `automations` record, but `history_for_bot` fetches
+/// and parses that record once per *distinct* id (memoized in `history_for_bot`), never
+/// once per referencing row. The preflight budget must charge it the same way -- a small
+/// linked automation referenced by many runs must never be rejected as if its payload were
+/// duplicated once per reference. `linked_payload` alone sits comfortably under budget, but
+/// naive per-reference charging (the pre-fix behavior) would multiply it past budget at 4
+/// references; this asserts the snapshot still succeeds and returns every entry.
 #[test]
-fn snapshot_budget_counts_linked_payload_for_each_materialized_history_entry() {
+fn snapshot_budget_charges_linked_automation_once_per_distinct_reference_not_per_row() {
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");
     let engine = Engine::open(&data).unwrap();
@@ -126,11 +134,23 @@ fn snapshot_budget_counts_linked_payload_for_each_materialized_history_entry() {
         &bot,
     )
     .unwrap();
-    // Invalid domain payload distinguishes early budgeting from materialization.
-    let linked_payload = json!("x".repeat(200_000)).to_string();
+    // A real, materializable Automation (not the deliberately-malformed payload the old
+    // per-reference test used): the fix lets this reach real materialization, so the
+    // fixture must survive it end to end, not just dodge the early budget check.
+    let padding = "x".repeat(200_000);
+    let automation = json!({
+        "id":"linked", "name":"sweep", "prompt":padding, "agentId":"codex",
+        "projectId":"proj", "executionTargetType":"local", "executionTargetId":"local",
+        "schedulerOwner":"local_host_service", "workspaceMode":"existing",
+        "reuseSession":false, "timezone":"UTC", "rrule":"FREQ=DAILY", "dtstart":0.0,
+        "enabled":true, "nextRunAt":100.0, "missedRunPolicy":"run_once_within_grace",
+        "missedRunGraceMinutes":30.0, "createdAt":0.0, "updatedAt":0.0,
+    })
+    .to_string();
+    assert!(automation.len() < drogon_protocol::MAX_FRAME_BYTES / 2);
     conn.execute(
         "INSERT INTO automations (id, bot_id, payload_json) VALUES ('linked', NULL, ?1)",
-        [&linked_payload],
+        [&automation],
     )
     .unwrap();
     for index in 0..4 {
@@ -148,15 +168,19 @@ fn snapshot_budget_counts_linked_payload_for_each_materialized_history_entry() {
         )
         .unwrap();
     }
-    assert!(linked_payload.len() < drogon_protocol::MAX_FRAME_BYTES / 2);
-    assert!(linked_payload.len() * 4 > drogon_protocol::MAX_FRAME_BYTES / 2);
+    // Naive per-reference charging would have summed this 4x -- comfortably over budget.
+    assert!(automation.len() * 4 > drogon_protocol::MAX_FRAME_BYTES / 2);
     let response = call(
         "bot.snapshot",
         json!({"hostId":workspace["hostId"], "workspaceId":workspace["id"], "locale":"en-US"}),
     );
+    assert!(response.ok, "{response:?}");
+    let history = response.result.unwrap()["history"]
+        .as_array()
+        .unwrap()
+        .len();
     assert_eq!(
-        response.error.as_ref().map(|error| error.code.as_str()),
-        Some("snapshot_too_large"),
-        "Budget each reference before loading malformed linked records: {response:?}",
+        history, 4,
+        "every referencing history row must still materialize"
     );
 }
