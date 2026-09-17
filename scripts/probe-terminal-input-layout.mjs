@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { waitForSessionStripTab } from "./probe-rendered-harness.mjs";
+import { waitForBridgeObservation } from "./acceptance-bridge-observation.mjs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -258,7 +259,15 @@ export async function probeTerminalInputLayout({ page, session, output, expected
         await page.waitForFunction(({ id, before }) => window.__drogonTerminals.get(id).options.fontSize > before, { id: session.id, before });
       }
       if (index === 3) await page.keyboard.press(`${modifier}+0`);
-      await page.waitForFunction(async ({ id, workspaceId }) => {
+      // Node-side polling, not waitForFunction: this wait must observe a
+      // convergence that lands silently (a daemon-side resize applies with
+      // no visual damage), and the predicate never re-evaluated inside a
+      // damage-quiet background window — one stale evaluation, then the
+      // full 15 s stall, even though every sessions() call answered in
+      // milliseconds and the daemon converged ~3 s after the live flip
+      // (PERF-02c). The house bridge observer drives each iteration as one
+      // CDP round trip from Node; predicate and assertions are unchanged.
+      await waitForBridgeObservation(page, async ({ id, workspaceId }) => {
         const terminal = window.__drogonTerminals?.get(id);
         const reply = await window.drogon.sessions(workspaceId);
         const current = reply.ok && reply.result.sessions.find((item) => item.id === id);
@@ -267,7 +276,7 @@ export async function probeTerminalInputLayout({ page, session, output, expected
         const surface = terminal.element.parentElement.getBoundingClientRect();
         return terminal.cols === current.cols && terminal.rows === current.rows
           && screen.right <= surface.right + 1 && screen.bottom <= surface.bottom + 1;
-      }, session);
+      }, session, { timeoutMs: 15000, intervalMs: 250 });
       const marker = `S${index}`;
       await page.locator(".xterm-helper-textarea").focus();
       await page.keyboard.type(`printf '${marker} '; stty size`);
