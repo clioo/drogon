@@ -344,6 +344,8 @@ type PendingCall = {
   method: string;
   params: object;
   requestId: string;
+  /** The credential bytes actually written on the wire for this flight. */
+  auth: string;
   resolve: (result: Result<unknown>) => void;
   reject: (error: Error) => void;
   deadline: ReturnType<typeof setTimeout>;
@@ -352,6 +354,12 @@ type PendingCall = {
   onAbort?: () => void;
   /** Mid-flight socket death replays the frame once, same `requestId`, fresh auth. */
   replayed: boolean;
+  /**
+   * An `unauthorized` answer refreshes the credential file once, same
+   * `requestId`. Independent of the transport replay above: one call can
+   * survive both a dead socket and a restarted daemon.
+   */
+  authRetried: boolean;
   /** The pool entry carrying this flight; reassigned on replay. */
   conn: PooledConnection;
 };
@@ -484,11 +492,21 @@ function cancel(call: PendingCall, error: Error): void {
 
 async function loadCredentials(
   signal?: AbortSignal,
+  /**
+   * Bypass the cache and re-read the token file. The daemon mints a fresh
+   * `auth.token` on every start (`ensure_token` in crates/drogond), so a
+   * call answered `unauthorized` must re-read before concluding anything:
+   * the cached token may predate a restart, while the file already carries
+   * the new boot's token. Callers that did not observe `unauthorized` keep
+   * the cached hot path (a missing file under a warm cache still
+   * authenticates, as before).
+   */
+  reload = false,
 ): Promise<CachedCredentials> {
   // `DROGON_DATA_DIR` never moves under a running app; the key only guards
   // tests that swap it between isolated cases.
   const key = `${process.platform}:${process.env.DROGON_DATA_DIR ?? ""}`;
-  if (cachedCredentials && cachedCredentials.key === key)
+  if (!reload && cachedCredentials && cachedCredentials.key === key)
     return cachedCredentials;
   // The endpoint actually moved: sockets bound to the stale one must never
   // serve new flights. A routine reload after a socket death (same key)
@@ -582,18 +600,7 @@ async function redeliver(call: PendingCall): Promise<void> {
     cancel(call, new Error("Request aborted"));
     return;
   }
-  const remaining = call.deadlineAt - Date.now();
-  if (remaining <= 0) {
-    pending.set(call.requestId, call);
-    settle(call, unreachable("Service request timed out"));
-    return;
-  }
-  pending.set(call.requestId, call);
-  call.deadline = setTimeout(() => {
-    settle(call, unreachable("Service request timed out"));
-  }, remaining);
-  if (call.signal && call.onAbort)
-    call.signal.addEventListener("abort", call.onAbort, { once: true });
+  if (!registerForResend(call)) return;
   let creds: CachedCredentials;
   try {
     creds = await loadCredentials(call.signal);
@@ -614,6 +621,88 @@ async function redeliver(call: PendingCall): Promise<void> {
     cancel(call, new Error("Request aborted"));
     return;
   }
+  call.auth = creds.auth;
+  await transmit(call, creds);
+}
+
+/**
+ * An `unauthorized` answer to a cleanly framed call, retried once with a
+ * freshly re-read token when the file actually moved (a daemon restart
+ * mints a new `auth.token` on every boot; the cache is keyed only by data
+ * dir and can never notice on its own). Same `requestId`, so the daemon's
+ * idempotency ledger still dedupes — and the rejected attempt never
+ * touched the ledger anyway (auth resolves before any ledger/effect
+ * touch). At most one file re-read per unauthorized answer, and no resend
+ * when the file did not move: a genuinely rejected credential settles as
+ * observed, never as a reload loop. The call's original absolute deadline
+ * still bounds the retry; contact loss stays `unverifiable`, never exit.
+ */
+async function refreshAuthAndRedeliver(
+  call: PendingCall,
+  unauthorized: Result<unknown>,
+): Promise<void> {
+  pending.delete(call.requestId);
+  detach(call);
+  if (call.signal?.aborted) {
+    cancel(call, new Error("Request aborted"));
+    return;
+  }
+  if (!registerForResend(call)) return;
+  let fresh: CachedCredentials;
+  try {
+    fresh = await loadCredentials(call.signal, true);
+  } catch {
+    // The file cannot be re-read: report the daemon's own verdict rather
+    // than a transport guess about it.
+    pending.set(call.requestId, call);
+    settle(call, unauthorized);
+    return;
+  }
+  if (call.signal?.aborted) {
+    cancel(call, new Error("Request aborted"));
+    return;
+  }
+  if (fresh.auth === call.auth) {
+    // No rotation: resending the same bytes would fail identically.
+    pending.set(call.requestId, call);
+    settle(call, unauthorized);
+    return;
+  }
+  call.auth = fresh.auth;
+  await transmit(call, fresh);
+}
+
+/**
+ * Remaining absolute budget, re-registration, deadline and abort wiring
+ * for a (re)delivery. False when the original deadline already lapsed (the
+ * timeout verdict is settled); the caller returns without sending.
+ */
+function registerForResend(call: PendingCall): boolean {
+  const remaining = call.deadlineAt - Date.now();
+  if (remaining <= 0) {
+    pending.set(call.requestId, call);
+    settle(call, unreachable("Service request timed out"));
+    return false;
+  }
+  pending.set(call.requestId, call);
+  call.deadline = setTimeout(() => {
+    settle(call, unreachable("Service request timed out"));
+  }, remaining);
+  if (call.signal && call.onAbort)
+    call.signal.addEventListener("abort", call.onAbort, { once: true });
+  return true;
+}
+
+/**
+ * Shared send tail for a (re)delivery: least-busy assignment and write.
+ * The caller owns credential selection (`redeliver` uses the cache,
+ * `refreshAuthAndRedeliver` a forced re-read), records `call.auth`, and
+ * ran `registerForResend` before entering.
+ */
+async function transmit(
+  call: PendingCall,
+  creds: CachedCredentials,
+): Promise<void> {
   // Reassignment, not affinity: the replay lands on whatever entry is
   // least busy now (often a survivor), never back on the dead one — the
   // dead entry left the pool before this ran.
@@ -714,6 +803,16 @@ function routeLine(conn: PooledConnection, line: string): void {
         "The service response does not match the expected contract.",
       ),
     );
+    return;
+  }
+  if (!parsed.ok && parsed.error.code === "unauthorized" && !call.authRetried) {
+    // A restarted daemon mints a fresh token while this client's cache
+    // still holds the old boot's: re-read once and resend the same
+    // `requestId` when the file moved, instead of wedging every later
+    // call on a stale credential. A second `unauthorized` (or an unmoved
+    // file) settles as observed — contact loss stays `unverifiable`.
+    call.authRetried = true;
+    void refreshAuthAndRedeliver(call, parsed);
     return;
   }
   if (parsed.ok) {
@@ -973,12 +1072,14 @@ export async function callNative(
       method,
       params,
       requestId,
+      auth: creds.auth,
       resolve,
       reject,
       deadline: undefined as unknown as ReturnType<typeof setTimeout>,
       deadlineAt: Date.now() + REQUEST_DEADLINE_MS,
       signal,
       replayed: false,
+      authRetried: false,
       conn,
     };
     const onDeadline = () => {
@@ -1113,6 +1214,10 @@ export async function callNativeHold(
     return await new Promise<Result<unknown>>((resolve) => {
       let settled = false;
       let socket: Socket | undefined;
+      // Set once an `unauthorized` answer has triggered the single
+      // credential-refresh retry below; a second `unauthorized` settles as
+      // observed instead of redialing forever.
+      let authRetried = false;
       const finish = (result: Result<unknown>) => {
         if (settled) return;
         settled = true;
@@ -1128,35 +1233,8 @@ export async function callNativeHold(
         () => finish(unreachable("Service request timed out")),
         timeoutMs,
       );
-      let dialed: Socket;
-      try {
-        dialed = (transportOverride?.createConnection ?? createConnection)(
-          creds.endpoint,
-        );
-      } catch {
-        finish(unreachable());
-        return;
-      }
-      socket = dialed;
-      try {
-        // A hold must never keep the app alive past its windows (same
-        // posture as pooled entries); the absolute deadline above — not
-        // an idle timer, since silence IS the hold — owns the lifetime.
-        socket.unref?.();
-      } catch {
-        // A fake transport without `unref` still works.
-      }
       let bytes = Buffer.alloc(0);
-      socket.on("connect", () => {
-        try {
-          socket?.write(frame);
-        } catch {
-          finish(unreachable());
-        }
-      });
-      socket.on("error", () => finish(unreachable()));
-      socket.on("end", () => finish(unreachable("Service disconnected")));
-      socket.on("data", (chunk: Buffer) => {
+      const onData = (chunk: Buffer) => {
         if (settled) return;
         if (bytes.length + chunk.length > MAX_FRAME_BYTES) {
           finish(malformed("Service response is too large."));
@@ -1179,8 +1257,98 @@ export async function callNativeHold(
           );
           return;
         }
+        if (
+          !authRetried &&
+          !parsed.ok &&
+          parsed.error.code === "unauthorized"
+        ) {
+          authRetried = true;
+          void refreshAuthAndResend(parsed);
+          return;
+        }
         finish(parsed);
-      });
+      };
+      const dial = (auth: string, endpoint: string) => {
+        let dialed: Socket;
+        try {
+          dialed = (transportOverride?.createConnection ?? createConnection)(
+            endpoint,
+          );
+        } catch {
+          finish(unreachable());
+          return;
+        }
+        socket = dialed;
+        try {
+          // A hold must never keep the app alive past its windows (same
+          // posture as pooled entries); the absolute deadline above — not
+          // an idle timer, since silence IS the hold — owns the lifetime.
+          socket.unref?.();
+        } catch {
+          // A fake transport without `unref` still works.
+        }
+        const dialFrame =
+          JSON.stringify({
+            protocol: 1,
+            requestId,
+            auth,
+            method,
+            params,
+          }) + "\n";
+        socket.on("connect", () => {
+          try {
+            socket?.write(dialFrame);
+          } catch {
+            finish(unreachable());
+          }
+        });
+        socket.on("error", () => finish(unreachable()));
+        socket.on("end", () => finish(unreachable("Service disconnected")));
+        socket.on("data", onData);
+      };
+      /**
+       * The daemon answered `unauthorized` to a cleanly framed call, which
+       * after a restart means the cached token predates the new boot (the
+       * daemon mints a fresh `auth.token` on every start): drop the stale
+       * connection, re-read the file once, and resend the same `requestId`
+       * when the file actually moved. The rejected attempt never touched
+       * the daemon's idempotency ledger (auth resolves before any
+       * ledger/effect touch), so the same id cannot double-apply. Anything
+       * else — an unreadable file, an unmoved token, a dead redial —
+       * settles with the most specific verdict observed, never as exit
+       * proof. The absolute deadline above still bounds the whole call,
+       * including this retry.
+       */
+      const refreshAuthAndResend = async (
+        unauthorized: Result<unknown>,
+      ): Promise<void> => {
+        try {
+          socket?.destroy();
+        } catch {
+          // Already half-closed; the resend below owns the outcome.
+        }
+        socket = undefined;
+        bytes = Buffer.alloc(0);
+        let fresh: CachedCredentials;
+        try {
+          fresh = await loadCredentials(undefined, true);
+        } catch {
+          // The file cannot be re-read: report the daemon's own verdict
+          // rather than a transport guess about it.
+          finish(unauthorized);
+          return;
+        }
+        if (settled) return;
+        if (fresh.auth === creds.auth) {
+          // No rotation: the credential is genuinely rejected, and
+          // resending it would fail identically — settle as observed.
+          finish(unauthorized);
+          return;
+        }
+        creds = fresh;
+        dial(creds.auth, creds.endpoint);
+      };
+      dial(creds.auth, creds.endpoint);
     });
   } finally {
     if (countAgainstCap) activeSessionOutputHolds -= 1;

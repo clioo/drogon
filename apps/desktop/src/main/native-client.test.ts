@@ -334,6 +334,15 @@ describe("callNative multiplexed transport (PERF-02)", () => {
     );
   }
 
+  function answerUnauthorized(socket: FakeSocket, requestId: string): void {
+    socket.emit(
+      "data",
+      Buffer.from(
+        `${JSON.stringify({ protocol: 1, requestId, ok: false, error: { code: "unauthorized", message: "unauthorized", retryable: true } })}\n`,
+      ),
+    );
+  }
+
   function requestIdOf(line: string): string {
     return (JSON.parse(line) as { requestId: string }).requestId;
   }
@@ -628,6 +637,69 @@ describe("callNative multiplexed transport (PERF-02)", () => {
     // Replay-once means exactly two dials, never a retry storm.
     expect(fakeDaemon.dials).toBe(2);
   });
+
+  test("a pooled call answered unauthorized re-reads the rotated token and resends once", async () => {
+    // Same wedge as the hold path, through the pool: the daemon restarted
+    // and minted a fresh auth.token while this client cached the old
+    // boot's. The first attempt is rejected; the file already moved.
+    const attempts: { requestId: string; auth: string }[] = [];
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answer(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0)) {
+        const body = JSON.parse(line) as {
+          requestId: string;
+          auth: string;
+        };
+        attempts.push(body);
+        if (body.auth === "test-token")
+          answerUnauthorized(socket, body.requestId);
+        else answer(socket, body.requestId);
+      }
+    };
+    // The restart rotates the file AFTER the client cached the old token.
+    await writeFile(
+      path.join(scratchDir, "auth.token"),
+      "rotated-token\n",
+      "utf8",
+    );
+    const result = await callNative("status", {}, "req-rotated");
+    expect(result.ok).toBe(true);
+    const rotated = attempts.filter((item) => item.requestId === "req-rotated");
+    expect(rotated).toHaveLength(2);
+    expect(rotated[0]!.auth).toBe("test-token");
+    expect(rotated[1]!.auth).toBe("rotated-token");
+    // A later call uses the refreshed cache directly: no third attempt.
+    attempts.length = 0;
+    expect((await callNative("status", {}, "req-after")).ok).toBe(true);
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({
+      requestId: "req-after",
+      auth: "rotated-token",
+    });
+  });
+
+  test("a pooled call answered unauthorized with no rotation settles as observed", async () => {
+    // The token file never moved: resending would fail identically, so the
+    // call reports the daemon's own verdict — exactly once, no redial.
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answer(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answerUnauthorized(socket, requestIdOf(line));
+    };
+    const dialsBefore = fakeDaemon.dials;
+    const result = await callNative("status", {}, "req-denied");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("unauthorized");
+    expect(fakeDaemon.dials).toBe(dialsBefore);
+  });
 });
 
 describe("callNativeHold dedicated long-holds (PERF-01)", () => {
@@ -901,6 +973,91 @@ describe("callNativeHold dedicated long-holds (PERF-01)", () => {
       "req-cached",
     );
     expect(held.ok).toBe(true);
+  });
+
+  test("a hold answered unauthorized re-reads the rotated token and resends once", async () => {
+    // A daemon restart mints a fresh auth.token while main still caches
+    // the pre-restart token: the first attempt is rejected, the file has
+    // already moved, so the hold must resend the SAME requestId with the
+    // fresh token instead of wedging every later bridge call.
+    const attempts: { requestId: string; auth: string }[] = [];
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answerStatus(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0)) {
+        const body = JSON.parse(line) as {
+          requestId: string;
+          auth: string;
+        };
+        attempts.push(body);
+        if (body.auth === "test-token")
+          answerError(socket, body.requestId, "unauthorized");
+        else answerOk(socket, body.requestId);
+      }
+    };
+    // The restart rotates the file AFTER main cached the old token.
+    await writeFile(
+      path.join(scratchDir, "auth.token"),
+      "rotated-token\n",
+      "utf8",
+    );
+    const dialsBefore = fakeDaemon.dials;
+    const held = await callNativeHold(
+      "session.output",
+      { cursor: 0 },
+      5_000,
+      true,
+      "req-rotated",
+    );
+    expect(held.ok).toBe(true);
+    // The hold's own dial plus exactly one redial: stale attempt plus the
+    // resent same-id frame with the rotated token (the daemon rejected the
+    // first, accepted the second).
+    expect(fakeDaemon.dials).toBe(dialsBefore + 2);
+    const holdAttempts = attempts.filter(
+      (item) => item.requestId === "req-rotated",
+    );
+    expect(holdAttempts).toHaveLength(2);
+    expect(holdAttempts[0]).toEqual(
+      expect.objectContaining({
+        requestId: "req-rotated",
+        auth: "test-token",
+      }),
+    );
+    expect(holdAttempts[1]).toEqual(
+      expect.objectContaining({
+        requestId: "req-rotated",
+        auth: "rotated-token",
+      }),
+    );
+  });
+
+  test("a hold answered unauthorized with no rotation settles as observed", async () => {
+    // The token file never moved: resending would fail identically, so the
+    // hold reports the daemon's own verdict with no redial.
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answerStatus(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answerError(socket, requestIdOf(line), "unauthorized");
+    };
+    const dialsBefore = fakeDaemon.dials;
+    const held = await callNativeHold(
+      "session.output",
+      { cursor: 0 },
+      5_000,
+      true,
+      "req-denied",
+    );
+    expect(held.ok).toBe(false);
+    if (!held.ok) expect(held.error.code).toBe("unauthorized");
+    expect(fakeDaemon.dials).toBe(dialsBefore + 1);
   });
 
   test("a hold that outlives its deadline reports unverifiable, never exit", async () => {
