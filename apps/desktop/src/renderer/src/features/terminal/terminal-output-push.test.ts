@@ -5,6 +5,7 @@ import {
   createOrderedTerminalWriter,
   decodeBase64ToBytes,
   isOutputPushAvailable,
+  isTransientHoldRefusal,
   resolveOutputChannel,
 } from "./terminal-output-push";
 
@@ -48,6 +49,15 @@ describe("resolveOutputChannel", () => {
   it("holds no long-poll while hidden or seeking", () => {
     expect(resolveOutputChannel({ ...base, visible: false })).toBe("poll");
     expect(resolveOutputChannel({ ...base, seeking: true })).toBe("poll");
+  });
+});
+
+describe("isTransientHoldRefusal", () => {
+  it("treats only hold_cap as transient capacity, never a version gap", () => {
+    expect(isTransientHoldRefusal("hold_cap")).toBe(true);
+    expect(isTransientHoldRefusal("method_not_found")).toBe(false);
+    expect(isTransientHoldRefusal("unverifiable")).toBe(false);
+    expect(isTransientHoldRefusal(undefined)).toBe(false);
   });
 });
 

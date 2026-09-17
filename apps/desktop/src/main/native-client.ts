@@ -319,6 +319,13 @@ export function identityMismatch(
  * tiny against one-per-request. Bigger bursts share least-busy connections;
  * only many simultaneous *slow* calls would still queue, and no client-side
  * cap fixes that without spending daemon threads to match.
+ *
+ * Held calls (`session.output` per-pane holds, `session.events.poll`) never
+ * ride the pool: the daemon serves one frame at a time per connection, so a
+ * hold would head-of-line-block every short call sharing its entry (and a
+ * second hold on the same socket would not even be read until the first
+ * answers). They use `callNativeHold` below: one dedicated one-shot
+ * connection per outstanding hold, destroyed on settle.
  */
 export const NATIVE_POOL_MAX_CONNECTIONS = 4;
 
@@ -366,6 +373,18 @@ let credentialKey: string | null = null;
 let pool: PooledConnection[] = [];
 const pending = new Map<string, PendingCall>();
 let connectionAttempts = 0;
+/**
+ * Outstanding dedicated `session.output` holds. The singleton
+ * `session.events.poll` loop bypasses the cap (grandfathered at exactly
+ * one); every per-pane output hold counts. Socket budget against the
+ * daemon's 64-connection cap (`DEFAULT_MAX_CONCURRENT_CONNECTIONS`):
+ * pool (4) + events poll (1) + output holds (<= MAX below) stays <= 21,
+ * with headroom for CLI and direct-socket users. Daemon threads are the
+ * tighter bound — one thread per held connection — which is why the cap
+ * counts holds, not bytes, and why a pane never starts a hold while
+ * hidden (the renderer's channel selection pins that).
+ */
+let activeSessionOutputHolds = 0;
 
 export type NativeTransport = {
   createConnection: (endpoint: string) => Socket;
@@ -412,6 +431,7 @@ export function resetNativeClientForTests(): void {
   cachedCredentials = null;
   credentialKey = null;
   lastKnownHostId = null;
+  activeSessionOutputHolds = 0;
   const stale = pool;
   pool = [];
   for (const conn of stale) {
@@ -1006,4 +1026,163 @@ export async function callNative(
       }
     })();
   });
+}
+
+/**
+ * Hard cap on simultaneous per-pane `session.output` holds (see the
+ * `activeSessionOutputHolds` budget above). Past it the caller gets a
+ * retryable `hold_cap` refusal and answers the round over the old poll
+ * instead — degradation, never deadlock, never daemon exhaustion.
+ */
+export const MAX_SESSION_OUTPUT_HOLDS = 16;
+
+/**
+ * Dedicated long-hold call for methods the daemon answers late by design
+ * (`session.output` per-pane output holds, `session.events.poll` state
+ * holds). Lifted from `session-state-bridge.ts`'s `callSessionDaemon`
+ * (same one-shot framing, same envelope validation, same `unverifiable`
+ * verdict family) onto the pool's cached credentials, with two changes
+ * the pool's shape requires: one dedicated one-shot connection per call
+ * — a hold must share a connection with NOTHING, not even another hold,
+ * because the daemon serves one frame at a time per connection — and a
+ * hard cap on simultaneous output holds.
+ *
+ * Deliberately NOT result-schema validation: like the bridge dial it
+ * replaces, this settles the envelope and each caller validates its own
+ * payload (`session.events.poll` keeps its zod contract,
+ * `drogon:readOutput` reuses `resultSchemas["session.output"]`), so this
+ * primitive cannot drift either contract.
+ *
+ * Lifetime notes: the socket is destroyed on settle (answer, error, end
+ * or absolute deadline) and `unref`'d, so a hold never keeps the app
+ * alive and never lingers past its answer — reclamation is the settle
+ * itself, plus the renderer's rule that a hidden pane starts no new
+ * hold. Early client-side cancel cannot free the daemon side (the held
+ * dispatch sleeps its whole wait regardless), so there is no cancel
+ * path: the absolute `timeoutMs` (which must cover the requested hold)
+ * is the only bound, and a hold that ends by timeout reports
+ * `unverifiable`, never exit.
+ */
+export async function callNativeHold(
+  method: string,
+  params: Record<string, unknown>,
+  timeoutMs: number,
+  countAgainstCap: boolean,
+  requestId: string = randomUUID(),
+): Promise<Result<unknown>> {
+  if (countAgainstCap) {
+    if (activeSessionOutputHolds >= MAX_SESSION_OUTPUT_HOLDS) {
+      return {
+        ok: false,
+        error: {
+          code: "hold_cap",
+          message:
+            "Too many simultaneous terminal output holds; retry over the poll.",
+          retryable: true,
+        },
+      };
+    }
+    activeSessionOutputHolds += 1;
+  }
+  try {
+    let creds: CachedCredentials;
+    try {
+      // Cached like every pooled call: the first hold warms it, later
+      // holds never re-read the directory or token on the hot path.
+      creds = await loadCredentials();
+    } catch {
+      return unreachable();
+    }
+    const frame =
+      JSON.stringify({
+        protocol: 1,
+        requestId,
+        auth: creds.auth,
+        method,
+        params,
+      }) + "\n";
+    if (Buffer.byteLength(frame) > MAX_FRAME_BYTES)
+      return {
+        ok: false,
+        error: {
+          code: "invalid_argument",
+          message: "Request is too large.",
+          retryable: false,
+        },
+      };
+    return await new Promise<Result<unknown>>((resolve) => {
+      let settled = false;
+      let socket: Socket | undefined;
+      const finish = (result: Result<unknown>) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(deadline);
+        try {
+          socket?.destroy();
+        } catch {
+          // Destroying a half-open socket must never mask the result.
+        }
+        resolve(result);
+      };
+      const deadline = setTimeout(
+        () => finish(unreachable("Service request timed out")),
+        timeoutMs,
+      );
+      let dialed: Socket;
+      try {
+        dialed = (transportOverride?.createConnection ?? createConnection)(
+          creds.endpoint,
+        );
+      } catch {
+        finish(unreachable());
+        return;
+      }
+      socket = dialed;
+      try {
+        // A hold must never keep the app alive past its windows (same
+        // posture as pooled entries); the absolute deadline above — not
+        // an idle timer, since silence IS the hold — owns the lifetime.
+        socket.unref?.();
+      } catch {
+        // A fake transport without `unref` still works.
+      }
+      let bytes = Buffer.alloc(0);
+      socket.on("connect", () => {
+        try {
+          socket?.write(frame);
+        } catch {
+          finish(unreachable());
+        }
+      });
+      socket.on("error", () => finish(unreachable()));
+      socket.on("end", () => finish(unreachable("Service disconnected")));
+      socket.on("data", (chunk: Buffer) => {
+        if (settled) return;
+        if (bytes.length + chunk.length > MAX_FRAME_BYTES) {
+          finish(malformed("Service response is too large."));
+          return;
+        }
+        bytes = Buffer.concat([bytes, chunk]);
+        const newline = bytes.indexOf(10);
+        if (newline < 0) return;
+        let parsed: Result<unknown>;
+        try {
+          parsed = validateEnvelope(
+            JSON.parse(bytes.subarray(0, newline).toString("utf8")),
+            requestId,
+          );
+        } catch {
+          finish(
+            malformed(
+              "The service response does not match the expected contract.",
+            ),
+          );
+          return;
+        }
+        finish(parsed);
+      });
+    });
+  } finally {
+    if (countAgainstCap) activeSessionOutputHolds -= 1;
+  }
 }

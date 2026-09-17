@@ -12,8 +12,6 @@
 // wakeups); native `needs_input` banners stay with it too, so this loop
 // never notifies and can never double-banner.
 import { randomUUID } from "node:crypto";
-import { readFile, realpath } from "node:fs/promises";
-import { createConnection } from "node:net";
 import type { BrowserWindow } from "electron";
 import { z } from "zod";
 import {
@@ -21,9 +19,8 @@ import {
   sessionStateChangedSchema,
 } from "../shared/notifications-contract";
 import type { Result } from "../shared/session-contract";
-import { dataDirectory, resolveEndpointPath } from "./native-client";
+import { callNativeHold } from "./native-client";
 
-const MAX_FRAME_BYTES = 1024 * 1024;
 /** Long-poll hold per round trip; under the socket deadline below. */
 const POLL_WAIT_MS = 20_000;
 const POLL_CALL_TIMEOUT_MS = 25_000;
@@ -87,124 +84,23 @@ function fanOutPush(event: PushedSessionEvent): void {
   }
 }
 
-function unreachable(message: string): Result<never> {
-  return {
-    ok: false,
-    error: { code: "unverifiable", message, retryable: true },
-  };
-}
-
-/** One framed-JSON round trip to the local daemon. Same shape as the browser
- * relay's client (which cannot be reused without dragging relay log copy
- * along); `callNative` is unusable here because the shared `resultSchemas`
- * map — coordinator-owned — has no `session.events.poll` entry. */
+/** One framed-JSON round trip to the local daemon over a dedicated
+ * one-shot connection (never the pool: a hold would head-of-line-block
+ * every short call sharing its entry). Same reason `callNative` is
+ * unusable here: the shared `resultSchemas` map has no
+ * `session.events.poll` entry, and the pool is for short calls only.
+ * Delegates to the lifted `callNativeHold` primitive (same framing, same
+ * envelope validation, same `unverifiable` verdict family); the payload
+ * contract below is unchanged. */
 export function callSessionDaemon(
   method: string,
   params: Record<string, unknown>,
   timeoutMs: number,
   requestId: string = randomUUID(),
 ): Promise<Result<unknown>> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let socket: ReturnType<typeof createConnection> | undefined;
-    const finish = (result: Result<unknown>) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(deadline);
-      try {
-        socket?.destroy();
-      } catch {
-        // Destroying a half-open socket must never mask the result.
-      }
-      resolve(result);
-    };
-    const deadline = setTimeout(
-      () => finish(unreachable("Session push request timed out.")),
-      timeoutMs,
-    );
-    const start = async () => {
-      let directory: string;
-      let auth: string;
-      try {
-        directory = await realpath(dataDirectory());
-        auth = (await readFile(`${directory}/auth.token`, "utf8")).trim();
-      } catch {
-        finish(unreachable("Session push cannot reach the Drogon service."));
-        return;
-      }
-      const endpoint = resolveEndpointPath(directory, process.platform);
-      const connected = createConnection(endpoint);
-      socket = connected;
-      const frame =
-        JSON.stringify({ protocol: 1, requestId, auth, method, params }) + "\n";
-      let bytes = Buffer.alloc(0);
-      connected.on("connect", () => connected.write(frame));
-      connected.on("error", () =>
-        finish(unreachable("Session push cannot reach the Drogon service.")),
-      );
-      connected.on("end", () =>
-        finish(unreachable("Session push lost the Drogon service.")),
-      );
-      connected.on("data", (chunk: Buffer) => {
-        if (settled) return;
-        if (bytes.length + chunk.length > MAX_FRAME_BYTES) {
-          finish({
-            ok: false,
-            error: {
-              code: "internal_error",
-              message: "Session push response is too large.",
-              retryable: false,
-            },
-          });
-          return;
-        }
-        bytes = Buffer.concat([bytes, chunk]);
-        const newline = bytes.indexOf(10);
-        if (newline < 0) return;
-        try {
-          const envelope = JSON.parse(
-            bytes.subarray(0, newline).toString("utf8"),
-          ) as Record<string, unknown>;
-          if (
-            envelope.protocol !== 1 ||
-            envelope.requestId !== requestId ||
-            typeof envelope.ok !== "boolean"
-          )
-            throw new Error("bad envelope");
-          if (envelope.ok) {
-            finish({ ok: true, result: envelope.result });
-          } else {
-            const error = envelope.error as Record<string, unknown>;
-            if (
-              !error ||
-              typeof error.code !== "string" ||
-              typeof error.message !== "string" ||
-              typeof error.retryable !== "boolean"
-            )
-              throw new Error("bad error");
-            finish({
-              ok: false,
-              error: {
-                code: error.code,
-                message: error.message,
-                retryable: error.retryable,
-              },
-            });
-          }
-        } catch {
-          finish({
-            ok: false,
-            error: {
-              code: "internal_error",
-              message: "Session push response does not match the contract.",
-              retryable: false,
-            },
-          });
-        }
-      });
-    };
-    void start();
-  });
+  // The singleton state loop bypasses the output-hold cap (grandfathered
+  // at exactly one by the `active` guard in `startSessionStatePush`).
+  return callNativeHold(method, params, timeoutMs, false, requestId);
 }
 
 /**

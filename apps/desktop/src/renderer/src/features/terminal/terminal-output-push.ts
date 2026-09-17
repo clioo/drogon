@@ -39,6 +39,16 @@ export function isOutputPushAvailable(
   return !!capabilities && capabilities.includes(OUTPUT_PUSH_CAPABILITY);
 }
 
+/**
+ * A `hold_cap` refusal from `drogon:readOutput` is transient main-side
+ * capacity (too many simultaneous holds), not a version gap: the pane
+ * answers the round over `read` and keeps push armed. Any other code
+ * keeps its existing meaning (`method_not_found` latches the old poll).
+ */
+export function isTransientHoldRefusal(code: string | undefined): boolean {
+  return code === "hold_cap";
+}
+
 export type OutputChannelKind = "push" | "poll";
 
 /**

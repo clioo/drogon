@@ -142,6 +142,7 @@ import {
   createOrderedTerminalWriter,
   decodeBase64ToBytes,
   isOutputPushAvailable,
+  isTransientHoldRefusal,
   resolveOutputChannel,
   type OutputChannelKind,
 } from "./terminal-output-push";
@@ -1327,10 +1328,10 @@ export function TerminalPane({
       // PERF-01: one held `session.output` long-poll per visible pane when
       // the daemon advertises push; the 24/120 ms `session.read` poll stays
       // the path everywhere else (old daemon, hidden pane, seek phase).
-      const channel = channelFor(seeking);
+      let channel = channelFor(seeking);
       const readOutput = window.drogon.readOutput;
       try {
-        const response =
+        let response =
           channel === "push" && typeof readOutput === "function"
             ? await readOutput({
                 ...inputIdentity,
@@ -1342,6 +1343,22 @@ export function TerminalPane({
                 cursor,
               });
         if (disposed) return;
+        if (
+          channel === "push" &&
+          !response.ok &&
+          isTransientHoldRefusal(response.error.code)
+        ) {
+          // Main is at its simultaneous-hold cap: answer THIS round over
+          // the old poll (output keeps flowing at the old cadence) and
+          // keep push armed — capacity is transient, not a version gap,
+          // so nothing latches off.
+          response = await window.drogon.read({
+            ...inputIdentity,
+            cursor,
+          });
+          channel = "poll";
+          if (disposed) return;
+        }
         if (!response.ok) {
           // An older daemon has no such method: latch the old poll and
           // re-read at once instead of retry-looping the failure. Any

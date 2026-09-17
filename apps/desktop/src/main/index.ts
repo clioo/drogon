@@ -89,10 +89,12 @@ import {
 import { buildDaemonPath } from "./daemon-path";
 import {
   callNative,
+  callNativeHold,
   dataDirectory,
   observeLocalEndpoint,
   type LocalEndpointObservation,
 } from "./native-client";
+import { resultSchemas } from "../shared/result-validation";
 import {
   bootstrapNativeRuntime,
   spawnDetachedDaemon,
@@ -414,21 +416,48 @@ function registerBridge() {
           return result;
         }
         // PERF-01 push channel (additive): the held `session.output`
-        // long-poll. Same 64 KiB page and cursor-mismatch guard as `read`;
-        // the renderer's 8 s hold sits under `callNative`'s 10 s idle
-        // socket timeout, and an older daemon answers `method_not_found`,
-        // which the pane reads as capability-absent (no new error shape).
+        // long-poll over a DEDICATED one-shot connection (`callNativeHold`,
+        // never the pool — the daemon serves one frame at a time per
+        // connection, so a hold would head-of-line-block every short call
+        // sharing its entry). Same 64 KiB page and cursor-mismatch guard
+        // as `read`; the absolute call timeout covers the requested hold
+        // plus dial/scheduling slack. An older daemon answers
+        // `method_not_found` (capability-absent fallback in the pane), and
+        // a `hold_cap` refusal is transient capacity (the pane answers the
+        // round over `read` and keeps push armed) — both pass through
+        // unchanged, never rewritten here.
         case "readOutput": {
-          const result = await callNative("session.output", {
-            ...(value as object),
-            limitBytes: 65536,
-          });
+          const input = value as { waitMs?: unknown };
+          const waitMs =
+            typeof input.waitMs === "number" &&
+            Number.isInteger(input.waitMs) &&
+            input.waitMs >= 0
+              ? Math.min(input.waitMs, 30_000)
+              : 0;
+          const result = await callNativeHold(
+            "session.output",
+            {
+              ...(value as object),
+              limitBytes: 65536,
+            },
+            waitMs + 5_000,
+            true,
+          );
           if (result.ok) {
-            const read = result.result as {
+            let read: {
               dataBase64: string;
               startCursor: number;
               nextCursor: number;
             };
+            try {
+              read = resultSchemas["session.output"].parse(
+                result.result,
+              ) as typeof read;
+            } catch {
+              return contractViolation(
+                "The service response does not match the expected contract.",
+              );
+            }
             if (
               readCursorMismatches(
                 read.dataBase64,

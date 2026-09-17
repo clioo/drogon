@@ -6,8 +6,10 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   MAX_FRAME_BYTES,
+  MAX_SESSION_OUTPUT_HOLDS,
   NATIVE_POOL_MAX_CONNECTIONS,
   callNative,
+  callNativeHold,
   getNativeConnectionStats,
   identityMismatch,
   resetNativeClientForTests,
@@ -625,5 +627,312 @@ describe("callNative multiplexed transport (PERF-02)", () => {
     }
     // Replay-once means exactly two dials, never a retry storm.
     expect(fakeDaemon.dials).toBe(2);
+  });
+});
+
+describe("callNativeHold dedicated long-holds (PERF-01)", () => {
+  let scratchDir = "";
+  let originalDataDir: string | undefined;
+
+  // Same controllable wire as the pool tests: one socket per dial, frames
+  // answered only when the test says so. A hold's socket is one-shot and
+  // dedicated — never pooled, never shared.
+  class FakeSocket extends EventEmitter {
+    written: string[] = [];
+    destroyed = false;
+    write(chunk: string | Buffer): boolean {
+      this.written.push(chunk.toString());
+      fakeDaemon.onWrite(this);
+      return true;
+    }
+    destroy(): this {
+      if (this.destroyed) return this;
+      this.destroyed = true;
+      this.emit("close");
+      return this;
+    }
+    setTimeout(): this {
+      return this;
+    }
+    unref(): this {
+      return this;
+    }
+  }
+
+  const fakeDaemon = {
+    dials: 0,
+    sockets: [] as FakeSocket[],
+    onWrite: (_socket: FakeSocket): void => {},
+  };
+
+  function requestIdOf(line: string): string {
+    return (JSON.parse(line) as { requestId: string }).requestId;
+  }
+
+  const statusResult = {
+    hostId: "test-host",
+    serviceInstanceId: "svc-1",
+    protocol: 1,
+    capabilities: [],
+    version: "test",
+  };
+
+  function answerOk(socket: FakeSocket, requestId: string): void {
+    socket.emit(
+      "data",
+      Buffer.from(
+        `${JSON.stringify({ protocol: 1, requestId, ok: true, result: {} })}\n`,
+      ),
+    );
+  }
+
+  function answerStatus(socket: FakeSocket, requestId: string): void {
+    socket.emit(
+      "data",
+      Buffer.from(
+        `${JSON.stringify({ protocol: 1, requestId, ok: true, result: statusResult })}\n`,
+      ),
+    );
+  }
+
+  function answerError(
+    socket: FakeSocket,
+    requestId: string,
+    code: string,
+  ): void {
+    socket.emit(
+      "data",
+      Buffer.from(
+        `${JSON.stringify({
+          protocol: 1,
+          requestId,
+          ok: false,
+          error: { code, message: code, retryable: true },
+        })}\n`,
+      ),
+    );
+  }
+
+  beforeEach(async () => {
+    resetNativeClientForTests();
+    fakeDaemon.dials = 0;
+    fakeDaemon.sockets = [];
+    fakeDaemon.onWrite = () => {};
+    setNativeTransportForTests({
+      createConnection: (_endpoint: string) => {
+        fakeDaemon.dials += 1;
+        const socket = new FakeSocket();
+        fakeDaemon.sockets.push(socket);
+        queueMicrotask(() => {
+          if (!socket.destroyed) socket.emit("connect");
+        });
+        return socket as unknown as Socket;
+      },
+    });
+    scratchDir = await mkdtemp(
+      path.join(tmpdir(), "drogon-native-client-hold-test-"),
+    );
+    await writeFile(
+      path.join(scratchDir, "auth.token"),
+      "test-token\n",
+      "utf8",
+    );
+    originalDataDir = process.env.DROGON_DATA_DIR;
+    process.env.DROGON_DATA_DIR = scratchDir;
+  });
+
+  afterEach(async () => {
+    resetNativeClientForTests();
+    if (originalDataDir === undefined) delete process.env.DROGON_DATA_DIR;
+    else process.env.DROGON_DATA_DIR = originalDataDir;
+    if (scratchDir) await rm(scratchDir, { recursive: true, force: true });
+  });
+
+  test("six simultaneous holds never delay a short pooled call", async () => {
+    // Warm the credential cache and the pool first (see the pool tests):
+    // past it every registration is microtask-ordered and deterministic.
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answerStatus(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    const held: { socket: FakeSocket; requestId: string }[] = [];
+    const arrived: { socket: FakeSocket; requestId: string }[] = [];
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0)) {
+        const requestId = requestIdOf(line);
+        arrived.push({ socket, requestId });
+        // Withhold every hold; the short call below must still answer at
+        // once on its own connection. The daemon serves one frame at a
+        // time per connection, so sharing would hang this `await` until
+        // the releases at the end (the test timeout would fire instead).
+        if (requestId.startsWith("req-hold-"))
+          held.push({ socket, requestId });
+        else answerStatus(socket, requestId);
+      }
+    };
+    const holds = Array.from({ length: 6 }, (_, i) =>
+      callNativeHold("session.output", { cursor: 0 }, 5_000, true, `req-hold-${i}`),
+    );
+    // Let every hold dial and register before the short call runs.
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const fast = await callNative("status", {}, "req-fast");
+    expect(fast.ok).toBe(true);
+    expect(held).toHaveLength(6);
+    // Causal proof, no timers: six distinct dedicated sockets for the
+    // holds, and the short call on a seventh that is none of them — it
+    // never shared a connection with any hold.
+    const holdSockets = new Set(held.map((item) => item.socket));
+    expect(holdSockets.size).toBe(6);
+    const fastArrival = arrived.find((item) => item.requestId === "req-fast");
+    expect(fastArrival).toBeDefined();
+    expect(holdSockets.has(fastArrival!.socket)).toBe(false);
+    // One warm pool dial, six dedicated hold dials, and the fast call
+    // reuses the idle warm entry — no eighth dial, no sharing with holds.
+    expect(fakeDaemon.dials).toBe(1 + 6);
+    for (const item of held) answerOk(item.socket, item.requestId);
+    const settled = await Promise.all(holds);
+    expect(settled.every((result) => result.ok)).toBe(true);
+    // Reclamation is the settle: every dedicated socket destroyed.
+    for (const socket of holdSockets) expect(socket.destroyed).toBe(true);
+  });
+
+  test("the cap refuses past the max and re-admits after settle", async () => {
+    // Warm the credential cache first (see the pool tests): past it every
+    // registration is microtask-ordered and the dial count below is exact.
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answerStatus(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    fakeDaemon.onWrite = () => {};
+    const holds = Array.from({ length: MAX_SESSION_OUTPUT_HOLDS }, (_, i) =>
+      callNativeHold("session.output", { cursor: 0 }, 5_000, true, `req-cap-${i}`),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Past the cap: a retryable refusal with no new dial — the pane
+    // answers the round over the old poll instead of queuing behind holds.
+    const refused = await callNativeHold(
+      "session.output",
+      { cursor: 0 },
+      5_000,
+      true,
+      "req-cap-overflow",
+    );
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.error.code).toBe("hold_cap");
+      expect(refused.error.retryable).toBe(true);
+    }
+    expect(fakeDaemon.dials).toBe(1 + MAX_SESSION_OUTPUT_HOLDS);
+    // Release every hold: all settle, all sockets destroyed, and the next
+    // hold is admitted — the cap counts outstanding holds, never history.
+    const released: FakeSocket[] = [];
+    for (const socket of fakeDaemon.sockets) {
+      const lines = socket.written.splice(0);
+      if (lines.length > 0) released.push(socket);
+      for (const line of lines) answerOk(socket, requestIdOf(line));
+    }
+    // Exactly the 16 hold frames (the warm pooled entry wrote nothing new
+    // and persists by design).
+    expect(released).toHaveLength(MAX_SESSION_OUTPUT_HOLDS);
+    const settled = await Promise.all(holds);
+    expect(settled.every((result) => result.ok)).toBe(true);
+    for (const socket of released) expect(socket.destroyed).toBe(true);
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answerOk(socket, requestIdOf(line));
+    };
+    expect(
+      (await callNativeHold("session.output", { cursor: 0 }, 5_000, true, "req-cap-after")).ok,
+    ).toBe(true);
+    expect(fakeDaemon.dials).toBe(1 + MAX_SESSION_OUTPUT_HOLDS + 1);
+  });
+
+  test("the singleton events hold bypasses the output cap", async () => {
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answerStatus(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    fakeDaemon.onWrite = () => {};
+    const holds = Array.from({ length: MAX_SESSION_OUTPUT_HOLDS }, (_, i) =>
+      callNativeHold("session.output", { cursor: 0 }, 5_000, true, `req-fill-${i}`),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The state loop is grandfathered at exactly one: even with every
+    // output slot taken it still dials its own dedicated connection.
+    const events = callNativeHold(
+      "session.events.poll",
+      { afterSeq: 0 },
+      5_000,
+      false,
+      "req-events",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakeDaemon.dials).toBe(1 + MAX_SESSION_OUTPUT_HOLDS + 1);
+    const eventsSocket = fakeDaemon.sockets.find((socket) =>
+      socket.written.some((line) => requestIdOf(line) === "req-events"),
+    );
+    expect(eventsSocket).toBeDefined();
+    answerOk(eventsSocket!, "req-events");
+    expect((await events).ok).toBe(true);
+    for (const socket of fakeDaemon.sockets) {
+      for (const line of socket.written.splice(0))
+        answerOk(socket, requestIdOf(line));
+    }
+    await Promise.all(holds);
+  });
+
+  test("holds reuse the cached credential without re-reading the token", async () => {
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answerStatus(socket, requestIdOf(line));
+    };
+    expect((await callNative("status", {}, "req-warm")).ok).toBe(true);
+    // The token file is gone; a cached hold still authenticates.
+    await rm(path.join(scratchDir, "auth.token"), { force: true });
+    const held = await callNativeHold(
+      "session.output",
+      { cursor: 0 },
+      5_000,
+      true,
+      "req-cached",
+    );
+    expect(held.ok).toBe(true);
+  });
+
+  test("a hold that outlives its deadline reports unverifiable, never exit", async () => {
+    fakeDaemon.onWrite = () => {};
+    const result = await callNativeHold(
+      "session.output",
+      { cursor: 0 },
+      50,
+      true,
+      "req-deadline",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("unverifiable");
+      expect(result.error.retryable).toBe(true);
+    }
+    expect(fakeDaemon.sockets[0]?.destroyed).toBe(true);
+  });
+
+  test("a method_not_found envelope passes through for the version latch", async () => {
+    fakeDaemon.onWrite = (socket) => {
+      for (const line of socket.written.splice(0))
+        answerError(socket, requestIdOf(line), "method_not_found");
+    };
+    const result = await callNativeHold(
+      "session.output",
+      { cursor: 0 },
+      5_000,
+      true,
+      "req-old-daemon",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("method_not_found");
   });
 });
