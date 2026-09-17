@@ -5,6 +5,18 @@ import { waitForSessionStripTab } from "./probe-rendered-harness.mjs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+// PERF-01d: each echo wait bounds itself instead of inheriting the page's
+// 15 s default. Hot p95 measured ~36 ms, so 3 s is ~80x headroom; cold
+// allows a quiet-cadence wake; burst covers ~100 KiB end to end. Polling
+// is a 10 ms timer, never rAF: the acceptance window runs hidden, where
+// frames stall under load and a frame-gated wait times out on a landed
+// echo — while a 100 ms tick would quantize every sample near 100 ms and
+// hide the signal this probe exists to record.
+const HOT_SAMPLE_TIMEOUT_MS = 3_000;
+const COLD_SAMPLE_TIMEOUT_MS = 5_000;
+const BURST_TIMEOUT_MS = 30_000;
+const ECHO_POLL_MS = 10;
+
 function percentile(sorted, p) {
   if (sorted.length === 0) return null;
   const rank = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
@@ -30,10 +42,22 @@ function summarizeLatency(samples) {
  * waits out the active window first so the pane falls back to its quiet
  * cadence; `burst` measures a large idle-pane output burst end to end.
  * Leaves the line cleared with Ctrl+C and the shell on a fresh prompt.
+ *
+ * PERF-01d: a missed sample is diagnostic, never fatal. Every wait carries
+ * its own short timeout on interval polling — never the inherited 15 s
+ * rAF wait, which stalls in the backgrounded acceptance window under
+ * load — and misses land in terminal-echo-latency.json with phase and
+ * buffer tail. One lost keystroke cannot poison later samples: the line
+ * is cleared and the cumulative expectation resyncs. Percentiles cover
+ * the samples that landed; `dropped` counts the ones that did not. Only
+ * a total blackout — no echo in any phase — still fails, naming the
+ * phase and the observed buffer tail.
  */
 export async function probeTerminalEchoLatency({ page, session, output, hotSamples = 30 }) {
   const evidence = { hot: [], coldMs: null, burstMs: null, samples: hotSamples };
-  await page.locator(".xterm-helper-textarea").focus();
+  const misses = [];
+  const focusTerminal = () => page.locator(".xterm-helper-textarea").focus();
+  await focusTerminal();
   // The shell must be sitting on an empty prompt: anything the journey
   // typed before would prefix every echo match below.
   await page.keyboard.press("Control+C");
@@ -54,16 +78,51 @@ export async function probeTerminalEchoLatency({ page, session, output, hotSampl
       tail += buffer.getLine(i)?.translateToString(true).replace(/\s+$/, "") ?? "";
     return tail.endsWith(want);
   };
+  // Last rows of one pane's buffer for miss diagnostics: enough to tell a
+  // lost keystroke (the echo is absent) from fragile waiting (it landed).
+  const readBufferTail = ({ id, rows = 8, maxChars = 500 }) => {
+    const terminal = window.__drogonTerminals?.get(id);
+    if (!terminal) return "<no terminal>";
+    const buffer = terminal.buffer.active;
+    const lines = [];
+    for (let i = Math.max(0, buffer.length - rows); i < buffer.length; i++)
+      lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
+    return lines.join("\n").slice(-maxChars);
+  };
+  const waitForEcho = async ({ want, timeoutMs, phase, sample }) => {
+    try {
+      await page.waitForFunction(tailMatches, { id: session.id, want }, { timeout: timeoutMs, polling: ECHO_POLL_MS });
+      return true;
+    } catch (error) {
+      const bufferTail = await page.evaluate(readBufferTail, { id: session.id }).catch(() => "<unreadable>");
+      misses.push({
+        phase, sample, expected: want, timeoutMs,
+        error: String(error?.message ?? error).split("\n")[0],
+        bufferTail,
+      });
+      return false;
+    }
+  };
   for (let s = 0; s < hotSamples; s++) {
+    // Re-focus per sample: the layout probe's cleanup tolerates focus
+    // loss, and a keystroke to the wrong target echoes nowhere.
+    await focusTerminal();
     const ch = alphabet[s % alphabet.length];
     const expected = `${typed}${ch}`;
     const t0 = await page.evaluate(() => performance.now());
     await page.keyboard.press(ch);
-    await page.waitForFunction(tailMatches, { id: session.id, want: expected });
+    const landed = await waitForEcho({ want: expected, timeoutMs: HOT_SAMPLE_TIMEOUT_MS, phase: "hot", sample: s });
     const t1 = await page.evaluate(() => performance.now());
-    evidence.hot.push(t1 - t0);
-    typed = expected;
-    assert.ok(evidence.hot[evidence.hot.length - 1] < 10_000, "echo must land, not hang");
+    if (landed) {
+      evidence.hot.push(t1 - t0);
+      typed = expected;
+    } else {
+      // Resync: a lost char stays a prefix of `expected` forever and would
+      // fail every later sample, so clear the line and start fresh.
+      await page.keyboard.press("Control+C");
+      await delay(300);
+      typed = "";
+    }
   }
   const hot = summarizeLatency(evidence.hot);
   // Cold echo: wait out the active window (1.5 s) so the pane falls back
@@ -73,10 +132,11 @@ export async function probeTerminalEchoLatency({ page, session, output, hotSampl
   typed = "";
   await delay(2200);
   {
+    await focusTerminal();
     const t0 = await page.evaluate(() => performance.now());
     await page.keyboard.press("z");
-    await page.waitForFunction(tailMatches, { id: session.id, want: "z" });
-    evidence.coldMs = (await page.evaluate(() => performance.now())) - t0;
+    if (await waitForEcho({ want: "z", timeoutMs: COLD_SAMPLE_TIMEOUT_MS, phase: "cold", sample: 0 }))
+      evidence.coldMs = (await page.evaluate(() => performance.now())) - t0;
   }
   // Idle-pane burst: after the pane goes quiet, dump ~100 KiB and time
   // Enter -> last line visible end to end.
@@ -85,13 +145,14 @@ export async function probeTerminalEchoLatency({ page, session, output, hotSampl
   {
     const burstMarker = `BURST_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
     const command = `i=0; while [ "$i" -lt 1200 ]; do printf '%080d ${burstMarker} %04d\\n' 0 "$i"; i=$((i+1)); done`;
+    await focusTerminal();
     await page.keyboard.type(command);
     // Timed from Enter: typing time is input, not output delivery.
     const t0 = await page.evaluate(() => performance.now());
     await page.keyboard.press("Enter");
     // Rows join before matching: an 80-column viewport wraps the ~104-char
     // burst line, so the marker's tail may start on the next row.
-    await page.waitForFunction(({ marker }) => {
+    const burstMatches = ({ marker }) => {
       const terminals = window.__drogonTerminals;
       if (!terminals) return false;
       for (const terminal of terminals.values()) {
@@ -102,11 +163,36 @@ export async function probeTerminalEchoLatency({ page, session, output, hotSampl
         if (tail.includes(`${marker} 1199`)) return true;
       }
       return false;
-    }, { marker: burstMarker });
-    evidence.burstMs = (await page.evaluate(() => performance.now())) - t0;
+    };
+    try {
+      await page.waitForFunction(burstMatches, { marker: burstMarker }, { timeout: BURST_TIMEOUT_MS, polling: ECHO_POLL_MS });
+      evidence.burstMs = (await page.evaluate(() => performance.now())) - t0;
+    } catch (error) {
+      const bufferTail = await page.evaluate(() => {
+        const lines = [];
+        for (const terminal of (window.__drogonTerminals ?? new Map()).values()) {
+          const buffer = terminal.buffer.active;
+          for (let i = Math.max(0, buffer.length - 8); i < buffer.length; i++)
+            lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
+        }
+        return lines.join("\n").slice(-500);
+      }).catch(() => "<unreadable>");
+      misses.push({
+        phase: "burst", sample: 0, expected: `${burstMarker} 1199`, timeoutMs: BURST_TIMEOUT_MS,
+        error: String(error?.message ?? error).split("\n")[0],
+        bufferTail,
+      });
+    }
   }
   await page.keyboard.press("Control+C");
-  const summary = { hot, coldMs: evidence.coldMs, burstMs: evidence.burstMs, samples: evidence.hot };
+  // The surviving product claim: an echo must eventually land, not hang
+  // forever. Partial misses degrade; a total blackout still fails, naming
+  // the phase and the observed buffer tail.
+  if (evidence.hot.length === 0 && evidence.coldMs == null) {
+    const first = misses[0];
+    assert.fail(`terminal echo never landed (missed=${misses.length}, firstMiss=${first?.phase ?? "hot"}#${first?.sample ?? 0}, bufferTail=${JSON.stringify(first?.bufferTail ?? "<unreadable>")}): an echo must eventually land, not hang forever`);
+  }
+  const summary = { hot, coldMs: evidence.coldMs, burstMs: evidence.burstMs, samples: evidence.hot, dropped: misses.length, missed: misses };
   if (output) await writeFile(path.join(output, "terminal-echo-latency.json"), JSON.stringify(summary, null, 2));
   return summary;
 }

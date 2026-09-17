@@ -671,8 +671,11 @@ try {
     // per keystroke and polls the xterm buffer via CDP for the echo,
     // reporting p50/p95. Numbers land in terminal-echo-latency.json; the
     // check name records that the probe ran, never a latency gate.
+    // PERF-01d: missed samples degrade (dropped=N, nulls for the phases
+    // that missed) instead of failing the run; only a total echo
+    // blackout rejects, with phase and buffer tail in the message.
     const echo = await probeTerminalEchoLatency({ page, session: original, output });
-    console.log(`[perf-01] echo hot p50=${echo.hot.p50?.toFixed(1)}ms p95=${echo.hot.p95?.toFixed(1)}ms cold=${echo.coldMs?.toFixed(1)}ms burst=${echo.burstMs?.toFixed(0)}ms`);
+    console.log(`[perf-01] echo hot p50=${echo.hot.p50?.toFixed(1)}ms p95=${echo.hot.p95?.toFixed(1)}ms cold=${echo.coldMs?.toFixed(1)}ms burst=${echo.burstMs?.toFixed(0)}ms dropped=${echo.dropped ?? 0}`);
     report.checks.push("terminal-echo-latency-measured");
   }
   report.checks.push(await probeSessionNavigation({
