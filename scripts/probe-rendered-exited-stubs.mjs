@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { runAcceptanceProcess } from "./acceptance-process.mjs";
 import {
-  runAcceptanceProcess,
-  startAcceptanceProcess,
-  waitAcceptanceExit,
-} from "./acceptance-process.mjs";
+  killOwnedDaemon,
+  spawnRestartDaemon,
+  waitForRestartedDaemon,
+} from "./acceptance-daemon-restart.mjs";
 import { waitForBridgeObservation } from "./acceptance-bridge-observation.mjs";
 
 // What "exited stubs behave like the fork's exited sessions" means
@@ -99,20 +99,6 @@ async function closeOpenStripTabs(page) {
   }
 }
 
-async function waitForDaemon(cliBin, dataDir) {
-  const deadline = Date.now() + 15000;
-  for (;;) {
-    try {
-      const status = await cliJson(cliBin, dataDir, ["status"]);
-      if (status.ok) return;
-    } catch {
-      // Not up yet.
-    }
-    if (Date.now() >= deadline) throw new Error("restarted daemon never came up");
-    await delay(100);
-  }
-}
-
 // Seeds two rows straight into SQLite while the daemon is down, exactly
 // like the issue's restart: on startup the recovery sweep flips them to
 // `unverifiable` — the real stub path, not a synthetic verdict. The seed
@@ -159,9 +145,9 @@ export async function probeRenderedExitedStubs({
       incarnation: item.incarnation,
     });
   }
-  daemon.kill("SIGKILL");
-  const observed = await waitAcceptanceExit(daemon, 10000);
-  assert.equal(observed.verdict, "exited");
+  // Kill -9 ONLY the daemon PID — and prove it died, so a later
+  // readiness failure can never be a kill that never landed (PERF-01e).
+  await killOwnedDaemon(daemon);
   const db = path.join(dataDir, "drogon.sqlite3");
   await runAcceptanceProcess("python3", [
     "-c",
@@ -172,12 +158,12 @@ export async function probeRenderedExitedStubs({
     stubBId,
     new Date().toISOString(),
   ]);
-  const next = startAcceptanceProcess(daemonBin, ["--data-dir", dataDir], {
-    stdio: "ignore",
-    env: { ...process.env },
-  });
-  adoptDaemon(next);
-  await waitForDaemon(cliBin, dataDir);
+  // The replacement's stderr is captured (not ignored): a startup
+  // refusal names itself in the readiness error instead of polling a dead
+  // process for 15 s (PERF-01e).
+  const restarted = spawnRestartDaemon(daemonBin, dataDir);
+  adoptDaemon(restarted.child);
+  await waitForRestartedDaemon(cliBin, dataDir, restarted);
   // The daemon died and came back inside one renderer heartbeat window, so
   // the connection monitor may never have seen the outage — no reconnect
   // transition means no session re-list and the new stub rows stay
