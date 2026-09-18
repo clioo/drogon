@@ -1022,8 +1022,8 @@ pub enum TerminalAction {
         incarnation: String,
         #[arg(long, value_name = "TEXT")]
         text: String,
-        /// Send TEXT's bytes verbatim: no newline-to-Return translation and
-        /// no separate Enter keystroke. For piping data rather than typing.
+        /// Send TEXT's bytes verbatim: no trailing-newline-to-Return
+        /// translation. For piping data rather than typing a message.
         #[arg(long)]
         literal: bool,
     },

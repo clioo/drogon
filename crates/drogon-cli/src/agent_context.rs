@@ -269,7 +269,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
                 "A trailing newline (or carriage return, or CRLF) is delivered as one carriage return, the byte a terminal puts on the wire when you press Enter and the only byte a raw-mode TUI submits on.",
                 "Every other byte is delivered unchanged in a single write, so an LF-separated multi-line message lands whole and only the final Return submits it.",
                 "A carriage return INSIDE the value is Enter too: convert CRLF line endings to LF first, or each CR submits early.",
-                "The result adds submittedEnter: true when that Return was delivered; acceptedBytes counts what reached the PTY, so a trailing CRLF reports one byte fewer than the input.",
+                "The result adds submittedEnter, true when that Return was delivered and false when it was not; acceptedBytes counts what reached the PTY, so a trailing CRLF reports one byte fewer than the input.",
                 "Use --literal to write the bytes verbatim instead (no Return translation, no Enter) when piping data rather than typing a message.",
             ],
         ),
