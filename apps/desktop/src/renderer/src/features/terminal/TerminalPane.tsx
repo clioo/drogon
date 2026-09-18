@@ -157,11 +157,13 @@ import {
   readOpenLinksInApp,
 } from "../browser/browser-bridge";
 import {
+  getTerminalUrlOpenHint,
   terminalHttpLinkActionDestinationsFor,
   terminalHttpLinkClickDestination,
   terminalHttpLinkDestinationLabel,
   type TerminalHttpLinkDestination,
 } from "./terminal-http-link-destinations";
+import { createTerminalOscLinkHandler } from "./terminal-osc-link-handler";
 import type { Session } from "../../../../shared/session-contract";
 import type { TerminalPasteSource } from "./terminal-paste-model";
 
@@ -751,45 +753,59 @@ export function TerminalPane({
       event?: Pick<MouseEvent, "shiftKey">,
     ): Promise<{ ok: true } | { ok: false; message: string }> =>
       openHttpUrlTo(terminalHttpLinkClickDestination(event?.shiftKey), url);
+    const requestHttpLinkAction = (mouse: MouseEvent, url: string): boolean => {
+      // The fork's popover (terminal-url-link-hit-testing.ts
+      // handleTerminalHttpLink): the primary action names the
+      // preference's destination, the alternate the other one.
+      const destinations =
+        terminalHttpLinkActionDestinationsFor(readOpenLinksInApp());
+      const runFor = (destination: TerminalHttpLinkDestination) => () => {
+        void openHttpUrlTo(destination, url).then((result) => {
+          if (!result.ok) report(result.message);
+        });
+      };
+      return requestTerminalLinkAction(mouse, linkActionContext.current, {
+        destination: url,
+        kind: "url",
+        primary: {
+          label: terminalHttpLinkDestinationLabel(destinations.primary),
+          external: destinations.primary === "system",
+          run: runFor(destinations.primary),
+        },
+        alternate: destinations.alternate
+          ? {
+              label: terminalHttpLinkDestinationLabel(destinations.alternate),
+              external: destinations.alternate === "system",
+              run: runFor(destinations.alternate),
+            }
+          : undefined,
+      });
+    };
     terminal.loadAddon(
       new WebLinksAddon((event, url) =>
         handleTerminalWebLinkClick(url, event, {
           openUrl: (linkUrl) => openHttpUrl(linkUrl, event ?? undefined),
-          requestAction: (mouse) => {
-            // The fork's popover (terminal-url-link-hit-testing.ts
-            // handleTerminalHttpLink): the primary action names the
-            // preference's destination, the alternate the other one.
-            const destinations =
-              terminalHttpLinkActionDestinationsFor(readOpenLinksInApp());
-            const runFor = (destination: TerminalHttpLinkDestination) => () => {
-              void openHttpUrlTo(destination, url).then((result) => {
-                if (!result.ok) report(result.message);
-              });
-            };
-            return requestTerminalLinkAction(mouse, linkActionContext.current, {
-              destination: url,
-              kind: "url",
-              primary: {
-                label: terminalHttpLinkDestinationLabel(destinations.primary),
-                external: destinations.primary === "system",
-                run: runFor(destinations.primary),
-              },
-              alternate: destinations.alternate
-                ? {
-                    label: terminalHttpLinkDestinationLabel(
-                      destinations.alternate,
-                    ),
-                    external: destinations.alternate === "system",
-                    run: runFor(destinations.alternate),
-                  }
-                : undefined,
-            });
-          },
+          requestAction: (mouse) => requestHttpLinkAction(mouse, url),
           clearSelection: () => terminal.clearSelection(),
           report,
         }),
       ),
     );
+    // #600: OSC 8 hyperlinks bypass the addon above — xterm resolves them
+    // itself and, with no linkHandler, raises its `confirm()` "could
+    // potentially be dangerous" dialog instead of opening anything. Options
+    // are read when a link is resolved, so assigning here (after the openers
+    // exist) is what the OscLinkProvider sees.
+    terminal.options.linkHandler = createTerminalOscLinkHandler({
+      openUrl: (linkUrl, event) => openHttpUrl(linkUrl, event),
+      requestAction: requestHttpLinkAction,
+      clearSelection: () => terminal.clearSelection(),
+      report,
+      // The link text is arbitrary for OSC 8, so name the real destination.
+      hover: (linkUrl) =>
+        setLinkTooltip(`${linkUrl} (${getTerminalUrlOpenHint({ isMac })})`),
+      leave: () => setLinkTooltip(null),
+    });
     const fileLinkProvider: ILinkProvider = {
       provideLinks: (bufferLineNumber, callback) => {
         // Why -1: xterm hands the provider a 1-based buffer line number;
