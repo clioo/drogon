@@ -132,7 +132,10 @@ was submitted and not just typed into the composer, and `acceptedBytes`
 counts what reached the PTY (a trailing CRLF is the one byte Return really
 is). Pass `--literal` to write the bytes verbatim instead, with no Return
 translation and no Enter, when you are piping data rather than typing a
-message. Read bounded output with
+message. A session in canonical mode — a plain shell, and a TUI before it
+sets raw mode — buffers one line up to the kernel's limit (1024 bytes on
+macOS), so keep a single line well under that or the terminating Enter is
+discarded along with it. Read bounded output with
 `drogon-cli terminal read --session <ID> --incarnation <TOKEN> --cursor 0 --limit-bytes 4096`,
 then keep paging with the returned `nextCursor` while `truncated` is true.
 Resize with `drogon-cli terminal resize --session <ID> --incarnation <TOKEN> --cols 80 --rows 24`,
