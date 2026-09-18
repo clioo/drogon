@@ -1,80 +1,54 @@
 //! How `terminal send` turns `--text` into PTY input (issue #599).
 //!
-//! Two facts about terminals decide everything here.
+//! **Return is a carriage return, not a line feed.** When a human presses
+//! Enter, the terminal puts `\r` (0x0D) on the wire. A TUI in raw mode
+//! (`ICRNL` off — every agent harness Drogon launches) therefore reads `\r`
+//! and nothing else as "submit"; a bare `\n` is just another character and
+//! lands in the input box as a literal newline. That is exactly the reported
+//! symptom: a follow-up sent to a live Claude Code session appeared in the
+//! composer and was never submitted as a turn. A shell in canonical mode is
+//! unaffected by the distinction, because its line discipline maps input CR
+//! to NL (`ICRNL`) for us.
 //!
-//! 1. **Return is a carriage return, not a line feed.** When a human presses
-//!    Enter, the terminal puts `\r` (0x0D) on the wire. A TUI in raw mode
-//!    (`ICRNL` off — every agent harness Drogon launches) therefore reads
-//!    `\r` and nothing else as "submit"; a bare `\n` is just another
-//!    character and lands in the input box as a literal newline. That is
-//!    exactly the reported symptom: the follow-up text appeared in the
-//!    session's composer but was never submitted as a turn. A shell in
-//!    canonical mode is unaffected by the distinction, because its line
-//!    discipline maps input CR to NL (`ICRNL`) for us.
+//! So `--text`'s trailing line terminator — `\n`, `\r\n` or `\r` — is
+//! delivered as one `\r`. That is the whole fix. It is the same byte the
+//! desktop's paste path puts on the PTY for a newline
+//! (`normalizeTerminalPasteLineEndings`) and the same byte the Work Graph's
+//! prompt delivery appends (`mentu-run-dispatch.ts`), so all three surfaces
+//! now agree on what Enter is.
 //!
-//! 2. **A keystroke is its own read.** TUIs distinguish typing from pasting
-//!    by how input arrives; a body and its Return delivered in one PTY write
-//!    can be read as a single pasted blob, in which case the trailing `\r`
-//!    is inserted as text instead of submitting. A human never produces that
-//!    shape, so neither do we: the body is written first, then — after
-//!    [`ENTER_PACE`], long enough for the reader to have drained the body —
-//!    the Return is written on its own. This is what `tmux send-keys <text>
-//!    Enter` does, and it makes the outcome independent of any particular
-//!    TUI's paste heuristics.
+//! **Everything else is delivered unchanged, in one write.** Two things
+//! follow from that, both deliberate:
 //!
-//! Only the *trailing* terminator is translated. Interior bytes reach the
-//! PTY exactly as given, which is what makes a multi-line message work: the
-//! embedded line feeds land in the composer as line feeds and the single
-//! Return at the end submits the whole thing as one turn. Rewriting them all
-//! to Return would instead submit each line as its own turn, and would
-//! fragment exactly the multi-line correction this command exists to send.
+//! - Interior bytes are the caller's. A multi-line message keeps its line
+//!   feeds, lands in the composer whole, and is submitted once by the
+//!   trailing Return. An interior *carriage* return is not rewritten either
+//!   — and, being Return, a raw-mode TUI will submit on it, so a CRLF-ended
+//!   payload has to be converted to LF by the caller before it is sent as
+//!   one message. The guide says so rather than the code guessing.
+//! - One write, not two. An earlier cut split the Return into a second,
+//!   paced write so a TUI would see a discrete keystroke rather than a
+//!   pasted blob. It cannot deliver that: bytes queue in the PTY's input
+//!   buffer, so a reader that is not already blocked in `read()` gets both
+//!   writes in one read anyway. What the split did reliably produce was a
+//!   window in which two concurrent sends to one session interleaved into a
+//!   single fused line. Serializing a multi-write send is the daemon's job —
+//!   it owns the PTY writer lock — not something a CLI process can promise,
+//!   so this one stays atomic.
 //!
-//! `--literal` opts out of both rules: the bytes go to the PTY exactly as
-//! given, in one write, which is what a caller piping data (rather than
+//! `--literal` opts out: the bytes go to the PTY exactly as given, with no
+//! Return translation, which is what a caller piping data (rather than
 //! typing a message) wants.
-
-use std::time::Duration;
-
-use sha2::{Digest, Sha256};
 
 /// The byte a terminal emits for Return.
 pub const ENTER: &str = "\r";
 
-/// Gap between the body write and the Return write. Small enough to be
-/// imperceptible on a command that already costs a socket round trip, large
-/// enough that a reader blocked in `read()` wakes on the body first.
-pub const ENTER_PACE: Duration = Duration::from_millis(40);
-
-/// Suffix that derives the Return write's ledger id from the body write's.
-/// Deterministic on purpose: `--retry-request` replays both writes onto the
-/// same two ledger rows instead of duplicating the keystroke.
-///
-/// The CLI refuses a caller-supplied request id that ends with it
-/// (`cli::validate_request_id`), so this half of the id namespace belongs to
-/// this module alone and a caller can never collide with a derived id.
-pub const ENTER_REQUEST_SUFFIX: &str = ".drogon-enter";
-
-/// Envelope cap from `drogon_protocol::Request::validate`.
-const MAX_REQUEST_ID_LEN: usize = 128;
-
-/// One PTY write: the exact bytes, and the ledger id they are sent under.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TerminalSendWrite {
-    pub request_id: String,
-    pub text: String,
-}
-
-impl TerminalSendWrite {
-    pub fn byte_len(&self) -> u64 {
-        self.text.len() as u64
-    }
-}
-
-/// The full delivery for one `terminal send`: the writes in order, plus
-/// whether the last of them is a Return keystroke.
+/// What one `terminal send` writes to the PTY.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalSendPlan {
-    pub writes: Vec<TerminalSendWrite>,
+    /// The exact bytes of the single `session.write`.
+    pub text: String,
+    /// Whether those bytes end with the Return that submits them.
     pub submitted_enter: bool,
 }
 
@@ -83,7 +57,7 @@ impl TerminalSendPlan {
     /// `acceptedBytes` reports, and it equals the `--text` byte length except
     /// when a trailing CRLF collapses into the one byte Return really is.
     pub fn byte_len(&self) -> u64 {
-        self.writes.iter().map(TerminalSendWrite::byte_len).sum()
+        self.text.len() as u64
     }
 }
 
@@ -99,62 +73,23 @@ fn split_trailing_terminator(text: &str) -> (&str, bool) {
     (text, false)
 }
 
-/// Derives the Return write's ledger id.
+/// Plans the write for one `terminal send`.
 ///
-/// Suffixing is enough while the result fits the envelope's 128-character
-/// cap. Past that the base is replaced by its SHA-256 digest rather than
-/// truncated: truncation would map two distinct caller ids that merely share
-/// a long prefix onto the same derived id, and the ledger would then answer
-/// the second send's Return with the first one's receipt — reporting a
-/// keystroke that never reached the PTY.
-fn enter_request_id(base: &str) -> String {
-    let suffixed = format!("{base}{ENTER_REQUEST_SUFFIX}");
-    if suffixed.len() <= MAX_REQUEST_ID_LEN {
-        return suffixed;
-    }
-    let digest = Sha256::digest(base.as_bytes());
-    format!("{digest:x}{ENTER_REQUEST_SUFFIX}")
-}
-
-/// Plans the writes for one `terminal send`.
-///
-/// `literal` delivers `text` verbatim in a single write — no Return
-/// translation, no separate keystroke.
-pub fn plan_terminal_send(text: &str, literal: bool, request_id: &str) -> TerminalSendPlan {
+/// `literal` delivers `text` verbatim — no Return translation.
+pub fn plan_terminal_send(text: &str, literal: bool) -> TerminalSendPlan {
     if literal {
         return TerminalSendPlan {
-            writes: vec![TerminalSendWrite {
-                request_id: request_id.to_string(),
-                text: text.to_string(),
-            }],
+            text: text.to_string(),
             submitted_enter: false,
         };
     }
     let (body, submitted_enter) = split_trailing_terminator(text);
-    let mut writes = Vec::with_capacity(2);
-    // An empty body still gets a write when there is no Return to carry the
-    // request: `--text ""` must keep reaching the service (which refuses it)
-    // rather than silently succeeding here.
-    if !body.is_empty() || !submitted_enter {
-        writes.push(TerminalSendWrite {
-            request_id: request_id.to_string(),
-            text: body.to_string(),
-        });
-    }
+    let mut out = body.to_string();
     if submitted_enter {
-        let id = if writes.is_empty() {
-            // Nothing but Enter: one write, under the caller's own id.
-            request_id.to_string()
-        } else {
-            enter_request_id(request_id)
-        };
-        writes.push(TerminalSendWrite {
-            request_id: id,
-            text: ENTER.to_string(),
-        });
+        out.push_str(ENTER);
     }
     TerminalSendPlan {
-        writes,
+        text: out,
         submitted_enter,
     }
 }
@@ -164,156 +99,130 @@ mod tests {
     use super::*;
 
     fn plan(text: &str) -> TerminalSendPlan {
-        plan_terminal_send(text, false, "req-1")
-    }
-
-    fn texts(plan: &TerminalSendPlan) -> Vec<&str> {
-        plan.writes.iter().map(|w| w.text.as_str()).collect()
+        plan_terminal_send(text, false)
     }
 
     #[test]
-    fn trailing_newline_becomes_a_separate_return_keystroke() {
-        let plan = plan("Correction: please also do X.\n");
-        assert_eq!(texts(&plan), vec!["Correction: please also do X.", "\r"]);
-        assert!(plan.submitted_enter);
-        assert_eq!(plan.byte_len(), 30);
+    fn trailing_newline_becomes_the_return_that_submits() {
+        let sent = plan("Correction: please also do X.\n");
+        assert_eq!(sent.text, "Correction: please also do X.\r");
+        assert!(sent.submitted_enter);
+        assert_eq!(sent.byte_len(), 30);
+        assert!(
+            !sent.text.contains('\n'),
+            "LF is not Enter: {:?}",
+            sent.text
+        );
     }
 
     #[test]
     fn trailing_crlf_and_bare_cr_are_the_same_return() {
         for text in ["hi\r\n", "hi\r", "hi\n"] {
-            let plan = plan(text);
-            assert_eq!(texts(&plan), vec!["hi", "\r"], "text: {text:?}");
-            assert!(plan.submitted_enter);
+            let sent = plan(text);
+            assert_eq!(sent.text, "hi\r", "text: {text:?}");
+            assert!(sent.submitted_enter);
             // Return is one byte, so a CRLF input delivers one byte fewer
             // than it was given. `acceptedBytes` counts what reached the PTY.
-            assert_eq!(plan.byte_len(), 3, "text: {text:?}");
+            assert_eq!(sent.byte_len(), 3, "text: {text:?}");
         }
     }
 
     #[test]
-    fn text_without_a_trailing_newline_is_one_verbatim_write() {
-        let plan = plan("echo hi");
-        assert_eq!(texts(&plan), vec!["echo hi"]);
-        assert!(!plan.submitted_enter);
-        assert_eq!(plan.writes[0].request_id, "req-1");
+    fn text_without_a_trailing_newline_is_delivered_verbatim() {
+        let sent = plan("echo hi");
+        assert_eq!(sent.text, "echo hi");
+        assert!(!sent.submitted_enter);
     }
 
     #[test]
-    fn a_lone_newline_is_just_enter_under_the_callers_own_id() {
+    fn a_lone_newline_is_just_enter() {
         for text in ["\n", "\r", "\r\n"] {
-            let plan = plan(text);
-            assert_eq!(texts(&plan), vec!["\r"], "text: {text:?}");
-            assert_eq!(plan.writes.len(), 1);
-            assert_eq!(plan.writes[0].request_id, "req-1");
-            assert!(plan.submitted_enter);
+            let sent = plan(text);
+            assert_eq!(sent.text, "\r", "text: {text:?}");
+            assert_eq!(sent.byte_len(), 1);
+            assert!(sent.submitted_enter);
         }
     }
 
-    /// The multi-line case the whole command exists for: one turn, not one
-    /// turn per line. Interior line feeds are the composer's, and only the
-    /// final Return submits.
+    /// The multi-line case the command exists for: one turn, not one turn
+    /// per line. Interior line feeds are the composer's; only the final
+    /// Return submits.
     #[test]
-    fn interior_newlines_stay_interior_and_only_the_last_one_submits() {
-        let unix = plan("one\ntwo\n");
-        assert_eq!(texts(&unix), vec!["one\ntwo", "\r"]);
-        assert_eq!(unix.byte_len(), 8);
-        let windows = plan("one\r\ntwo\r\n");
-        assert_eq!(texts(&windows), vec!["one\r\ntwo", "\r"]);
+    fn interior_line_feeds_stay_line_feeds_and_only_the_last_one_submits() {
+        let sent = plan("one\ntwo\n");
+        assert_eq!(sent.text, "one\ntwo\r");
+        assert_eq!(sent.byte_len(), 8);
+        assert_eq!(sent.text.matches('\r').count(), 1);
+    }
+
+    /// An interior carriage return IS Return, and is passed through rather
+    /// than guessed at. A caller with CRLF line endings has to convert them,
+    /// which is what the guide tells them to do.
+    #[test]
+    fn an_interior_carriage_return_is_delivered_unchanged() {
+        let sent = plan("one\r\ntwo\n");
+        assert_eq!(sent.text, "one\r\ntwo\r");
+        assert_eq!(sent.text.matches('\r').count(), 2);
+        let lone = plan("one\rtwo\n");
+        assert_eq!(lone.text, "one\rtwo\r");
     }
 
     #[test]
     fn a_blank_trailing_line_submits_exactly_once() {
-        let plan = plan("hi\n\n");
-        assert_eq!(texts(&plan), vec!["hi\n", "\r"]);
-        assert!(plan.submitted_enter);
-        assert_eq!(plan.byte_len(), 4);
+        let sent = plan("hi\n\n");
+        assert_eq!(sent.text, "hi\n\r");
+        assert!(sent.submitted_enter);
+        assert_eq!(sent.byte_len(), 4);
+    }
+
+    /// Only the LAST terminator is Return; a preceding one is body.
+    #[test]
+    fn only_the_final_terminator_is_translated() {
+        assert_eq!(plan("hi\r\r").text, "hi\r\r");
+        assert_eq!(plan("hi\n\r").text, "hi\n\r");
+        assert_eq!(plan("hi\r\n\n").text, "hi\r\n\r");
+        for text in ["hi\r\r", "hi\n\r", "hi\r\n\n"] {
+            assert!(plan(text).submitted_enter, "text: {text:?}");
+        }
     }
 
     #[test]
-    fn empty_text_still_produces_one_write_for_the_service_to_refuse() {
+    fn empty_text_stays_empty_for_the_service_to_refuse() {
         for literal in [false, true] {
-            let plan = plan_terminal_send("", literal, "req-1");
-            assert_eq!(texts(&plan), vec![""], "literal: {literal}");
-            assert!(!plan.submitted_enter);
-            assert_eq!(plan.byte_len(), 0);
+            let sent = plan_terminal_send("", literal);
+            assert_eq!(sent.text, "", "literal: {literal}");
+            assert!(!sent.submitted_enter);
+            assert_eq!(sent.byte_len(), 0);
         }
     }
 
     #[test]
     fn literal_sends_the_bytes_untouched() {
-        for text in ["one\ntwo\n", "hi\r\n", "\n"] {
-            let plan = plan_terminal_send(text, true, "req-1");
-            assert_eq!(texts(&plan), vec![text], "text: {text:?}");
-            assert!(!plan.submitted_enter);
-            assert_eq!(plan.byte_len(), text.len() as u64);
-            assert_eq!(plan.writes[0].request_id, "req-1");
+        for text in ["one\ntwo\n", "hi\r\n", "\n", ""] {
+            let sent = plan_terminal_send(text, true);
+            assert_eq!(sent.text, text, "text: {text:?}");
+            assert!(!sent.submitted_enter);
+            assert_eq!(sent.byte_len(), text.len() as u64);
         }
     }
 
     #[test]
     fn non_ascii_text_is_measured_in_bytes_not_characters() {
-        let plan = plan("héllo → wörld ✓\n");
-        assert_eq!(texts(&plan), vec!["héllo → wörld ✓", "\r"]);
-        assert_eq!(plan.byte_len(), "héllo → wörld ✓".len() as u64 + 1);
+        let sent = plan("héllo → wörld ✓\n");
+        assert_eq!(sent.text, "héllo → wörld ✓\r");
+        assert_eq!(sent.byte_len(), "héllo → wörld ✓".len() as u64 + 1);
     }
 
     #[test]
     fn control_bytes_other_than_the_trailing_newline_survive() {
-        let plan = plan("\u{0003}\u{0016}o\tk\n");
-        assert_eq!(texts(&plan), vec!["\u{0003}\u{0016}o\tk", "\r"]);
+        let sent = plan("\u{0003}\u{0016}o\tk\n");
+        assert_eq!(sent.text, "\u{0003}\u{0016}o\tk\r");
     }
 
     #[test]
     fn whitespace_only_text_keeps_its_spaces_and_submits() {
-        let plan = plan("   \n");
-        assert_eq!(texts(&plan), vec!["   ", "\r"]);
-        assert!(plan.submitted_enter);
-    }
-
-    #[test]
-    fn enter_write_derives_a_distinct_ledger_id() {
-        let plan = plan("hi\n");
-        assert_eq!(plan.writes[0].request_id, "req-1");
-        assert_eq!(plan.writes[1].request_id, "req-1.drogon-enter");
-    }
-
-    /// Truncation would map these two onto one derived id and let the ledger
-    /// answer the second send's Return with the first's receipt.
-    #[test]
-    fn long_ids_that_share_a_prefix_derive_different_return_ids() {
-        let shared = "x".repeat(MAX_REQUEST_ID_LEN - 4);
-        let left = enter_request_id(&format!("{shared}ABCD"));
-        let right = enter_request_id(&format!("{shared}WXYZ"));
-        assert_ne!(left, right);
-        for derived in [&left, &right] {
-            assert!(derived.len() <= MAX_REQUEST_ID_LEN, "len {}", derived.len());
-            assert!(derived.ends_with(ENTER_REQUEST_SUFFIX));
-            assert!(!derived.chars().any(char::is_control));
-        }
-    }
-
-    #[test]
-    fn derived_ids_are_deterministic_so_a_replay_lands_on_the_same_row() {
-        for base in ["req-1", &"y".repeat(MAX_REQUEST_ID_LEN)] {
-            assert_eq!(enter_request_id(base), enter_request_id(base));
-        }
-        // A multi-byte id is digested whole, never cut inside a character.
-        let wide = "é".repeat(MAX_REQUEST_ID_LEN);
-        let derived = enter_request_id(&wide);
-        assert!(derived.len() <= MAX_REQUEST_ID_LEN, "len {}", derived.len());
-        assert!(derived.ends_with(ENTER_REQUEST_SUFFIX));
-    }
-
-    /// The reserved suffix is what makes the derived id unreachable by a
-    /// caller; `cli::validate_request_id` enforces the other half.
-    #[test]
-    fn a_derived_id_is_itself_a_reserved_id() {
-        let derived = enter_request_id("req-1");
-        assert!(derived.ends_with(ENTER_REQUEST_SUFFIX));
-        assert_eq!(
-            enter_request_id(&"z".repeat(200)).len(),
-            64 + ENTER_REQUEST_SUFFIX.len()
-        );
+        let sent = plan("   \n");
+        assert_eq!(sent.text, "   \r");
+        assert!(sent.submitted_enter);
     }
 }

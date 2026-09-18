@@ -111,7 +111,7 @@ impl Drop for Daemon {
 
 fn run_cli(data_dir: &Path, args: &[&str]) -> std::process::Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_drogon-cli"));
-    command.args(args).env_remove("DROGON_MENTU_RUNTIME");
+    command.args(args);
     common::scrub_environment(&mut command, data_dir);
     command.output().expect("spawn drogon-cli")
 }

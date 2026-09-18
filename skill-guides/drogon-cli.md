@@ -119,19 +119,20 @@ listing with `drogon-cli terminal list --workspace <ID>` or list all with
 
 Write input with `drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT>`.
 To send Enter, end the value with a real newline (shell `$'...'` quoting),
-not the two characters backslash-n. That trailing newline is delivered as
-Return — the carriage return a terminal puts on the wire when you press
-Enter, and the only byte a raw-mode TUI reads as submit — written on its own
-so the TUI sees a keystroke rather than a pasted blob. Interior bytes are
-untouched, so a multi-line message lands whole and the one Return at the end
-submits it as a single turn. The result reports `submittedEnter` so you can
-confirm the message was submitted and not just typed into the composer, and
-`acceptedBytes` counts what reached the PTY (a trailing CRLF is the one byte
-Return really is). A send whose text is delivered but whose Enter is not
-fails saying so: replay it with the SAME `--retry-request <ID>` to submit it
-without retyping. Pass `--literal` to write the bytes verbatim instead, with
-no Return translation and no Enter, when you are piping data rather than
-typing a message. Read bounded output with
+not the two characters backslash-n; a trailing carriage return or CRLF means
+the same thing. That trailing terminator is delivered as one carriage
+return — the byte a terminal puts on the wire when you press Enter, and the
+only byte a raw-mode TUI reads as submit. Every other byte is delivered
+unchanged in a single write, so a message whose lines end in LF lands in the
+composer whole and the one Return at the end submits it as a single turn.
+A carriage return INSIDE the value is Enter too, so convert CRLF line
+endings to LF before sending a multi-line message, or each CR will submit
+early. The result reports `submittedEnter` so you can confirm the message
+was submitted and not just typed into the composer, and `acceptedBytes`
+counts what reached the PTY (a trailing CRLF is the one byte Return really
+is). Pass `--literal` to write the bytes verbatim instead, with no Return
+translation and no Enter, when you are piping data rather than typing a
+message. Read bounded output with
 `drogon-cli terminal read --session <ID> --incarnation <TOKEN> --cursor 0 --limit-bytes 4096`,
 then keep paging with the returned `nextCursor` while `truncated` is true.
 Resize with `drogon-cli terminal resize --session <ID> --incarnation <TOKEN> --cols 80 --rows 24`,

@@ -6,11 +6,10 @@
 //! Claude Code session's composer but never submitted.
 //!
 //! The fixture is a raw-mode reader — `stty raw` turns off the line
-//! discipline's `ICRNL`, so it sees the exact bytes, exactly as an agent TUI
-//! does — that dumps each `read()` separately. It therefore proves both
-//! halves of the fix at once: Return arrives as `0d` (not `0a`), and it
-//! arrives in a read of its own rather than glued to the message body, which
-//! is what lets a TUI treat it as a keystroke instead of pasted text.
+//! discipline's `ICRNL`, so it sees the exact bytes an agent TUI would — and
+//! it dumps them in hex. That is the only honest way to check this: in
+//! canonical mode the line discipline maps CR to NL for the program, so a
+//! cooked reader cannot tell the fixed behaviour from the broken one.
 
 #![cfg(unix)]
 
@@ -32,16 +31,12 @@ const READY_TIMEOUT: Duration = Duration::from_secs(20);
 const OUTPUT_TIMEOUT: Duration = Duration::from_secs(20);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
-/// Dumps what each individual `read()` of the PTY returned, in hex, between
-/// `:` markers. `dd bs=64 count=1` is one `read()` syscall and `stty raw`
-/// sets `VMIN=1`, so a read returns the moment any byte is available: two
-/// separate writes produce two separate dumps, one write produces one dump
-/// and then blocks.
+/// Dumps the exact bytes the PTY delivered, in hex, between `:` markers.
+/// `dd bs=64 count=1` is one `read()` syscall and `stty raw` sets `VMIN=1`,
+/// so the read returns as soon as the write lands.
 const RAW_READER_SCRIPT: &str = r#"#!/bin/sh
 stty raw -echo
 printf 'READY:'
-dd bs=64 count=1 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
-printf ':'
 dd bs=64 count=1 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
 printf ':DONE'
 "#;
@@ -112,6 +107,7 @@ fn build_drogond() -> PathBuf {
 struct Daemon {
     data_dir: PathBuf,
     child: Child,
+    reaped: bool,
 }
 
 impl Daemon {
@@ -132,13 +128,10 @@ impl Daemon {
         let daemon = Daemon {
             data_dir: data_dir.to_path_buf(),
             child,
+            reaped: false,
         };
         daemon.wait_ready();
         daemon
-    }
-
-    fn pid(&self) -> u32 {
-        self.child.id()
     }
 
     fn wait_ready(&self) {
@@ -167,8 +160,28 @@ impl Daemon {
     }
 }
 
+impl Daemon {
+    /// Signals the daemon this test started and waits for its real exit
+    /// status. A reaped status IS the proof it is gone — probing the pid
+    /// afterwards would ask about whatever process later reused the number.
+    fn shut_down(mut self) -> std::process::ExitStatus {
+        let _ = self.child.kill();
+        let status = self
+            .child
+            .wait()
+            .expect("reap the drogond this test started");
+        self.reaped = true;
+        status
+    }
+}
+
 impl Drop for Daemon {
     fn drop(&mut self) {
+        if self.reaped {
+            return;
+        }
+        // Unwind path only: never panics (a panic in drop aborts), still
+        // reaps so no daemon or zombie outlives the test.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -258,21 +271,8 @@ fn write_raw_reader(dir: &Path) -> PathBuf {
     path
 }
 
-/// Whether the PID this test spawned is gone. Identity-scoped: only the
-/// daemon this test owns is ever inspected or signalled.
-fn process_is_gone(pid: u32) -> bool {
-    // SAFETY-free check: `kill -0` through the shell, so no unsafe libc here.
-    !Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
 #[test]
-fn a_trailing_newline_reaches_a_raw_mode_reader_as_a_return_of_its_own() {
+fn a_trailing_newline_reaches_a_raw_mode_reader_as_a_carriage_return() {
     let drogond = build_drogond();
     let root = tempfile::Builder::new()
         .prefix("dg-send-")
@@ -284,7 +284,6 @@ fn a_trailing_newline_reaches_a_raw_mode_reader_as_a_return_of_its_own() {
     let reader = write_raw_reader(&workspace);
 
     let daemon = Daemon::start(&drogond, &data_dir);
-    let daemon_pid = daemon.pid();
     let workspace_id = field(
         &ok(
             &data_dir,
@@ -328,19 +327,16 @@ fn a_trailing_newline_reaches_a_raw_mode_reader_as_a_return_of_its_own() {
         assert_eq!(sent["result"]["submittedEnter"], true, "{sent:#}");
 
         let text = wait_for_marker(&data_dir, &session, &incarnation, ":DONE");
-        let dumps: Vec<&str> = text
-            .trim_end_matches(":DONE")
+        let dump = text
             .rsplit("READY:")
             .next()
             .expect("output after READY:")
-            .split(':')
-            .collect();
-        assert_eq!(
-            dumps,
-            vec!["6869", "0d"],
-            "the body must arrive in one read and Return (0d, never 0a) in \
-             the next; full session output: {text:?}"
-        );
+            .trim_end_matches(":DONE")
+            .trim_end_matches(':')
+            .to_string();
+        // `hi` then Return. `0d` is Enter; `0a` is the byte that used to be
+        // sent and that a raw-mode TUI does not submit on.
+        assert_eq!(dump, "68690d", "full session output: {text:?}");
     }));
 
     // Teardown runs on success and on failure, before the daemon goes away.
@@ -356,10 +352,11 @@ fn a_trailing_newline_reaches_a_raw_mode_reader_as_a_return_of_its_own() {
         ],
     );
     assert_eq!(closed["result"]["verdict"], "exited", "{closed:#}");
-    drop(daemon);
+    // Exit proven by the reaped status of the process this test owns.
+    let exit = daemon.shut_down();
     assert!(
-        process_is_gone(daemon_pid),
-        "the drogond this test started (pid {daemon_pid}) is still running"
+        exit.code().is_some() || std::os::unix::process::ExitStatusExt::signal(&exit).is_some(),
+        "the drogond this test started did not report an exit: {exit:?}"
     );
 
     if let Err(panic) = outcome {
@@ -380,7 +377,6 @@ fn literal_keeps_delivering_the_exact_bytes_a_caller_asked_for() {
     let reader = write_raw_reader(&workspace);
 
     let daemon = Daemon::start(&drogond, &data_dir);
-    let daemon_pid = daemon.pid();
     let workspace_id = field(
         &ok(
             &data_dir,
@@ -423,13 +419,17 @@ fn literal_keeps_delivering_the_exact_bytes_a_caller_asked_for() {
         );
         assert_eq!(sent["result"]["acceptedBytes"], 3, "{sent:#}");
         assert_eq!(sent["result"]["submittedEnter"], false, "{sent:#}");
-        // One write, so the raw reader sees body and LF in the same read —
-        // the shape that never submitted a turn, kept only behind the flag.
-        let text = wait_for_marker(&data_dir, &session, &incarnation, "68690a");
-        assert!(
-            !text.contains(":DONE"),
-            "a literal send must not also deliver a Return: {text:?}"
-        );
+        // The raw reader sees the line feed the caller asked for — the shape
+        // that never submitted a turn, kept only behind the flag.
+        let text = wait_for_marker(&data_dir, &session, &incarnation, ":DONE");
+        let dump = text
+            .rsplit("READY:")
+            .next()
+            .expect("output after READY:")
+            .trim_end_matches(":DONE")
+            .trim_end_matches(':')
+            .to_string();
+        assert_eq!(dump, "68690a", "full session output: {text:?}");
     }));
 
     let closed = ok(
@@ -444,10 +444,11 @@ fn literal_keeps_delivering_the_exact_bytes_a_caller_asked_for() {
         ],
     );
     assert_eq!(closed["result"]["verdict"], "exited", "{closed:#}");
-    drop(daemon);
+    // Exit proven by the reaped status of the process this test owns.
+    let exit = daemon.shut_down();
     assert!(
-        process_is_gone(daemon_pid),
-        "the drogond this test started (pid {daemon_pid}) is still running"
+        exit.code().is_some() || std::os::unix::process::ExitStatusExt::signal(&exit).is_some(),
+        "the drogond this test started did not report an exit: {exit:?}"
     );
 
     if let Err(panic) = outcome {

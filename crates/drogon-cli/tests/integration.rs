@@ -2056,17 +2056,17 @@ fn send_args<'a>(text: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_with_trailing_newline_writes_the_body_then_a_lone_return() {
+async fn send_with_a_trailing_newline_writes_a_carriage_return_not_a_line_feed() {
     let dir = temp_data_dir("s-en");
     let service = MockService::start(dir.path(), echo_behavior());
 
     let output = run_cli(dir.path(), &send_args("Correction: also do X.\n", &[]));
     assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
-    // Two writes: the message, then Enter on its own so a TUI reads it as a
-    // keystroke instead of as the tail of a pasted blob.
+    // CR is what a terminal puts on the wire for Return, and the only byte a
+    // raw-mode TUI submits on. LF was the bug.
     assert_eq!(
         captured_writes(&service),
-        vec!["Correction: also do X.".to_string(), "\r".to_string()],
+        vec!["Correction: also do X.\r".to_string()]
     );
     assert!(
         stdout(&output).contains("Wrote 23 bytes to sess-1, ending with Enter."),
@@ -2076,21 +2076,53 @@ async fn send_with_trailing_newline_writes_the_body_then_a_lone_return() {
     drop(service);
 }
 
+/// One RPC per send, so two agents nudging the same session cannot interleave
+/// inside a single message the way a split body/Return delivery let them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_multi_line_message_is_one_turn_with_its_newlines_intact() {
+async fn a_send_is_exactly_one_atomic_write() {
+    let dir = temp_data_dir("s-atom");
+    let service = MockService::start(dir.path(), echo_behavior());
+
+    for text in ["hi\n", "hi", "\n", "one\ntwo\n"] {
+        let output = run_cli(dir.path(), &send_args(text, &[]));
+        assert_eq!(output.status.code(), Some(0), "text {text:?}");
+    }
+    let requests: Vec<String> = service
+        .captured()
+        .iter()
+        .map(|request| request["method"].as_str().unwrap_or("").to_string())
+        .collect();
+    assert_eq!(requests, vec!["session.write".to_string(); 4]);
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_multi_line_message_is_one_turn_with_its_line_feeds_intact() {
     let dir = temp_data_dir("s-nlf");
     let service = MockService::start(dir.path(), echo_behavior());
 
-    // Only the trailing terminator is a keystroke. Interior bytes reach the
-    // PTY exactly as given, so a multi-line correction lands in the composer
-    // whole and the one Return at the end submits it as a single turn —
-    // rewriting them all to CR would submit each line separately.
-    let output = run_cli(dir.path(), &send_args("one\ntwo\r\nthree\n", &[]));
+    // Only the trailing terminator is Return. Interior bytes reach the PTY as
+    // given, so a multi-line correction lands in the composer whole and the
+    // one Return at the end submits it as a single turn.
+    let output = run_cli(dir.path(), &send_args("one\ntwo\nthree\n", &[]));
     assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
-    assert_eq!(
-        captured_writes(&service),
-        vec!["one\ntwo\r\nthree".to_string(), "\r".to_string()]
-    );
+    let writes = captured_writes(&service);
+    assert_eq!(writes, vec!["one\ntwo\nthree\r".to_string()]);
+    assert_eq!(writes[0].matches('\r').count(), 1);
+    drop(service);
+}
+
+/// The caller's bytes, not the CLI's guess: an interior CR is Return and is
+/// passed through, which is why the guide tells a caller with CRLF line
+/// endings to convert them before sending one message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_interior_carriage_return_is_delivered_unchanged() {
+    let dir = temp_data_dir("s-icr");
+    let service = MockService::start(dir.path(), echo_behavior());
+
+    let output = run_cli(dir.path(), &send_args("one\r\ntwo\n", &[]));
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert_eq!(captured_writes(&service), vec!["one\r\ntwo\r".to_string()]);
     drop(service);
 }
 
@@ -2104,10 +2136,7 @@ async fn a_trailing_crlf_is_the_one_byte_return_it_really_is() {
     // checks the keystroke rather than inferring it from the byte count.
     let output = run_cli(dir.path(), &send_args("hi\r\n", &["--json"]));
     assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
-    assert_eq!(
-        captured_writes(&service),
-        vec!["hi".to_string(), "\r".to_string()]
-    );
+    assert_eq!(captured_writes(&service), vec!["hi\r".to_string()]);
     let envelope: Value = serde_json::from_str(&stdout(&output)).expect("one envelope");
     assert_eq!(envelope["result"]["acceptedBytes"], 3);
     assert_eq!(envelope["result"]["submittedEnter"], true);
@@ -2115,51 +2144,7 @@ async fn a_trailing_crlf_is_the_one_byte_return_it_really_is() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_return_ledger_suffix_is_reserved_against_caller_ids() {
-    let dir = temp_data_dir("s-rsv");
-    let service = MockService::start(dir.path(), echo_behavior());
-
-    // Without the reservation a caller could mint the id a send derives for
-    // its Return, and the ledger would answer one with the other's receipt.
-    for id in ["mine.drogon-enter", "x.drogon-enter"] {
-        let output = run_cli(dir.path(), &send_args("hi\n", &["--request-id", id]));
-        assert_eq!(output.status.code(), Some(2), "id {id} must be refused");
-        assert!(
-            stderr(&output).contains("reserved for the Enter keystroke"),
-            "stderr: {}",
-            stderr(&output)
-        );
-    }
-    // Nothing was attempted, and an ordinary dotted id still works.
-    assert!(captured_writes(&service).is_empty());
-    let output = run_cli(
-        dir.path(),
-        &send_args("hi\n", &["--request-id", "mine.enter"]),
-    );
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
-    drop(service);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_empty_text_still_reaches_the_service_that_refuses_it() {
-    let dir = temp_data_dir("s-le");
-    let service = MockService::start(dir.path(), echo_behavior());
-
-    for extra in [vec![], vec!["--literal"]] {
-        let output = run_cli(dir.path(), &send_args("", &extra));
-        // The service owns the refusal of an empty payload; the CLI must not
-        // quietly succeed without asking it.
-        assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
-    }
-    assert_eq!(
-        captured_writes(&service),
-        vec![String::new(), String::new()]
-    );
-    drop(service);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_of_only_a_newline_is_one_return_under_the_callers_request_id() {
+async fn send_of_only_a_newline_is_just_the_return() {
     let dir = temp_data_dir("s-be");
     let service = MockService::start(dir.path(), echo_behavior());
 
@@ -2169,12 +2154,6 @@ async fn send_of_only_a_newline_is_one_return_under_the_callers_request_id() {
     );
     assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
     assert_eq!(captured_writes(&service), vec!["\r".to_string()]);
-    let ids: Vec<String> = service
-        .captured()
-        .iter()
-        .map(|request| request["requestId"].as_str().unwrap_or("").to_string())
-        .collect();
-    assert_eq!(ids, vec!["req-bare".to_string()]);
     let envelope: Value = serde_json::from_str(&stdout(&output)).expect("one envelope");
     assert_eq!(envelope["requestId"], "req-bare");
     assert_eq!(envelope["result"]["acceptedBytes"], 1);
@@ -2183,37 +2162,7 @@ async fn send_of_only_a_newline_is_one_return_under_the_callers_request_id() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_json_sums_accepted_bytes_and_reports_the_submitted_enter() {
-    let dir = temp_data_dir("s-js");
-    let service = MockService::start(dir.path(), echo_behavior());
-
-    let output = run_cli(
-        dir.path(),
-        &send_args("hi\n", &["--request-id", "req-7", "--json"]),
-    );
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
-    let envelope: Value = serde_json::from_str(&stdout(&output)).expect("exactly one envelope");
-    assert_eq!(envelope["ok"], true);
-    // One envelope under the caller's own id, whatever the Return write used.
-    assert_eq!(envelope["requestId"], "req-7");
-    assert_eq!(envelope["result"]["acceptedBytes"], 3);
-    assert_eq!(envelope["result"]["submittedEnter"], true);
-    // The Return is ledgered under a deterministic derived id, so a replay
-    // dedupes it instead of typing a second Enter.
-    let ids: Vec<String> = service
-        .captured()
-        .iter()
-        .map(|request| request["requestId"].as_str().unwrap_or("").to_string())
-        .collect();
-    assert_eq!(
-        ids,
-        vec!["req-7".to_string(), "req-7.drogon-enter".to_string()]
-    );
-    drop(service);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_without_a_trailing_newline_stays_one_verbatim_write() {
+async fn send_without_a_trailing_newline_is_verbatim_and_claims_no_enter() {
     let dir = temp_data_dir("s-ne");
     let service = MockService::start(dir.path(), echo_behavior());
 
@@ -2223,11 +2172,15 @@ async fn send_without_a_trailing_newline_stays_one_verbatim_write() {
     let envelope: Value = serde_json::from_str(&stdout(&output)).expect("one envelope");
     assert_eq!(envelope["result"]["acceptedBytes"], 7);
     assert_eq!(envelope["result"]["submittedEnter"], false);
+    assert!(
+        stdout(&output).contains("\"submittedEnter\": false"),
+        "the keystroke claim must be explicit in both directions"
+    );
     drop(service);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_literal_writes_the_bytes_untouched_in_one_call() {
+async fn send_literal_writes_the_bytes_untouched() {
     let dir = temp_data_dir("s-lit");
     let service = MockService::start(dir.path(), echo_behavior());
 
@@ -2243,7 +2196,25 @@ async fn send_literal_writes_the_bytes_untouched_in_one_call() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_refused_body_write_never_submits_a_stale_composer() {
+async fn an_empty_text_is_still_forwarded_rather_than_short_circuited() {
+    let dir = temp_data_dir("s-le");
+    let service = MockService::start(dir.path(), echo_behavior());
+
+    // Refusing an empty payload is the service's call (`require_str`), so the
+    // CLI has to ask it rather than succeed or fail on its own.
+    for extra in [vec![], vec!["--literal"]] {
+        let output = run_cli(dir.path(), &send_args("", &extra));
+        assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    }
+    assert_eq!(
+        captured_writes(&service),
+        vec![String::new(), String::new()]
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refused_send_claims_no_submitted_turn() {
     let dir = temp_data_dir("s-rb");
     let service = MockService::start(
         dir.path(),
@@ -2253,112 +2224,42 @@ async fn a_refused_body_write_never_submits_a_stale_composer() {
         }),
     );
 
-    let output = run_cli(dir.path(), &send_args("hi\n", &["--request-id", "req-9"]));
-    assert_eq!(output.status.code(), Some(1));
-    // Exactly one write attempt: a Return after a failed body would submit
-    // whatever the session's input box already held.
-    assert_eq!(captured_writes(&service).len(), 1);
-    assert!(
-        stderr(&output).contains("no such session"),
-        "stderr: {}",
-        stderr(&output)
-    );
-    drop(service);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_body_write_the_service_shortchanged_never_submits() {
-    let dir = temp_data_dir("s-sb");
-    let behavior = invariant_behavior(|_| json!({ "acceptedBytes": 1 }));
-    let service = MockService::start(dir.path(), behavior);
-
-    let output = run_cli(dir.path(), &send_args("hello\n", &[]));
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(captured_writes(&service).len(), 1);
-    assert!(
-        stderr(&output).contains("acceptedBytes (1) does not match the 5 bytes sent"),
-        "stderr: {}",
-        stderr(&output)
-    );
-    drop(service);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_refused_return_write_reports_the_callers_own_request_id() {
-    let dir = temp_data_dir("s-re");
-    let service = MockService::start(
-        dir.path(),
-        std::sync::Arc::new(|request: Value| {
-            let id = request["requestId"].as_str().unwrap_or("").to_string();
-            if id.ends_with(".drogon-enter") {
-                return Action::Respond(error_envelope(&id, "unverifiable", "session exited"));
-            }
-            Action::Respond(ok_envelope(
-                &id,
-                json!({
-                    "acceptedBytes": STANDARD
-                        .decode(request["params"]["dataBase64"].as_str().unwrap_or(""))
-                        .map(|bytes| bytes.len())
-                        .unwrap_or(0)
-                }),
-            ))
-        }),
-    );
-
     let output = run_cli(
         dir.path(),
-        &send_args("hi\n", &["--request-id", "req-11", "--json"]),
+        &send_args("hi\n", &["--request-id", "req-9", "--json"]),
     );
     assert_eq!(output.status.code(), Some(1));
     let envelope: Value = serde_json::from_str(&stdout(&output)).expect("failure envelope");
     assert_eq!(envelope["ok"], false);
-    // The derived id is a ledger detail; the caller retries with their own.
-    assert_eq!(envelope["requestId"], "req-11");
-    assert_eq!(envelope["error"]["code"], "unverifiable");
-    // The one partially-applied outcome this command has must say so, and
-    // name the replay that submits without retyping the message.
-    let message = envelope["error"]["message"].as_str().expect("message");
+    assert_eq!(envelope["requestId"], "req-9");
     assert!(
-        message.contains("2 bytes of the message already reached sess-1")
-            && message.contains("--retry-request req-11"),
-        "message: {message}"
-    );
-    // Human mode carries the same admission on stderr (JSON mode keeps
-    // stdout as the single parseable channel, so stderr stays silent there).
-    let human = run_cli(dir.path(), &send_args("hi\n", &["--request-id", "req-12"]));
-    assert_eq!(human.status.code(), Some(1));
-    assert!(
-        stderr(&human).contains("2 bytes of the message already reached sess-1")
-            && stderr(&human).contains("--retry-request req-12"),
-        "stderr: {}",
-        stderr(&human)
+        envelope["result"].is_null() && !stdout(&output).contains("submittedEnter"),
+        "a failed send must not report a keystroke: {}",
+        stdout(&output)
     );
     drop(service);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_refused_body_write_claims_no_partial_delivery() {
-    let dir = temp_data_dir("s-nb");
-    let service = MockService::start(
-        dir.path(),
-        std::sync::Arc::new(|request: Value| {
-            let id = request["requestId"].as_str().unwrap_or("").to_string();
-            Action::Respond(error_envelope(&id, "not_found", "no such session"))
-        }),
-    );
+async fn a_shortchanged_write_is_refused_against_the_bytes_actually_sent() {
+    let dir = temp_data_dir("s-sb");
+    let behavior = invariant_behavior(|_| json!({ "acceptedBytes": 1 }));
+    let service = MockService::start(dir.path(), behavior);
 
-    let output = run_cli(dir.path(), &send_args("hi\n", &[]));
+    // `hello\n` puts six bytes on the wire (`hello` + CR), and the check is
+    // against those, not against the `--text` length.
+    let output = run_cli(dir.path(), &send_args("hello\n", &[]));
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        !stderr(&output).contains("already reached"),
-        "nothing was delivered, so nothing may be claimed: {}",
+        stderr(&output).contains("acceptedBytes (1) does not match the 6 bytes sent"),
+        "stderr: {}",
         stderr(&output)
     );
     drop(service);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_replayed_with_retry_request_reuses_both_ledger_ids() {
+async fn send_replayed_with_retry_request_reuses_the_one_ledger_id() {
     let dir = temp_data_dir("s-rt");
     let service = MockService::start(dir.path(), echo_behavior());
 
@@ -2374,15 +2275,8 @@ async fn send_replayed_with_retry_request_reuses_both_ledger_ids() {
         .iter()
         .map(|request| request["requestId"].as_str().unwrap_or("").to_string())
         .collect();
-    assert_eq!(
-        ids,
-        vec![
-            "replay-1".to_string(),
-            "replay-1.drogon-enter".to_string(),
-            "replay-1".to_string(),
-            "replay-1.drogon-enter".to_string(),
-        ],
-        "a replay must land on the same two ledger rows"
-    );
+    // One id, so the ledger dedupes the whole message — Return included —
+    // instead of a replay typing a second Enter.
+    assert_eq!(ids, vec!["replay-1".to_string(), "replay-1".to_string()]);
     drop(service);
 }

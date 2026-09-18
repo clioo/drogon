@@ -34,7 +34,7 @@ use crate::error::{CliError, mentu_approval_required, method_not_found, timeout}
 use crate::output;
 use crate::paths;
 use crate::skills;
-use crate::terminal_send::{ENTER_PACE, plan_terminal_send};
+use crate::terminal_send::plan_terminal_send;
 use crate::transport::{ANALYSIS_TIMEOUT, DEFAULT_TIMEOUT};
 use drogon_protocol::graph::{
     GraphNodeStateResult, GraphResult, GraphResumeResult, GraphRunNodeFailoverResult,
@@ -353,23 +353,13 @@ async fn terminal(
 
 /// `terminal send`: delivers `--text` the way a terminal delivers typed
 /// input (issue #599). `crate::terminal_send` owns the why; this function
-/// owns the round trips.
+/// owns the round trip — exactly one, so two agents nudging the same session
+/// cannot interleave inside a single message.
 ///
-/// A submitted send is two `session.write` calls — body, then Return — so a
-/// TUI reads the Return as its own keystroke. They are two ledger entries
-/// under deterministic ids, so `--retry-request` replays both exactly once.
-/// The body write failing aborts before the Return: a Return alone would
-/// submit whatever the composer already held.
-///
-/// The reverse is the one partially-applied outcome this command has: the
-/// text reached the PTY and the Return did not. It is never silent — the
-/// failure says so and names the safe recovery, which is a replay under the
-/// SAME id (a fresh id would retype the body before submitting it).
-///
-/// Rendering stays one envelope under the caller's own request id, with
-/// `acceptedBytes` summed over the writes and an additive `submittedEnter`
-/// so a caller can verify the keystroke that used to go missing.
-#[allow(clippy::too_many_arguments)]
+/// The envelope gains an additive `submittedEnter` so a caller can verify
+/// the keystroke that used to go missing, rather than inferring it from
+/// `acceptedBytes` (which counts what reached the PTY, and so is one byte
+/// short of a `--text` that ended in CRLF).
 async fn terminal_send(
     client: &Client,
     request_id: &str,
@@ -379,51 +369,28 @@ async fn terminal_send(
     text: &str,
     literal: bool,
 ) -> Result<RunOutcome, CliError> {
-    let plan = plan_terminal_send(text, literal, request_id);
-    let mut accepted: u64 = 0;
-    let mut envelope: Option<CallOk> = None;
-    for (index, write) in plan.writes.iter().enumerate() {
-        if index > 0 {
-            tokio::time::sleep(ENTER_PACE).await;
-        }
-        let params = json!({
-            "sessionId": session,
-            "incarnation": incarnation,
-            // UTF-8 encoded once, here; never shell-interpolated anywhere.
-            "dataBase64": STANDARD.encode(write.text.as_bytes()),
-        });
-        let expected = write.byte_len();
-        // Every failure reports the caller's own id, never the derived one:
-        // the derived id is a ledger detail, not something to retry with.
-        // Once bytes are on the PTY, a failure also has to admit it.
-        let delivered = accepted;
-        let blame = |err: CliError| {
-            let err = err.on_request_id(request_id);
-            if delivered == 0 {
-                return err;
-            }
-            err.annotated(&format!(
-                "{delivered} bytes of the message already reached {session};                  the Enter did not. Replay this exact command with                  --retry-request {request_id} to submit it without retyping"
-            ))
-        };
-        let call = client
-            .call("session.write", params, &write.request_id, DEFAULT_TIMEOUT)
-            .await
-            .map_err(&blame)?;
-        let result: WriteResult = Client::decode_checked(&call, "session.write", |result| {
-            check_write(result, expected)
-        })
-        .map_err(&blame)?;
-        accepted += result.accepted_bytes;
-        envelope.get_or_insert(call);
-    }
-    let mut call = envelope.expect("every send plans at least one write");
+    let plan = plan_terminal_send(text, literal);
+    let params = json!({
+        "sessionId": session,
+        "incarnation": incarnation,
+        // UTF-8 encoded once, here; never shell-interpolated anywhere.
+        "dataBase64": STANDARD.encode(plan.text.as_bytes()),
+    });
+    let expected = plan.byte_len();
+    let call = client
+        .call("session.write", params, request_id, DEFAULT_TIMEOUT)
+        .await?;
+    let write: WriteResult = Client::decode_checked(&call, "session.write", |result| {
+        check_write(result, expected)
+    })?;
+    let mut call = call;
     call.raw["result"] = json!({
-        "acceptedBytes": accepted,
+        "acceptedBytes": write.accepted_bytes,
         "submittedEnter": plan.submitted_enter,
     });
     call.result = call.raw["result"].clone();
     let session_id = session.to_string();
+    let accepted = write.accepted_bytes;
     let submitted_enter = plan.submitted_enter;
     emit(
         call,

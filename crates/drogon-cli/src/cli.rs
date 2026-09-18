@@ -2251,18 +2251,6 @@ fn validate_request_id(request_id: &str) -> Result<(), CliError> {
             "--request-id must be 1..=128 characters without control characters".into(),
         ));
     }
-    // `terminal send` ledgers its Return keystroke under `<id><suffix>`
-    // (see `crate::terminal_send`). Reserving that half of the namespace is
-    // what makes the derived id unreachable: a caller who could mint one
-    // would otherwise collide with a send's Return write and be answered
-    // with `request_conflict`, or — worse — with its receipt.
-    if request_id.ends_with(crate::terminal_send::ENTER_REQUEST_SUFFIX) {
-        return Err(CliError::Usage(format!(
-            "--request-id must not end with {}: that suffix is reserved for \
-             the Enter keystroke `terminal send` writes",
-            crate::terminal_send::ENTER_REQUEST_SUFFIX
-        )));
-    }
     Ok(())
 }
 

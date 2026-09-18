@@ -207,14 +207,27 @@ pub fn error_envelope(request_id: &str, code: &str, message: &str) -> Value {
 /// `unauthorized`. Stripped before `extra_env`, so a test that wants one of
 /// them still sets it explicitly and gets exactly the value it asked for.
 pub const INHERITED_BINDINGS: &[&str] = &[
+    // Authoritative over the service token (`credential.rs`): inherited, the
+    // test's own daemon answers every call `unauthorized`.
     "DROGON_DISPATCH_CAPABILITY",
+    // Session identity and its incarnations: `terminal`/`worktree` verbs
+    // infer a parent from these, and `orchestration_binding.rs` refuses a
+    // stale one.
     "DROGON_SESSION_ID",
-    "DROGON_WORKSPACE_ID",
+    "DROGON_SESSION_INCARNATION",
+    "DROGON_HOOK_INCARNATION",
     "DROGON_INCARNATION",
+    "DROGON_WORKSPACE_ID",
+    // Scope hints `orchestration_commands.rs` reads: an inherited host id
+    // makes `--from` fail `unsupported_host` and conflicts with `--host`.
+    "DROGON_HOST_ID",
     "DROGON_DISPATCH_ID",
     "DROGON_TASK_ID",
     "DROGON_RUN_ID",
     "DROGON_COORDINATOR_ID",
+    // Read daemon-side (`drogon-core` mentu runtime): a developer's value
+    // would reach every daemon a test spawns.
+    "DROGON_MENTU_RUNTIME",
 ];
 
 /// Points a command at `data_dir` and clears every inherited binding.
