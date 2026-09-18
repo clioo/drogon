@@ -113,40 +113,116 @@ test("a report confirms a send whose acknowledgment never arrived", async () => 
   await settle();
   expect(send).toHaveBeenCalledTimes(1);
 });
-test("corrective resizes are rate limited so two surfaces cannot storm SIGWINCH", async () => {
+// The pane pairs every answered read with observe() and then an
+// unconditional flush() (TerminalPane read loop, both branches). Any rate
+// limit that only gates the flush inside observe() is decorative: dropping
+// the cached confirmation is itself what lets the pane's own flush send.
+// These drive that exact pairing, which is the only shape production has.
+const readTick = async (
+  sync: ReturnType<typeof createTerminalGeometrySync>,
+  reported: { cols: number; rows: number },
+) => {
+  sync.observe(reported);
+  sync.flush();
+  await settle();
+};
+test("corrective resizes are rate limited under the pane's own observe-then-flush tick", async () => {
   const send = vi.fn(async () => {});
   let clock = 0;
   const sync = createTerminalGeometrySync({ isReady: () => true, send, onError: vi.fn(), now: () => clock });
   sync.request(wide);
   await settle();
   send.mockClear();
+  // A second writer holding the session at `narrow` for a second of reads.
   for (let i = 0; i < 20; i += 1) {
-    sync.observe(narrow);
-    await settle();
+    await readTick(sync, narrow);
     clock += 50;
   }
   expect(send).toHaveBeenCalledTimes(1);
   clock += TERMINAL_GEOMETRY_RECONCILE_MIN_INTERVAL_MS;
-  sync.observe(narrow);
-  sync.observe(narrow);
-  await settle();
+  await readTick(sync, narrow);
+  await readTick(sync, narrow);
   expect(send).toHaveBeenCalledTimes(2);
 });
-test("a hidden pane drops its stale confirmation but never takes the pty", async () => {
-  let visible = true;
+test("a floor-blocked report leaves the confirmation standing so the pane's flush stays quiet", async () => {
   const send = vi.fn(async () => {});
-  const sync = createTerminalGeometrySync({ isReady: () => visible, send, onError: vi.fn(), now: () => 0 });
+  let clock = 0;
+  const sync = createTerminalGeometrySync({ isReady: () => true, send, onError: vi.fn(), now: () => clock });
   sync.request(wide);
   await settle();
-  visible = false;
-  sync.observe(narrow);
-  expect(sync.observe(narrow)).toBe(false);
-  await settle();
+  await readTick(sync, narrow); // stale-report skip
+  send.mockClear();
+  await readTick(sync, narrow); // the one corrective resize
   expect(send).toHaveBeenCalledTimes(1);
-  visible = true;
-  sync.flush();
+  send.mockClear();
+  clock += 100;
+  await readTick(sync, narrow);
+  // Neither observe() nor the pane's flush may send inside the floor.
+  expect(send).not.toHaveBeenCalled();
+});
+test("an external resize still heals within one read tick of the floor expiring", async () => {
+  const send = vi.fn(async () => {});
+  let clock = 10_000;
+  const sync = createTerminalGeometrySync({ isReady: () => true, send, onError: vi.fn(), now: () => clock });
+  sync.request(wide);
   await settle();
-  expect(send.mock.calls).toEqual([[wide], [wide]]);
+  send.mockClear();
+  await readTick(sync, narrow); // stale-report skip
+  expect(send).not.toHaveBeenCalled();
+  await readTick(sync, narrow);
+  expect(send.mock.calls).toEqual([[wide]]);
+});
+test("a wall clock that steps backwards cannot park reconciliation", async () => {
+  const send = vi.fn(async () => {});
+  let clock = 1_000_000;
+  const sync = createTerminalGeometrySync({ isReady: () => true, send, onError: vi.fn(), now: () => clock });
+  sync.request(wide);
+  await settle();
+  await readTick(sync, narrow); // stale-report skip
+  send.mockClear();
+  await readTick(sync, narrow);
+  expect(send).toHaveBeenCalledTimes(1);
+  // ntp correction / host resume: an hour backwards.
+  clock -= 3_600_000;
+  send.mockClear();
+  await readTick(sync, narrow); // the skip that every send arms
+  await readTick(sync, narrow);
+  expect(send).toHaveBeenCalledTimes(1);
+});
+test("a send completing after a connection boundary does not eat a genuine report", async () => {
+  const inflight = deferred();
+  const send = vi.fn().mockReturnValueOnce(inflight.promise).mockResolvedValue(undefined);
+  const sync = createTerminalGeometrySync({ isReady: () => true, send, onError: vi.fn(), now: () => 0 });
+  sync.request(wide);
+  expect(send).toHaveBeenCalledTimes(1);
+  // The transport dropped and came back: nothing is left in transit, so the
+  // late completion must not arm a skip that swallows the next report.
+  sync.invalidate();
+  inflight.resolve();
+  await settle();
+  // The boundary itself re-sent (the epoch moved under the in-flight send),
+  // and that send arms the one legitimate skip. The next report is genuine.
+  send.mockClear();
+  await readTick(sync, narrow);
+  await readTick(sync, narrow);
+  expect(send.mock.calls).toEqual([[wide]]);
+});
+// Precedence, pinned deliberately: a session being displayed is sized by the
+// surface displaying it. A visible pane already takes the pty on its first
+// fit, so this only makes that ownership survive a later external resize;
+// a hidden pane never takes it.
+test("the visible pane owns the grid of the session it is displaying", async () => {
+  let visible = false;
+  const send = vi.fn(async () => {});
+  let clock = 0;
+  const sync = createTerminalGeometrySync({ isReady: () => visible, send, onError: vi.fn(), now: () => clock });
+  sync.request(wide);
+  await readTick(sync, narrow);
+  await readTick(sync, narrow);
+  expect(send).not.toHaveBeenCalled();
+  visible = true;
+  await readTick(sync, narrow);
+  expect(send.mock.calls).toEqual([[wide]]);
 });
 test("reports during an in-flight resize are ignored, and nonsense reports never resize", async () => {
   const first = deferred();

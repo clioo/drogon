@@ -5,8 +5,8 @@ const isGrid = (grid: Grid) =>
 
 /**
  * Floor between two corrective resizes. A corrective resize is a real
- * SIGWINCH, so two surfaces disagreeing about one session must degrade to a
- * slow disagreement rather than a redraw storm in the agent's TUI.
+ * SIGWINCH, so a session two writers disagree about must degrade to a slow
+ * disagreement rather than a redraw storm in the agent's TUI.
  */
 export const TERMINAL_GEOMETRY_RECONCILE_MIN_INTERVAL_MS = 1000;
 
@@ -25,9 +25,12 @@ export function createTerminalGeometrySync(options: {
   let epoch = 0;
   let inFlight = false;
   let disposed = false;
-  // A read that was already in flight when a send completed was answered
-  // before the pty changed size, so its size report is not evidence about
-  // the new size. Reads are serialized, so exactly one report is suspect.
+  // A resize answer that was already on the wire when the pty took its new
+  // size reports the old one. The daemon builds every read answer from the
+  // live handle when it answers — a held `session.output` that opened before
+  // the resize still reports the new size — so only an answer already in
+  // transit can be that stale, and the pane keeps at most one read
+  // outstanding, so exactly one answer per completed send is suspect.
   let staleReports = 0;
   let lastReconcileAt = Number.NEGATIVE_INFINITY;
   const flush = () => {
@@ -43,7 +46,9 @@ export function createTerminalGeometrySync(options: {
         if (!disposed && sentEpoch === epoch) options.onError(error);
       } finally {
         inFlight = false;
-        staleReports = 1;
+        // Across a connection boundary nothing is left in transit, so a
+        // skip there would only eat a genuine report.
+        if (sentEpoch === epoch) staleReports = 1;
         // Failure at the same size waits for a real read/reveal event, not
         // a promise-driven retry loop. Newer measurements may proceed now.
         if (!same(target, desired) || sentEpoch !== epoch) flush();
@@ -66,6 +71,10 @@ export function createTerminalGeometrySync(options: {
      * Leaving it standing froze the pane one grid away from its pty for the
      * rest of the session, which is how an agent's cursor-relative redraw
      * lands on the wrong rows and never erases what it drew over (#598).
+     *
+     * Dropping the cache is itself the act that authorizes a send — the
+     * pane flushes after every answered read — so the floor has to gate the
+     * drop, not just the flush below it, or the rate limit is decorative.
      * Returns true when a corrective resize was issued.
      */
     observe(reported: Grid): boolean {
@@ -81,11 +90,16 @@ export function createTerminalGeometrySync(options: {
         confirmed = desired;
         return false;
       }
-      confirmed = null;
+      // A hidden or unavailable pane cannot take the pty; spending the
+      // floor here would only delay the correction it will make on reveal.
       if (!options.isReady()) return false;
       const at = now();
+      // A wall clock that steps backwards (the host resumed, ntp corrected)
+      // must not park reconciliation until it catches up again.
+      if (at < lastReconcileAt) lastReconcileAt = Number.NEGATIVE_INFINITY;
       if (at - lastReconcileAt < TERMINAL_GEOMETRY_RECONCILE_MIN_INTERVAL_MS) return false;
       lastReconcileAt = at;
+      confirmed = null;
       flush();
       return true;
     },

@@ -1159,13 +1159,12 @@ export function TerminalPane({
     // agent keeps computing its cursor-relative redraws — how far up to move,
     // where lines wrap, how far its erases reach — for a grid this terminal
     // does not have, so the erases fall short and the redraw lands on top of
-    // transcript rows that were never cleared (#598). A corrective resize
-    // makes the pty match what the user can see and the SIGWINCH makes the
-    // agent repaint; the frame already on screen was composed against the
-    // wrong grid, so repaint it from the buffer too.
+    // transcript rows that were never cleared (#598). The corrective resize
+    // is the whole repair: its SIGWINCH is what makes the agent repaint, and
+    // repainting here would only redraw the wrong-grid frame that is already
+    // on screen, before the new size has even landed.
     const reconcilePtyGeometry = (value: Session) => {
-      if (!geometrySync?.observe({ cols: value.cols, rows: value.rows })) return;
-      refreshViewport();
+      geometrySync?.observe({ cols: value.cols, rows: value.rows });
     };
     // Loss of contact is never proof of exit: a read failure or transport
     // error must not leave a stale "live" badge showing. Once exited is
