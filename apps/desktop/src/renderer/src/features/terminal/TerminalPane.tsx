@@ -1151,6 +1151,21 @@ export function TerminalPane({
       lastObserved = value;
       callbacks.current.onSession(value);
     };
+    // The daemon reports the pty's own grid on every read; it is the
+    // authority, and this pane's last accepted resize is only a cache of it.
+    // Anything else holding the session can resize the pty (a second
+    // surface, `drogon-cli terminal resize`, a bot, an orchestration
+    // worker), and nothing else ever told this pane. Left unreconciled, the
+    // agent keeps computing its cursor-relative redraws — how far up to move,
+    // where lines wrap, how far its erases reach — for a grid this terminal
+    // does not have, so the erases fall short and the redraw lands on top of
+    // transcript rows that were never cleared (#598). The corrective resize
+    // is the whole repair: its SIGWINCH is what makes the agent repaint, and
+    // repainting here would only redraw the wrong-grid frame that is already
+    // on screen, before the new size has even landed.
+    const reconcilePtyGeometry = (value: Session) => {
+      geometrySync?.observe({ cols: value.cols, rows: value.rows });
+    };
     // Loss of contact is never proof of exit: a read failure or transport
     // error must not leave a stale "live" badge showing. Once exited is
     // positively observed, that stays authoritative — a later transport
@@ -1406,6 +1421,7 @@ export function TerminalPane({
           }
           caughtUp.current = bytes.length < TERMINAL_READ_PAGE_BYTES;
           canWrite = value.session.verdict === "live";
+          reconcilePtyGeometry(value.session);
           if (canWrite) geometrySync?.flush();
           else geometrySync?.invalidate();
           if (bytes.length > 0) lastActivityAt = Date.now();
@@ -1434,6 +1450,7 @@ export function TerminalPane({
         // pane's ordered chain.
         cursor = value.nextCursor;
         canWrite = value.session.verdict === "live";
+        reconcilePtyGeometry(value.session);
         if (canWrite) geometrySync?.flush();
         else geometrySync?.invalidate();
         if (bytes.length > 0) lastActivityAt = Date.now();
