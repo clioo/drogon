@@ -297,3 +297,16 @@ test("a disposed pane never resizes the pty from a late report", async () => {
   await settle();
   expect(send).toHaveBeenCalledTimes(1);
 });
+test("a connection boundary disarms a skip the completed send left behind", async () => {
+  const send = vi.fn(async () => {});
+  const sync = createTerminalGeometrySync({ isReady: () => true, send, onError: vi.fn(), now: () => 0 });
+  sync.request(wide);
+  await settle(); // completes, arming the one stale-report skip
+  // The transport then dropped. Nothing is left in transit, so the armed
+  // skip is stale bookkeeping: the first report after the boundary is
+  // genuine evidence and observe() itself must act on it.
+  sync.invalidate();
+  send.mockClear();
+  expect(await readTick(sync, narrow)).toBe(true);
+  expect(send.mock.calls).toEqual([[wide]]);
+});
