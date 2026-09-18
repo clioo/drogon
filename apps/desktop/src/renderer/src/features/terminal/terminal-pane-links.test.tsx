@@ -111,6 +111,9 @@ describe("TerminalPane link routing (#600)", () => {
     };
     window.addEventListener("drogon:open-external-url", onExternal);
     (window as unknown as { drogon: unknown }).drogon = {
+      // A daemon with no output-push capability, so the pane stays on the
+      // poll path and this test exercises links rather than the transport.
+      status: async () => ({ ok: true, result: { capabilities: [] } }),
       read: async () => ({
         ok: true,
         result: { data: "", nextCursor: 0, truncated: false },
