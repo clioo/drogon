@@ -60,6 +60,22 @@ impl CliError {
         }
     }
 
+    /// Re-keys an error onto the caller's own request id, keeping its kind
+    /// and its envelope. Used where one command makes several ledgered round
+    /// trips under derived ids (`terminal send`'s Return write): the derived
+    /// id is an internal ledger detail, so every failure must still name the
+    /// id the caller passed and can retry with.
+    pub fn on_request_id(self, request_id: &str) -> Self {
+        match self {
+            CliError::Usage(message) => CliError::Usage(message),
+            CliError::Local { error, .. } => CliError::local(error, request_id),
+            CliError::Server { error, mut raw } => {
+                raw["requestId"] = Value::String(request_id.to_string());
+                CliError::Server { error, raw }
+            }
+        }
+    }
+
     /// Re-keys an error onto the operation's request id. Used for capability
     /// preflight failures: the preflight `status` is a read-only request with
     /// its own id, but every error the caller sees must retain the operation's

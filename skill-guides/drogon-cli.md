@@ -119,7 +119,14 @@ listing with `drogon-cli terminal list --workspace <ID>` or list all with
 
 Write input with `drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT>`.
 To send Enter, end the value with a real newline (shell `$'...'` quoting),
-not the two characters backslash-n. Read bounded output with
+not the two characters backslash-n. Every newline in the value is delivered
+as Return — the carriage return a terminal puts on the wire when you press
+Enter, which is the only byte a raw-mode TUI reads as submit — and a trailing
+one is written on its own so the TUI sees a keystroke rather than a pasted
+blob. The result reports `submittedEnter` so you can confirm the message was
+submitted and not just typed into the composer. Pass `--literal` to write the
+bytes verbatim instead, with no Return translation and no Enter, when you are
+piping data rather than typing a message. Read bounded output with
 `drogon-cli terminal read --session <ID> --incarnation <TOKEN> --cursor 0 --limit-bytes 4096`,
 then keep paging with the returned `nextCursor` while `truncated` is true.
 Resize with `drogon-cli terminal resize --session <ID> --incarnation <TOKEN> --cols 80 --rows 24`,

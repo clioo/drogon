@@ -257,8 +257,8 @@ pub fn all_commands() -> Vec<AgentCommand> {
             "terminal send",
             &["terminal", "send"],
             "Write UTF-8 text to a session (encoded to base64 exactly once)",
-            "drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT>",
-            &["incarnation", "session", "text"],
+            "drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT> [--literal]",
+            &["incarnation", "literal", "session", "text"],
             &[],
             &[
                 "drogon-cli terminal send --session sess-1 --incarnation tok --text 'echo hi' --json",
@@ -266,6 +266,9 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[
                 "Text is encoded to base64 exactly once here, never shell interpolated anywhere.",
                 "To send Enter, end the value with a real newline, not the two characters backslash-n.",
+                "Every newline is delivered as Return (carriage return), the byte a terminal puts on the wire when you press Enter; a trailing one is written on its own so a TUI reads it as a keystroke and submits the turn.",
+                "The result adds submittedEnter: true when that Return was delivered; acceptedBytes counts it.",
+                "Use --literal to write the bytes verbatim instead (no Return translation, no Enter) when piping data rather than typing a message.",
             ],
         ),
         entry(

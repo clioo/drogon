@@ -1013,7 +1013,7 @@ pub enum TerminalAction {
     /// Write UTF-8 text to a session (encoded to base64 exactly once)
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT>\nValid flags: --data-dir, --help, --incarnation, --json, --request-id, --retry-request, --session, --text"
+        override_usage = "drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT> [--literal]\nValid flags: --data-dir, --help, --incarnation, --json, --literal, --request-id, --retry-request, --session, --text"
     )]
     Send {
         #[arg(long, value_name = "ID")]
@@ -1022,6 +1022,10 @@ pub enum TerminalAction {
         incarnation: String,
         #[arg(long, value_name = "TEXT")]
         text: String,
+        /// Send TEXT's bytes verbatim: no newline-to-Return translation and
+        /// no separate Enter keystroke. For piping data rather than typing.
+        #[arg(long)]
+        literal: bool,
     },
     /// Resize a session's PTY
     #[command(
