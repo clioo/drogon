@@ -10,7 +10,7 @@ use crate::client::{
     MeetingCommitmentPage, MeetingList, MeetingRead, MeetingSuggestion, MeetingTranscript,
     MentuApproval, MentuOpenResult, MentuRun, MentuRunsResult, MentuStepRun, MethodResult, Project,
     ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Workspace, WorkspaceList,
-    Worktree, WorktreeList, WriteResult,
+    Worktree, WorktreeList,
 };
 use drogon_protocol::graph::{
     Graph, GraphCompileResult, GraphFailoverAttemptRecord, GraphNodeState, GraphRuntimeRef,
@@ -221,10 +221,6 @@ pub fn session_read(result: &ReadResult) -> String {
         }
         Err(_) => format!("{header}\n<body is not valid base64; use --json for wire bytes>"),
     }
-}
-
-pub fn session_wrote(result: &WriteResult, session_hint: &str) -> String {
-    session_wrote_bytes(result.accepted_bytes, session_hint, false)
 }
 
 /// `terminal send`'s line. `submitted_enter` says the delivery ended with a
@@ -851,9 +847,6 @@ pub fn render(result: &MethodResult, context: &RenderContext) -> String {
         (MethodResult::Session(session), RenderContext::SessionClosed) => session_closed(session),
         (MethodResult::SessionList(list), _) => session_list(list),
         (MethodResult::Read(read), _) => session_read(read),
-        (MethodResult::Write(write), RenderContext::SentTo(session)) => {
-            session_wrote(write, session)
-        }
         _ => unreachable!("command layer pairs results with matching contexts"),
     }
 }
@@ -864,7 +857,6 @@ pub enum RenderContext {
     SessionStarted,
     SessionResized,
     SessionClosed,
-    SentTo(String),
 }
 
 /// `meeting list`: when there is nothing to show, the first line has to be

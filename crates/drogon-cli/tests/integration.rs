@@ -2196,16 +2196,41 @@ async fn send_literal_writes_the_bytes_untouched() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_empty_text_is_still_forwarded_rather_than_short_circuited() {
+async fn an_empty_text_is_forwarded_and_the_services_refusal_is_surfaced() {
     let dir = temp_data_dir("s-le");
-    let service = MockService::start(dir.path(), echo_behavior());
+    // Mirrors the daemon's own `require_str`, which rejects an empty
+    // `dataBase64`. Refusing an empty payload is the service's call, so the
+    // CLI has to ask rather than succeed or fail on its own — and a mock
+    // that accepted what the daemon refuses would pin the wrong contract.
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request: Value| {
+            let id = request["requestId"].as_str().unwrap_or("").to_string();
+            if request["params"]["dataBase64"]
+                .as_str()
+                .unwrap_or("")
+                .is_empty()
+            {
+                return Action::Respond(error_envelope(
+                    &id,
+                    "invalid_argument",
+                    "missing or invalid field: dataBase64",
+                ));
+            }
+            Action::Respond(ok_envelope(&id, json!({ "acceptedBytes": 0 })))
+        }),
+    );
 
-    // Refusing an empty payload is the service's call (`require_str`), so the
-    // CLI has to ask it rather than succeed or fail on its own.
     for extra in [vec![], vec!["--literal"]] {
         let output = run_cli(dir.path(), &send_args("", &extra));
-        assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+        assert_eq!(output.status.code(), Some(1), "extra {extra:?}");
+        assert!(
+            stderr(&output).contains("missing or invalid field: dataBase64"),
+            "stderr: {}",
+            stderr(&output)
+        );
     }
+    // Both spellings reached the service rather than being short-circuited.
     assert_eq!(
         captured_writes(&service),
         vec![String::new(), String::new()]

@@ -39,19 +39,23 @@ const POLL_INTERVAL: Duration = Duration::from_millis(25);
 /// Window for a negative assertion: long enough for a delivery that did
 /// happen to show up, short enough not to pad the suite.
 const SETTLE: Duration = Duration::from_secs(2);
+/// Same, per table row: the send has already returned, so an over-delivered
+/// byte is in the PTY and the fixture only needs a moment to echo it.
+const ROW_SETTLE: Duration = Duration::from_millis(250);
 
 /// Dumps, in hex between `:` markers, exactly the first `$1` bytes the PTY
-/// delivered and then exactly `$1` more. `dd bs=1` reads a byte at a time,
-/// so the dump never depends on where a read boundary happened to fall.
-/// The second dump is how a duplicate delivery becomes visible: with one
-/// delivery it blocks forever and `SECOND` never appears.
+/// delivered, then reads ONE more byte. `dd bs=1` reads a byte at a time, so
+/// the dump never depends on where a read boundary happened to fall.
+/// The second read is how anything beyond the expected bytes becomes
+/// visible: with an exact delivery it blocks forever and `EXTRA` never
+/// appears.
 const RAW_READER_SCRIPT: &str = r#"#!/bin/sh
 stty raw -echo
 printf 'READY:'
 dd bs=1 count="$1" 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
 printf ':DONE:'
-dd bs=1 count="$1" 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
-printf ':SECOND'
+dd bs=1 count=1 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
+printf ':EXTRA'
 "#;
 
 fn workspace_root() -> PathBuf {
@@ -276,12 +280,41 @@ fn wait_for_marker(data_dir: &Path, session: &str, incarnation: &str, marker: &s
 /// The session's output after a bounded settle, for the one assertion that
 /// is about something NOT arriving. Anything a returned call wrote is
 /// already in the PTY; this just gives the fixture time to react to it.
-fn session_output_after(data_dir: &Path, session: &str, incarnation: &str) -> String {
-    let deadline = Instant::now() + SETTLE;
+fn session_output_after(
+    data_dir: &Path,
+    session: &str,
+    incarnation: &str,
+    settle: Duration,
+) -> String {
+    let deadline = Instant::now() + settle;
     while Instant::now() < deadline {
         std::thread::sleep(POLL_INTERVAL);
     }
     session_output(data_dir, session, incarnation)
+}
+
+/// A session the fixture is still running. Checked before a negative
+/// assertion so "nothing more arrived" cannot really mean "the reader died".
+fn assert_still_live(data_dir: &Path, session: &str, incarnation: &str, label: &str) {
+    let read = ok(
+        data_dir,
+        &[
+            "terminal",
+            "read",
+            "--session",
+            session,
+            "--incarnation",
+            incarnation,
+            "--cursor",
+            "0",
+            "--limit-bytes",
+            "1",
+        ],
+    );
+    assert_eq!(
+        read["result"]["session"]["verdict"], "live",
+        "{label}: the fixture must still be reading: {read:#}"
+    );
 }
 
 fn write_raw_reader(dir: &Path) -> PathBuf {
@@ -464,6 +497,31 @@ fn a_raw_mode_reader_gets_exactly_the_documented_bytes() {
             accepted: 2,
             submitted_enter: false,
         },
+        // Nothing BUT the submit.
+        Case {
+            text: "\n",
+            literal: false,
+            hex: "0d",
+            accepted: 1,
+            submitted_enter: true,
+        },
+        Case {
+            text: "\r\n",
+            literal: false,
+            hex: "0d",
+            accepted: 1,
+            submitted_enter: true,
+        },
+        // An interior carriage return is the caller's byte, passed through
+        // rather than guessed at — it is Return to the reader, which is why
+        // the guide tells a caller with CRLF line endings to convert them.
+        Case {
+            text: "A\rB\n",
+            literal: false,
+            hex: "410d420d",
+            accepted: 4,
+            submitted_enter: true,
+        },
         // Multi-byte text is measured and delivered in bytes.
         Case {
             text: "é\n",
@@ -523,6 +581,17 @@ fn a_raw_mode_reader_gets_exactly_the_documented_bytes() {
                 first_dump(&text),
                 case.hex,
                 "{label}: session output {text:?}"
+            );
+            // The dump is the first `n` bytes, so over-delivery would match
+            // it by prefix. The fixture's one extra read is what rules that
+            // out — and the reader has to still be alive for its silence to
+            // mean anything.
+            assert_still_live(&fixture.data_dir, &session, &incarnation, &label);
+            let settled =
+                session_output_after(&fixture.data_dir, &session, &incarnation, ROW_SETTLE);
+            assert!(
+                !settled.contains(":EXTRA"),
+                "{label}: more bytes reached the PTY than were asked for: {settled:?}"
             );
             fixture.close(&session, &incarnation);
         }
@@ -605,13 +674,15 @@ fn a_replayed_send_reaches_the_pty_exactly_once() {
         }
         let text = wait_for_marker(&fixture.data_dir, &session, &incarnation, ":DONE");
         assert_eq!(first_dump(&text), "50494e470d", "session output {text:?}");
-        // The fixture's second read only completes if a second delivery
-        // landed, so `SECOND` appearing is the duplicate. Settle first: the
-        // replay has already returned, and anything it wrote would be in
-        // the PTY by now.
-        let settled = session_output_after(&fixture.data_dir, &session, &incarnation);
+        // The fixture's extra read only completes if another byte arrived,
+        // so `EXTRA` appearing is the duplicate. Both legs of the negative
+        // assertion are covered: the first delivery is proven by `:DONE`
+        // above, and the reader is proven to still be waiting below, so
+        // silence cannot mean "nothing was ever sent" or "the reader died".
+        assert_still_live(&fixture.data_dir, &session, &incarnation, "replay");
+        let settled = session_output_after(&fixture.data_dir, &session, &incarnation, SETTLE);
         assert!(
-            !settled.contains(":SECOND"),
+            !settled.contains(":EXTRA"),
             "the replay delivered the message twice: {settled:?}"
         );
     }));
