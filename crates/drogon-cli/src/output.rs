@@ -10,7 +10,7 @@ use crate::client::{
     MeetingCommitmentPage, MeetingList, MeetingRead, MeetingSuggestion, MeetingTranscript,
     MentuApproval, MentuOpenResult, MentuRun, MentuRunsResult, MentuStepRun, MethodResult, Project,
     ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Workspace, WorkspaceList,
-    Worktree, WorktreeList, WriteResult,
+    Worktree, WorktreeList,
 };
 use drogon_protocol::graph::{
     Graph, GraphCompileResult, GraphFailoverAttemptRecord, GraphNodeState, GraphRuntimeRef,
@@ -223,8 +223,20 @@ pub fn session_read(result: &ReadResult) -> String {
     }
 }
 
-pub fn session_wrote(result: &WriteResult, session_hint: &str) -> String {
-    format!("Wrote {} bytes to {}.", result.accepted_bytes, session_hint)
+/// `terminal send`'s line. `submitted_enter` says the delivery ended with a
+/// Return keystroke, so a reader can tell "typed into the composer" from
+/// "typed and submitted" — the distinction issue #599 was about. The byte
+/// count covers everything written, the Return included.
+pub fn session_wrote_bytes(
+    accepted_bytes: u64,
+    session_hint: &str,
+    submitted_enter: bool,
+) -> String {
+    if submitted_enter {
+        format!("Wrote {accepted_bytes} bytes to {session_hint}, ending with Enter.")
+    } else {
+        format!("Wrote {accepted_bytes} bytes to {session_hint}.")
+    }
 }
 
 pub fn session_resized(session: &Session) -> String {
@@ -835,9 +847,6 @@ pub fn render(result: &MethodResult, context: &RenderContext) -> String {
         (MethodResult::Session(session), RenderContext::SessionClosed) => session_closed(session),
         (MethodResult::SessionList(list), _) => session_list(list),
         (MethodResult::Read(read), _) => session_read(read),
-        (MethodResult::Write(write), RenderContext::SentTo(session)) => {
-            session_wrote(write, session)
-        }
         _ => unreachable!("command layer pairs results with matching contexts"),
     }
 }
@@ -848,7 +857,6 @@ pub enum RenderContext {
     SessionStarted,
     SessionResized,
     SessionClosed,
-    SentTo(String),
 }
 
 /// `meeting list`: when there is nothing to show, the first line has to be

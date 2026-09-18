@@ -34,6 +34,7 @@ use crate::error::{CliError, mentu_approval_required, method_not_found, timeout}
 use crate::output;
 use crate::paths;
 use crate::skills;
+use crate::terminal_send::plan_terminal_send;
 use crate::transport::{ANALYSIS_TIMEOUT, DEFAULT_TIMEOUT};
 use drogon_protocol::graph::{
     GraphNodeStateResult, GraphResult, GraphResumeResult, GraphRunNodeFailoverResult,
@@ -264,28 +265,18 @@ async fn terminal(
             session,
             incarnation,
             text,
+            literal,
         } => {
-            let sent_bytes = text.len() as u64;
-            let params = json!({
-                "sessionId": session,
-                "incarnation": incarnation,
-                // UTF-8 encoded once, here; never shell-interpolated anywhere.
-                "dataBase64": STANDARD.encode(text.as_bytes()),
-            });
-            let call = client
-                .call("session.write", params, request_id, DEFAULT_TIMEOUT)
-                .await?;
-            let write: WriteResult = Client::decode_checked(&call, "session.write", |result| {
-                check_write(result, sent_bytes)
-            })?;
-            let session_id = session.clone();
-            emit(
-                call,
+            terminal_send(
+                client,
+                request_id,
                 json,
-                || output::session_wrote(&write, &session_id),
-                0,
-                None,
+                session,
+                incarnation,
+                text,
+                *literal,
             )
+            .await
         }
         TerminalAction::Resize {
             session,
@@ -358,6 +349,56 @@ async fn terminal(
             )
         }
     }
+}
+
+/// `terminal send`: delivers `--text` the way a terminal delivers typed
+/// input (issue #599). `crate::terminal_send` owns the why; this function
+/// owns the round trip — exactly one, so two agents nudging the same session
+/// cannot interleave inside a single message.
+///
+/// The envelope gains an additive `submittedEnter` so a caller can verify
+/// the keystroke that used to go missing, rather than inferring it from
+/// `acceptedBytes` (which counts what reached the PTY, and so is one byte
+/// short of a `--text` that ended in CRLF).
+async fn terminal_send(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    session: &str,
+    incarnation: &str,
+    text: &str,
+    literal: bool,
+) -> Result<RunOutcome, CliError> {
+    let plan = plan_terminal_send(text, literal);
+    let params = json!({
+        "sessionId": session,
+        "incarnation": incarnation,
+        // UTF-8 encoded once, here; never shell-interpolated anywhere.
+        "dataBase64": STANDARD.encode(plan.text.as_bytes()),
+    });
+    let expected = plan.byte_len();
+    let call = client
+        .call("session.write", params, request_id, DEFAULT_TIMEOUT)
+        .await?;
+    let write: WriteResult = Client::decode_checked(&call, "session.write", |result| {
+        check_write(result, expected)
+    })?;
+    let mut call = call;
+    call.raw["result"] = json!({
+        "acceptedBytes": write.accepted_bytes,
+        "submittedEnter": plan.submitted_enter,
+    });
+    call.result = call.raw["result"].clone();
+    let session_id = session.to_string();
+    let accepted = write.accepted_bytes;
+    let submitted_enter = plan.submitted_enter;
+    emit(
+        call,
+        json,
+        || output::session_wrote_bytes(accepted, &session_id, submitted_enter),
+        0,
+        None,
+    )
 }
 
 /// Client-side wait over the existing `session.read`: no new RPC was added

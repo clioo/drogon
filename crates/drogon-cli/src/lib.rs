@@ -52,5 +52,6 @@ pub mod paths;
 pub mod skill_metadata;
 pub mod skills;
 pub mod skills_agents;
+pub mod terminal_send;
 pub mod transport;
 pub mod wire;
