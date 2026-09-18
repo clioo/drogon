@@ -793,9 +793,11 @@ export function TerminalPane({
     );
     // #600: OSC 8 hyperlinks bypass the addon above — xterm resolves them
     // itself and, with no linkHandler, raises its `confirm()` "could
-    // potentially be dangerous" dialog instead of opening anything. Options
-    // are read when a link is resolved, so assigning here (after the openers
-    // exist) is what the OscLinkProvider sees.
+    // potentially be dangerous" dialog instead of opening anything.
+    // Must stay ahead of `terminal.open()` and the first write: the
+    // OscLinkProvider reads this option once per resolution and bakes it into
+    // each link, so a link resolved before the assignment keeps the dialog
+    // for as long as it lives (pinned by terminal-osc-link-handler.test.ts).
     terminal.options.linkHandler = createTerminalOscLinkHandler({
       openUrl: (linkUrl, event) => openHttpUrl(linkUrl, event),
       requestAction: requestHttpLinkAction,
@@ -1519,6 +1521,10 @@ export function TerminalPane({
       linkPointerGesture.current = null;
       linkActionContext.current = null;
       setLinkActionRequest(null);
+      // The tooltip is keyed to a pointer that no longer has a terminal
+      // under it; without this it survives the remount on a restart/resume
+      // and names a link from the previous incarnation.
+      setLinkTooltip(null);
       fileLinkDisposable.dispose();
       subscription.dispose();
       selection.dispose();

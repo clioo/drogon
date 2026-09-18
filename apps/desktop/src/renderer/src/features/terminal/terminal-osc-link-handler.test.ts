@@ -8,6 +8,7 @@ import { Terminal } from "@xterm/xterm";
 import type { ILink, ILinkProvider } from "@xterm/xterm";
 import {
   createTerminalOscLinkHandler,
+  normalizedTerminalHttpUrl,
   TERMINAL_OSC_LINK_REFUSED_MESSAGE,
 } from "./terminal-osc-link-handler";
 import { terminalHttpLinkClickDestination } from "./terminal-http-link-destinations";
@@ -91,12 +92,22 @@ describe("createTerminalOscLinkHandler", () => {
   it("ignores gestures the terminal does not own", () => {
     const openUrl = vi.fn(async () => ({ ok: true as const }));
     const requestAction = vi.fn(() => true);
-    const handler = createTerminalOscLinkHandler({ openUrl, requestAction });
-    // Right click belongs to the context menu; Alt+drag is column select.
+    const leave = vi.fn();
+    const handler = createTerminalOscLinkHandler({
+      openUrl,
+      requestAction,
+      leave,
+    });
+    // Right click belongs to the context menu, Alt+drag is column select,
+    // and middle click is the X11 paste gesture.
     handler.activate(mouse({ button: 2 }), URL_UNDER_TEST, range);
     handler.activate(mouse({ altKey: true }), URL_UNDER_TEST, range);
+    handler.activate(mouse({ button: 1 }), URL_UNDER_TEST, range);
+    handler.activate(undefined as unknown as MouseEvent, URL_UNDER_TEST, range);
     expect(openUrl).not.toHaveBeenCalled();
     expect(requestAction).not.toHaveBeenCalled();
+    // An unowned gesture leaves the pointer where it was, tooltip included.
+    expect(leave).not.toHaveBeenCalled();
   });
 
   it("reports an opener failure instead of failing silently", async () => {
@@ -108,6 +119,54 @@ describe("createTerminalOscLinkHandler", () => {
     handler.activate(mouse(), URL_UNDER_TEST, range);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(report).toHaveBeenCalledWith("no workspace");
+  });
+
+  it("reports a rejected opener instead of leaving an unhandled rejection", async () => {
+    const report = vi.fn();
+    const handler = createTerminalOscLinkHandler({
+      openUrl: () => Promise.reject(new Error("bridge gone")),
+      report,
+    });
+    handler.activate(mouse(), URL_UNDER_TEST, range);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(report).toHaveBeenCalledWith("The link could not be opened.");
+  });
+
+  it("dismisses the hover tooltip once the click has opened the link", () => {
+    const leave = vi.fn();
+    const handler = createTerminalOscLinkHandler({
+      openUrl: async () => ({ ok: true as const }),
+      leave,
+    });
+    // Opening the system browser takes focus away, so xterm never fires
+    // `leave` of its own accord and the tooltip would sit there.
+    handler.activate(mouse(), URL_UNDER_TEST, range);
+    expect(leave).toHaveBeenCalled();
+  });
+
+  it("strips the padding an OSC 8 URI may carry before opening it", async () => {
+    const openUrl = vi.fn(async (_url: string) => ({ ok: true as const }));
+    const hover = vi.fn();
+    const handler = createTerminalOscLinkHandler({ openUrl, hover });
+    const padded = `  ${URL_UNDER_TEST}  `;
+    // `new URL` tolerates the padding, so an untrimmed URI would reach
+    // shell.openExternal verbatim.
+    handler.activate(mouse(), padded, range);
+    handler.hover?.(mouse(), padded, range);
+    await Promise.resolve();
+    expect(openUrl.mock.calls[0]?.[0]).toBe(URL_UNDER_TEST);
+    expect(hover).toHaveBeenCalledWith(URL_UNDER_TEST);
+  });
+
+  it("normalizes only http(s) URLs", () => {
+    expect(normalizedTerminalHttpUrl("https://example.com")).toBe(
+      "https://example.com/",
+    );
+    expect(normalizedTerminalHttpUrl("HTTP://Example.COM/A")).toBe(
+      "http://example.com/A",
+    );
+    expect(normalizedTerminalHttpUrl("javascript:alert(1)")).toBeNull();
+    expect(normalizedTerminalHttpUrl("")).toBeNull();
   });
 
   it("names the real destination on hover and clears it on leave", () => {
@@ -249,6 +308,26 @@ describe("xterm OSC 8 hyperlinks", () => {
     expect(linksOnRow(term, 1)).toEqual([]);
     expect(openUrl).not.toHaveBeenCalled();
     expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it("bakes the handler into a link when it resolves it, so the option must be set first", async () => {
+    const openUrl = vi.fn(async () => ({ ok: true as const }));
+    const term = await openTerminal(osc8(URL_UNDER_TEST));
+    // Resolve while no handler is set, as a pane that assigned the option
+    // after its first write would. The stale link keeps xterm's dialog even
+    // once the handler arrives — which is why TerminalPane assigns the
+    // option before `terminal.open()`.
+    const stale = linksOnRow(term, 1);
+    term.options.linkHandler = createTerminalOscLinkHandler({ openUrl });
+    stale[0].activate(mouse(), stale[0].text);
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(openUrl).not.toHaveBeenCalled();
+    // Anything resolved after the assignment routes normally.
+    confirmSpy.mockClear();
+    linksOnRow(term, 1)[0].activate(mouse(), URL_UNDER_TEST);
+    await Promise.resolve();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(openUrl).toHaveBeenCalledTimes(1);
   });
 
   it("hands the hover the URL, not the link's visible text", async () => {
