@@ -2,6 +2,7 @@ import { expect, test, vi } from "vitest";
 import {
   createTerminalGeometrySync,
   TERMINAL_GEOMETRY_RECONCILE_MIN_INTERVAL_MS,
+  TERMINAL_GRID_MAX_DIMENSION,
 } from "./terminal-geometry-sync";
 const wide = { cols: 76, rows: 26 };
 const narrow = { cols: 21, rows: 26 };
@@ -122,9 +123,13 @@ const readTick = async (
   sync: ReturnType<typeof createTerminalGeometrySync>,
   reported: { cols: number; rows: number },
 ) => {
-  sync.observe(reported);
+  // The verdict matters as much as the send count: when the cache is null
+  // for any reason the pane's own flush() sends too, so a send alone cannot
+  // distinguish "observe corrected this" from "observe was bypassed".
+  const corrected = sync.observe(reported);
   sync.flush();
   await settle();
+  return corrected;
 };
 test("corrective resizes are rate limited under the pane's own observe-then-flush tick", async () => {
   const send = vi.fn(async () => {});
@@ -152,12 +157,15 @@ test("a floor-blocked report leaves the confirmation standing so the pane's flus
   await settle();
   await readTick(sync, narrow); // stale-report skip
   send.mockClear();
-  await readTick(sync, narrow); // the one corrective resize
+  expect(await readTick(sync, narrow)).toBe(true); // the one corrective resize
   expect(send).toHaveBeenCalledTimes(1);
   send.mockClear();
   clock += 100;
+  // The corrective send armed its own skip, so this tick proves nothing.
   await readTick(sync, narrow);
-  // Neither observe() nor the pane's flush may send inside the floor.
+  // This one reaches the floor: neither observe() nor the pane's trailing
+  // flush may send, which requires the cached confirmation to still stand.
+  expect(await readTick(sync, narrow)).toBe(false);
   expect(send).not.toHaveBeenCalled();
 });
 test("an external resize still heals within one read tick of the floor expiring", async () => {
@@ -180,31 +188,38 @@ test("a wall clock that steps backwards cannot park reconciliation", async () =>
   await settle();
   await readTick(sync, narrow); // stale-report skip
   send.mockClear();
-  await readTick(sync, narrow);
+  expect(await readTick(sync, narrow)).toBe(true);
   expect(send).toHaveBeenCalledTimes(1);
   // ntp correction / host resume: an hour backwards.
   clock -= 3_600_000;
   send.mockClear();
   await readTick(sync, narrow); // the skip that every send arms
-  await readTick(sync, narrow);
+  // The correction must come from observe() itself. Without the rewind
+  // guard the floor still blocks here and any send is the trailing flush
+  // leaking through a cache observe() should not have dropped.
+  expect(await readTick(sync, narrow)).toBe(true);
   expect(send).toHaveBeenCalledTimes(1);
 });
 test("a send completing after a connection boundary does not eat a genuine report", async () => {
+  let ready = true;
   const inflight = deferred();
   const send = vi.fn().mockReturnValueOnce(inflight.promise).mockResolvedValue(undefined);
-  const sync = createTerminalGeometrySync({ isReady: () => true, send, onError: vi.fn(), now: () => 0 });
+  const sync = createTerminalGeometrySync({ isReady: () => ready, send, onError: vi.fn(), now: () => 0 });
   sync.request(wide);
   expect(send).toHaveBeenCalledTimes(1);
   // The transport dropped and came back: nothing is left in transit, so the
-  // late completion must not arm a skip that swallows the next report.
+  // late completion must not arm a skip that swallows the next report. Held
+  // unready across the boundary so the re-send cannot mask the skip.
+  ready = false;
   sync.invalidate();
   inflight.resolve();
   await settle();
-  // The boundary itself re-sent (the epoch moved under the in-flight send),
-  // and that send arms the one legitimate skip. The next report is genuine.
+  expect(send).toHaveBeenCalledTimes(1);
+  ready = true;
   send.mockClear();
-  await readTick(sync, narrow);
-  await readTick(sync, narrow);
+  // The very first report after the boundary is genuine evidence, and it is
+  // observe() that must act on it.
+  expect(await readTick(sync, narrow)).toBe(true);
   expect(send.mock.calls).toEqual([[wide]]);
 });
 // Precedence, pinned deliberately: a session being displayed is sized by the
@@ -212,17 +227,43 @@ test("a send completing after a connection boundary does not eat a genuine repor
 // fit, so this only makes that ownership survive a later external resize;
 // a hidden pane never takes it.
 test("the visible pane owns the grid of the session it is displaying", async () => {
-  let visible = false;
+  let visible = true;
   const send = vi.fn(async () => {});
-  let clock = 0;
-  const sync = createTerminalGeometrySync({ isReady: () => visible, send, onError: vi.fn(), now: () => clock });
+  const sync = createTerminalGeometrySync({ isReady: () => visible, send, onError: vi.fn(), now: () => 0 });
   sync.request(wide);
-  await readTick(sync, narrow);
-  await readTick(sync, narrow);
+  await settle();
+  await readTick(sync, wide); // stale-report skip, then confirmed
+  await readTick(sync, wide);
+  send.mockClear();
+  // Something else takes the pty while this pane is hidden. A hidden pane
+  // neither corrects nor drops its cache, so the pane's own flush on reveal
+  // has nothing to re-send: the correction must come from the next report.
+  visible = false;
+  expect(await readTick(sync, narrow)).toBe(false);
+  expect(await readTick(sync, narrow)).toBe(false);
   expect(send).not.toHaveBeenCalled();
   visible = true;
-  await readTick(sync, narrow);
+  sync.flush();
+  await settle();
+  expect(send).not.toHaveBeenCalled();
+  expect(await readTick(sync, narrow)).toBe(true);
   expect(send.mock.calls).toEqual([[wide]]);
+});
+test("a grid past the daemon's limit is asked for at the limit, not retried forever", async () => {
+  const send = vi.fn(async () => {});
+  const onError = vi.fn();
+  const sync = createTerminalGeometrySync({ isReady: () => true, send, onError, now: () => 0 });
+  // A 5K display at the minimum font zoom measures past the daemon's bound.
+  sync.request({ cols: 1500, rows: 26 });
+  await settle();
+  const clamped = { cols: TERMINAL_GRID_MAX_DIMENSION, rows: 26 };
+  expect(send.mock.calls).toEqual([[clamped]]);
+  send.mockClear();
+  // The pty answers with what it took. That is agreement, not a
+  // contradiction to correct, so no banner loop and no SIGWINCH per tick.
+  for (let i = 0; i < 10; i += 1) expect(await readTick(sync, clamped)).toBe(false);
+  expect(send).not.toHaveBeenCalled();
+  expect(onError).not.toHaveBeenCalled();
 });
 test("reports during an in-flight resize are ignored, and nonsense reports never resize", async () => {
   const first = deferred();

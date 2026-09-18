@@ -10,6 +10,19 @@ const isGrid = (grid: Grid) =>
  */
 export const TERMINAL_GEOMETRY_RECONCILE_MIN_INTERVAL_MS = 1000;
 
+/**
+ * The widest grid `session.resize` accepts (daemon `require_dimension`,
+ * 1..=1000). A pane can measure past it — a 5K display at the 8 px minimum
+ * font zoom clears 1000 columns — and the daemon then rejects every send as
+ * `invalid_argument`. Retrying that forever raised an error banner per read
+ * tick and left the pty permanently narrower than the terminal, which is the
+ * one way to reach #598's mismatch with no second writer involved. Clamping
+ * asks for the widest grid the protocol allows instead, so the pty converges
+ * and stays converged on a size the daemon will actually take.
+ */
+export const TERMINAL_GRID_MAX_DIMENSION = 1000;
+const clampDimension = (value: number) => Math.min(value, TERMINAL_GRID_MAX_DIMENSION);
+
 /** Keep the latest measured grid through unavailable/hidden intervals.
  * Source counterpart: pty-size-reconcile and visibility-resume reassertion.
  * Serialize requests so an older resize cannot finish after the final size. */
@@ -58,7 +71,11 @@ export function createTerminalGeometrySync(options: {
   return {
     request(grid: Grid) {
       if (!isGrid(grid)) return;
-      desired = { ...grid };
+      // Clamped before it becomes `desired` so `observe` compares the pty's
+      // report against the grid actually asked for; comparing against the
+      // unclamped measurement would read the daemon's honest answer as a
+      // contradiction and correct it, forever.
+      desired = { cols: clampDimension(grid.cols), rows: clampDimension(grid.rows) };
       flush();
     },
     flush,
@@ -103,6 +120,10 @@ export function createTerminalGeometrySync(options: {
       flush();
       return true;
     },
+    // Deliberately unfloored: a connection boundary is not a disagreement,
+    // it is the loss of any evidence about the pty, and the pane must
+    // re-assert once the transport returns rather than wait out a floor
+    // meant for two writers fighting over one session.
     invalidate() { epoch++; confirmed = null; staleReports = 0; },
     dispose() { disposed = true; desired = null; confirmed = null; },
   };
