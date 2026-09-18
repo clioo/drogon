@@ -131,6 +131,12 @@ describe("TerminalPane link routing (#600)", () => {
     window.removeEventListener("drogon:open-external-url", onExternal);
     cleanup();
     vi.restoreAllMocks();
+    // The suite shares one jsdom window across files, so a stub left here
+    // becomes another file's environment.
+    delete (window as Partial<Window & { drogon: unknown }>).drogon;
+    delete (window as Partial<Window & { matchMedia: unknown }>).matchMedia;
+    delete (globalThis as Partial<typeof globalThis & { confirm: unknown }>)
+      .confirm;
   });
 
   async function mountWithLink(): Promise<{

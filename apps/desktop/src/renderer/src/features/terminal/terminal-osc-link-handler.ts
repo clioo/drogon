@@ -23,7 +23,13 @@ export type TerminalOscLinkHandlerDeps = {
     url: string,
     event: Pick<MouseEvent, "shiftKey"> | undefined,
   ) => ReturnType<TerminalWebLinkOpener>;
-  /** Plain-click popover requester, shared with the regex web-link path. */
+  /**
+   * The link-action popover, shared with the regex web-link path so both
+   * kinds of http link stay identical. No gesture reaches it today: the
+   * owner's 2026-09-10 rule made every owned click a direct open, and
+   * `handleTerminalWebLinkClick` tests that first. It is wired so that
+   * relaxing that rule restores the popover for OSC 8 links too.
+   */
   requestAction?: (event: MouseEvent, url: string) => boolean;
   clearSelection?: () => void;
   report?: (message: string) => void;
@@ -46,17 +52,15 @@ export const TERMINAL_OSC_LINK_REFUSED_MESSAGE =
  * does (`extractTerminalHttpLinks` yields `parsed.toString()`).
  */
 export function normalizedTerminalHttpUrl(text: string): string | null {
+  // `isExternalUrlAllowed` parses before it answers, so this cannot throw.
   if (!isExternalUrlAllowed(text)) return null;
-  try {
-    return new URL(text).toString();
-  } catch {
-    return null;
-  }
+  return new URL(text).toString();
 }
 
 export function createTerminalOscLinkHandler(
   deps: TerminalOscLinkHandlerDeps,
 ): ILinkHandler {
+  const { requestAction } = deps;
   return {
     // Load-bearing: xterm's OscLinkProvider drops `javascript:`, `file:` and
     // every other scheme only while this stays false. `activate` and `hover`
@@ -70,15 +74,16 @@ export function createTerminalOscLinkHandler(
       }
       const handled = handleTerminalWebLinkClick(url, event, {
         openUrl: (linkUrl) => deps.openUrl(linkUrl, event),
-        requestAction: deps.requestAction
-          ? (mouse) => deps.requestAction?.(mouse, url) ?? false
+        requestAction: requestAction
+          ? (mouse) => requestAction(mouse, url)
           : undefined,
         clearSelection: deps.clearSelection,
         report: deps.report,
       });
-      // xterm fires `leave` on pointer movement, and a click that hands focus
-      // to the system browser produces none — so without this the hover
-      // tooltip stays on screen over the terminal.
+      // The gesture is spent, so the "click to open" hint has nothing left to
+      // offer. xterm only fires `leave` on pointer movement, and a click that
+      // hands focus to a browser produces none, so the tooltip would sit over
+      // the terminal until the pointer happened to cross the link again.
       if (handled) deps.leave?.();
     },
     hover: (_event, text) => {
