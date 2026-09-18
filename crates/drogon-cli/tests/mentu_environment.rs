@@ -6,6 +6,8 @@
 
 #![cfg(unix)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -61,14 +63,20 @@ struct Daemon {
 
 impl Daemon {
     fn start(drogond_path: &Path, data_dir: &Path) -> Daemon {
-        let child = Command::new(drogond_path)
+        let mut command = Command::new(drogond_path);
+        command
             .arg("--data-dir")
             .arg(data_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn drogond");
+            .stderr(Stdio::piped());
+        // The daemon hands its own environment to the sessions it spawns, so
+        // a binding inherited from the Drogon session running this suite must
+        // not reach them either.
+        for name in common::INHERITED_BINDINGS {
+            command.env_remove(name);
+        }
+        let child = command.spawn().expect("spawn drogond");
         let daemon = Daemon {
             data_dir: data_dir.to_path_buf(),
             child,
@@ -102,13 +110,10 @@ impl Drop for Daemon {
 }
 
 fn run_cli(data_dir: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_drogon-cli"))
-        .args(args)
-        .env("DROGON_DATA_DIR", data_dir)
-        .env_remove("DROGON_DISPATCH_CAPABILITY")
-        .env_remove("DROGON_MENTU_RUNTIME")
-        .output()
-        .expect("spawn drogon-cli")
+    let mut command = Command::new(env!("CARGO_BIN_EXE_drogon-cli"));
+    command.args(args).env_remove("DROGON_MENTU_RUNTIME");
+    common::scrub_environment(&mut command, data_dir);
+    command.output().expect("spawn drogon-cli")
 }
 
 #[test]

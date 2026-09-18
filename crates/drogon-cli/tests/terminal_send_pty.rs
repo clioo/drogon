@@ -25,7 +25,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 
-use common::{stderr, stdout};
+use common::{INHERITED_BINDINGS, run_cli, stderr, stdout};
 
 const BUILD_TIMEOUT: Duration = Duration::from_secs(300);
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -116,14 +116,19 @@ struct Daemon {
 
 impl Daemon {
     fn start(drogond: &Path, data_dir: &Path) -> Daemon {
-        let child = Command::new(drogond)
+        let mut command = Command::new(drogond);
+        command
             .arg("--data-dir")
             .arg(data_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn drogond");
+            .stderr(Stdio::piped());
+        // The daemon passes its own environment on to the sessions it spawns,
+        // so the fixture must not inherit another runtime's bindings either.
+        for name in INHERITED_BINDINGS {
+            command.env_remove(name);
+        }
+        let child = command.spawn().expect("spawn drogond");
         let daemon = Daemon {
             data_dir: data_dir.to_path_buf(),
             child,
@@ -147,10 +152,16 @@ impl Daemon {
             {
                 return;
             }
-            assert!(
-                start.elapsed() <= READY_TIMEOUT,
-                "drogond was not ready within {READY_TIMEOUT:?}"
-            );
+            if start.elapsed() > READY_TIMEOUT {
+                let probe = run_cli(&self.data_dir, &["--json", "status"]);
+                panic!(
+                    "drogond was not ready within {READY_TIMEOUT:?}; last status \
+                     probe exited {:?}: {}{}",
+                    probe.status.code(),
+                    stdout(&probe),
+                    stderr(&probe)
+                );
+            }
             std::thread::sleep(POLL_INTERVAL);
         }
     }
@@ -161,24 +172,6 @@ impl Drop for Daemon {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
-}
-
-/// Runs the built `drogon-cli` against `data_dir` with this test process's
-/// own Drogon session bindings removed. The suite itself often runs *inside*
-/// a Drogon session, and an inherited `DROGON_SESSION_ID` would make
-/// `terminal create` try to parent the fixture under a session that does not
-/// exist on this throwaway daemon.
-fn run_cli(data_dir: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_drogon-cli"))
-        .args(args)
-        .env("DROGON_DATA_DIR", data_dir)
-        .env_remove("DROGON_SESSION_ID")
-        .env_remove("DROGON_WORKSPACE_ID")
-        .env_remove("DROGON_INCARNATION")
-        .env_remove("DROGON_DISPATCH_ID")
-        .env_remove("DROGON_TASK_ID")
-        .output()
-        .expect("spawn drogon-cli")
 }
 
 fn call(data_dir: &Path, args: &[&str]) -> (i32, Value) {

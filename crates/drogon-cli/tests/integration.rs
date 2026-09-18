@@ -2077,22 +2077,83 @@ async fn send_with_trailing_newline_writes_the_body_then_a_lone_return() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_never_puts_a_line_feed_on_the_wire() {
+async fn a_multi_line_message_is_one_turn_with_its_newlines_intact() {
     let dir = temp_data_dir("s-nlf");
     let service = MockService::start(dir.path(), echo_behavior());
 
-    // Every spelling of "and press Enter" reaches the PTY as CR, never LF:
-    // a raw-mode TUI submits on CR alone.
+    // Only the trailing terminator is a keystroke. Interior bytes reach the
+    // PTY exactly as given, so a multi-line correction lands in the composer
+    // whole and the one Return at the end submits it as a single turn —
+    // rewriting them all to CR would submit each line separately.
     let output = run_cli(dir.path(), &send_args("one\ntwo\r\nthree\n", &[]));
     assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
-    let writes = captured_writes(&service);
     assert_eq!(
-        writes,
-        vec!["one\rtwo\rthree".to_string(), "\r".to_string()]
+        captured_writes(&service),
+        vec!["one\ntwo\r\nthree".to_string(), "\r".to_string()]
     );
-    assert!(
-        !writes.iter().any(|write| write.contains('\n')),
-        "no write may carry a line feed: {writes:?}"
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_trailing_crlf_is_the_one_byte_return_it_really_is() {
+    let dir = temp_data_dir("s-crlf");
+    let service = MockService::start(dir.path(), echo_behavior());
+
+    // Four bytes in, three on the wire: `acceptedBytes` counts what reached
+    // the PTY, and CRLF is one Return there. `submittedEnter` is how a caller
+    // checks the keystroke rather than inferring it from the byte count.
+    let output = run_cli(dir.path(), &send_args("hi\r\n", &["--json"]));
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    assert_eq!(
+        captured_writes(&service),
+        vec!["hi".to_string(), "\r".to_string()]
+    );
+    let envelope: Value = serde_json::from_str(&stdout(&output)).expect("one envelope");
+    assert_eq!(envelope["result"]["acceptedBytes"], 3);
+    assert_eq!(envelope["result"]["submittedEnter"], true);
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_return_ledger_suffix_is_reserved_against_caller_ids() {
+    let dir = temp_data_dir("s-rsv");
+    let service = MockService::start(dir.path(), echo_behavior());
+
+    // Without the reservation a caller could mint the id a send derives for
+    // its Return, and the ledger would answer one with the other's receipt.
+    for id in ["mine.drogon-enter", "x.drogon-enter"] {
+        let output = run_cli(dir.path(), &send_args("hi\n", &["--request-id", id]));
+        assert_eq!(output.status.code(), Some(2), "id {id} must be refused");
+        assert!(
+            stderr(&output).contains("reserved for the Enter keystroke"),
+            "stderr: {}",
+            stderr(&output)
+        );
+    }
+    // Nothing was attempted, and an ordinary dotted id still works.
+    assert!(captured_writes(&service).is_empty());
+    let output = run_cli(
+        dir.path(),
+        &send_args("hi\n", &["--request-id", "mine.enter"]),
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_empty_text_still_reaches_the_service_that_refuses_it() {
+    let dir = temp_data_dir("s-le");
+    let service = MockService::start(dir.path(), echo_behavior());
+
+    for extra in [vec![], vec!["--literal"]] {
+        let output = run_cli(dir.path(), &send_args("", &extra));
+        // The service owns the refusal of an empty payload; the CLI must not
+        // quietly succeed without asking it.
+        assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    }
+    assert_eq!(
+        captured_writes(&service),
+        vec![String::new(), String::new()]
     );
     drop(service);
 }
@@ -2144,7 +2205,10 @@ async fn send_json_sums_accepted_bytes_and_reports_the_submitted_enter() {
         .iter()
         .map(|request| request["requestId"].as_str().unwrap_or("").to_string())
         .collect();
-    assert_eq!(ids, vec!["req-7".to_string(), "req-7.enter".to_string()]);
+    assert_eq!(
+        ids,
+        vec!["req-7".to_string(), "req-7.drogon-enter".to_string()]
+    );
     drop(service);
 }
 
@@ -2226,7 +2290,7 @@ async fn a_refused_return_write_reports_the_callers_own_request_id() {
         dir.path(),
         std::sync::Arc::new(|request: Value| {
             let id = request["requestId"].as_str().unwrap_or("").to_string();
-            if id.ends_with(".enter") {
+            if id.ends_with(".drogon-enter") {
                 return Action::Respond(error_envelope(&id, "unverifiable", "session exited"));
             }
             Action::Respond(ok_envelope(
@@ -2251,6 +2315,45 @@ async fn a_refused_return_write_reports_the_callers_own_request_id() {
     // The derived id is a ledger detail; the caller retries with their own.
     assert_eq!(envelope["requestId"], "req-11");
     assert_eq!(envelope["error"]["code"], "unverifiable");
+    // The one partially-applied outcome this command has must say so, and
+    // name the replay that submits without retyping the message.
+    let message = envelope["error"]["message"].as_str().expect("message");
+    assert!(
+        message.contains("2 bytes of the message already reached sess-1")
+            && message.contains("--retry-request req-11"),
+        "message: {message}"
+    );
+    // Human mode carries the same admission on stderr (JSON mode keeps
+    // stdout as the single parseable channel, so stderr stays silent there).
+    let human = run_cli(dir.path(), &send_args("hi\n", &["--request-id", "req-12"]));
+    assert_eq!(human.status.code(), Some(1));
+    assert!(
+        stderr(&human).contains("2 bytes of the message already reached sess-1")
+            && stderr(&human).contains("--retry-request req-12"),
+        "stderr: {}",
+        stderr(&human)
+    );
+    drop(service);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refused_body_write_claims_no_partial_delivery() {
+    let dir = temp_data_dir("s-nb");
+    let service = MockService::start(
+        dir.path(),
+        std::sync::Arc::new(|request: Value| {
+            let id = request["requestId"].as_str().unwrap_or("").to_string();
+            Action::Respond(error_envelope(&id, "not_found", "no such session"))
+        }),
+    );
+
+    let output = run_cli(dir.path(), &send_args("hi\n", &[]));
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        !stderr(&output).contains("already reached"),
+        "nothing was delivered, so nothing may be claimed: {}",
+        stderr(&output)
+    );
     drop(service);
 }
 
@@ -2275,9 +2378,9 @@ async fn send_replayed_with_retry_request_reuses_both_ledger_ids() {
         ids,
         vec![
             "replay-1".to_string(),
-            "replay-1.enter".to_string(),
+            "replay-1.drogon-enter".to_string(),
             "replay-1".to_string(),
-            "replay-1.enter".to_string(),
+            "replay-1.drogon-enter".to_string(),
         ],
         "a replay must land on the same two ledger rows"
     );

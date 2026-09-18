@@ -266,8 +266,10 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[
                 "Text is encoded to base64 exactly once here, never shell interpolated anywhere.",
                 "To send Enter, end the value with a real newline, not the two characters backslash-n.",
-                "Every newline is delivered as Return (carriage return), the byte a terminal puts on the wire when you press Enter; a trailing one is written on its own so a TUI reads it as a keystroke and submits the turn.",
-                "The result adds submittedEnter: true when that Return was delivered; acceptedBytes counts it.",
+                "A trailing newline is delivered as Return (carriage return), the byte a terminal puts on the wire when you press Enter, written on its own so a TUI reads it as a keystroke and submits the turn.",
+                "Interior bytes are untouched, so a multi-line message lands whole and only the final Return submits it.",
+                "The result adds submittedEnter: true when that Return was delivered; acceptedBytes counts what reached the PTY, so a trailing CRLF reports one byte fewer than the input.",
+                "If the text is delivered but the Enter is not, the failure says so: replay with the SAME --retry-request <ID> to submit it without retyping.",
                 "Use --literal to write the bytes verbatim instead (no Return translation, no Enter) when piping data rather than typing a message.",
             ],
         ),

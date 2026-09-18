@@ -361,6 +361,11 @@ async fn terminal(
 /// The body write failing aborts before the Return: a Return alone would
 /// submit whatever the composer already held.
 ///
+/// The reverse is the one partially-applied outcome this command has: the
+/// text reached the PTY and the Return did not. It is never silent — the
+/// failure says so and names the safe recovery, which is a replay under the
+/// SAME id (a fresh id would retype the body before submitting it).
+///
 /// Rendering stays one envelope under the caller's own request id, with
 /// `acceptedBytes` summed over the writes and an additive `submittedEnter`
 /// so a caller can verify the keystroke that used to go missing.
@@ -390,14 +395,25 @@ async fn terminal_send(
         let expected = write.byte_len();
         // Every failure reports the caller's own id, never the derived one:
         // the derived id is a ledger detail, not something to retry with.
+        // Once bytes are on the PTY, a failure also has to admit it.
+        let delivered = accepted;
+        let blame = |err: CliError| {
+            let err = err.on_request_id(request_id);
+            if delivered == 0 {
+                return err;
+            }
+            err.annotated(&format!(
+                "{delivered} bytes of the message already reached {session};                  the Enter did not. Replay this exact command with                  --retry-request {request_id} to submit it without retyping"
+            ))
+        };
         let call = client
             .call("session.write", params, &write.request_id, DEFAULT_TIMEOUT)
             .await
-            .map_err(|err| err.on_request_id(request_id))?;
+            .map_err(&blame)?;
         let result: WriteResult = Client::decode_checked(&call, "session.write", |result| {
             check_write(result, expected)
         })
-        .map_err(|err| err.on_request_id(request_id))?;
+        .map_err(&blame)?;
         accepted += result.accepted_bytes;
         envelope.get_or_insert(call);
     }
