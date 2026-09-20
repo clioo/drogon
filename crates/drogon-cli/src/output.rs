@@ -227,15 +227,28 @@ pub fn session_read(result: &ReadResult) -> String {
 /// Return keystroke, so a reader can tell "typed into the composer" from
 /// "typed and submitted" — the distinction issue #599 was about. The byte
 /// count covers everything written, the Return included.
+/// Human `terminal send`: how many bytes, and exactly what happened to the
+/// Return. `inline` is named out loud (issue #625) because it is the shape
+/// that can be swallowed by a paste-detecting TUI — a caller reading this
+/// line should know the difference without consulting the JSON.
 pub fn session_wrote_bytes(
     accepted_bytes: u64,
     session_hint: &str,
-    submitted_enter: bool,
+    enter_delivery: &str,
+    bracketed_paste: bool,
 ) -> String {
-    if submitted_enter {
-        format!("Wrote {accepted_bytes} bytes to {session_hint}, ending with Enter.")
-    } else {
-        format!("Wrote {accepted_bytes} bytes to {session_hint}.")
+    let head = format!("Wrote {accepted_bytes} bytes to {session_hint}");
+    match enter_delivery {
+        "keypress" if bracketed_paste => {
+            format!("{head}, pasted and submitted with Enter as a keypress.")
+        }
+        "keypress" => format!("{head}, submitted with Enter as a keypress."),
+        "inline" => format!(
+            "{head}, ending with Enter in the same write (this service cannot \
+             deliver it as a separate keypress, so a paste-detecting TUI may \
+             not submit it)."
+        ),
+        _ => format!("{head}."),
     }
 }
 
