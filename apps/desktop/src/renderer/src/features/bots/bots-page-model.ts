@@ -248,12 +248,20 @@ export type BotStatusPill = {
 
 /** True when the bot has nothing configured at all: no responsibilities,
  *  no monitors, no session. Exactly the collapsed-row state the design
- *  calls out. */
+ *  calls out.
+ *
+ *  `monitorsUnread` (the read failed, or there was no source) means the
+ *  monitor count is UNKNOWN, not zero — a bot whose monitors could not be
+ *  read is never "nothing configured", because the collapsed row would
+ *  then assert an absence nobody verified. That conflation is the whole
+ *  complaint behind #608. */
 export function isBotUnconfigured(
   bot: Pick<BotsPanelBot, "responsibilities" | "currentSession">,
   monitorCount: number,
+  monitorsUnread = false,
 ): boolean {
   return (
+    !monitorsUnread &&
     bot.responsibilities.length === 0 &&
     monitorCount === 0 &&
     bot.currentSession === null
@@ -271,11 +279,14 @@ export function botStatusPill(input: {
   bot: Pick<BotsPanelBot, "responsibilities" | "currentSession">;
   monitorCount: number;
   observedLiveness?: BotsPanelHostObservation;
+  /** The monitor rows could not be read, so the count is unknown and
+   *  "Idle" would be an unverified claim. */
+  monitorsUnread?: boolean;
 }): BotStatusPill {
   if (input.observedLiveness === "live") {
     return { label: "In session", tone: "live" };
   }
-  if (isBotUnconfigured(input.bot, input.monitorCount)) {
+  if (isBotUnconfigured(input.bot, input.monitorCount, input.monitorsUnread)) {
     return { label: "Idle", tone: "idle" };
   }
   return { label: "Ready for a purpose", tone: "ready" };
@@ -544,11 +555,19 @@ export function monitorLastFiring(
 
 /** Collapsed-row muted line: what is genuinely true about the bot. The
  *  "Standby workspace initialized" suffix is only claimed when the daemon
- *  actually provisioned the bot's dedicated home. */
+ *  actually provisioned the bot's dedicated home.
+ *
+ *  When the monitors could not be read, the line says exactly that instead
+ *  of "no monitors yet": the collapsed row must never assert an absence
+ *  that no read established. */
 export function collapsedRowNote(
   bot: Pick<BotsPanelBot, "home">,
+  monitorsUnread = false,
 ): string {
-  return bot.home
-    ? "No automations or monitors yet · Standby workspace initialized"
+  const configured = monitorsUnread
+    ? "No automations · monitors could not be read"
     : "No automations or monitors yet";
+  return bot.home
+    ? `${configured} · Standby workspace initialized`
+    : configured;
 }

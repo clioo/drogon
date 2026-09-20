@@ -765,8 +765,9 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
         (candidate) => candidate.id === botId,
       );
       const monitorCount = monitorsByBotId?.[botId]?.length ?? 0;
+      const monitorsUnread = monitorReadErrorByBotId[botId] !== undefined;
       const defaultExpanded = bot
-        ? !isBotUnconfigured(bot, monitorCount)
+        ? !isBotUnconfigured(bot, monitorCount, monitorsUnread)
         : true;
       const next = {
         ...expandedOverrides,
@@ -775,7 +776,13 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       saveBotCardExpansion(next);
       setExpandedOverrides(next);
     },
-    [localSnapshot, snapshot, monitorsByBotId, expandedOverrides],
+    [
+      localSnapshot,
+      snapshot,
+      monitorsByBotId,
+      monitorReadErrorByBotId,
+      expandedOverrides,
+    ],
   );
 
   return {

@@ -858,7 +858,11 @@ pub fn delegation_identity(
     match (case_repo, case) {
         // The namespace keeps pull request #42 and issue #42 in the same
         // repository apart: they are two cases, two worktrees, two runs.
-        (Some(repo), Some(case)) => format!("{}-case:{repo}:{}", case.kind(), case.number),
+        // The pull-request spelling is byte-identical to earlier builds, so
+        // a release in flight across an upgrade still joins its own run.
+        (Some(repo), Some(case)) => {
+            format!("{}-case:{repo}:{}", case.identity_prefix(), case.number)
+        }
         _ => event.event_id.clone(),
     }
 }
@@ -894,9 +898,19 @@ pub struct GithubCase {
 }
 
 impl GithubCase {
-    /// The case's own resource, as the event spells it.
-    fn kind(self) -> &'static str {
-        self.target.resource_prefix()
+    /// The namespace this case's delegation identity is minted in.
+    ///
+    /// Pull requests keep the historical `pr` spelling deliberately: the
+    /// identity derives the run-row id a redelivered event joins, so
+    /// changing it would make a release that happened BEFORE an upgrade
+    /// miss its own run afterwards and open a second session on the same
+    /// worktree. It is NOT `resource_prefix()` for that reason — the two
+    /// look interchangeable and are not.
+    fn identity_prefix(self) -> &'static str {
+        match self.target {
+            crate::bots::monitors::github::GithubTarget::Pulls => "pr",
+            crate::bots::monitors::github::GithubTarget::Issues => "issue",
+        }
     }
 
     /// The case in words for the delegation prompt ("pull request", "issue").
@@ -1995,9 +2009,12 @@ mod tests {
         let pull_event = event("pull/42");
         let issue_event = event("issue/42");
         let repo = Some("clioo/drogon");
+        // The literal matters: this string derives the run-row id a
+        // redelivered event joins. `pr-case:` is what every earlier build
+        // wrote, so it must not drift.
         assert_eq!(
             delegation_identity(&pull_event, repo, Some(pull)),
-            "pull-case:clioo/drogon:42"
+            "pr-case:clioo/drogon:42"
         );
         assert_eq!(
             delegation_identity(&issue_event, repo, Some(issue)),

@@ -259,7 +259,15 @@ export function BotsPanel({
                 {visibleBots.map((bot) => {
                   const monitorCount =
                     monitorsByBotId?.[bot.id]?.length ?? 0;
-                  const unconfigured = isBotUnconfigured(bot, monitorCount);
+                  // A read that ran and FAILED leaves the count unknown,
+                  // so the card must not collapse as "nothing configured".
+                  const monitorsUnread =
+                    monitorReadErrorByBotId[bot.id] !== undefined;
+                  const unconfigured = isBotUnconfigured(
+                    bot,
+                    monitorCount,
+                    monitorsUnread,
+                  );
                   return (
                     <div
                       key={bot.id}

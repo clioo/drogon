@@ -60,11 +60,16 @@ pub const GITHUB_CATCH_UP_GRACE_MS: f64 = 30.0 * 60.0 * 1000.0;
 /// Longest persisted error text (chars) — the check-in message bound.
 const MAX_ERROR_CHARS: usize = 512;
 
-/// How many numbers a monitor's seen set retains (newest kept). A
-/// repository with more open pull requests (or issues) than this still
-/// works: the oldest numbers fall out of the set, and one that leaves and
-/// re-enters the open list may be released again — bounded, honest, and
-/// never unbounded growth.
+/// How many numbers a monitor's seen set retains (newest kept). The
+/// oldest numbers fall out of the set, so one that leaves and re-enters
+/// the open list may be released again — bounded, honest, and never
+/// unbounded growth.
+///
+/// This bounds the DEDUPE SET, not the watch's reach: one poll reads a
+/// single page of [`GITHUB_PULLS_PER_PAGE`] oldest-first, so a repository
+/// with more than that many open items does not see the newest ones until
+/// older ones close. That page limit is pre-existing and shared by both
+/// kinds; paginating is a separate change.
 pub const MAX_SEEN_PULLS: usize = 512;
 
 /// Which GitHub collection a watch reads. A monitor has exactly one kind,

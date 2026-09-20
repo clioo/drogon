@@ -931,67 +931,30 @@ pub fn github_pr_rule_from_wire(
     project_id: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<GithubPrRule, String> {
-    use serde_json::Value;
-    let text = |key: &str| -> Option<String> {
-        params
-            .get(key)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    };
-    let repo = text("repo")
-        .ok_or_else(|| format!("repo is required for {RULE_KIND_GITHUB_PR} (owner/name)"))?;
-    let filter_tag = text("filter").unwrap_or_else(|| "opened".to_string());
-    let filter = GithubPrFilter::parse(&filter_tag).ok_or_else(|| {
-        format!("unknown filter {filter_tag:?}; opened|assigned|review_requested")
+    // The SAME wire reader the issue watch uses. It was a near-duplicate
+    // before, and the copies had already drifted (one trimmed `secretRefs`,
+    // the other did not), so the two kinds disagreed about which rules they
+    // would accept — exactly the divergence sharing an evaluator is meant
+    // to rule out.
+    let common = github_watch_wire_fields(RULE_KIND_GITHUB_PR, params)?;
+    let filter = GithubPrFilter::parse(&common.filter_tag).ok_or_else(|| {
+        format!(
+            "unknown filter {:?}; opened|assigned|review_requested",
+            common.filter_tag
+        )
     })?;
-    let login = text("login");
-    let api_base = text("apiBase");
-    let harness = text("harness");
-    let skills = match params.get("skills") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(|item| {
-                item.as_str()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string)
-                    .ok_or_else(|| "skills must be an array of non-empty names".to_string())
-            })
-            .collect::<Result<Vec<String>, String>>()?,
-        Some(_) => return Err("skills must be an array of names".to_string()),
-    };
     let rule = GithubPrRule {
         host_id: host_id.to_string(),
         project_id: project_id.to_string(),
-        repo,
+        repo: common.repo,
         filter,
-        login,
-        api_base,
-        timeout_ms: params
-            .get("timeoutMs")
-            .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_HTTP_TIMEOUT_MS),
-        max_body_bytes: params
-            .get("maxBodyBytes")
-            .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_HTTP_BODY_BYTES),
-        secret_refs: match params.get("secretRefs") {
-            None | Some(Value::Null) => Vec::new(),
-            Some(Value::Array(items)) => items
-                .iter()
-                .map(|item| {
-                    item.as_str()
-                        .map(str::to_string)
-                        .ok_or_else(|| "secretRefs must be an array of bare names".to_string())
-                })
-                .collect::<Result<Vec<String>, String>>()?,
-            Some(_) => return Err("secretRefs must be an array of bare names".to_string()),
-        },
-        harness,
-        skills,
+        login: common.login,
+        api_base: common.api_base,
+        timeout_ms: common.timeout_ms,
+        max_body_bytes: common.max_body_bytes,
+        secret_refs: common.secret_refs,
+        harness: common.harness,
+        skills: common.skills,
     };
     validate_github_pr_rule(&rule)?;
     Ok(rule)
@@ -1686,6 +1649,48 @@ mod tests {
         // An issue watch and a pull-request watch on the same repository
         // are different rules, so they never share an approval.
         assert_ne!(base.approval_hash(), github_rule().approval_hash());
+    }
+
+    /// The two GitHub kinds read the SAME wire object through the same
+    /// helper, so a payload one accepts the other accepts too (modulo the
+    /// filter vocabulary). They were near-duplicates once and had already
+    /// drifted on `secretRefs` trimming.
+    #[test]
+    fn both_github_wire_readers_admit_the_same_payload() {
+        let padded = serde_json::json!({
+            "repo": "  clioo/drogon  ",
+            "filter": "assigned",
+            "login": "  clioo  ",
+            "secretRefs": ["  GITHUB_TOKEN_REF  "],
+            "harness": "  codex  ",
+            "skills": ["  drogon-cli  "],
+            "timeoutMs": 12_345,
+            "maxBodyBytes": 4_096,
+        });
+        let object = padded.as_object().unwrap();
+        let pull = github_pr_rule_from_wire("h", "p", object).expect("pr rule");
+        let issue = github_issue_rule_from_wire("h", "p", object).expect("issue rule");
+        assert_eq!(pull.repo, "clioo/drogon");
+        assert_eq!(issue.repo, "clioo/drogon");
+        assert_eq!(pull.login.as_deref(), Some("clioo"));
+        assert_eq!(issue.login.as_deref(), Some("clioo"));
+        // The drift that existed: one side trimmed the secret reference and
+        // the other kept the padding, so the same payload validated for an
+        // issue watch and was refused for a pull-request watch.
+        assert_eq!(pull.secret_refs, vec!["GITHUB_TOKEN_REF".to_string()]);
+        assert_eq!(issue.secret_refs, pull.secret_refs);
+        assert_eq!(pull.harness.as_deref(), Some("codex"));
+        assert_eq!(issue.harness, pull.harness);
+        assert_eq!(pull.skills, vec!["drogon-cli".to_string()]);
+        assert_eq!(issue.skills, pull.skills);
+        assert_eq!(pull.timeout_ms, 12_345);
+        assert_eq!(issue.timeout_ms, pull.timeout_ms);
+        assert_eq!(issue.max_body_bytes, pull.max_body_bytes);
+        // A missing repo is refused identically by both.
+        let bare = serde_json::json!({"filter": "opened"});
+        let bare = bare.as_object().unwrap();
+        assert!(github_pr_rule_from_wire("h", "p", bare).is_err());
+        assert!(github_issue_rule_from_wire("h", "p", bare).is_err());
     }
 
     #[test]

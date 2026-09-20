@@ -20,6 +20,7 @@ import {
   monitorSourceLabel,
   monitorTitle,
   monitorTriggerLabel,
+  isBotUnconfigured,
 } from "./bots-page-model";
 
 describe("bots-page-model", () => {
@@ -484,6 +485,28 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
     expect(collapsedRowNote({ home: { path: "/x" } } as never)).toBe(
       "No automations or monitors yet · Standby workspace initialized",
     );
+  });
+
+  it("never asserts an absence of monitors that no read established", () => {
+    // An unread monitor list has no count, so neither the muted line nor
+    // the "nothing configured" verdict may claim there are none (#608).
+    expect(collapsedRowNote({} as never, true)).toBe(
+      "No automations · monitors could not be read",
+    );
+    expect(collapsedRowNote({ home: { path: "/x" } } as never, true)).toBe(
+      "No automations · monitors could not be read · Standby workspace initialized",
+    );
+    const bare = { responsibilities: [], currentSession: null } as never;
+    expect(isBotUnconfigured(bare, 0)).toBe(true);
+    expect(isBotUnconfigured(bare, 0, true)).toBe(false);
+    // ...so the pill does not read "Idle" off an unknown count either.
+    expect(
+      botStatusPill({ bot: bare, monitorCount: 0 }).label,
+    ).toBe("Idle");
+    expect(
+      botStatusPill({ bot: bare, monitorCount: 0, monitorsUnread: true })
+        .label,
+    ).not.toBe("Idle");
   });
 
   it("says nothing about a reopen that names the recorded conversation", () => {

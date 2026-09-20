@@ -665,6 +665,31 @@ describe("use-bots-page-controller: design column side reads", () => {
     expect(screen.getByText("No runs yet")).toBeTruthy();
   });
 
+  it("never presents a bot with an unread monitor list as 'nothing configured'", async () => {
+    // The collapsed row is the last place the old conflation survived: a
+    // bot with no responsibilities whose monitor read FAILED counted as
+    // zero monitors, collapsed by default, and the muted line asserted
+    // "No automations or monitors yet" — an absence nobody verified.
+    render(
+      <BotsPanel
+        snapshot={{ bots: [bot({ responsibilities: [] })], history: [] }}
+        scope={scope}
+        monitorList={async () => ({
+          ok: false as const,
+          error: { message: "The monitor read failed." },
+        })}
+      />,
+    );
+    // The card no longer collapses into the design's "nothing configured"
+    // row off an unknown count: it stays expanded and states the failure.
+    expect(
+      await screen.findByText(/Could not read this Bot's monitors/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/No automations or monitors yet/)).toBeNull();
+    // ...and the status pill does not claim "Idle" off an unknown count.
+    expect(screen.queryByText("Idle")).toBeNull();
+  });
+
   it("says there is no monitor source when the bridge supplies none", async () => {
     render(
       <BotsPanel

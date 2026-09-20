@@ -172,10 +172,16 @@ export function BotResponsibilityCard({
     (responsibility) => responsibility.kind === "scheduled",
   );
   const monitorCount = monitors?.length ?? 0;
-  const unconfigured = isBotUnconfigured(bot, monitorCount);
+  // A read that RAN and FAILED leaves the count unknown, so nothing below
+  // may present it as zero. `monitors === null` alone is weaker — it also
+  // covers a props-only caller with no monitor source at all, whose
+  // collapsed rendering is unchanged.
+  const monitorsUnread = monitors === null && monitorReadError !== null;
+  const unconfigured = isBotUnconfigured(bot, monitorCount, monitorsUnread);
   const status = botStatusPill({
     bot,
     monitorCount,
+    monitorsUnread,
     observedLiveness,
   });
   const statusStyle = STATUS_PILL_STYLES[status.tone];
@@ -187,14 +193,17 @@ export function BotResponsibilityCard({
   // form, the chevron expands the full card.
   if (!expanded) {
     const note = unconfigured
-      ? collapsedRowNote(bot)
+      ? collapsedRowNote(bot, monitorsUnread)
       : [
           scheduled.length === 1
             ? "1 automation"
             : `${scheduled.length} automations`,
-          monitorCount === 1
-            ? "1 monitor"
-            : `${monitorCount} monitor${monitorCount === 0 ? "s" : ""}`,
+          // An unread list has no count to state.
+          monitorsUnread
+            ? "monitors unavailable"
+            : monitorCount === 1
+              ? "1 monitor"
+              : `${monitorCount} monitor${monitorCount === 0 ? "s" : ""}`,
         ].join(" · ");
     return (
       <Card
