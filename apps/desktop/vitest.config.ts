@@ -14,6 +14,9 @@ const isolate = process.env.DROGON_VITEST_ISOLATE === "1";
 
 export default defineConfig({
   test: {
+    // Order inoculation (see the file): safe-first evaluation of the
+    // modules whose import cycle freezes registry state by entry order.
+    setupFiles: ["./vitest.setup.ts"],
     isolate,
     // Windows runners can spend ~95 s transforming modules before the first
     // test in a file runs. Keep slow CI hosts from timing out synchronous
