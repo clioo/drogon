@@ -1420,10 +1420,14 @@ fn a_read_page_carries_every_grid_it_spans() {
     assert_eq!(opening[0]["cursor"], 0);
 
     // Two resizes with output either side of each, all before the next read.
-    let cut_a = resize_to(120, 40, "spans-resize-a")["gridCursor"].as_u64().unwrap();
+    let cut_a = resize_to(120, 40, "spans-resize-a")["gridCursor"]
+        .as_u64()
+        .unwrap();
     poke("spans-poke-a");
     wait_past(cut_a, "spans-read-a");
-    let cut_b = resize_to(90, 30, "spans-resize-b")["gridCursor"].as_u64().unwrap();
+    let cut_b = resize_to(90, 30, "spans-resize-b")["gridCursor"]
+        .as_u64()
+        .unwrap();
     poke("spans-poke-b");
     wait_past(cut_b, "spans-read-b");
 
@@ -1464,7 +1468,10 @@ fn a_read_page_carries_every_grid_it_spans() {
         .as_array()
         .unwrap()
         .len();
-    assert_eq!(before, after, "a resize to the current size must add no cut");
+    assert_eq!(
+        before, after,
+        "a resize to the current size must add no cut"
+    );
 
     ok(
         &engine,
@@ -1539,7 +1546,11 @@ fn an_evicted_page_names_no_grid() {
     assert_eq!(page["startCursor"], 0);
     assert_eq!(page["nextCursor"], 3);
     let changes = page["gridChanges"].as_array().unwrap();
-    assert_eq!(changes.len(), 0, "evicted page must name no grid: {changes:?}");
+    assert_eq!(
+        changes.len(),
+        0,
+        "evicted page must name no grid: {changes:?}"
+    );
 
     ok(
         &engine,

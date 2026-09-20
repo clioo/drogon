@@ -251,7 +251,11 @@ impl SessionHandle {
             ring: Mutex::new(RingBuffer::new()),
             // Cursor 0: every byte this session ever writes was produced
             // at the grid it was opened with, until a resize says otherwise.
-            size: Mutex::new(VecDeque::from([GridChange { cursor: 0, cols, rows }])),
+            size: Mutex::new(VecDeque::from([GridChange {
+                cursor: 0,
+                cols,
+                rows,
+            }])),
             exit_code: Mutex::new(None),
             reader_done: AtomicBool::new(false),
             last_activity: Mutex::new(None),
@@ -1348,7 +1352,11 @@ pub(crate) fn resize(handle: &SessionHandle, cols: u16, rows: u16) -> Result<Val
         // would spend a history slot and make a reader re-apply a grid it
         // already holds.
         if history.back().map(|g| (g.cols, g.rows)) != Some((cols, rows)) {
-            history.push_back(GridChange { cursor: grid_cursor, cols, rows });
+            history.push_back(GridChange {
+                cursor: grid_cursor,
+                cols,
+                rows,
+            });
             // Bounded: a reader that has already passed an old cut will
             // never ask for it again, and the ring drops those bytes long
             // before this many resizes matter.
