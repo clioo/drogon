@@ -1,8 +1,21 @@
 // @vitest-environment jsdom
 import { act } from "@testing-library/react";
 import { renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useProjectHeaderDrag } from "./project-header-drag";
+
+// The tests below replace the frame loop with a no-op. The jsdom window is
+// shared across files in a worker (`isolate: false`), so restore it after
+// every test: a leaked no-op stalls any later file that waits on
+// requestAnimationFrame (e.g. sonner's toast teardown).
+const realRequestAnimationFrame =
+  window.requestAnimationFrame.bind(window);
+const realCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+
+afterEach(() => {
+  window.requestAnimationFrame = realRequestAnimationFrame;
+  window.cancelAnimationFrame = realCancelAnimationFrame;
+});
 
 function fireWindow(type: string, init: Record<string, unknown>): void {
   const event = new Event(type, { bubbles: true, cancelable: true });
