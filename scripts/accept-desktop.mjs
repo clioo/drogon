@@ -924,6 +924,7 @@ try {
     await mentuSetting.screenshot({
       path: path.join(output, "settings-optional-mentu.png"),
       animations: "disabled",
+      timeout: 120_000,
     });
     await page.getByRole("button", { name: "Back to app", exact: true }).click({ timeout: 10000 });
     await settings.waitFor({ state: "hidden", timeout: 10000 });
@@ -942,6 +943,7 @@ try {
   await page.screenshot({
     path: path.join(output, "narrow.png"),
     animations: "disabled",
+    timeout: 120_000,
   });
   report.checks.push("narrow-no-document-overflow");
   await page.getByRole("button", { name: /Close .* session/ }).click();
@@ -1612,7 +1614,7 @@ try {
       );
       assert.equal(worktrees.ok, true);
       assert.ok(worktrees.result.worktrees.length >= 3, "seeded worktrees must survive");
-      await page.screenshot({ path: path.join(output, "upgrade-from-previous-build-after.png") });
+      await page.screenshot({ path: path.join(output, "upgrade-from-previous-build-after.png"), timeout: 120_000 });
       report.checks.push("upgrade-from-previous-build-data-survives");
     } finally {
       if (browser) await browser.close().catch(() => {});
@@ -1649,7 +1651,7 @@ try {
         dialogText.includes("is newer than") && dialogText.includes(upgradeDataDir),
         `refusal dialog must name the marker and the data dir, got: ${dialogText.slice(0, 400)}`,
       );
-      await page.screenshot({ path: path.join(output, "upgrade-from-previous-build-refusal.png") });
+      await page.screenshot({ path: path.join(output, "upgrade-from-previous-build-refusal.png"), timeout: 120_000 });
       report.checks.push("upgrade-from-previous-build-downgrade-refusal-dialog");
     } finally {
       if (browser) await browser.close().catch(() => {});

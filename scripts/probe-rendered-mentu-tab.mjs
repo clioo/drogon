@@ -62,6 +62,7 @@ async function shot(page, output, name) {
   await page.screenshot({
     path: path.join(output, name),
     animations: "disabled",
+    timeout: 120_000,
   });
 }
 

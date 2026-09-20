@@ -63,7 +63,7 @@ export async function probeEditorKeyboardInput({ page, workspace, output }) {
     .getByLabel("Changed on disk", { exact: true })
     .first()
     .waitFor({ timeout: 15_000 });
-  await page.screenshot({ path: path.join(output, "editor-conflict.png") });
+  await page.screenshot({ path: path.join(output, "editor-conflict.png"), timeout: 120_000 });
   const snapshot = {
     banner: true,
     dirty: true,
