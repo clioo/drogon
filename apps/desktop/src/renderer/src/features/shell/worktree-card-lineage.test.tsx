@@ -203,12 +203,14 @@ describe("WorktreeCard subagent nesting box (issue #359)", () => {
     expect(selected).toEqual(["term-3"]);
   });
 
-  test("a 3-level tree renders treeitems with levels, groups and depth markers", () => {
+  test("a 3-level tree renders treeitems with levels and expanded state, and no group roles", () => {
     const { view } = renderCard("wt-deep-1", threeLevelSet());
     const rows = view.container.querySelector(".shell-worktree-card-rows");
     expect(rows?.getAttribute("role")).toBe("tree");
-    // Every level reads as a treeitem at its 1-based level with a stable
-    // 0-based depth marker for the end-to-end assertion.
+    // The flat-tree contract carries the whole hierarchy: every level reads
+    // as a treeitem at its 1-based level with a stable 0-based depth marker
+    // for the end-to-end assertion, and the children containers are
+    // presentational wrappers — never a group role.
     for (const [id, level, depth] of [
       ["root-1", "1", "0"],
       ["child-1", "2", "1"],
@@ -220,12 +222,24 @@ describe("WorktreeCard subagent nesting box (issue #359)", () => {
       expect(node.getAttribute("aria-level")).toBe(level);
       expect(node.getAttribute("data-lineage-depth")).toBe(depth);
     }
-    // Each nested children container is a group (one per parent level).
-    expect(rows!.querySelectorAll('[role="group"]').length).toBe(2);
+    expect(
+      rows!.querySelectorAll('[role="group"]').length,
+      "children containers must stay presentational",
+    ).toBe(0);
+    // Expanded state rides each parent treeitem: depth 1 and depth 2 start
+    // expanded, the depth 3 leaf carries no aria-expanded at all.
     const rootNode = rows!.querySelector(
       `[data-worktree-agent-row='root-1']`,
     )!.closest('[role="treeitem"]')!;
     expect(rootNode.getAttribute("aria-expanded")).toBe("true");
+    const childNode = rows!.querySelector(
+      `[data-worktree-agent-row='child-1']`,
+    )!.closest('[role="treeitem"]')!;
+    expect(childNode.getAttribute("aria-expanded")).toBe("true");
+    const grandNode = rows!.querySelector(
+      `[data-worktree-agent-row='grand-1']`,
+    )!.closest('[role="treeitem"]')!;
+    expect(grandNode.getAttribute("aria-expanded")).toBeNull();
     // Depth >= 1 rows all carry the lineage child chrome, not only depth 1.
     const childRow = rows!.querySelector(
       `[data-worktree-agent-row='child-1']`,

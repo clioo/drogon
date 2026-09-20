@@ -141,7 +141,12 @@ function renderAgentBranch(
         {branch}
       </div>
       {hasChildAgents && expanded ? (
-        <div className="worktree-agent-lineage-children" role="group">
+        // Presentational wrapper only: the hierarchy rides the flat-tree
+        // contract (`role="treeitem"` + 1-based `aria-level` +
+        // `aria-expanded` on each node), so no `role="group"` — a group
+        // sibling its parent treeitem does not own would misdescribe the
+        // tree.
+        <div className="worktree-agent-lineage-children">
           {childRows.map((childRow) =>
             renderAgentBranch({ ...childContext, row: childRow }),
           )}

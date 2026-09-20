@@ -46,25 +46,31 @@ impl ForegroundMemo {
         Some((self.harness.clone(), self.at.clone()))
     }
 
+    /// Stores a fresh probe and returns the effective `(harness, at)` pair —
+    /// the memo's pinned stamp when pgid and harness are unchanged, the
+    /// newly minted stamp otherwise. Callers must return THIS pair, not the
+    /// locally minted `at`: returning the local stamp rechurns
+    /// `observedHarnessAt` once per TTL on the wire.
     pub(crate) fn store(
         &mut self,
         pgid: Option<i32>,
         harness: Option<String>,
         at: Option<String>,
         now: Instant,
-    ) {
+    ) -> (Option<String>, Option<String>) {
         // Pin the first observation's stamp while the same pgid keeps
         // resolving to the same harness: a re-probe with nothing changed
         // must not churn `observedHarnessAt` every TTL. Only a changed pgid
         // or a changed harness mints a new stamp.
         if self.pgid == pgid && self.harness == harness && self.at.is_some() {
             self.checked_at = Some(now);
-            return;
+        } else {
+            self.pgid = pgid;
+            self.harness = harness;
+            self.at = at;
+            self.checked_at = Some(now);
         }
-        self.pgid = pgid;
-        self.harness = harness;
-        self.at = at;
-        self.checked_at = Some(now);
+        (self.harness.clone(), self.at.clone())
     }
 }
 
@@ -80,22 +86,19 @@ pub(crate) fn match_harness_executable(file_name: &str) -> Option<String> {
     None
 }
 
-/// Generic runtime shims whose own name proves nothing: the harness, if any,
-/// hides in the process's argv.
+/// Genuine runtimes that exec a script, whose own name proves nothing: the
+/// harness, if any, hides in the process's argv. Shells (`sh`, `bash`,
+/// `zsh`, `dash`) and `env` are deliberately NOT shims: a shell's argv
+/// describes what the shell was asked to run at some point, not what is
+/// running now, so scanning it would invent an agent (e.g. a session
+/// created as `/bin/sh -c '... claude ...'` sitting at its prompt would
+/// report `claude` while nothing runs but the prompt). `env claude` and
+/// `sh -c claude` both exec the harness anyway, which the direct
+/// executable match already sees.
 fn is_runtime_shim(file_name: &str) -> bool {
     matches!(
         file_name,
-        "node"
-            | "bun"
-            | "deno"
-            | "python"
-            | "python3"
-            | "sh"
-            | "bash"
-            | "zsh"
-            | "env"
-            | "npx"
-            | "dash"
+        "node" | "bun" | "deno" | "python" | "python3" | "npx"
     )
 }
 

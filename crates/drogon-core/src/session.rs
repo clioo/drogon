@@ -1692,12 +1692,15 @@ pub(crate) fn observed_harness(
     }
     let harness = pgid.and_then(crate::session_foreground::resolve_harness);
     let at = harness.as_ref().map(|_| crate::now_rfc3339());
+    // The wire stamp is the memo's effective stamp, not the locally minted
+    // `at`: while the same pgid keeps resolving to the same harness the
+    // memo pins the first stamp, so `observedHarnessAt` stays identical
+    // across reads that straddle the TTL instead of churning once per TTL.
     handle
         .foreground
         .lock()
         .unwrap()
-        .store(pgid, harness.clone(), at.clone(), now);
-    (harness, at)
+        .store(pgid, harness, at, now)
 }
 
 pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i64>) -> Value {

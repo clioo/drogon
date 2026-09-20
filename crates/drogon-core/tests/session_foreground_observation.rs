@@ -84,6 +84,15 @@ fn find_bash() -> String {
     panic!("no bash binary for the observation-clear fixture");
 }
 
+fn find_sh() -> String {
+    for candidate in ["/bin/sh", "/usr/bin/sh"] {
+        if std::path::Path::new(candidate).is_file() {
+            return candidate.to_string();
+        }
+    }
+    panic!("no sh binary for the shell-argv fixture");
+}
+
 fn base64_of(text: &str) -> String {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD.encode(text.as_bytes())
@@ -215,6 +224,9 @@ fn direct_executable_named_claude_is_observed() {
 }
 
 /// A `node` shim whose argv names `/claude` is observed via the argv scan.
+/// The fixture is a real binary named `node` (a shell script by that name
+/// would exec as `sh`, whose argv must never be scanned — see
+/// `shell_prompt_with_harness_token_in_argv_reports_nothing`).
 #[test]
 fn shim_argv_path_observes_claude() {
     let dir = tempfile::tempdir().unwrap();
@@ -226,8 +238,7 @@ fn shim_argv_path_observes_claude() {
     let claude_path = dir.path().join("claude");
     std::fs::write(&claude_path, "# harness target\n").unwrap();
     let node_path = dir.path().join("node");
-    std::fs::write(&node_path, "#!/bin/sh\nsleep 30\n").unwrap();
-    make_executable(&node_path);
+    build_sleeper(&node_path);
     let session = ok(
         &engine,
         "session.start",
@@ -252,6 +263,57 @@ fn shim_argv_path_observes_claude() {
             .as_str()
             .is_some_and(|at| !at.is_empty())
     );
+
+    let stopped = stop_session(&engine, &session_id, &incarnation);
+    assert_eq!(stopped["verdict"], "exited");
+}
+
+/// A shell sitting at its prompt never reports a harness named in its own
+/// command line (issue #622, F5): the foreground process IS the shell, and
+/// a shell's argv describes what it was asked to run, not what is running
+/// now. Scanning it would invent an agent, so shells are not argv-scan
+/// shims. (The token is newline-separated because the argv scanner only
+/// matches exact final path components — a `;`-suffixed token matches
+/// nothing either way and would not pin this.)
+#[test]
+fn shell_prompt_with_harness_token_in_argv_reports_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_dir = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    let workspace_id = register_workspace_at(&engine, &workspace_dir);
+
+    let sh = find_sh();
+    let session = ok(
+        &engine,
+        "session.start",
+        json!({
+            "workspaceId": workspace_id,
+            "command": sh,
+            "args": ["-c", "echo /usr/local/bin/claude\nread x"],
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    // The shell echoes, then blocks in `read`: the foreground is the shell
+    // itself at its prompt. The first read waits out the 1 s memo TTL: the
+    // spawn-time probe caches its pre-exec `None`, so reads inside the TTL
+    // would pass without ever probing the live shell. Past the TTL every
+    // read re-probes the shell itself — and must still report nothing.
+    std::thread::sleep(Duration::from_millis(1500));
+    for _ in 0..2 {
+        let listed = ok(&engine, "session.list", json!({}));
+        let row = listed["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == session_id)
+            .expect("session must be listed");
+        assert_eq!(row["observedHarnessId"], Value::Null);
+        assert_eq!(row["observedHarnessAt"], Value::Null);
+        std::thread::sleep(Duration::from_millis(600));
+    }
 
     let stopped = stop_session(&engine, &session_id, &incarnation);
     assert_eq!(stopped["verdict"], "exited");
@@ -423,6 +485,115 @@ fn observation_clears_when_the_foregrounded_agent_exits() {
     // the observation clears (polled past the 1 s memo TTL).
     let row = poll_observed(&engine, &session_id, &Value::Null, Duration::from_secs(20));
     assert_eq!(row["observedHarnessAt"], Value::Null);
+
+    let stopped = stop_session(&engine, &session_id, &incarnation);
+    assert_eq!(stopped["verdict"], "exited");
+}
+
+/// The wire stamp is the memo's pinned stamp (issue #622, F6): reads that
+/// straddle the 1 s memo TTL report an IDENTICAL `observedHarnessAt` while
+/// the same agent keeps running, and a NEW stamp once the foreground
+/// harness changes. This goes through `session.list`, not the memo alone —
+/// the memo-level unit test passed while the wire still churned once per
+/// TTL, because the caller returned its locally minted stamp.
+#[test]
+fn observed_stamp_is_stable_across_ttl_and_moves_with_the_harness() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_dir = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    let workspace_id = register_workspace_at(&engine, &workspace_dir);
+
+    let claude = dir.path().join("claude");
+    build_timed_sleeper(&claude);
+    let pi = dir.path().join("pi");
+    build_timed_sleeper(&pi);
+    let session = ok(
+        &engine,
+        "session.start",
+        json!({
+            "workspaceId": workspace_id,
+            "command": find_bash(),
+            "args": ["-i"],
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+    let row_of = |engine: &Engine| {
+        ok(engine, "session.list", json!({}))["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == session_id)
+            .expect("session must be listed")
+            .clone()
+    };
+
+    // Foreground the claude fixture the way a user runs it at the prompt.
+    ok(
+        &engine,
+        "session.write",
+        json!({
+            "sessionId": session_id,
+            "incarnation": incarnation,
+            "dataBase64": base64_of(&format!("{} 8\n", claude.to_string_lossy())),
+        }),
+    );
+    let first = poll_observed(
+        &engine,
+        &session_id,
+        &json!("claude"),
+        Duration::from_secs(12),
+    );
+    let stamp_a = first["observedHarnessAt"]
+        .as_str()
+        .expect("an observation carries its RFC 3339 stamp")
+        .to_string();
+
+    // Straddle the memo TTL while the same agent keeps running: the stamp
+    // must be identical, not a fresh `now` per read.
+    std::thread::sleep(Duration::from_millis(1500));
+    let row = row_of(&engine);
+    assert_eq!(row["observedHarnessId"], json!("claude"));
+    assert_eq!(
+        row["observedHarnessAt"],
+        json!(stamp_a),
+        "the wire stamp must be the memo's pinned stamp across the TTL"
+    );
+
+    // The fixture exits on its own; the observation clears.
+    let cleared = poll_observed(&engine, &session_id, &Value::Null, Duration::from_secs(20));
+    assert_eq!(cleared["observedHarnessAt"], Value::Null);
+
+    // Foreground a different harness: a new stamp is minted.
+    ok(
+        &engine,
+        "session.write",
+        json!({
+            "sessionId": session_id,
+            "incarnation": incarnation,
+            "dataBase64": base64_of(&format!("{} 8\n", pi.to_string_lossy())),
+        }),
+    );
+    let second = poll_observed(&engine, &session_id, &json!("pi"), Duration::from_secs(12));
+    let stamp_b = second["observedHarnessAt"]
+        .as_str()
+        .expect("the new harness observation carries its stamp")
+        .to_string();
+    assert_ne!(
+        stamp_b, stamp_a,
+        "a changed foreground harness must mint a new stamp"
+    );
+
+    // And the new stamp is itself stable across the TTL.
+    std::thread::sleep(Duration::from_millis(1500));
+    let row = row_of(&engine);
+    assert_eq!(row["observedHarnessId"], json!("pi"));
+    assert_eq!(
+        row["observedHarnessAt"],
+        json!(stamp_b),
+        "the new stamp must pin too"
+    );
 
     let stopped = stop_session(&engine, &session_id, &incarnation);
     assert_eq!(stopped["verdict"], "exited");
