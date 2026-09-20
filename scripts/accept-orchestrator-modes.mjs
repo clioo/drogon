@@ -20,11 +20,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
-import { runAcceptanceProcess as exec, startAcceptanceProcess as start, stopAcceptanceProcess as stop } from "./acceptance-process.mjs";
+import { runAcceptanceProcess as exec, scrubInheritedDispatchBindings, startAcceptanceProcess as start, stopAcceptanceProcess as stop } from "./acceptance-process.mjs";
 import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
 import { startForegroundObservation, verifyForegroundObservation } from "./acceptance-foreground.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { bundledRuntimeDestination } from "./mentu-runtime-provision.mjs";
+
+// This journey owns a disposable daemon: drop the parent dispatch context so
+// its CLI never presents a foreign credential to its own daemon.
+scrubInheritedDispatchBindings();
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const appDir = path.join(root, "apps/desktop");

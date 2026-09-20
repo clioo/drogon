@@ -82,5 +82,53 @@
     "requires": null,
     "timeoutMs": 1200000,
     "note": "Pre-migration backup restore against a locally packaged ad-hoc bundle (node scripts/package-desktop.mjs): lock refusal, restore overlay light/dark, confirmation gate, relaunch healthy, CLI restore. All owned processes verified exited."
+  },
+  {
+    "script": "scripts/accept-orchestration-e2e.mjs",
+    "requires": null,
+    "timeoutMs": 600000,
+    "note": "Fixture pi drives the real daemon end to end: default policy dispatch, exact provider/model propagation, durable worker_done with result metadata, retry failover, ask/resume, and outcome-less exit discipline."
+  },
+  {
+    "script": "scripts/accept-orchestrator.mjs",
+    "requires": null,
+    "timeoutMs": 900000,
+    "note": "Orchestrator canvas on the real app over CDP: honest disabled state, live Main agent node, delegate brief write-through, Agent telemetry/Usage ledgers, and a real durable run that stops without fabricating success."
+  },
+  {
+    "script": "scripts/accept-orchestrator-modes.mjs",
+    "requires": "pi",
+    "timeoutMs": 1200000,
+    "note": "SKIPPED: the three execution modes drive the real pi harness on the cheap model; needs real model inference, forbidden from validation on this host."
+  },
+  {
+    "script": "scripts/accept-durable-orchestrator.mjs",
+    "requires": null,
+    "timeoutMs": 900000,
+    "note": "Work Graph roles run as native sessions on fixture harnesses: main-only pass, findings-review-retest loop, fallback exhaustion, and reload without duplicate launches."
+  },
+  {
+    "script": "scripts/accept-mentu-run-delegation.mjs",
+    "requires": null,
+    "timeoutMs": 900000,
+    "note": "Recipe delegation on the surviving path: unapproved content refuses, hash-bound approval mints per run, live row carries step outcome/output, settle to succeeded, desktop confirms Work Graph open. Needs the pinned mentu-recipes runtime provisioned (gitignored)."
+  },
+  {
+    "script": "scripts/accept-live-child-crash.mjs",
+    "requires": null,
+    "timeoutMs": 600000,
+    "note": "A provably live PTY child survives daemon SIGKILL: the restarted daemon labels the prior-live session unverifiable, renews identity, refuses respawn, and replays the historic receipt verbatim."
+  },
+  {
+    "script": "scripts/accept-cli-worktree-lineage.mjs",
+    "requires": null,
+    "timeoutMs": 900000,
+    "note": "A worktree created by drogon-cli inside a session nests under that session's worktree in the sidebar; nesting survives reload and no-parent stays top-level."
+  },
+  {
+    "script": "scripts/accept-worker-settle-releases-pty.mjs",
+    "requires": null,
+    "timeoutMs": 300000,
+    "note": "A worker that reports worker_done but keeps running reads succeeded-but-live; worker-stop refuses attempt_settled without signalling, and worker-release reaps the PTY so none stays live."
   }
 ]
