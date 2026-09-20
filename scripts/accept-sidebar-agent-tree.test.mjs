@@ -4,13 +4,17 @@
 // PTY.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
+  ACCEPTANCE_RUST_BUILD,
   CHECK_NAMES,
   COLLAPSE_STORAGE_KEY,
   TIMED_SLEEPER_C_SOURCE,
   isObservedClaudeSession,
   parseCollapsedLineageEnvelope,
   projectAgentTreeRow,
+  projectBinaryIdentity,
   quoteShellWord,
   rootRowTextIsAgentNotTerminal,
 } from "./accept-sidebar-agent-tree.mjs";
@@ -123,6 +127,63 @@ describe("isObservedClaudeSession", () => {
     assert.equal(isObservedClaudeSession({ harnessId: null, observedHarnessId: null }), false);
     assert.equal(isObservedClaudeSession({ harnessId: null, observedHarnessId: "pi" }), false);
     assert.equal(isObservedClaudeSession(null), false);
+  });
+});
+
+describe("acceptance rust build spec", () => {
+  it("builds the daemon and CLI from the current tree, locked", () => {
+    assert.deepEqual(ACCEPTANCE_RUST_BUILD, {
+      command: "cargo",
+      args: ["build", "-p", "drogond", "-p", "drogon-cli", "--locked"],
+      timeoutMs: 600000,
+    });
+  });
+});
+
+describe("projectBinaryIdentity", () => {
+  it("records the resolved path with the post-build mtime and size", () => {
+    const here = fileURLToPath(import.meta.url);
+    const stats = statSync(here);
+    assert.deepEqual(projectBinaryIdentity(here, stats), {
+      path: here,
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+    });
+  });
+
+  it("nulls missing stats instead of passing undefined through", () => {
+    assert.deepEqual(projectBinaryIdentity("/tmp/drogond", null), {
+      path: "/tmp/drogond",
+      mtimeMs: null,
+      size: null,
+    });
+  });
+});
+
+describe("binary provenance guard wiring", () => {
+  // The run itself needs a real desktop and daemon, so the companion pins
+  // the wiring as source shape: reverting the build step must fail here.
+  const source = readFileSync(
+    fileURLToPath(import.meta.url).replace(/\.test\.mjs$/, ".mjs"),
+    "utf8",
+  );
+
+  it("says why the build is part of the acceptance", () => {
+    assert.match(source, /certified a stale/);
+  });
+
+  it("builds the spec binaries before the daemon starts", () => {
+    assert.match(source, /await exec\(ACCEPTANCE_RUST_BUILD\.command/);
+    assert.ok(
+      source.indexOf("ACCEPTANCE_RUST_BUILD.command") < source.indexOf("start(daemonBinary"),
+      "the build precedes the first use of either binary",
+    );
+  });
+
+  it("records post-build mtimes and HEAD in the report", () => {
+    assert.match(source, /report\.binaries\s*=/);
+    assert.match(source, /projectBinaryIdentity\(daemonBinary, drogondStat\)/);
+    assert.match(source, /\["rev-parse", "HEAD"\]/);
   });
 });
 

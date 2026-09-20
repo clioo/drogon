@@ -28,9 +28,43 @@
 //   env -u DROGON_SESSION_ID -u DROGON_WORKSPACE_ID -u DROGON_DATA_DIR \
 //     -u DROGON_INCARNATION -u DROGON_TERMINAL \
 //     node scripts/accept-sidebar-agent-tree.mjs
+//
+// Why the acceptance builds the Rust binaries itself instead of trusting
+// the caller to have built them: a green run once certified a stale
+// `drogond` built before the daemon fixes under test, passing only because
+// the fixture was then a natively-named binary. The `cargo build` below
+// makes the rest of the report mean anything; it aborts loudly when it
+// fails, and the report records the binary mtimes plus HEAD so a reader
+// can tell which code a report belongs to.
 import assert from "node:assert/strict";
-import { access, chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+
+/**
+ * The build the acceptance runs before it touches either binary: the
+ * daemon and CLI under test, locked to the current tree. Kept next to the
+ * imports (and exported) so the companion pins the exact scope — narrowing
+ * this without updating the test breaks loudly instead of certifying less.
+ */
+export const ACCEPTANCE_RUST_BUILD = {
+  command: "cargo",
+  args: ["build", "-p", "drogond", "-p", "drogon-cli", "--locked"],
+  timeoutMs: 600000,
+};
+
+/**
+ * Project a post-build binary identity for the JSON report: the resolved
+ * path plus the mtime and size the build just left behind. A reader
+ * compares these against the reported HEAD to tell which code a report
+ * belongs to.
+ */
+export function projectBinaryIdentity(filePath, fileStat) {
+  return {
+    path: filePath,
+    mtimeMs: fileStat?.mtimeMs ?? null,
+    size: fileStat?.size ?? null,
+  };
+}
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -310,6 +344,33 @@ export async function runSidebarAgentTreeAcceptance() {
     } catch {
       throw new Error("Build the dev desktop first: pnpm --filter @drogon/desktop build");
     }
+    // The binaries under test are built here, from this tree, as part of
+    // the acceptance — never trusted from an earlier build (see the file
+    // header). A cached rebuild is quick; a stale daemon would make every
+    // check below certify the wrong code, so a failed build aborts the run.
+    try {
+      await exec(ACCEPTANCE_RUST_BUILD.command, [...ACCEPTANCE_RUST_BUILD.args], {
+        cwd: root,
+        timeout: ACCEPTANCE_RUST_BUILD.timeoutMs,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+    } catch (error) {
+      throw new Error(
+        `The acceptance builds its own daemon and CLI before certifying anything ` +
+          `(${ACCEPTANCE_RUST_BUILD.command} ${ACCEPTANCE_RUST_BUILD.args.join(" ")}), and that build failed: ` +
+          `${error?.stderr ?? error?.message ?? String(error)}`,
+        { cause: error },
+      );
+    }
+    // Provenance for the report: what was exercised, and from which tree,
+    // so a reader can tell which code a report belongs to.
+    const [drogondStat, cliStat] = await Promise.all([stat(daemonBinary), stat(cli)]);
+    const { stdout: gitHeadStdout } = await exec("git", ["rev-parse", "HEAD"], { cwd: root, timeout: 30000 });
+    report.binaries = {
+      drogond: projectBinaryIdentity(daemonBinary, drogondStat),
+      "drogon-cli": projectBinaryIdentity(cli, cliStat),
+    };
+    report.gitHead = gitHeadStdout.trim();
     // Nothing in this process's own context may leak into the fixture:
     // every DROGON_* variable (session, workspace, dispatch, run, data
     // dir, incarnation, terminal) would scope the control-path CLI calls
