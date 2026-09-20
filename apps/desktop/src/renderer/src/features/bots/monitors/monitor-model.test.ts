@@ -11,6 +11,7 @@ import {
   emptyMonitorForm,
   isMonitorFormReady,
   monitorActionsEnabled,
+  monitorResourceLabel,
   monitorRuleKindSupported,
   monitorStatusLabel,
   validateMonitorCron,
@@ -161,5 +162,26 @@ describe("monitor-model", () => {
     expect(monitorRuleKindSupported(github.ruleKind)).toBe(true);
     expect(monitorActionsEnabled(github)).toBe(true);
     expect(monitorStatusLabel(github)).toBe("Needs approval");
+  });
+});
+
+describe("monitorResourceLabel covers every supported kind", () => {
+  it("names each rule kind this renderer admits, never the bare token", () => {
+    // The fail-closed default is for kinds the renderer does NOT support.
+    // Every kind in SUPPORTED_MONITOR_RULE_KINDS must have real words, or
+    // the view contradicts its own contract.
+    for (const ruleKind of SUPPORTED_MONITOR_RULE_KINDS) {
+      const label = monitorResourceLabel({ ruleKind, resource: "" });
+      expect(label, `${ruleKind} falls through to the bare token`).not.toBe(
+        ruleKind,
+      );
+    }
+    expect(
+      monitorResourceLabel({ ruleKind: "github_issue.v1", resource: "" }),
+    ).toBe("GitHub issue watch");
+    // An unsupported kind still fails closed to its own token.
+    expect(
+      monitorResourceLabel({ ruleKind: "future_kind.v9", resource: "" }),
+    ).toBe("future_kind.v9");
   });
 });

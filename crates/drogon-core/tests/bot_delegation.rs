@@ -1251,22 +1251,49 @@ fn worktree_names_are_deterministic_and_branch_safe() {
 }
 
 #[test]
-fn pr_case_worktree_names_are_case_scoped_and_stable() {
-    use drogon_core::bots::delegation::worktree_name_for_pr_case;
-    let a = worktree_name_for_pr_case(17, "clioo/drogon");
+fn github_case_worktree_names_are_case_scoped_and_stable() {
+    use drogon_core::bots::delegation::{GithubCase, worktree_name_for_github_case};
+    use drogon_core::bots::monitors::github::GithubTarget;
+    let pull = GithubCase {
+        target: GithubTarget::Pulls,
+        number: 17,
+    };
+    let a = worktree_name_for_github_case(pull, "clioo/drogon");
     assert_eq!(a, "review-pr-17-clioo-drogon");
     // A redelivery of the same case reuses the exact name.
-    assert_eq!(a, worktree_name_for_pr_case(17, "clioo/drogon"));
+    assert_eq!(a, worktree_name_for_github_case(pull, "clioo/drogon"));
     // Two different repositories sharing a PR number never collapse into
     // one worktree.
-    assert_ne!(a, worktree_name_for_pr_case(17, "clioo/other"));
+    assert_ne!(a, worktree_name_for_github_case(pull, "clioo/other"));
+    // Nor do an issue and a pull request sharing a number.
+    let issue = GithubCase {
+        target: GithubTarget::Issues,
+        number: 17,
+    };
+    assert_eq!(
+        worktree_name_for_github_case(issue, "clioo/drogon"),
+        "issue-17-clioo-drogon"
+    );
+    assert_ne!(a, worktree_name_for_github_case(issue, "clioo/drogon"));
     // Branch-safe: the slug is alphanumeric and dashes only.
     assert!(a.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'));
+    assert!(
+        worktree_name_for_github_case(issue, "clioo/drogon")
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-')
+    );
 }
 
 #[test]
-fn delegation_identity_is_the_case_for_pull_requests_and_the_event_otherwise() {
-    use drogon_core::bots::delegation::{DelegationEvent, delegation_identity};
+fn delegation_identity_is_the_case_for_github_watches_and_the_event_otherwise() {
+    use drogon_core::bots::delegation::{DelegationEvent, GithubCase, delegation_identity};
+    use drogon_core::bots::monitors::github::GithubTarget;
+    let case = |number: u64| {
+        Some(GithubCase {
+            target: GithubTarget::Pulls,
+            number,
+        })
+    };
     let base = DelegationEvent {
         event_id: "mev_a".to_string(),
         monitor_id: "mon-1".to_string(),
@@ -1283,18 +1310,32 @@ fn delegation_identity_is_the_case_for_pull_requests_and_the_event_otherwise() {
     let mut other = base.clone();
     other.event_id = "mev_b".to_string();
     assert_eq!(
-        delegation_identity(&base, Some("clioo/drogon"), Some(17)),
-        delegation_identity(&other, Some("clioo/drogon"), Some(17))
+        delegation_identity(&base, Some("clioo/drogon"), case(17)),
+        delegation_identity(&other, Some("clioo/drogon"), case(17))
     );
     // A different repo (or number) is a different case, and a non-PR
     // event keeps its own event id as the identity.
     assert_ne!(
-        delegation_identity(&base, Some("clioo/drogon"), Some(17)),
-        delegation_identity(&base, Some("clioo/other"), Some(17))
+        delegation_identity(&base, Some("clioo/drogon"), case(17)),
+        delegation_identity(&base, Some("clioo/other"), case(17))
     );
     assert_ne!(
-        delegation_identity(&base, Some("clioo/drogon"), Some(17)),
-        delegation_identity(&base, Some("clioo/drogon"), Some(18))
+        delegation_identity(&base, Some("clioo/drogon"), case(17)),
+        delegation_identity(&base, Some("clioo/drogon"), case(18))
+    );
+    // An ISSUE case with the same number is a different case again.
+    let mut issue_event = base.clone();
+    issue_event.resource = "issue/17".to_string();
+    assert_ne!(
+        delegation_identity(&base, Some("clioo/drogon"), case(17)),
+        delegation_identity(
+            &issue_event,
+            Some("clioo/drogon"),
+            Some(GithubCase {
+                target: GithubTarget::Issues,
+                number: 17
+            })
+        )
     );
     assert_eq!(delegation_identity(&base, None, None), base.event_id);
 }
