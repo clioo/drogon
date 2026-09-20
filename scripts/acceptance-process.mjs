@@ -142,8 +142,26 @@ export function scrubInheritedDispatchBindings(env = process.env) {
   return env;
 }
 
+// CI journeys-leg software rendering (DROGON_SOFTWARE_RENDERING=1, set only
+// on the journeys job): force Chromium's software compositor for Electron
+// launches so page.screenshot cannot stall inside a headless GPU process.
+// One bounded attempt at the compositor stall behind the journey gate
+// (bot-session-honesty, session-resume-by-id, workspace-session-restart,
+// desktop-files all die in page.screenshot with fonts already loaded).
+// Default-off everywhere else, and never applied to non-Electron spawns:
+// drogond and drogon-cli reject unknown flags.
+const ELECTRON_BINARY_RE = /^electron(\.exe)?$/i;
+
+export function withSoftwareRenderingArgs(file, args, env = process.env) {
+  if (env.DROGON_SOFTWARE_RENDERING !== "1") return args;
+  const base = String(file).split(/[\\/]/).pop() ?? "";
+  if (!ELECTRON_BINARY_RE.test(base)) return args;
+  return ["--disable-gpu", "--disable-gpu-compositing", ...args];
+}
+
 export function startAcceptanceProcess(file, args, options = {}) {
-  return spawn(file, args, { ...options, shell: false, windowsHide: true });
+  const launchArgs = withSoftwareRenderingArgs(file, args, options.env ?? process.env);
+  return spawn(file, launchArgs, { ...options, shell: false, windowsHide: true });
 }
 
 export function runAcceptanceProcess(file, args, options = {}) {

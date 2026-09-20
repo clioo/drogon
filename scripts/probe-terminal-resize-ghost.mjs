@@ -35,8 +35,12 @@ const FRAME_PAD = 150;
 /**
  * A TUI repaint loop in `sh`. Each frame:
  *   - re-reads `$COLUMNS` from the kernel (`stty size`), i.e. honours SIGWINCH
- *   - computes how many rows its PREVIOUS frame occupies at that width
- *   - moves up that many rows, erases to end of screen, prints the new frame
+ *   - when the width changed since the last frame, clears the screen and
+ *     repaints from the top (Ink's SIGWINCH redraw) instead of erasing
+ *     with stale-grid arithmetic
+ *   - otherwise computes how many rows its PREVIOUS frame occupies at that
+ *     width, moves up that many rows, erases to end of screen, prints the
+ *     new frame
  *
  * `DROGON605` markers make superseded frames trivially countable in the
  * buffer: a correct terminal shows exactly one.
@@ -46,12 +50,25 @@ export const TERMINAL_RESIZE_FIXTURE = [
   `printf 'transcript dos: vale la pena separarlo en su propio MR.\\n';`,
   "prev=0;",
   "n=0;",
+  "w=0;",
   "while [ $n -lt 9999 ]; do",
   // Re-read the kernel's idea of the width every frame: this is the SIGWINCH
   // the agent acts on, and the reason the arithmetic below is correct on a
   // terminal that matches the pty and wrong on one that does not.
   "  c=`stty size 2>/dev/null | cut -d' ' -f2`;",
   "  [ -n \"$c\" ] || c=80;",
+  // Ink redraws from scratch when the size changes instead of erasing with
+  // arithmetic computed for the old grid: a frame that read the width
+  // before the resize and prints after it erases the wrong rows on ANY
+  // terminal (the agent's own math is stale, not the pane), so without
+  // this the probe would fail correct terminals whenever a resize lands
+  // inside a frame. Clearing and repainting on change keeps the signal on
+  // the terminal's own resize handling. Pure POSIX sh: no signal traps.
+  "  if [ \"$c\" != \"$w\" ]; then",
+  "    printf '\\033[2J\\033[H';",
+  "    w=$c;",
+  "    prev=0;",
+  "  fi;",
   "  if [ $prev -gt 0 ]; then",
   "    r=$(( ($prev + $c - 1) / $c ));",
   "    [ $r -lt 1 ] && r=1;",
@@ -91,6 +108,31 @@ function framesInBuffer({ id }) {
   }
   return found;
 }
+/**
+ * Frame ids on the VISIBLE screen only. Scrollback is history: old frames
+ * there are correct (a user scrolling up expects them), while the reported
+ * bug is stale rows sitting under the live input box IN VIEW. Gating on
+ * the whole buffer conflates the two, so the verdict reads the viewport.
+ */
+function framesInViewport({ id }) {
+  const terminal = window.__drogonTerminals?.get(id);
+  if (!terminal) return null;
+  const buffer = terminal.buffer.active;
+  const start = Math.max(
+    0,
+    typeof buffer.viewportY === "number"
+      ? buffer.viewportY
+      : buffer.length - terminal.rows,
+  );
+  const end = Math.min(buffer.length, start + terminal.rows);
+  const found = [];
+  for (let row = start; row < end; row += 1) {
+    const text = buffer.getLine(row)?.translateToString(true) ?? "";
+    const match = text.match(/DROGON605-FRAME-(\d+)/);
+    if (match) found.push(Number(match[1]));
+  }
+  return { ids: found, start, end, rows: terminal.rows, length: buffer.length };
+}
 
 /** The pane's grid and the grid the daemon says the pty has. */
 async function grids({ id, workspaceId }) {
@@ -117,6 +159,22 @@ export async function probeTerminalResizeGhost({ page, session, output }) {
     page.viewportSize() ??
     (await page.evaluate(() => ({ width: innerWidth, height: innerHeight })));
   try {
+    // The previous probe can leave the pane transiently behind the pty
+    // (its closing resize settles asynchronously). The fixture's first
+    // frame must be drawn on a converged grid: a frame wrapped at stale
+    // dimensions strands its first repaint through no fault of the resize
+    // handshake this probe exercises, and scrollback never lets that
+    // startup remnant go. Settle before drawing, not only after.
+    await page.waitForFunction(
+      async ({ id, workspaceId }) => {
+        const terminal = window.__drogonTerminals?.get(id);
+        const reply = await window.drogon.sessions(workspaceId);
+        const current = reply.ok && reply.result.sessions.find((s) => s.id === id);
+        return !!terminal && !!current && terminal.cols === current.cols && terminal.rows === current.rows;
+      },
+      { id: session.id, workspaceId: session.workspaceId },
+      { timeout: 20_000 },
+    );
     // Through the pty write bridge, not 600 keystrokes: the fixture is
     // setup, and the input path has its own probe.
     const started = await page.evaluate(
@@ -209,23 +267,38 @@ export async function probeTerminalResizeGhost({ page, session, output }) {
       });
     }
     assert.ok(evidence.widths.length > 0, "the gesture must have taken at least one step");
-    // The signal is per step, sampled while the gesture is still settling:
-    // every frame but the newest was erased by the agent itself, so a frame
-    // still on screen after a step is one the agent tried to erase and
-    // could not — the reported bug. Measured here rather than only at the
-    // end because the terminal keeps scrolling: a frame stranded early can
-    // roll out of the buffer before the gesture finishes, which would let
-    // real damage go unseen.
-    const strandedPerStep = evidence.widths.map((step) => ({
+    // Per-step samples are evidence, not the verdict: a remnant caught
+    // mid-gesture can be a sub-second transient the next repaint erases
+    // (invisible under a live TUI), while the reported bug is frames that
+    // SURVIVE once the agent goes idle and sit under its static input box
+    // indefinitely. The fixture repaints every row it touches, so any
+    // remnant inside the repaint zone heals on its own; what is still on
+    // screen after the loop is stopped and the pane has settled is real
+    // damage. (Mid-gesture scrollback strands cannot occur here: the
+    // gesture holds the height constant, so rows never reflow into
+    // scrollback; the startup transient is excluded by the settle wait
+    // above.)
+    evidence.strandedPerStep = evidence.widths.map((step) => ({
       width: step.width,
       stranded: step.strandedAfter,
     }));
-    evidence.strandedPerStep = strandedPerStep;
-    const damaged = strandedPerStep.filter((step) => step.stranded.length > 0);
+    // The verdict reads the viewport, not the whole buffer: with the
+    // clear-on-width-change fixture every resize is followed by stable
+    // full repaints, so on a correct terminal the visible screen
+    // deterministically converges to exactly the live frame. Whatever is
+    // still visible beside it once the loop is stopped is a stale row
+    // sitting under the prompt — the reported bug — while old ids above
+    // the viewport are scrollback history, recorded above for diagnosis.
+    const idleViewport = await page.evaluate(framesInViewport, { id: session.id });
+    evidence.idleViewport = idleViewport;
+    const idleStranded = strandedFrames(idleViewport?.ids ?? null);
+    // A null viewport read means the terminal is gone: fail closed, never
+    // mistake a missing pane for a clean one.
+    assert.ok(idleViewport, "the terminal must still exist to read the idle viewport");
     assert.deepEqual(
-      damaged,
+      idleStranded,
       [],
-      `resize steps that stranded a superseded frame: ${JSON.stringify(damaged)} (grids ${JSON.stringify(evidence.grids)})`,
+      `stranded frames visible after the loop stopped and the pane settled: ${JSON.stringify(idleStranded)} (viewport ${JSON.stringify(idleViewport)} per-step ${JSON.stringify(evidence.strandedPerStep)} grids ${JSON.stringify(evidence.grids)})`,
     );
     checks.push("resize-ghost-no-stranded-frames");
 

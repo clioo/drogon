@@ -62,6 +62,7 @@ async function shot(page, output, name) {
   await page.screenshot({
     path: path.join(output, name),
     animations: "disabled",
+    timeout: 120_000,
   });
 }
 
@@ -256,6 +257,10 @@ export async function probeRenderedMentuTab({
     await shot(page, output, `mentu-tab-${width}.png`);
   }
   checks.push("mentu-tab-no-horizontal-overflow-1440-1100-900-760");
+  // Leave the viewport wide again: later probes (Tasks, theme relaunch)
+  // assume a full-width canvas, and a stuck 760px clips their click
+  // targets. Same restore the orchestrator probe already does.
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   // 6. Reload: the strip (and the Mentu tab's membership) comes back with no
   //    clicks, exactly like the editor/browser tabs.

@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { EventEmitter, once } from "node:events";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import {
   INHERITED_DISPATCH_BINDINGS,
   scrubInheritedDispatchBindings,
   startAcceptanceProcess,
+  withSoftwareRenderingArgs,
   waitAcceptanceExit,
   stopAcceptanceProcess,
   captureDescendants,
@@ -193,6 +197,80 @@ test("scrubInheritedDispatchBindings drops only the inherited bindings", () => {
   assert.equal(env.PATH, "/usr/bin:/bin");
   assert.equal(env.HOME, "/tmp/home");
 });
+
+test("software rendering args stay off unless the journeys job opts in", () => {
+  const args = ["appDir", "--remote-debugging-port=0"];
+  assert.equal(withSoftwareRenderingArgs("/opt/electron/electron", args, {}), args);
+  assert.equal(
+    withSoftwareRenderingArgs("/opt/electron/electron", args, { DROGON_SOFTWARE_RENDERING: "0" }),
+    args,
+  );
+  assert.equal(
+    withSoftwareRenderingArgs("/opt/drogon/drogond", args, { DROGON_SOFTWARE_RENDERING: "1" }),
+    args,
+  );
+});
+
+test("software rendering args target only the Electron binary name", () => {
+  const args = ["appDir"];
+  for (const file of [
+    "/opt/electron/electron",
+    "C:\\tools\\electron.exe",
+    "/Applications/Drogon.app/Contents/MacOS/Electron",
+  ]) {
+    assert.deepEqual(
+      withSoftwareRenderingArgs(file, args, { DROGON_SOFTWARE_RENDERING: "1" }),
+      ["--disable-gpu", "--disable-gpu-compositing", "appDir"],
+      `Electron at ${file} must receive the software compositor flags`,
+    );
+  }
+  assert.equal(
+    withSoftwareRenderingArgs("/opt/drogon/drogon-cli", args, { DROGON_SOFTWARE_RENDERING: "1" }),
+    args,
+  );
+});
+
+test(
+  "Electron launches receive the software compositor flags end to end",
+  {
+    skip:
+      process.platform === "win32"
+        ? "the argv-echo shim is a POSIX executable"
+        : false,
+  },
+  async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "acceptance-electron-"));
+    try {
+      const shim = path.join(dir, "electron");
+      await writeFile(shim, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n");
+      await chmod(shim, 0o755);
+      const readArgv = (env) =>
+        new Promise((resolve, reject) => {
+          const child = startAcceptanceProcess(shim, ["appDir", "--remote-debugging-port=0"], {
+            stdio: ["ignore", "pipe", "ignore"],
+            env,
+          });
+          let out = "";
+          child.stdout.on("data", (bytes) => {
+            out += bytes;
+          });
+          child.on("error", reject);
+          child.on("exit", (code) =>
+            code === 0
+              ? resolve(out.trim().split("\n"))
+              : reject(new Error(`argv shim exited with code ${code}`)),
+          );
+        });
+      const enabled = await readArgv({ ...process.env, DROGON_SOFTWARE_RENDERING: "1" });
+      assert.deepEqual(enabled.slice(0, 2), ["--disable-gpu", "--disable-gpu-compositing"]);
+      assert.deepEqual(enabled.slice(2), ["appDir", "--remote-debugging-port=0"]);
+      const { DROGON_SOFTWARE_RENDERING: _optOut, ...baseEnv } = process.env;
+      assert.deepEqual(await readArgv(baseEnv), ["appDir", "--remote-debugging-port=0"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);
 
 test("scrubbed env keeps explicit per-journey values assigned after", () => {
   const env = scrubInheritedDispatchBindings({

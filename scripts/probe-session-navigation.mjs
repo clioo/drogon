@@ -6,11 +6,17 @@ import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 export async function probeSessionNavigation({
   page,
   workspaceId,
+  workspaceName = "folder",
   session,
   marker,
 }) {
+  // The card carries the workspace's own name (issue #579: a folder
+  // composer run creates an additional named workspace, so the session
+  // under test may live anywhere but the implicit "folder" card).
+  const selectName = `Select ${workspaceName}`;
+  const sessionsGroupName = `${workspaceName} sessions`;
   const card = page.locator("[data-worktree-card-id]").filter({
-    has: page.getByRole("button", { name: "Select folder", exact: true }),
+    has: page.getByRole("button", { name: selectName, exact: true }),
   });
   const terminal = page.locator(".xterm-helper-textarea:visible");
   const assertSession = async () => {
@@ -37,19 +43,34 @@ export async function probeSessionNavigation({
     assert.equal(sessions[0].verdict, "live");
   };
 
+  // Mod+digit jumps by workspace INDEX (issue #579: the session under
+  // test may live in an added workspace, not workspaces[0]). Derive the
+  // digit from the live list so the shortcut returns to THIS workspace.
+  const workspaceIds = await page.evaluate(async () => {
+    const response = await window.drogon.workspaces();
+    if (!response.ok) throw new Error(response.error.message);
+    return response.result.workspaces.map((item) => item.id);
+  });
+  const workspaceIndex = workspaceIds.indexOf(workspaceId);
+  assert.ok(
+    workspaceIndex >= 0 && workspaceIndex < 9,
+    `session workspace must have a Mod+digit shortcut (index ${workspaceIndex})`,
+  );
+  const workspaceDigit = String(workspaceIndex + 1);
+  const mod = process.platform === "darwin" ? "Meta" : "Control";
   for (const route of ["Bots", "Automations", "Tasks"]) {
     for (const target of ["row", "card"]) {
       await page.getByRole("button", { name: route, exact: true }).click();
       await terminal.waitFor({ state: "hidden" });
       if (target === "row") {
         await card
-          .getByRole("group", { name: "folder sessions" })
+          .getByRole("group", { name: sessionsGroupName })
           .getByRole("button")
           .first()
           .click();
       } else {
         await card
-          .getByRole("button", { name: "Select folder", exact: true })
+          .getByRole("button", { name: selectName, exact: true })
           .click();
       }
       await assertSession();
@@ -68,14 +89,12 @@ export async function probeSessionNavigation({
     }
     await page.getByRole("button", { name: route, exact: true }).click();
     await terminal.waitFor({ state: "hidden" });
-    await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+1" : "Control+1",
-    );
+    await page.keyboard.press(`${mod}+${workspaceDigit}`);
     await assertSession();
   }
   // A second click on the active card must preserve the live projection too.
   await card
-    .getByRole("button", { name: "Select folder", exact: true })
+    .getByRole("button", { name: selectName, exact: true })
     .click();
   await assertSession();
   await terminal.focus();

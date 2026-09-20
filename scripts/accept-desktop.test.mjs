@@ -38,3 +38,66 @@ test("it runs against the same live shell session as the other terminal probes",
   // given anything else would resize a pane no agent is drawing into.
   assert.match(source, /probeTerminalResizeGhost\(\{ page, session: original, output \}\)/);
 });
+
+test("the workspace under test is the composer's added row, never workspaces[0]", () => {
+  // Issue #579: the folder composer creates an additional named workspace,
+  // so workspaces[0] is the older implicit row with an honestly empty
+  // session list. The journey snapshots ids first and takes the set
+  // difference; reverting to workspaces[0] must fail this test.
+  assert.ok(
+    source.includes("const workspaceIdsBefore = await page.evaluate"),
+    "the composer run must snapshot workspace ids first",
+  );
+  assert.ok(
+    source.includes("the composer must add exactly one workspace"),
+    "exactly one added workspace must be required",
+  );
+  assert.equal(
+    (source.match(/return response\.result\.workspaces\[0\];/g) ?? []).length,
+    0,
+    "no session lookup may address workspaces[0]",
+  );
+});
+
+test("the session navigation drives the composer's workspace by name", () => {
+  assert.ok(
+    source.includes("workspaceName: registered.name"),
+    "navigation must address the composer's card, not the implicit one",
+  );
+});
+
+test("the orchestrator status query addresses the tab's own workspace", () => {
+  // The run is filed under the Work Graph tab's workspace id: the tab
+  // opens in the implicit workspace (selected first), and the status
+  // query must use that same id — never the composer's added workspace,
+  // which shares the folder path but owns no run.
+  assert.ok(
+    source.includes("workspaceId: implicitWorkspaceId"),
+    "orchestrator status must query the implicit workspace",
+  );
+  assert.ok(
+    source.includes('[aria-label="Select folder"]'),
+    "the implicit card selection must be proven settled before the tab opens",
+  );
+});
+
+test("the restart probes select the composer's workspace first", () => {
+  // The probes create terminals in the SELECTED workspace but assert on
+  // registered.id; whichever card an earlier probe left selected would
+  // otherwise receive the post-restart terminal.
+  assert.ok(
+    source.includes("Select ${registered.name}"),
+    "the composer's card must be selected before the restart probes",
+  );
+});
+
+test("evidence screenshots carry the cold-runner budget", async () => {
+  // Pin test for the ubuntu journeys-leg screenshot budget: Playwright's
+  // 15s default times out on a cold xvfb/software-rendered runner even
+  // after fonts load (CI proof on PR #633). Reverting a timeout must fail
+  // this test — that is what the discrimination gate checks.
+  const { checkFileBudget } = await import("./check-screenshot-budget.mjs");
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const result = await checkFileBudget(root, "scripts/accept-desktop.mjs");
+  assert.deepEqual(result.problems, []);
+});
