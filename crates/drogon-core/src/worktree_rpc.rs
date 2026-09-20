@@ -477,10 +477,15 @@ fn remove_worktree_checkout(
         ))),
         RemoveRecovery::DeleteCheckoutDirectory => {
             delete_checkout_directory(project_path, Path::new(worktree_path))?;
-            // The directory is gone but git may still hold the admin entry
-            // that made `remove` refuse; without this the name stays taken
-            // and recreating the same workspace fails.
-            let _ = run_git(project_path, &["worktree".to_string(), "prune".to_string()]);
+            // The directory is gone, but git may still hold the admin entry
+            // that made `remove` refuse, and the name stays taken until that
+            // entry goes. Retrying the same scoped remove retires exactly
+            // this worktree's entry, now that what it objected to is no
+            // longer there. `git worktree prune` would do it too -- and would
+            // also deregister every *other* worktree whose directory merely
+            // happens to be away right now (an unmounted volume, a detached
+            // drive), which deleting this workspace has no business doing.
+            let _ = run_git(project_path, &git_worktree_remove_argv(worktree_path, true));
             Ok(())
         }
     }

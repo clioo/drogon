@@ -747,6 +747,62 @@ fn worktree_remove_forces_a_checkout_git_refuses_even_twice_forced() {
 }
 
 #[test]
+fn worktree_remove_leaves_a_sibling_worktree_whose_directory_is_merely_away() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let doomed = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "doomed"}),
+    );
+    let sibling = ok(
+        &engine,
+        "worktree.create",
+        "w2",
+        json!({"projectId": project_id, "name": "sibling"}),
+    );
+    let doomed_path = doomed["path"].as_str().unwrap().to_string();
+    let sibling_path = sibling["path"].as_str().unwrap().to_string();
+
+    // The sibling lives on a volume that is not mounted right now, so git
+    // counts its entry as prunable. Deleting an unrelated workspace must not
+    // take it away: a repo-wide `git worktree prune` here would deregister
+    // it, and it would come back from the mount no longer a worktree.
+    let stashed = format!("{sibling_path}.unmounted");
+    std::fs::rename(&sibling_path, &stashed).unwrap();
+    // Force the doomed checkout down the recovery path: git still registers
+    // it, but its .git file no longer resolves, so `remove -f -f` refuses.
+    std::fs::write(Path::new(&doomed_path).join(".git"), "not a gitfile\n").unwrap();
+
+    ok(
+        &engine,
+        "worktree.remove",
+        "w3",
+        json!({"id": doomed["id"], "force": true}),
+    );
+    std::fs::rename(&stashed, &sibling_path).unwrap();
+    assert!(
+        worktree_paths(repo.path()).contains(&sibling_path),
+        "the sibling is still a registered worktree once its volume is back"
+    );
+    assert!(
+        !worktree_paths(repo.path()).contains(&doomed_path),
+        "and the deleted workspace's own entry is gone"
+    );
+}
+
+#[test]
 fn worktree_remove_still_reports_a_failure_git_owns() {
     let data_dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(data_dir.path()).unwrap();
