@@ -232,6 +232,18 @@ that home), and read everything the Bot owns with `drogon-cli bot list
 --bot <ID> --workspace <ID> --json` (automations, monitors with their
 health and revisions, home profile, audit count).
 
+`bot list` also reports `folder` (where the Bot's record actually lives)
+and `workspaceId` (the workspace that folder is registered under, which is
+NOT the home workspace `bot whoami` returns). A `workspaceId` of `null`
+with a `notice` means that folder has left the workspace registry — the
+project or worktree it was created in was removed. The read still answers
+in full, because the Bot's automations, monitors, home and audit trail are
+untouched, but anything that must target a live workspace (creating or
+testing an automation or monitor) is refused with `workspace_deregistered`
+until the folder is registered again with `drogon-cli workspace add
+<FOLDER>`. That code means the Bot is intact; `unknown_workspace` means the
+id you passed names nothing on this host.
+
 ### Pull-request watches (the headline case)
 
 `drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME>`

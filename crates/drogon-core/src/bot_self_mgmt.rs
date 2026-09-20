@@ -2005,6 +2005,31 @@ fn resolve_self_bot(
     Ok((folder, workspace_id, bot))
 }
 
+/// Read-only twin of [`resolve_self_bot`]: the Bot's own folder never has
+/// to still be a registered workspace for the Bot to be allowed to READ
+/// its own state. Returns `None` for the workspace id in that case (issue
+/// #609) rather than refusing the read, so `bot list` keeps reporting the
+/// automations, monitors, home and audit count that are all still there.
+/// The actor fence and the host fence are unchanged.
+fn resolve_self_bot_for_read(
+    tx: &Transaction,
+    derived_host_id: &str,
+    scope: &SelfScope,
+) -> Result<(String, Option<String>, Bot), RpcError> {
+    scope.check_actor()?;
+    let (folder, workspace_id) = crate::bot_mutation_rpc::resolve_bot_owning_folder_and_workspace(
+        tx,
+        derived_host_id,
+        &scope.workspace_id,
+        &scope.host_id,
+        &scope.bot_id,
+    )?;
+    let bot = bots_storage::get_bot(tx, derived_host_id, &folder, &scope.bot_id)
+        .map_err(bots_storage_error)?
+        .ok_or_else(|| not_found(format!("bot {} not found", scope.bot_id)))?;
+    Ok((folder, workspace_id, bot))
+}
+
 fn audit(
     tx: &Transaction,
     request_id: &str,
@@ -2230,7 +2255,7 @@ impl crate::Engine {
         }
         let conn = self.db.lock().unwrap();
         let tx = conn.unchecked_transaction().map_err(error::from_sqlite)?;
-        let (folder, _, bot) = resolve_self_bot(&tx, &self.host_id, &scope)?;
+        let (folder, workspace_id, bot) = resolve_self_bot_for_read(&tx, &self.host_id, &scope)?;
         let home = home_for_bot(&tx, &scope.bot_id).map_err(self_storage_error)?;
         let bot_rev = bots_storage::current_rev(&tx, &self.host_id, &folder, &bot.id)
             .map_err(bots_storage_error)?
@@ -2245,10 +2270,20 @@ impl crate::Engine {
             .map(|(record, rev)| monitor_view(&tx, &record, rev, now_ms, delegations_used_today))
             .collect::<Vec<_>>();
         let audit_count = audit_count_for_bot(&tx, &bot.id).map_err(self_storage_error)?;
+        // `workspaceId` is the workspace the Bot's own folder is registered
+        // under -- null, with the reason in `notice`, when that folder has
+        // left the registry (#609). Everything else below is durable state
+        // that survives regardless, so the read still answers in full.
+        let notice = workspace_id
+            .is_none()
+            .then(|| crate::bot_mutation_rpc::folder_notice(&bot.id, &folder));
         Ok(json!({
             "hostId": self.host_id,
             "botId": bot.id,
             "botRev": bot_rev,
+            "folder": folder,
+            "workspaceId": workspace_id,
+            "notice": notice,
             "home": home,
             "automations": automations,
             "monitors": monitors,
