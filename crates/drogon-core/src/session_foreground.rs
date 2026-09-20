@@ -75,12 +75,16 @@ impl ForegroundMemo {
 }
 
 /// Matches a file name against the harness catalog's own executables
-/// (`claude`, `pi`, `opencode`, `agy`, `codex`). Reuses
-/// `HarnessId::executable()`; never a hand-copied list.
+/// (`claude`, `pi`, `opencode`, `agy`, `codex`) and returns the shared
+/// session contract's harness ID vocabulary (`HarnessId` wire spelling),
+/// never an executable name. The two vocabularies coincide for every
+/// harness except Antigravity, whose executable is `agy` and whose wire id
+/// is `antigravity`. Matches on `HarnessId::executable()`; maps through
+/// `crate::harness::harness_id_wire` — never a hand-copied list.
 pub(crate) fn match_harness_executable(file_name: &str) -> Option<String> {
     for harness in drogon_harness::HarnessId::ALL {
         if file_name == harness.executable() {
-            return Some(harness.executable().to_string());
+            return Some(crate::harness::harness_id_wire(harness).to_string());
         }
     }
     None
@@ -111,7 +115,9 @@ fn file_name_of(path: &std::path::Path) -> String {
 }
 
 /// Scans argv entries for the first argument whose file name matches a
-/// harness executable. Query strings and fragments are not stripped: an
+/// harness executable, returning the contract's harness ID vocabulary via
+/// `match_harness_executable` (wire id, never an executable name).
+/// Query strings and fragments are not stripped: an
 /// argument only matches when its final path component is exactly a harness
 /// executable, so `notclaude` and `claude-wrapper` never match.
 fn match_harness_in_argv(args: &[String]) -> Option<String> {
@@ -151,7 +157,8 @@ fn match_harness_in_argv(args: &[String]) -> Option<String> {
     None
 }
 
-/// Resolves a foreground pgid to a harness id, or `None` when nothing
+/// Resolves a foreground pgid to a harness id (the contract's `HarnessId`
+/// wire spelling, never an executable name), or `None` when nothing
 /// matches. Direct executable match first; shim executables fall back to an
 /// argv scan; anything else reports nothing.
 #[cfg(unix)]
@@ -324,11 +331,21 @@ mod tests {
     #[test]
     fn harness_executables_match_exactly_and_only_them() {
         for harness in drogon_harness::HarnessId::ALL {
+            // The match is on the executable name but the result is the
+            // contract's wire id — the two differ for Antigravity
+            // (`agy` vs `antigravity`), so compare against
+            // `harness_id_wire`, never against `executable()` itself.
             assert_eq!(
                 match_harness_executable(harness.executable()),
-                Some(harness.executable().to_string())
+                Some(crate::harness::harness_id_wire(harness).to_string())
             );
         }
+        // The executable/wire-id divergence, pinned by name: `agy` on the
+        // wire is `antigravity`, never the raw executable string.
+        assert_eq!(
+            match_harness_executable("agy"),
+            Some("antigravity".to_string())
+        );
         for non_harness in [
             "",
             "claudex",

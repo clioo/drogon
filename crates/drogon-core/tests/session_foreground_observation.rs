@@ -223,6 +223,55 @@ fn direct_executable_named_claude_is_observed() {
     assert_eq!(stopped["verdict"], "exited");
 }
 
+/// A direct executable named `agy` (Antigravity's executable) is observed
+/// as the contract's wire id `antigravity`, never the raw executable name
+/// (issue #622, F9): the executable and wire-id vocabularies diverge only
+/// for Antigravity, so this is the one fixture that pins the mapping.
+#[test]
+fn direct_executable_named_agy_is_observed_as_antigravity() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_dir = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    let workspace_id = register_workspace_at(&engine, &workspace_dir);
+
+    let fixture = dir.path().join("agy");
+    build_timed_sleeper(&fixture);
+    let session = ok(
+        &engine,
+        "session.start",
+        json!({
+            "workspaceId": workspace_id,
+            "command": fixture.to_string_lossy(),
+            "args": ["8"],
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    // Polled past the 1 s memo TTL like the neighbouring tests: the
+    // spawn-time probe caches its pre-exec `None`, so reads inside the TTL
+    // would never see the live fixture.
+    let row = poll_observed(
+        &engine,
+        &session_id,
+        &json!("antigravity"),
+        Duration::from_secs(5),
+    );
+    assert_eq!(row["harnessId"], Value::Null);
+    assert!(
+        row["observedHarnessAt"]
+            .as_str()
+            .is_some_and(|at| !at.is_empty()),
+        "an observation carries its RFC 3339 stamp"
+    );
+    // The observation never deposits hook-derived state.
+    assert_eq!(row["agentState"], json!("unknown"));
+
+    let stopped = stop_session(&engine, &session_id, &incarnation);
+    assert_eq!(stopped["verdict"], "exited");
+}
+
 /// A `node` shim whose argv names `/claude` is observed via the argv scan.
 /// The fixture is a real binary named `node` (a shell script by that name
 /// would exec as `sh`, whose argv must never be scanned — see
