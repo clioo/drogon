@@ -45,7 +45,7 @@ test("the workspace under test is the composer's added row, never workspaces[0]"
   // session list. The journey snapshots ids first and takes the set
   // difference; reverting to workspaces[0] must fail this test.
   assert.ok(
-    source.includes("workspaceIdsBefore"),
+    source.includes("const workspaceIdsBefore = await page.evaluate"),
     "the composer run must snapshot workspace ids first",
   );
   assert.ok(
@@ -74,6 +74,10 @@ test("the orchestrator status query addresses the tab's own workspace", () => {
   assert.ok(
     source.includes("workspaceId: implicitWorkspaceId"),
     "orchestrator status must query the implicit workspace",
+  );
+  assert.ok(
+    source.includes('[aria-label="Select folder"]'),
+    "the implicit card selection must be proven settled before the tab opens",
   );
 });
 

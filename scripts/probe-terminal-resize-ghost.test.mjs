@@ -57,6 +57,20 @@ const ghostProbeSource = readFileSync(
 );
 
 describe("resize-ghost determinism", () => {
+  it("documents the Ink-style redraw in the fixture contract", () => {
+    assert.ok(
+      ghostProbeSource.includes("repaints from the top"),
+      "the fixture docstring must describe the width-change repaint",
+    );
+  });
+
+  it("reads only the visible viewport for the verdict", () => {
+    assert.ok(
+      ghostProbeSource.includes("Scrollback is history"),
+      "the viewport reader must document why scrollback is excluded",
+    );
+  });
+
   it("settles the pane to the pty grid before writing the fixture", () => {
     const settle = ghostProbeSource.indexOf("Settle before drawing, not only after");
     assert.ok(settle !== -1, "the pre-fixture settle must exist");
