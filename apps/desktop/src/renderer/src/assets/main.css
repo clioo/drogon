@@ -1824,6 +1824,18 @@ footer[data-testid="status-bar"] {
     color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
+/* Issue #622: nested groups compound their indentation (margin + padding per
+   level), so every group and its direct tree nodes must be allowed to
+   shrink — without min-width the depth-3 rows overflow the default sidebar
+   width instead of truncating. Rows already carry min-w-0 + truncate. */
+.worktree-agent-lineage-children {
+  min-width: 0;
+}
+
+.worktree-agent-lineage-children > [data-lineage-depth] {
+  min-width: 0;
+}
+
 /* The fork's compact-agent-summary-panel + expansion grid (reference
    main.css verbatim): the collapsed summary keeps pill spacing while the
    expanded tree reads quiet inside the card; the reveal animates the grid

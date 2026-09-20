@@ -6,6 +6,7 @@
    Pure functions, unit-tested.) */
 import type { AgentState, Session } from "../../../../shared/session-contract";
 import { sessionDotState } from "./agent-state";
+import { resolveRowHarnessId } from "./worktree-agent-rows";
 
 // Why: the source's SUMMARY_STATE_ORDER (waiting, blocked, working,
 // monitoring, interrupted, done, unverifiable, idle) puts the stale-channel
@@ -73,15 +74,16 @@ export function cardDotState(sessions: Session[]): AgentState {
 /**
  * The worktree's agent identity for the card's status lane: the session that
  * owns the state the lane's glyph is showing (`cardDotState`'s winning
- * group), and only when that session actually reported a harness. The lane
- * draws no avatar for a plain shell or an empty card — the reference's
- * summary pill pairs an AgentStateDot with the AgentIcon of the agents in
- * that same state group (worktree-card-compact-agents.tsx), and this is the
- * same pairing for the single card-level lane.
+ * group), and only when that session has a resolved harness (launch or
+ * observed, via `resolveRowHarnessId`). The lane draws no avatar for a
+ * plain shell or an empty card — the reference's summary pill pairs an
+ * AgentStateDot with the AgentIcon of the agents in that same state group
+ * (worktree-card-compact-agents.tsx), and this is the same pairing for the
+ * single card-level lane.
  */
 export function cardIdentitySession(sessions: Session[]): Session | null {
   const identified = sessions.filter(
-    (session) => session.harnessId !== null && session.harnessId !== undefined,
+    (session) => resolveRowHarnessId(session) !== null,
   );
   if (identified.length === 0) return null;
   const dot = cardDotState(sessions);

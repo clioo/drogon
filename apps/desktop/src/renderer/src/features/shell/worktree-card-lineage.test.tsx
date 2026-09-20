@@ -7,9 +7,15 @@
 import React from "react";
 import { describe, expect, test, afterEach } from "vitest";
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import { renderHook } from "@testing-library/react";
 import type { Session, Workspace, Worktree } from "../../../../shared/session-contract";
 import { WorktreeCard } from "./WorktreeCard";
-import { clearWorktreeAgentExpansionStateForTests } from "./worktree-card-agents-expansion-state";
+import {
+  clearWorktreeAgentExpansionStateForTests,
+  resetWorktreeAgentExpansionMemoryForTests,
+  seedWorktreeAgentExpansionStateForTests,
+  useWorktreeAgentExpansionState,
+} from "./worktree-card-agents-expansion-state";
 import { EMPTY_TAB_STRIP_STATE } from "./tab-order";
 import { TooltipProvider } from "../../components/ui/tooltip";
 
@@ -51,7 +57,11 @@ function worktree(id: string): Worktree {
   };
 }
 
-function renderCard(treeId: string, sessions: Session[]) {
+function renderCard(
+  treeId: string,
+  sessions: Session[],
+  agentActivityDisplayMode: "compact" | "full" = "full",
+) {
   (window as unknown as { drogon?: unknown }).drogon ??= {};
   const selected: string[] = [];
   const view = render(
@@ -70,10 +80,26 @@ function renderCard(treeId: string, sessions: Session[]) {
         tabStrip={EMPTY_TAB_STRIP_STATE}
         onRemove={null}
         onRename={null}
+        agentActivityDisplayMode={agentActivityDisplayMode}
       />
     </TooltipProvider>,
   );
   return { view, selected };
+}
+
+/** Three levels: a root, its child, and the child's own child. */
+function threeLevelSet(): Session[] {
+  return [
+    session("root-1", { createdAt: "2026-09-08T11:00:00.000Z" }),
+    session("child-1", {
+      parentSessionId: "root-1",
+      createdAt: "2026-09-08T11:05:00.000Z",
+    }),
+    session("grand-1", {
+      parentSessionId: "child-1",
+      createdAt: "2026-09-08T11:06:00.000Z",
+    }),
+  ];
 }
 
 /** The bug report's shape: one Pi session whose probes spawned 3 children. */
@@ -175,6 +201,202 @@ describe("WorktreeCard subagent nesting box (issue #359)", () => {
     ) as HTMLElement;
     fireEvent.click(childRow);
     expect(selected).toEqual(["term-3"]);
+  });
+
+  test("a 3-level tree renders treeitems with levels, groups and depth markers", () => {
+    const { view } = renderCard("wt-deep-1", threeLevelSet());
+    const rows = view.container.querySelector(".shell-worktree-card-rows");
+    expect(rows?.getAttribute("role")).toBe("tree");
+    // Every level reads as a treeitem at its 1-based level with a stable
+    // 0-based depth marker for the end-to-end assertion.
+    for (const [id, level, depth] of [
+      ["root-1", "1", "0"],
+      ["child-1", "2", "1"],
+      ["grand-1", "3", "2"],
+    ] as const) {
+      const node = rows!.querySelector(
+        `[data-worktree-agent-row='${id}']`,
+      )!.closest('[role="treeitem"]')!;
+      expect(node.getAttribute("aria-level")).toBe(level);
+      expect(node.getAttribute("data-lineage-depth")).toBe(depth);
+    }
+    // Each nested children container is a group (one per parent level).
+    expect(rows!.querySelectorAll('[role="group"]').length).toBe(2);
+    const rootNode = rows!.querySelector(
+      `[data-worktree-agent-row='root-1']`,
+    )!.closest('[role="treeitem"]')!;
+    expect(rootNode.getAttribute("aria-expanded")).toBe("true");
+    // Depth >= 1 rows all carry the lineage child chrome, not only depth 1.
+    const childRow = rows!.querySelector(
+      `[data-worktree-agent-row='child-1']`,
+    )!;
+    const grandRow = rows!.querySelector(
+      `[data-worktree-agent-row='grand-1']`,
+    )!;
+    expect(childRow.className).toContain("worktree-agent-lineage-child-row");
+    expect(grandRow.className).toContain("worktree-agent-lineage-child-row");
+    expect(
+      rows!.querySelector(`[data-worktree-agent-row='root-1']`)!.className,
+    ).not.toContain("worktree-agent-lineage-child-row");
+  });
+
+  test("collapsing depth 1 hides depths 2 and 3", () => {
+    const { view } = renderCard("wt-deep-2", threeLevelSet());
+    const rows = view.container.querySelector(".shell-worktree-card-rows")!;
+    const rootNode = rows
+      .querySelector(`[data-worktree-agent-row='root-1']`)!
+      .closest('[role="treeitem"]') as HTMLElement;
+    fireEvent.click(
+      within(rootNode).getByRole("button", { name: "Hide 1 child agent" }),
+    );
+    expect(
+      rows.querySelector("[data-worktree-agent-row='child-1']"),
+      "depth 2 must leave the DOM",
+    ).toBeNull();
+    expect(
+      rows.querySelector("[data-worktree-agent-row='grand-1']"),
+      "depth 3 must leave the DOM",
+    ).toBeNull();
+    expect(
+      rows.querySelector("[data-worktree-agent-row='root-1']"),
+      "depth 1 stays",
+    ).not.toBeNull();
+    expect(rootNode.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  test("collapsing depth 2 leaves depth 1 visible", () => {
+    const { view } = renderCard("wt-deep-3", threeLevelSet());
+    const rows = view.container.querySelector(".shell-worktree-card-rows")!;
+    const childNode = rows
+      .querySelector(`[data-worktree-agent-row='child-1']`)!
+      .closest('[role="treeitem"]') as HTMLElement;
+    fireEvent.click(
+      within(childNode).getByRole("button", { name: "Hide 1 child agent" }),
+    );
+    expect(
+      rows.querySelector("[data-worktree-agent-row='grand-1']"),
+      "depth 3 must leave the DOM",
+    ).toBeNull();
+    expect(
+      rows.querySelector("[data-worktree-agent-row='child-1']"),
+      "depth 2 stays",
+    ).not.toBeNull();
+    expect(
+      rows.querySelector("[data-worktree-agent-row='root-1']"),
+      "depth 1 stays",
+    ).not.toBeNull();
+  });
+
+  test("a collapsed depth-2 parent stays collapsed across a simulated reload", () => {
+    const first = renderCard("wt-deep-4", threeLevelSet());
+    const rows = first.view.container.querySelector(
+      ".shell-worktree-card-rows",
+    )!;
+    const childNode = rows
+      .querySelector(`[data-worktree-agent-row='child-1']`)!
+      .closest('[role="treeitem"]') as HTMLElement;
+    fireEvent.click(
+      within(childNode).getByRole("button", { name: "Hide 1 child agent" }),
+    );
+    first.view.unmount();
+    // A reload empties the module map but keeps the persisted fold.
+    resetWorktreeAgentExpansionMemoryForTests();
+    const second = renderCard("wt-deep-4", threeLevelSet());
+    const rows2 = second.view.container.querySelector(
+      ".shell-worktree-card-rows",
+    )!;
+    expect(
+      rows2.querySelector("[data-worktree-agent-row='grand-1']"),
+      "depth 3 stays hidden after reload",
+    ).toBeNull();
+    expect(
+      rows2.querySelector("[data-worktree-agent-row='child-1']"),
+      "depth 2 stays visible after reload",
+    ).not.toBeNull();
+    second.view.unmount();
+  });
+
+  test("the next toggle prunes dead collapsed ids but keeps a fold whose children merely exited", () => {
+    seedWorktreeAgentExpansionStateForTests("wt-prune-1", {
+      collapsedLineageParents: new Set(["gone-1"]),
+      compactRootListExpanded: false,
+    });
+    const { view } = renderCard("wt-prune-1", orchestrationSet());
+    // Collapse the live parent: the dead id is pruned, the live fold lands.
+    fireEvent.click(view.getByRole("button", { name: "Hide 3 child agents" }));
+    const probe = renderHook(() => useWorktreeAgentExpansionState("wt-prune-1"));
+    expect(probe.result.current.collapsedLineageParents.has("gone-1")).toBe(
+      false,
+    );
+    expect(probe.result.current.collapsedLineageParents.has("term-1")).toBe(
+      true,
+    );
+    probe.unmount();
+    view.unmount();
+  });
+
+  test("compact mode names observed sessions in the pill and prunes through the pill tree", () => {
+    seedWorktreeAgentExpansionStateForTests("wt-prune-2", {
+      collapsedLineageParents: new Set(["gone-9"]),
+      compactRootListExpanded: false,
+    });
+    const { view } = renderCard(
+      "wt-prune-2",
+      [
+        session("o-1", {
+          observedHarnessId: "claude",
+          createdAt: "2026-09-08T11:00:00.000Z",
+        }),
+        session("o-2", {
+          parentSessionId: "o-1",
+          createdAt: "2026-09-08T11:05:00.000Z",
+        }),
+        session("s-2", { createdAt: "2026-09-08T11:30:00.000Z" }),
+      ],
+      "compact",
+    );
+    // The pill names the observed session's harness (the shared resolver),
+    // not Shell.
+    const pill = view.getByRole("button", { name: /Expand 2 agents/ });
+    expect(pill.getAttribute("aria-label")).toContain("Claude idle");
+    fireEvent.click(pill);
+    const rows = view.container.querySelector(".shell-worktree-card-rows")!;
+    const parentNode = rows
+      .querySelector(`[data-worktree-agent-row='o-1']`)!
+      .closest('[role="treeitem"]') as HTMLElement;
+    fireEvent.click(
+      within(parentNode).getByRole("button", { name: "Hide 1 child agent" }),
+    );
+    const probe = renderHook(() => useWorktreeAgentExpansionState("wt-prune-2"));
+    expect(probe.result.current.collapsedLineageParents.has("gone-9")).toBe(
+      false,
+    );
+    expect(probe.result.current.collapsedLineageParents.has("o-1")).toBe(true);
+    probe.unmount();
+    view.unmount();
+  });
+
+  test("a collapsed parent whose children merely exited keeps its fold", () => {
+    const first = renderCard("wt-exit-1", orchestrationSet());
+    fireEvent.click(first.view.getByRole("button", { name: "Hide 3 child agents" }));
+    first.view.unmount();
+    // The children exit but stay listed; the fold must survive the new list.
+    const exited = orchestrationSet().map((item) =>
+      item.id === "term-1"
+        ? item
+        : { ...item, verdict: "exited" as const, exitCode: 0 },
+    );
+    const second = renderCard("wt-exit-1", exited);
+    expect(
+      second.view.container.querySelector(".worktree-agent-lineage-children"),
+      "exited children must not unfold the parent",
+    ).toBeNull();
+    const probe = renderHook(() => useWorktreeAgentExpansionState("wt-exit-1"));
+    expect(probe.result.current.collapsedLineageParents.has("term-1")).toBe(
+      true,
+    );
+    probe.unmount();
+    second.view.unmount();
   });
 
   test("leaf root rows keep the disclosure gutter when a sibling has children", () => {

@@ -90,6 +90,8 @@ describe("areWorktreeAgentRowPropsEqual", () => {
     for (const overrides of [
       { id: "s2" },
       { harnessId: "claude" },
+      // Issue #622: the glyph and title follow the observed harness too.
+      { observedHarnessId: "claude" },
       { verdict: "exited" },
       { agentState: "idle" },
       { agentStateAt: "2026-01-01T00:01:00Z" },

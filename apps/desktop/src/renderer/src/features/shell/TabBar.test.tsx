@@ -202,6 +202,24 @@ describe("TabBar strip order", () => {
     ).toBeTruthy();
   });
 
+  it("badges an agent started inside a shell tab (observed harness, issue #622)", () => {
+    const observed: Session = {
+      ...session("a"),
+      harnessId: null,
+      observedHarnessId: "pi",
+    };
+    renderStrip({ sessions: [observed, session("b"), session("c")] });
+    const tab = screen
+      .getAllByRole("tab")
+      .find((el) => el.getAttribute("data-tab-id") === "a");
+    expect(tab).toBeTruthy();
+    expect(tab?.querySelector('[title="Pi"]')).toBeTruthy();
+    // Tab titles and numbering are unchanged by the observation.
+    expect(
+      screen.getAllByRole("tab").map((t) => t.getAttribute("aria-label")),
+    ).toEqual(["Terminal 1 live", "Terminal 2 live", "Terminal 3 live"]);
+  });
+
   it("keeps plain-arrow roving navigation (accept-desktop contract)", () => {
     const onSelect = vi.fn();
     const onRetry = vi.fn();

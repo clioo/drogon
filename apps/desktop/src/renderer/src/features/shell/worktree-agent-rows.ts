@@ -49,6 +49,17 @@ export function formatRowHarnessLabel(harnessId: HarnessId | null): string {
 }
 
 /**
+ * Which harness a session is running (issue #622): the launched harness
+ * when `harness.start` named one, else the harness the daemon observed in
+ * the session PTY's foreground process group, else null for a plain shell.
+ * The ONE shared answer — every surface (row title, secondary, glyph, tab
+ * badge) uses this function and no surface re-derives it.
+ */
+export function resolveRowHarnessId(session: Session): HarnessId | null {
+  return session.harnessId ?? session.observedHarnessId ?? null;
+}
+
+/**
  * Coarse `34m` / `2h` / `3d` duration, floored so it never overstates the
  * gap (fork's formatCompactDuration verbatim).
  */
@@ -127,7 +138,10 @@ export function resolveRowMessagePreview(
  * Secondary row text (the fork's CompactAgentRow secondary slot): the
  * freshness report while the agent is not reporting, then the session's
  * message preview, then the harness identity for agent sessions and the
- * command basename for plain shells.
+ * command basename for plain shells. When the primary already names the
+ * resolved harness there is no fallthrough to the command basename — no
+ * `Claude - zsh`, never `Claude - Claude`. A genuine plain shell still
+ * reads `Terminal 1 - zsh`.
  */
 export function resolveRowSecondary(
   session: Session,
@@ -138,7 +152,11 @@ export function resolveRowSecondary(
   if (state === "unknown") return agentNoUpdateLabel(rowEvidenceMs(session), now);
   const preview = resolveRowMessagePreview(session, primaryTitle);
   if (preview) return preview;
-  if (session.harnessId) return formatRowHarnessLabel(session.harnessId);
+  const resolvedHarnessId = resolveRowHarnessId(session);
+  if (resolvedHarnessId) {
+    if (primaryTitle === formatRowHarnessLabel(resolvedHarnessId)) return "";
+    return formatRowHarnessLabel(resolvedHarnessId);
+  }
   return commandBasename(session);
 }
 
@@ -211,10 +229,17 @@ export function buildWorktreeAgentRows(
   const customTitles = inputs.customTitles ?? {};
   return ordered.map((session) => {
     const evidenceMs = rowEvidenceMs(session);
+    // A custom rename still wins; otherwise a session running a resolved
+    // harness reads the harness label, and only a session with no resolved
+    // harness keeps `Terminal N`. Numbering still counts every session, so
+    // plain shells keep their exact `Terminal N` titles.
+    const resolvedHarnessId = resolveRowHarnessId(session);
     const title = recoveryTabLabel({
       label: resolveTabTitle(
         session.id,
-        defaultTerminalTabTitle(positionById.get(session.id) ?? 1),
+        resolvedHarnessId
+          ? formatRowHarnessLabel(resolvedHarnessId)
+          : defaultTerminalTabTitle(positionById.get(session.id) ?? 1),
         customTitles,
       ),
       verdict: session.verdict,
