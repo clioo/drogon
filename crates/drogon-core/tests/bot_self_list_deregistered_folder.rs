@@ -292,3 +292,50 @@ fn a_stranded_bot_can_still_dry_run_its_own_monitor_but_not_dispatch() {
     ));
     assert_eq!(refused.code, "workspace_deregistered", "{refused:?}");
 }
+
+#[test]
+fn a_second_workspace_section_on_the_same_folder_does_not_confuse_the_bot() {
+    // v2 carries issue #579: a folder Project can own several named
+    // Workspaces sharing one folder path, and a Bot resolves to the folder's
+    // primary (earliest-created) one. The #609 fix touches that very query,
+    // so pin both halves: an extra section must not move the Bot, and
+    // removing the project must still strand it exactly once.
+    let fx = Fx::new();
+    let sibling = success(fx.engine.dispatch(request(
+        "second-section",
+        "worktree.create",
+        json!({"projectId": fx.project_id, "name": "Second section"}),
+    )));
+    let sibling_worktree_id = sibling["id"].as_str().unwrap().to_string();
+    let sibling_workspace_id = sibling["workspaceId"].as_str().unwrap().to_string();
+    assert_ne!(sibling_workspace_id, fx.workspace_id);
+
+    // A second section at the same path leaves the Bot on the primary.
+    let with_sibling = success(fx.call("list-sibling", "bot.self_list", json!({})));
+    assert_eq!(
+        with_sibling["workspaceId"],
+        json!(fx.workspace_id),
+        "the folder's primary Workspace, not the newer section: {with_sibling}"
+    );
+    assert_eq!(with_sibling["notice"], Value::Null, "{with_sibling}");
+
+    // Removing the extra section unregisters only that Workspace row.
+    success(fx.engine.dispatch(request(
+        "drop-section",
+        "worktree.remove",
+        json!({"id": sibling_worktree_id}),
+    )));
+    let after_drop = success(fx.call("list-dropped", "bot.self_list", json!({})));
+    assert_eq!(
+        after_drop["workspaceId"],
+        json!(fx.workspace_id),
+        "{after_drop}"
+    );
+    assert_eq!(after_drop["notice"], Value::Null, "{after_drop}");
+
+    // Removing the project takes every Workspace row at that path with it.
+    fx.deregister_record_folder();
+    let stranded = success(fx.call("list-stranded", "bot.self_list", json!({})));
+    assert_eq!(stranded["workspaceId"], Value::Null, "{stranded}");
+    assert!(stranded["notice"].is_string(), "{stranded}");
+}
