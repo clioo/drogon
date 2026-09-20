@@ -23,5 +23,23 @@ export default defineConfig({
     // #312: worker threads avoid the process churn that can trigger the
     // ubuntu-22.04 runner's external termination of the desktop suite.
     pool: "threads",
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary"],
+      include: [
+        "src/main/**/*.{ts,tsx}",
+        "src/preload/**/*.ts",
+        "src/renderer/src/**/*.{ts,tsx}",
+        "src/shared/**/*.{ts,tsx}",
+      ],
+      exclude: [
+        "**/*.test.{ts,tsx}",
+        "**/*.test-d.ts",
+        "node_modules/**",
+        "out/**",
+        "dist/**",
+        "coverage/**",
+      ],
+    },
   },
 });

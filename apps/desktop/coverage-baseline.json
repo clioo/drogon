@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "generatedAt": "2026-09-20T02:28:18.414Z",
+  "areas": {
+    "renderer": {
+      "files": 777,
+      "statements": {
+        "covered": 18851,
+        "total": 29320,
+        "pct": 64.29399727148703
+      },
+      "branches": {
+        "covered": 15008,
+        "total": 23987,
+        "pct": 62.567223912952855
+      },
+      "functions": {
+        "covered": 4811,
+        "total": 7675,
+        "pct": 62.68403908794789
+      },
+      "lines": {
+        "covered": 17450,
+        "total": 26516,
+        "pct": 65.80932267310303
+      }
+    },
+    "main": {
+      "files": 69,
+      "statements": {
+        "covered": 2715,
+        "total": 4296,
+        "pct": 63.19832402234636
+      },
+      "branches": {
+        "covered": 1818,
+        "total": 3044,
+        "pct": 59.72404730617609
+      },
+      "functions": {
+        "covered": 469,
+        "total": 823,
+        "pct": 56.98663426488457
+      },
+      "lines": {
+        "covered": 2523,
+        "total": 3842,
+        "pct": 65.66892243623113
+      }
+    },
+    "preload": {
+      "files": 26,
+      "statements": {
+        "covered": 61,
+        "total": 384,
+        "pct": 15.885416666666666
+      },
+      "branches": {
+        "covered": 29,
+        "total": 83,
+        "pct": 34.93975903614458
+      },
+      "functions": {
+        "covered": 13,
+        "total": 240,
+        "pct": 5.416666666666667
+      },
+      "lines": {
+        "covered": 54,
+        "total": 359,
+        "pct": 15.041782729805014
+      }
+    },
+    "shared": {
+      "files": 92,
+      "statements": {
+        "covered": 1374,
+        "total": 1581,
+        "pct": 86.90702087286527
+      },
+      "branches": {
+        "covered": 892,
+        "total": 1068,
+        "pct": 83.52059925093633
+      },
+      "functions": {
+        "covered": 220,
+        "total": 257,
+        "pct": 85.60311284046692
+      },
+      "lines": {
+        "covered": 1261,
+        "total": 1435,
+        "pct": 87.87456445993031
+      }
+    }
+  },
+  "total": {
+    "statements": {
+      "covered": 23001,
+      "total": 35581,
+      "pct": 64.64405160057333
+    },
+    "branches": {
+      "covered": 17747,
+      "total": 28182,
+      "pct": 62.972819530196574
+    },
+    "functions": {
+      "covered": 5513,
+      "total": 8995,
+      "pct": 61.289605336297946
+    },
+    "lines": {
+      "covered": 21288,
+      "total": 32152,
+      "pct": 66.21050012440905
+    }
+  }
+}
