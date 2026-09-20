@@ -13,6 +13,7 @@ import type {
   BotRunHarnessOverrides,
   BotsPanelBot,
   BotsPanelHostObservation,
+  BotMonitorFiringOutcome,
   BotMonitorHealth,
   BotMonitorView,
 } from "../../../../shared/bot-contract";
@@ -353,7 +354,7 @@ export function monitorHealthPill(health: BotMonitorHealth): MonitorHealthPill {
  *  that is the owner's headline case and must never render as a bare
  *  internal token. */
 export function monitorTitle(view: BotMonitorView): string {
-  if (view.ruleKind === "github_pr.v1") {
+  if (view.ruleKind === "github_pr.v1" || view.ruleKind === "github_issue.v1") {
     return typeof view.repo === "string" && view.repo.length > 0
       ? view.repo
       : view.ruleKind;
@@ -370,8 +371,9 @@ export function monitorTitle(view: BotMonitorView): string {
 /**
  * The SOURCE cell, honest per rule kind — never the bare rule kind for a
  * kind this build renders:
- * - a `github_pr.v1` watch shows the repository it watches and its case
- *   (the filter, with the login it compares against);
+ * - a `github_pr.v1` / `github_issue.v1` watch shows the repository it
+ *   watches, WHICH collection it reads, and its case (the filter, with
+ *   the login it compares against);
  * - a file watch shows its path; a script watch shows its script path;
  * - an http poll's URL text is sealed daemon-side (only its hash
  *   travels), so the cell says that in words instead of printing the
@@ -380,7 +382,8 @@ export function monitorTitle(view: BotMonitorView): string {
  */
 export function monitorSourceLabel(view: BotMonitorView): string {
   switch (view.ruleKind) {
-    case "github_pr.v1": {
+    case "github_pr.v1":
+    case "github_issue.v1": {
       const repo =
         typeof view.repo === "string" && view.repo ? view.repo : null;
       const filter =
@@ -388,12 +391,16 @@ export function monitorSourceLabel(view: BotMonitorView): string {
       const login =
         typeof view.login === "string" && view.login ? view.login : null;
       if (!repo) return view.ruleKind;
+      // The collection is part of the source: "opened" means something
+      // different for pull requests than for issues.
+      const collection =
+        view.ruleKind === "github_issue.v1" ? "issues" : "pull requests";
       const caseText = filter
         ? login
-          ? `case: ${filter} (${login})`
-          : `case: ${filter}`
-        : null;
-      return caseText ? `${repo} · ${caseText}` : repo;
+          ? `${collection}, case: ${filter} (${login})`
+          : `${collection}, case: ${filter}`
+        : collection;
+      return `${repo} · ${caseText}`;
     }
     case "local_file_digest.v1":
       return typeof view.resource === "string" && view.resource
@@ -488,10 +495,13 @@ export type MonitorLastFiring = {
 };
 
 const MONITOR_FIRING_LABELS: Record<
-  NonNullable<BotMonitorView["firing"]>["lastOutcome"],
+  BotMonitorFiringOutcome,
   { label: string; adverse: boolean }
 > = {
   dispatched: { label: "Prompt sent", adverse: false },
+  // A refused `harness.start`: no session was ever admitted. It must not
+  // read like a dispatch that worked.
+  dispatch_failed: { label: "Dispatch failed", adverse: true },
   joined_existing: { label: "Prompt sent (replay)", adverse: false },
   refused: { label: "Refused", adverse: true },
   orphaned: { label: "Target missing", adverse: true },
@@ -507,8 +517,14 @@ export function monitorLastFiring(
   now: number = Date.now(),
 ): MonitorLastFiring | null {
   if (!view.firing) return null;
-  const wording = MONITOR_FIRING_LABELS[view.firing.lastOutcome];
-  if (!wording) return null;
+  // A verdict this build has no wording for (a newer daemon) is shown as
+  // the daemon's own token, treated as adverse: a firing that happened is
+  // never reported as "Never fired", and an unknown verdict is never
+  // quietly painted as a success.
+  const wording =
+    MONITOR_FIRING_LABELS[
+      view.firing.lastOutcome as BotMonitorFiringOutcome
+    ] ?? { label: view.firing.lastOutcome, adverse: true };
   const deltaMs = Math.max(0, now - view.firing.lastAtMs);
   const minutes = Math.floor(deltaMs / 60_000);
   const ageLabel =

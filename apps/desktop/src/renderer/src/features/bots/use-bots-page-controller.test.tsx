@@ -629,7 +629,11 @@ describe("use-bots-page-controller: design column side reads", () => {
     expect(screen.getByText("3 consecutive errors")).toBeTruthy();
   });
 
-  it("keeps the columns honest when a side read fails or is absent", async () => {
+  it("names the REASON a monitor read failed instead of blaming the bridge", async () => {
+    // #608: the daemon can answer `bot.monitor_list` perfectly well, but a
+    // contract mismatch made the read fail — and the page reported that as
+    // "the daemon bridge does not expose the monitor read", which is wrong
+    // about the capability AND throws away the only diagnosis there is.
     render(
       <BotsPanel
         snapshot={{
@@ -638,17 +642,89 @@ describe("use-bots-page-controller: design column side reads", () => {
         }}
         scope={scope}
         automationList={async () => ({ ok: false as const })}
-        monitorList={async () => ({ ok: false as const })}
+        monitorList={async () => ({
+          ok: false as const,
+          error: {
+            message:
+              "The service response does not match the expected contract.",
+          },
+        })}
       />,
     );
-    // Failed monitor read: the unavailable note, never an empty claim.
     expect(
-      await screen.findByText(/Monitor details are unavailable/),
+      await screen.findByText(
+        /Could not read this Bot's monitors: The service response does not match the expected contract\./,
+      ),
     ).toBeTruthy();
+    expect(screen.queryByText(/bridge does not expose/)).toBeNull();
+    // ...and the count is not asserted as zero when nothing could be read.
+    expect(screen.getByText("unknown")).toBeTruthy();
+    expect(screen.queryByText("0 watching")).toBeNull();
     // Failed automation join: the card stays, the schedule reads as a dash.
     expect(screen.getAllByText("Review duty").length).toBeGreaterThanOrEqual(1);
-    // No automation summary → no "Active" chip of invented state.
     expect(screen.getByText("No runs yet")).toBeTruthy();
+  });
+
+  it("says there is no monitor source when the bridge supplies none", async () => {
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [bot({ responsibilities: [responsibility()] })],
+          history: [],
+        }}
+        scope={scope}
+        automationList={async () => ({ ok: false as const })}
+      />,
+    );
+    // A DIFFERENT fact from a failed read, and it gets different words.
+    expect(
+      await screen.findByText(/no monitor data source/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Could not read this Bot's monitors/)).toBeNull();
+  });
+
+  it("keeps a monitor read that a newer daemon verdict would once have broken", async () => {
+    // The whole `bot.monitor_list` result used to be rejected when a bot's
+    // newest firing carried a verdict this build had no name for; every
+    // monitor the bot owned then vanished from the page.
+    const monitorList = vi.fn(async () => ({
+      ok: true as const,
+      result: {
+        monitors: [
+          {
+            ...monitorView(),
+            firing: {
+              lastEventId: "mev_1",
+              lastOutcome: "dispatch_failed",
+              lastRunId: null,
+              lastDetail: "harness.start refused: not_found: no such harness",
+              lastResource: "issue/608",
+              lastAtMs: Date.now(),
+              countToday: 1,
+            },
+          },
+        ],
+        workspaceId: scope.workspaceId,
+      },
+    }));
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [bot({ responsibilities: [responsibility()] })],
+          history: [],
+        }}
+        scope={scope}
+        monitorList={monitorList}
+      />,
+    );
+    // The monitor is still rendered, and the refusal is named as a refusal
+    // — never as a dispatch that worked, never as "Never fired".
+    expect(await screen.findByText(/Dispatch failed/)).toBeTruthy();
+    expect(screen.queryByText("Never fired")).toBeNull();
+    expect(screen.queryByText(/bridge does not expose/)).toBeNull();
+    expect(
+      screen.getByText(/harness.start refused: not_found: no such harness/),
+    ).toBeTruthy();
   });
 });
 

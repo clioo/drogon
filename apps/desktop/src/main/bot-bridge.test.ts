@@ -278,6 +278,112 @@ describe("Bot monitor list bridge", () => {
     expect(call).toHaveBeenCalledExactlyOnceWith("bot.monitor_list", monitorInput);
   });
 
+  /// The exact shape that broke the Monitors column (#608): the daemon has
+  /// always been able to record `dispatch_failed` (a refused
+  /// `harness.start`), but the result schema admitted six verdicts. Because
+  /// the WHOLE result is validated here, that one token failed the read for
+  /// the bot — and the page then reported the bridge as not exposing
+  /// monitors at all.
+  it("reads a monitor whose newest firing is a dispatch_failed verdict", async () => {
+    const result = {
+      hostId: "host",
+      botId: "bot-1",
+      workspaceId: "resolved-ws",
+      monitors: [
+        {
+          ...monitorView,
+          firing: {
+            lastEventId: "mev_1",
+            lastOutcome: "dispatch_failed",
+            lastRunId: null,
+            lastDetail: "harness.start refused: not_found: no such harness",
+            lastResource: "issue/608",
+            lastAtMs: 1_726_000_000_000,
+            countToday: 1,
+          },
+        },
+      ],
+    };
+    const call = vi.fn(async () => ({ ok: true as const, result }));
+    expect(await dispatchBotMonitorList(monitorInput, call)).toEqual({
+      ok: true,
+      result,
+    });
+  });
+
+  /// Every verdict the daemon declares must survive this gate. The list is
+  /// the consumer half of `FIRING_OUTCOMES` in
+  /// `crates/drogon-core/src/bots/delegation.rs`.
+  it("reads every firing verdict the daemon can write, plus an unknown one", async () => {
+    for (const lastOutcome of [
+      "dispatched",
+      "dispatch_failed",
+      "joined_existing",
+      "refused",
+      "orphaned",
+      "cap_exceeded",
+      "stale_skipped",
+      // A verdict from a newer daemon must degrade to one unlabelled cell,
+      // never erase the bot's whole monitor list again.
+      "some_future_verdict",
+    ]) {
+      const result = {
+        hostId: "host",
+        botId: "bot-1",
+        workspaceId: "resolved-ws",
+        monitors: [
+          {
+            ...monitorView,
+            firing: {
+              lastEventId: "mev_1",
+              lastOutcome,
+              lastRunId: null,
+              lastDetail: null,
+              lastResource: null,
+              lastAtMs: 1_726_000_000_000,
+              countToday: 1,
+            },
+          },
+        ],
+      };
+      const call = vi.fn(async () => ({ ok: true as const, result }));
+      expect(
+        (await dispatchBotMonitorList(monitorInput, call)).ok,
+        `verdict ${lastOutcome} must not fail the read`,
+      ).toBe(true);
+    }
+  });
+
+  it("reads a github_issue.v1 watch with its rule summary fields", async () => {
+    const result = {
+      hostId: "host",
+      botId: "bot-1",
+      workspaceId: "resolved-ws",
+      monitors: [
+        {
+          ...monitorView,
+          ruleKind: "github_issue.v1",
+          resource: undefined,
+          maxBytes: undefined,
+          repo: "clioo/drogon",
+          filter: "opened",
+          login: null,
+          apiBase: null,
+          caseHarness: "codex",
+          caseSkills: ["drogon-cli"],
+          secretRefs: ["GITHUB_TOKEN_REF"],
+        },
+      ],
+    };
+    const call = vi.fn(async () => ({ ok: true as const, result }));
+    const read = await dispatchBotMonitorList(monitorInput, call);
+    expect(read.ok).toBe(true);
+    expect(read.ok && read.result.monitors[0]?.ruleKind).toBe(
+      "github_issue.v1",
+    );
+    expect(read.ok && read.result.monitors[0]?.repo).toBe("clioo/drogon");
+  });
+
   it("rejects a resolved-echo of '' and a foreign bot id", async () => {
     const call = vi.fn(async () => ({
       ok: true as const,

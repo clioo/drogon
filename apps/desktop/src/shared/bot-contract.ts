@@ -290,19 +290,40 @@ export type BotMonitorView = {
   [summaryField: string]: unknown;
 };
 
+/** The delegation verdicts this build knows how to label. It must stay
+ *  in lockstep with the daemon's own producing set
+ *  (`FIRING_OUTCOMES` in `crates/drogon-core/src/bots/delegation.rs`).
+ *
+ *  `dispatch_failed` is here because leaving it out broke the whole
+ *  Monitors column: the daemon has always been able to write it (a
+ *  refused `harness.start`), the monitor read was validated against this
+ *  union, and one such firing made `bot.monitor_list` fail for that bot —
+ *  which the page then reported as "the daemon bridge does not expose the
+ *  monitor read". `lastOutcome` is deliberately widened to `string` below
+ *  so a FUTURE verdict degrades to one unlabelled cell instead of erasing
+ *  every monitor the bot has. */
+export const BOT_MONITOR_FIRING_OUTCOMES = [
+  "dispatched",
+  "dispatch_failed",
+  "joined_existing",
+  "refused",
+  "orphaned",
+  "cap_exceeded",
+  "stale_skipped",
+] as const;
+
+export type BotMonitorFiringOutcome =
+  (typeof BOT_MONITOR_FIRING_OUTCOMES)[number];
+
 /** One settled delegation verdict for a monitor: dispatched = the bound
  *  responsibility ran (runId names the run row, also visible in the
  *  bot's history as a "Monitor event"); the other outcomes are honest
  *  refusals with their reason. Metadata only, never watched bytes. */
 export type BotMonitorFiringView = {
   lastEventId: string;
-  lastOutcome:
-    | "dispatched"
-    | "joined_existing"
-    | "refused"
-    | "orphaned"
-    | "cap_exceeded"
-    | "stale_skipped";
+  /** A known verdict, or an unrecognized token from a newer daemon —
+   *  shown as itself rather than dropped. */
+  lastOutcome: BotMonitorFiringOutcome | (string & {});
   lastRunId: string | null;
   lastDetail: string | null;
   /** The released case's own resource (`pull/42` for a pull-request

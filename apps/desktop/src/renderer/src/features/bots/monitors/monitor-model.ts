@@ -8,6 +8,7 @@ export const MONITOR_RULE_KIND = "local_file_digest.v1" as const;
 export const MONITOR_RULE_KIND_SCRIPT = "script_command.v1" as const;
 export const MONITOR_RULE_KIND_HTTP_POLL = "http_poll.v1" as const;
 export const MONITOR_RULE_KIND_GITHUB_PR = "github_pr.v1" as const;
+export const MONITOR_RULE_KIND_GITHUB_ISSUE = "github_issue.v1" as const;
 export const MONITOR_RESULT_SCHEMA_VERSION = 1;
 export const MAX_MONITOR_FILE_BYTES = 256 * 1024;
 export const MAX_MONITOR_PATH_BYTES = 1024;
@@ -28,6 +29,7 @@ export const MAX_MONITOR_PATH_BYTES = 1024;
 export const SUPPORTED_MONITOR_RULE_KINDS: readonly string[] = [
   MONITOR_RULE_KIND,
   MONITOR_RULE_KIND_GITHUB_PR,
+  MONITOR_RULE_KIND_GITHUB_ISSUE,
 ];
 
 export function monitorRuleKindSupported(ruleKind: string): boolean {

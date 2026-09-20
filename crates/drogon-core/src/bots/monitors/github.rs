@@ -1,6 +1,16 @@
-//! `github_pr.v1` evaluation: one bounded, authenticated read of a
-//! repository's open pull requests, then a dedupe decision over the pull
-//! numbers.
+//! `github_pr.v1` / `github_issue.v1` evaluation: one bounded,
+//! authenticated read of a repository's open pull requests (or open
+//! issues), then a dedupe decision over their numbers.
+//!
+//! The two kinds share EVERY line below — the transport, the dedupe set,
+//! the seeding rule and the commit shape — because a watch that replayed
+//! the backlog on first run would be the same bug twice. Only three things
+//! differ, all carried by [`GithubTarget`]: the list path GitHub is asked
+//! for, the namespace an event id is minted in, and the `pull/<n>` vs
+//! `issue/<n>` resource a release names. One extra rule applies to issues
+//! alone: GitHub's issues endpoint also returns pull requests (every PR is
+//! an issue), and [`filter_items`] drops those, so an issue watch never
+//! fires for a pull request.
 //!
 //! Three properties this module owns, each pinned by its own test:
 //!
@@ -10,8 +20,8 @@
 //!   memory of one `curl` child. Every byte this module can return for
 //!   persistence (error text, check-in messages) has passed
 //!   [`crate::integrations::resolve::scrub_for_persist`].
-//! - **The same PR never fires twice.** Dedupe is a per-monitor table of
-//!   pull numbers that have already been released
+//! - **The same PR (or issue) never fires twice.** Dedupe is a per-monitor
+//!   table of the numbers that have already been released
 //!   (`bot_monitor_github_seen`), never a digest of the response bytes: an
 //!   unrelated comment on PR #41 cannot re-release it.
 //! - **An outage is never a catch-up storm.** A watch that was not
@@ -38,7 +48,9 @@ use rusqlite::Connection;
 use serde::Deserialize;
 
 use super::result::{MonitorCheckResult, MonitorErrorKind};
-use super::rule::{GITHUB_PULLS_PER_PAGE, GithubPrFilter, GithubPrRule};
+use super::rule::{
+    GITHUB_PULLS_PER_PAGE, GithubIssueFilter, GithubIssueRule, GithubPrFilter, GithubPrRule,
+};
 
 /// A watch whose last successful check is older than this seeds forward
 /// instead of replaying the backlog. Matches the delegation drain's own
@@ -48,21 +60,128 @@ pub const GITHUB_CATCH_UP_GRACE_MS: f64 = 30.0 * 60.0 * 1000.0;
 /// Longest persisted error text (chars) — the check-in message bound.
 const MAX_ERROR_CHARS: usize = 512;
 
-/// How many pull numbers a monitor's seen set retains (newest kept). A
-/// repository with more open pull requests than this still works: the
-/// oldest numbers fall out of the set, and a pull request that leaves and
+/// How many numbers a monitor's seen set retains (newest kept). A
+/// repository with more open pull requests (or issues) than this still
+/// works: the oldest numbers fall out of the set, and one that leaves and
 /// re-enters the open list may be released again — bounded, honest, and
 /// never unbounded growth.
 pub const MAX_SEEN_PULLS: usize = 512;
 
-/// The pull-request subset this watch needs from GitHub's pull list.
+/// Which GitHub collection a watch reads. A monitor has exactly one kind,
+/// so this is fixed for the life of a rule and rides inside its approval
+/// hash by way of the rule variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GithubTarget {
+    /// `github_pr.v1`: the repository's open pull requests.
+    Pulls,
+    /// `github_issue.v1`: the repository's open issues, pull requests
+    /// excluded.
+    Issues,
+}
+
+impl GithubTarget {
+    /// The REST list path segment this target reads.
+    pub fn path_segment(self) -> &'static str {
+        match self {
+            Self::Pulls => "pulls",
+            Self::Issues => "issues",
+        }
+    }
+
+    /// Namespace for minted event ids, so an id says which kind of case it
+    /// belongs to and the two can never be confused in evidence.
+    pub fn event_namespace(self) -> &'static str {
+        match self {
+            Self::Pulls => "github_pr",
+            Self::Issues => "github_issue",
+        }
+    }
+
+    /// The `resource` prefix one released number carries (`pull/42`,
+    /// `issue/42`) — WHAT the firing released.
+    pub fn resource_prefix(self) -> &'static str {
+        match self {
+            Self::Pulls => "pull",
+            Self::Issues => "issue",
+        }
+    }
+}
+
+/// Which open items a watch considers "for me". The pull-request kind's
+/// third case (`review_requested`) has no issue analogue; an issue rule
+/// simply never produces it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GithubWatchFilter {
+    Opened,
+    Assigned,
+    ReviewRequested,
+}
+
+/// The kind-independent projection of a GitHub watch rule: everything one
+/// poll needs, borrowed. Both rule kinds convert into it, so the evaluator
+/// below has a single code path and the two watches cannot drift.
+pub struct GithubWatch<'a> {
+    pub target: GithubTarget,
+    pub repo: &'a str,
+    pub filter: GithubWatchFilter,
+    /// The login `assigned` / `review_requested` compare against. `None`
+    /// with such a filter matches nothing (validation forbids the shape;
+    /// the evaluator still refuses to guess).
+    pub login: Option<&'a str>,
+    pub api_base: Option<&'a str>,
+    pub timeout_ms: u64,
+    pub max_body_bytes: u64,
+}
+
+impl<'a> From<&'a GithubPrRule> for GithubWatch<'a> {
+    fn from(rule: &'a GithubPrRule) -> Self {
+        Self {
+            target: GithubTarget::Pulls,
+            repo: &rule.repo,
+            filter: match rule.filter {
+                GithubPrFilter::Opened => GithubWatchFilter::Opened,
+                GithubPrFilter::Assigned => GithubWatchFilter::Assigned,
+                GithubPrFilter::ReviewRequested => GithubWatchFilter::ReviewRequested,
+            },
+            login: rule.login.as_deref(),
+            api_base: rule.api_base.as_deref(),
+            timeout_ms: rule.timeout_ms,
+            max_body_bytes: rule.max_body_bytes,
+        }
+    }
+}
+
+impl<'a> From<&'a GithubIssueRule> for GithubWatch<'a> {
+    fn from(rule: &'a GithubIssueRule) -> Self {
+        Self {
+            target: GithubTarget::Issues,
+            repo: &rule.repo,
+            filter: match rule.filter {
+                GithubIssueFilter::Opened => GithubWatchFilter::Opened,
+                GithubIssueFilter::Assigned => GithubWatchFilter::Assigned,
+            },
+            login: rule.login.as_deref(),
+            api_base: rule.api_base.as_deref(),
+            timeout_ms: rule.timeout_ms,
+            max_body_bytes: rule.max_body_bytes,
+        }
+    }
+}
+
+/// The subset this watch needs from GitHub's pull or issue list.
 #[derive(Debug, Clone, Deserialize)]
-struct GithubPull {
+struct GithubItem {
     number: u64,
     #[serde(default)]
     assignees: Vec<GithubLogin>,
     #[serde(default)]
     requested_reviewers: Vec<GithubLogin>,
+    /// Present (and non-null) only on a pull request. GitHub's ISSUES
+    /// endpoint returns pull requests too — every PR is an issue — and
+    /// this is the field that tells them apart, so an issue watch can drop
+    /// them instead of firing a triage session for a code review.
+    #[serde(default)]
+    pull_request: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,12 +241,14 @@ pub fn cursor_for_seen(seen: &BTreeSet<u64>) -> String {
     ))
 }
 
-/// Stable event id for one pull request on one monitor: `mev_<sha256[..32]>`.
-/// The same PR on the same watch always mints the same event id, so a
-/// redelivered tick is a duplicate rather than a second release.
-pub fn event_id_for_pull(monitor_id: &str, pull_number: u64) -> String {
+/// Stable event id for one released number on one monitor:
+/// `mev_<sha256[..32]>`. The same PR (or issue) on the same watch always
+/// mints the same event id, so a redelivered tick is a duplicate rather
+/// than a second release. The target's namespace is part of the digest, so
+/// a pull-request watch and an issue watch can never mint the same id.
+pub fn event_id_for_number(target: GithubTarget, monitor_id: &str, number: u64) -> String {
     let digest = crate::bots::monitors::eval::digest_bytes(
-        format!("github_pr:{monitor_id}:{pull_number}").as_bytes(),
+        format!("{}:{monitor_id}:{number}", target.event_namespace()).as_bytes(),
     );
     crate::bots::monitors::eval::event_id_for(monitor_id, &"00".repeat(32), &digest)
 }
@@ -147,20 +268,20 @@ fn prune(seen: &mut BTreeSet<u64>) {
 /// drains one per tick instead of silently swallowing the rest.
 pub fn decide(
     monitor_id: &str,
-    pull_numbers: &[u64],
+    numbers: &[u64],
     seen: &BTreeSet<u64>,
     seed_baseline: bool,
 ) -> GithubDedupeDecision {
     let _ = monitor_id;
     if seed_baseline {
         let mut baseline = seen.clone();
-        baseline.extend(pull_numbers.iter().copied());
+        baseline.extend(numbers.iter().copied());
         prune(&mut baseline);
         return GithubDedupeDecision::Seed {
             cursor: cursor_for_seen(&baseline),
         };
     }
-    let unseen = pull_numbers
+    let unseen = numbers
         .iter()
         .copied()
         .filter(|number| !seen.contains(number))
@@ -182,7 +303,7 @@ pub fn decide(
 /// The seen set a decision commits alongside its cursor.
 pub fn seen_after(
     decision: &GithubDedupeDecision,
-    pull_numbers: &[u64],
+    numbers: &[u64],
     seen: &BTreeSet<u64>,
 ) -> BTreeSet<u64> {
     let mut next = seen.clone();
@@ -191,23 +312,39 @@ pub fn seen_after(
         GithubDedupeDecision::Release { number, .. } => {
             next.insert(*number);
         }
-        GithubDedupeDecision::Seed { .. } => next.extend(pull_numbers.iter().copied()),
+        GithubDedupeDecision::Seed { .. } => next.extend(numbers.iter().copied()),
     }
     prune(&mut next);
     next
 }
 
 /// Turn a decision into the outcome the tick commits.
-pub fn result_for(
-    monitor_id: &str,
-    monitor_version: u64,
-    decision: &GithubDedupeDecision,
-    pull_numbers: &[u64],
-    seen: &BTreeSet<u64>,
-    cursor_before: Option<&str>,
-    observed_at_ms: f64,
-) -> GithubPollOutcome {
-    let seen_next = seen_after(decision, pull_numbers, seen);
+/// What one poll observed, for [`result_for`]: the watch it belongs to,
+/// the numbers it read and the state it read them against.
+pub struct PollContext<'a> {
+    pub target: GithubTarget,
+    pub monitor_id: &'a str,
+    pub monitor_version: u64,
+    /// The filtered numbers this poll saw.
+    pub numbers: &'a [u64],
+    /// The dedupe set as it was BEFORE this poll.
+    pub seen: &'a BTreeSet<u64>,
+    /// Last accepted cursor, retained by a no-change tick.
+    pub cursor_before: Option<&'a str>,
+    pub observed_at_ms: f64,
+}
+
+pub fn result_for(poll: &PollContext<'_>, decision: &GithubDedupeDecision) -> GithubPollOutcome {
+    let PollContext {
+        target,
+        monitor_id,
+        monitor_version,
+        numbers,
+        seen,
+        cursor_before,
+        observed_at_ms,
+    } = *poll;
+    let seen_next = seen_after(decision, numbers, seen);
     match decision {
         GithubDedupeDecision::Nothing => GithubPollOutcome::Emit {
             result: MonitorCheckResult::no_change(
@@ -230,78 +367,90 @@ pub fn result_for(
             result: MonitorCheckResult::changed(
                 monitor_id,
                 monitor_version,
-                event_id_for_pull(monitor_id, *number),
+                event_id_for_number(target, monitor_id, *number),
                 cursor.clone(),
                 observed_at_ms,
             ),
-            resource: resource_for_pull(*number),
+            resource: resource_for_number(target, *number),
             seen: seen_next,
         },
     }
 }
 
-/// Filter GitHub's pull list down to the rule's case.
-pub fn filter_pulls(rule: &GithubPrRule, pulls: &[GithubPullView]) -> Vec<u64> {
-    let mut numbers: Vec<u64> = pulls
+/// Filter GitHub's list down to the watch's case.
+///
+/// An ISSUE watch drops every item carrying `pull_request` first: GitHub's
+/// issues endpoint returns pull requests as issues, and a watch asked for
+/// issues must never release a code review as if it were a bug report.
+pub fn filter_items(watch: &GithubWatch<'_>, items: &[GithubItemView]) -> Vec<u64> {
+    let mut numbers: Vec<u64> = items
         .iter()
-        .filter(|pull| match rule.filter {
-            GithubPrFilter::Opened => true,
-            GithubPrFilter::Assigned => rule
-                .login
-                .as_deref()
-                .is_some_and(|login| pull.assignees.iter().any(|who| who == login)),
-            GithubPrFilter::ReviewRequested => rule
-                .login
-                .as_deref()
-                .is_some_and(|login| pull.requested_reviewers.iter().any(|who| who == login)),
+        .filter(|item| match watch.target {
+            GithubTarget::Issues => !item.is_pull_request,
+            GithubTarget::Pulls => true,
         })
-        .map(|pull| pull.number)
+        .filter(|item| match watch.filter {
+            GithubWatchFilter::Opened => true,
+            GithubWatchFilter::Assigned => watch
+                .login
+                .is_some_and(|login| item.assignees.iter().any(|who| who == login)),
+            GithubWatchFilter::ReviewRequested => watch
+                .login
+                .is_some_and(|login| item.requested_reviewers.iter().any(|who| who == login)),
+        })
+        .map(|item| item.number)
         .collect();
     numbers.sort_unstable();
     numbers
 }
 
-/// One pull request as the filter sees it (a projection of the JSON above,
-/// so the filter is testable without a server).
+/// One pull request or issue as the filter sees it (a projection of the
+/// JSON above, so the filter is testable without a server).
 #[derive(Debug, Clone, PartialEq)]
-pub struct GithubPullView {
+pub struct GithubItemView {
     pub number: u64,
     pub assignees: Vec<String>,
     pub requested_reviewers: Vec<String>,
+    /// True when GitHub marked this row as a pull request.
+    pub is_pull_request: bool,
 }
 
-impl GithubPullView {
-    fn from_wire(pull: GithubPull) -> Self {
+impl GithubItemView {
+    fn from_wire(item: GithubItem) -> Self {
         Self {
-            number: pull.number,
-            assignees: pull.assignees.into_iter().map(|who| who.login).collect(),
-            requested_reviewers: pull
+            number: item.number,
+            assignees: item.assignees.into_iter().map(|who| who.login).collect(),
+            requested_reviewers: item
                 .requested_reviewers
                 .into_iter()
                 .map(|who| who.login)
                 .collect(),
+            is_pull_request: item.pull_request.is_some_and(|value| !value.is_null()),
         }
     }
 }
 
-/// Parse GitHub's pull-list body into the projection. A body that is not a
-/// JSON array of pull objects is a `Malformed` refusal, never a guess.
-pub fn parse_pulls(body: &str) -> Result<Vec<GithubPullView>, String> {
-    let pulls: Vec<GithubPull> = serde_json::from_str(body)
-        .map_err(|e| format!("pull list is not the expected JSON: {e}"))?;
-    Ok(pulls.into_iter().map(GithubPullView::from_wire).collect())
+/// Parse GitHub's list body into the projection. A body that is not a JSON
+/// array of objects is a `Malformed` refusal, never a guess.
+pub fn parse_items(body: &str) -> Result<Vec<GithubItemView>, String> {
+    let items: Vec<GithubItem> =
+        serde_json::from_str(body).map_err(|e| format!("list is not the expected JSON: {e}"))?;
+    Ok(items.into_iter().map(GithubItemView::from_wire).collect())
 }
 
-/// The exact URL one poll reads: `{apiBase}/repos/{owner}/{name}/pulls`.
-pub fn pulls_url(api_base: &str, repo: &str) -> Result<String, String> {
+/// The exact URL one poll reads:
+/// `{apiBase}/repos/{owner}/{name}/{pulls|issues}`.
+pub fn list_url(target: GithubTarget, api_base: &str, repo: &str) -> Result<String, String> {
     let base = api_base.trim_end_matches('/');
     let segments: Vec<&str> = repo.split('/').collect();
-    if segments.len() != 2 {
+    if segments.len() != 2 || segments.iter().any(|segment| segment.is_empty()) {
         return Err("repo must be 'owner/name'".to_string());
     }
     Ok(format!(
-        "{base}/repos/{}/{}/pulls?state=open&sort=created&direction=asc&per_page={GITHUB_PULLS_PER_PAGE}",
-        segments[0], segments[1]
+        "{base}/repos/{}/{}/{}?state=open&sort=created&direction=asc&per_page={GITHUB_PULLS_PER_PAGE}",
+        segments[0],
+        segments[1],
+        target.path_segment(),
     ))
 }
 
@@ -457,6 +606,10 @@ fn truncate(text: &str) -> String {
 /// Read the seen set for one monitor. Absent / unreadable tables read as an
 /// empty set (a watch that never released anything — never an error).
 pub fn seen_for_monitor(conn: &Connection, monitor_id: &str) -> BTreeSet<u64> {
+    // `pull_number` is the column's historical name; the table is keyed by
+    // (monitor_id, number) and a monitor has exactly ONE kind, so an issue
+    // watch's numbers live here too without a migration or any chance of
+    // collision with a pull-request watch's.
     let read = || -> Result<Vec<u64>, rusqlite::Error> {
         let mut stmt = conn.prepare(
             "SELECT pull_number FROM bot_monitor_github_seen WHERE monitor_id = ?1 ORDER BY pull_number",
@@ -503,7 +656,7 @@ pub struct PersistedWatch<'a> {
     pub monitor_version: u64,
     /// Last accepted cursor (`v1:<hex>`), `None` before the first check.
     pub cursor: Option<&'a str>,
-    /// Pull numbers this watch already released (or seeded).
+    /// Numbers this watch already released (or seeded).
     pub seen: &'a BTreeSet<u64>,
     /// The monitor's last successful check, which decides whether this tick
     /// seeds (first check, or a gap wider than the configured catch-up
@@ -514,10 +667,11 @@ pub struct PersistedWatch<'a> {
     pub expected_interval_ms: Option<f64>,
 }
 
-/// The full evaluation of one due `github_pr.v1` monitor, with the token
-/// already resolved by the caller (grant-checked, memory-only).
+/// The full evaluation of one due GitHub watch — pull requests or issues,
+/// one code path — with the token already resolved by the caller
+/// (grant-checked, memory-only).
 pub fn evaluate_with_token(
-    rule: &GithubPrRule,
+    watch: &GithubWatch<'_>,
     persisted: &PersistedWatch<'_>,
     token: Option<&str>,
     now_ms: f64,
@@ -526,11 +680,10 @@ pub fn evaluate_with_token(
     let monitor_version = persisted.monitor_version;
     let cursor_before = persisted.cursor;
     let seen = persisted.seen;
-    let api_base = rule
+    let api_base = watch
         .api_base
-        .as_deref()
         .unwrap_or(super::rule::DEFAULT_GITHUB_API_BASE);
-    let url = match pulls_url(api_base, &rule.repo) {
+    let url = match list_url(watch.target, api_base, watch.repo) {
         Ok(url) => url,
         Err(message) => {
             return GithubPollOutcome::Error {
@@ -540,7 +693,12 @@ pub fn evaluate_with_token(
         }
     };
     let auth = token.map(|token| format!("Authorization: Bearer {token}"));
-    let fetched = match fetch(&url, auth.as_deref(), rule.timeout_ms, rule.max_body_bytes) {
+    let fetched = match fetch(
+        &url,
+        auth.as_deref(),
+        watch.timeout_ms,
+        watch.max_body_bytes,
+    ) {
         Ok(fetched) => fetched,
         Err(error) => {
             let detail = match &error {
@@ -562,12 +720,17 @@ pub fn evaluate_with_token(
         return GithubPollOutcome::Error {
             error_kind: error_kind_for_status(fetched.status),
             message: truncate(&scrub(
-                &format!("GitHub answered HTTP {} for {}", fetched.status, rule.repo),
+                &format!(
+                    "GitHub answered HTTP {} for {}/{}",
+                    fetched.status,
+                    watch.repo,
+                    watch.target.path_segment()
+                ),
                 token,
             )),
         };
     }
-    let views = match parse_pulls(&fetched.body) {
+    let views = match parse_items(&fetched.body) {
         Ok(views) => views,
         Err(message) => {
             return GithubPollOutcome::Error {
@@ -576,7 +739,7 @@ pub fn evaluate_with_token(
             };
         }
     };
-    let numbers = filter_pulls(rule, &views);
+    let numbers = filter_items(watch, &views);
     let seed_baseline = match persisted.last_success_at_ms {
         // First ever successful check: today's open pulls are the baseline.
         None => true,
@@ -594,13 +757,16 @@ pub fn evaluate_with_token(
     };
     let decision = decide(monitor_id, &numbers, seen, seed_baseline);
     result_for(
-        monitor_id,
-        monitor_version,
+        &PollContext {
+            target: watch.target,
+            monitor_id,
+            monitor_version,
+            numbers: &numbers,
+            seen,
+            cursor_before,
+            observed_at_ms: now_ms,
+        },
         &decision,
-        &numbers,
-        seen,
-        cursor_before,
-        now_ms,
     )
 }
 
@@ -614,22 +780,33 @@ fn scrub(text: &str, token: Option<&str>) -> String {
     }
 }
 
-/// The number of a `pull/<n>` resource, if the event names one.
-pub fn pull_number_from_resource(resource: &str) -> Option<u64> {
-    resource
-        .strip_prefix("pull/")
-        .and_then(|number| number.parse::<u64>().ok())
+/// The `(target, number)` a `pull/<n>` or `issue/<n>` resource names, if
+/// the event names one. Unknown prefixes are `None` — never guessed.
+pub fn case_from_resource(resource: &str) -> Option<(GithubTarget, u64)> {
+    for target in [GithubTarget::Pulls, GithubTarget::Issues] {
+        if let Some(number) = resource
+            .strip_prefix(target.resource_prefix())
+            .and_then(|rest| rest.strip_prefix('/'))
+            .and_then(|number| number.parse::<u64>().ok())
+        {
+            return Some((target, number));
+        }
+    }
+    None
 }
 
-/// The `resource` string one released pull request carries in its event.
-pub fn resource_for_pull(number: u64) -> String {
-    format!("pull/{number}")
+/// The `resource` string one released pull request or issue carries in its
+/// event.
+pub fn resource_for_number(target: GithubTarget, number: u64) -> String {
+    format!("{}/{number}", target.resource_prefix())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bots::monitors::rule::{GithubPrFilter, GithubPrRule};
+    use crate::bots::monitors::rule::{
+        GithubIssueFilter, GithubIssueRule, GithubPrFilter, GithubPrRule,
+    };
 
     fn rule(filter: GithubPrFilter, login: Option<&str>) -> GithubPrRule {
         GithubPrRule {
@@ -647,11 +824,28 @@ mod tests {
         }
     }
 
-    fn view(number: u64, assignees: &[&str], reviewers: &[&str]) -> GithubPullView {
-        GithubPullView {
+    fn issue_rule(filter: GithubIssueFilter, login: Option<&str>) -> GithubIssueRule {
+        GithubIssueRule {
+            host_id: "h".into(),
+            project_id: "p".into(),
+            repo: "clioo/drogon".into(),
+            filter,
+            login: login.map(str::to_string),
+            api_base: None,
+            timeout_ms: 30_000,
+            max_body_bytes: 65_536,
+            secret_refs: vec![],
+            harness: None,
+            skills: vec![],
+        }
+    }
+
+    fn view(number: u64, assignees: &[&str], reviewers: &[&str]) -> GithubItemView {
+        GithubItemView {
             number,
             assignees: assignees.iter().map(|s| s.to_string()).collect(),
             requested_reviewers: reviewers.iter().map(|s| s.to_string()).collect(),
+            is_pull_request: false,
         }
     }
 
@@ -663,22 +857,91 @@ mod tests {
             view(43, &[], &["clioo"]),
         ];
         assert_eq!(
-            filter_pulls(&rule(GithubPrFilter::Opened, None), &pulls),
+            filter_items(&(&rule(GithubPrFilter::Opened, None)).into(), &pulls),
             vec![41, 42, 43]
         );
         assert_eq!(
-            filter_pulls(&rule(GithubPrFilter::Assigned, Some("clioo")), &pulls),
+            filter_items(
+                &(&rule(GithubPrFilter::Assigned, Some("clioo"))).into(),
+                &pulls
+            ),
             vec![42]
         );
         assert_eq!(
-            filter_pulls(
-                &rule(GithubPrFilter::ReviewRequested, Some("clioo")),
+            filter_items(
+                &(&rule(GithubPrFilter::ReviewRequested, Some("clioo"))).into(),
                 &pulls
             ),
             vec![43]
         );
         // A login nobody matches releases nothing — never a widened filter.
-        assert!(filter_pulls(&rule(GithubPrFilter::Assigned, Some("nobody")), &pulls).is_empty());
+        assert!(
+            filter_items(
+                &(&rule(GithubPrFilter::Assigned, Some("nobody"))).into(),
+                &pulls
+            )
+            .is_empty()
+        );
+    }
+
+    /// GitHub's ISSUES endpoint returns pull requests as issues. An issue
+    /// watch must drop them: a code review is not a bug report, and the
+    /// two kinds mint different cases.
+    #[test]
+    fn an_issue_watch_never_releases_a_pull_request() {
+        let listed = [
+            view(41, &["clioo"], &[]),
+            GithubItemView {
+                number: 42,
+                assignees: vec!["clioo".to_string()],
+                requested_reviewers: vec![],
+                // GitHub marks this row as a pull request.
+                is_pull_request: true,
+            },
+            view(43, &["someone"], &[]),
+        ];
+        assert_eq!(
+            filter_items(
+                &(&issue_rule(GithubIssueFilter::Opened, None)).into(),
+                &listed
+            ),
+            vec![41, 43],
+            "the pull request is dropped before the filter runs"
+        );
+        assert_eq!(
+            filter_items(
+                &(&issue_rule(GithubIssueFilter::Assigned, Some("clioo"))).into(),
+                &listed
+            ),
+            vec![41],
+            "an assigned pull request is still not an issue"
+        );
+        // The same list read as PULLS keeps everything the filter admits:
+        // only the issue kind applies the exclusion.
+        assert_eq!(
+            filter_items(&(&rule(GithubPrFilter::Opened, None)).into(), &listed),
+            vec![41, 42, 43]
+        );
+    }
+
+    /// Presence of the `pull_request` key is what GitHub actually sends;
+    /// the projection must read it from the wire, not be told.
+    #[test]
+    fn the_pull_request_marker_is_read_from_the_wire() {
+        let parsed = parse_items(
+            r#"[{"number":41},
+                {"number":42,"pull_request":{"url":"https://api.github.com/repos/a/b/pulls/42"}},
+                {"number":43,"pull_request":null}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed
+                .iter()
+                .map(|item| item.is_pull_request)
+                .collect::<Vec<_>>(),
+            vec![false, true, false],
+            "only a non-null pull_request marks a row as a PR"
+        );
     }
 
     #[test]
@@ -764,15 +1027,27 @@ mod tests {
     }
 
     #[test]
-    fn event_ids_are_stable_per_pull_and_monitor() {
-        let first = event_id_for_pull("mon-1", 42);
-        assert_eq!(first, event_id_for_pull("mon-1", 42));
-        assert_ne!(first, event_id_for_pull("mon-1", 43));
-        assert_ne!(first, event_id_for_pull("mon-2", 42));
+    fn event_ids_are_stable_per_case_and_monitor() {
+        let pulls = GithubTarget::Pulls;
+        let issues = GithubTarget::Issues;
+        let first = event_id_for_number(pulls, "mon-1", 42);
+        assert_eq!(first, event_id_for_number(pulls, "mon-1", 42));
+        assert_ne!(first, event_id_for_number(pulls, "mon-1", 43));
+        assert_ne!(first, event_id_for_number(pulls, "mon-2", 42));
+        // Issue #42 and pull request #42 are different cases even on the
+        // same monitor id, so their ids must differ too.
+        assert_ne!(first, event_id_for_number(issues, "mon-1", 42));
         assert!(crate::bots::monitors::result::is_valid_event_id(&first));
-        assert_eq!(resource_for_pull(42), "pull/42");
-        assert_eq!(pull_number_from_resource("pull/42"), Some(42));
-        assert_eq!(pull_number_from_resource("notes/status.md"), None);
+        assert!(crate::bots::monitors::result::is_valid_event_id(
+            &event_id_for_number(issues, "mon-1", 42)
+        ));
+        assert_eq!(resource_for_number(pulls, 42), "pull/42");
+        assert_eq!(resource_for_number(issues, 42), "issue/42");
+        assert_eq!(case_from_resource("pull/42"), Some((pulls, 42)));
+        assert_eq!(case_from_resource("issue/42"), Some((issues, 42)));
+        assert_eq!(case_from_resource("notes/status.md"), None);
+        assert_eq!(case_from_resource("pull/"), None);
+        assert_eq!(case_from_resource("issue/not-a-number"), None);
     }
 
     #[test]
@@ -783,7 +1058,18 @@ mod tests {
             cursor: cursor_for_seen(&BTreeSet::from([41, 42])),
         };
         // The repository also shows #43: releasing #42 must NOT mark #43 seen.
-        let outcome = result_for("mon-1", 3, &decision, &[41, 42, 43], &seen, None, 100.0);
+        let outcome = result_for(
+            &PollContext {
+                target: GithubTarget::Pulls,
+                monitor_id: "mon-1",
+                monitor_version: 3,
+                numbers: &[41, 42, 43],
+                seen: &seen,
+                cursor_before: None,
+                observed_at_ms: 100.0,
+            },
+            &decision,
+        );
         let GithubPollOutcome::Emit {
             result,
             resource,
@@ -794,7 +1080,7 @@ mod tests {
         };
         assert_eq!(
             result.event_id(),
-            Some(event_id_for_pull("mon-1", 42).as_str())
+            Some(event_id_for_number(GithubTarget::Pulls, "mon-1", 42).as_str())
         );
         assert_eq!(
             result.cursor(),
@@ -808,13 +1094,16 @@ mod tests {
         // leaves the seen set exactly as it was.
         let prior = cursor_for_seen(&BTreeSet::from([7]));
         let quiet = result_for(
-            "mon-1",
-            3,
+            &PollContext {
+                target: GithubTarget::Pulls,
+                monitor_id: "mon-1",
+                monitor_version: 3,
+                numbers: &[7],
+                seen: &BTreeSet::from([7]),
+                cursor_before: Some(&prior),
+                observed_at_ms: 100.0,
+            },
             &GithubDedupeDecision::Nothing,
-            &[7],
-            &BTreeSet::from([7]),
-            Some(&prior),
-            100.0,
         );
         let GithubPollOutcome::Emit {
             result,
@@ -830,25 +1119,42 @@ mod tests {
     }
 
     #[test]
-    fn url_carries_the_repo_and_the_paging_bound() {
+    fn url_carries_the_repo_the_collection_and_the_paging_bound() {
         assert_eq!(
-            pulls_url("https://api.github.com", "clioo/drogon").unwrap(),
+            list_url(
+                GithubTarget::Pulls,
+                "https://api.github.com",
+                "clioo/drogon"
+            )
+            .unwrap(),
             "https://api.github.com/repos/clioo/drogon/pulls?state=open&sort=created&direction=asc&per_page=100"
+        );
+        // The issue watch reads the ISSUES collection of the same repo —
+        // the only difference in the request it sends.
+        assert_eq!(
+            list_url(
+                GithubTarget::Issues,
+                "https://api.github.com",
+                "clioo/drogon"
+            )
+            .unwrap(),
+            "https://api.github.com/repos/clioo/drogon/issues?state=open&sort=created&direction=asc&per_page=100"
         );
         // A trailing slash never doubles.
         assert!(
-            pulls_url("http://127.0.0.1:9/", "a/b")
+            list_url(GithubTarget::Pulls, "http://127.0.0.1:9/", "a/b")
                 .unwrap()
                 .starts_with("http://127.0.0.1:9/repos/a/b")
         );
-        assert!(pulls_url("https://api.github.com", "drogon").is_err());
+        assert!(list_url(GithubTarget::Issues, "https://api.github.com", "drogon").is_err());
+        assert!(list_url(GithubTarget::Issues, "https://api.github.com", "a/").is_err());
     }
 
     #[test]
     fn malformed_bodies_and_statuses_are_honest_errors() {
-        assert!(parse_pulls("not json").is_err());
-        assert!(parse_pulls(r#"{"message":"Bad credentials"}"#).is_err());
-        let pulls = parse_pulls(r#"[{"number":42,"assignees":[{"login":"clioo"}]}]"#).unwrap();
+        assert!(parse_items("not json").is_err());
+        assert!(parse_items(r#"{"message":"Bad credentials"}"#).is_err());
+        let pulls = parse_items(r#"[{"number":42,"assignees":[{"login":"clioo"}]}]"#).unwrap();
         assert_eq!(pulls[0].number, 42);
         assert_eq!(pulls[0].assignees, vec!["clioo".to_string()]);
         assert_eq!(error_kind_for_status(401), MonitorErrorKind::Unauthorized);

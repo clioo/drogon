@@ -133,6 +133,7 @@ export function BotResponsibilityCard({
   onLaunch,
   onLaunchNew,
   onApproveMonitor,
+  monitorReadError = null,
 }: {
   bot: BotsPanelBot;
   history: BotsPanelHistoryEntry[];
@@ -141,9 +142,13 @@ export function BotResponsibilityCard({
    *  session; the automations column then renders the bot record's own
    *  fields only. */
   automationsById: Map<string, AutomationSummary> | null;
-  /** Durable monitors from `bot.monitor_list`. Null means no monitor data
-   *  source; the column says so instead of claiming an empty watch. */
+  /** Durable monitors from `bot.monitor_list`. Null means the rows could
+   *  not be read; the column says so instead of claiming an empty watch. */
   monitors: BotMonitorView[] | null;
+  /** Why this bot's monitor read failed, when it did — the daemon's own
+   *  message. Null means no read was attempted (no data source this
+   *  session), which is a DIFFERENT fact and gets different words. */
+  monitorReadError?: string | null;
   /** Shared busy gate (a mutation is in flight): automation Run buttons
    *  disable while it lasts, exactly like the controller's own gate. */
   busy?: boolean;
@@ -513,13 +518,24 @@ export function BotResponsibilityCard({
                 Monitors
               </h3>
               <Badge variant="secondary">
-                {monitorCount} watching
+                {monitors === null ? "unknown" : `${monitorCount} watching`}
               </Badge>
             </div>
-            {monitors === null ? (
+            {monitors === null && monitorReadError ? (
+              // The read really ran and really failed. Say why, in the
+              // daemon's own words: "the bridge does not expose monitors"
+              // was wrong about both the cause and the capability.
+              <p
+                className="rounded-lg border border-dashed border-destructive/50 px-3 py-3 text-xs text-destructive"
+                role="status"
+                data-testid={`bot-monitors-error-${bot.id}`}
+              >
+                Could not read this Bot&apos;s monitors: {monitorReadError}
+              </p>
+            ) : monitors === null ? (
               <p className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                Monitor details are unavailable in this session — the daemon
-                bridge does not expose the monitor read.
+                Monitor details are unavailable in this session — this view
+                has no monitor data source.
               </p>
             ) : monitors.length ? (
               monitors.map((monitor) => (

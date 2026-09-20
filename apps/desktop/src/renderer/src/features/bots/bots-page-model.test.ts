@@ -365,7 +365,7 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
     ).toBe("github_pr.v1");
   });
 
-  it("renders the SOURCE cell per kind: repo + case, path, script, sealed URL", () => {
+  it("renders the SOURCE cell per kind: repo + collection + case, path, script, sealed URL", () => {
     expect(
       monitorSourceLabel({
         ruleKind: "github_pr.v1",
@@ -373,14 +373,52 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
         filter: "assigned",
         login: "clioo",
       } as never),
-    ).toBe("clioo/drogon · case: assigned (clioo)");
+    ).toBe("clioo/drogon · pull requests, case: assigned (clioo)");
     expect(
       monitorSourceLabel({
         ruleKind: "github_pr.v1",
         repo: "clioo/drogon",
         filter: "opened",
       } as never),
-    ).toBe("clioo/drogon · case: opened");
+    ).toBe("clioo/drogon · pull requests, case: opened");
+    // The collection is part of the source: an ISSUE watch and a PULL
+    // REQUEST watch on the same repository with the same filter must never
+    // render the same line.
+    expect(
+      monitorSourceLabel({
+        ruleKind: "github_issue.v1",
+        repo: "clioo/drogon",
+        filter: "opened",
+      } as never),
+    ).toBe("clioo/drogon · issues, case: opened");
+    expect(
+      monitorSourceLabel({
+        ruleKind: "github_issue.v1",
+        repo: "clioo/drogon",
+        filter: "assigned",
+        login: "clioo",
+      } as never),
+    ).toBe("clioo/drogon · issues, case: assigned (clioo)");
+    expect(
+      monitorSourceLabel({
+        ruleKind: "github_issue.v1",
+        repo: "clioo/drogon",
+        filter: "opened",
+      } as never),
+    ).not.toBe(
+      monitorSourceLabel({
+        ruleKind: "github_pr.v1",
+        repo: "clioo/drogon",
+        filter: "opened",
+      } as never),
+    );
+    // An issue watch is titled by its repository too, never the bare kind.
+    expect(
+      monitorTitle({
+        ruleKind: "github_issue.v1",
+        repo: "clioo/drogon",
+      } as never),
+    ).toBe("clioo/drogon");
     expect(
       monitorSourceLabel({ ruleKind: "local_file_digest.v1", resource: "notes/a.md" } as never),
     ).toBe("notes/a.md");

@@ -36,6 +36,16 @@
 //!   only admitted v2 interpreter is `GhApi`; `Bun`/`Python3` are reserved
 //!   for a reviewed v3 addition.
 //!
+//! v4 adds the issue sibling of that case: `github_issue.v1`, "an issue was
+//! opened (or assigned to me)". It is a separate variant rather than a flag
+//! on `github_pr.v1` so every already-approved pull-request rule keeps its
+//! exact canonical bytes and stays armed. It carries the same fields, the
+//! same id-like constraints and the same reference-only credential, and it
+//! shares one evaluator with the pull-request watch (`super::github`), so
+//! the two can never drift on dedupe or on seeding. GitHub's issues
+//! endpoint also returns pull requests; the evaluator drops those, so an
+//! issue watch never fires for a PR.
+//!
 //! The caller reads file bytes / runs the interpreter (bounded, with its
 //! own timeout) outside any DB lock; this module only validates the rule
 //! shape and derives the approval hash.
@@ -51,11 +61,17 @@ pub const RULE_KIND_SCRIPT_COMMAND: &str = "script_command.v1";
 pub const RULE_KIND_HTTP_POLL: &str = "http_poll.v1";
 /// GitHub pull-request watch rule kind (v3).
 pub const RULE_KIND_GITHUB_PR: &str = "github_pr.v1";
+/// GitHub issue watch rule kind (v4).
+pub const RULE_KIND_GITHUB_ISSUE: &str = "github_issue.v1";
 /// Rule kinds evaluated by the producer in this build. Schema-admitted kinds
 /// without an evaluator remain readable but are never runnable.
-pub const EVALUATED_RULE_KINDS: &[&str] = &[RULE_KIND_LOCAL_FILE_DIGEST, RULE_KIND_GITHUB_PR];
+pub const EVALUATED_RULE_KINDS: &[&str] = &[
+    RULE_KIND_LOCAL_FILE_DIGEST,
+    RULE_KIND_GITHUB_PR,
+    RULE_KIND_GITHUB_ISSUE,
+];
 /// Schema version of the rule shape itself.
-pub const RULE_SCHEMA_VERSION: u32 = 3;
+pub const RULE_SCHEMA_VERSION: u32 = 4;
 /// Longest admitted scope/path string in bytes (host, project, resource).
 pub const MAX_SCOPE_STRING_BYTES: usize = 1024;
 /// Hard ceiling for any monitored file read in bytes (256 KiB).
@@ -99,7 +115,8 @@ pub const MAX_CASE_SKILLS: usize = 16;
 pub const MAX_LOGIN_BYTES: usize = 39;
 /// Default GitHub REST base when the rule names none.
 pub const DEFAULT_GITHUB_API_BASE: &str = "https://api.github.com";
-/// How many pull requests one poll reads (GitHub's own page ceiling).
+/// How many pull requests (or issues) one poll reads — GitHub's own page
+/// ceiling, shared by both GitHub watch kinds.
 pub const GITHUB_PULLS_PER_PAGE: u16 = 100;
 
 /// A single watched file, project-relative. `max_bytes` is the monitor
@@ -311,6 +328,73 @@ pub struct GithubPrRule {
     pub skills: Vec<String>,
 }
 
+/// Which open issues a `github_issue.v1` watch considers "for me". Applied
+/// to the `assignees` array of GitHub's own issue list, so a rule needs one
+/// endpoint and no search query language — exactly like [`GithubPrFilter`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GithubIssueFilter {
+    /// Any open issue in the repository (the reported case: "watch this
+    /// repo for new issues").
+    Opened,
+    /// Open issues assigned to `login`.
+    Assigned,
+}
+
+impl GithubIssueFilter {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Opened => "opened",
+            Self::Assigned => "assigned",
+        }
+    }
+
+    /// Parses the wire spelling; `None` for an unknown tag (refused, never
+    /// guessed).
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "opened" => Some(Self::Opened),
+            "assigned" => Some(Self::Assigned),
+            _ => None,
+        }
+    }
+
+    /// Whether this filter needs a login to compare against.
+    pub fn requires_login(&self) -> bool {
+        !matches!(self, Self::Opened)
+    }
+}
+
+/// A GitHub issue watch: the issue sibling of [`GithubPrRule`], with the
+/// same scope, the same reference-only credential, the same bounds and the
+/// same per-case dispatch choices. Kept a separate struct (rather than a
+/// `target` flag on the pull-request rule) so every already-approved
+/// `github_pr.v1` record keeps its exact canonical bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubIssueRule {
+    pub host_id: String,
+    pub project_id: String,
+    /// `owner/name`.
+    pub repo: String,
+    pub filter: GithubIssueFilter,
+    /// The GitHub login this watch is for. Required unless `filter` is
+    /// `opened` (an unfiltered watch compares against nothing).
+    pub login: Option<String>,
+    /// REST base; `None` means [`DEFAULT_GITHUB_API_BASE`].
+    pub api_base: Option<String>,
+    pub timeout_ms: u64,
+    pub max_body_bytes: u64,
+    pub secret_refs: Vec<String>,
+    /// Harness the released session must run. `None` leaves the choice to
+    /// the Bot's own harness policy.
+    pub harness: Option<String>,
+    /// Skills the released session must use. Ids only — rendered into the
+    /// delegation prompt, so the alphabet is constrained, never free text.
+    #[serde(default)]
+    pub skills: Vec<String>,
+}
+
 /// The rule enum. `local_file_digest.v1` is byte-stable; the v2 and v3
 /// variants are additive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,6 +408,8 @@ pub enum MonitorRule {
     HttpPoll(HttpPollRule),
     #[serde(rename = "github_pr.v1")]
     GithubPr(GithubPrRule),
+    #[serde(rename = "github_issue.v1")]
+    GithubIssue(GithubIssueRule),
 }
 
 impl MonitorRule {
@@ -333,6 +419,7 @@ impl MonitorRule {
             Self::ScriptCommand(_) => RULE_KIND_SCRIPT_COMMAND,
             Self::HttpPoll(_) => RULE_KIND_HTTP_POLL,
             Self::GithubPr(_) => RULE_KIND_GITHUB_PR,
+            Self::GithubIssue(_) => RULE_KIND_GITHUB_ISSUE,
         }
     }
 
@@ -364,6 +451,13 @@ impl MonitorRule {
         }
     }
 
+    pub fn github_issue(&self) -> Option<&GithubIssueRule> {
+        match self {
+            Self::GithubIssue(inner) => Some(inner),
+            _ => None,
+        }
+    }
+
     /// The server-resolved `(host_id, project_id)` scope common to every
     /// kind. Scope resolution must never assume the file variant.
     pub fn scope(&self) -> (&str, &str) {
@@ -372,6 +466,7 @@ impl MonitorRule {
             Self::ScriptCommand(inner) => (&inner.host_id, &inner.project_id),
             Self::HttpPoll(inner) => (&inner.host_id, &inner.project_id),
             Self::GithubPr(inner) => (&inner.host_id, &inner.project_id),
+            Self::GithubIssue(inner) => (&inner.host_id, &inner.project_id),
         }
     }
 
@@ -389,6 +484,7 @@ impl MonitorRule {
             ),
             Self::HttpPoll(inner) => (None, Vec::new(), inner.secret_refs.clone()),
             Self::GithubPr(inner) => (None, Vec::new(), inner.secret_refs.clone()),
+            Self::GithubIssue(inner) => (None, Vec::new(), inner.secret_refs.clone()),
         }
     }
 
@@ -440,6 +536,20 @@ impl MonitorRule {
                 "cursorSpec": inner.cursor_spec,
                 "secretRefs": inner.secret_refs,
             }),
+            Self::GithubIssue(inner) => json!({
+                "ruleKind": RULE_KIND_GITHUB_ISSUE,
+                "hostId": inner.host_id,
+                "projectId": inner.project_id,
+                "repo": inner.repo,
+                "filter": inner.filter.as_str(),
+                "login": inner.login,
+                "apiBase": inner.api_base,
+                "timeoutMs": inner.timeout_ms,
+                "maxBodyBytes": inner.max_body_bytes,
+                "secretRefs": inner.secret_refs,
+                "caseHarness": inner.harness,
+                "caseSkills": inner.skills,
+            }),
             Self::GithubPr(inner) => json!({
                 "ruleKind": RULE_KIND_GITHUB_PR,
                 "hostId": inner.host_id,
@@ -460,8 +570,15 @@ impl MonitorRule {
     /// The effective REST base for a GitHub watch (the rule's own, or the
     /// public API).
     pub fn github_api_base(&self) -> Option<&str> {
-        self.github_pr()
-            .map(|inner| inner.api_base.as_deref().unwrap_or(DEFAULT_GITHUB_API_BASE))
+        match self {
+            Self::GithubPr(inner) => {
+                Some(inner.api_base.as_deref().unwrap_or(DEFAULT_GITHUB_API_BASE))
+            }
+            Self::GithubIssue(inner) => {
+                Some(inner.api_base.as_deref().unwrap_or(DEFAULT_GITHUB_API_BASE))
+            }
+            _ => None,
+        }
     }
 }
 
@@ -628,8 +745,61 @@ fn is_id_like(value: &str, allowed: &[u8]) -> bool {
         })
 }
 
+/// The fields both GitHub watch kinds share, borrowed for one validation
+/// pass. Extracting them keeps `github_pr.v1` and `github_issue.v1` under
+/// ONE set of bounds: a rule that would be refused as a PR watch is refused
+/// as an issue watch for the same reason and in the same words.
+struct GithubWatchFields<'a> {
+    host_id: &'a str,
+    project_id: &'a str,
+    repo: &'a str,
+    filter_name: &'a str,
+    requires_login: bool,
+    login: Option<&'a String>,
+    api_base: Option<&'a String>,
+    timeout_ms: u64,
+    max_body_bytes: u64,
+    secret_refs: &'a [String],
+    harness: Option<&'a String>,
+    skills: &'a [String],
+}
+
 fn validate_github_pr_rule(inner: &GithubPrRule) -> Result<(), String> {
-    validate_scope(&inner.host_id, &inner.project_id)?;
+    validate_github_watch(&GithubWatchFields {
+        host_id: &inner.host_id,
+        project_id: &inner.project_id,
+        repo: &inner.repo,
+        filter_name: inner.filter.as_str(),
+        requires_login: inner.filter.requires_login(),
+        login: inner.login.as_ref(),
+        api_base: inner.api_base.as_ref(),
+        timeout_ms: inner.timeout_ms,
+        max_body_bytes: inner.max_body_bytes,
+        secret_refs: &inner.secret_refs,
+        harness: inner.harness.as_ref(),
+        skills: &inner.skills,
+    })
+}
+
+fn validate_github_issue_rule(inner: &GithubIssueRule) -> Result<(), String> {
+    validate_github_watch(&GithubWatchFields {
+        host_id: &inner.host_id,
+        project_id: &inner.project_id,
+        repo: &inner.repo,
+        filter_name: inner.filter.as_str(),
+        requires_login: inner.filter.requires_login(),
+        login: inner.login.as_ref(),
+        api_base: inner.api_base.as_ref(),
+        timeout_ms: inner.timeout_ms,
+        max_body_bytes: inner.max_body_bytes,
+        secret_refs: &inner.secret_refs,
+        harness: inner.harness.as_ref(),
+        skills: &inner.skills,
+    })
+}
+
+fn validate_github_watch(inner: &GithubWatchFields<'_>) -> Result<(), String> {
+    validate_scope(inner.host_id, inner.project_id)?;
     if inner.repo.len() > MAX_REPO_BYTES {
         return Err(format!("repo must be at most {MAX_REPO_BYTES} bytes"));
     }
@@ -641,13 +811,13 @@ fn validate_github_pr_rule(inner: &GithubPrRule) -> Result<(), String> {
     {
         return Err("repo must be the 'owner/name' slug of a GitHub repository".to_string());
     }
-    if inner.filter.requires_login() && inner.login.is_none() {
+    if inner.requires_login && inner.login.is_none() {
         return Err(format!(
             "login is required for the {} filter",
-            inner.filter.as_str()
+            inner.filter_name
         ));
     }
-    if let Some(login) = &inner.login {
+    if let Some(login) = inner.login {
         let shaped = !login.is_empty()
             && login.len() <= MAX_LOGIN_BYTES
             && login
@@ -660,7 +830,7 @@ fn validate_github_pr_rule(inner: &GithubPrRule) -> Result<(), String> {
             );
         }
     }
-    if let Some(api_base) = &inner.api_base {
+    if let Some(api_base) = inner.api_base {
         if api_base.len() > MAX_API_BASE_BYTES {
             return Err(format!(
                 "apiBase must be at most {MAX_API_BASE_BYTES} bytes"
@@ -690,8 +860,8 @@ fn validate_github_pr_rule(inner: &GithubPrRule) -> Result<(), String> {
             inner.max_body_bytes
         ));
     }
-    validate_secret_refs(&inner.secret_refs)?;
-    if let Some(harness) = &inner.harness
+    validate_secret_refs(inner.secret_refs)?;
+    if let Some(harness) = inner.harness
         && (harness.len() > MAX_HARNESS_BYTES || !is_id_like(harness, &[]))
     {
         return Err(
@@ -702,7 +872,7 @@ fn validate_github_pr_rule(inner: &GithubPrRule) -> Result<(), String> {
     if inner.skills.len() > MAX_CASE_SKILLS {
         return Err(format!("at most {MAX_CASE_SKILLS} skills"));
     }
-    for skill in &inner.skills {
+    for skill in inner.skills {
         if skill.len() > MAX_SKILL_NAME_BYTES || !is_id_like(skill, &[]) {
             return Err(format!(
                 "skill {skill:?} must be an id-like name (letters, digits, '_', '-', '.') of 1..={MAX_SKILL_NAME_BYTES} bytes"
@@ -749,6 +919,7 @@ pub fn validate_rule(rule: &MonitorRule) -> Result<(), String> {
         MonitorRule::ScriptCommand(inner) => validate_script_rule(inner),
         MonitorRule::HttpPoll(inner) => validate_http_poll_rule(inner),
         MonitorRule::GithubPr(inner) => validate_github_pr_rule(inner),
+        MonitorRule::GithubIssue(inner) => validate_github_issue_rule(inner),
     }
 }
 
@@ -826,6 +997,97 @@ pub fn github_pr_rule_from_wire(
     Ok(rule)
 }
 
+/// Build a `github_issue.v1` rule from an open wire object. Same mapping,
+/// same defaults and the same server-resolved scope as
+/// [`github_pr_rule_from_wire`] — only the filter vocabulary differs, since
+/// an issue has no review request.
+pub fn github_issue_rule_from_wire(
+    host_id: &str,
+    project_id: &str,
+    params: &serde_json::Map<String, serde_json::Value>,
+) -> Result<GithubIssueRule, String> {
+    let common = github_watch_wire_fields(RULE_KIND_GITHUB_ISSUE, params)?;
+    let filter = GithubIssueFilter::parse(&common.filter_tag)
+        .ok_or_else(|| format!("unknown filter {:?}; opened|assigned", common.filter_tag))?;
+    let rule = GithubIssueRule {
+        host_id: host_id.to_string(),
+        project_id: project_id.to_string(),
+        repo: common.repo,
+        filter,
+        login: common.login,
+        api_base: common.api_base,
+        timeout_ms: common.timeout_ms,
+        max_body_bytes: common.max_body_bytes,
+        secret_refs: common.secret_refs,
+        harness: common.harness,
+        skills: common.skills,
+    };
+    validate_github_issue_rule(&rule)?;
+    Ok(rule)
+}
+
+/// The wire fields both GitHub watch kinds read, parsed once. The filter is
+/// returned as its raw tag because the two kinds admit different vocabularies.
+struct GithubWatchWire {
+    repo: String,
+    filter_tag: String,
+    login: Option<String>,
+    api_base: Option<String>,
+    timeout_ms: u64,
+    max_body_bytes: u64,
+    secret_refs: Vec<String>,
+    harness: Option<String>,
+    skills: Vec<String>,
+}
+
+fn github_watch_wire_fields(
+    kind: &str,
+    params: &serde_json::Map<String, serde_json::Value>,
+) -> Result<GithubWatchWire, String> {
+    use serde_json::Value;
+    let text = |key: &str| -> Option<String> {
+        params
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let names = |key: &str, what: &str| -> Result<Vec<String>, String> {
+        match params.get(key) {
+            None | Some(Value::Null) => Ok(Vec::new()),
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|item| {
+                    item.as_str()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                        .ok_or_else(|| format!("{key} must be an array of {what}"))
+                })
+                .collect(),
+            Some(_) => Err(format!("{key} must be an array of {what}")),
+        }
+    };
+    Ok(GithubWatchWire {
+        repo: text("repo").ok_or_else(|| format!("repo is required for {kind} (owner/name)"))?,
+        filter_tag: text("filter").unwrap_or_else(|| "opened".to_string()),
+        login: text("login"),
+        api_base: text("apiBase"),
+        timeout_ms: params
+            .get("timeoutMs")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_HTTP_TIMEOUT_MS),
+        max_body_bytes: params
+            .get("maxBodyBytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_HTTP_BODY_BYTES),
+        secret_refs: names("secretRefs", "bare names")?,
+        harness: text("harness"),
+        skills: names("skills", "non-empty names")?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -869,7 +1131,7 @@ mod tests {
     fn accepts_scoped_relative_file_and_reports_kind() {
         let rule = file_rule();
         assert_eq!(rule.kind_str(), RULE_KIND_LOCAL_FILE_DIGEST);
-        assert_eq!(RULE_SCHEMA_VERSION, 3);
+        assert_eq!(RULE_SCHEMA_VERSION, 4);
         assert!(validate_rule(&rule).is_ok());
     }
 
@@ -1259,9 +1521,204 @@ mod tests {
         assert_eq!(view["filter"], "assigned");
         assert_eq!(view["caseHarness"], "codex");
         assert_eq!(view["caseSkills"][0], "drogon-cli");
-        assert_eq!(RULE_SCHEMA_VERSION, 3);
+        assert_eq!(RULE_SCHEMA_VERSION, 4);
         let wire = serde_json::to_string(&rule).unwrap();
         assert_eq!(serde_json::from_str::<MonitorRule>(&wire).unwrap(), rule);
+    }
+
+    /// Compatibility proof for the v4 bump: adding `github_issue.v1` is
+    /// ADDITIVE, so an already-approved pull-request rule's canonical bytes
+    /// (and therefore its approval hash) are unchanged and it never re-parks.
+    #[test]
+    fn github_pr_canonical_bytes_are_frozen_across_the_issue_kind_bump() {
+        let expected = concat!(
+            r#"{"kind":"github_pr.v1","hostId":"host-1","projectId":"proj-1","#,
+            r#""repo":"clioo/drogon","filter":"assigned","login":"clioo","apiBase":null,"#,
+            r#""timeoutMs":30000,"maxBodyBytes":65536,"secretRefs":["GITHUB_TOKEN_REF"],"#,
+            r#""harness":"codex","skills":["drogon-cli"]}"#
+        );
+        assert_eq!(
+            String::from_utf8(github_rule().canonical_bytes()).unwrap(),
+            expected
+        );
+    }
+
+    fn mutate_issue(base: &MonitorRule, f: impl FnOnce(&mut GithubIssueRule)) -> MonitorRule {
+        let MonitorRule::GithubIssue(mut inner) = base.clone() else {
+            unreachable!()
+        };
+        f(&mut inner);
+        MonitorRule::GithubIssue(inner)
+    }
+
+    fn github_issue_rule() -> MonitorRule {
+        MonitorRule::GithubIssue(GithubIssueRule {
+            host_id: "host-1".to_string(),
+            project_id: "proj-1".to_string(),
+            repo: "clioo/drogon".to_string(),
+            filter: GithubIssueFilter::Opened,
+            login: None,
+            api_base: None,
+            timeout_ms: DEFAULT_HTTP_TIMEOUT_MS,
+            max_body_bytes: DEFAULT_HTTP_BODY_BYTES,
+            secret_refs: vec!["GITHUB_TOKEN_REF".to_string()],
+            harness: Some("codex".to_string()),
+            skills: vec!["drogon-cli".to_string()],
+        })
+    }
+
+    #[test]
+    fn github_issue_rule_validates_and_reports_its_case() {
+        let rule = github_issue_rule();
+        assert_eq!(rule.kind_str(), RULE_KIND_GITHUB_ISSUE);
+        assert_eq!(rule.scope(), ("host-1", "proj-1"));
+        assert!(validate_rule(&rule).is_ok());
+        assert_eq!(rule.record_mirror().2, vec!["GITHUB_TOKEN_REF".to_string()]);
+        assert_eq!(rule.github_api_base(), Some(DEFAULT_GITHUB_API_BASE));
+        assert!(
+            rule.github_pr().is_none(),
+            "an issue rule is not a pull-request rule"
+        );
+        assert!(rule.github_issue().is_some());
+        let view = rule.summary_json();
+        assert_eq!(view["ruleKind"], "github_issue.v1");
+        assert_eq!(view["repo"], "clioo/drogon");
+        assert_eq!(view["filter"], "opened");
+        assert_eq!(view["caseHarness"], "codex");
+        assert_eq!(view["caseSkills"][0], "drogon-cli");
+        // The kind has an evaluator, so it is runnable and never parks as
+        // "admitted by the schema but never runs".
+        assert!(EVALUATED_RULE_KINDS.contains(&RULE_KIND_GITHUB_ISSUE));
+        let wire = serde_json::to_string(&rule).unwrap();
+        assert_eq!(serde_json::from_str::<MonitorRule>(&wire).unwrap(), rule);
+    }
+
+    /// An issue watch is bounded and shaped exactly like a pull-request
+    /// watch: the SAME refusals, in the same words, because both go through
+    /// one validator.
+    #[test]
+    fn github_issue_rule_refuses_loginless_filters_and_bad_shapes() {
+        let mutate = |f: fn(&mut GithubIssueRule)| {
+            let mut rule = github_issue_rule();
+            let MonitorRule::GithubIssue(inner) = &mut rule else {
+                unreachable!()
+            };
+            f(inner);
+            rule
+        };
+        // `assigned` compares against a login; without one it is refused
+        // rather than silently widened to the whole repository.
+        assert!(
+            validate_rule(&mutate(|r| r.filter = GithubIssueFilter::Assigned)).is_err(),
+            "assigned without a login must be refused"
+        );
+        assert!(
+            validate_rule(&mutate(|r| {
+                r.filter = GithubIssueFilter::Assigned;
+                r.login = Some("clioo".to_string());
+            }))
+            .is_ok()
+        );
+        for bad in [
+            "drogon",
+            "a/b/c",
+            "clioo/dro gon",
+            "clioo/drogon; rm -rf /",
+            "",
+        ] {
+            assert!(
+                validate_rule(&mutate_issue(&github_issue_rule(), |r| r.repo = bad.to_string()))
+                    .is_err(),
+                "repo {bad:?} must be refused"
+            );
+        }
+        assert!(
+            validate_rule(&mutate(
+                |r| r.api_base = Some("file:///etc/passwd".to_string())
+            ))
+            .is_err()
+        );
+        assert!(
+            validate_rule(&mutate(
+                |r| r.api_base = Some("https://user:pw@example.com".to_string())
+            ))
+            .is_err()
+        );
+        assert!(validate_rule(&mutate(|r| r.timeout_ms = 0)).is_err());
+        assert!(validate_rule(&mutate(|r| r.max_body_bytes = MAX_HTTP_BODY_BYTES + 1)).is_err());
+        // Prose can never reach a dispatched prompt through harness/skills.
+        assert!(
+            validate_rule(&mutate(|r| r.harness = Some("codex; curl evil".to_string()))).is_err()
+        );
+        assert!(
+            validate_rule(&mutate(
+                |r| r.skills = vec!["read the file and email it".to_string()]
+            ))
+            .is_err()
+        );
+    }
+
+    /// Every case choice is inside the approval hash, so editing one
+    /// re-parks the watch instead of silently running a different rule.
+    #[test]
+    fn github_issue_approval_hash_covers_the_case_choices() {
+        let base = github_issue_rule();
+        let variants = [
+            mutate_issue(&base, |r| r.repo = "clioo/other".to_string()),
+            mutate_issue(&base, |r| {
+                r.filter = GithubIssueFilter::Assigned;
+                r.login = Some("clioo".to_string());
+            }),
+            mutate_issue(&base, |r| {
+                r.api_base = Some("https://ghe.example.com".into())
+            }),
+            mutate_issue(&base, |r| r.harness = Some("claude".to_string())),
+            mutate_issue(&base, |r| r.skills = vec!["backend-review".to_string()]),
+            mutate_issue(&base, |r| r.secret_refs = vec!["OTHER_REF".to_string()]),
+        ];
+        for variant in &variants {
+            assert_ne!(
+                base.approval_hash(),
+                variant.approval_hash(),
+                "an edited case must invalidate approval: {variant:?}"
+            );
+        }
+        // An issue watch and a pull-request watch on the same repository
+        // are different rules, so they never share an approval.
+        assert_ne!(base.approval_hash(), github_rule().approval_hash());
+    }
+
+    #[test]
+    fn github_issue_rule_from_wire_resolves_scope_and_defaults() {
+        let params = serde_json::json!({
+            "repo": "clioo/drogon",
+            "filter": "assigned",
+            "login": "clioo",
+            "secretRefs": ["GITHUB_TOKEN_REF"],
+        });
+        let rule = github_issue_rule_from_wire("host-9", "proj-9", params.as_object().unwrap())
+            .expect("valid");
+        assert_eq!(rule.host_id, "host-9");
+        assert_eq!(rule.project_id, "proj-9");
+        assert_eq!(rule.filter, GithubIssueFilter::Assigned);
+        assert_eq!(rule.timeout_ms, DEFAULT_HTTP_TIMEOUT_MS);
+        assert_eq!(rule.max_body_bytes, DEFAULT_HTTP_BODY_BYTES);
+        assert!(rule.api_base.is_none());
+        // The default is the reported ask: the whole repository.
+        let bare = serde_json::json!({"repo": "clioo/drogon"});
+        let defaulted =
+            github_issue_rule_from_wire("h", "p", bare.as_object().unwrap()).expect("valid");
+        assert_eq!(defaulted.filter, GithubIssueFilter::Opened);
+        // A pull-request-only filter has no issue spelling and is refused,
+        // never silently downgraded to `opened`.
+        let reviewy = serde_json::json!(
+            {"repo": "clioo/drogon", "filter": "review_requested", "login": "clioo"}
+        );
+        assert!(github_issue_rule_from_wire("h", "p", reviewy.as_object().unwrap()).is_err());
+        let bogus = serde_json::json!({"repo": "clioo/drogon", "filter": "mine"});
+        assert!(github_issue_rule_from_wire("h", "p", bogus.as_object().unwrap()).is_err());
+        let repoless = serde_json::json!({"filter": "opened"});
+        assert!(github_issue_rule_from_wire("h", "p", repoless.as_object().unwrap()).is_err());
     }
 
     #[test]

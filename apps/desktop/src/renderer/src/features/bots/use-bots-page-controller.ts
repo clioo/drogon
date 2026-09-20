@@ -108,6 +108,9 @@ export type BotsPageControllerDeps = {
   }) => Promise<{
     ok: boolean;
     result?: { monitors: BotMonitorView[]; workspaceId: string };
+    /** Why the read failed, when it did. Surfaced verbatim: a failed
+     *  read and an absent bridge are different facts. */
+    error?: { message: string };
   }>;
   /** Parked-watch approval (the redesigned MONITORS column's real
    *  affordance): arms the monitor's CURRENT rule text through the
@@ -185,6 +188,13 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     string,
     BotMonitorView[]
   > | null>(null);
+  // Why a bot's monitor read produced nothing, keyed by bot id. A failed
+  // read is NOT the same as an absent bridge, and conflating the two is
+  // what made a contract mismatch look like "monitors are not exposed at
+  // all" (#608). The reason is the daemon's own, never invented here.
+  const [monitorReadErrorByBotId, setMonitorReadErrorByBotId] = useState<
+    Record<string, string>
+  >({});
   // Per-bot card expansion. Unset means "the design's default": configured
   // bots render expanded, bots with nothing configured render as the
   // compact collapsed row. Explicit toggles win over the default and are
@@ -268,16 +278,34 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
         }),
       );
       const nextMonitors: Record<string, BotMonitorView[]> = {};
+      const nextErrors: Record<string, string> = {};
       let sawSource = false;
-      for (const result of results) {
-        if (result.status !== "fulfilled") continue;
+      for (const [index, result] of results.entries()) {
+        const bot = bots[index];
+        if (result.status !== "fulfilled") {
+          // The bridge call itself threw (no IPC handler, a serialization
+          // failure). That is a real failure with a real reason — record
+          // it instead of dropping the bot silently.
+          if (bot) nextErrors[bot.id] = errorMessage(result.reason);
+          continue;
+        }
         sawSource = true;
         const { botId, listed } = result.value;
         if (listed.ok && listed.result) {
           nextMonitors[botId] = listed.result.monitors;
+        } else {
+          nextErrors[botId] =
+            listed.error?.message ?? "The monitor read failed.";
         }
       }
-      if (!cancelled && sawSource) setMonitorsByBotId(nextMonitors);
+      if (cancelled) return;
+      setMonitorReadErrorByBotId(nextErrors);
+      // Any settled call at all means the source exists: from here the
+      // column distinguishes "no rows" from "this bot's read failed",
+      // instead of reporting both as a missing bridge.
+      if (sawSource || Object.keys(nextErrors).length > 0) {
+        setMonitorsByBotId(nextMonitors);
+      }
     })();
     return () => {
       cancelled = true;
@@ -776,6 +804,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     approveMonitor,
     automationSummaries,
     monitorsByBotId,
+    monitorReadErrorByBotId,
     expandedOverrides,
     toggleExpanded,
     filterQuery,

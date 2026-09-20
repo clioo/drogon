@@ -414,14 +414,20 @@ export const botMonitorListResultSchema = z.object({
         firing: z
           .object({
             lastEventId: z.string(),
-            lastOutcome: z.enum([
-              "dispatched",
-              "joined_existing",
-              "refused",
-              "orphaned",
-              "cap_exceeded",
-              "stale_skipped",
-            ]),
+            // NOT an enum, on purpose. The daemon owns this vocabulary
+            // (`FIRING_OUTCOMES` in crates/drogon-core/src/bots/
+            // delegation.rs) and grew `dispatch_failed` after this schema
+            // was written. Because the WHOLE bot.monitor_list result is
+            // validated here before the renderer sees it, one unknown token
+            // failed the entire read for that bot — and the Bots page
+            // reported that as "the daemon bridge does not expose the
+            // monitor read". A bounded token keeps the read alive; the view
+            // model labels the known set and shows anything else verbatim.
+            lastOutcome: z
+              .string()
+              .min(1)
+              .max(64)
+              .regex(/^[a-z][a-z0-9_]*$/u),
             lastRunId: z.string().nullable(),
             lastDetail: z.string().nullable(),
             // The released case's own resource (`pull/42` for a

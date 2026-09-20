@@ -61,7 +61,7 @@ use crate::automations::runner::{
 };
 use crate::automations::storage as automations_storage;
 use crate::bots::monitors::{
-    MonitorRecord, policy::MonitorInferencePolicy, storage as monitor_storage,
+    MonitorRecord, MonitorRule, policy::MonitorInferencePolicy, storage as monitor_storage,
 };
 use crate::bots::policy as bots_policy;
 use crate::bots::records::{
@@ -438,6 +438,34 @@ fn outbox_table_exists(conn: &Connection) -> bool {
 
 /// Terminal-verdict buckets for [`settle_event`]. Each maps to the
 /// durable firing outcome string the monitor surfaces read back.
+/// A session was really admitted for this event.
+pub const FIRING_OUTCOME_DISPATCHED: &str = "dispatched";
+/// `harness.start` refused: NO session was admitted. A distinct verdict on
+/// purpose — evidence a human reads must never make a refusal look like a
+/// dispatch that worked.
+pub const FIRING_OUTCOME_DISPATCH_FAILED: &str = "dispatch_failed";
+
+/// Every verdict this build can write to `bot_monitor_firings.outcome`,
+/// and therefore every value `bot.monitor_list` can project as
+/// `firing.lastOutcome`.
+///
+/// This list is the contract the Bots page's monitor read is validated
+/// against. Adding a verdict WITHOUT adding it to the consumer's schema
+/// made the whole monitor read fail for that bot — the panel then claimed
+/// the bridge did not expose monitors at all. Keep the two in lockstep
+/// (`apps/desktop/src/shared/bot-validation.ts`), and keep the consumer
+/// tolerant of an unknown token so the next addition degrades to one
+/// unlabelled cell instead of erasing the column.
+pub const FIRING_OUTCOMES: &[&str] = &[
+    FIRING_OUTCOME_DISPATCHED,
+    FIRING_OUTCOME_DISPATCH_FAILED,
+    "joined_existing",
+    "refused",
+    "orphaned",
+    "cap_exceeded",
+    "stale_skipped",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeleteBucket {
     Orphaned,
@@ -786,12 +814,13 @@ pub fn worktree_name_for_event(event_id: &str) -> String {
     format!("deleg-{hex}")
 }
 
-/// Deterministic worktree name for a pull-request case. The case is the
-/// (repository, pull number) pair — NOT the pull number alone — so two
-/// different repositories sharing a PR number never collapse into one
-/// worktree, and a redelivered event for the same case reuses the name
-/// instead of creating a second worktree.
-pub fn worktree_name_for_pr_case(pull_number: u64, repo: &str) -> String {
+/// Deterministic worktree name for a GitHub case. The case is the
+/// (repository, kind, number) triple — NOT the number alone — so two
+/// different repositories sharing a number never collapse into one
+/// worktree, issue #42 never collides with pull request #42, and a
+/// redelivered event for the same case reuses the name instead of
+/// creating a second worktree.
+pub fn worktree_name_for_github_case(case: GithubCase, repo: &str) -> String {
     let slug: String = repo
         .chars()
         .map(|c| {
@@ -802,7 +831,17 @@ pub fn worktree_name_for_pr_case(pull_number: u64, repo: &str) -> String {
             }
         })
         .collect();
-    format!("review-pr-{pull_number}-{slug}")
+    // `review-pr-<n>-<slug>` is the name pull-request cases have always
+    // used; keeping it verbatim means an in-flight PR delivery still finds
+    // the worktree an earlier build created for it.
+    match case.target {
+        crate::bots::monitors::github::GithubTarget::Pulls => {
+            format!("review-pr-{}-{slug}", case.number)
+        }
+        crate::bots::monitors::github::GithubTarget::Issues => {
+            format!("issue-{}-{slug}", case.number)
+        }
+    }
 }
 
 /// The idempotency identity of one delegation: the CASE when the event is
@@ -814,10 +853,12 @@ pub fn worktree_name_for_pr_case(pull_number: u64, repo: &str) -> String {
 pub fn delegation_identity(
     event: &DelegationEvent,
     case_repo: Option<&str>,
-    case_pull_number: Option<u64>,
+    case: Option<GithubCase>,
 ) -> String {
-    match (case_repo, case_pull_number) {
-        (Some(repo), Some(number)) => format!("pr-case:{repo}:{number}"),
+    match (case_repo, case) {
+        // The namespace keeps pull request #42 and issue #42 in the same
+        // repository apart: they are two cases, two worktrees, two runs.
+        (Some(repo), Some(case)) => format!("{}-case:{repo}:{}", case.kind(), case.number),
         _ => event.event_id.clone(),
     }
 }
@@ -840,6 +881,45 @@ pub fn delegation_request_id(
         responsibility_id,
         event_id,
     )
+}
+
+/// The GitHub case one released event is about: which collection it came
+/// from and which number. Derived from the event's own `resource`
+/// (`pull/42`, `issue/42`), so it is a number and a kind — never watched
+/// content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GithubCase {
+    pub target: crate::bots::monitors::github::GithubTarget,
+    pub number: u64,
+}
+
+impl GithubCase {
+    /// The case's own resource, as the event spells it.
+    fn kind(self) -> &'static str {
+        self.target.resource_prefix()
+    }
+
+    /// The case in words for the delegation prompt ("pull request", "issue").
+    fn noun(self) -> &'static str {
+        match self.target {
+            crate::bots::monitors::github::GithubTarget::Pulls => "pull request",
+            crate::bots::monitors::github::GithubTarget::Issues => "issue",
+        }
+    }
+
+    /// The `gh` subcommand a released session uses to read this case.
+    fn gh_hint(self, number: u64) -> String {
+        match self.target {
+            crate::bots::monitors::github::GithubTarget::Pulls => format!(
+                "bring it into the worktree (`gh pr checkout {number}` from inside it) or \
+                 read its diff with `gh pr diff {number}`"
+            ),
+            crate::bots::monitors::github::GithubTarget::Issues => format!(
+                "read it in full with `gh issue view {number}` (add `--comments` for the \
+                 discussion)"
+            ),
+        }
+    }
 }
 
 /// Input to the delegation prompt. Note what is NOT here: there is no
@@ -870,11 +950,11 @@ pub struct DelegationPromptInput<'a> {
     pub case_harness: Option<&'a str>,
     /// Skills the released session must use (already id-like).
     pub case_skills: &'a [String],
-    /// The pull request this case is about, when the watch is a
-    /// `github_pr.v1` one.
-    pub case_pull_number: Option<u64>,
-    /// The GitHub repository the case's pull request lives in (`owner/name`,
-    /// id-like and inside the rule's approval hash).
+    /// The pull request or issue this case is about, when the watch is a
+    /// `github_pr.v1` / `github_issue.v1` one.
+    pub case_github: Option<GithubCase>,
+    /// The GitHub repository the case lives in (`owner/name`, id-like and
+    /// inside the rule's approval hash).
     pub case_repo: Option<&'a str>,
 }
 
@@ -890,20 +970,23 @@ pub fn build_delegation_prompt(input: &DelegationPromptInput) -> String {
     } else {
         instructions.to_string()
     };
-    // What the case is. A `github_pr.v1` watch carries `pull/<n>` as its
-    // resource; the number is a number, never watched bytes.
-    let case_line = match input.case_pull_number {
-        Some(number) => format!(
-            "- case: pull request #{number} in {repo} — the change to review\n",
+    // What the case is. A GitHub watch carries `pull/<n>` or `issue/<n>` as
+    // its resource; the number is a number, never watched bytes.
+    let case_line = match input.case_github {
+        Some(case) => format!(
+            "- case: {noun} #{number} in {repo} — what this session is about\n",
+            noun = case.noun(),
+            number = case.number,
             repo = input.case_repo.unwrap_or(&event.project_id)
         ),
         None => String::new(),
     };
-    let pull_note = match input.case_pull_number {
-        Some(number) => format!(
-            "   This case is pull request #{number}: bring it into the worktree \
-             (`gh pr checkout {number}` from inside it) or read its diff with \
-             `gh pr diff {number}` before you dispatch the review.\n"
+    let case_note = match input.case_github {
+        Some(case) => format!(
+            "   This case is {noun} #{number}: {hint} before you dispatch the work.\n",
+            noun = case.noun(),
+            number = case.number,
+            hint = case.gh_hint(case.number),
         ),
         None => String::new(),
     };
@@ -939,7 +1022,7 @@ pub fn build_delegation_prompt(input: &DelegationPromptInput) -> String {
          derived from the event id, so a redelivered event reuses it instead of \
          creating a second worktree. If it already exists from an earlier delivery \
          of this event, reuse it.\n\
-         {pull_note}\
+         {case_note}\
          2. Read `drogon-cli graph read --workspace <id> --json`. Prepare the graph's \
          intent and a main-node JSON file in that worktree. The main node needs id, title, \
          harness ({harness_flag}), an explicitly selected model, prompt, enabled:true, and \
@@ -1326,26 +1409,37 @@ fn drain_single_event<S: DispatchSeam>(
         }
     };
     // The case fields come from the monitor rule (approval-hashed) when
-    // the watch is a `github_pr.v1` one; a file watch has none. Computed
-    // once, BEFORE the idempotency check, because the case is the dedupe
-    // identity: two watches releasing the same PR must land on the same
-    // run-row id and join instead of racing for one worktree name.
-    let github_case = monitor.rule.github_pr();
-    let case_repo = github_case.map(|rule| rule.repo.as_str());
-    let case_harness = github_case.and_then(|rule| rule.harness.as_deref());
-    let case_skills: &[String] = github_case
-        .map(|rule| rule.skills.as_slice())
-        .unwrap_or(&[]);
-    let case_pull_number = github_case
-        .and_then(|_| crate::bots::monitors::github::pull_number_from_resource(&event.resource));
-    let identity = delegation_identity(event, case_repo, case_pull_number);
-    // A pull-request case is keyed BY THE CASE (repository + PR number):
-    // one bot, one PR, one review session — whatever watch (and whatever
-    // binding) released it, the second release joins the first run and
-    // says so in its firing evidence. The run row itself still records
-    // the dispatching event's own responsibility, and the joined event's
-    // history names the exact run it joined.
-    let is_pr_case = case_repo.is_some() && case_pull_number.is_some();
+    // the watch is a `github_pr.v1` / `github_issue.v1` one; a file watch
+    // has none. Computed once, BEFORE the idempotency check, because the
+    // case is the dedupe identity: two watches releasing the same PR (or
+    // the same issue) must land on the same run-row id and join instead of
+    // racing for one worktree name.
+    let (case_repo, case_harness, case_skills): (Option<&str>, Option<&str>, &[String]) =
+        match &monitor.rule {
+            MonitorRule::GithubPr(rule) => (
+                Some(rule.repo.as_str()),
+                rule.harness.as_deref(),
+                rule.skills.as_slice(),
+            ),
+            MonitorRule::GithubIssue(rule) => (
+                Some(rule.repo.as_str()),
+                rule.harness.as_deref(),
+                rule.skills.as_slice(),
+            ),
+            _ => (None, None, &[]),
+        };
+    let case_github = case_repo.and_then(|_| {
+        crate::bots::monitors::github::case_from_resource(&event.resource)
+            .map(|(target, number)| GithubCase { target, number })
+    });
+    let identity = delegation_identity(event, case_repo, case_github);
+    // A GitHub case is keyed BY THE CASE (repository + kind + number): one
+    // bot, one pull request (or one issue), one session — whatever watch
+    // (and whatever binding) released it, the second release joins the
+    // first run and says so in its firing evidence. The run row itself
+    // still records the dispatching event's own responsibility, and the
+    // joined event's history names the exact run it joined.
+    let is_pr_case = case_repo.is_some() && case_github.is_some();
     // Owning bot gone (deleted after firing): orphan, delete — recorded
     // so the monitor's history shows the honest refusal.
     let bot_id = match event.bot_id.clone().or(monitor.bot_id.clone()) {
@@ -1711,14 +1805,14 @@ fn drain_single_event<S: DispatchSeam>(
         headless: true,
     };
     // The case's own dispatch choices come from the monitor rule (approval-
-    // hashed) when the watch is a `github_pr.v1` one; a file watch has none
-    // and keeps today's wording exactly. (The values were computed before
-    // the idempotency check — the case IS the dedupe identity.)
-    // A pull-request case names its worktree after the case (PR number AND
-    // repository): two different repos sharing a PR number never collapse
+    // hashed) when the watch is a GitHub one; a file watch has none and
+    // keeps today's wording exactly. (The values were computed before the
+    // idempotency check — the case IS the dedupe identity.)
+    // A GitHub case names its worktree after the case (kind, number AND
+    // repository): two different repos sharing a number never collapse
     // into one worktree, and a redelivery reuses the exact name.
-    let worktree_name = match (case_repo, case_pull_number) {
-        (Some(repo), Some(number)) => worktree_name_for_pr_case(number, repo),
+    let worktree_name = match (case_repo, case_github) {
+        (Some(repo), Some(case)) => worktree_name_for_github_case(case, repo),
         _ => worktree_name_for_event(&event.event_id),
     };
     let operating = crate::bots::prompt::build_operating_prompt(
@@ -1734,7 +1828,7 @@ fn drain_single_event<S: DispatchSeam>(
             max_per_day: MAX_DELEGATIONS_PER_BOT_PER_DAY,
             case_harness,
             case_skills,
-            case_pull_number,
+            case_github,
             case_repo,
         }),
     );
@@ -1757,20 +1851,20 @@ fn drain_single_event<S: DispatchSeam>(
     // `dispatched`, with the observation failure kept as its detail.
     let (firing_outcome, dispatch_detail) = match &outcome {
         RunnerOutcome::DispatchFailed(error) => (
-            "dispatch_failed",
+            FIRING_OUTCOME_DISPATCH_FAILED,
             Some(format!(
                 "harness.start refused: {}: {}",
                 error.code, error.message
             )),
         ),
         RunnerOutcome::ObservationFailed { error, .. } => (
-            "dispatched",
+            FIRING_OUTCOME_DISPATCHED,
             Some(format!(
                 "session started; observation failed: {}: {}",
                 error.code, error.message
             )),
         ),
-        RunnerOutcome::Observed { .. } => ("dispatched", None),
+        RunnerOutcome::Observed { .. } => (FIRING_OUTCOME_DISPATCHED, None),
     };
     // Claim = delete, in the SAME transaction as the run row, the firing
     // evidence, and the cap bump: all four commit together or none do.
@@ -1814,7 +1908,7 @@ fn drain_single_event<S: DispatchSeam>(
     })();
     match record {
         Ok(()) => {
-            if firing_outcome == "dispatch_failed" {
+            if firing_outcome == FIRING_OUTCOME_DISPATCH_FAILED {
                 eprintln!(
                     "[delegation] {} {}",
                     event.event_id,
@@ -1831,5 +1925,162 @@ fn drain_single_event<S: DispatchSeam>(
             eprintln!("[delegation] record failed: {e}");
             summary.failed += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bots::monitors::github::GithubTarget;
+
+    fn event(resource: &str) -> DelegationEvent {
+        DelegationEvent {
+            event_id: "mev_abc".into(),
+            monitor_id: "mon-1".into(),
+            monitor_version: 1,
+            cursor: "v1:00".into(),
+            host_id: "host-1".into(),
+            project_id: "proj-1".into(),
+            resource: resource.into(),
+            bot_id: Some("bot-1".into()),
+            observed_at_ms: 1_000.0,
+        }
+    }
+
+    /// Every verdict the drain can persist must be in [`FIRING_OUTCOMES`].
+    /// The desktop's monitor read is validated against exactly this list;
+    /// a verdict missing from it made the WHOLE read fail for that bot (the
+    /// Bots page then reported the monitor bridge as unavailable), so the
+    /// producing side pins its own set here.
+    #[test]
+    fn every_producible_firing_outcome_is_declared() {
+        for bucket in [
+            DeleteBucket::Orphaned,
+            DeleteBucket::Refused,
+            DeleteBucket::JoinedExisting,
+            DeleteBucket::CapExceeded,
+            DeleteBucket::StaleSkipped,
+        ] {
+            assert!(
+                FIRING_OUTCOMES.contains(&bucket.outcome_str()),
+                "{bucket:?} writes an outcome the contract does not declare"
+            );
+        }
+        for dispatch_outcome in [FIRING_OUTCOME_DISPATCHED, FIRING_OUTCOME_DISPATCH_FAILED] {
+            assert!(FIRING_OUTCOMES.contains(&dispatch_outcome));
+        }
+        assert_eq!(
+            FIRING_OUTCOMES.len(),
+            7,
+            "a new verdict needs the desktop contract updated with it \
+             (apps/desktop/src/shared/bot-validation.ts)"
+        );
+        // A refused dispatch is never spelled like a successful one.
+        assert_ne!(FIRING_OUTCOME_DISPATCH_FAILED, FIRING_OUTCOME_DISPATCHED);
+    }
+
+    /// Two GitHub cases are the same case only when repository, kind AND
+    /// number all match: issue #42 must never join pull request #42's run
+    /// or steal its worktree.
+    #[test]
+    fn a_github_case_identity_separates_issues_from_pull_requests() {
+        let pull = GithubCase {
+            target: GithubTarget::Pulls,
+            number: 42,
+        };
+        let issue = GithubCase {
+            target: GithubTarget::Issues,
+            number: 42,
+        };
+        let pull_event = event("pull/42");
+        let issue_event = event("issue/42");
+        let repo = Some("clioo/drogon");
+        assert_eq!(
+            delegation_identity(&pull_event, repo, Some(pull)),
+            "pull-case:clioo/drogon:42"
+        );
+        assert_eq!(
+            delegation_identity(&issue_event, repo, Some(issue)),
+            "issue-case:clioo/drogon:42"
+        );
+        assert_ne!(
+            delegation_identity(&pull_event, repo, Some(pull)),
+            delegation_identity(&issue_event, repo, Some(issue)),
+        );
+        assert_ne!(
+            worktree_name_for_github_case(pull, "clioo/drogon"),
+            worktree_name_for_github_case(issue, "clioo/drogon"),
+        );
+        // The pull-request worktree name is unchanged from earlier builds,
+        // so a delivery in flight across an upgrade still finds its tree.
+        assert_eq!(
+            worktree_name_for_github_case(pull, "clioo/drogon"),
+            "review-pr-42-clioo-drogon"
+        );
+        // A repository sharing a number is still a different case.
+        assert_ne!(
+            delegation_identity(&issue_event, Some("other/repo"), Some(issue)),
+            delegation_identity(&issue_event, repo, Some(issue)),
+        );
+        // Without a GitHub case the identity is the event id, as before.
+        assert_eq!(
+            delegation_identity(&event("notes/status.md"), None, None),
+            "mev_abc"
+        );
+    }
+
+    /// The prompt names the case in the words of its kind and hands the
+    /// session the right `gh` command — never "review this pull request"
+    /// for an issue.
+    #[test]
+    fn the_prompt_names_the_case_by_its_kind() {
+        let issue_event = event("issue/42");
+        let prompt = build_delegation_prompt(&DelegationPromptInput {
+            event: &issue_event,
+            project_id: "proj-1",
+            project_path: "/tmp/proj",
+            responsibility_name: "Triage new issues",
+            responsibility_instructions: "Reproduce, then fix.",
+            worktree_name: "issue-42-clioo-drogon",
+            used_today: 1,
+            max_per_day: 20,
+            case_harness: Some("codex"),
+            case_skills: &[],
+            case_github: Some(GithubCase {
+                target: GithubTarget::Issues,
+                number: 42,
+            }),
+            case_repo: Some("clioo/drogon"),
+        });
+        assert!(prompt.contains("issue #42 in clioo/drogon"), "{prompt}");
+        assert!(prompt.contains("gh issue view 42"), "{prompt}");
+        assert!(
+            !prompt.contains("gh pr diff"),
+            "an issue case must not be told to read a diff: {prompt}"
+        );
+
+        let pull_prompt = build_delegation_prompt(&DelegationPromptInput {
+            event: &event("pull/42"),
+            project_id: "proj-1",
+            project_path: "/tmp/proj",
+            responsibility_name: "Review assigned pull requests",
+            responsibility_instructions: "Read the diff.",
+            worktree_name: "review-pr-42-clioo-drogon",
+            used_today: 1,
+            max_per_day: 20,
+            case_harness: Some("codex"),
+            case_skills: &[],
+            case_github: Some(GithubCase {
+                target: GithubTarget::Pulls,
+                number: 42,
+            }),
+            case_repo: Some("clioo/drogon"),
+        });
+        assert!(
+            pull_prompt.contains("pull request #42 in clioo/drogon"),
+            "{pull_prompt}"
+        );
+        assert!(pull_prompt.contains("gh pr checkout 42"), "{pull_prompt}");
+        assert!(!pull_prompt.contains("gh issue view"), "{pull_prompt}");
     }
 }

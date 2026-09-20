@@ -60,7 +60,7 @@ describe("BotMonitorCardItem", () => {
     // case — and the SOURCE cell names the case.
     expect(screen.getByText("clioo/drogon")).toBeTruthy();
     expect(
-      screen.getByText("clioo/drogon · case: assigned (clioo)"),
+      screen.getByText("clioo/drogon · pull requests, case: assigned (clioo)"),
     ).toBeTruthy();
     // The very build that ships the kind must never disown it.
     expect(screen.queryByText(/Unsupported rule kind/)).toBeNull();

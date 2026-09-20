@@ -77,9 +77,9 @@ use crate::bots::monitors::record::{
 use crate::bots::monitors::result::{MonitorCheckResult, MonitorErrorKind, MonitorOutcome};
 use crate::bots::monitors::rule::{
     DEFAULT_HTTP_BODY_BYTES, DEFAULT_HTTP_TIMEOUT_MS, DEFAULT_SCRIPT_OUTPUT_BYTES,
-    DEFAULT_SCRIPT_TIMEOUT_MS, GithubPrRule, HttpCursorSpec, HttpPollRule, LocalFileRule,
-    MAX_FILE_BYTES, MAX_HTTP_BODY_BYTES, MAX_HTTP_TIMEOUT_MS, MAX_SCRIPT_OUTPUT_BYTES,
-    MAX_SCRIPT_TIMEOUT_MS, MonitorRule, ScriptInterpreter, ScriptRule,
+    DEFAULT_SCRIPT_TIMEOUT_MS, HttpCursorSpec, HttpPollRule, LocalFileRule, MAX_FILE_BYTES,
+    MAX_HTTP_BODY_BYTES, MAX_HTTP_TIMEOUT_MS, MAX_SCRIPT_OUTPUT_BYTES, MAX_SCRIPT_TIMEOUT_MS,
+    MonitorRule, ScriptInterpreter, ScriptRule,
 };
 use crate::bots::monitors::storage as monitor_storage;
 use crate::bots::monitors::{backoff_ms, should_admit};
@@ -825,7 +825,7 @@ impl MonitorHealth {
 fn has_evaluator(rule: &MonitorRule) -> bool {
     matches!(
         rule,
-        MonitorRule::LocalFileDigest(_) | MonitorRule::GithubPr(_)
+        MonitorRule::LocalFileDigest(_) | MonitorRule::GithubPr(_) | MonitorRule::GithubIssue(_)
     )
 }
 
@@ -1117,10 +1117,10 @@ pub struct MonitorTickSummary {
     pub retired: usize,
 }
 
-/// How many `github_pr.v1` watches one tick may read over the network. A
-/// hostile or slow API can then never let one crowded table stall the tick
-/// (the leftover watches are read by the next tick; the rule's own timeout
-/// bounds each read).
+/// How many GitHub watches (`github_pr.v1` + `github_issue.v1`) one tick
+/// may read over the network. A hostile or slow API can then never let one
+/// crowded table stall the tick (the leftover watches are read by the next
+/// tick; the rule's own timeout bounds each read).
 pub const MAX_GITHUB_POLLS_PER_TICK: usize = 4;
 
 /// Integration kind whose sealed store holds GitHub tokens. The rule names
@@ -1199,9 +1199,9 @@ pub fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSumm
                 summary.skipped += 1;
                 continue;
             }
-            // `github_pr.v1` has its own evaluator (Phase D below).
-            if let Some(github_rule) = record.rule.github_pr() {
-                if github_rule.host_id != engine.host_id {
+            // Both GitHub kinds share the network evaluator (Phase D below).
+            if let Some((github_host_id, _)) = github_scope_of(&record.rule) {
+                if github_host_id != engine.host_id {
                     summary.refused += 1;
                     continue;
                 }
@@ -1423,7 +1423,7 @@ pub fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSumm
             }
         }
     }
-    // Phase D: GitHub pull-request watches. Each one reads over the network
+    // Phase D: GitHub pull-request and issue watches. Each one reads over the network
     // with no DB lock held, then commits cursor + seen set + check-in (+ the
     // outbox event when a pull request is released) in ONE transaction.
     // Bounded per tick so a slow API can never stall the scheduler.
@@ -1443,9 +1443,30 @@ pub fn tick_bot_monitors(engine: &crate::Engine, now_ms: f64) -> MonitorTickSumm
     summary
 }
 
-/// One `github_pr.v1` watch through its whole tick: resolve the token,
-/// read the pull list, decide, commit. Never holds the DB lock across the
-/// network read; a failure is an honest check-in that retains the cursor.
+/// The `(host_id, project_id)` scope of a GitHub watch of either kind, or
+/// `None` when the rule is not a GitHub watch at all. One accessor so the
+/// tick can never admit one kind and forget the other.
+fn github_scope_of(rule: &MonitorRule) -> Option<(&str, &str)> {
+    match rule {
+        MonitorRule::GithubPr(inner) => Some((&inner.host_id, &inner.project_id)),
+        MonitorRule::GithubIssue(inner) => Some((&inner.host_id, &inner.project_id)),
+        _ => None,
+    }
+}
+
+/// The secret references a GitHub watch of either kind names.
+fn github_secret_refs_of(rule: &MonitorRule) -> &[String] {
+    match rule {
+        MonitorRule::GithubPr(inner) => &inner.secret_refs,
+        MonitorRule::GithubIssue(inner) => &inner.secret_refs,
+        _ => &[],
+    }
+}
+
+/// One GitHub watch through its whole tick — pull requests or issues, one
+/// path: resolve the token, read the list, decide, commit. Never holds the
+/// DB lock across the network read; a failure is an honest check-in that
+/// retains the cursor.
 fn tick_github_monitor(
     engine: &crate::Engine,
     record: &MonitorRecord,
@@ -1453,16 +1474,25 @@ fn tick_github_monitor(
     now_ms: f64,
     summary: &mut MonitorTickSummary,
 ) {
-    let Some(rule) = record.rule.github_pr().cloned() else {
-        summary.skipped += 1;
-        return;
-    };
+    // The rule is cloned so the borrowed `GithubWatch` view below outlives
+    // every DB lock this function takes.
+    let rule = record.rule.clone();
+    let (watch, host_id, project_id): (crate::bots::monitors::github::GithubWatch<'_>, &str, &str) =
+        match &rule {
+            MonitorRule::GithubPr(inner) => (inner.into(), &inner.host_id, &inner.project_id),
+            MonitorRule::GithubIssue(inner) => (inner.into(), &inner.host_id, &inner.project_id),
+            _ => {
+                summary.skipped += 1;
+                return;
+            }
+        };
     summary.evaluated += 1;
     // Resolve the token (grant-checked inside the caller's transaction) and
     // the persisted seen set, then release the lock before any IO.
     let (token, seen) = {
         let conn = engine.db.lock().unwrap();
-        let token = match resolve_github_token(engine, &conn, record, &rule) {
+        let token = match resolve_github_token(engine, &conn, record, github_secret_refs_of(&rule))
+        {
             Ok(token) => token,
             Err((kind, message)) => {
                 drop(conn);
@@ -1482,7 +1512,7 @@ fn tick_github_monitor(
         expected_interval_ms: monitor_cron_interval_ms(record),
     };
     let outcome = crate::bots::monitors::github::evaluate_with_token(
-        &rule,
+        &watch,
         &persisted,
         token.as_deref(),
         now_ms,
@@ -1529,8 +1559,8 @@ fn tick_github_monitor(
             };
             let decision = crate::bots::monitors::commit::decide_commit(
                 &state,
-                &rule.host_id,
-                &rule.project_id,
+                host_id,
+                project_id,
                 &resource,
                 record.bot_id.as_deref(),
                 &result,
@@ -1677,9 +1707,9 @@ fn resolve_github_token(
     engine: &crate::Engine,
     conn: &Connection,
     record: &MonitorRecord,
-    rule: &GithubPrRule,
+    secret_refs: &[String],
 ) -> std::result::Result<Option<String>, (MonitorErrorKind, String)> {
-    if rule.secret_refs.is_empty() {
+    if secret_refs.is_empty() {
         return Ok(None);
     }
     let Some(bot_id) = record.bot_id.as_deref() else {
@@ -1699,7 +1729,7 @@ fn resolve_github_token(
         .unchecked_transaction()
         .map_err(|e| (MonitorErrorKind::IoError, format!("grant read failed: {e}")))?;
     let resolved =
-        crate::integrations::resolve::resolve_for_bot_in_tx(&tx, &store, bot_id, &rule.secret_refs);
+        crate::integrations::resolve::resolve_for_bot_in_tx(&tx, &store, bot_id, secret_refs);
     match resolved {
         Ok(values) => Ok(values.into_iter().next().map(|(_, value)| value)),
         Err(error) => {
