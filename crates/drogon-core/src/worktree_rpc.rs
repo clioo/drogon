@@ -11,7 +11,7 @@
 //! output cap, kill+reap) rather than duplicating that machinery.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use drogon_protocol::RpcError;
@@ -384,7 +384,11 @@ fn recovery_after_failed_git_remove(force: bool, still_registered: Option<bool>)
 /// guard that keeps a forced delete off the primary worktree, which git
 /// refuses with "is a main working tree". A path that is already gone is a
 /// success; the caller's next step is dropping the rows either way.
-fn delete_checkout_directory(project_path: &Path, worktree_path: &Path) -> Result<(), RpcError> {
+fn delete_checkout_directory(
+    project_path: &Path,
+    worktree_path: &Path,
+    other_checkouts: &[String],
+) -> Result<(), RpcError> {
     if !worktree_path.is_absolute() {
         return Err(error::invalid_argument(format!(
             "refusing to delete \"{}\": the recorded workspace path is not absolute",
@@ -417,9 +421,8 @@ fn delete_checkout_directory(project_path: &Path, worktree_path: &Path) -> Resul
             worktree_path.display()
         )));
     };
-    let target = std::fs::canonicalize(parent)
-        .unwrap_or_else(|_| parent.to_path_buf())
-        .join(name);
+    let resolved_parent = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+    let target = resolved_parent.join(name);
     let project =
         std::fs::canonicalize(project_path).unwrap_or_else(|_| project_path.to_path_buf());
     if project == target || project.starts_with(&target) {
@@ -428,8 +431,26 @@ fn delete_checkout_directory(project_path: &Path, worktree_path: &Path) -> Resul
             target.display()
         )));
     }
+    // Another workspace's checkout sitting inside this one would go with it
+    // while its own row survived, pointing at nothing: one card's delete
+    // silently destroying another card's work. `worktree.create` takes a name
+    // containing a separator, so this nesting needs no tampering to reach.
+    if let Some(nested) = other_checkouts.iter().find(|other| {
+        let raw = Path::new(other.as_str()).to_path_buf();
+        let canonical = PathBuf::from(canonical_or_raw(other));
+        (raw != target && raw.starts_with(&target))
+            || (canonical != target && canonical.starts_with(&target))
+    }) {
+        return Err(error::invalid_argument(format!(
+            "refusing to delete \"{}\": the workspace at \"{nested}\" is inside it. Delete that one first.",
+            target.display()
+        )));
+    }
     let metadata = match std::fs::symlink_metadata(&target) {
         Ok(metadata) => metadata,
+        // A path that is already gone is a success: the caller's next step is
+        // dropping the rows either way, and refusing here would stand a
+        // workspace back up that nothing can reach -- which is what #604 was.
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(err) => {
             return Err(error::io_error(format!(
@@ -475,6 +496,7 @@ fn remove_worktree_checkout(
     project_path: &Path,
     worktree_path: &str,
     force: bool,
+    other_checkouts: &[String],
 ) -> Result<(), RpcError> {
     let argv = git_worktree_remove_argv(worktree_path, force);
     // Git itself refuses a dirty worktree without --force; this call
@@ -493,7 +515,7 @@ fn remove_worktree_checkout(
             "git no longer registers a working tree at \"{worktree_path}\", so it cannot remove it. Use Force to delete the leftover directory and clear this workspace."
         ))),
         RemoveRecovery::DeleteCheckoutDirectory => {
-            delete_checkout_directory(project_path, Path::new(worktree_path))?;
+            delete_checkout_directory(project_path, Path::new(worktree_path), other_checkouts)?;
             // The directory is gone, but git may still hold the admin entry
             // that made `remove` refuse, and the name stays taken until that
             // entry goes. Retrying the same scoped remove retires exactly
@@ -1408,12 +1430,32 @@ impl Engine {
             return self.remove_implicit_folder_worktree(&id);
         };
 
+        // Every other registered checkout, so the delete below can refuse to
+        // take one of them down with this one (they nest -- see
+        // `delete_checkout_directory`).
+        let other_checkouts: Vec<String> = {
+            let conn = self.db.lock().unwrap();
+            let mut stmt = conn
+                .prepare("SELECT path FROM worktrees WHERE id != ?1")
+                .map_err(error::from_sqlite)?;
+            let paths = stmt
+                .query_map([&id], |r| r.get::<_, String>(0))
+                .map_err(error::from_sqlite)?;
+            paths
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(error::from_sqlite)?
+        };
         // A folder Workspace section (issue #579) has no git worktree to
         // remove — its path is the folder itself, shared with the project.
         // Removing it only unregisters this Workspace row; the folder and
         // its files are never touched.
         if project_kind != "folder" {
-            remove_worktree_checkout(Path::new(&project_path), &worktree_path, force)?;
+            remove_worktree_checkout(
+                Path::new(&project_path),
+                &worktree_path,
+                force,
+                &other_checkouts,
+            )?;
         }
 
         let conn = self.db.lock().unwrap();
@@ -1674,20 +1716,20 @@ mod tests {
         std::fs::create_dir(&project).unwrap();
 
         assert_eq!(
-            delete_checkout_directory(&project, Path::new("workspaces/x"))
+            delete_checkout_directory(&project, Path::new("workspaces/x"), &[])
                 .unwrap_err()
                 .code,
             "invalid_argument"
         );
         assert_eq!(
-            delete_checkout_directory(&project, &project)
+            delete_checkout_directory(&project, &project, &[])
                 .unwrap_err()
                 .code,
             "invalid_argument",
             "the project checkout is never the orphan"
         );
         assert_eq!(
-            delete_checkout_directory(&project, root.path())
+            delete_checkout_directory(&project, root.path(), &[])
                 .unwrap_err()
                 .code,
             "invalid_argument",
@@ -1705,9 +1747,9 @@ mod tests {
         std::fs::create_dir_all(orphan.join("nested")).unwrap();
         std::fs::write(orphan.join("nested/file.txt"), "work").unwrap();
 
-        delete_checkout_directory(&project, &orphan).unwrap();
+        delete_checkout_directory(&project, &orphan, &[]).unwrap();
         assert!(!orphan.exists());
-        delete_checkout_directory(&project, &orphan)
+        delete_checkout_directory(&project, &orphan, &[])
             .expect("a path that is already gone is a success, not a failure");
     }
 
@@ -1721,7 +1763,7 @@ mod tests {
         std::fs::create_dir(&project).unwrap();
         std::fs::write(&stray, "left behind").unwrap();
 
-        delete_checkout_directory(&project, &stray).unwrap();
+        delete_checkout_directory(&project, &stray, &[]).unwrap();
         assert!(!stray.exists());
     }
 
@@ -1736,7 +1778,7 @@ mod tests {
         std::fs::write(elsewhere.join("keep.txt"), "not this workspace's").unwrap();
         std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
 
-        delete_checkout_directory(&project, &link).unwrap();
+        delete_checkout_directory(&project, &link, &[]).unwrap();
         assert!(!link.exists(), "the link itself is removed");
         assert!(
             elsewhere.join("keep.txt").exists(),

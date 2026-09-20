@@ -527,10 +527,11 @@ fn worktree_remove_refuses_a_dirty_checkout_unless_forced() {
     )
     .unwrap();
 
-    assert_eq!(
-        err_code(&engine, "worktree.remove", "w2", json!({"id": id})),
-        "io_error",
-        "git worktree remove refuses a dirty checkout without --force"
+    let refusal = err_message(&engine, "worktree.remove", "w2", json!({"id": id}));
+    assert!(
+        refusal.contains("use --force to delete it"),
+        "git worktree remove refuses a dirty checkout without --force, in its \
+         own words -- got: {refusal}"
     );
     ok(
         &engine,
@@ -1067,6 +1068,78 @@ fn folder_workspace_remove_carries_project_removes_file_semantics() {
         !Path::new(&scratch).exists(),
         "the app-owned scratch goes, exactly as project.remove documents"
     );
+}
+
+#[test]
+fn worktree_remove_refuses_to_take_a_nested_workspace_down_with_it() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let outer = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "outer"}),
+    );
+    // A name may carry a separator, so one workspace's checkout can sit
+    // inside another's without anyone tampering with the database.
+    let inner = ok(
+        &engine,
+        "worktree.create",
+        "w2",
+        json!({"projectId": project_id, "name": "outer/inner", "branch": "inner-branch"}),
+    );
+    let outer_path = outer["path"].as_str().unwrap().to_string();
+    let inner_path = inner["path"].as_str().unwrap().to_string();
+    assert!(
+        Path::new(&inner_path).starts_with(&outer_path),
+        "precondition: the inner checkout really is inside the outer one"
+    );
+    std::fs::write(Path::new(&inner_path).join("work.txt"), "uncommitted\n").unwrap();
+
+    // Send the outer one down the recovery path, where Drogon deletes the
+    // directory itself: a plain `remove_dir_all` would take the inner
+    // checkout with it and leave the inner row pointing at nothing.
+    std::fs::write(Path::new(&outer_path).join(".git"), "not a gitfile\n").unwrap();
+    let refusal = err_message(
+        &engine,
+        "worktree.remove",
+        "w3",
+        json!({"id": outer["id"], "force": true}),
+    );
+    assert!(
+        refusal.contains("is inside it") && refusal.contains(&inner_path),
+        "the refusal names the workspace that would have been destroyed -- got: {refusal}"
+    );
+    assert!(
+        Path::new(&inner_path).join("work.txt").exists(),
+        "the nested workspace's uncommitted work survives"
+    );
+
+    // Deleting the inner one first is the way through, and then the outer
+    // one goes.
+    ok(
+        &engine,
+        "worktree.remove",
+        "w4",
+        json!({"id": inner["id"], "force": true}),
+    );
+    ok(
+        &engine,
+        "worktree.remove",
+        "w5",
+        json!({"id": outer["id"], "force": true}),
+    );
+    assert!(!Path::new(&outer_path).exists());
 }
 
 // --- Agent state --------------------------------------------------------------
