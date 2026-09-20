@@ -57,43 +57,69 @@ export const TERMINAL_HIDDEN_POLL_MS = 2_000;
 /** Coalescing interval for metadata-only session observations. */
 export const SESSION_UPDATE_MIN_INTERVAL_MS = 500;
 
+/**
+ * One retained seek page. It carries both halves of what a replay needs — the
+ * bytes with the ring range they cover (what `planGridCutWrites` plans
+ * against) and the grid the daemon reported when it answered them (what the
+ * plan changes xterm's grid to) — so a replay feeds them exactly the way a
+ * live read does (#605).
+ */
+export type ReplayTailPage = {
+  bytes: Uint8Array;
+  /** Ring offsets this page's first and last byte sit at. */
+  startCursor: number;
+  nextCursor: number;
+  /** The grid the daemon reported for the session when it answered. */
+  cols: number;
+  rows: number;
+  /** Ring offset that reported grid took effect at, when the daemon says. */
+  gridCursor?: number;
+  /** Every grid change inside these bytes, in order, oldest first. */
+  gridChanges?: readonly { cursor: number; cols: number; rows: number }[];
+  /** True when the daemon had already dropped bytes this page follows. */
+  truncated: boolean;
+};
+
 export type ReplayTailBuffer = {
   /** True when content the daemon retained was (or will be) skipped. */
   readonly dropped: boolean;
-  push: (chunk: Uint8Array, truncated: boolean) => void;
-  /** Empties and returns the retained chunks in write order. */
-  drain: () => Uint8Array[];
+  push: (page: ReplayTailPage) => void;
+  /** Empties and returns the retained pages in write order. */
+  drain: () => ReplayTailPage[];
 };
 
 /**
  * Retains only the newest `limitBytes` of replay pages. Pushing past the
- * limit drops the oldest chunk and marks the replay as dropped (the pane
+ * limit drops the oldest page and marks the replay as dropped (the pane
  * then shows the fork's "[Earlier output is no longer retained]" marker).
+ * The page's own grid report is kept: dropping an older page cannot strip a
+ * later one's cuts, because each page carries the grid in force at its own
+ * first byte.
  */
 export function createReplayTailBuffer(
   limitBytes: number = TERMINAL_REPLAY_TAIL_BYTE_LIMIT,
 ): ReplayTailBuffer {
-  let chunks: Uint8Array[] = [];
+  let pages: ReplayTailPage[] = [];
   let bytes = 0;
   let dropped = false;
   return {
     get dropped() {
       return dropped;
     },
-    push(chunk: Uint8Array, truncated: boolean) {
-      if (truncated) dropped = true;
-      chunks.push(chunk);
-      bytes += chunk.length;
+    push(page: ReplayTailPage) {
+      if (page.truncated) dropped = true;
+      pages.push(page);
+      bytes += page.bytes.length;
       while (bytes > limitBytes) {
-        const oldest = chunks.shift();
+        const oldest = pages.shift();
         if (!oldest) break;
-        bytes -= oldest.length;
+        bytes -= oldest.bytes.length;
         dropped = true;
       }
     },
     drain() {
-      const out = chunks;
-      chunks = [];
+      const out = pages;
+      pages = [];
       bytes = 0;
       return out;
     },
