@@ -1214,20 +1214,17 @@ fn grid_changes_for(handle: &SessionHandle, start: u64, end: u64) -> Value {
         }));
     }
     let mut out = Vec::with_capacity(changes.len() + 1);
-    match in_force {
-        Some(change) => {
-            out.push(json!({ "cursor": start, "cols": change.cols, "rows": change.rows }));
-        }
-        // Eviction dropped every cut at or before `start` (dozens of
-        // resizes with almost no output between them). Name the oldest
-        // grid still remembered, at this page's own first byte, rather
-        // than naming nothing: a reader with no entry parses at whatever
-        // it happens to hold, which no pty ever reported for these bytes.
-        None => {
-            if let Some(oldest) = history.front() {
-                out.push(json!({ "cursor": start, "cols": oldest.cols, "rows": oldest.rows }));
-            }
-        }
+    // When eviction has dropped every cut at or before `start`, there is
+    // nothing truthful to stamp: the oldest grid still remembered took
+    // effect strictly after `start` (every retained cut has cursor >
+    // `start` exactly when this arm runs), so naming it at `start` would
+    // attribute bytes composed before it to a grid the pty did not hold
+    // for them. An empty array keeps the reader on the grid it holds,
+    // which for a contiguous reader is the grid those bytes were composed
+    // at; a reader that jumped here heals on the next page whose `start`
+    // a retained cut covers.
+    if let Some(change) = in_force {
+        out.push(json!({ "cursor": start, "cols": change.cols, "rows": change.rows }));
     }
     out.extend(changes);
     Value::Array(out)

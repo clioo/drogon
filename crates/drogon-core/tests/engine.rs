@@ -1474,13 +1474,18 @@ fn a_read_page_carries_every_grid_it_spans() {
     );
 }
 
-/// #605 iteration 2: the history is bounded (64), so dozens of resizes with
+/// #605 iteration 3: the history is bounded (64), so dozens of resizes with
 /// almost no output between them evict every cut at or before an old page.
-/// The page must still name a grid for its first byte — the oldest one
-/// still remembered — rather than an empty array, which a reader parses at
-/// whatever it happens to hold.
+/// The page must name NO grid rather than stamp the oldest one still
+/// remembered: every retained cut has a cursor strictly after the page's
+/// `start`, so that grid took effect after these bytes were composed — the
+/// daemon's own `resize` documents that the ring's bytes predate the cut.
+/// Stamping it would reflow a contiguous reader (which still holds the
+/// composition grid) onto a wrong width and misparse exactly the bytes this
+/// mechanism exists to protect. An empty array keeps the held grid; the
+/// reader heals on the next page a retained cut covers.
 #[test]
-fn an_evicted_page_still_names_a_grid() {
+fn an_evicted_page_names_no_grid() {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(dir.path()).unwrap();
     let workspace_id = register_workspace(&engine, dir.path(), "ws-evict");
@@ -1527,14 +1532,14 @@ fn an_evicted_page_still_names_a_grid() {
         );
     }
 
-    // A page ending before the surviving pile still carries one entry,
-    // stamped at its own first byte.
+    // A page ending before the surviving pile carries no entry: the pile's
+    // grids all took effect after these bytes, so none of them is this
+    // page's grid. The reader holds the composition grid and heals later.
     let page = read_old("evict-read");
     assert_eq!(page["startCursor"], 0);
     assert_eq!(page["nextCursor"], 3);
     let changes = page["gridChanges"].as_array().unwrap();
-    assert_eq!(changes.len(), 1, "evicted page must still name a grid: {changes:?}");
-    assert_eq!(changes[0]["cursor"], 0);
+    assert_eq!(changes.len(), 0, "evicted page must name no grid: {changes:?}");
 
     ok(
         &engine,
