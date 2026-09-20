@@ -49,7 +49,8 @@ impl RingBuffer {
         }
     }
 
-    #[allow(dead_code)]
+    /// Absolute offset one past the last byte ever written. `session::resize`
+    /// records it as the grid's cut point (#605).
     pub(crate) fn end_cursor(&self) -> u64 {
         self.end_cursor
     }

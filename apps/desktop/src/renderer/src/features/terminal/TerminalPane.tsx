@@ -23,6 +23,7 @@ import { TerminalInputQueue } from "./terminal-input-queue";
 import { preventTerminalBacktabNavigation } from "./terminal-backtab-navigation";
 import { createTerminalShiftEnterHandler } from "./terminal-shift-enter";
 import { createTerminalGeometrySync } from "./terminal-geometry-sync";
+import { planGridCutWrites } from "./terminal-grid-cut";
 import { TerminalKittyKeyboardModeTracker } from "../../../../shared/terminal-kitty-keyboard-mode-tracker";
 import { attachTerminalMouseWheelMultiplier } from "./terminal-tui-wheel";
 import { resolveTerminalJisYenInput } from "./terminal-jis-yen-input";
@@ -665,16 +666,62 @@ export function TerminalPane({
     // explicitly — they are the only path that rebuilds a stale backing
     // store and glyph atlas.
     let geometrySync: ReturnType<typeof createTerminalGeometrySync> | null = null;
+    // Declared here, above the fit path that reads it: whether a live pty
+    // exists decides who owns xterm's grid.
+    let canWrite = session.verdict === "live";
+    // True only while a pty-reported grid is being applied, so xterm's own
+    // resize event cannot feed that grid back as a fresh request and undo a
+    // newer measurement the user has already made.
+    let applyingPtyGrid = false;
+    // The grid the terminal will hold once everything already queued on the
+    // write chain has run. Pages are planned while earlier pages are still
+    // being written, so `terminal.cols` at plan time can be a grid the chain
+    // has already left behind — and planning against it would skip a resize
+    // the stream still needs (a pty that goes A -> B -> A inside one page's
+    // flight) and misparse the bytes after it.
+    let queuedGrid = { cols: terminal.cols, rows: terminal.rows };
+    /**
+     * The one place xterm's grid changes (#605). Every caller is either the
+     * pty's report at its cut point or a pane with no live pty to follow.
+     */
+    const applyTerminalGrid = (grid: { cols: number; rows: number }) => {
+      if (disposed) return;
+      queuedGrid = grid;
+      if (terminal.cols === grid.cols && terminal.rows === grid.rows) return;
+      applyingPtyGrid = true;
+      try {
+        terminal.resize(grid.cols, grid.rows);
+      } catch {
+        // Pane may be mid-teardown; the next report retries.
+      } finally {
+        applyingPtyGrid = false;
+      }
+      repairTerminalWebglBackingStore(terminal);
+    };
+    /**
+     * Measures the container and asks the pty for that grid — it does NOT
+     * resize xterm. The pty owns the grid: an agent computes its
+     * cursor-relative redraws from the size it was told, so a terminal that
+     * re-wraps ahead of the SIGWINCH strands every frame in flight (#605).
+     * xterm follows the pty's report instead, at the byte the pty changed.
+     *
+     * A session with no live pty is the exception: nothing is drawing, so
+     * fitting locally costs nothing and keeps an exited or unverifiable pane
+     * matched to its container.
+     */
     const fitAndSyncTerminal = () => {
       if (disposed || !hasMeasurableTerminalBox(mount)) return;
+      let measured: { cols: number; rows: number } | undefined;
       try {
-        fit.fit();
+        measured = fit.proposeDimensions();
       } catch {
         return;
       }
+      if (!measured) return;
+      if (!canWrite) applyTerminalGrid(measured);
       if (webgl.addon === null) attachWebgl();
       repairTerminalWebglBackingStore(terminal);
-      geometrySync?.request({ cols: terminal.cols, rows: terminal.rows });
+      geometrySync?.request(measured);
     };
     const osc52Handler = createOsc52OscHandler({
       // OSC 52 clipboard defaults on (source gate); queries stay blocked.
@@ -1069,7 +1116,6 @@ export function TerminalPane({
     });
     let cursor = 0;
     let timeout: ReturnType<typeof setTimeout>;
-    let canWrite = session.verdict === "live";
     let lastObserved = session;
     // R16-AT replay pacing: a fresh mount seeks to the live edge, discarding
     // older ring pages without parsing them, and renders only the retained
@@ -1257,7 +1303,14 @@ export function TerminalPane({
         report(message);
       },
     });
-    const resize = terminal.onResize((grid) => geometrySync?.request(grid));
+    // Only a grid xterm reached on its own (a local fit with no live pty)
+    // is a request; echoing back the pty's own report would clobber a newer
+    // measurement the user has already made with a size the pty is about to
+    // leave.
+    const resize = terminal.onResize((grid) => {
+      if (applyingPtyGrid) return;
+      geometrySync?.request(grid);
+    });
     const observer = new ResizeObserver(fitTerminal);
     observer.observe(mount);
     // Reveal is a recovery boundary (fork terminal-visibility-resume): a pane
@@ -1329,11 +1382,10 @@ export function TerminalPane({
         disposeTerminalWebglAddon(webgl.addon);
         webgl.addon = null;
         if (!disposed && hasMeasurableTerminalBox(mount)) {
-          try {
-            fit.fit();
-          } catch {
-            // Container may not have dimensions yet.
-          }
+          // Re-measure through the same path: dropping the GPU renderer
+          // changes the measured cell size, and that is a resize the pty
+          // has to be told about, not one xterm may take by itself (#605).
+          fitAndSyncTerminal();
           refreshViewport();
         }
       },
@@ -1421,6 +1473,16 @@ export function TerminalPane({
             return;
           }
           seeking = false;
+          // The retained tail ends at the live edge, so the grid the daemon
+          // reports now is the one its newest bytes — the agent's live input
+          // zone — were composed for. Adopt it before replaying rather than
+          // re-wrapping them at whatever grid this pane happens to hold
+          // (#605); older rows in the tail are scrollback the agent will
+          // never address again.
+          applyTerminalGrid({
+            cols: value.session.cols,
+            rows: value.session.rows,
+          });
           const dropped = replayTail.dropped;
           const tailChunks = replayTail.drain();
           if (dropped)
@@ -1480,7 +1542,37 @@ export function TerminalPane({
         // Recomputed — not the request's channel: a tab switch mid-hold
         // must not re-arm a push hold for a now-hidden pane.
         scheduleNextRead(channelFor(false), bytes.length === TERMINAL_READ_PAGE_BYTES);
-        await orderedWrite(bytes);
+        // #605: the pty's grid changes at the offsets it reports, so
+        // xterm's changes there too — after the last byte composed for the
+        // old grid and before the first byte composed for the new one. A
+        // page can span more than one change when a drag outruns the read
+        // cadence, and each has to land at its own byte or the bytes
+        // composed at the middle grid are parsed at the wrong width.
+        // Queued through the ordered chain because the next page may
+        // already be arriving.
+        const steps = planGridCutWrites(
+          {
+            startCursor: value.startCursor,
+            nextCursor: value.nextCursor,
+            bytes,
+          },
+          { ...value.session, gridChanges: value.gridChanges },
+          queuedGrid,
+        );
+        // A rejected write is reported by the awaited last step; the ones
+        // before it only have to stay in the chain, never unhandled.
+        for (let index = 0; index < steps.length; index += 1) {
+          const step = steps[index];
+          if (step.kind === "grid") {
+            const grid = step.grid;
+            queuedGrid = grid;
+            void orderedWrite.run(() => applyTerminalGrid(grid)).catch(() => {});
+          } else if (index === steps.length - 1) {
+            await orderedWrite(step.bytes);
+          } else {
+            void orderedWrite(step.bytes).catch(() => {});
+          }
+        }
         if (disposed) return;
       } catch {
         scheduleReadRetry();

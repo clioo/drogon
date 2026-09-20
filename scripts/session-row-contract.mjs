@@ -6,11 +6,21 @@ import assert from "node:assert/strict";
 // the same rule the renderer already applies (`hasForegroundChild?` is
 // optional in `session-contract.ts` / `result-validation.ts`).
 
+// `gridCursor` (issue #605) is dropped rather than defaulted, because it
+// is the only field here that is not comparable across a restart at all.
+// It is an offset into the session's in-memory ring: a live handle reports
+// where its current grid took effect, and the restored row has no ring
+// behind it for that offset to mean anything. Defaulting it to 0 would
+// assert the two are equal when one is simply unanswerable. The live value
+// is pinned where it belongs, against a live handle, in
+// `crates/drogon-core/tests/engine.rs`.
+
 // Normalizes a row for cross-restart comparison: a missing field means
 // the row was restored from a payload that predates it, which the
 // contract reads as idle. A present value is never stripped or coerced.
 export function normalizeSessionRow(row) {
-  return { ...row, hasForegroundChild: row.hasForegroundChild ?? false };
+  const { gridCursor: _ringOffset, ...comparable } = row;
+  return { ...comparable, hasForegroundChild: row.hasForegroundChild ?? false };
 }
 
 export function normalizeSessionRows(rows) {

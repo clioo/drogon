@@ -161,3 +161,40 @@ describe("createOrderedTerminalWriter", () => {
     expect(landed).toEqual(["good"]);
   });
 });
+
+describe("ordered writer run() (#605)", () => {
+  it("runs an action after every byte queued before it, and before the next", async () => {
+    // The terminal's grid change is the action: it must land between the
+    // bytes composed at the old grid and the bytes composed at the new one,
+    // even though the pane arms its next read before the write settles.
+    const landed: string[] = [];
+    const writer = createOrderedTerminalWriter(async (bytes) => {
+      const text = new TextDecoder().decode(bytes);
+      await new Promise((resolve) => setTimeout(resolve, text === "head" ? 30 : 0));
+      landed.push(text);
+    });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    await Promise.all([
+      writer(encode("head")),
+      writer.run(() => landed.push("<resize>")),
+      writer(encode("tail")),
+      writer(encode("next-page")),
+    ]);
+    expect(landed).toEqual(["head", "<resize>", "tail", "next-page"]);
+  });
+
+  it("returns the action's value and does not wedge the chain when it throws", async () => {
+    const landed: string[] = [];
+    const writer = createOrderedTerminalWriter(async (bytes) => {
+      landed.push(new TextDecoder().decode(bytes));
+    });
+    await expect(
+      writer.run(() => {
+        throw new Error("resize failed");
+      }),
+    ).rejects.toThrow("resize failed");
+    expect(await writer.run(() => 7)).toBe(7);
+    await writer(new TextEncoder().encode("after"));
+    expect(landed).toEqual(["after"]);
+  });
+});

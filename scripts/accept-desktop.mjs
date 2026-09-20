@@ -61,6 +61,7 @@ import {
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import { probeSessionNavigation } from "./probe-session-navigation.mjs";
 import { probeTerminalEchoLatency, probeTerminalInputLayout } from "./probe-terminal-input-layout.mjs";
+import { probeTerminalResizeGhost } from "./probe-terminal-resize-ghost.mjs";
 import { installPrivateAcceptanceEnvironment } from "./acceptance-private-environment.mjs";
 import { PI_PROVIDER, PI_MODEL_ID } from "./sealed-model-route.mjs";
 import {
@@ -667,6 +668,11 @@ try {
   assert.ok(original?.incarnation);
   if (process.platform !== "win32") {
     report.checks.push(...await probeTerminalInputLayout({ page, session: original, output, expectedHome: privateEnvironment.home, dataDir }));
+    // #605: an agent TUI redrawing its input zone while the pane is resized
+    // must not strand the frames it already replaced. Shell fixture, no
+    // provider inference — the bug is in the pane/pty grid handshake and is
+    // the same for every harness.
+    report.checks.push(...await probeTerminalResizeGhost({ page, session: original, output }));
     // PERF-01 keystroke -> echo latency (additive): types a unique token
     // per keystroke and polls the xterm buffer via CDP for the echo,
     // reporting p50/p95. Numbers land in terminal-echo-latency.json; the
