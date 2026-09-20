@@ -252,6 +252,19 @@ export async function probeRenderedExitedStubs({
   assertStubRecordsForgotten(await bridgeSessions(page, workspaceId), {
     absentIds: [revivedFromId],
   });
+  // The strip derives from the session list on a later render than the
+  // sessions state above: the revived tab's label can still carry the old
+  // id for a commit after the record is already gone. Wait for the label
+  // to turn over instead of asserting on the first paint — a tab that
+  // never lets go of the forgotten id still fails below, loudly.
+  await page.waitForFunction(
+    (id) =>
+      ![...document.querySelectorAll('[role="tab"]')].some((tab) =>
+        (tab.getAttribute("aria-label") ?? tab.textContent ?? "").includes(id),
+      ),
+    revivedFromId,
+    { timeout: 15000 },
+  );
   assert.equal(
     await page.getByRole("tab", { name: new RegExp(revivedFromId) }).count(),
     0,

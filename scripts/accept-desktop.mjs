@@ -548,10 +548,20 @@ try {
   await folderRowComposer.waitFor({ state: "detached" });
   report.checks.push("folder-project-header-create-control-opens-preselected-composer");
   // New-workspace composer (Projects header "+"): for a folder project
-  // the composer opens the implicit workspace straight away. The project
+  // the composer creates an additional named workspace sharing the folder
+  // path (issue #579 — its own section with its own sessions), not the
+  // implicit workspace the Add Project flow registered. The project
   // picker is the fork's type-ahead combobox; "Blank Terminal" keeps the
   // journey sessionless (the composer auto-picks an available agent, so an
   // explicit blank pick keeps this fixture from launching a real one).
+  // The workspace under test is the one this composer run adds: snapshot
+  // ids first and take the set difference, never workspaces[0] (that is
+  // the older implicit row, whose session list is honestly empty).
+  const workspaceIdsBefore = await page.evaluate(async () => {
+    const response = await window.drogon.workspaces();
+    if (!response.ok) throw new Error(response.error.message);
+    return response.result.workspaces.map((item) => item.id);
+  });
   await page.getByRole("button", { name: "New workspace", exact: true }).click();
   const composer = page.getByRole("dialog", { name: "Create workspace" });
   await composer.getByRole("combobox", { name: "Project" }).click();
@@ -560,12 +570,37 @@ try {
   await page.getByRole("option", { name: "Blank Terminal" }).click();
   await composer.getByRole("button", { name: "Create workspace" }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
-  report.checks.push("composer-opens-folder-implicit-workspace");
-  registered = await page.evaluate(async () => {
-    const response = await window.drogon.workspaces();
-    if (!response.ok) throw new Error(response.error.message);
-    return response.result.workspaces[0];
-  });
+  report.checks.push("composer-creates-named-folder-workspace");
+  registered = null;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const created = await page.evaluate(async (known) => {
+      const response = await window.drogon.workspaces();
+      if (!response.ok) throw new Error(response.error.message);
+      return response.result.workspaces.filter((item) => !known.includes(item.id));
+    }, workspaceIdsBefore);
+    if (created.length === 1) {
+      registered = created[0];
+      break;
+    }
+    await delay(100);
+  }
+  assert.equal(
+    (registered ? 1 : 0),
+    1,
+    "the composer must add exactly one workspace for the folder project",
+  );
+  // The Add Project flow registered exactly one workspace before the
+  // composer ran: the implicit folder row. Probes that open tabs in the
+  // selected workspace while querying status by workspace id must address
+  // the tab's own workspace (the orchestrator run is filed under the
+  // tab's workspace id, not the folder path), so the implicit row's id is
+  // pinned here for those probes.
+  assert.equal(
+    workspaceIdsBefore.length,
+    1,
+    "exactly one workspace (the implicit folder row) must exist before the composer runs",
+  );
+  const implicitWorkspaceId = workspaceIdsBefore[0];
   report.checks.push("isolated-renderer-and-real-folder-registration");
   const mentuCli = packaged
     ? packaged.cli
@@ -685,7 +720,7 @@ try {
     report.checks.push("terminal-echo-latency-measured");
   }
   report.checks.push(await probeSessionNavigation({
-    page, workspaceId: registered.id, session: original, marker,
+    page, workspaceId: registered.id, workspaceName: registered.name, session: original, marker,
   }));
   await page.reload();
   await waitForTerminalText(page, marker);
@@ -1101,9 +1136,20 @@ try {
     report.checks.push(
       ...(await probeRenderedTabs({ page, workspace, output })),
     );
-    // The orchestrator probe runs FIRST: it needs a workspace with NO
-    // .drogon/graph.json (the honest initial state and the configure-and-run
-    // journey). The Mentu tab probe below then writes its own fixture graph.
+    // The orchestrator probe needs a workspace with NO .drogon/graph.json
+    // (the honest initial state and the configure-and-run journey). The
+    // Mentu tab probe below then writes its own fixture graph. The run the
+    // tab starts is filed under the tab's workspace id, so the tab must
+    // open in the implicit workspace AND the status query must address
+    // that same id — the composer's added workspace (registered.id) shares
+    // the folder path but owns no run. Selecting the implicit card first
+    // is a no-op when it is already selected.
+    await page.getByRole("button", { name: "Select folder", exact: true }).click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[aria-label="Select folder"]')?.getAttribute("aria-current") ===
+        "page",
+    );
     report.checks.push(
       ...(await probeOrchestrator({
         page,
@@ -1111,7 +1157,7 @@ try {
         output,
         cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
         dataDir,
-        workspaceId: registered.id,
+        workspaceId: implicitWorkspaceId,
       })),
     );
     // Mentu-as-tab: the reported bug (the "+" menu's Mentu entry used to
@@ -1259,6 +1305,18 @@ try {
       })),
     );
   }
+  // The restart probes below create terminals through the UI in the
+  // SELECTED workspace but assert on registered.id: select the composer's
+  // workspace card first (a no-op when it is already selected). Without
+  // this, whichever card the sealed journeys left selected receives the
+  // post-restart terminal and the probes read the wrong workspace.
+  await page.getByRole("button", { name: `Select ${registered.name}`, exact: true }).click();
+  await page.waitForFunction(
+    (label) =>
+      document.querySelector(`[aria-label="${label}"]`)?.getAttribute("aria-current") ===
+      "page",
+    `Select ${registered.name}`,
+  );
   if (!packaged) {
     // R16-AL (fixes #222): kill -9 ONLY the owned daemon mid-session,
     // restart it over the same data dir, and prove the session list still
