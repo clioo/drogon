@@ -90,6 +90,29 @@ jobs:
           node scripts/accept-live-child-crash.mjs
       - run: pnpm check:hygiene
 
+  discrimination:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Fetch the PR base ref
+        run: git fetch origin ${{ github.base_ref }} --depth=50
+      # The gate itself needs only node builtins + git, but renderer test
+      # files run through the workspace vitest, so install dependencies
+      # without lifecycle scripts (skips the Electron binary download).
+      - name: Install pinned JavaScript dependencies
+        run: |
+          npm install --global pnpm@11.19.0
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Run the test-discrimination gate
+        run: node scripts/check-test-discrimination.mjs --base origin/${{ github.base_ref }}
+
   windows-compilation:
     runs-on: windows-2022
     timeout-minutes: 20

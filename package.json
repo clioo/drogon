@@ -14,6 +14,7 @@
     "typecheck": "pnpm --filter @drogon/desktop typecheck",
     "test": "cargo test --workspace --locked && pnpm --filter @drogon/desktop test",
     "check:hygiene": "node --test scripts/check-repo-hygiene.test.mjs scripts/check-docs-links.test.mjs && node scripts/check-repo-hygiene.mjs && node scripts/check-docs-links.mjs",
+    "check:discrimination": "node scripts/check-test-discrimination.mjs",
     "accept:core-cli": "node scripts/accept-core-cli.mjs",
     "accept:desktop": "node scripts/accept-desktop.mjs",
     "test:packaging": "node --test scripts/acceptance-report-state.test.mjs scripts/acceptance-bridge-observation.test.mjs scripts/acceptance-private-environment.test.mjs scripts/acceptance-process.test.mjs scripts/acceptance-theme.test.mjs scripts/acceptance-usage-fixture.test.mjs scripts/acceptance-foreground.test.mjs scripts/desktop-artifacts.test.mjs scripts/packaged-runtime-admission.test.mjs scripts/packaged-fixture-daemon.test.mjs scripts/preview-install-lock.test.mjs scripts/install-drogon.test.mjs scripts/probe-rendered-harness.test.mjs scripts/probe-packaged-surfaces.test.mjs scripts/probe-sealed-journeys.test.mjs scripts/sealed-model-fixture.test.mjs scripts/sealed-model-fixture-lifecycle.test.mjs scripts/sealed-fixture-ownership.test.mjs tests/parity/ports/WP-ENG-RUNTIME/package-admission/sealed-bundle-identity.test.mjs scripts/accept-release-artifact.test.mjs scripts/probe-chat-lifecycle.test.mjs scripts/probe-host-environment.test.mjs scripts/probe-terminal-echo-latency.test.mjs scripts/acceptance-daemon-restart.test.mjs",
