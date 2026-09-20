@@ -18,12 +18,18 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import {
-  callNative,
-  callNativeHold,
-  resetNativeClientForTests,
-} from "./native-client";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// Worker-reuse hermeticity (docs/reference/desktop-test-isolation.md): the
+// desktop suite shares one module registry per worker, and several main
+// test files mock `../native-client`. A static import here would stay bound
+// to whichever `../native-client` won the import race — a mock whose
+// `callNative` never spawns the daemon this test kills and restarts.
+// Rebinding the real client after a registry reset keeps the test pinned
+// to the real transport under any file order.
+let callNative: typeof import("./native-client").callNative;
+let callNativeHold: typeof import("./native-client").callNativeHold;
+let resetNativeClientForTests: typeof import("./native-client").resetNativeClientForTests;
 
 const describeUnix = process.platform === "win32" ? describe.skip : describe;
 
@@ -79,6 +85,8 @@ describeUnix("native-client survives a kill -9 plus restart (PERF-01c)", () => {
   let daemon: ChildProcess | null = null;
 
   beforeEach(async () => {
+    vi.resetModules();
+    ({ callNative, callNativeHold, resetNativeClientForTests } = await import("./native-client"));
     resetNativeClientForTests();
     scratchDir = await mkdtemp(path.join(tmpdir(), "drogon-restart-test-"));
     realDir = await realpath(scratchDir);

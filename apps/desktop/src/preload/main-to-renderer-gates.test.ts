@@ -3,7 +3,7 @@
 // malformed payloads instead of forwarding them into renderer listeners.
 // Each test pins the DROP decision: the matching mutation delivers the
 // malformed frame and the test fails.
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const electron = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => void>();
@@ -23,13 +23,40 @@ const electron = vi.hoisted(() => {
 
 vi.mock("electron", () => electron);
 
-import { appMenu } from "./app-menu";
-import { mentu } from "./mentu";
-import { nativeTheme, NATIVE_THEME_CHANGED_CHANNEL } from "./native-theme";
-import { project } from "./project";
+import { NATIVE_THEME_CHANGED_CHANNEL } from "./native-theme";
 import { PROJECTS_CHANGED_CHANNEL } from "../shared/project-contract";
 import { MENTU_OPEN_TAB_CHANNEL } from "../shared/mentu-contract";
 import { menuIpcChannels } from "../shared/menu-contract";
+
+// Worker-reuse hermeticity (docs/reference/desktop-test-isolation.md): the
+// desktop suite shares one module registry per worker, so a statically
+// imported bridge would stay bound to whichever file's `electron` mock won
+// the import race and `emit` below would miss its listener. Rebinding the
+// bridges to this file's mock after a registry reset keeps every assertion
+// below deterministic under any file order.
+let appMenu: typeof import("./app-menu").appMenu;
+let mentu: typeof import("./mentu").mentu;
+let nativeTheme: typeof import("./native-theme").nativeTheme;
+let project: typeof import("./project").project;
+
+beforeAll(async () => {
+  vi.resetModules();
+  ({ appMenu } = await import("./app-menu"));
+  ({ mentu } = await import("./mentu"));
+  ({ nativeTheme } = await import("./native-theme"));
+  ({ project } = await import("./project"));
+});
+
+beforeEach(() => {
+  electron.handlers.clear();
+  electron.ipcRenderer.on.mockClear();
+  electron.ipcRenderer.removeListener.mockClear();
+  electron.ipcRenderer.invoke.mockClear();
+});
+
+afterAll(() => {
+  vi.resetModules();
+});
 
 function emit(channel: string, payload: unknown): void {
   electron.handlers.get(channel)?.({}, payload);

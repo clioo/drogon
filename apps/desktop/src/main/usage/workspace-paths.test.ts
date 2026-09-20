@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 const { nextResult } = vi.hoisted(() => ({
   nextResult: { current: undefined as unknown },
@@ -11,7 +11,22 @@ vi.mock("../native-client", () => ({
   },
 }));
 
-import { readWorkspaceProbes } from "./workspace-paths";
+// Worker-reuse hermeticity (docs/reference/desktop-test-isolation.md): the
+// desktop suite shares one module registry per worker, so a statically
+// imported reader would stay bound to whichever `../native-client` won the
+// import race — the real client, which shells out to the live daemon and
+// returns real workspaces (observed as rotating failures). Rebinding after
+// a registry reset keeps the mocked transport deterministic.
+let readWorkspaceProbes: typeof import("./workspace-paths").readWorkspaceProbes;
+
+beforeAll(async () => {
+  vi.resetModules();
+  ({ readWorkspaceProbes } = await import("./workspace-paths"));
+});
+
+afterAll(() => {
+  vi.resetModules();
+});
 
 function answer(result: unknown) {
   nextResult.current = () => Promise.resolve(result);
