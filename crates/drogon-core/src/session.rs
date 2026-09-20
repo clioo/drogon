@@ -1307,9 +1307,10 @@ pub(crate) struct WriteOutcome {
 
 /// Whether wrapping `body` in paste markers is both safe and useful.
 ///
-/// Safe: the far end reads a paste as text (`TerminalModes::paste_is_text`
-/// — bracketed paste on, and not a full-screen application on the
-/// alternate screen), and the body carries no C0
+/// Safe: the far end reads a paste as text
+/// (`TerminalModes::paste_is_text` — bracketed paste on, and either a
+/// harness Drogon launched or, in a session it did not, a program that
+/// is not on the alternate screen), and the body carries no C0
 /// control byte that a paste frame would either swallow (a real keystroke
 /// like `ETX`) or be broken by (`ESC`). Sanitizing those bytes instead
 /// would corrupt what the caller asked to deliver, so a body containing

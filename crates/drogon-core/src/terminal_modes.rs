@@ -50,8 +50,10 @@ const BRACKETED_PASTE_MODE: u32 = 2004;
 
 /// The DEC private modes that switch to and from the alternate screen:
 /// 47 (the original), 1047 (clear on exit) and 1049 (save cursor and
-/// clear). A far end on the alternate screen is a full-screen keystroke
-/// application, not a composer — see [`TerminalModes::paste_is_text`].
+/// clear). Switching to it says a full-screen application is painting —
+/// which is NOT the same as saying it is not a composer, because
+/// Antigravity is both. It is only the tie-breaker for a session whose
+/// far end Drogon did not launch; see [`TerminalModes::paste_is_text`].
 const ALTERNATE_SCREEN_MODES: [u32; 3] = [47, 1047, 1049];
 
 /// Longest partial sequence carried across chunk boundaries. A real
@@ -126,6 +128,18 @@ impl TerminalModes {
     /// full-screen program — loses framing and keeps the paced Return,
     /// which is the safe direction: a weaker delivery, never corrupted
     /// keystrokes.
+    ///
+    /// The converse is the standing limit, and it is irreducible rather
+    /// than unnoticed: a full-screen program the AGENT opens inside a
+    /// launched session (vim, a pager) is still framed for, because the
+    /// session's record says agent composer. There is no announcement
+    /// that separates the two — real vim emits `ESC [ ? 1049 h` and then
+    /// `ESC [ ? 2004 h`, byte for byte the order Antigravity uses, so
+    /// even the order of the two cannot tell them apart. The damage is
+    /// bounded: a message sent while a full-screen program holds the
+    /// session's foreground never reaches the agent either way, framed
+    /// or not, and `--literal` is the byte-exact path for a caller that
+    /// really means keystrokes.
     pub(crate) fn paste_is_text(self, launched_agent_composer: bool) -> bool {
         self.bracketed_paste && (launched_agent_composer || !self.alternate_screen)
     }

@@ -94,14 +94,16 @@ fn install_announcing_fixture(dir: &tempfile::TempDir, modes: &str) {
     .unwrap();
 }
 
-fn register_workspace(engine: &Engine) -> String {
+/// Returns the id AND the directory, so the caller keeps it alive for
+/// exactly as long as the engine needs it and it is removed afterwards.
+fn register_workspace(engine: &Engine) -> (String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().to_string_lossy().to_string();
-    std::mem::forget(dir);
-    ok(engine, "workspace.register", json!({ "path": path }))["id"]
+    let id = ok(engine, "workspace.register", json!({ "path": path }))["id"]
         .as_str()
         .unwrap()
-        .to_string()
+        .to_string();
+    (id, dir)
 }
 
 /// Waits until the fixture's announcement has been read by the daemon,
@@ -131,7 +133,7 @@ fn framed_for_launched_harness(modes: &str) -> bool {
     let dir = tempfile::tempdir().unwrap();
     install_announcing_fixture(&dir, modes);
     let engine = Engine::open(dir.path()).unwrap();
-    let workspace = register_workspace(&engine);
+    let (workspace, _workspace_dir) = register_workspace(&engine);
     let started = ok(
         &engine,
         "harness.start",
