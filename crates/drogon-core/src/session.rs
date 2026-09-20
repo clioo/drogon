@@ -188,11 +188,13 @@ pub(crate) struct SessionHandle {
     /// exit advances the linked run rows (see `run_completion.rs`).
     headless: AtomicBool,
     /// Issue #625: whether a framed body would be read as TEXT by the
-    /// program on the far end — it has DECSET 2004 on and is not on the
-    /// alternate screen — as observed in its OWN output by the reader
-    /// thread. That is the only far end a framed write is safe for, so
-    /// this gate decides whether `write_parts` frames a body before the
-    /// Return that submits it.
+    /// program on the far end, from what it announced in its OWN output
+    /// (observed by the reader thread) and from whether `harness.start`
+    /// launched an agent composer here. See
+    /// [`crate::terminal_modes::TerminalModes::paste_is_text`]. That is
+    /// the only far end a framed write is safe for, so this gate decides
+    /// whether `write_parts` frames a body before the Return that
+    /// submits it.
     paste_is_text: AtomicBool,
     /// The incremental scanner behind `bracketed_paste`. Held separately
     /// because it carries a partial sequence across chunk boundaries;
@@ -266,7 +268,7 @@ impl SessionHandle {
         scanner.feed(chunk);
         let modes: TerminalModes = scanner.modes();
         drop(scanner);
-        let paste_is_text = modes.paste_is_text();
+        let paste_is_text = modes.paste_is_text(self.launched_agent_composer());
         // Only a change touches the atomic: steady output stays quiet.
         if self.paste_is_text.load(Ordering::Acquire) != paste_is_text {
             self.paste_is_text.store(paste_is_text, Ordering::Release);
@@ -277,6 +279,21 @@ impl SessionHandle {
     /// (issue #625). See `TerminalModes::paste_is_text`.
     pub(crate) fn paste_is_text(&self) -> bool {
         self.paste_is_text.load(Ordering::Acquire)
+    }
+
+    /// Whether `harness.start` launched an agent composer in this PTY.
+    ///
+    /// Every harness Drogon can launch is one (`HarnessId::ALL`: Claude
+    /// Code, Codex, Pi, OpenCode, Antigravity), so the launch record is
+    /// the answer and no list has to be kept in step here. A plain
+    /// `session.start` — a shell, or whatever the user runs in it — has
+    /// no record and is judged by what it announces instead.
+    ///
+    /// A headless run (`claude -p`) also carries a record, but it paints
+    /// no TUI and never announces bracketed paste, so it is never framed
+    /// for either way.
+    fn launched_agent_composer(&self) -> bool {
+        self.harness_id.is_some()
     }
 
     pub(crate) fn set_status_hooks_enabled(&self, enabled: bool) -> Result<(), RpcError> {

@@ -138,8 +138,11 @@ heuristic takes the whole burst as pasted text, and the message sits in
 the composer unsubmitted.
 
 "Reads a paste as text" means the far end turned bracketed paste on and
-is on the normal screen, which is where the agent composers live. A
-full-screen application on the alternate screen (vim, `less`, `htop`) is
+is either a harness Drogon launched (every one of them is an agent
+composer, whatever screen it paints on — Claude Code, Codex and Pi use
+the normal screen, Antigravity the alternate one) or, for a session you
+started yourself, a program on the normal screen. A full-screen
+application you launched in a plain session (vim, `less`, `nano`) is
 never framed for, because a paste there is text in a buffer rather than
 the keystrokes you meant — `:wq` would be typed, not run. Those far ends
 still get the paced Return; `bracketedPaste` in the result tells you

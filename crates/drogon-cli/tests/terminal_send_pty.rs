@@ -1224,6 +1224,8 @@ fn bracketed_framing_is_applied_only_where_it_is_safe_and_needed() {
     const ON: &str = r"\033[?2004h";
     const OFF_AGAIN: &str = r"\033[?2004h\033[?2004l";
     const ALT_SCREEN: &str = r"\033[?1049h\033[?2004h";
+    const ALT_SCREEN_1047: &str = r"\033[?1047h\033[?2004h";
+    const ALT_SCREEN_47: &str = r"\033[?47h\033[?2004h";
     const BACK_FROM_ALT: &str = r"\033[?1049h\033[?2004h\033[?1049l";
     const CASES: &[FrameCase] = &[
         FrameCase {
@@ -1386,6 +1388,24 @@ fn bracketed_framing_is_applied_only_where_it_is_safe_and_needed() {
         FrameCase {
             what: "...not even for a long message",
             modes: ALT_SCREEN,
+            text: "rebase onto v2 please\n",
+            literal: false,
+            framed: false,
+            hex: "726562617365206f6e746f20763220706c656173650d",
+        },
+        // The older spellings of the same switch, pinned at the service
+        // and not only in the scanner's own tests.
+        FrameCase {
+            what: "the 1047 spelling of the alternate screen counts too",
+            modes: ALT_SCREEN_1047,
+            text: "rebase onto v2 please\n",
+            literal: false,
+            framed: false,
+            hex: "726562617365206f6e746f20763220706c656173650d",
+        },
+        FrameCase {
+            what: "and the original 47 spelling",
+            modes: ALT_SCREEN_47,
             text: "rebase onto v2 please\n",
             literal: false,
             framed: false,

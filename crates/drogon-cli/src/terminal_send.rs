@@ -49,12 +49,13 @@
 //!
 //! "Reads a paste as text" is narrower than "announced DECSET 2004", and
 //! deliberately so. vim announces it too, and `:wq` pasted into vim is
-//! text typed into a buffer rather than the command the caller meant. A
-//! full-screen keystroke application says what it is by switching to the
-//! alternate screen, so the daemon frames only for a far end that has
-//! bracketed paste on AND is on the normal screen — which is where every
-//! agent composer this command exists for lives. Anything else gets the
-//! paced Return alone: a weaker delivery, never corrupted keystrokes.
+//! text typed into a buffer rather than the command the caller meant. So
+//! the daemon frames only for a far end it can place: one `harness.start`
+//! launched — every harness Drogon can launch is an agent composer, and
+//! that record beats any guess — or, in a session you started yourself,
+//! a program that is not on the alternate screen a full-screen keystroke
+//! application switches to. Anything else gets the paced Return alone: a
+//! weaker delivery, never corrupted keystrokes.
 //!
 //! So the reply distinguishes two things a caller used to have to guess
 //! between. `submittedEnter` says a Return reached the PTY.

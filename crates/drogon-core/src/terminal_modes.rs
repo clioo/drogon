@@ -32,6 +32,15 @@
 //! mode corrects both at once. Tracking an exit here instead would mean
 //! guessing which program owns the PTY, which is exactly the guesswork
 //! this module exists to remove.
+//!
+//! The alternate-screen flag is stale in the same way and for the same
+//! reason, but it errs the other way: a full-screen program killed
+//! before it can emit `ESC [ ? 1049 l` leaves the session looking
+//! full-screen, so framing is withheld from whatever runs next and a
+//! message gets the paced Return alone. That is the safe direction — a
+//! weaker delivery, never corrupted keystrokes — and a session Drogon
+//! launched an agent composer into is unaffected, because its launch
+//! record outranks the screen.
 
 /// `ESC` — the byte every sequence here starts with.
 const ESC: u8 = 0x1b;
@@ -88,7 +97,8 @@ pub(crate) struct TerminalModes {
 }
 
 impl TerminalModes {
-    /// Whether a framed body would be read as TEXT by this far end.
+    /// Whether a framed body would be read as TEXT by this far end,
+    /// given whether Drogon launched an agent composer in the PTY.
     ///
     /// Bracketed paste alone is not enough, and an adversarial pass is
     /// why. vim announces 2004 like any modern application, but `:wq`
@@ -96,18 +106,28 @@ impl TerminalModes {
     /// the send reported success while vim sat in INSERT mode with
     /// `:wqhello` on screen. What separates the two is not the length of
     /// the body (that was tried, and it only moved the failure) but what
-    /// kind of program is on the far end, and a full-screen keystroke
-    /// application says so itself by switching to the alternate screen.
-    /// vim, `less`, `htop` and a full-height `fzf` all do; the agent
-    /// composers this command exists for — Claude Code, Codex, Pi,
-    /// OpenCode — stay in the normal screen, where their transcript
-    /// scrolls.
+    /// kind of program is on the far end.
     ///
-    /// A composer that does use the alternate screen loses framing and
-    /// keeps the paced Return, which is the safe direction: a weaker
-    /// delivery, never corrupted keystrokes.
-    pub(crate) fn paste_is_text(self) -> bool {
-        self.bracketed_paste && !self.alternate_screen
+    /// Two things answer that, in order. If `harness.start` launched the
+    /// far end, Drogon KNOWS it is an agent composer — every harness it
+    /// can launch is one — and that fact beats any guess. Otherwise the
+    /// guess is the alternate screen, which a full-screen keystroke
+    /// application switches to and announces: vim, `less`, `nano` and a
+    /// full-height `fzf` all do.
+    ///
+    /// The launch record has to come first because the screen is a poor
+    /// proxy: a later pass caught Antigravity (`agy`) painting
+    /// `ESC [ ? 1049 h` before its own `ESC [ ? 2004 h`, so the screen
+    /// alone would have quietly left every agy session with the bug this
+    /// module exists to fix. Claude Code, Codex and Pi stay on the normal
+    /// screen; agy does not; both are agent composers.
+    ///
+    /// A far end that is neither — an unlaunched session running a
+    /// full-screen program — loses framing and keeps the paced Return,
+    /// which is the safe direction: a weaker delivery, never corrupted
+    /// keystrokes.
+    pub(crate) fn paste_is_text(self, launched_agent_composer: bool) -> bool {
+        self.bracketed_paste && (launched_agent_composer || !self.alternate_screen)
     }
 }
 
@@ -394,11 +414,13 @@ mod tests {
     /// application says what it is by switching to the alternate screen.
     #[test]
     fn a_full_screen_application_does_not_read_a_paste_as_text() {
+        const UNLAUNCHED: bool = false;
+
         // A composer: paste on, normal screen.
         let composer = modes_after(&[b"\x1b[?2004h"]);
         assert!(composer.bracketed_paste);
         assert!(!composer.alternate_screen);
-        assert!(composer.paste_is_text());
+        assert!(composer.paste_is_text(UNLAUNCHED));
 
         // vim's shape: alternate screen and paste, in either order and
         // in either one or two sequences.
@@ -410,7 +432,7 @@ mod tests {
             let modes = modes_after(announcement);
             assert!(modes.bracketed_paste, "{announcement:?}");
             assert!(modes.alternate_screen, "{announcement:?}");
-            assert!(!modes.paste_is_text(), "{announcement:?}");
+            assert!(!modes.paste_is_text(UNLAUNCHED), "{announcement:?}");
         }
 
         // The older spellings count too.
@@ -419,7 +441,7 @@ mod tests {
             on.extend_from_slice(mode);
             on.extend_from_slice(b"h");
             assert!(
-                !modes_after(&[b"\x1b[?2004h", &on]).paste_is_text(),
+                !modes_after(&[b"\x1b[?2004h", &on]).paste_is_text(UNLAUNCHED),
                 "mode {}",
                 String::from_utf8_lossy(mode)
             );
@@ -427,13 +449,56 @@ mod tests {
 
         // Leaving the alternate screen gives the paste its meaning back,
         // which is what happens when a pager exits back to the composer.
-        assert!(modes_after(&[b"\x1b[?2004h\x1b[?1049h", b"\x1b[?1049l"]).paste_is_text());
+        assert!(
+            modes_after(&[b"\x1b[?2004h\x1b[?1049h", b"\x1b[?1049l"]).paste_is_text(UNLAUNCHED)
+        );
         // And an alternate screen with no paste announcement is still
         // not something to frame for.
-        assert!(!modes_after(&[b"\x1b[?1049h"]).paste_is_text());
+        assert!(!modes_after(&[b"\x1b[?1049h"]).paste_is_text(UNLAUNCHED));
     }
 
-    /// xterm ignores a NUL inside a CSI and keeps parsing; this aborts
+    /// What Drogon launched beats what the screen suggests. Antigravity
+    /// paints `ESC [ ? 1049 h` before its own `ESC [ ? 2004 h`, so the
+    /// screen alone would leave every `agy` session with issue #625 —
+    /// and it is an agent composer, which the launch record already
+    /// says.
+    #[test]
+    fn a_launched_agent_composer_reads_a_paste_as_text_on_either_screen() {
+        const LAUNCHED: bool = true;
+
+        // agy's observed shape.
+        let agy = modes_after(&[b"\x1b[?1049h", b"\x1b[?25l", b"\x1b[?2004h"]);
+        assert!(agy.alternate_screen);
+        assert!(agy.paste_is_text(LAUNCHED), "agy must still be framed for");
+        assert!(
+            !agy.paste_is_text(false),
+            "...and the screen alone is exactly what would have missed it"
+        );
+
+        // Claude Code's and Codex's observed shape: normal screen.
+        for composer in [
+            &[&b"\x1b[?25l"[..], &b"\x1b[?2004h"[..], &b"\x1b[?2031h"[..]][..],
+            &[
+                &b"\x1b[?2004h"[..],
+                &b"\x1b[?1004h"[..],
+                &b"\x1b[?2026h"[..],
+            ][..],
+        ] {
+            assert!(
+                modes_after(composer).paste_is_text(LAUNCHED),
+                "{composer:?}"
+            );
+            assert!(modes_after(composer).paste_is_text(false), "{composer:?}");
+        }
+
+        // The launch record never invents an announcement: a far end
+        // that never asked for bracketed paste is never framed for,
+        // whoever started it.
+        assert!(!modes_after(&[b"plain output"]).paste_is_text(LAUNCHED));
+        assert!(!modes_after(&[b"\x1b[?2004h", b"\x1b[?2004l"]).paste_is_text(LAUNCHED));
+    }
+
+    /// xterm ignores a NUL inside a CSI    /// xterm ignores a NUL inside a CSI and keeps parsing; this aborts
     /// the sequence. The divergence can only withhold framing, never add
     /// it, so it stays — but it is pinned rather than accidental.
     #[test]
