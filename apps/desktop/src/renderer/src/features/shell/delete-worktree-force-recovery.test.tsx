@@ -4,7 +4,15 @@
 // has to reach the user as the unstopped-pty toast, and its Force Delete
 // button has to re-submit the removal with force, not re-send the same
 // unforced call the daemon just declined.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   act,
   cleanup,
@@ -15,15 +23,35 @@ import {
   within,
 } from "@testing-library/react";
 import { toast } from "sonner";
-import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
 import type { Workspace, Worktree } from "../../../../shared/session-contract";
 
 vi.mock("sonner", () => ({
   toast: { info: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
 }));
 
-const info = vi.mocked(toast.info);
-const error = vi.mocked(toast.error);
+// Worker-reuse hermeticity (docs/reference/desktop-test-isolation.md): the
+// desktop suite shares one module registry per worker, so a statically
+// imported dialog would stay bound to whichever file's `sonner` won the
+// import race — the real one (DaemonUpdateBanner renders a live <Toaster/>)
+// or a sibling's warning-only mock, both of which leave this file's
+// `info`/`error` mocks at zero calls (observed as four 15s toast waits on
+// windows-compilation). Rebinding after a registry reset keeps the recovery
+// assertions below deterministic under any file order.
+let DeleteWorktreeDialog: typeof import("./DeleteWorktreeDialog").DeleteWorktreeDialog;
+let info = vi.mocked(toast.info);
+let error = vi.mocked(toast.error);
+
+beforeAll(async () => {
+  vi.resetModules();
+  ({ DeleteWorktreeDialog } = await import("./DeleteWorktreeDialog"));
+  const fresh = await import("sonner");
+  info = vi.mocked(fresh.toast.info);
+  error = vi.mocked(fresh.toast.error);
+});
+
+afterAll(() => {
+  vi.resetModules();
+});
 
 /** The full suite runs these renders well past the 1s default. */
 const WAIT = { timeout: 15_000 } as const;
