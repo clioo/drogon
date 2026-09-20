@@ -16,9 +16,31 @@ const pending = {
   revision: "0123456789ab",
   reason: "runtime_busy",
 };
-afterEach(() => {
-  cleanup();
+afterEach(async () => {
+  // The safety-poll test leaves fake timers on; the flush below needs the
+  // real clock.
+  vi.useRealTimers();
+  // Dismiss while the Toaster is still mounted so the dismissal flows through
+  // its subscriber instead of into the void.
   toast.dismiss();
+  // Await the actual removal: sonner removes a dismissed toast on a
+  // rAF-deferred publish plus deleteToast's 200ms exit timer
+  // (TIME_BEFORE_UNMOUNT), neither of which unmounting cancels. A test ending
+  // first strands those timers past the file; with `isolate: false` they fire
+  // after this file's jsdom is torn down and crash a later node-env file with
+  // `ReferenceError: window is not defined` (sonner setTimeout ->
+  // removeToast setToasts -> dispatchSetState -> resolveUpdatePriority).
+  await waitFor(
+    () =>
+      expect(document.querySelectorAll("[data-sonner-toast]").length).toBe(0),
+    { timeout: 5_000 },
+  );
+  // A dismiss that races an in-flight auto-close schedules TWO exit timers
+  // (the auto-close path plus the delete-flag effect path); the first removal
+  // unmounts the toast while the second is still pending. Let it fire while
+  // the host is still mounted.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  cleanup();
 });
 
 describe("DaemonUpdateBanner", () => {
