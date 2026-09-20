@@ -1,0 +1,63 @@
+[
+  {
+    "script": "scripts/accept-bot-monitors.mjs",
+    "requires": "pi",
+    "timeoutMs": 1500000,
+    "note": "SKIPPED: a Bot's own monitor and automation act end to end; needs real pi/dgx-spark inference plus two minute-scale scheduler ticks, unavailable under the no-real-inference rule on this host.",
+    "status": "skipped"
+  },
+  {
+    "script": "scripts/accept-bot-graph-sidebar.mjs",
+    "requires": null,
+    "timeoutMs": 600000,
+    "note": "Graph sidebar renders the live main beside workers, contact loss reads unverifiable, recovery preserves collapse; zero harness start/stop side effects."
+  },
+  {
+    "script": "scripts/accept-bot-open-session-focus.mjs",
+    "requires": null,
+    "timeoutMs": 1200000,
+    "note": "With a Bot session already open, Open session focuses it instead of dispatching a duplicate; repeated clicks keep one conversation."
+  },
+  {
+    "script": "scripts/accept-bot-session-honesty.mjs",
+    "requires": null,
+    "timeoutMs": 1500000,
+    "note": "Failed resumes never claim restoration, missing homes are recreated with notice, races open one session, dead links open fresh; the unverifiable Bot row renders not-reporting, never exit."
+  },
+  {
+    "script": "scripts/accept-bot-session-restart.mjs",
+    "requires": null,
+    "timeoutMs": 1500000,
+    "note": "A Bot session boots, accepts a turn, and boots again after an app relaunch; daemon recovery reads unverifiable and Stop really exits the process."
+  },
+  {
+    "script": "scripts/accept-bot-session-resume.mjs",
+    "requires": null,
+    "timeoutMs": 1200000,
+    "note": "First-click focus lands on the live Bot session, a closed session resumes through the harness --continue path, and the Chats row shows the agent avatar and name."
+  },
+  {
+    "script": "scripts/accept-session-resume-by-id.mjs",
+    "requires": null,
+    "timeoutMs": 1500000,
+    "note": "A SIGKILLed daemon's workspace session offers Resume and returns the same provider conversation with --resume <id>; the Bot twin rotates its durable link and reopens the same conversation."
+  },
+  {
+    "script": "scripts/accept-workspace-session-restart.mjs",
+    "requires": null,
+    "timeoutMs": 900000,
+    "note": "A recovered workspace session never renders a blank live-looking pane: the row loses its live affordance, the overlay offers Restart/Close, and Restart yields a usable shell."
+  },
+  {
+    "script": "scripts/accept-sidebar-agent-tree.mjs",
+    "requires": null,
+    "timeoutMs": 1200000,
+    "note": "An agent spawned in a shell nests three levels deep in the sidebar, collapse persists across reload, and the root row reads the agent, not the shell."
+  },
+  {
+    "script": "scripts/accept-subagent-tab-groups.mjs",
+    "requires": null,
+    "timeoutMs": 1200000,
+    "note": "Fan-out subagents group under their leader, one click folds the group, typed input reaches only the leader while folded, and the fold survives reload."
+  }
+]

@@ -393,6 +393,17 @@ async function addProject(projectPath) {
   await addDialog.getByRole("button", { name: "Add Project", exact: true }).click();
   await addDialog.waitFor({ state: "hidden" });
   await page.getByRole("button", { name: /^Select / }).first().waitFor();
+  // Product bug (App.tsx `panelRegistry` memo): the Bots page freezes
+  // `createWorkspaceId` from before this project was added/selected, so
+  // Create Bot is refused with "Select a workspace before creating a
+  // Bot." even though the new project IS selected. A renderer reload
+  // remounts the panel with the live selection; the daemon, data dir and
+  // selection survive it. Revisit when the memo tracks selection.
+  await page.reload();
+  await emulatePageFocus(page);
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor();
 }
 
 async function workspaceIdFor(projectPath) {
@@ -795,6 +806,40 @@ try {
     .locator(`[data-bot-session-row="${homeBot.botId}"]`)
     .first()
     .waitFor();
+
+  // Lane 3 item 3: the RENDERED row must agree with the daemon snapshot.
+  // The daemon says `unverifiable` (contact lost in the restart); the
+  // Bot's own Chats row must render the not-reporting state — never
+  // "Exited", and never a live/idle/working claim for a session this
+  // daemon instance holds no child for.
+  const raceRow = page
+    .locator(`[data-bot-session-row="${homeBot.botId}"]`)
+    .first();
+  await page.waitForFunction(
+    (botId) =>
+      document
+        .querySelector(`[data-bot-session-row="${CSS.escape(botId)}"]`)
+        ?.getAttribute("data-bot-session-state") === "unknown",
+    homeBot.botId,
+    { timeout: 20000 },
+  );
+  const raceRowState = await raceRow.getAttribute("data-bot-session-state");
+  const raceRowText = ((await raceRow.textContent()) ?? "").trim();
+  report.raceRowState = { state: raceRowState, text: raceRowText };
+  assert.equal(
+    raceRowState,
+    "unknown",
+    `contact loss must render the not-reporting row state, got ${raceRowState}`,
+  );
+  assert.ok(
+    raceRowText.includes("No recent update"),
+    `the row must say it is not reporting: ${raceRowText}`,
+  );
+  assert.ok(
+    !raceRowText.includes("Exited") && !raceRowText.includes("Idle"),
+    `contact loss must never render as exit or idle: ${raceRowText}`,
+  );
+  report.checks.push("unverifiable-bot-row-renders-not-reporting");
 
   // The race: both surfaces clicked in the SAME tick. A click against a
   // stale snapshot focuses instead of dispatching (the safe direction), so

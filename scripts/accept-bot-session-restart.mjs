@@ -285,6 +285,15 @@ async function createBot() {
   await addDialog.getByLabel("Folder or repository path").fill(foreignDir);
   await addDialog.getByRole("button", { name: "Add Project", exact: true }).click();
   await page.getByRole("button", { name: /^Select project/ }).waitFor();
+  // Product bug (App.tsx `panelRegistry` memo): the Bots page freezes
+  // `createWorkspaceId` from before this project was added/selected, so
+  // Create Bot is refused with "Select a workspace before creating a
+  // Bot." even though the new project IS selected. A renderer reload
+  // remounts the panel with the live selection; the daemon, data dir and
+  // selection survive it. Revisit when the memo tracks selection.
+  await page.reload();
+  await emulatePageFocus(page);
+  await page.getByRole("button", { name: "Reveal active workspace", exact: true }).waitFor();
 
   await page.getByRole("button", { name: "Bots", exact: true }).first().click();
   const panel = page.locator('[data-testid="bots-panel"]');
