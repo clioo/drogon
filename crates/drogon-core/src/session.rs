@@ -98,6 +98,13 @@ pub(crate) struct SessionHandle {
     pub(crate) session_id: String,
     pub(crate) incarnation: String,
     pub(crate) workspace_id: String,
+    /// The directory this PTY was spawned in. `session.start` accepts an
+    /// explicit `cwd` anywhere inside the workspace root, so the owning
+    /// workspace does not say where the child actually sits — and a delete
+    /// has to know, or it unlinks a directory a terminal is standing in
+    /// (issue #621). Not persisted: a row from a prior instance has no
+    /// child to place, and inventing one would be the opposite of evidence.
+    pub(crate) cwd: String,
     pub(crate) host_id: String,
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
@@ -224,6 +231,7 @@ impl SessionHandle {
         session_id: String,
         incarnation: String,
         workspace_id: String,
+        cwd: String,
         host_id: String,
         command: String,
         args: Vec<String>,
@@ -242,6 +250,7 @@ impl SessionHandle {
             session_id,
             incarnation,
             workspace_id,
+            cwd,
             host_id,
             command,
             args,

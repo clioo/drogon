@@ -72,6 +72,7 @@ mod worker_brief;
 mod workspace;
 mod workspace_file_rpc;
 mod workspace_files;
+mod workspace_session_settle;
 mod worktree_issues;
 mod worktree_rpc;
 

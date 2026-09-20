@@ -235,6 +235,21 @@ fn parse_lsof_pid_records(output: &str) -> Vec<u32> {
         .collect()
 }
 
+/// Where a live process is standing *now*, when the platform can say.
+///
+/// `worktree.remove` asks before unlinking a checkout: a terminal's
+/// recorded spawn directory is where it started, not where it is, and a
+/// shell that walked into the checkout afterwards would otherwise lose its
+/// cwd mid-run (issue #621). `None` means the question could not be
+/// answered here — an unsupported platform, no `lsof`, a process already
+/// gone — and callers fall back to what they recorded rather than treating
+/// silence as an answer.
+pub(crate) fn live_process_cwd(pid: u32) -> Option<String> {
+    process_cwd_and_command_line(pid)
+        .ok()
+        .and_then(|(cwd, _)| cwd)
+}
+
 /// (cwd, command line) for a pid; `Err` when neither could be read.
 #[cfg(target_os = "macos")]
 fn process_cwd_and_command_line(pid: u32) -> Result<(Option<String>, Option<String>), ()> {

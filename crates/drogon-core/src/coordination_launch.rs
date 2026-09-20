@@ -128,6 +128,13 @@ impl Engine {
         let operation = self.worker_operation(&dispatch_id);
         let _operation = operation.lock().unwrap();
         let _admission = self.lifecycle_gate.read().unwrap();
+        // The third route into a workspace's PTY set, beside `session.start`
+        // and `harness.start`: a dispatch spawns into
+        // `params.placement.workspace_id`, so it takes the same workspace
+        // admission gate they do. Without it a worker could be launched into
+        // a checkout that `worktree.remove` had already settled and was
+        // about to unlink (found by the adversarial pass on #621).
+        let _workspace_admission = self.workspace_lifecycle_gate.read().unwrap();
         let key = coordinator_actor(&params.scope).receipt_key(&request.request_id)?;
         // Defer preflight failures until after receipt lookup; replay needs no installed harness.
         let preflight = self.plan_coordination_launch(&params, &dispatch_id);
