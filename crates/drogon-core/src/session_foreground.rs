@@ -53,6 +53,14 @@ impl ForegroundMemo {
         at: Option<String>,
         now: Instant,
     ) {
+        // Pin the first observation's stamp while the same pgid keeps
+        // resolving to the same harness: a re-probe with nothing changed
+        // must not churn `observedHarnessAt` every TTL. Only a changed pgid
+        // or a changed harness mints a new stamp.
+        if self.pgid == pgid && self.harness == harness && self.at.is_some() {
+            self.checked_at = Some(now);
+            return;
+        }
         self.pgid = pgid;
         self.harness = harness;
         self.at = at;
@@ -352,6 +360,64 @@ mod tests {
         assert_eq!(
             match_harness_in_argv(&["/opt/claude-wrapper".to_string()]),
             None
+        );
+    }
+
+    #[test]
+    fn memo_pins_the_first_stamp_while_pgid_and_harness_hold() {
+        let mut memo = ForegroundMemo::default();
+        let first = Instant::now();
+        memo.store(
+            Some(11),
+            Some("claude".to_string()),
+            Some("2026-01-01T00:00:00Z".to_string()),
+            first,
+        );
+        // A re-probe with nothing changed refreshes the freshness clock but
+        // keeps the first observation's stamp.
+        let later = first + OBSERVED_TTL + Duration::from_millis(1);
+        memo.store(
+            Some(11),
+            Some("claude".to_string()),
+            Some("2026-01-01T00:00:01Z".to_string()),
+            later,
+        );
+        assert_eq!(
+            memo.cached(Some(11), later),
+            Some((
+                Some("claude".to_string()),
+                Some("2026-01-01T00:00:00Z".to_string())
+            ))
+        );
+        // A changed pgid mints a new stamp, even for the same harness.
+        let pgid_changed = later + OBSERVED_TTL + Duration::from_millis(1);
+        memo.store(
+            Some(12),
+            Some("claude".to_string()),
+            Some("2026-01-01T00:00:02Z".to_string()),
+            pgid_changed,
+        );
+        assert_eq!(
+            memo.cached(Some(12), pgid_changed),
+            Some((
+                Some("claude".to_string()),
+                Some("2026-01-01T00:00:02Z".to_string())
+            ))
+        );
+        // A changed harness on the same pgid mints a new stamp too.
+        let harness_changed = pgid_changed + OBSERVED_TTL + Duration::from_millis(1);
+        memo.store(
+            Some(12),
+            Some("pi".to_string()),
+            Some("2026-01-01T00:00:03Z".to_string()),
+            harness_changed,
+        );
+        assert_eq!(
+            memo.cached(Some(12), harness_changed),
+            Some((
+                Some("pi".to_string()),
+                Some("2026-01-01T00:00:03Z".to_string())
+            ))
         );
     }
 

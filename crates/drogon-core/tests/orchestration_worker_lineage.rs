@@ -275,33 +275,70 @@ fn worker_without_parent_stays_parentless() {
     setup.wait_for_session_exit(&worker_session);
 }
 
-/// A `parentSessionId` naming no session on this host is refused before any
-/// worker effect.
+/// A `parentSessionId` naming no session on this host is DROPPED, not
+/// refused: the CLI attaches it automatically from its inherited
+/// `DROGON_SESSION_ID`, so a stale or already-closed coordinator id must
+/// never fail a launch over cosmetic attribution. The worker launches
+/// parentless.
 #[test]
-fn worker_with_unknown_parent_is_refused() {
+fn worker_with_unknown_parent_launches_parentless() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _saved = SavedPath::capture();
     let dir = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
     let setup = WorkerSetup::open(&dir, &bin);
 
-    let task_id = setup.task("refused lineage");
-    let code = err_response(
-        &setup.engine,
-        "orchestration.workerStart",
-        json!({
-            "contractVersion": 1, "hostId": setup.host, "runId": setup.run_id,
-            "coordinatorId": "owner", "consumerGeneration": 1,
-            "taskId": task_id, "workspaceId": setup.workspace_id,
-            "mode": "fresh",
-            "launch": {"harnessId": "claude", "model": "fixture-model",
-                       "permissionMode": "unattended"},
-            "parentSessionId": "no-such-session",
-        }),
-    );
-    assert_eq!(code, "not_found");
+    let task_id = setup.task("dangling lineage");
+    let started = setup.start_worker(&task_id, json!({ "parentSessionId": "no-such-session" }));
+    let dispatch_id = started["dispatchId"].as_str().unwrap().to_string();
+    let worker_session = started["sessionIdentity"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    // No worker session leaked for the refused start.
+    let row = setup.session_row(&worker_session);
+    assert_eq!(
+        row["parentSessionId"],
+        Value::Null,
+        "an unknown parent is dropped; the worker launches parentless"
+    );
+
+    setup.stop_worker(&dispatch_id);
+    setup.wait_for_session_exit(&worker_session);
+}
+
+/// A shape-invalid `parentSessionId` (empty, or containing NUL) is still
+/// refused before any worker effect.
+#[test]
+fn worker_with_shape_invalid_parent_is_refused() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved = SavedPath::capture();
+    let dir = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let setup = WorkerSetup::open(&dir, &bin);
+
+    for parent in ["", "bad\0parent"] {
+        let task_id = setup.task("refused lineage");
+        let code = err_response(
+            &setup.engine,
+            "orchestration.workerStart",
+            json!({
+                "contractVersion": 1, "hostId": setup.host, "runId": setup.run_id,
+                "coordinatorId": "owner", "consumerGeneration": 1,
+                "taskId": task_id, "workspaceId": setup.workspace_id,
+                "mode": "fresh",
+                "launch": {"harnessId": "claude", "model": "fixture-model",
+                           "permissionMode": "unattended"},
+                "parentSessionId": parent,
+            }),
+        );
+        assert_eq!(
+            code, "invalid_argument",
+            "parent {parent:?} must be refused"
+        );
+    }
+
+    // No worker session leaked for the refused starts.
     let listed = ok(&setup.engine, "session.list", json!({}));
     assert_eq!(
         listed["sessions"].as_array().unwrap().len(),

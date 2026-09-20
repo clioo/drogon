@@ -336,10 +336,15 @@ impl Engine {
         // Issue #622 (subagent nesting): the optional creator-session
         // identity — `drogon-cli orchestration worker-start` sends its
         // inherited `DROGON_SESSION_ID` as `parentSessionId`, exactly like
-        // `terminal create` / `harness start` children do. Validated like
-        // `session.start` validates it (`do_session_start`): non-empty, and
-        // must name a session on this host. A coordinator outside a Drogon
-        // terminal sends none, and the worker stays parentless.
+        // `terminal create` / `harness start` children do. Only the shape
+        // is refused here (empty or NUL): an id that names no session on
+        // this host is DROPPED and the worker launches parentless. The CLI
+        // attaches that id automatically from its inherited environment —
+        // the caller never asked for a parent — so a stale or already-closed
+        // coordinator session id must never fail a launch over cosmetic
+        // attribution. The sidebar already renders a dangling parent as a
+        // flat root, so dropping is display-safe. A coordinator outside a
+        // Drogon terminal sends none, and the worker stays parentless.
         let parent_session_id = match params.parent_session_id.as_deref() {
             None => None,
             Some(parent) => {
@@ -354,12 +359,11 @@ impl Engine {
                     )
                     .map_err(error::from_sqlite)?
                     > 0;
-                if !exists {
-                    return Err(error::not_found(
-                        "parentSessionId names no session on this host",
-                    ));
+                if exists {
+                    Some(parent.to_string())
+                } else {
+                    None
                 }
-                Some(parent.to_string())
             }
         };
         let prepared = session_admission::reserve(

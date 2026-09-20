@@ -75,6 +75,45 @@ fn find_sleep() -> std::path::PathBuf {
     panic!("no sleep binary for the foreground fixture");
 }
 
+fn find_bash() -> String {
+    for candidate in ["/bin/bash", "/usr/bin/bash"] {
+        if std::path::Path::new(candidate).is_file() {
+            return candidate.to_string();
+        }
+    }
+    panic!("no bash binary for the observation-clear fixture");
+}
+
+fn base64_of(text: &str) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(text.as_bytes())
+}
+
+/// A real binary named by the caller that sleeps `argv[1]` seconds (8 by
+/// default) and exits on its own, so the foregrounding shell returns to
+/// the foreground mid-test. Same `cc` trick as [`build_sleeper`]: a copy
+/// of a platform binary will not do on macOS.
+fn build_timed_sleeper(dst: &std::path::Path) {
+    let src = dst.with_extension("c");
+    std::fs::write(
+        &src,
+        "#include <stdlib.h>\n#include <unistd.h>\nint main(int argc, char **argv) { unsigned s = argc > 1 ? (unsigned)atoi(argv[1]) : 8; sleep(s); return 0; }\n",
+    )
+    .unwrap();
+    let output = std::process::Command::new("cc")
+        .args(["-O2", "-o"])
+        .arg(dst)
+        .arg(&src)
+        .output()
+        .expect("spawn cc for the timed foreground fixture");
+    assert!(
+        output.status.success(),
+        "cc failed for the timed foreground fixture: {output:?}"
+    );
+    make_executable(dst);
+    let _ = std::fs::remove_file(&src);
+}
+
 fn make_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
     let mut perm = std::fs::metadata(path).unwrap().permissions();
@@ -316,6 +355,77 @@ fn harness_launched_session_keeps_observed_null() {
     let stopped = stop_session(&engine, &session_id, &incarnation);
     assert_eq!(stopped["verdict"], "exited");
     assert_eq!(stopped["observedHarnessId"], Value::Null);
+}
+
+/// The observation clears when the agent exits (issue #622, C3): a plain
+/// interactive shell that foregrounds the fixture `claude` reports it, and
+/// reports null again once the fixture exits on its own and the shell
+/// returns to the foreground. Without the clear, the row would read
+/// `Claude` forever after the agent quit.
+#[test]
+fn observation_clears_when_the_foregrounded_agent_exits() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_dir = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    let workspace_id = register_workspace_at(&engine, &workspace_dir);
+
+    let fixture = dir.path().join("claude");
+    build_timed_sleeper(&fixture);
+    let session = ok(
+        &engine,
+        "session.start",
+        json!({
+            "workspaceId": workspace_id,
+            "command": find_bash(),
+            "args": ["-i"],
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    // Baseline: the bare interactive shell foregrounds no harness.
+    std::thread::sleep(Duration::from_millis(500));
+    let listed = ok(&engine, "session.list", json!({}));
+    let row = listed["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == session_id)
+        .expect("session must be listed");
+    assert_eq!(row["observedHarnessId"], Value::Null);
+
+    // Foreground the fixture the way a user runs `claude` at the prompt.
+    ok(
+        &engine,
+        "session.write",
+        json!({
+            "sessionId": session_id,
+            "incarnation": incarnation,
+            "dataBase64": base64_of(&format!("{} 8\n", fixture.to_string_lossy())),
+        }),
+    );
+    let row = poll_observed(
+        &engine,
+        &session_id,
+        &json!("claude"),
+        Duration::from_secs(12),
+    );
+    assert_eq!(row["harnessId"], Value::Null);
+    assert!(
+        row["observedHarnessAt"]
+            .as_str()
+            .is_some_and(|at| !at.is_empty()),
+        "an observation carries its RFC 3339 stamp"
+    );
+
+    // The fixture exits on its own; the shell returns to the foreground and
+    // the observation clears (polled past the 1 s memo TTL).
+    let row = poll_observed(&engine, &session_id, &Value::Null, Duration::from_secs(20));
+    assert_eq!(row["observedHarnessAt"], Value::Null);
+
+    let stopped = stop_session(&engine, &session_id, &incarnation);
+    assert_eq!(stopped["verdict"], "exited");
 }
 
 /// An observed `claude` buys no hook authority: every `session.hook_event`
