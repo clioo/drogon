@@ -191,7 +191,10 @@ jobs:
       # - screenshot/compositor stall (page.screenshot times out with fonts
       #   loaded; headless GPU/compositor path, not slowness): desktop-files
       #   (29 checks then the workspace-properties shot never completes),
-      #   bot-session-honesty, session-resume-by-id, workspace-session-restart.
+      #   bot-session-honesty, session-resume-by-id, workspace-session-restart,
+      #   plus orchestrator and durable-orchestrator (second CI round: stall
+      #   persists WITH the DROGON_SOFTWARE_RENDERING attempt active, so per
+      #   the brief the chase stops here).
       # - missing host prerequisite: meetings (no Notes folder on the
       #   runner; needs a macOS leg or a seeded Notes corpus), repro-demo
       #   and mentu-run-delegation (pinned mentu-recipes runtime,
@@ -202,7 +205,7 @@ jobs:
       # Honest requires: skips stay in the manifest: bot-monitors (no pi),
       # backup-restore (no bundle), orchestrator-modes (no pi). The runner
       # counts skips separately and fails when zero journeys run.
-      # The manifest holds the union of the lanes (16 run, 8 held out):
+      # The manifest holds the union of the lanes (14 run, 10 held out):
       # the sequential gate needs room for all of them on one runner.
       # Shard this job if the wall time grows teeth; do not drop entries
       # to fit.

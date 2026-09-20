@@ -82,28 +82,12 @@
       "note": "Fixture pi drives the real daemon end to end: default policy dispatch, exact provider/model propagation, durable worker_done with result metadata, retry failover, ask/resume, and outcome-less exit discipline."
     },
     {
-      "name": "orchestrator",
-      "script": "scripts/accept-orchestrator.mjs",
-      "args": [],
-      "requires": null,
-      "timeoutMs": 900000,
-      "note": "Orchestrator canvas on the real app over CDP: honest disabled state, live Main agent node, delegate brief write-through, Agent telemetry/Usage ledgers, and a real durable run that stops without fabricating success."
-    },
-    {
       "name": "orchestrator-modes",
       "script": "scripts/accept-orchestrator-modes.mjs",
       "args": [],
       "requires": "pi",
       "timeoutMs": 1200000,
       "note": "SKIPPED: the three execution modes drive the real pi harness on the cheap model; needs real model inference, forbidden from validation on this host."
-    },
-    {
-      "name": "durable-orchestrator",
-      "script": "scripts/accept-durable-orchestrator.mjs",
-      "args": [],
-      "requires": null,
-      "timeoutMs": 900000,
-      "note": "Work Graph roles run as native sessions on fixture harnesses: main-only pass, findings-review-retest loop, fallback exhaustion, and reload without duplicate launches."
     },
     {
       "name": "live-child-crash",
@@ -180,6 +164,18 @@
       "script": "scripts/accept-mentu-run-delegation.mjs",
       "args": [],
       "reason": "HELD OUT (PR #633, fourth pass): missing host prerequisite, same as repro-demo — the pinned mentu-recipes runtime is gitignored and absent from fresh checkouts and the job provisions none, so mentu.runtime_install deterministically answers ok:false (observed against the real CLI) and the journey asserts ok:true. To run it: provision the runtime as for repro-demo. (Held out on structural evidence without waiting a CI cycle; beyond the six named in the brief — flagged in the report.)"
+    },
+    {
+      "name": "orchestrator",
+      "script": "scripts/accept-orchestrator.mjs",
+      "args": [],
+      "reason": "HELD OUT (PR #633, fourth pass, second CI round): screenshot/compositor stall — page.screenshot Timeout 15000ms exceeded with fonts already loaded (accept-orchestrator.mjs shot, main:419), the same headless GPU/compositor signature as the other stall hold-outs, WITH the DROGON_SOFTWARE_RENDERING software-compositor attempt active. The attempt did not unstall it; per the brief the chase stops here. Re-add once a CI run proves the stall fixed."
+    },
+    {
+      "name": "durable-orchestrator",
+      "script": "scripts/accept-durable-orchestrator.mjs",
+      "args": [],
+      "reason": "HELD OUT (PR #633, fourth pass, second CI round): screenshot/compositor stall — page.screenshot Timeout 30000ms exceeded with fonts already loaded, WITH the DROGON_SOFTWARE_RENDERING software-compositor attempt active. The attempt did not unstall it; per the brief the chase stops here. Re-add once a CI run proves the stall fixed."
     }
   ]
 }
