@@ -138,10 +138,7 @@ export function resolveRowMessagePreview(
  * Secondary row text (the fork's CompactAgentRow secondary slot): the
  * freshness report while the agent is not reporting, then the session's
  * message preview, then the harness identity for agent sessions and the
- * command basename for plain shells. When the primary already names the
- * resolved harness there is no fallthrough to the command basename — no
- * `Claude - zsh`, never `Claude - Claude`. A genuine plain shell still
- * reads `Terminal 1 - zsh`.
+ * command basename for plain shells.
  */
 export function resolveRowSecondary(
   session: Session,

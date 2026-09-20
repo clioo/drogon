@@ -195,6 +195,12 @@ describe("WorktreeCard nested session rows", () => {
       expect(
         shellRow.querySelector('[title="Shell"] svg.lucide-terminal'),
       ).not.toBeNull();
+      // The card lane draws the harness avatar for the observed session.
+      expect(
+        container.querySelector(
+          '[data-worktree-card-agent-avatar][title="Claude"]',
+        ),
+      ).not.toBeNull();
     } finally {
       unmount();
     }
