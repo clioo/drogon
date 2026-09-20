@@ -224,6 +224,10 @@ export function TabBar({
     order: reconciled,
     sessions,
     collapsedLeaderIds: onToggleLineage ? collapsedLineageIds : [],
+    // Pinning is re-partitioned at group granularity: a pinned leader takes
+    // its subagents to the front with it, so an unpinned child never lands
+    // inside the pinned run.
+    pinnedIds,
   });
   const ordered = lineage.order;
   const collapsedLeaders = new Set(

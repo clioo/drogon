@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTabStripLineage,
+  foldAwareBulkCloseTargets,
   resolveTabPromptTarget,
   toggleCollapsedLeader,
   type TabLineageSession,
@@ -149,6 +150,77 @@ describe("buildTabStripLineage", () => {
   });
 });
 
+describe("group integrity (adversarial review of #613)", () => {
+  it("re-attaches a child dragged out of its group, by design", () => {
+    // A drag writes the flat order; grouping owns adjacency, so a child
+    // dropped outside its group comes back beside its leader rather than
+    // leaving the group scattered across the strip. Pinned here so the
+    // behaviour is a decision on record, not an accident.
+    const dragged = buildTabStripLineage({
+      order: ["lead", "solo", "kid"],
+      sessions: sessions(["lead", null], ["solo", null], ["kid", "lead"]),
+    });
+    expect(dragged.order).toEqual(["lead", "kid", "solo"]);
+  });
+
+  it("frees a folded group when its leader loses its tab", () => {
+    // Closing the leader must not strand its subagents behind a fold with
+    // nothing left to unfold them: they become visible roots.
+    const orphaned = buildTabStripLineage({
+      order: ["kid-1", "kid-2", "solo"],
+      sessions: sessions(
+        ["kid-1", "lead"],
+        ["kid-2", "lead"],
+        ["solo", null],
+      ),
+      collapsedLeaderIds: ["lead"],
+    });
+    expect(orphaned.visibleOrder).toEqual(["kid-1", "kid-2", "solo"]);
+    expect(orphaned.hiddenBy.size).toBe(0);
+  });
+});
+
+describe("pinned groups (adversarial review of #613)", () => {
+  // The caller partitions pins over the FLAT order, before grouping. Without
+  // a second, group-granular partition a pinned leader's unpinned subagents
+  // end up seated inside the pinned run.
+  it("carries a pinned leader's whole group to the front", () => {
+    const lineage = buildTabStripLineage({
+      order: ["lead", "solo", "kid"],
+      sessions: sessions(["lead", null], ["solo", null], ["kid", "lead"]),
+      pinnedIds: ["lead"],
+    });
+    expect(lineage.order).toEqual(["lead", "kid", "solo"]);
+    expect(lineage.rootBySessionId.get("kid")).toBe("lead");
+    expect(lineage.rootBySessionId.get("solo")).toBe("solo");
+  });
+
+  it("never seats an unpinned group inside the pinned run", () => {
+    const lineage = buildTabStripLineage({
+      // `solo` is pinned, the leader is not: the leader's group must stay
+      // behind it as one block, not straddle the boundary.
+      order: ["lead", "kid-1", "solo", "kid-2"],
+      sessions: sessions(
+        ["lead", null],
+        ["kid-1", "lead"],
+        ["solo", null],
+        ["kid-2", "lead"],
+      ),
+      pinnedIds: ["solo"],
+    });
+    expect(lineage.order).toEqual(["solo", "lead", "kid-1", "kid-2"]);
+  });
+
+  it("pins a browser or editor tab like the singleton it is", () => {
+    const lineage = buildTabStripLineage({
+      order: ["lead", "kid", "browser-1"],
+      sessions: sessions(["lead", null], ["kid", "lead"]),
+      pinnedIds: ["browser-1"],
+    });
+    expect(lineage.order).toEqual(["browser-1", "lead", "kid"]);
+  });
+});
+
 describe("resolveTabPromptTarget", () => {
   it("hands the prompt to the leader while the subagent is folded away", () => {
     const lineage = buildTabStripLineage({
@@ -190,5 +262,87 @@ describe("toggleCollapsedLeader", () => {
       "gone",
       "lead",
     ]);
+  });
+
+  it("does not persist a fold for a leader the strip does not know", () => {
+    expect(toggleCollapsedLeader([], "ghost", known)).toEqual([]);
+  });
+});
+
+describe("foldAwareBulkCloseTargets (adversarial review of #613)", () => {
+  // Stored order scatters the group; grouping renders [lead, kid-1, kid-2,
+  // solo] and the fold leaves [lead, solo] on screen.
+  const scattered = {
+    order: ["lead", "kid-1", "solo", "kid-2"],
+    sessions: sessions(
+      ["lead", null],
+      ["kid-1", "lead"],
+      ["solo", null],
+      ["kid-2", "lead"],
+    ),
+  };
+  const folded = buildTabStripLineage({
+    ...scattered,
+    collapsedLeaderIds: ["lead"],
+  });
+  const open = buildTabStripLineage(scattered);
+
+  it("closes to the right of what is on screen, not of the stored order", () => {
+    // Over the flat stored order this would be [kid-1, solo, kid-2] — two of
+    // them folded away and one of them not even to the right any more.
+    expect(
+      foldAwareBulkCloseTargets({
+        lineage: folded,
+        pinnedIds: [],
+        anchorId: "lead",
+        mode: "to-right",
+      }),
+    ).toEqual(["solo"]);
+  });
+
+  it("never stops a folded subagent belonging to some other tab", () => {
+    expect(
+      foldAwareBulkCloseTargets({
+        lineage: folded,
+        pinnedIds: [],
+        anchorId: "solo",
+        mode: "others",
+      }),
+      // `lead` goes, and its folded group goes with it — but nothing else
+      // reaches into a fold the user cannot see.
+    ).toEqual(["lead", "kid-1", "kid-2"]);
+  });
+
+  it("takes a folded group along when its leader is closed", () => {
+    expect(
+      foldAwareBulkCloseTargets({
+        lineage: folded,
+        pinnedIds: [],
+        anchorId: "solo",
+        mode: "to-left",
+      }),
+    ).toEqual(["lead", "kid-1", "kid-2"]);
+  });
+
+  it("closes an expanded group one visible tab at a time", () => {
+    expect(
+      foldAwareBulkCloseTargets({
+        lineage: open,
+        pinnedIds: [],
+        anchorId: "lead",
+        mode: "to-right",
+      }),
+    ).toEqual(["kid-1", "kid-2", "solo"]);
+  });
+
+  it("still refuses to close a pinned tab", () => {
+    expect(
+      foldAwareBulkCloseTargets({
+        lineage: open,
+        pinnedIds: ["kid-1"],
+        anchorId: "lead",
+        mode: "to-right",
+      }),
+    ).toEqual(["kid-2", "solo"]);
   });
 });

@@ -62,6 +62,7 @@ import {
 } from "./features/shell/tab-order";
 import {
   buildTabStripLineage,
+  foldAwareBulkCloseTargets,
   resolveTabPromptTarget,
   toggleCollapsedLeader,
 } from "./features/shell/tab-strip/tab-lineage";
@@ -3899,6 +3900,7 @@ export function App() {
     order: liveStripOrder(),
     sessions: stripSessions,
     collapsedLeaderIds: tabStrip.collapsedLineage ?? [],
+    pinnedIds: tabStrip.pinned,
   });
   // A folded subagent has no tab, so it must not hold the input either:
   // its leader answers for the whole group while it stays folded. Only
@@ -3950,8 +3952,18 @@ export function App() {
     anchorId: string,
     mode: "others" | "to-right" | "to-left",
   ) => {
-    const order = liveStripOrder();
-    const targets = bulkCloseTargets(order, tabStrip.pinned, anchorId, mode);
+    // Issue #606: bulk close follows what the strip actually shows. Over the
+    // flat order, "close to the right" of a leader would close tabs that are
+    // not to its right any more, and "close others" would stop the PTYs of
+    // folded subagents the user cannot see. A folded group still closes WITH
+    // the leader it is folded into — that tab is what represents it.
+    const order = stripLineage.visibleOrder;
+    const targets = foldAwareBulkCloseTargets({
+      lineage: stripLineage,
+      pinnedIds: tabStrip.pinned,
+      anchorId,
+      mode,
+    });
     if (targets.length === 0) return;
     const doomed = new Set(targets);
     // Move selection off a doomed tab first so each close keeps a survivor.

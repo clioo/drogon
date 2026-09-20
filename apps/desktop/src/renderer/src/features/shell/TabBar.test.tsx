@@ -715,6 +715,22 @@ describe("TabBar subagent groups (#606)", () => {
     expect(labels[1]).toContain("Terminal 4");
   });
 
+  it("keeps a group whole when one of its subagents is pinned", () => {
+    renderStrip({
+      sessions: fanOut,
+      stripOrder: ["lead", "kid-1", "solo", "kid-2"],
+      pinnedIds: ["kid-1"],
+      onToggleLineage: () => {},
+    });
+    // Pinning is a group decision: a pinned subagent rides with its leader
+    // instead of being torn to the front on its own, which would leave the
+    // group split across the pinned boundary.
+    expect(tabIds()).toEqual(["lead", "kid-1", "kid-2", "solo"]);
+    expect(
+      screen.getAllByRole("tab")[1].getAttribute("data-pinned"),
+    ).toBe("true");
+  });
+
   it("shows no chevron at all without a grouping handler", () => {
     renderStrip({
       sessions: fanOut,

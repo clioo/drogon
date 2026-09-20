@@ -10,6 +10,12 @@
 // looks selected: every session runs a shell that appends each line it reads
 // to its own file, so a line typed while the group is folded must show up in
 // the leader's file and in neither subagent's.
+//
+// Run it from a plain shell. Inside a dispatched orchestration worker the
+// inherited DROGON_* variables scope every CLI call to that dispatch, so this
+// script's own fixture daemon answers `unauthorized` and the run dies waiting
+// for readiness. `env -u DROGON_SESSION_ID -u DROGON_WORKSPACE_ID -u
+// DROGON_DATA_DIR ... node scripts/accept-subagent-tab-groups.mjs` clears it.
 import assert from "node:assert/strict";
 import { access, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";

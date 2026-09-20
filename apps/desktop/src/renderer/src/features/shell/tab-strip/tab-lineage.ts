@@ -7,6 +7,7 @@
    sidebar list does not: what order keeps a group contiguous, which tabs
    a collapsed group hides, and which session the prompt belongs to while
    it is hidden. Pure functions, unit-tested. */
+import { bulkCloseTargets } from "../tab-order";
 import {
   buildSessionLineageTree,
   type SessionLineageNode,
@@ -22,8 +23,9 @@ export type TabStripLineage = {
   /**
    * The strip order with every group made contiguous: a leader is
    * immediately followed by its descendants, depth-first, each kept in the
-   * relative position the stored order gave it. Non-session ids (browser,
-   * editor, Mentu) pass through untouched.
+   * relative position the stored order gave it, and pinned groups moved to
+   * the front as whole runs. Non-session ids (browser, editor, Mentu) keep
+   * their own positions and pin like the singletons they are.
    */
   order: string[];
   /** `order` minus the tabs a collapsed group is currently hiding. */
@@ -36,6 +38,8 @@ export type TabStripLineage = {
   hiddenBy: ReadonlyMap<string, string>;
   /** Nesting depth per session id; 0 for a leader / ungrouped session. */
   depthById: ReadonlyMap<string, number>;
+  /** The group root every session belongs to; a root maps to itself. */
+  rootBySessionId: ReadonlyMap<string, string>;
 };
 
 export type TabStripLineageInput = {
@@ -45,6 +49,12 @@ export type TabStripLineageInput = {
   sessions: readonly TabLineageSession[];
   /** Leaders the user has folded shut. */
   collapsedLeaderIds?: readonly string[] | ReadonlySet<string>;
+  /**
+   * Pinned tab ids. Pinning is partitioned again AFTER grouping, at group
+   * granularity: pinning a leader carries its group to the front instead of
+   * leaving unpinned subagents stranded inside the pinned run.
+   */
+  pinnedIds?: readonly string[] | ReadonlySet<string>;
 };
 
 const EMPTY_LINEAGE: TabStripLineage = {
@@ -54,6 +64,7 @@ const EMPTY_LINEAGE: TabStripLineage = {
   descendantsByLeaderId: new Map(),
   hiddenBy: new Map(),
   depthById: new Map(),
+  rootBySessionId: new Map(),
 };
 
 /**
@@ -68,6 +79,7 @@ export function buildTabStripLineage({
   order,
   sessions,
   collapsedLeaderIds = [],
+  pinnedIds = [],
 }: TabStripLineageInput): TabStripLineage {
   if (order.length === 0) return EMPTY_LINEAGE;
   const sessionById = new Map<string, TabLineageSession>();
@@ -111,17 +123,19 @@ export function buildTabStripLineage({
   strip.forEach((id, index) => positionInStrip.set(id, index));
   const emitted = new Set<string>();
   const depthById = new Map<string, number>();
+  const rootBySessionId = new Map<string, string>();
   const groupedOrder: string[] = [];
-  const emitSubtree = (sessionId: string, depth: number): void => {
+  const emitSubtree = (sessionId: string, depth: number, rootId: string): void => {
     if (emitted.has(sessionId)) return;
     emitted.add(sessionId);
     groupedOrder.push(sessionId);
     depthById.set(sessionId, depth);
+    rootBySessionId.set(sessionId, rootId);
     const children = [...(childrenByLeaderId.get(sessionId) ?? [])].sort(
       (a, b) =>
         (positionInStrip.get(a) ?? 0) - (positionInStrip.get(b) ?? 0),
     );
-    for (const childId of children) emitSubtree(childId, depth + 1);
+    for (const childId of children) emitSubtree(childId, depth + 1, rootId);
   };
   const rootSessionIds = new Set(
     tree.rootRows.map((row) => row.session.id),
@@ -134,12 +148,32 @@ export function buildTabStripLineage({
     // A child reached before its leader waits for the leader's subtree;
     // an unreachable one (leader gone) is already a root here.
     if (!rootSessionIds.has(id)) continue;
-    emitSubtree(id, 0);
+    emitSubtree(id, 0, id);
   }
   // Belt and braces: anything the walk could not reach still gets a tab.
   for (const id of strip) {
-    if (sessionById.has(id) && !emitted.has(id)) emitSubtree(id, 0);
+    if (sessionById.has(id) && !emitted.has(id)) emitSubtree(id, 0, id);
   }
+
+  // Pinning is re-applied here, after grouping, because the caller's
+  // partitionPinnedOrder ran over the flat order: pinning a leader whose
+  // subagents are unpinned would otherwise seat unpinned tabs inside the
+  // pinned run. A group moves as one, led by its root's pin.
+  const pinned = new Set(pinnedIds);
+  const runs: { rootId: string; ids: string[] }[] = [];
+  for (const id of groupedOrder) {
+    const rootId = rootBySessionId.get(id) ?? id;
+    const openRun = runs[runs.length - 1];
+    if (openRun && openRun.rootId === rootId && rootBySessionId.has(id)) {
+      openRun.ids.push(id);
+    } else {
+      runs.push({ rootId, ids: [id] });
+    }
+  }
+  const partitionedOrder = [
+    ...runs.filter((run) => pinned.has(run.rootId)),
+    ...runs.filter((run) => !pinned.has(run.rootId)),
+  ].flatMap((run) => run.ids);
 
   const descendantsByLeaderId = new Map<string, string[]>();
   const collectDescendants = (sessionId: string): string[] => {
@@ -157,7 +191,7 @@ export function buildTabStripLineage({
 
   const collapsed = new Set(collapsedLeaderIds);
   const hiddenBy = new Map<string, string>();
-  for (const id of groupedOrder) {
+  for (const id of partitionedOrder) {
     if (!collapsed.has(id) || !childrenByLeaderId.has(id)) continue;
     // A nested collapsed leader inside an already-hidden group keeps the
     // outermost one as the owner, so unfolding it reveals the whole path.
@@ -168,12 +202,13 @@ export function buildTabStripLineage({
   }
 
   return {
-    order: groupedOrder,
-    visibleOrder: groupedOrder.filter((id) => !hiddenBy.has(id)),
+    order: partitionedOrder,
+    visibleOrder: partitionedOrder.filter((id) => !hiddenBy.has(id)),
     childrenByLeaderId,
     descendantsByLeaderId,
     hiddenBy,
     depthById,
+    rootBySessionId,
   };
 }
 
@@ -209,7 +244,45 @@ export function toggleCollapsedLeader(
   if (next.has(leaderId)) next.delete(leaderId);
   else next.add(leaderId);
   if (knownSessionIds.size === 0) return [...next];
-  return [...next].filter(
-    (id) => id === leaderId || knownSessionIds.has(id),
+  return [...next].filter((id) => knownSessionIds.has(id));
+}
+
+/**
+ * Bulk close ("others" / "to the right" / "to the left") over what the strip
+ * actually shows.
+ *
+ * Run over the flat order instead, "to the right" of a leader closes tabs
+ * that grouping moved elsewhere, and "others" reaches into folded groups and
+ * stops PTYs the user cannot see. Closing is destructive, so it follows the
+ * visible order — and a folded group goes with the leader it is folded into,
+ * because that tab is what stands for it on screen.
+ */
+export function foldAwareBulkCloseTargets({
+  lineage,
+  pinnedIds,
+  anchorId,
+  mode,
+}: {
+  lineage: Pick<
+    TabStripLineage,
+    "visibleOrder" | "descendantsByLeaderId" | "hiddenBy"
+  >;
+  pinnedIds: ReadonlySet<string> | readonly string[];
+  anchorId: string;
+  mode: "others" | "to-right" | "to-left";
+}): string[] {
+  const visible = bulkCloseTargets(
+    lineage.visibleOrder,
+    pinnedIds,
+    anchorId,
+    mode,
   );
+  return visible.flatMap((id) => [
+    id,
+    // Only the tabs THIS leader is hiding: a nested fold under a visible
+    // leader is carried by that leader's own entry in `visible`.
+    ...(lineage.descendantsByLeaderId.get(id) ?? []).filter(
+      (descendantId) => lineage.hiddenBy.get(descendantId) === id,
+    ),
+  ]);
 }
