@@ -76,3 +76,29 @@ test("normalized rows compare equal across the restart boundary", () => {
     normalizeSessionRows(beforeCrash),
   );
 });
+
+// #605: `gridCursor` is a ring offset, and the ring does not survive a
+// restart. A live row reports where its grid took effect; the restored row
+// has no ring for that number to index into, so the field is not part of a
+// cross-restart comparison at all.
+test("normalizeSessionRow drops gridCursor from the comparison", () => {
+  assert.equal("gridCursor" in normalizeSessionRow({ id: "s1", gridCursor: 4096 }), false);
+  assert.equal("gridCursor" in normalizeSessionRow({ id: "s1" }), false);
+});
+
+test("a live row and its restored stub compare equal whatever the cut was", () => {
+  const live = { id: "s1", cols: 120, rows: 40, gridCursor: 512, hasForegroundChild: false };
+  const { gridCursor: _dropped, ...restored } = live;
+  assert.deepEqual(normalizeSessionRows([restored]), normalizeSessionRows([live]));
+  // And a different live cut is still the same row.
+  assert.deepEqual(
+    normalizeSessionRows([{ ...live, gridCursor: 103 }]),
+    normalizeSessionRows([restored]),
+  );
+});
+
+test("dropping the cut never hides a real difference in the grid itself", () => {
+  const a = { id: "s1", cols: 120, rows: 40, gridCursor: 0 };
+  const b = { id: "s1", cols: 80, rows: 24, gridCursor: 0 };
+  assert.notDeepEqual(normalizeSessionRows([a]), normalizeSessionRows([b]));
+});
