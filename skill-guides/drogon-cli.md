@@ -238,11 +238,13 @@ NOT the home workspace `bot whoami` returns). A `workspaceId` of `null`
 with a `notice` means that folder has left the workspace registry — the
 project or worktree it was created in was removed. The read still answers
 in full, because the Bot's automations, monitors, home and audit trail are
-untouched, but anything that must target a live workspace (creating or
-testing an automation or monitor) is refused with `workspace_deregistered`
-until the folder is registered again with `drogon-cli workspace add
-<FOLDER>`. That code means the Bot is intact; `unknown_workspace` means the
-id you passed names nothing on this host.
+untouched, and `bot test-monitor` still dry-runs, since it commits nothing.
+Anything that must target a live workspace — creating or changing an
+automation or monitor, and `bot test-automation`, which really can dispatch
+— is refused with `workspace_deregistered` until the folder is registered
+again with `drogon-cli workspace add <FOLDER>`. That code means the Bot is
+intact; `unknown_workspace` means the id you passed names nothing on this
+host.
 
 ### Pull-request watches (the headline case)
 

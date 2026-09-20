@@ -251,3 +251,44 @@ fn an_id_this_host_never_knew_is_still_routed_by_the_bot_itself() {
     )));
     assert_eq!(missing.code, "not_found", "{missing:?}");
 }
+
+#[test]
+fn a_stranded_bot_can_still_dry_run_its_own_monitor_but_not_dispatch() {
+    let fx = Fx::new();
+    let monitor = success(fx.call(
+        "make-monitor",
+        "bot.self_create_monitor",
+        json!({"resource": "notes.md", "trigger": {"kind": "manual"}}),
+    ));
+    let monitor_id = monitor["monitorId"].as_str().unwrap().to_string();
+    let automation = success(fx.call(
+        "make-automation",
+        "bot.self_create_automation",
+        json!({
+            "name": "Morning sweep",
+            "schedule": "0 9 * * *",
+            "prompt": "Check the watchtower.",
+        }),
+    ));
+    let responsibility_id = automation["responsibilityId"].as_str().unwrap().to_string();
+
+    fx.deregister_record_folder();
+
+    // `bot.self_test_monitor` commits no cursor, check or event, so it is a
+    // read and keeps answering -- the same rule as `bot.self_list`.
+    let dry_run = success(fx.call(
+        "test-monitor",
+        "bot.self_test_monitor",
+        json!({"monitorId": monitor_id}),
+    ));
+    assert_eq!(dry_run["monitorId"], json!(monitor_id), "{dry_run}");
+
+    // `bot.self_test_automation` can really dispatch, and a dispatch needs a
+    // live workspace to land in, so it stays refused -- by name.
+    let refused = error(fx.call(
+        "test-automation",
+        "bot.self_test_automation",
+        json!({"responsibilityId": responsibility_id}),
+    ));
+    assert_eq!(refused.code, "workspace_deregistered", "{refused:?}");
+}

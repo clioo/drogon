@@ -2755,6 +2755,11 @@ impl crate::Engine {
         }
         let conn = self.db.lock().unwrap();
         let tx = conn.unchecked_transaction().map_err(error::from_sqlite)?;
+        // Strict on purpose, unlike `bot.self_test_monitor` above: the
+        // evaluation below really can DISPATCH (`ResponsibilityDispatchAttempt
+        // ::Dispatched`), and a dispatch has to land in a live workspace. A
+        // Bot whose folder left the registry is refused here by name
+        // (`workspace_deregistered`), not by a sqlite error.
         let (folder, _, _) = resolve_self_bot(&tx, &self.host_id, &scope)?;
         // resolve_self_bot already fenced the actor to its own Bot; the
         // from-storage evaluation re-proves ownership once more.
@@ -3721,7 +3726,12 @@ impl crate::Engine {
         let (record, root, file_rule) = {
             let conn = self.db.lock().unwrap();
             let tx = conn.unchecked_transaction().map_err(error::from_sqlite)?;
-            let (_, _, _) = resolve_self_bot(&tx, &self.host_id, &scope)?;
+            // Read-only, like `bot.self_list` (#609): this dry run commits
+            // no cursor, check or event, so a Bot whose folder has left the
+            // workspace registry may still test its own monitor. A monitor
+            // whose WATCHED project is gone is a different thing, and the
+            // `workspace::get_path` below still refuses that by name.
+            let (_, _, _) = resolve_self_bot_for_read(&tx, &self.host_id, &scope)?;
             let (record, _) = load_owned_monitor(&tx, &scope.bot_id, &params.monitor_id)?;
             let file_rule = record.rule.local_file().cloned();
             let root = match &file_rule {
