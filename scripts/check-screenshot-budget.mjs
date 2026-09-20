@@ -104,6 +104,11 @@ export function checkScreenshotBudget(source, fileLabel) {
   return { ok: problems.length === 0, problems };
 }
 
+export async function checkFileBudget(root, rel) {
+  const source = await readFile(path.join(root, rel), "utf8");
+  return checkScreenshotBudget(source, rel);
+}
+
 export async function runJourney({ root }) {
   const checks = [];
   const problems = [];

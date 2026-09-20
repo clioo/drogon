@@ -90,3 +90,14 @@ test("the restart probes select the composer's workspace first", () => {
     "the composer's card must be selected before the restart probes",
   );
 });
+
+test("evidence screenshots carry the cold-runner budget", async () => {
+  // Pin test for the ubuntu journeys-leg screenshot budget: Playwright's
+  // 15s default times out on a cold xvfb/software-rendered runner even
+  // after fonts load (CI proof on PR #633). Reverting a timeout must fail
+  // this test — that is what the discrimination gate checks.
+  const { checkFileBudget } = await import("./check-screenshot-budget.mjs");
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const result = await checkFileBudget(root, "scripts/accept-desktop.mjs");
+  assert.deepEqual(result.problems, []);
+});

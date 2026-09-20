@@ -46,3 +46,12 @@ describe("mentu tab viewport hygiene", () => {
     );
   });
 });
+
+it("evidence screenshots carry the cold-runner budget", async () => {
+  // Same pin as accept-desktop.test.mjs: reverting the shot() timeout must
+  // fail this test.
+  const { checkFileBudget } = await import("./check-screenshot-budget.mjs");
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const result = await checkFileBudget(root, "scripts/probe-rendered-mentu-tab.mjs");
+  assert.deepEqual(result.problems, []);
+});
