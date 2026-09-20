@@ -1,0 +1,126 @@
+{
+  "kind": "preload-close-guard-acceptance",
+  "baseModuleRevision": "bb85b83",
+  "gitMetadata": {
+    "available": true,
+    "resolver": "direct .git file reads; no Git command executed",
+    "headRef": "refs/heads/p2-release-journeys",
+    "candidateHeadRevision": "1e871c084d8b4b85404cf813ee2a063b5b587f7c",
+    "workingTreeNote": "candidateHeadRevision is the committed HEAD read directly from .git files (no Git command executed); working-tree changes may exist and are not asserted clean"
+  },
+  "behavioralArtifactIdentity": {
+    "note": "the built main/preload digests identify the artifacts whose live behavior was probed",
+    "builtPreloadSha256": "93a439274a0eebdb91d84e6144bed89dd857c8941761f069375e7550ea2976d4",
+    "builtMainSha256": "edd15a9fe0ea0bcc9ae85ccf17c5d2838dea0e534dcd5b2ec5cc019d0b8ddaf5"
+  },
+  "behavioralVerdict": "GREEN",
+  "evidenceVerdict": {
+    "verdict": "complete",
+    "complete": true,
+    "missing": []
+  },
+  "cleanupVerdict": "clean",
+  "status": "SUCCESS",
+  "failureClass": null,
+  "checks": [
+    "nonce-fixture-created-under-preflight-acceptance",
+    "actual-product-launched-with-loopback-cdp-endpoint",
+    "connected-to-production-window-over-cdp",
+    "main-world-has-no-node-privileged-globals-and-bridged-preload-ran",
+    "guard-descriptor-satisfies-contract",
+    "guarded-close-is-noop-and-irreversible"
+  ],
+  "assertions": {
+    "securityPosture": {
+      "ok": true,
+      "failureClass": null,
+      "electronVersion": "44.2.0"
+    },
+    "closeGuardDescriptor": {
+      "own": {
+        "typeofValue": "function",
+        "configurable": false,
+        "writable": false,
+        "enumerable": false,
+        "isNative": false,
+        "sourcePreview": "() => {\n  }"
+      },
+      "prototype": null,
+      "sameValueAsPrototype": false
+    },
+    "closeGuardVerdict": {
+      "ok": true,
+      "failureClass": null,
+      "descriptor": {
+        "typeofValue": "function",
+        "configurable": false,
+        "writable": false,
+        "enumerable": false,
+        "isNative": false,
+        "sourcePreview": "() => {\n  }"
+      }
+    },
+    "postClose": {
+      "alive": true,
+      "sum": 2,
+      "url": "file:///Users/carlos/Library/Application%20Support/Drogon/workspaces/Drogon/p2-release-journeys/apps/desktop/out/renderer/index.html"
+    },
+    "replacementResistance": {
+      "assignmentFailed": true,
+      "defineError": "TypeError",
+      "stillTheGuard": true
+    }
+  },
+  "cleanup": [
+    "product electron instance: owned by this run",
+    "cdp browser session: closed",
+    "product electron instance: exited"
+  ],
+  "stages": {},
+  "startedAt": "2026-09-20T17:50:05.730Z",
+  "electronBinary": "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/p2-release-journeys/node_modules/.pnpm/electron@44.2.0/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+  "nodeVersion": "v24.19.0",
+  "nodePath": "/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+  "fixture": "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/p2-release-journeys/.preflight/acceptance/preload-close-guard-q9ylGP",
+  "evidenceDir": "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/p2-release-journeys/tests/parity/ports/WP-UI-PRELOAD/electron-close-guard",
+  "launch": {
+    "argv": [
+      "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/p2-release-journeys/apps/desktop",
+      "--remote-debugging-port=0"
+    ],
+    "shell": false,
+    "clearedUnsafeEnvKeys": [
+      "ELECTRON_RUN_AS_NODE",
+      "ELECTRON_NO_ASAR",
+      "ELECTRON_EXTRA_LAUNCH_ARGS",
+      "ELECTRON_RENDERER_URL",
+      "NODE_OPTIONS",
+      "NODE_PATH"
+    ],
+    "clearedInheritedDrogonKeys": [
+      "DROGON_TERMINAL",
+      "DROGON_CLI_COMMAND",
+      "DROGON_WORKSPACE_ID",
+      "DROGON_HOOK_INCARNATION",
+      "DROGON_RUN_ID",
+      "DROGON_HOST_ID",
+      "DROGON_HOOK_USAGE_ONLY",
+      "DROGON_SESSION_INCARNATION",
+      "DROGON_DISPATCH_CAPABILITY",
+      "DROGON_TASK_ID",
+      "DROGON_SESSION_ID",
+      "DROGON_HOOK_MARKER",
+      "DROGON_HOOK_CLI",
+      "DROGON_DISPATCH_ID"
+    ]
+  },
+  "endpoint": "ws://127.0.0.1:57605/devtools/browser/31c1fd94-339b-41e7-9949-1a15eb4344db",
+  "pageUrl": "file:///Users/carlos/Library/Application%20Support/Drogon/workspaces/Drogon/p2-release-journeys/apps/desktop/out/renderer/index.html",
+  "electronVersion": "44.2.0",
+  "screenshots": {
+    "before": "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/p2-release-journeys/tests/parity/ports/WP-UI-PRELOAD/electron-close-guard/2026-09-20T17-50-09-316Z/before.png",
+    "after": "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/p2-release-journeys/tests/parity/ports/WP-UI-PRELOAD/electron-close-guard/2026-09-20T17-50-09-316Z/after.png"
+  },
+  "finishedAt": "2026-09-20T17:50:09.316Z",
+  "evidencePath": "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/p2-release-journeys/tests/parity/ports/WP-UI-PRELOAD/electron-close-guard/2026-09-20T17-50-09-316Z"
+}

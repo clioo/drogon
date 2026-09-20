@@ -1,13 +1,16 @@
-// Acceptance for the background-window restore contract: closing and
+// Source guard for the background-window restore contract: closing and
 // restoring a window must never activate the app during validation.
 //
-// Spawn-free and build-free: it reads the desktop main sources as text and
-// pins the exact rule that keeps `DROGON_BACKGROUND_WINDOW=1` runs hidden —
-// the saved-bounds/maximized restore path must stay behind the background
-// guard, and no activation call may appear on any unguarded path. Removing
-// the guard (or adding a stray show/focus/restore) makes this journey FAIL.
+// This is a STATIC check, not a journey: it is spawn-free and build-free,
+// reading the desktop main sources as text and pinning the exact rule that
+// keeps `DROGON_BACKGROUND_WINDOW=1` runs hidden — the saved-bounds/maximized
+// restore path must stay behind the background guard, and no activation call
+// may appear on any unguarded path. Removing the guard (or adding a stray
+// show/focus/restore) makes this check FAIL. Runtime proof that a restored
+// window stays hidden comes from `DROGON_VERIFY_OS_FOCUS=1
+// node scripts/accept-desktop.mjs`, not from here.
 //
-// Usage: node scripts/accept-window-restore-background.mjs [--root DIR]
+// Usage: node scripts/check-background-window-guard.mjs [--root DIR]
 // Exits nonzero unless every check passes; prints one JSON verdict.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -37,7 +40,7 @@ export function parseArgs(argv = []) {
       options.root = path.resolve(argv[++index] ?? "");
       assert.ok(options.root && argv[index], "--root requires a directory");
     } else if (arg === "--help" || arg === "-h") {
-      console.log("Usage: node scripts/accept-window-restore-background.mjs [--root DIR]");
+      console.log("Usage: node scripts/check-background-window-guard.mjs [--root DIR]");
       process.exit(0);
     } else {
       assert.fail(`Unknown argument: ${arg}`);
@@ -209,7 +212,7 @@ export async function runJourney({ root = DEFAULT_ROOT, read = readFile } = {}) 
   }
   return {
     status: problems.length === 0 ? "PASSED" : "FAILED",
-    journey: "scripts/accept-window-restore-background.mjs",
+    journey: "scripts/check-background-window-guard.mjs",
     checks,
     problems,
   };

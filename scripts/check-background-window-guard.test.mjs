@@ -1,5 +1,5 @@
-// Unit tests for the background-window restore journey. No Electron, no
-// browser, no child process: every case runs the journey's pure checks
+// Unit tests for the background-window source guard. No Electron, no
+// browser, no child process: every case runs the guard's pure checks
 // against the real sources or small broken variants of them.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -14,7 +14,7 @@ import {
   parseArgs,
   runJourney,
   WINDOW_STATE_REL,
-} from "./accept-window-restore-background.mjs";
+} from "./check-background-window-guard.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const realMain = await readFile(path.join(ROOT, MAIN_INDEX_REL), "utf8");
@@ -27,7 +27,7 @@ test("real product sources pass every check", async () => {
   assert.ok(verdict.checks.length === 4);
 });
 
-test("a removed background guard fails the journey", () => {
+test("a removed background guard fails the check", () => {
   const broken = realState.replace("if (backgroundWindow) return;", "if (false) return;");
   assert.notEqual(broken, realState);
   const result = checkRevealGuard(broken);
@@ -35,7 +35,7 @@ test("a removed background guard fails the journey", () => {
   assert.ok(result.problems.some((problem) => problem.includes("early-return guard")));
 });
 
-test("activation before the guard fails the journey", () => {
+test("activation before the guard fails the check", () => {
   const broken = realState.replace(
     "if (backgroundWindow) return;",
     "window.show();\n  if (backgroundWindow) return;",
@@ -45,28 +45,28 @@ test("activation before the guard fails the journey", () => {
   assert.ok(result.problems.some((problem) => problem.includes("before the background guard")));
 });
 
-test("a stray show outside the reveal helper fails the journey", () => {
+test("a stray show outside the reveal helper fails the check", () => {
   const broken = `${realMain}\n// regression probe\nwindow.show();\n`;
   const result = checkNoBareActivation(broken, realState);
   assert.equal(result.ok, false);
   assert.ok(result.problems.some((problem) => problem.includes("reveal only through revealRestoredWindow")));
 });
 
-test("a forbidden activation API fails the journey", () => {
+test("a forbidden activation API fails the check", () => {
   const broken = `${realMain}\nwindow.bringToFront();\n`;
   const result = checkNoBareActivation(broken, realState);
   assert.equal(result.ok, false);
   assert.ok(result.problems.some((problem) => problem.includes("bringToFront")));
 });
 
-test("an unguarded second-instance focus fails the journey", () => {
+test("an unguarded second-instance focus fails the check", () => {
   const broken = realMain.replace("if (window && !backgroundWindow) {", "if (window) {");
   assert.notEqual(broken, realMain);
   const result = checkSecondInstance(broken);
   assert.equal(result.ok, false);
 });
 
-test("a visible-by-default window fails the journey", () => {
+test("a visible-by-default window fails the check", () => {
   const broken = realMain.replace("show: false,", "show: true,");
   assert.notEqual(broken, realMain);
   const result = checkCreateWindow(broken);

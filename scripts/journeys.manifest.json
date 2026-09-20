@@ -60,9 +60,21 @@
     "note": "Fan-out subagents group under their leader, one click folds the group, typed input reaches only the leader while folded, and the fold survives reload."
   },
   {
-    "script": "scripts/accept-window-restore-background.mjs",
+    "script": "scripts/accept-preload-close-guard.mjs",
     "requires": null,
-    "timeoutMs": 60000,
-    "note": "Closing and restoring a window never activates the app: saved-bounds restore stays behind the background guard and no bare show/focus call exists on any unguarded path."
+    "timeoutMs": 300000,
+    "note": "Main-world window.close guard is installed, non-native, and irreversible over live CDP against the dev build (DROGON_BACKGROUND_WINDOW=1, disposable data dir)."
+  },
+  {
+    "script": "scripts/accept-meetings.mjs",
+    "requires": null,
+    "timeoutMs": 600000,
+    "note": "Meetings section over live CDP against the dev build: missing/empty/populated states, 320-transcript corpus, search, filters, extraction via fixture pi, read-only guarantee, light/dark sweeps."
+  },
+  {
+    "script": "scripts/accept-repro-demo.mjs",
+    "requires": null,
+    "timeoutMs": 3600000,
+    "note": "Settings Demo reproducible executed twice end to end against the dev build with fixture harness (no model inference): bot session, work graph, parallel workers, adversarial rounds, cost reporting."
   }
 ]
