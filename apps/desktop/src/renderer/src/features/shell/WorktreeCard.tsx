@@ -49,6 +49,7 @@ import { useWorktreeGitStatus } from "./use-worktree-git-status";
 import {
   buildWorktreeAgentRows,
   formatRowHarnessLabel,
+  resolveRowHarnessId,
 } from "./worktree-agent-rows";
 import type { WorktreeAgentRow as WorktreeAgentRowData } from "./worktree-agent-rows";
 import { WorktreeAgentRow } from "./WorktreeAgentRow";
@@ -99,26 +100,52 @@ function renderAgentBranch(
     ancestorSessionIds: descendantAncestorSessionIds,
     depth: depth + 1,
   };
+  // Issue #622: the tree node wraps the row instead of living inside it,
+  // so the row keeps its exact shape (the div-with-nested-disclosure-button
+  // for chevron rows, the button for leaves) while the wrapper carries the
+  // treeitem semantics. Derived from the context — no new prop on the row.
+  const inLineageTree = context.childrenByParentSessionId.size > 0;
+  const branch = (
+    <WorktreeAgentRow
+      row={row}
+      disabled={context.disabled}
+      onSelect={context.onSelect}
+      childCount={hasChildAgents ? childRows.length : undefined}
+      childrenExpanded={expanded}
+      onToggleChildren={
+        hasChildAgents
+          ? () => context.onToggleParent(row.session.id)
+          : undefined
+      }
+      reserveDisclosureGutter={
+        isRootRow && context.anyRootHasChildren && !hasChildAgents
+      }
+      // Issue #622: every descendant at depth >= 1 gets the lineage child
+      // chrome, not only depth 1.
+      isChildRow={depth >= 1}
+    />
+  );
+  if (!inLineageTree) {
+    return <Fragment key={row.session.id}>{branch}</Fragment>;
+  }
   return (
     <Fragment key={row.session.id}>
-      <WorktreeAgentRow
-        row={row}
-        disabled={context.disabled}
-        onSelect={context.onSelect}
-        childCount={hasChildAgents ? childRows.length : undefined}
-        childrenExpanded={expanded}
-        onToggleChildren={
-          hasChildAgents
-            ? () => context.onToggleParent(row.session.id)
-            : undefined
-        }
-        reserveDisclosureGutter={
-          isRootRow && context.anyRootHasChildren && !hasChildAgents
-        }
-        // Why: the fork's isLineageChild is depth === 1 exactly.
-        isChildRow={depth === 1}
-      />
+      <div
+        role="treeitem"
+        aria-level={depth + 1}
+        aria-expanded={hasChildAgents ? expanded : undefined}
+        aria-label={`${row.title}${row.secondary ? ` - ${row.secondary}` : ""}`}
+        data-lineage-depth={depth}
+        className="min-w-0"
+      >
+        {branch}
+      </div>
       {hasChildAgents && expanded ? (
+        // Presentational wrapper only: the hierarchy rides the flat-tree
+        // contract (`role="treeitem"` + 1-based `aria-level` +
+        // `aria-expanded` on each node), so no `role="group"` — a group
+        // sibling its parent treeitem does not own would misdescribe the
+        // tree.
         <div className="worktree-agent-lineage-children">
           {childRows.map((childRow) =>
             renderAgentBranch({ ...childContext, row: childRow }),
@@ -284,12 +311,22 @@ export function WorktreeCard({
       (childrenByParentSessionId.get(row.session.id) ?? []).length > 0,
   );
   const rowSessions = rows.map((row) => row.session);
+  // Live ids for prune-on-toggle: ids of sessions that no longer exist are
+  // pruned when the user next folds, never eagerly on read — so a collapsed
+  // parent whose children merely exited keeps its fold.
+  const liveSessionIds = attached.map((session) => session.id);
+  const handleToggleLineageParent = (sessionId: string) => {
+    toggleLineageParent(sessionId, liveSessionIds);
+  };
   const summary = summarizeCardSessions(rowSessions);
   const agentSummary = summarizeCardAgentStates(rowSessions);
   // The agent identity drawn beside the status dot (the fork's summary-pill
   // pairing of an AgentStateDot with the AgentIcon of the agents in that
-  // same state group); null when no session reported a harness.
+  // same state group); null when no session has a resolved harness.
   const identitySession = cardIdentitySession(rowSessions);
+  const identityHarnessId = identitySession
+    ? resolveRowHarnessId(identitySession)
+    : null;
   // Row activation selects the workspace first, then the session tab: the
   // workspace switch clears the active tab, so the tab selection must win
   // last in the same batch (mirrors the notification focus handler).
@@ -373,15 +410,15 @@ export function WorktreeCard({
               the unread bell): an emerald filled dot for a live-but-quiet
               worktree, the amber bell while the agent needs the user. */}
           <AgentStateIcon state={summary.state} size={12} variant="card" />
-          {identitySession?.harnessId ? (
+          {identityHarnessId ? (
             <span
               className="shell-worktree-card-agent-avatar"
               data-worktree-card-agent-avatar=""
-              title={formatRowHarnessLabel(identitySession.harnessId)}
+              title={formatRowHarnessLabel(identityHarnessId)}
             >
               <HarnessMenuIcon
-                harnessId={identitySession.harnessId}
-                displayName={formatRowHarnessLabel(identitySession.harnessId)}
+                harnessId={identityHarnessId}
+                displayName={formatRowHarnessLabel(identityHarnessId)}
                 size={13}
               />
             </span>
@@ -490,7 +527,9 @@ export function WorktreeCard({
                 >
                   <CompactAgentSummaryButton
                     sessions={rowSessions}
-                    labelFor={(session) => formatRowHarnessLabel(session.harnessId ?? null)}
+                    labelFor={(session) =>
+                      formatRowHarnessLabel(resolveRowHarnessId(session))
+                    }
                     subjectLabel={`${childrenByParentSessionId.size > 0 ? rootRows.length : rows.length} agents`}
                     expanded={compactRootListExpanded}
                     onToggle={toggleCompactRootList}
@@ -502,7 +541,7 @@ export function WorktreeCard({
                         ancestorSessionIds: new Set(),
                         childrenByParentSessionId,
                         collapsedLineageParents,
-                        onToggleParent: toggleLineageParent,
+                        onToggleParent: handleToggleLineageParent,
                         anyRootHasChildren,
                         disabled,
                         onSelect: handleSelectSession,
@@ -517,7 +556,7 @@ export function WorktreeCard({
                     ancestorSessionIds: new Set(),
                     childrenByParentSessionId,
                     collapsedLineageParents,
-                    onToggleParent: toggleLineageParent,
+                    onToggleParent: handleToggleLineageParent,
                     anyRootHasChildren,
                     disabled,
                     onSelect: handleSelectSession,

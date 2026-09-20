@@ -4,8 +4,13 @@
 // actually accepts or rejects a daemon payload — agree about the fields the
 // renderer depends on. A field declared in one and missing from the other is
 // how a payload silently stops reaching the code that needs it.
-import { describe, expect, it } from "vitest";
+// Additive observed-harness fields of `session-contract.ts` (issue #622)
+// are pinned the same way: the declaration is read as source text and
+// matched with a regex — esbuild erases types, so no runtime test can reach
+// `Session["observedHarnessId"]` / `Session["observedHarnessAt"]` directly —
+// and the runtime twin must accept a payload carrying both fields.
 import fs from "node:fs";
+import { describe, expect, it } from "vitest";
 import { resultSchemas } from "./result-validation";
 
 const contractSource = fs.readFileSync(
@@ -72,5 +77,47 @@ describe("ReadResult gridChanges (#605)", () => {
       truncated: false,
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe("Session observed-harness fields (#622)", () => {
+  it("are declared on the contract", () => {
+    // The overlay reads the daemon's foreground-process observation off
+    // these fields; without the declarations the row cannot name what it
+    // is actually running.
+    expect(contractSource).toMatch(
+      /^\s*observedHarnessId\?: HarnessId \| null;$/m,
+    );
+    expect(contractSource).toMatch(
+      /^\s*observedHarnessAt\?: string \| null;$/m,
+    );
+  });
+
+  it("are optional, because a daemon predating them still answers", () => {
+    expect(contractSource).toMatch(/observedHarnessId\?/);
+    expect(contractSource).toMatch(/observedHarnessAt\?/);
+    expect(
+      resultSchemas["session.start"].safeParse(validSession).success,
+    ).toBe(true);
+  });
+
+  it("are accepted by the runtime schema the contract describes", () => {
+    const observedHarnessAt = new Date(0).toISOString();
+    const parsed = resultSchemas["session.start"].safeParse({
+      ...validSession,
+      observedHarnessId: "claude",
+      observedHarnessAt,
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(
+        (parsed.data as { observedHarnessId?: string | null })
+          .observedHarnessId,
+      ).toBe("claude");
+      expect(
+        (parsed.data as { observedHarnessAt?: string | null })
+          .observedHarnessAt,
+      ).toBe(observedHarnessAt);
+    }
   });
 });

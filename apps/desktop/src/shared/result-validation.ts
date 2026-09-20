@@ -67,6 +67,12 @@ const session = z.object({
   // rows; optional so a response from an older service without it still
   // validates, and absent reads as idle at the call sites.
   hasForegroundChild: z.boolean().optional(),
+  // Issue #622: the daemon reports the harness id observed in the session
+  // PTY's foreground process group with its stamp (session-contract.ts);
+  // optional so a response from an older service without them still
+  // validates, and absent reads as "nothing observed" at the call sites.
+  observedHarnessId: z.string().nullable().optional(),
+  observedHarnessAt: z.string().nullable().optional(),
 });
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 // PERF-01 push channel: `session.output` answers the exact `session.read`

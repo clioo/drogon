@@ -101,8 +101,9 @@ describe("WorktreeCard nested session rows", () => {
       "s-1",
     );
     try {
-      // Harness session row: tab title + harness identity.
-      expect(screen.getByRole("button", { name: /Terminal 1.*Claude/ })).toBeTruthy();
+      // Harness session row: the harness label is the primary title now
+      // (issue #622: the row reads what the session runs, not Terminal N).
+      expect(screen.getByRole("button", { name: "Claude" })).toBeTruthy();
       // Fallback row for the session that never reported: tab title plus
       // the fork's freshness copy, never a bare missing row.
       expect(
@@ -145,6 +146,61 @@ describe("WorktreeCard nested session rows", () => {
       expect(surface?.getAttribute("aria-label") ?? "").toContain(
         "1 working, 1 idle",
       );
+    } finally {
+      unmount();
+    }
+  });
+
+  test("an observed-only session reads the harness with its icon; a plain shell reads Terminal N - zsh with the terminal glyph", () => {
+    const { container, unmount } = renderCard(
+      [
+        session({
+          id: "s-1",
+          agentState: "working",
+          harnessId: null,
+          observedHarnessId: "claude",
+          command: "/bin/zsh",
+          createdAt: "2026-09-08T11:00:00.000Z",
+        }),
+        session({
+          id: "s-2",
+          agentState: "working",
+          harnessId: null,
+          command: "/bin/zsh",
+          createdAt: "2026-09-08T11:30:00.000Z",
+        }),
+      ],
+      "",
+    );
+    try {
+      // No `Claude - zsh`, never `Claude - Claude`: the harness label is
+      // the whole row text for the observed session.
+      expect(screen.getByRole("button", { name: "Claude" })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Terminal 2 - zsh" }),
+      ).toBeTruthy();
+      const observedRow = container.querySelector(
+        '[data-worktree-agent-row="s-1"]',
+      ) as HTMLElement;
+      const shellRow = container.querySelector(
+        '[data-worktree-agent-row="s-2"]',
+      ) as HTMLElement;
+      // The observed session draws the harness mark (no lucide terminal
+      // glyph) with the harness title; the plain shell draws the terminal
+      // glyph with the Shell title.
+      expect(
+        observedRow.querySelector('[title="Claude"] svg:not(.lucide)'),
+      ).not.toBeNull();
+      expect(observedRow.querySelector("svg.lucide-terminal")).toBeNull();
+      expect(
+        shellRow.querySelector('[title="Shell"] svg.lucide-terminal'),
+      ).not.toBeNull();
+      // The card lane draws the harness avatar for the observed session.
+      expect(
+        container.querySelector(
+          '[data-worktree-card-agent-avatar][title="Claude"]',
+        ),
+      ).not.toBeNull();
     } finally {
       unmount();
     }

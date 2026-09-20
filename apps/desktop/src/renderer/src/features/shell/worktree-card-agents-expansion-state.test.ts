@@ -9,6 +9,7 @@ import {
   MAX_PERSISTED_WORKTREE_AGENT_EXPANSIONS,
   clearWorktreeAgentExpansionStateForTests,
   getWorktreeAgentExpansionCountForTests,
+  resetWorktreeAgentExpansionMemoryForTests,
   seedWorktreeAgentExpansionStateForTests,
   useWorktreeAgentExpansionState,
 } from "./worktree-card-agents-expansion-state";
@@ -53,6 +54,96 @@ describe("useWorktreeAgentExpansionState", () => {
     act(() => hook.result.current.toggleCompactRootList());
     act(() => hook.result.current.toggleCompactRootList());
     expect(getWorktreeAgentExpansionCountForTests()).toBe(0);
+  });
+
+  test("the lineage fold survives a simulated renderer reload", () => {
+    fresh();
+    const first = renderHook(() => useWorktreeAgentExpansionState("wt-1"));
+    act(() => first.result.current.toggleLineageParent("s-9"));
+    expect(first.result.current.collapsedLineageParents.has("s-9")).toBe(true);
+    first.unmount();
+    // A reload empties the module map but keeps localStorage.
+    resetWorktreeAgentExpansionMemoryForTests();
+    const second = renderHook(() => useWorktreeAgentExpansionState("wt-1"));
+    expect(second.result.current.collapsedLineageParents.has("s-9")).toBe(
+      true,
+    );
+    second.unmount();
+  });
+
+  test("folds are independent per worktree across a workspace switch and reload", () => {
+    fresh();
+    const a = renderHook(() => useWorktreeAgentExpansionState("wt-a"));
+    act(() => a.result.current.toggleLineageParent("s-1", ["s-1"]));
+    const b = renderHook(() => useWorktreeAgentExpansionState("wt-b"));
+    act(() => b.result.current.toggleLineageParent("s-2", ["s-2"]));
+    a.unmount();
+    b.unmount();
+    resetWorktreeAgentExpansionMemoryForTests();
+    const a2 = renderHook(() => useWorktreeAgentExpansionState("wt-a"));
+    const b2 = renderHook(() => useWorktreeAgentExpansionState("wt-b"));
+    expect([...a2.result.current.collapsedLineageParents]).toEqual(["s-1"]);
+    expect([...b2.result.current.collapsedLineageParents]).toEqual(["s-2"]);
+    a2.unmount();
+    b2.unmount();
+  });
+
+  test("a corrupt storage payload degrades to nothing collapsed", () => {
+    fresh();
+    localStorage.setItem(
+      "drogon:shell:collapsed-lineage-parents",
+      "not-json{{{",
+    );
+    const hook = renderHook(() => useWorktreeAgentExpansionState("wt-x"));
+    expect(hook.result.current.collapsedLineageParents.size).toBe(0);
+    // Folding still works afterwards — the bad payload is simply ignored.
+    act(() => hook.result.current.toggleLineageParent("s-1", ["s-1"]));
+    expect(hook.result.current.collapsedLineageParents.has("s-1")).toBe(true);
+    hook.unmount();
+  });
+
+  test("a wrong-shaped payload keeps only clean string ids", () => {
+    fresh();
+    localStorage.setItem(
+      "drogon:shell:collapsed-lineage-parents",
+      JSON.stringify({
+        "wt-x": ["s-1", 1, null, "", "s-1"],
+        "": ["s-2"],
+        "wt-y": "nope",
+        "wt-z": [],
+      }),
+    );
+    const hook = renderHook(() => useWorktreeAgentExpansionState("wt-x"));
+    expect([...hook.result.current.collapsedLineageParents]).toEqual(["s-1"]);
+    hook.unmount();
+  });
+
+  test("reads never prune; the next toggle with live ids does", () => {
+    fresh();
+    seedWorktreeAgentExpansionStateForTests("wt-p", {
+      collapsedLineageParents: new Set(["dead-1", "live-1"]),
+      compactRootListExpanded: false,
+    });
+    // A read alone never prunes, so a collapsed parent whose children
+    // merely exited keeps its fold across list refreshes.
+    const hook = renderHook(() => useWorktreeAgentExpansionState("wt-p"));
+    expect(hook.result.current.collapsedLineageParents.has("dead-1")).toBe(
+      true,
+    );
+    // The next toggle prunes ids of sessions that no longer exist.
+    act(() =>
+      hook.result.current.toggleLineageParent("live-2", ["live-1", "live-2"]),
+    );
+    expect(hook.result.current.collapsedLineageParents.has("dead-1")).toBe(
+      false,
+    );
+    expect(hook.result.current.collapsedLineageParents.has("live-1")).toBe(
+      true,
+    );
+    expect(hook.result.current.collapsedLineageParents.has("live-2")).toBe(
+      true,
+    );
+    hook.unmount();
   });
 
   test("the LRU bound holds and evicts the oldest entry", () => {

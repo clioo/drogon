@@ -139,4 +139,15 @@ describe("cardIdentitySession", () => {
     const agent = session({ id: "agent", agentState: "idle", harnessId: "pi" });
     expect(cardIdentitySession([shell, agent])?.id).toBe("agent");
   });
+
+  test("an observed-only session identifies the card (issue #622)", () => {
+    const shell = session({ id: "shell", agentState: "idle", harnessId: null });
+    const observed = session({
+      id: "observed",
+      agentState: "idle",
+      harnessId: null,
+      observedHarnessId: "claude",
+    });
+    expect(cardIdentitySession([shell, observed])?.id).toBe("observed");
+  });
 });

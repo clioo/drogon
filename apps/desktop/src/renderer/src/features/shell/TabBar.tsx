@@ -29,7 +29,10 @@ import type { EditorTabState } from "./editor-tab";
 import { ShellIconButton } from "./ShellIconButton";
 import { SortableTab, TAB_STRIP_DRAG_ACTIVATION_PX } from "./SortableTab";
 import { HarnessMenuIcon } from "./TabCreateMenuIcons";
-import { formatRowHarnessLabel } from "./worktree-agent-rows";
+import {
+  formatRowHarnessLabel,
+  resolveRowHarnessId,
+} from "./worktree-agent-rows";
 import {
   hydrateTerminalSplits,
   splitForTab,
@@ -586,6 +589,10 @@ export function TabBar({
                   lineage.descendantsByLeaderId.get(item.id) ?? []
                 ).length;
                 const groupExpanded = !collapsedLeaders.has(item.id);
+                // The resolved harness (launch or observed, issue #622), so
+                // an agent started inside a shell tab gets its badge too.
+                // Tab titles and numbering are unchanged.
+                const badgeHarnessId = resolveRowHarnessId(item);
                 return (
                   <SortableTab
                     key={item.id}
@@ -601,14 +608,14 @@ export function TabBar({
                             tabs stay scannable; the state indicator here is
                             unchanged, this only adds the harness identity. */}
                         <AgentStateIcon state={sessionDotState(item)} size={13} />
-                        {item.harnessId && (
+                        {badgeHarnessId && (
                           <span
                             className="inline-flex shrink-0"
-                            title={formatRowHarnessLabel(item.harnessId)}
+                            title={formatRowHarnessLabel(badgeHarnessId)}
                           >
                             <HarnessMenuIcon
-                              harnessId={item.harnessId}
-                              displayName={formatRowHarnessLabel(item.harnessId)}
+                              harnessId={badgeHarnessId}
+                              displayName={formatRowHarnessLabel(badgeHarnessId)}
                               size={12}
                             />
                           </span>
