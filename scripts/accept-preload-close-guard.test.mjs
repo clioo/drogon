@@ -274,6 +274,30 @@ test("git metadata resolver falls back to packed-refs", async (context) => {
   assert.equal(meta.candidateHeadRevision, "81d3a34259e0e3d31701fd33344b2f9cd83f8854");
 });
 
+test("git metadata resolver follows a worktree gitfile", async (context) => {
+  const root = await mkdtemp(path.join(tmpdir(), "close-guard-gitmeta-"));
+  context.after(() => import("node:fs/promises").then((fs) => fs.rm(root, { recursive: true, force: true })));
+  // Linked-worktree layout: the worktree gitdir holds HEAD plus a
+  // commondir pointer, while the shared ref lives in the common dir.
+  const workGit = await mkdtemp(path.join(tmpdir(), "close-guard-workgit-"));
+  context.after(() => import("node:fs/promises").then((fs) => fs.rm(workGit, { recursive: true, force: true })));
+  const commonGit = await mkdtemp(path.join(tmpdir(), "close-guard-commongit-"));
+  context.after(() => import("node:fs/promises").then((fs) => fs.rm(commonGit, { recursive: true, force: true })));
+  await writeFile(path.join(workGit, "HEAD"), "ref: refs/heads/p2-release-journeys\n");
+  await writeFile(path.join(workGit, "commondir"), `${commonGit}\n`);
+  await mkdir(path.join(commonGit, "refs", "heads"), { recursive: true });
+  await writeFile(
+    path.join(commonGit, "refs", "heads", "p2-release-journeys"),
+    "84ca70310000000000000000000000000000000000\n",
+  );
+  await writeFile(path.join(root, ".git"), `gitdir: ${workGit}\n`);
+  const meta = await resolveGitMetadata(root);
+  assert.equal(meta.available, true);
+  assert.equal(meta.headRef, "refs/heads/p2-release-journeys");
+  assert.equal(meta.candidateHeadRevision, "84ca70310000000000000000000000000000000000");
+  assert.match(meta.resolver, /no Git command executed/);
+});
+
 test("git metadata resolver handles detached HEAD and missing .git", async (context) => {
   const root = await mkdtemp(path.join(tmpdir(), "close-guard-gitmeta-"));
   context.after(() => import("node:fs/promises").then((fs) => fs.rm(root, { recursive: true, force: true })));

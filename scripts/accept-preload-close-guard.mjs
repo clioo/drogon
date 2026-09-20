@@ -81,12 +81,26 @@ export function parseCliArgs(argv) {
 /** Read-only Git metadata resolver: reads .git/HEAD and its loose or packed
  *  ref directly as files. No Git command is ever executed. The reported HEAD
  *  is the committed tip only; working-tree changes may exist and are NOT
- *  asserted clean by this resolver. */
+ *  asserted clean by this resolver. A worktree gitfile (`.git` containing
+ *  `gitdir: <path>`) is followed to the real git dir, still by file reads. */
+async function resolveGitDir(root) {
+  const dotGit = path.join(root, ".git");
+  try {
+    const pointer = (await readFile(dotGit, "utf8")).trim();
+    if (pointer.startsWith("gitdir:")) {
+      return path.resolve(root, pointer.slice("gitdir:".length).trim());
+    }
+  } catch {
+    // `.git` is a directory (EISDIR) or missing; fall through to dotGit.
+  }
+  return dotGit;
+}
+
 export async function resolveGitMetadata(root = repositoryRoot()) {
   const note =
     "candidateHeadRevision is the committed HEAD read directly from .git files (no Git command executed); working-tree changes may exist and are not asserted clean";
   try {
-    const gitDir = path.join(root, ".git");
+    const gitDir = await resolveGitDir(root);
     const head = (await readFile(path.join(gitDir, "HEAD"), "utf8")).trim();
     const symbolic = head.match(/^ref: (.+)$/);
     if (!symbolic) {
@@ -99,33 +113,44 @@ export async function resolveGitMetadata(root = repositoryRoot()) {
       };
     }
     const headRef = symbolic[1];
+    // Linked worktrees keep shared refs in the common dir (`commondir`
+    // points at the main .git); plain repos have no commondir file.
+    let commonDir = gitDir;
     try {
-      const loose = (await readFile(path.join(gitDir, headRef), "utf8")).trim();
-      return {
-        available: true,
-        resolver: "direct .git file reads; no Git command executed",
-        headRef,
-        candidateHeadRevision: loose,
-        workingTreeNote: note,
-      };
+      const pointer = (await readFile(path.join(gitDir, "commondir"), "utf8")).trim();
+      if (pointer) commonDir = path.resolve(gitDir, pointer);
     } catch {
-      const packed = await readFile(path.join(gitDir, "packed-refs"), "utf8");
+      // No commondir: gitDir holds everything itself.
+    }
+    const ok = (candidateHeadRevision) => ({
+      available: true,
+      resolver: "direct .git file reads; no Git command executed",
+      headRef,
+      candidateHeadRevision,
+      workingTreeNote: note,
+    });
+    for (const dir of [gitDir, commonDir]) {
+      try {
+        return ok((await readFile(path.join(dir, headRef), "utf8")).trim());
+      } catch {
+        // Try the next dir.
+      }
+    }
+    for (const dir of [gitDir, commonDir]) {
+      let packed = null;
+      try {
+        packed = await readFile(path.join(dir, "packed-refs"), "utf8");
+      } catch {
+        continue;
+      }
       for (const line of packed.split("\n")) {
         const entry = line.trim();
         if (!entry || entry.startsWith("#") || entry.startsWith("^")) continue;
         const [revision, ref] = entry.split(" ");
-        if (ref === headRef) {
-          return {
-            available: true,
-            resolver: "direct .git file reads; no Git command executed",
-            headRef,
-            candidateHeadRevision: revision,
-            workingTreeNote: note,
-          };
-        }
+        if (ref === headRef) return ok(revision);
       }
-      throw new Error(`ref ${headRef} not found in loose refs or packed-refs`);
     }
+    throw new Error(`ref ${headRef} not found in loose refs or packed-refs`);
   } catch (error) {
     return {
       available: false,
